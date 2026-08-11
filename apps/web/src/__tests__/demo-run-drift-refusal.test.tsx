@@ -233,7 +233,13 @@ describe('S2 · demo run — 409 tutorial_scope_required is a refusal, not a fai
     expect(text).toMatch(/nothing changed/i);
     // WHY: the records this acts on are not in the workspace the request addressed.
     expect(text).toMatch(/exist only inside a worked example/i);
-    expect(text).toMatch(/none is open/i);
+    // Scoped to THIS TAB, not asserted globally: the signal is `sessionStorage` (per-tab)
+    // and the server's 409 says only that THIS REQUEST carried no scope header. Neither
+    // is evidence about other tabs, so "none is open" would be false for a reader whose
+    // walkthrough is running in one. Corrected 2026-08-11 alongside the same defect in
+    // the worked-example panel.
+    expect(text).toMatch(/this browser tab is not in one/i);
+    expect(text).not.toMatch(/none is open/i);
     // WHERE the reader goes, named as a product surface.
     expect(text).toMatch(/Help & Tutorial/i);
     // It must not misdescribe a healthy server, and must not claim a loss.

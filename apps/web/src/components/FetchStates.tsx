@@ -15,11 +15,15 @@
  */
 
 import './fetchstates.css';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Link, useInRouterContext } from 'react-router-dom';
 import { AudioWaveform, Check, Copy, TriangleAlert } from './icons';
 import { API_BASE, isHostedBuild, RUN_COMMAND } from '../lib/api';
 import type { ApiError } from '../lib/api';
+import { isExampleRecordId } from '../lib/exampleRecords';
 import { LABELS } from '../lib/labels';
+import { ROUTES } from '../lib/routes';
+import { useWorkspaceScope } from '../lib/workspaceScope';
 import {
   buildContext,
   buildDiagnosticsReport,
@@ -51,6 +55,12 @@ export function LoadingPanel({ label = 'Loading…' }: { label?: string }) {
  *                  (`run_not_found`, `source_not_allowed`), or for a path that
  *                  read one. It names the part that was read and refuses to claim
  *                  the experiment is absent.
+ * - `example_workspace_ended`
+ *                — the same 404 as `not_found`, for one of the five BUILT-IN
+ *                  WORKED-EXAMPLE ids, while NO worked-example session is open.
+ *                  "It may not have been created yet" is the wrong explanation for
+ *                  that id, so this branch gives the right one: worked-example
+ *                  records live only in a temporary workspace, and none is open.
  * - `path_not_found`
  *                — HTTP 404 for anything else — a collection read, a build-level
  *                  read, or a request whose path was not recorded. See
@@ -68,6 +78,7 @@ export function LoadingPanel({ label = 'Loading…' }: { label?: string }) {
  */
 export type DownKind =
   | 'not_found'
+  | 'example_workspace_ended'
   | 'record_part_not_found'
   | 'path_not_found'
   | 'auth'
@@ -84,6 +95,15 @@ export interface DownCopy {
   showRunCommand: boolean;
   /** Whether reloading (re-entering the identity flow) is offered. */
   offerReload: boolean;
+  /**
+   * Whether a link back to My Experiments is offered.
+   *
+   * Set ONLY where navigating actually helps — i.e. where the API answered, so the
+   * rest of the app is reachable. It stays false for every branch whose cause is
+   * "the API did not answer": a link into another surface that is equally broken is
+   * the same small lie `DownBrand` refuses to tell.
+   */
+  offerExperimentsLink: boolean;
 }
 
 /**
@@ -154,6 +174,23 @@ export function recordSubResource(path: string | undefined): string | undefined 
 }
 
 /**
+ * The EXPERIMENT ID this failed path named, or `undefined` when it named none.
+ *
+ * Deliberately matches BOTH `/experiments/{id}` and `/experiments/{id}/…`, because
+ * the record screens read an experiment and its parts concurrently and the path
+ * that reaches the panel is whichever promise rejected first — see the long note in
+ * `downCopy`. Reading the id from the PATH rather than from the router means it is
+ * the id THIS REQUEST asked about, not whatever the address bar says now.
+ *
+ * The query string is stripped: `?scope=…` on a record read does not change which
+ * id was named.
+ */
+export function recordPathExperimentId(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  return /^\/experiments\/([^/?#]+)/.exec(path)?.[1];
+}
+
+/**
  * PRODUCT NAMES for the parts of a record, keyed by the wire segment `api.ts`
  * puts in the URL.
  *
@@ -218,8 +255,30 @@ function subResourceLabel(segment: string): string {
  *
  * `hosted` is injectable only so tests can exercise a hosted build without a
  * separate bundle; production always uses the compile-time `isHostedBuild`.
+ *
+ * `scope` IS THE WORKSPACE SCOPE AT RENDER TIME (`null` = the ordinary workspace),
+ * and is OMITTED — not defaulted — by a caller that does not know it. Omission is
+ * the fail-safe value: only `null` can unlock the `example_workspace_ended` branch,
+ * so a caller unaware of this argument keeps today's copy rather than gaining a
+ * claim it never supplied evidence for.
+ *
+ * WHY RENDER-TIME SCOPE IS SOUND HERE, GIVEN THAT THIS FUNCTION IS PURE AND THE
+ * SCOPE MAY HAVE MOVED SINCE THE REQUEST. The generic 404 branch below refuses to
+ * name an expired session for exactly that reason, and this branch does not
+ * contradict it. It is used ONLY in the `scope === null` direction, where both
+ * possible histories make the same sentence true: either the request also carried no
+ * session (a deep link or a reload — the record is genuinely not in the ordinary
+ * workspace), or it carried one that has since been disposed (the walkthrough just
+ * ended — the temporary workspace and its records are gone). "This is a
+ * worked-example id and no worked-example workspace is open" holds in both, and
+ * neither is a claim about a cause the response did not evidence. A non-`null`
+ * scope never takes the branch.
  */
-export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): DownCopy {
+export function downCopy(
+  error?: ApiError,
+  hosted: boolean = isHostedBuild,
+  scope?: string | null,
+): DownCopy {
   const status = error?.status;
 
   /*
@@ -321,12 +380,74 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * through to the generic branch, which is what the panel can honestly say.
    */
   const underOneRecord = isRecordPath(error?.path) || subResource !== undefined;
-  if (
+  const recordAbsent =
     status === 404 &&
     !interceptedByEdge &&
     ((reason === 'experiment_not_found' && underOneRecord) ||
-      (reason === undefined && isRecordPath(error?.path)))
-  ) {
+      (reason === undefined && isRecordPath(error?.path)));
+
+  /*
+   * THE RECORD IS ABSENT AND IT IS A WORKED-EXAMPLE ID, WITH NO WALKTHROUGH OPEN.
+   *
+   * SAME 404, SAME EVIDENCE, DIFFERENT EXPLANATION. The branch below is reached by
+   * exactly the same signals; this one only overrides the SENTENCE, for the one id
+   * class where "it may not have been created yet" is the wrong account of what
+   * happened. The five built-in worked-example records ARE created — inside a
+   * worked-example session, whose directory the backend discards when the
+   * walkthrough ends. A reader who finishes the walkthrough and presses Back, or
+   * who opens a bookmarked example link, is not looking at a malfunction.
+   *
+   * REACHED MOST EASILY BY `finishTutorial`, and reachable at all because the bounce
+   * that normally protects a record surface CANNOT fire here:
+   * `useWorkspaceScopeChanged` (`lib/workspaceScope.ts`) compares the scope now
+   * against the scope AT MOUNT, so a COLD MOUNT in the ordinary workspace
+   * (`null` → `null`) is not a change and nothing redirects. That is correct — there
+   * was no change — which is precisely why the panel has to explain itself instead.
+   *
+   * NO CROSS-SCOPE READ, AND NO CLAIM OF ONE. `isExampleRecordId` is a build-time
+   * set membership test (`lib/exampleRecords.ts`); no request is made, and the
+   * backend is never asked to look outside the scope it was given —
+   * `workspace.py:3587-3592` refuses that on purpose. The copy therefore says only
+   * what is true of the id and of how worked-example workspaces work, and asserts
+   * nothing about what any other scope holds.
+   *
+   * THE SCOPE SIGNAL IS PER-TAB, AND THE COPY IS WORDED TO MATCH — this is the one
+   * thing to get right here, and the first draft got it wrong. `scope === null` comes
+   * from `readTutorialSession()`, which reads **`sessionStorage`** (`lib/tutorialSession.ts`),
+   * chosen deliberately so the pointer dies with the tab. So `null` means "THIS TAB
+   * holds no session", NOT "no session exists". A reader with the walkthrough open in
+   * tab A who opens a bookmarked example link in tab B lands here while their
+   * walkthrough is very much alive — and that is the ORDINARY way to arrive, since a
+   * pasted link is the motivating case for this branch existing at all.
+   *
+   * An earlier revision said "and none is open" and told that reader the API had
+   * discarded "anything answered or exported inside it". Both were false in tab B, in
+   * the same direction as the defect this branch removes — a per-tab fact stated as a
+   * global one. The lines now say "this browser tab is not in one" and name the
+   * possibility explicitly, so they are true whether the walkthrough ended or is still
+   * running somewhere this page cannot see. `HelpAndTutorial.tsx` already draws the
+   * same distinction ("if the check THIS TAB …"); this matches it.
+   *
+   * IT PROMISES NO RECOVERY. The discarded workspace is gone; the third line offers
+   * a fresh walkthrough and says in the same breath that it is a new start, so the
+   * one affordance named cannot be mistaken for a way back to the lost one.
+   */
+  if (recordAbsent && scope === null && isExampleRecordId(recordPathExperimentId(error?.path))) {
+    return {
+      kind: 'example_workspace_ended',
+      title: 'Worked Example Not Open',
+      lines: [
+        'This id belongs to one of the five built-in worked-example records. Those records exist only inside a worked-example walkthrough, and this browser tab is not in one — so this id names nothing in the workspace you are viewing.',
+        'A worked-example workspace is reachable only from the tab that opened it, and it is temporary: when that walkthrough ends the ISAAC API discards it, along with anything answered or exported inside it. If one is still open in another tab, carry on there — this page cannot reach it.',
+        `Starting the walkthrough again from ${LABELS.navSettings} → ${LABELS.settingsTabHelp} opens a fresh worked-example workspace with new copies of these five records — a new start, not a way back into an earlier one.`,
+      ],
+      showRunCommand: false,
+      offerReload: false,
+      offerExperimentsLink: true,
+    };
+  }
+
+  if (recordAbsent) {
     return {
       kind: 'not_found',
       title: 'Record Not Found',
@@ -337,6 +458,7 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
       ],
       showRunCommand: false,
       offerReload: false,
+      offerExperimentsLink: false,
     };
   }
 
@@ -410,6 +532,7 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
       ],
       showRunCommand: false,
       offerReload: false,
+      offerExperimentsLink: false,
     };
   }
 
@@ -439,6 +562,16 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * the API inherits it. It is deliberately NOT fixed here — widening `isHtml` is a
    * change to how every API response is classified, which does not belong in a copy
    * correction — so treat this as a known, bounded limit of the intercept guard.
+   *
+   * WHAT THE WORKED-EXAMPLE BRANCH CHANGES ABOUT THAT GAP, recorded because it is a
+   * real widening and not merely one more inheritor. An undetected intercept on an
+   * example deep link used to produce the VAGUE claim ("may not have been created
+   * yet"); it now produces a DETAILED and confident narrative about a discarded
+   * walkthrough, for a response that never reached ISAAC. The frequency is unchanged
+   * and no new path is opened — the guard is the same `isHtml` — but a wrong answer
+   * stated confidently is worse than the same wrong answer stated vaguely, so the
+   * cost of leaving `isHtml` alone went up by this branch, and a future decision to
+   * widen it should count this among its reasons.
    *
    * NEITHER DOES A READ UNDER `/experiments/{id}/…` — that is the branch immediately
    * above, which can at least name the part that was read.
@@ -480,6 +613,7 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
       ],
       showRunCommand: false,
       offerReload: false,
+      offerExperimentsLink: false,
     };
   }
 
@@ -501,6 +635,7 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
       ],
       showRunCommand: false,
       offerReload: true,
+      offerExperimentsLink: false,
     };
   }
 
@@ -513,6 +648,7 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
       ],
       showRunCommand: true,
       offerReload: false,
+      offerExperimentsLink: false,
     };
   }
 
@@ -526,6 +662,7 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
       ],
       showRunCommand: false,
       offerReload: false,
+      offerExperimentsLink: false,
     };
   }
 
@@ -539,6 +676,7 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
     ],
     showRunCommand: false,
     offerReload: true,
+    offerExperimentsLink: false,
   };
 }
 
@@ -641,6 +779,15 @@ export function DownTechnicalDetails({ error }: { error: ApiError }) {
  * would make the failure state depend on a provider being present — exactly the
  * kind of coupling that turns one broken fetch into a blank page. Guarded, so a
  * non-browser environment yields the honest placeholder instead of throwing.
+ *
+ * THE MODULE NOW IMPORTS `Link`, AND THAT IS NOT AN EXCEPTION TO THE ABOVE — the
+ * sentence would misdescribe its own module if it stopped here, so: the rule is
+ * "no hook that THROWS without a provider". `useInRouterContext()` is
+ * provider-optional by contract — it returns `false` outside a Router rather than
+ * throwing — so it is used to DECIDE whether a `Link` may render, and the whole
+ * actions wrapper is skipped when it cannot. `useLocation`/`useNavigate` would
+ * throw and are still barred here. The bare-render path is exercised by tests,
+ * because several suites mount `BackendDown` outside a Router.
  */
 function currentRoute(): string {
   try {
@@ -810,15 +957,29 @@ export function DiagnosticsPanel({
  * the response did not evidence — see `downCopy` for the branch table.
  */
 export function BackendDown({ error, onRetry }: { error?: ApiError; onRetry?: () => void }) {
-  const copy = downCopy(error);
+  /* The workspace this surface is reading right now. Read from the tutorial store
+     (a module store, no provider), so this stays safe from all 14 call sites —
+     including the ⌘K dialog, which renders outside any screen. See `downCopy` for
+     why the render-time value is sound in the one direction it is used. */
+  const scope = useWorkspaceScope();
+  /* `Link` needs a Router. `BackendDown` is unit-rendered bare in several suites,
+     and a failure state that CRASHES the page it is explaining would be the worst
+     possible regression, so the link is rendered only where routing exists. The
+     copy never depends on this — it names Settings & API → Help & Tutorial in
+     words, which stays findable with or without the shortcut. */
+  const inRouter = useInRouterContext();
+  const copy = downCopy(error, isHostedBuild, scope);
+  const titleId = useId();
   return (
-    <div className="fetch-state error" role="alert">
+    <div className="fetch-state error" role="alert" aria-labelledby={titleId}>
       <span className="fetch-state-icon" aria-hidden="true">
         <TriangleAlert size={22} strokeWidth={2.2} />
       </span>
       <div className="fetch-state-body">
         <DownBrand />
-        <h2 className="fetch-state-title">{copy.title}</h2>
+        <h2 className="fetch-state-title" id={titleId}>
+          {copy.title}
+        </h2>
         {copy.lines.map((line) => (
           <p className="fetch-state-text" key={line}>
             {line}
@@ -831,8 +992,13 @@ export function BackendDown({ error, onRetry }: { error?: ApiError; onRetry?: ()
         {!isHostedBuild && copy.showRunCommand && (
           <pre className="fetch-state-cmd mono">{RUN_COMMAND}</pre>
         )}
-        {(copy.offerReload || onRetry) && (
+        {(copy.offerReload || (copy.offerExperimentsLink && inRouter) || onRetry) && (
           <div className="fetch-state-actions">
+            {copy.offerExperimentsLink && inRouter && (
+              <Link className="btn btn-primary fetch-state-link" to={ROUTES.experiments}>
+                {LABELS.navExperiments}
+              </Link>
+            )}
             {copy.offerReload && (
               <button type="button" className="btn btn-primary" onClick={reloadPage}>
                 Reload
