@@ -2091,7 +2091,17 @@ _TRUTH_PATH_FILES = (
 #: describes has landed. The alternative — failing on entries that no longer match a real
 #: diff — was considered and rejected: it turns every innocent branch cut after such a
 #: merge red, which is the same "fires on an unrelated slice" defect this rescope fixes.
-_DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {}
+_DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
+    "src/isaac_records/draft_validator.py": (
+        "sha256 exactness: `_SHA256_RE` was `^[0-9a-f]{64}$`, and Python's `$` also "
+        "matches before a trailing newline, so the 65-character string `\"9\"*64 + \"\\n\"` "
+        "passed the draft gate and — the official schema declaring `sha256` as bare "
+        "`{\"type\": \"string\"}` with no pattern — exported into an official record that "
+        "then validated ok. The pattern is now `\\A[0-9a-f]{64}\\Z`, so the exactness is "
+        "in the constant and no future `.match()` caller can reopen the hole. Delete this "
+        "entry once the change has landed on main."
+    ),
+}
 
 
 def test_every_truth_path_change_on_this_branch_is_disclosed():
