@@ -59,8 +59,8 @@ Files: `qa/validator-upload-package/` in the repo, or the ZIP.
 
 ```
 ZIP     qa/validator-upload-package/isaac-validator-qa-files.zip
-sha256  8a2d4948825c56bbcd9f707d70133c3dd3ba39092b8b17474a0155e1b9bf7170
-bytes   66133
+sha256  daee2ebc7bfa9dc0abbb167f575b02ab2477f384c38bcacbff63f1b124a66d04
+bytes   66823
 ```
 
 > Verify the checksum before you trust the archive:

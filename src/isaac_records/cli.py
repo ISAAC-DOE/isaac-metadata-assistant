@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .audit import audit_records, render_audit
 from .draft_validator import validate_draft
+from .exactness import EXACTNESS_HEADING, check_exactness
 from .export import export_draft
 from .ids import new_record_id
 from .official import validate_official
@@ -50,12 +51,34 @@ def cmd_validate(args, root: Path) -> int:
         return 0 if report.ok else 1
     report = validate_official(obj, root)
     print(report.render())
+    # EXACTNESS — a HARD gate, printed after the schema verdict and folded into the exit
+    # code, unlike the advisory warnings below.
+    #
+    # It is reported SEPARATELY, and not merged into the schema report, because it is not
+    # a schema error: the vendored schema, read as written, accepts these values. Printing
+    # it under "valid against official ISAAC schema v1.05" would attribute a local ISAAC
+    # policy to upstream. Keeping the two verdicts visibly distinct is what lets a reader
+    # tell "your record breaks the official schema" from "your record passes the official
+    # schema only through a regex-flavour accident, and ISAAC will not export it".
+    #
+    # It DOES gate the exit code: `isaac validate --official` is what `CLAUDE.md` §1 tells
+    # a user to run, so a value `isaac export` would refuse must not be reported here as a
+    # clean PASS. Exiting 0 on a record that cannot be exported is the contradiction this
+    # closes.
+    exactness = check_exactness(obj, root)
+    if not exactness.ok:
+        print()
+        print(EXACTNESS_HEADING)
+        print(exactness.render())
     if args.warnings:
         # Advisory only: printed AFTER the hard official report and NEVER folded into the
         # exit code below, so warnings can never gate validation or export.
         print()
         print(portal_warnings(obj).render())
-    return 0 if report.ok else 1
+    # `and exactness.ok` — the ONLY non-schema input to this exit code, and deliberately
+    # not `portal_warnings`, which stays advisory. See the block above for why a hard gate
+    # that blocks export must also fail the command a user runs to ask "will this export?".
+    return 0 if (report.ok and exactness.ok) else 1
 
 
 def cmd_export(args, root: Path) -> int:

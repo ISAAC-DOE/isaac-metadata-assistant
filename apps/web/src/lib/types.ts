@@ -159,6 +159,22 @@ export interface ValidationResult {
   ok: boolean;
   schemaVersion: string; // v1.05
   errors: { path: string; message: string }[];
+
+  // WHICH GATE REFUSED. `ok` is no longer the official schema's verdict on every
+  // producer: `POST /api/validate/record` also applies ISAAC's anchored-pattern
+  // exactness gate, so `ok: false` there can sit above `schema_ok: true` and an
+  // EMPTY `errors`. `VerdictCard` used to read that as "invalid against official
+  // ISAAC schema v1.05 — 0 errors", asserting that the upstream schema rejected a
+  // record it accepted, about a document CLAUDE.md §1 makes not ours to speak for.
+  //
+  // Both fields are OPTIONAL, and that is deliberate rather than lazy: the
+  // per-experiment validate route returns neither, and its `ok` IS the schema
+  // verdict. An absent `schemaOk` therefore means "same as `ok`" — the reading
+  // that was true before this pair existed — and an absent `exactnessErrors`
+  // means the producer does not run that gate, which is different from running it
+  // and finding nothing.
+  schemaOk?: boolean;
+  exactnessErrors?: { path: string; message: string }[];
 }
 
 export interface AuditResult {
@@ -654,16 +670,36 @@ export interface ApiValidateResult {
 export interface ApiValidateRecordResult {
   ok: boolean;
   summary: string;
-  errors: { path: string; message: string }[];
+  errors: { path: string; message: string }[]; // SCHEMA errors only
   schema_version: string; // "1.05"
+
+  // The official schema's OWN verdict, preserved beside `ok`. Optional because a
+  // response predating the exactness gate carries neither this nor
+  // `exactness_errors`; absent means "same as `ok`".
+  schema_ok?: boolean;
+  // ISAAC's anchored-pattern exactness findings. NOT schema errors, and kept in
+  // their own list for exactly that reason: all five `pattern` gates in the
+  // vendored schema are written `^...$` and Python's `$` also matches before one
+  // trailing newline, so the schema accepts values its own pattern text refuses.
+  // Merging these into `errors` would attribute an ISAAC policy to upstream.
+  exactness_errors?: { path: string; message: string }[];
+
   // R2 — the ADVISORY tier, which this route did not previously run at all. Optional
   // in the type because a cached/older response shape must not break the client, and
   // because the two 422 rejection paths (malformed JSON, non-object body) legitimately
   // carry no warnings: there is no record to advise on.
   //
-  // `ok` above is computed from schema validation ALONE and is never combined with the
-  // warning count. A warning must not be able to turn a PASS into a FAIL, or this tier
-  // becomes a second authority on validity beside the vendored schema.
+  // `ok` above is never combined with the warning count — that half of this note is
+  // unchanged and still load-bearing. A warning must not be able to turn a PASS into a
+  // FAIL, or this tier becomes a second authority on validity beside the vendored schema.
+  //
+  // ~~"`ok` above is computed from schema validation ALONE"~~ — WAS TRUE, IS NOT. The
+  // old wording is kept struck through rather than deleted, because it read as a
+  // guarantee and a future reader who remembers it would be wrong. `ok` is now
+  // `schema_ok && exactness_ok`. Advisory warnings are still excluded; the exactness
+  // gate is the ONE non-schema input, and it is a hard gate rather than an opinion —
+  // `export_draft` refuses the same records, so a `true` here would have made this
+  // route the one surface that says yes to something the product says no to.
   advisory?: boolean;
   gating?: boolean;
   warnings?: AdvisoryWarning[];

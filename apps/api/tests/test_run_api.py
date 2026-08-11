@@ -3516,16 +3516,50 @@ _TRUTH_PATH_FILES = (
 #: describes has landed. The alternative — failing on entries that no longer match a real
 #: diff — was considered and rejected: it turns every innocent branch cut after such a
 #: merge red, which is the same "fires on an unrelated slice" defect this rescope fixes.
-#: EMPTY ON PURPOSE, and it was not always. The ``draft_validator.py`` sha256-exactness
-#: entry that lived here has LANDED on ``main`` (``_SHA256_RE`` reads
-#: ``\A[0-9a-f]{64}\Z`` at ``src/isaac_records/draft_validator.py``), so by the deletion
-#: rule stated above the entry is gone. Leaving it would have left that one truth-path
-#: file editable, unguarded, by every branch cut afterwards — which is precisely the
-#: erosion the "KNOWN LIMITATION" paragraph names. The guard was negative-controlled
-#: after the deletion (a temporary comment added to ``draft_validator.py``; the test
-#: failed naming that file; the edit was reverted), because an allowlist emptied without
-#: re-proving the assertion still fires is indistinguishable from one switched off.
-_DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {}
+#: The ``draft_validator.py`` sha256-exactness entry that lived here has LANDED on
+#: ``main`` (#118), so by the deletion rule stated above it is gone — leaving it would
+#: have left that truth-path file editable, unguarded, by every branch cut afterwards.
+#: The two entries below are THIS branch's, and are deleted the same way once landed.
+_DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
+    "src/isaac_records/export.py": (
+        "Anchored-pattern EXACTNESS gate. All five `pattern` gates in the vendored "
+        "official schema are written `^...$`, and Python's `$` also matches before a "
+        "trailing newline, so every one of them accepts a value it visibly intends to "
+        "refuse — measured with the project's jsonschema 4.26.0. The sharpest case is "
+        "`tags`, whose `^\\S(.*\\S)?$` exists solely to forbid leading/trailing "
+        "whitespace and which refuses a trailing space and a trailing tab while "
+        "admitting a trailing newline; `transform` copies tags verbatim "
+        "(`list(draft[\"tags\"])`) and nothing in export.py or draft_validator.py "
+        "strips, so `\"campaign\\n\"` exported into an official record that then "
+        "validated PASS. `export_draft` now calls `exactness.check_exactness` on the "
+        "ASSEMBLED RECORD (not the draft — same reasoning as "
+        "`_enforce_server_owned_invariant`: transform writes strings from several "
+        "independent places and guarding writers one at a time loses to the one you "
+        "forgot) and REFUSES, naming the field and the character class. It never strips "
+        "— silently repairing a value would mutate metadata the author supplied, which "
+        "CLAUDE.md §5 forbids. The schema is NOT edited (§1) and `validate_official` is "
+        "NOT made stricter, so the official-schema verdict, the audit, `diagnose` and "
+        "the corpus-mutation oracle are all unchanged. Same commit also corrects the "
+        "record_id rejection message, which cited `^[0-9A-Z]{26}$` — a pattern that in "
+        "Python MATCHES the newline-suffixed string it was rejecting. Review follow-up "
+        "on the same branch: `exactness.check_exactness` (NOT itself a §13 truth-path "
+        "file, and export.py's call site is unchanged) now walks `err.context` "
+        "recursively, because `anyOf`/`oneOf` wrap their branch errors and the flat "
+        "`validator == 'pattern'` filter DISCARDED such findings silently — nothing in "
+        "the vendored schema sits there today, so no export verdict moves, but the "
+        "module promised refresh-proof coverage and did not have it. Covered by "
+        "tests/test_schema_string_gate_exactness.py. Delete this entry once landed."
+    ),
+    "src/isaac_records/cli.py": (
+        "`isaac validate --official` now also runs `exactness.check_exactness`, prints "
+        "it under its own heading — explicitly labelled NOT a schema rule, so a local "
+        "ISAAC policy is never attributed to the upstream schema — and folds it into the "
+        "exit code. Without this, the command CLAUDE.md §1 tells users to run would exit "
+        "0 on a record `isaac export` refuses. `portal_warnings` remains advisory and "
+        "still cannot move the exit code; exactness is the only non-schema input added. "
+        "Covered by tests/test_schema_string_gate_exactness.py. Delete once landed."
+    ),
+}
 
 
 def test_every_truth_path_change_on_this_branch_is_disclosed():

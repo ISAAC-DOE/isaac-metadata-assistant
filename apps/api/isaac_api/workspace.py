@@ -152,9 +152,29 @@ TUTORIAL_TTL_HOURS = 24
 #: pattern is the path-traversal boundary for the whole tutorial namespace, so it
 #: is an ALLOWLIST rather than a denylist of bad shapes: no ``.``, no ``/``, no
 #: ``\``, no NUL, no empty string, nothing shorter than 16 or longer than 64.
-#: Matching is done with ``re.fullmatch`` (which anchors both ends itself, and so
-#: cannot be defeated by ``$``'s trailing-newline tolerance).
-_SESSION_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")
+#:
+#: ANCHORED IN THE PATTERN, with ``\A``/``\Z``. It was previously written bare —
+#: ``[A-Za-z0-9_-]{16,64}`` — with a comment justifying the omission by arguing
+#: that ``re.fullmatch`` "cannot be defeated by ``$``'s trailing-newline
+#: tolerance". That rationale defended an anchor the pattern did not contain:
+#: there was no ``$`` here to be tolerant, and the reasoning quietly assumed the
+#: single ``fullmatch`` call site would stay a ``fullmatch`` forever.
+#:
+#: It would not survive that assumption breaking. Measured: change the call in
+#: ``is_tutorial_session_id`` from ``fullmatch`` to ``match`` and the bare pattern
+#: accepts ``"abcdefghijklmnop" + "\n" + "../../etc/passwd"`` — arbitrary-suffix
+#: path injection, at a boundary whose polarity is ALLOW at every consumer and one
+#: of whose consumers is DESTRUCTIVE (``dispose_tutorial_session`` below, called on
+#: a name read off the filesystem).
+#:
+#: ``\A``/``\Z`` and not ``^``/``$``: Python's ``$`` also matches before a trailing
+#: newline, so ``^...$`` with ``.match()`` would admit exactly the injection above
+#: with the traversal on its own line. ``\Z`` is end-of-string, full stop. With
+#: ``fullmatch`` the anchors are redundant, which is the point — the exactness now
+#: lives in the pattern, so no future caller can reopen the hole by reaching for a
+#: different ``re`` method. ``tests/test_tutorial_session_id.py`` pins both the
+#: behaviour and the redundancy.
+_SESSION_ID_RE = re.compile(r"\A[A-Za-z0-9_-]{16,64}\Z")
 
 
 class InvalidTutorialSession(ValueError):

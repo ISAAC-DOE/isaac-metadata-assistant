@@ -278,8 +278,8 @@ def test_no_archive_member_carries_a_machine_specific_path():
 #:
 #:   shasum -a 256 qa/validator-upload-package/isaac-validator-qa-files.zip
 #:   wc -c          qa/validator-upload-package/isaac-validator-qa-files.zip
-_ARCHIVE_SHA256 = "8a2d4948825c56bbcd9f707d70133c3dd3ba39092b8b17474a0155e1b9bf7170"
-_ARCHIVE_BYTES = 66133
+_ARCHIVE_SHA256 = "daee2ebc7bfa9dc0abbb167f575b02ab2477f384c38bcacbff63f1b124a66d04"
+_ARCHIVE_BYTES = 66823
 
 #: Documents that quote the digest to a human. Both are asserted to be FOUND, so
 #: renaming one cannot make the cross-check vacuous.

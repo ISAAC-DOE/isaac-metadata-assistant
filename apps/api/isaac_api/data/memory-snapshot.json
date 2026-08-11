@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "9829683bfad67de7df94ac5669e15698fb0db7fa2e590fec418247e99db3eb97"
+        "sha256": "2591ebb57a15c3a982d6f794cc237e88bf26f8814672ce810aec7e2411b2e4db"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "938cb4a42390c7789bd5d698d4effb0ffb897d0364ce4d3b88d334c02943b1f3"
+        "sha256": "8bf69ba04bd2e355bd860cd941eba0a1e3ce5acef71304402c0578120abae51f"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "2823cc864db3b476f81570d04558a97aae46a1f9db51b3f37d80a7c666560835"
+        "sha256": "1d21f657c2b60cd708a199902682970c330b6d530b0377f40ca466c9304ec403"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10488,7 +10488,7 @@
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
-        "sha256": "3e60e8a161a8f4587f9c9e40047538b1695a22c0132ed76e160db3373364ee7a"
+        "sha256": "05f7bd066dc0a7d2bdcce60a774ed8ecab6bd33f570167dfe6cf684f1c16da94"
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "b8359ff317c2268d8990bed0ff44f5b7c4be90c35c24feddddcc3c1d4e77a22a"
+        "sha256": "a3b56ccaa9962ada4cd30d5f0dfe50116773e13ffc83ae2065021400c76dd089"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "d4d7d418568856f1cb63bb3819f7de7d6052df5634476f3e069e9869d26348bc"
+        "sha256": "38ef35eaa2afd72c0c34c4688b4836bc2c5aeb24372f6d43d54770a7fc3941d0"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10816,7 +10816,7 @@
       },
       {
         "path": "src/isaac_records/cli.py",
-        "sha256": "d4a81469e92200e317ad793b28f5891730ea0751dd179c542f29d8025d0cdf46"
+        "sha256": "350ef6bea071cf4d2bace3824be0c9a0b79c7954b0f45d57d69609b2b44410c5"
       },
       {
         "path": "src/isaac_records/complete.py",
@@ -10828,7 +10828,7 @@
       },
       {
         "path": "src/isaac_records/export.py",
-        "sha256": "6d87676ed525c4857afc5103b34cf5b3e3e23fbc857db0cc06708d58c0f530a3"
+        "sha256": "2c6cb801796727b60db1f0e8b6db13f7f2e13f908a7b6b3cae8d3cce70d19282"
       },
       {
         "path": "src/isaac_records/extract/__init__.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "10986be40dafaadec13180ff379e00e6f0729ab0496e8878b4a1adf12f3c6a97"
+    "served_manifest_fingerprint": "324577865bdbe71edc4f92b50841bd0aff02b0b93f08fd9eb9c59e8e26fdae68"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

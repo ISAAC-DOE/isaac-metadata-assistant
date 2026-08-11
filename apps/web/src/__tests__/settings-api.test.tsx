@@ -1075,7 +1075,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * Both numbers are now 92, re-measured from `create_app().openapi()` after that merge.
    * If you change the assertion, change this line in the same edit.
    */
-  it('describes the contract it claims to: 47 operations, 92 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 47 operations, 94 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1510,8 +1510,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     drops the 91 `\n\n` separators, and 43,557 - 182 = 43,375.
     // A third witness, before either line was changed: `npx vitest run` reported
     // `expected 43375 to be 42371`.
-    expect(total).toBe(43589);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(92);
+    expect(total).toBe(45126);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(94);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so
     //     `GET /api/experiments/{id}/evidence-classification` now names six classes
@@ -1522,6 +1522,26 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     47 operations this array names, not read off the captured copy:
     //         total 41,511 · post-lead 89 · raw sum of descriptions 41,689
     //         internal consistency: 41,689 - (2 x 89 separators) = 41,511.
+    // (e) THE ANCHORED-PATTERN EXACTNESS GATE.
+    // One description grew: `POST /api/validate/record`. It had said the standalone and
+    // per-experiment validators "agree by construction", full stop, which the ISAAC
+    // anchored-pattern exactness gate made FALSE of the top-level `ok` — the two really
+    // do diverge, measured, on a record whose tag ends in a newline. The corrected text
+    // scopes the parity claim to the schema verdict, documents `schema_ok` and
+    // `exactness_errors`, and keeps the superseded sentence visible with the reason, so
+    // it is two paragraphs longer. The fixture was NOT hand-edited: it was
+    // re-transcribed from `create_app().openapi()`, which is why
+    // `test_contract_description_parity.py` is green in both directions.
+    //
+    // MEASURED the same two independent ways every corrected total above was:
+    //
+    //   · from the SERVED document: the splitPurpose paragraph rule transcribed into
+    //     Python over `create_app().openapi()`'s 47 descriptions gives total 42,491 and
+    //     90 post-lead paragraphs.
+    //   · internal consistency: raw sum of `d.description.length` = 42,671; this figure
+    //     drops the 90 `\n\n` separators, and 42,671 - 180 = 42,491.
+    //
+    // Neither number was arrived at by adding a delta to the previous one.
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);
