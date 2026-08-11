@@ -190,6 +190,26 @@ export class ApiError extends Error {
    * evidence of an authentication redirect, not an inference.
    */
   readonly htmlIntercept: boolean;
+  /**
+   * The backend's OWN typed reason string — the `error` field of a JSON error
+   * body — when one was safely readable. `undefined` whenever it was not, and
+   * consumers must treat `undefined` as "not observed", never as a default.
+   *
+   * WHY THIS EXISTS. The API deliberately distinguishes reasons that share a
+   * status: a 404 under `/experiments/{id}` can be `experiment_not_found` (no
+   * such record), `run_not_found` (the record exists and was read successfully
+   * and holds no run under that id — `routes.py::_run_not_found` says
+   * collapsing them "would tell a client to go looking in the wrong place"),
+   * `source_not_allowed`, or `tutorial_session_not_found` from the scope
+   * dependency. `httpError` copies the status and nothing else, so every one of
+   * those arrived at the UI identical, and `FetchStates.downCopy` reported all
+   * of them as a missing record. This field is how a screen can tell them apart.
+   *
+   * NEVER SET FROM AN HTML BODY. A sign-in page served on an API path carries no
+   * ISAAC reason, and inventing one from it is the defect `htmlIntercept`
+   * exists to prevent — see `readReason`.
+   */
+  readonly reason?: string;
 
   constructor(
     message: string,
@@ -200,6 +220,7 @@ export class ApiError extends Error {
       path?: string;
       contentType?: string;
       htmlIntercept?: boolean;
+      reason?: string;
     } = {},
   ) {
     super(message);
@@ -210,6 +231,7 @@ export class ApiError extends Error {
     this.path = opts.path;
     this.contentType = opts.contentType;
     this.htmlIntercept = opts.htmlIntercept ?? false;
+    this.reason = opts.reason;
   }
 }
 
@@ -237,6 +259,59 @@ function httpError(res: Response, path: string): ApiError {
     htmlIntercept ? HTML_INTERCEPT_MESSAGE : `Request failed (${res.status}).`,
     { status: res.status, path, contentType, htmlIntercept },
   );
+}
+
+/**
+ * `httpError`, PLUS the backend's own typed reason when one is safely readable.
+ *
+ * `httpError` stays synchronous and body-free, because many callers are and
+ * because a body can be consumed only once — this is a separate, async
+ * construction used where the caller is about to throw and has NOT read the body.
+ * It is the same shape `tutorialSessionState` already uses for its one reason
+ * (`httpError`, then a guarded `res.json()`), generalised so that every read
+ * failure carries what the API actually said instead of only its status.
+ *
+ * THREE RULES, each of which is a defect this module has already had:
+ *
+ *  1. NEVER READ A REASON OUT OF AN HTML BODY. An authenticating edge answers an
+ *     `/api/*` path with its sign-in page, and a reason parsed from that would be
+ *     fabricated. The `htmlIntercept` short-circuit is the same refusal
+ *     `readJson` and `mutationError` make.
+ *  2. A FAILED OR ABSENT PARSE LEAVES `reason` UNDEFINED. `.catch(() =>
+ *     undefined)` and the `typeof === 'string'` test mean a non-JSON body, an
+ *     empty body, `{}`, or `{"detail": …}` (FastAPI's shape for an unrouted
+ *     path) all yield "not observed" rather than a wrong reason. Consumers must
+ *     degrade to their generic branch, which `downCopy` does.
+ *  3. ONLY 404. Widening this to other statuses would read bodies that
+ *     `mutationError` owns and could double-consume one; there is no need, and
+ *     the narrow rule is the safe one.
+ *
+ * A BEHAVIOUR CHANGE RULE 3 CAUSES, DISCLOSED BECAUSE IT IS REAL AND NOT OBVIOUS.
+ * Only the 404 path awaits `res.json()`, so a 404 now rejects one `await` LATER than
+ * every other failing status. In a bundle whose members fail with MIXED statuses —
+ * say a 404 on `GET /experiments/{id}` and a 500 on `POST /audit` — the non-404
+ * rejection therefore wins the `Promise.all` systematically, where previously the
+ * winner was whatever the network happened to deliver first. Three things to hold
+ * onto: this is ORDERING, not information (no reason is lost, and a 404 reaching the
+ * panel still carries its reason); both outcomes produce honest copy (a 500 renders
+ * `http_error`, "the API was reached but answered with HTTP 500", which is true of
+ * that response); and it is deliberately NOT compensated for, because introducing a
+ * delay to even the race up would be complexity in service of a cosmetic tie-break.
+ * It is pinned by test (`api.test.ts`, "a mixed-status bundle") so that a future
+ * change to the precedence is loud rather than silent.
+ */
+async function httpErrorWithReason(res: Response, path: string): Promise<ApiError> {
+  const base = httpError(res, path);
+  if (res.status !== 404 || base.htmlIntercept) return base;
+  const body = (await res.json().catch(() => undefined)) as { error?: unknown } | undefined;
+  if (typeof body?.error !== 'string') return base;
+  return new ApiError(base.message, {
+    status: base.status,
+    path: base.path,
+    contentType: base.contentType,
+    htmlIntercept: base.htmlIntercept,
+    reason: body.error,
+  });
 }
 
 /**
@@ -374,9 +449,46 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   }
 }
 
+/*
+ * THE TWO GENERIC HELPERS, BOTH WIDENED TO CARRY A TYPED 404 REASON — and they have
+ * to be BOTH, which is a correction of a first attempt that widened only `getJson`.
+ *
+ * Every read that renders `BackendDown` through `useFetch` comes through one of
+ * these, and the screens fetch in BUNDLES. `getRecordBundle` issues SEVEN
+ * experiment-scoped requests for one route in ONE `Promise.all` — `GET {id}`,
+ * `/draft`, `/pending`, `POST /validate`, `POST /audit`, `/warnings`, `/evidence`,
+ * so six of the seven are sub-resource paths and two of the seven are POSTs. On a
+ * genuinely missing record ALL of them 404, and the rejection that reaches the panel
+ * is whichever landed first. If only `getJson` carried the reason, a `POST /validate`
+ * rejection winning that race would leave `reason === undefined` and the copy would
+ * fall back to the path rule — so the screen's wording for ONE underlying truth would
+ * depend on scheduling. Widening both makes every member of the bundle carry
+ * `experiment_not_found`, and the race stops mattering. That race-independence is the
+ * entire reason this is done by reason rather than by path; see
+ * `FetchStates.downCopy`.
+ *
+ * CORRECTION, RECORDED RATHER THAN OVERWRITTEN. An earlier revision of this comment
+ * cited "`getEvidenceBundle` races `getExperiment` against every `getSourcePreview`"
+ * as the racing site. THAT IS FALSE and is withdrawn: `getEvidenceBundle` is TWO
+ * SEQUENTIAL `Promise.all`s (see its own comment below), the previews are fetched
+ * only after the first bundle resolves, and on a genuinely missing record the first
+ * bundle rejects and `getSourcePreview` is never called at all. The racing sites are
+ * `getRecordBundle` above, `getEvidenceBundle`'s FIRST `Promise.all` (1 exact +
+ * 3 sub-resource reads), `getExportReadiness`, `getExperimentGraphBundle`,
+ * `GuidedCompletion.tsx:46` and `useRecordSession.ts:226`. The conclusion — widen
+ * both helpers — is unchanged; only the example was wrong.
+ *
+ * SAFE AGAINST DOUBLE-CONSUMPTION: on the failure path the body is untouched before
+ * this point and the throw follows immediately, so `readJson` never also runs. On
+ * the success path nothing changed — `readJson` still performs the only parse.
+ *
+ * `mutationError` is deliberately untouched. It already owns body reading for the
+ * statuses that carry a conflict payload (412 / 400), and the methods that use it
+ * surface failures inline rather than through `BackendDown`.
+ */
 async function getJson<T>(path: string): Promise<T> {
   const res = await request(path);
-  if (!res.ok) throw httpError(res, path);
+  if (!res.ok) throw await httpErrorWithReason(res, path);
   return readJson<T>(res, path);
 }
 
@@ -385,7 +497,7 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
     method: 'POST',
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw httpError(res, path);
+  if (!res.ok) throw await httpErrorWithReason(res, path);
   return readJson<T>(res, path);
 }
 
@@ -397,9 +509,21 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
  * so existing callers (e.g. the export 409 branch) are unaffected. An HTML
  * intercept short-circuits: there is no conflict payload in a sign-in page.
  */
+/*
+ * 422 JOINED 412 AND 400, and the reason is a copy defect rather than a taste.
+ *
+ * `POST /edit` answers 422 with `{"error": "invalid_field_value", "key": …}` for a
+ * correction it cannot store. Without the body, every 422 looked identical to every
+ * other, so the screen could only say "could not be applied (422) … try again" — and
+ * that DROPS the one sentence a scientist needs, which is that the value they had
+ * before is still there. The body is what lets the notice say it.
+ *
+ * Additive: this only POPULATES `err.body` where it was previously `undefined`. No
+ * caller's branch changes, because none of them reads `body` on a 422 today.
+ */
 async function mutationError(res: Response, path: string): Promise<ApiError> {
   const err = httpError(res, path);
-  if (!err.htmlIntercept && (res.status === 412 || res.status === 400)) {
+  if (!err.htmlIntercept && (res.status === 412 || res.status === 400 || res.status === 422)) {
     const body = await res.json().catch(() => undefined);
     return new ApiError(err.message, {
       status: res.status,

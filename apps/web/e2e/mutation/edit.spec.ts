@@ -108,10 +108,26 @@ test.describe('R4 · edit', () => {
      * THE DEFECT THIS GUARDS, reachable with no tampering at all. `saveEdit` used to
      * rewrite the summary row to the typed value on any RESOLVED promise, i.e. it read
      * HTTP 200 as proof of a write. `apply_corrections` refuses a malformed sha256 and
-     * leaves the stored hash alone, returning 200 with `rev` unmoved — so the row read
-     * "Asset Hash / you answered not-a-valid-sha256 / Confirmed by You" while the server
-     * still held HASH_A. A "Confirmed by You" chip over a value the truth core refused
-     * is a false claim of confirmed authority over a scientific value.
+     * leaves the stored hash alone — so the row read "Asset Hash / you answered
+     * not-a-valid-sha256 / Confirmed by You" while the server still held HASH_A. A
+     * "Confirmed by You" chip over a value the truth core refused is a false claim of
+     * confirmed authority over a scientific value.
+     *
+     * THE STATUS CHANGED, AND THE PROPERTIES DID NOT. This test asserted a 200, and
+     * asserted it deliberately: at the time the server DID answer 200 with `rev`
+     * unmoved, and the fix was to make the client interpret that correctly. The server
+     * now refuses the same request with 422 `invalid_field_value`, because a recognised
+     * field carrying an unstorable value is the same case as a body naming no
+     * recognised field — which this route has always answered 422 (see
+     * `test_edit_unknown_field_writes_nothing`, ten lines from the old assertion in
+     * `test_edit_field.py`).
+     *
+     * Every property this test existed to guard is asserted below unchanged: nothing
+     * written, `rev` unmoved, the editor still open with the typed value, no impact
+     * note, no "Confirmed by You" over the refused value, and a well-formed retry still
+     * landing. What was rewritten is only the STATUS and the sentence the screen shows
+     * — and the sentence still carries the one claim that matters, that the previous
+     * value is intact.
      *
      * Real UI, real backend: no route interception and no synthesised response.
      */
@@ -130,20 +146,29 @@ test.describe('R4 · edit', () => {
     await editor(page).getByLabel('Asset Hash').fill(MALFORMED_HASH);
     await editor(page).getByRole('button', { name: 'Save' }).click();
 
-    // The correction was ACCEPTED as a request and applied to nothing — a 200 the client
-    // had to interpret, not an error it could lean on.
+    // The correction was REFUSED, typed, before anything was written.
     await expect
       .poll(() => statuses.length, { message: 'the correction never left the page' })
       .toBe(1);
-    expect(statuses[0], 'a recognised key with a refused value is a 200, not a 4xx').toBe(200);
+    expect(statuses[0], 'a recognised key with an unstorable value is refused, not absorbed').toBe(
+      422,
+    );
 
-    // The screen says nothing was applied, and names no cause — the response carries
-    // none. (`invalidation.reason` claims "the submitted value was identical", which is
-    // false here; it must not be surfaced.)
+    /*
+     * The screen still says the two things that matter and still names no cause.
+     *
+     * NO CAUSE: the 422 body carries `error` and `key`, and neither says WHY the value
+     * is wrong. The old note avoided naming a cause because a 200 carried none; this
+     * one avoids it because naming one would be invented. Same rule, same assertion.
+     *
+     * `invalidation.reason` is no longer reachable on this path at all — there is no
+     * 200 body — which removes the specific trap the old comment recorded: that
+     * `reason` claimed "the submitted value was identical", which was false here.
+     */
     const note = editor(page).locator('.completion-submit-error');
-    await expect(note).toContainText('Nothing was applied');
-    await expect(note).toContainText('previously confirmed value');
-    await expect(note).not.toContainText(/identical|malformed|invalid/i);
+    await expect(note).toContainText('was not applied');
+    await expect(note).toContainText('still holds the value it held before');
+    await expect(note).not.toContainText(/identical|malformed|invalid|sha/i);
 
     // The editor stays open with the typed value, as on a 412 — the correction can be
     // retried without retyping — and no impact note claims a downstream change.
