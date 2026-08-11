@@ -701,7 +701,32 @@ workflows. Dean is therefore the only person who can answer Q1–Q4.
 | **Q17** | **Is `X-authentik-uid` permanent and non-reassignable across rename, departure, deactivation and rehire?** Raised 2026-08-02: the UID claim is now known to reach the pod (§6A), so it is a live alternative to the username as ISAAC's canonical internal key. Presence is observable; **lifecycle is not** — no request can reveal what happens to a UID when a person leaves and returns. Pairs with **Q5** (the same question for the username); ISAAC likely needs *both* answers, since the probable design keeps UID as the internal key and username as the compatibility alias. |
 | **Q18** | **Will the infrastructure strip client-supplied `X-authentik-entitlements` and `X-Isaac-Edge`, or should ISAAC treat them as permanently untrusted?** On the tested path the edge supplied neither and the client's own values arrived untouched (§6A.2) — so `X-Isaac-Edge` cannot currently witness that a request traversed the edge, which is the one job its name implies. ISAAC's position is already "permanently disqualified from security decisions"; this asks whether that is also *your* intent, or whether the annotation is meant to cover them and does not. |
 | **Q19** | **May the deployed ISAAC backend read each of the 30 production-derived records through the existing read-only path, clone each record only in memory, apply controlled field removals or schema-invalid mutations, run ISAAC's deterministic workflow, discard every copy, and return only aggregate pass/fail conclusions with no values, identifiers, per-record output, or database writes?** Raised 2026-08-02 for the corpus-validation phase. See the authorization audit recorded with that phase for why this is asked rather than assumed. |
-| **Q20** | **Does your answer to Q10 extend from `attribution.uploaded_by` to ISAAC's own actor columns — specifically the actor on a per-Run field OVERRIDE, on a SUBMISSION, and on each row of a REVISION history?** Raised 2026-08-11 by the scientist-capture programme. **Why this is not already Q10:** Q10 asks about one field of the *upstream official schema*, whose description already invites server-stamping. These three are different in kind — they are **ISAAC-owned application tables** (`isaac_experiments` today, `isaac_runs` and the deferred revision/submission tables of contract §8 D7 later), they are **append-only audit rows rather than a mutable metadata field**, and a wrong or reassigned principal in them **misattributes a scientific decision to a person who did not make it** and cannot be corrected by re-editing a field. So the blast radius differs even if the claim you name is the same. If the answer is "the same claim, stamped the same way", say so and the question closes; ISAAC will not infer that from Q10. **What ISAAC has already built rather than waiting:** the actor seam exists and is deliberately left **unset/unknown** — no client-supplied or user-typed actor is ever accepted as authoritative, and no submitter is fabricated. **The cost of this staying open is bounded and known:** overrides, validation and drafting all work without it; what cannot ship is an *attributed* submission or an *attributed* revision row. |
+| **Q25** | **RENUMBERED FROM `Q20` ON 2026-08-11, THE SAME DAY IT WAS RAISED — see the note below this table. The question text is unchanged.** **Does your answer to Q10 extend from `attribution.uploaded_by` to ISAAC's own actor columns — specifically the actor on a per-Run field OVERRIDE, on a SUBMISSION, and on each row of a REVISION history?** Raised 2026-08-11 by the scientist-capture programme. **Why this is not already Q10:** Q10 asks about one field of the *upstream official schema*, whose description already invites server-stamping. These three are different in kind — they are **ISAAC-owned application tables** (`isaac_experiments` today, `isaac_runs` and the deferred revision/submission tables of contract §8 D7 later), they are **append-only audit rows rather than a mutable metadata field**, and a wrong or reassigned principal in them **misattributes a scientific decision to a person who did not make it** and cannot be corrected by re-editing a field. So the blast radius differs even if the claim you name is the same. If the answer is "the same claim, stamped the same way", say so and the question closes; ISAAC will not infer that from Q10. **What ISAAC has already built rather than waiting:** the actor seam exists and is deliberately left **unset/unknown** — no client-supplied or user-typed actor is ever accepted as authoritative, and no submitter is fabricated. **The cost of this staying open is bounded and known:** overrides, validation and drafting all work without it; what cannot ship is an *attributed* submission or an *attributed* revision row. |
+
+### The `Q20` collision, and why the actor question is now `Q25` (2026-08-11)
+
+**This question was filed as `Q20` earlier the same day, and `Q20` was already taken.** It is
+recorded here rather than silently corrected, because the mechanism that produced it is the exact
+one `ai-integration-decision-packet.md:478` had already written a rule against, and a silent fix
+would leave the next session free to repeat it.
+
+`Q20` has meant **"may JSON Schema `format` enforcement be armed in the official validator?"** since
+before 2026-08-05. That meaning is not merely documented — it is **load-bearing in committed code**:
+`authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` (`apps/api/isaac_api/authorization.py:118`) is
+`False`, `APPROVAL_QUESTION_REFERENCE` points at `docs/dean-authorization-packet.md`, and seven
+further files under `apps/api/` reference it. The question has also **already been put to Dean** in
+that packet, alongside `Q19` — which is answered — so `Q20` is an identifier that has left the
+repository and is awaiting an external answer.
+
+**The concrete harm this avoids.** Had the handoff gone out with two live `Q20`s, a one-word reply
+from Dean — *"Q20: yes"* — would have been ambiguous between arming a validator gate on the truth
+path and authorizing server-stamped actor columns. Nothing downstream could have detected which was
+meant, and one of the two readings silently changes official validation behaviour.
+
+**The rule, applied:** identifiers sent to an external decision-maker are **append-only**. `Q1`–`Q24`
+were all in use (measured: `grep -rhoE '\bQ[0-9]{1,3}\b' docs/ apps/ src/`), so the actor question
+takes the next free number, `Q25`. `Q20` keeps its established meaning and is untouched. Nothing was
+shifted.
 
 ---
 

@@ -471,11 +471,27 @@ and the capture spec's §9 gate table does not name them individually.
 >
 > | Proposed label | Where it actually lives | Why there |
 > |---|---|---|
-> | *authoritative identity* | `identity-trust-contract.md` §7, **Q5 / Q10 / Q17 / Q18** (principal, stamping, UID lifecycle, untrusted headers), **Q6 / Q7** for authorization, plus new **Q20** for ISAAC's own override / submission / revision actor columns | That document asks the question **more precisely than a single "D1" can**. It already separates *which claim arrives* (observed, §6A) from *whether the claim is trustworthy* (Q18) from *whether the identifier survives a rename or rehire* (Q5, Q17) — three different answers from three different kinds of authority. Collapsing them into one row would lose the distinction that §6A.1 exists to protect. |
+> | *authoritative identity* | `identity-trust-contract.md` §7, **Q5 / Q10 / Q17 / Q18** (principal, stamping, UID lifecycle, untrusted headers), **Q6 / Q7** for authorization, plus new **Q25** for ISAAC's own override / submission / revision actor columns — **filed as `Q20` and renumbered the same day, because `Q20` was already taken by `format` enforcement and is load-bearing in `authorization.py`; see `identity-trust-contract.md` §7, "The `Q20` collision"** | That document asks the question **more precisely than a single "D1" can**. It already separates *which claim arrives* (observed, §6A) from *whether the claim is trustworthy* (Q18) from *whether the identifier survives a rename or rehire* (Q5, Q17) — three different answers from three different kinds of authority. Collapsing them into one row would lose the distinction that §6A.1 exists to protect. |
 > | *apply `0002_runs`* | `migration-approval-packet-0002.md`, STATUS + §12A.3 | It is not an open question any more. Krish approved it on 2026-08-11 and the condition on that approval is discharged. What remains is an **operator action with a runbook** (§8 → §9 → §10), not a decision needing a packet row. |
 >
 > The rule, stated so it survives the next continuation: **an identifier that has been sent to an
-> external decision-maker is append-only.** Add `D10`, `Q21`. Never shift.
+> external decision-maker is append-only.** Add the next **free** identifier. Never shift.
+>
+> **MEASURE THE NEXT FREE NUMBER; DO NOT ASSUME IT (added 2026-08-11).** This line previously read
+> *"Add `D10`, `Q21`"* — and **`Q21` was already in use when that was written**
+> (`docs/portal-identity-and-metrics-audit.md:133`, *which identifier string is the authenticated
+> identity*). So the rule against reusing an identifier shipped with an example that reused one.
+> That is not an idle correction: on 2026-08-11 the actor-columns question was in fact filed as
+> `Q20` — also taken, and load-bearing in `apps/api/isaac_api/authorization.py` — and had to be
+> renumbered to `Q25` before the Dean handoff went out. Both mistakes have the same root: a number
+> guessed rather than measured. The command:
+>
+> ```bash
+> grep -rhoE '\b(Q|D)[0-9]{1,3}\b' docs/ apps/ src/ | sort -u -V | tail -5
+> ```
+>
+> At the time of writing that yields `Q24` as the highest `Q` in use, so `Q25` is next — which is
+> why the actor question is `Q25`. `D9` remains the highest `D`, so `D10` is still correct.
 
 ---
 
