@@ -61,6 +61,7 @@ function rec(over: Partial<RuntimeRecord> & { experiment_id: string }): RuntimeR
       insufficient_evidence: 0,
       conflicting_evidence: 0,
       unknown: 0,
+      unreadable: 0,
     },
     artifact_state: 'none',
     record_rev: 1,
@@ -87,6 +88,10 @@ const SEEDS: RuntimeRecord[] = [
       insufficient_evidence: 5,
       conflicting_evidence: 0,
       unknown: 1,
+      // NON-ZERO on purpose: with every seed at 0 the sixth class would be
+      // summed into `totalFields` as nothing, and the exhaustiveness assertions
+      // below would pass just as well with the class dropped entirely.
+      unreadable: 2,
     },
   }),
   rec({
@@ -100,6 +105,7 @@ const SEEDS: RuntimeRecord[] = [
       insufficient_evidence: 2,
       conflicting_evidence: 1,
       unknown: 0,
+      unreadable: 0,
     },
   }),
   rec({
@@ -112,6 +118,7 @@ const SEEDS: RuntimeRecord[] = [
       insufficient_evidence: 0,
       conflicting_evidence: 0,
       unknown: 0,
+      unreadable: 0,
     },
   }),
   rec({
@@ -124,6 +131,7 @@ const SEEDS: RuntimeRecord[] = [
       insufficient_evidence: 1,
       conflicting_evidence: 2,
       unknown: 0,
+      unreadable: 0,
     },
   }),
   rec({
@@ -138,6 +146,7 @@ const SEEDS: RuntimeRecord[] = [
       insufficient_evidence: 0,
       conflicting_evidence: 0,
       unknown: 0,
+      unreadable: 0,
     },
     artifact_state: 'stale',
   }),
@@ -333,25 +342,36 @@ describe('deriveEvidenceTotals', () => {
     expect(t.insufficientEvidence).toBe(seedSum('insufficient_evidence'));
     expect(t.conflictingEvidence).toBe(seedSum('conflicting_evidence'));
     expect(t.unknown).toBe(seedSum('unknown'));
+    expect(t.unreadable).toBe(seedSum('unreadable'));
   });
 
-  it('totalFields is the sum of the five, and is FIELDS — not records', () => {
+  it('totalFields is the sum of the six, and is FIELDS — not records', () => {
     const t = deriveEvidenceTotals(SEEDS);
     const expected =
-      t.supported + t.inferredCandidate + t.insufficientEvidence + t.conflictingEvidence + t.unknown;
+      t.supported +
+      t.inferredCandidate +
+      t.insufficientEvidence +
+      t.conflictingEvidence +
+      t.unknown +
+      t.unreadable;
     expect(t.totalFields).toBe(expected);
     expect(t.recordsCounted).toBe(SEEDS.length);
     // The unit distinction is the point: many fields per record.
     expect(t.totalFields).toBeGreaterThan(t.recordsCounted);
   });
 
-  it('carries the five classes in the backend’s display precedence, not by count', () => {
+  it('carries the six classes in the backend’s display precedence, not by count', () => {
     expect(EVIDENCE_CLASSES.map((c) => c.key)).toEqual([
       'supported',
       'inferred_candidate',
       'insufficient_evidence',
       'conflicting_evidence',
       'unknown',
+      // `unreadable` — a READ FAILURE, never folded into `unknown`, which claims
+      // nothing defensible is recorded. Listed here because `deriveEvidenceTotals`
+      // sums only what this array names, so an omission is a silent undercount of
+      // `totalFields`, i.e. of the stacked bar's own denominator.
+      'unreadable',
     ]);
     // Precedence is fixed, so it must NOT track the fixture's counts.
     const t = deriveEvidenceTotals(SEEDS);
@@ -366,6 +386,7 @@ describe('deriveEvidenceTotals', () => {
       insufficientEvidence: 0,
       conflictingEvidence: 0,
       unknown: 0,
+      unreadable: 0,
       totalFields: 0,
       recordsCounted: 0,
     });

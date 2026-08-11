@@ -1,5 +1,5 @@
 import './evidence.css';
-import { SOURCE_ICON } from './icons';
+import { sourceIcon } from './icons';
 import type { FieldEvidence, SourceType } from '../lib/types';
 
 const SRC_CLASS: Record<SourceType, string> = {
@@ -12,13 +12,22 @@ const SRC_CLASS: Record<SourceType, string> = {
   web_form: 'src-filelisting',
 };
 
-/** A neutral chip + colored source-type icon + mono source_type label. */
+/**
+ * A neutral chip + colored source-type icon + mono source_type label.
+ *
+ * Tolerates a source type this build does not know: the glyph falls back (see
+ * `sourceIcon`) and the label still prints the stored string verbatim, so an
+ * unrecognised kind is shown as itself rather than crashing the surface it is on.
+ * This token is mounted on the record workbench field rows AND in the Evidence
+ * sidecar detail, so the crash it used to cause had two blast radii, not one.
+ */
 export function SourceTypeToken({ sourceType }: { sourceType: SourceType }) {
-  const Icon = SOURCE_ICON[sourceType];
+  const Icon = sourceIcon(sourceType);
+  const cls = SRC_CLASS[sourceType] ?? 'src-unknown';
   return (
-    <span className={`src-token ${SRC_CLASS[sourceType]}`}>
+    <span className={`src-token ${cls}`}>
       <Icon size={12} strokeWidth={2} aria-hidden="true" />
-      {sourceType}
+      {typeof sourceType === 'string' && sourceType ? sourceType : 'source type not recorded'}
     </span>
   );
 }

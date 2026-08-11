@@ -469,11 +469,102 @@ def _match_field_entry(token: Optional[str], evidence_trail: list) -> Optional[d
 
 
 def _traceable_labels(evidence_trail: list) -> list:
+    """Fields this surface can actually trace — DELIBERATELY excluding the unreadable.
+
+    An entry ``serialize`` marked ``unavailable`` with nothing salvaged carries an
+    empty ``evidence`` list, so the truthiness test already omits it, and that is
+    kept on purpose rather than by accident: this list is offered to the user as
+    "fields I can trace for you", and a field whose stored evidence could not be
+    read is precisely the one this surface CANNOT trace. Listing it would promise
+    an answer that does not exist.
+
+    Consistency with the answer path is the point, and it holds in both
+    directions: a field omitted here is answered by
+    :func:`_unreadable_field_refusal` if the user names it anyway (a refusal, not
+    a claim), and a PARTIALLY readable field keeps some evidence, so it is listed
+    here AND answered — with the unreadable part disclosed. What excluding these
+    must NOT do is make the empty-list fallback say nothing exists, which is why
+    :func:`_unreadable_trail_count` exists.
+    """
     labels: list = []
     for entry in evidence_trail:
         if entry.get("evidence"):
             labels.append(_humanize(str(entry.get("path") or "")))
     return labels
+
+
+def _unreadable_trail_count(evidence_trail: list) -> int:
+    """How many trail entries yielded NO readable evidence because they could not be read.
+
+    Counted separately from "has no evidence" so the no-labels fallback can tell a
+    scientist which of the two it is looking at.
+    """
+    return sum(
+        1 for e in evidence_trail if e.get("unavailable") and not e.get("evidence")
+    )
+
+
+def _unreadable_entry_reason(entry: dict) -> str:
+    """The trail's own reason, or a neutral stand-in. Never a stored value.
+
+    ``serialize`` composes the reason from the JSON TYPE it found (``_kind``) and
+    never interpolates the stored content, so passing it through to the user adds
+    no leak. The fallback exists because an absent reason must not silently become
+    an assertion that the entry is fine.
+    """
+    reason = entry.get("unavailable_reason")
+    return reason if isinstance(reason, str) and reason else "it could not be read"
+
+
+def _unreadable_field_refusal(entry: dict, base: str, followups: list, tail: str):
+    """A field IS recorded; its evidence could not be read. Refuse, do not assert.
+
+    THE DEFECT THIS EXISTS TO FIX, as measured on ``ba8e38e`` with the draft
+    ``{"fields": {"sample.name": 7}}``:
+
+    ======================  =========================  ==========================
+    ..                      base ``77820bf``           branch ``ba8e38e``
+    ======================  =========================  ==========================
+    trail                   ``[]``                     1 unavailable entry
+    ``_match_field_entry``  ``None``                   MATCHES
+    outcome                 ``insufficient_context``   ``answered``
+    text                    "No cited source is        "Name has no cited source
+                            recorded for a field yet." recorded yet."
+    ======================  =========================  ==========================
+
+    The branch turned a refusal into a confident FALSE answer: the field's cited
+    sources may exist and merely be unreadable, so "has no cited source" is a
+    claim this code is in no position to make. The browser side of the same branch
+    had already got this right — ``adapt.ts::provenanceFor`` refuses the identical
+    sentence with the comment *"'carries no citation' would be a FALSE claim about
+    an entry whose citations exist but could not be read"*; this is that reasoning
+    applied to the deterministic Assistant surface.
+
+    WHY A REFUSAL AND NOT A DISCLOSING ``answered`` (CLAUDE.md §5). §5 permits
+    exactly one honest move when a value is not supported by evidence: leave it
+    missing, or ask. It does not permit asserting the negative. Here the QUESTION
+    is "what cites this field / what evidence does it have", and the surface that
+    would answer it is unreadable — so there is no grounded answer to give at all,
+    only the observation that the entry exists and could not be read. That is
+    ``insufficient_context``: the context needed to answer is genuinely absent.
+    Calling it ``answered`` would record, in the outcome field the app counts and
+    displays, that this question was answered from grounded evidence, when what
+    was really served was a statement about the server's own reading failure. The
+    PARTIAL case is different and is deliberately still ``answered``: there the
+    readable entries genuinely answer the question, and the disclosure names what
+    is missing from that answer — the same split ``provenanceFor`` makes.
+    """
+    label = _humanize(str(entry.get("path") or ""))
+    text = (
+        f"{label} has a recorded entry, but its stored evidence could not be read "
+        f"({_unreadable_entry_reason(entry)}) — so {tail} Nothing is invented in "
+        f"its place."
+    )
+    # The citation is a route to the surface that states the same failure per
+    # entry; it asserts nothing about the evidence and lets the user go look.
+    return text, "insufficient_context", ["files"], [
+        {"label": "Evidence & Sources", "navigate_to": f"{base}{_EVIDENCE_SUFFIX}"}
+    ], followups
 
 
 _MEMORY_TAIL = "Project memory returns leads to verify — never a validation verdict."
@@ -822,14 +913,31 @@ def _provenance(classified, ctx, base, followups):
     entry = _match_field_entry(token, ctx.evidence_trail)
     if entry is None:
         labels = _traceable_labels(ctx.evidence_trail)
+        unreadable = _unreadable_trail_count(ctx.evidence_trail)
         if labels:
             text = (
                 "Tell me which field to trace. Traceable fields include: "
                 f"{_join_capped(labels)}."
             )
+        elif unreadable:
+            # "No cited source is recorded" would be FALSE here: every entry in
+            # this trail has one, and every one of them could not be read.
+            text = (
+                f"No field's cited sources can be read — "
+                f"{_count(unreadable, 'recorded entry', 'recorded entries')} could "
+                "not be read, so I can't say whether any citation exists. Evidence "
+                "& Sources states which ones and why."
+            )
         else:
             text = "No cited source is recorded for a field yet."
         return text, "insufficient_context", ["files"], [], followups
+    if entry.get("unavailable") and not entry.get("evidence"):
+        return _unreadable_field_refusal(
+            entry,
+            base,
+            followups,
+            "I can't say whether it has a cited source, and I won't guess one.",
+        )
     label = _humanize(str(entry.get("path") or ""))
     types = _source_types(entry.get("evidence"))
     n = len(entry.get("evidence") or [])
@@ -841,6 +949,14 @@ def _provenance(classified, ctx, base, followups):
         )
     else:
         text = f"{label} has no cited source recorded yet."
+    if entry.get("unavailable"):
+        # PARTIALLY readable: the sentence above describes exactly what could be
+        # read, so it reads as complete unless the rest is said out loud. Same
+        # split, and same reason, as `adapt.ts::provenanceFor`.
+        text = (
+            f"{text} Part of this entry's evidence is unavailable: "
+            f"{_unreadable_entry_reason(entry)}."
+        )
     # IMPORTANT-3: the citation opens the Evidence Explorer, not the record root.
     return text, "answered", ["files"], [
         {"label": "Evidence & Sources", "navigate_to": f"{base}{_EVIDENCE_SUFFIX}"}
@@ -852,14 +968,31 @@ def _evidence(classified, ctx, base, followups):
     entry = _match_field_entry(token, ctx.evidence_trail)
     if entry is None:
         labels = _traceable_labels(ctx.evidence_trail)
+        unreadable = _unreadable_trail_count(ctx.evidence_trail)
         if labels:
             text = (
                 "Tell me which field's evidence to summarize. Fields with evidence "
                 f"include: {_join_capped(labels)}."
             )
+        elif unreadable:
+            # "No field has recorded evidence entries" would be FALSE here — the
+            # entries are recorded; none of them could be read.
+            text = (
+                "No field's evidence can be read — "
+                f"{_count(unreadable, 'recorded entry', 'recorded entries')} could "
+                "not be read, so I can't summarize any of it or say whether it "
+                "exists. Evidence & Sources states which ones and why."
+            )
         else:
             text = "No field has recorded evidence entries yet."
         return text, "insufficient_context", ["files"], [], followups
+    if entry.get("unavailable") and not entry.get("evidence"):
+        return _unreadable_field_refusal(
+            entry,
+            base,
+            followups,
+            "I can't summarize its evidence or say whether any exists.",
+        )
     label = _humanize(str(entry.get("path") or ""))
     types = _source_types(entry.get("evidence"))
     n = len(entry.get("evidence") or [])
@@ -873,6 +1006,13 @@ def _evidence(classified, ctx, base, followups):
             f"{label} has {_count(n, 'evidence entry', 'evidence entries')}: "
             f"{_join_capped(shown)}. Multiple entries can provide separate support "
             "for the same field."
+        )
+    if entry.get("unavailable"):
+        # PARTIALLY readable — the count above is a count of what could be READ,
+        # so leaving it unqualified would state the entry's evidence as complete.
+        text = (
+            f"{text} Part of this entry's evidence is unavailable: "
+            f"{_unreadable_entry_reason(entry)}."
         )
     # IMPORTANT-3: the citation opens the Evidence Explorer, not the record root.
     return text, "answered", ["files"], [

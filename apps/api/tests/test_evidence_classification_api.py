@@ -23,7 +23,17 @@ import isaac_api.workspace as ws
 
 from conftest import bind_tutorial_session, tutorial_client
 
-CLASSES = {"supported", "inferred_candidate", "insufficient_evidence", "conflicting_evidence", "unknown"}
+#: The SIX evidence-support classes. ``unreadable`` is its own key on purpose —
+#: see ``runtime_records.EVIDENCE_CLASSES``; folding it into ``unknown`` would
+#: make the histogram assert "no defensible value" about an entry nobody read.
+CLASSES = {
+    "supported",
+    "inferred_candidate",
+    "insufficient_evidence",
+    "conflicting_evidence",
+    "unknown",
+    "unreadable",
+}
 FIELD_KEYS = {"field", "classification", "value_state", "explanation", "sources"}
 
 
@@ -94,7 +104,7 @@ def test_requires_auth_when_key_set(tmp_path, monkeypatch):
 
 
 def test_counts_histogram_holds_on_a_raw_partial_seed(client):
-    """The class histogram invariant (sum == #fields, keys == the 5 classes) holds
+    """The class histogram invariant (sum == #fields, keys == the 6 classes) holds
     on a not-yet-ready seed too, not just the ready record."""
     body = client.get(f"/api/experiments/{ws.SEED_PARTIAL_ID}/evidence-classification").json()
     assert set(body["counts"]) == CLASSES

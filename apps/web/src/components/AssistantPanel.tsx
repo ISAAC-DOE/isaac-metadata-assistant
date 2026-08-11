@@ -11,6 +11,7 @@ import {
   CircleAlert,
   CircleDashed,
   CircleHelp,
+  EyeOff,
   TriangleAlert,
   Check,
   X,
@@ -264,6 +265,9 @@ const CLASS_META: Record<string, { label: string; Icon: LucideIcon }> = {
   insufficient_evidence: { label: LABELS.chipEvInsufficient, Icon: CircleAlert },
   conflicting_evidence: { label: LABELS.chipEvConflicting, Icon: TriangleAlert },
   unknown: { label: LABELS.chipEvUnknown, Icon: CircleHelp },
+  // A read failure, not a finding — its own words and its own glyph so it is
+  // never announced as "Unknown".
+  unreadable: { label: LABELS.chipEvUnreadable, Icon: EyeOff },
 };
 
 const DEFAULT_SESSION_KEY = '__assistant__';

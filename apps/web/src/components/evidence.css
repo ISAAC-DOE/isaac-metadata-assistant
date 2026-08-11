@@ -26,6 +26,13 @@
 .src-filelisting svg { color: var(--src-filelisting); }
 .src-derivation svg { color: var(--src-derivation); }
 .src-userconf svg { color: var(--src-userconf); }
+/* A source type this build has no mapping for. `EvidenceRow.tsx` falls back to
+   this class name, which was previously written but never DEFINED — so the one
+   case the fallback exists for got no rule at all. Deliberately NEUTRAL: an
+   unrecognised kind must not borrow one of the four known source hues, because
+   the hue is a claim about which kind of source it is. The chip frame and mono
+   label still come from `.src-token`, so it reads as a token, not as nothing. */
+.src-unknown svg { color: var(--text-tertiary); }
 
 /* ---- EvidenceRow (compact citation) -------------------------------- */
 .ev-row {
@@ -187,6 +194,19 @@
 .trail-dot.derivation { background: var(--src-derivation); }
 .trail-dot.user_confirmation { background: var(--src-userconf); }
 .trail-resolved { color: var(--pass-solid); flex: none; }
+/* An entry whose stored evidence could not be read. It stays IN the list — the
+   marker is a text label, not a colour or a glyph alone, so the state survives
+   greyscale, high-contrast and a screen reader. */
+.trail-unavailable {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-token);
+  background: var(--needsyou-bg);
+  border: 1px solid var(--needsyou-border);
+  color: var(--needsyou-text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
 
 /* ---- SourcePreview (S5 right pane) --------------------------------- */
 .preview {
@@ -354,6 +374,22 @@
 }
 .sidecar-kv.wrap { white-space: normal; }
 .sidecar-none { color: var(--text-tertiary); }
+/* Distinct from `.sidecar-none`, because the two say different things: "no
+   citations recorded" is a fact about the record, this is a failure to read it. */
+.sidecar-unavailable {
+  color: var(--needsyou-text);
+  background: var(--needsyou-bg);
+  border: 1px solid var(--needsyou-border);
+  border-radius: var(--radius-inner);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  /* `.sidecar-obj` is mono (it renders JSON); this is prose about a failure, so
+     it opts back out to the body face rather than reading like stored content. */
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: normal;
+}
 .sidecar-obj {
   border: 1px solid var(--border);
   border-radius: var(--radius-inner);

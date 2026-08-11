@@ -27,14 +27,20 @@ from . import evidence_classify
 from .dependencies import artifact_state
 from .workflow import derive_workflow
 
-#: The five evidence-support classes, in display precedence. The single source
+#: The six evidence-support classes, in display precedence. The single source
 #: for the ``evidence_counts`` histogram key set (counts only — never per-field).
+#:
+#: ``unreadable`` is its own bucket, not folded into ``unknown``: ``unknown``
+#: asserts that nothing defensible is recorded, and an entry whose stored evidence
+#: could not be read supports no such assertion. Folding them would have made the
+#: workspace histogram state a finding about the science that nobody measured.
 EVIDENCE_CLASSES: tuple[str, ...] = (
     "supported",
     "inferred_candidate",
     "insufficient_evidence",
     "conflicting_evidence",
     "unknown",
+    "unreadable",
 )
 
 #: The ONLY keys a projected record may carry — a strict, safe allow-set.

@@ -36,7 +36,16 @@ ALLOWED_KEYS = {
     "updated_utc",
     "navigate_to",
 }
-EVIDENCE_CLASSES = {"supported", "inferred_candidate", "insufficient_evidence", "conflicting_evidence", "unknown"}
+EVIDENCE_CLASSES = {
+    "supported",
+    "inferred_candidate",
+    "insufficient_evidence",
+    "conflicting_evidence",
+    "unknown",
+    # A read failure, never folded into `unknown` (which claims nothing
+    # defensible is recorded). See `runtime_records.EVIDENCE_CLASSES`.
+    "unreadable",
+}
 # Keys/substrings that must NEVER appear anywhere in the projection payload.
 FORBIDDEN_SUBSTRINGS = ["/Users/", "\\Users\\", "draft", "answer_log", "proposal", "sidecar"]
 

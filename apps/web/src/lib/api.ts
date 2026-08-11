@@ -1314,12 +1314,23 @@ export const api = {
 } as const;
 
 /** Distinct source-file basenames referenced by any evidence entry (order kept). */
+/**
+ * The source fixtures the trail cites, read DEFENSIVELY, per entry.
+ *
+ * This is inside `getEvidenceBundle`'s async body, which is why its shape
+ * assumptions were load-bearing in the worst way: on `77820bf` a single entry
+ * whose `evidence` was not an array (measured with `evidence: 7`) threw here,
+ * the WHOLE bundle promise rejected, and the Evidence view rendered the
+ * "Backend Not Running" alert — blaming the server for one malformed item in one
+ * record. One bad entry now contributes no cited files and nothing else changes.
+ */
 function citedSourceFiles(evidence: ApiEvidenceEntry[]): string[] {
   const seen: string[] = [];
-  for (const entry of evidence) {
-    for (const ev of entry.evidence ?? []) {
-      const file = ev.source_file;
-      if (file && !seen.includes(file)) seen.push(file);
+  for (const entry of Array.isArray(evidence) ? evidence : []) {
+    const list = entry && Array.isArray(entry.evidence) ? entry.evidence : [];
+    for (const ev of list) {
+      const file = ev && typeof ev === 'object' ? ev.source_file : undefined;
+      if (typeof file === 'string' && file && !seen.includes(file)) seen.push(file);
     }
   }
   return seen;
