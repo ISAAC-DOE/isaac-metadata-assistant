@@ -30,6 +30,7 @@
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 
 import { RunInheritedPanel } from '../components/RunInheritedPanel';
 import { stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
@@ -39,6 +40,7 @@ const EXP = 'demo';
 const RUN = 'RUNAAA';
 const OVERRIDES = `POST /api/experiments/${EXP}/runs/${RUN}/overrides`;
 const CLEAR = `POST /api/experiments/${EXP}/runs/${RUN}/overrides/clear`;
+const GET_RUN = `GET /api/experiments/${EXP}/runs/${RUN}`;
 
 const MATERIAL = 'field:sample.material.name';
 const DIAMETER = 'field:sample.geometry.pellet_diameter_mm';
@@ -115,6 +117,24 @@ function mount(run: ApiRunView, routes: Record<string, RouteEntry> = {}) {
   stubFetchRoutes(routes);
   const view = render(<RunInheritedPanel experimentId={EXP} run={run} onRun={onRun} />);
   return { onRun, view };
+}
+
+/**
+ * The panel with a PARENT that adopts what the server returns.
+ *
+ * `mount` hands `onRun` to a spy, which is right for asserting what was sent —
+ * but it freezes `run.version` at the mounted value, so it cannot show that a
+ * re-read makes the NEXT attempt carry a different token. That is exactly the
+ * claim the 412 recovery has to back, so it is tested against a parent that does
+ * what `RunCard`'s does: replace the run with the one the server returned.
+ */
+function mountLive(initial: ApiRunView, routes: Record<string, RouteEntry> = {}) {
+  stubFetchRoutes(routes);
+  function Harness() {
+    const [run, setRun] = useState(initial);
+    return <RunInheritedPanel experimentId={EXP} run={run} onRun={setRun} />;
+  }
+  return render(<Harness />);
 }
 
 const panel = () => screen.getByRole('region', { name: 'Values inherited from the record' });
@@ -685,5 +705,297 @@ describe('a refused write', () => {
     );
     expect(rowFor(MATERIAL).textContent).not.toMatch(/cannot hold this override/);
     expect(outcome()).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8 — the 412's named remedy is ON SCREEN, and it actually recovers
+// ---------------------------------------------------------------------------
+
+describe('recovering from a compare-and-swap refusal', () => {
+  /** The run as a second client left it: same values, a version this page has not seen. */
+  const movedRun = () => runView({ rev: 9, version: 'ra.9' });
+
+  /** 412 on the first override attempt, 200 on every one after it. */
+  function overridesThenSucceed(): RouteEntry {
+    let calls = 0;
+    return () => {
+      calls += 1;
+      if (calls === 1) return { status: 412, body: { error: 'stale_write', current_version: 'ra.9' } };
+      return {
+        body: {
+          run: overriddenRun('Copper(I) Oxide', { rev: 10, version: 'ra.10' }),
+          override: { address: MATERIAL, recorded_utc: '2099-04-02T10:00:00Z' },
+        },
+      };
+    };
+  }
+
+  async function driveToStale(log: ReturnType<typeof requestLog>, routes: Record<string, RouteEntry>) {
+    mountLive(runView(), log.wrap(routes));
+    await openOverride(MATERIAL, 'Copper(I) Oxide');
+    await act(async () => {
+      fireEvent.click(confirmBox(MATERIAL));
+    });
+    await act(async () => {
+      fireEvent.click(recordButton(MATERIAL));
+    });
+    await waitFor(() =>
+      expect(rowFor(MATERIAL).textContent).toMatch(/the override was not recorded/),
+    );
+  }
+
+  const refreshButton = () =>
+    within(rowFor(MATERIAL)).getByRole('button', {
+      name: 'Refresh this run · sample.material.name',
+    }) as HTMLButtonElement;
+
+  it('offers the refresh it names, and a retry then carries the version the server holds', async () => {
+    /*
+     * THE DEFECT THIS PINS. The notice said "Refresh this run to load the version the
+     * server holds", and the app's only refresh was `RunCard`'s, gated on
+     * `autosave.status === 'conflict'` — a state an override 412 never reaches, because
+     * this write does not go through `useRunAutosave` at all. So `run.version` could
+     * never advance, every retry 412'd forever, and only a full page reload recovered.
+     */
+    const log = requestLog();
+    await driveToStale(log, {
+      [OVERRIDES]: overridesThenSucceed(),
+      [GET_RUN]: { body: { run: movedRun() } },
+    });
+    expect(log.seen[0].ifMatch).toBe('"ra.3"');
+
+    await act(async () => {
+      fireEvent.click(refreshButton());
+    });
+
+    // The re-read is reported as a re-read — NOT as a write, and not as a retry.
+    await waitFor(() => expect(outcome()).toMatch(/This run was re-read from the server/));
+    expect(outcome()).toMatch(/Nothing was written/);
+    expect(outcome()).toMatch(/is still not recorded/);
+    expect(rowFor(MATERIAL).textContent).not.toMatch(/the override was not recorded/);
+
+    // The form is still open, still holding the value and the ticked confirmation…
+    expect((within(rowFor(MATERIAL)).getByRole('textbox') as HTMLInputElement).value).toBe(
+      'Copper(I) Oxide',
+    );
+    expect(confirmBox(MATERIAL).checked).toBe(true);
+    // …and the retry carries the SERVER's token, which is the whole point.
+    await act(async () => {
+      fireEvent.click(recordButton(MATERIAL));
+    });
+    await waitFor(() => expect(outcome()).toMatch(/Override recorded for sample\.material\.name/));
+    const overridePosts = log.seen.filter((s) => s.key === OVERRIDES);
+    expect(overridePosts).toHaveLength(2);
+    expect(overridePosts[1].ifMatch).toBe('"ra.9"');
+  });
+
+  it('leaves focus on the retry the copy names, never on the document body', async () => {
+    const log = requestLog();
+    await driveToStale(log, {
+      [OVERRIDES]: overridesThenSucceed(),
+      [GET_RUN]: { body: { run: movedRun() } },
+    });
+    await act(async () => {
+      fireEvent.click(refreshButton());
+    });
+    await waitFor(() => expect(outcome()).toMatch(/re-read from the server/));
+    expect(document.activeElement).toBe(recordButton(MATERIAL));
+  });
+
+  it('says so when the re-read itself fails, and keeps the refusal on screen', async () => {
+    // A control that fails silently would be the very defect this button was added to
+    // remove. The 412 is still true and still unresolved, so its notice stays.
+    const log = requestLog();
+    await driveToStale(log, {
+      [OVERRIDES]: overridesThenSucceed(),
+      [GET_RUN]: { status: 503, body: { error: 'unavailable' } },
+    });
+    await act(async () => {
+      fireEvent.click(refreshButton());
+    });
+    await waitFor(() =>
+      expect(rowFor(MATERIAL).textContent).toMatch(/This run could not be re-read/),
+    );
+    expect(rowFor(MATERIAL).textContent).toMatch(/the override was not recorded/);
+    expect(outcome()).not.toMatch(/re-read from the server/);
+    // …and the reader is left on the control they can try again, not on `<body>`.
+    expect(document.activeElement).toBe(refreshButton());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9 — focus survives every control that destroys itself
+// ---------------------------------------------------------------------------
+
+describe('keyboard focus', () => {
+  /*
+   * MEASURED BEFORE THE FIX, in a real browser, on the trigger of row 9 of 13:
+   *
+   *   BEFORE ACTIVATE: BUTTON.btn.btn-secondary|Override for this run · …
+   *   AFTER ACTIVATE : BODY|Skip to contentISAAC…
+   *   AFTER CANCEL   : BODY|Skip to contentISAAC…
+   *
+   * Every control on this surface unmounts the moment it is activated, and nothing
+   * moved focus after it — so a keyboard or screen-reader reader was dropped on
+   * `<body>` and had to tab back through the skip link, the app shell and every
+   * preceding row to reach the box they had just revealed. The axe scan says nothing
+   * about this: axe does not evaluate focus movement.
+   */
+  const trigger = (name: RegExp) =>
+    within(rowFor(MATERIAL)).getByRole('button', { name }) as HTMLButtonElement;
+
+  it('moves to the value box when the form opens', async () => {
+    mount(runView());
+    await act(async () => {
+      fireEvent.click(trigger(/Override for this run/));
+    });
+    expect(document.activeElement).toBe(within(rowFor(MATERIAL)).getByRole('textbox'));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('returns to the control that opened the form when the reader cancels', async () => {
+    mount(runView());
+    await act(async () => {
+      fireEvent.click(trigger(/Override for this run/));
+    });
+    await act(async () => {
+      fireEvent.click(within(rowFor(MATERIAL)).getByRole('button', { name: 'Cancel' }));
+    });
+    expect(document.activeElement).toBe(trigger(/Override for this run/));
+  });
+
+  it('lands on the row\'s own control after a successful record — which now says something else', async () => {
+    // The trigger the reader activated has been REPLACED rather than restored: an
+    // inherited row is an overridden one now, so the button in its place reads
+    // "Change this run's value". Focusing it announces the new state by name.
+    mountLive(runView(), {
+      [OVERRIDES]: {
+        body: {
+          run: overriddenRun('Copper(I) Oxide'),
+          override: { address: MATERIAL, recorded_utc: '2099-04-02T10:00:00Z' },
+        },
+      },
+    });
+    await openOverride(MATERIAL, 'Copper(I) Oxide');
+    await act(async () => {
+      fireEvent.click(confirmBox(MATERIAL));
+    });
+    await act(async () => {
+      fireEvent.click(recordButton(MATERIAL));
+    });
+    await waitFor(() => expect(outcome()).toMatch(/Override recorded/));
+    expect(document.activeElement).toBe(trigger(/Change this run's value/));
+  });
+
+  it('moves to the revert confirmation, and back again when the reader keeps the override', async () => {
+    mount(overriddenRun('Copper(I) Oxide'));
+    await act(async () => {
+      fireEvent.click(trigger(/Revert to inherited/));
+    });
+    expect(document.activeElement).toBe(
+      within(rowFor(MATERIAL)).getByRole('button', { name: 'Confirm revert' }),
+    );
+    await act(async () => {
+      fireEvent.click(within(rowFor(MATERIAL)).getByRole('button', { name: 'Keep the override' }));
+    });
+    expect(document.activeElement).toBe(trigger(/Revert to inherited/));
+  });
+
+  it('lands on the row\'s remaining control after a successful revert', async () => {
+    // The control the reader started from is GONE — there is no override left to
+    // revert — so focus goes to the one the row still has, which states the new
+    // state in its own name.
+    mountLive(overriddenRun('Copper(I) Oxide'), {
+      [CLEAR]: { body: { run: runView(), cleared: true } },
+    });
+    await act(async () => {
+      fireEvent.click(trigger(/Revert to inherited/));
+    });
+    await act(async () => {
+      fireEvent.click(within(rowFor(MATERIAL)).getByRole('button', { name: 'Confirm revert' }));
+    });
+    await waitFor(() => expect(outcome()).toMatch(/Override removed/));
+    expect(document.activeElement).toBe(trigger(/Override for this run/));
+  });
+
+  it('lands on the refusal rather than the body when a write is refused', async () => {
+    // The submit disabled itself for the round trip, and a browser blurs a control it
+    // disables — so without this the reader is on `<body>` with an alert they cannot
+    // reach. The notice is a `tabIndex={-1}` landing place, the error-summary pattern.
+    mount(runView(), {
+      [OVERRIDES]: {
+        status: 422,
+        body: { error: 'not_overridable', address: MATERIAL, message: 'No.' },
+      },
+    });
+    await openOverride(MATERIAL, 'Copper(I) Oxide');
+    await act(async () => {
+      fireEvent.click(confirmBox(MATERIAL));
+    });
+    await act(async () => {
+      fireEvent.click(recordButton(MATERIAL));
+    });
+    await waitFor(() =>
+      expect(rowFor(MATERIAL).textContent).toMatch(/This address cannot hold this override/),
+    );
+    expect(document.activeElement).toBe(rowFor(MATERIAL).querySelector('.run-inherited-failure'));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10 — "carries no value" and "carries something unshowable" are different facts
+// ---------------------------------------------------------------------------
+
+describe('a record value this row cannot render', () => {
+  const structuredRun = () =>
+    runView({
+      inherited: {
+        [MATERIAL]: {
+          state: 'overridden',
+          payload: envelope('Copper(I) Oxide'),
+          // An object at a `field:` address. Latent today — every overridable field
+          // path is `str`/`float` server-side — but `valueText` returns `null` for it
+          // exactly as it does for absence, and the two are different statements.
+          inherited_payload: envelope({ a: 1 }),
+        },
+      },
+    });
+
+  it('says the record carries something unshowable, not that it carries nothing', () => {
+    mount(structuredRun());
+    const text = rowFor(MATERIAL).textContent ?? '';
+    expect(text).toMatch(/carries a value at this address that this row cannot show in one line/);
+    expect(text).not.toMatch(/carries no value at this address/);
+  });
+
+  it('draws the same distinction in the form\'s own context line', async () => {
+    mount(structuredRun());
+    await act(async () => {
+      fireEvent.click(
+        within(rowFor(MATERIAL)).getByRole('button', { name: /Change this run's value/ }),
+      );
+    });
+    const text = rowFor(MATERIAL).textContent ?? '';
+    expect(text).toMatch(/cannot show in one line/);
+    expect(text).not.toMatch(/carries no value at this address/);
+  });
+
+  it('still says "carries no value" when the record really carries none', () => {
+    // The other half of the discrimination: the original sentence must survive for
+    // the case it was written for, or this is a rename rather than a fix.
+    mount(
+      runView({
+        inherited: {
+          [MATERIAL]: {
+            state: 'overridden',
+            payload: envelope('Copper(I) Oxide'),
+            inherited_payload: null,
+          },
+        },
+      }),
+    );
+    expect(rowFor(MATERIAL).textContent).toMatch(/The record carries no value at this address/);
   });
 });

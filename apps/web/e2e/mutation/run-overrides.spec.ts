@@ -375,6 +375,70 @@ test.describe('per-run overrides of inherited record values', () => {
     expect(after.resolved[MATERIAL]).not.toBe('Never Recorded Oxide');
   });
 
+  test('…and can RECOVER from it on screen: the refresh it names is there, and the retry succeeds', async ({
+    page,
+    request,
+    session,
+  }) => {
+    /*
+     * THE DEFECT THIS EXISTS FOR. The notice above told the reader to "refresh this
+     * run", and the app's only refresh was `RunCard`'s conflict banner, gated on
+     * `autosave.status === 'conflict'` — a state an override 412 never reaches,
+     * because this write never goes through `useRunAutosave`. Measured by driving
+     * exactly the scenario above: REFRESH BUTTON COUNT 0, CONFLICT BANNER COUNT 0.
+     * `run.version` in the prop could therefore never advance, so every retry 412'd
+     * forever and only a full page reload recovered. The test above asserts the
+     * message; this one asserts a way out of the state the message describes.
+     */
+    await openRunsSection(page, SEED.ready);
+    const card = await addAndExpand(page, 1);
+    const before = (await readRuns(request, session, SEED.ready))[0];
+    await renameRunBehindTheUi(request, session, SEED.ready, before, 'Renamed elsewhere');
+
+    await recordOverride(card, MATERIAL, 'Recovered Oxide');
+    const target = row(card, MATERIAL);
+    await expect(target).toContainText('the override was not recorded');
+    // The reader is ON the refusal, not on `<body>`: the submit is disabled for the
+    // whole round trip, so focus has to be put somewhere when the answer arrives.
+    await expect(target.locator('.run-inherited-failure')).toBeFocused();
+
+    // The card-level banner is still absent — the remedy has to be in the notice.
+    await expect(card.locator('.run-conflict')).toHaveCount(0);
+    const refresh = target.getByRole('button', {
+      name: 'Refresh this run · sample.material.name',
+    });
+    await expect(refresh).toBeVisible();
+    await refresh.click();
+
+    // A RE-READ IS NOT A WRITE, and the panel says which one happened.
+    await expect(outcome(card)).toContainText('This run was re-read from the server');
+    await expect(outcome(card)).toContainText('is still not recorded');
+    await expect(target).not.toContainText('the override was not recorded');
+    const runsAfterRefresh = (await readRuns(request, session, SEED.ready))[0];
+    expect(runsAfterRefresh.states[MATERIAL]).toBe('inherited');
+    // The token the page just adopted is NOT the one it sent — which is the whole
+    // reason the retry below can do anything but 412 again.
+    expect(runsAfterRefresh.version).not.toBe(before.version);
+
+    // The entry survived the recovery, so the retry is one click rather than a
+    // re-type — and focus is already on it.
+    await expect(target.getByRole('textbox')).toHaveValue('Recovered Oxide');
+    await expect(target.getByRole('checkbox')).toBeChecked();
+    const record = target.getByRole('button', { name: 'Record override' });
+    await expect(record).toBeFocused();
+    await record.click();
+
+    // THE RETRY SUCCEEDS — which is only possible because the refresh really did
+    // advance the version this page sends.
+    await expect(outcome(card)).toContainText('Override recorded for sample.material.name');
+    const after = (await readRuns(request, session, SEED.ready))[0];
+    expect(after.states[MATERIAL]).toBe('overridden');
+    expect(after.resolved[MATERIAL]).toBe('Recovered Oxide');
+    // …and the concurrent client's change is still there: recovering from the refusal
+    // did not overwrite what caused it.
+    expect(after.label).toBe('Renamed elsewhere');
+  });
+
   test('the panel and its open override form carry no axe violation', async ({ page }) => {
     /*
      * SCOPED TO THE PANEL, and scanned in the state the sweep cannot reach.
@@ -430,5 +494,67 @@ test.describe('per-run overrides of inherited record values', () => {
 
     const runs = await readRuns(request, session, SEED.fresh);
     expect(runs[0].states[MATERIAL]).toBe('inherited');
+  });
+
+  test('every control that unmounts itself hands focus on, and none of them drops it on the body', async ({
+    page,
+  }) => {
+    /*
+     * MEASURED BEFORE THE FIX, in this browser, on this panel:
+     *
+     *   BEFORE ACTIVATE: BUTTON.btn.btn-secondary|Override for this run · sample.material.name
+     *   AFTER ACTIVATE : BODY|Skip to contentISAAC…
+     *   AFTER CANCEL   : BODY|Skip to contentISAAC…
+     *
+     * Every control here destroys itself when it is activated and nothing moved
+     * focus after it, so a keyboard or screen-reader reader on row 9 of 13 landed on
+     * `<body>` and had to tab through the skip link, the app shell, the record header
+     * and eight rows at two buttons each to reach the box they had just revealed.
+     *
+     * THIS IS A REAL-FOCUS TEST ON PURPOSE. The panel's axe scan is no evidence
+     * either way — axe does not evaluate focus movement — and `document.activeElement`
+     * after a React commit in jsdom is a weaker witness than the browser's own.
+     */
+    await openRunsSection(page, SEED.fresh);
+    const card = await addAndExpand(page, 1);
+    const target = row(card, MATERIAL);
+    const openTrigger = target.getByRole('button', {
+      name: 'Override for this run · sample.material.name',
+    });
+
+    // OPEN → the box that was just revealed.
+    await openTrigger.click();
+    await expect(target.getByRole('textbox')).toBeFocused();
+
+    // CANCEL → the control that opened it, which is back in the same place.
+    await target.getByRole('button', { name: 'Cancel' }).click();
+    await expect(openTrigger).toBeFocused();
+
+    // SUBMIT → the row's own control, which now READS DIFFERENTLY, so focusing it
+    // announces the row's new state through the control's own name.
+    await recordOverride(card, MATERIAL, 'Focused Oxide');
+    await expect(outcome(card)).toContainText('Override recorded');
+    const changeTrigger = target.getByRole('button', {
+      name: "Change this run's value · sample.material.name",
+    });
+    await expect(changeTrigger).toBeFocused();
+
+    // REVERT, FIRST CLICK → the confirmation it revealed.
+    const revertTrigger = target.getByRole('button', {
+      name: 'Revert to inherited · sample.material.name',
+    });
+    await revertTrigger.click();
+    await expect(target.getByRole('button', { name: 'Confirm revert' })).toBeFocused();
+
+    // REVERT, BACKED OUT → the control that opened the confirmation.
+    await target.getByRole('button', { name: 'Keep the override' }).click();
+    await expect(revertTrigger).toBeFocused();
+
+    // REVERT, CONFIRMED → the row's remaining control. The one the reader started
+    // from is gone: there is no override left to revert.
+    await revertTrigger.click();
+    await target.getByRole('button', { name: 'Confirm revert' }).click();
+    await expect(outcome(card)).toContainText('Override removed');
+    await expect(openTrigger).toBeFocused();
   });
 });

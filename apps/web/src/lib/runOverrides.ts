@@ -65,6 +65,21 @@ export function valueText(value: unknown): string | null {
 }
 
 /**
+ * TRUE when a value IS there and this row cannot render it — never for absence.
+ *
+ * `valueText` returns `null` for two different facts: the address carries
+ * nothing, and the address carries an object or an array. A row that reports
+ * both as "carries no value" states the first when the second is true, which is
+ * a false statement about a scientist's record rather than a rendering
+ * shortcoming. Latent rather than live today — every one of the overridable
+ * `field:` addresses is coerced to `str`/`float` server-side — but the two
+ * sentences are different and the panel says whichever one holds.
+ */
+export function isUnrenderableValue(value: unknown): boolean {
+  return value !== null && value !== undefined && valueText(value) === null;
+}
+
+/**
  * One row of the inherited panel: what this run holds at one record-level
  * address, where it came from, and what the record says about it now.
  *
@@ -85,6 +100,12 @@ export interface OverrideRow {
   text: string | null;
   /** The RECORD's current value, as text. `null` when it carries none. */
   recordText: string | null;
+  /**
+   * True when the record DOES carry a value here and it is not one line of text
+   * (an object or an array). Distinguishes "carries nothing" from "carries
+   * something this row cannot show" — see {@link isUnrenderableValue}.
+   */
+  recordUnrenderable: boolean;
   /** What the override displaced when recorded, as text. History, never refreshed. */
   displacedText: string | null;
   /** True when the record's value has moved away from what the override displaced. */
@@ -117,8 +138,9 @@ export function overrideRows(run: ApiRunView): OverrideRow[] {
   for (const [address, resolution] of Object.entries(run.inherited ?? {})) {
     if (!address.startsWith(FIELD_ADDRESS_PREFIX)) continue;
     if (!resolution || resolution.state === 'absent') continue;
+    const recordValue = payloadValue(resolution.inherited_payload);
     const text = valueText(payloadValue(resolution.payload));
-    const recordText = valueText(payloadValue(resolution.inherited_payload));
+    const recordText = valueText(recordValue);
     const displacedText = valueText(payloadValue(resolution.displaced_payload));
     if (text === null && resolution.state !== 'overridden') continue;
     rows.push({
@@ -127,6 +149,7 @@ export function overrideRows(run: ApiRunView): OverrideRow[] {
       state: resolution.state,
       text,
       recordText,
+      recordUnrenderable: isUnrenderableValue(recordValue),
       displacedText,
       recordMovedSince:
         resolution.state === 'overridden' &&
@@ -171,7 +194,21 @@ export type OverridePayloadResult =
  * validator anywhere would object. So the type is mirrored from the record's own
  * current value, the reader is TOLD that is what is happening, and a text entry
  * that cannot be that type is refused on screen rather than sent — a format
- * check, exactly like `parseRunField`'s, never a scientific judgement.
+ * check, never a scientific judgement.
+ *
+ * IT DOES REINTERPRET, THOUGH, AND THE EARLIER WORDING ("a format check, exactly
+ * like `parseRunField`'s") DENIED IT — while `parseRunField`'s own header was
+ * amended to say the opposite. `Number()` accepts more grammars than a decimal
+ * literal, so this gate is a format check AND a reinterpretation: `0x10` is sent
+ * as `16` and `1e3` as `1000`, which makes the `user_confirmation.answer` this
+ * file writes read `"16"` for text nobody typed. Three things keep that honest
+ * rather than hidden. The value is only ever the one `Number()` produced, so
+ * nothing is invented; `Infinity` and `NaN` are refused outright by
+ * `Number.isFinite`; and it is the same reinterpretation the SERVER records for a
+ * run's own fields (`routes._confirmation_answer` stringifies the stored value,
+ * not the keystrokes), so the two answers agree rather than diverging. Once the
+ * write lands the row shows the STORED value back — `16`, not `0x10` — which is
+ * where the reader sees what was recorded.
  *
  * The reference is the RECORD's value where there is one, and the run's own
  * override where the record carries nothing (an override may sit at an address

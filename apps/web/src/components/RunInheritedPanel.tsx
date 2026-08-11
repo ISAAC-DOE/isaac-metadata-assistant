@@ -50,9 +50,31 @@
  * second, explicit click. `api.setRunOverride`/`clearRunOverride` take the flag as
  * an argument and pass it through, so the assertion is made here, where the
  * gesture is, and nowhere else.
+ *
+ * EVERY CONTROL HERE DESTROYS ITSELF WHEN IT IS ACTIVATED, so this panel MOVES
+ * FOCUS — and it did not, which was a real keyboard defect rather than a polish
+ * item. Opening the form unmounts the button that opened it; cancelling unmounts
+ * the form; a successful write replaces the row's controls with different ones.
+ * With nothing moving focus, activating any of them dropped the caret to `<body>`
+ * (measured), so a keyboard or screen-reader reader on row 9 of 13 had to tab back
+ * through the skip link, the app shell and eight rows to reach the input they had
+ * just revealed. An axe scan cannot see this: axe does not evaluate focus
+ * movement. {@link FOCUS_KEYS} lists every control focus is moved to, and
+ * `focusAfter` states what is focused at each exit and why; the last resort is the
+ * panel itself, never `<body>`.
+ *
+ * A 412 NAMES A CONTROL THAT IS ON SCREEN. The stale notice used to say "Refresh
+ * this run" while the ONLY refresh in the app was `RunCard`'s, gated on
+ * `autosave.status === 'conflict'` — a state an override 412 never enters, because
+ * the override write does not go through `useRunAutosave` at all. Measured on this
+ * branch's own compare-and-swap scenario: zero refresh buttons, zero conflict
+ * banners, and every retry 412ing forever because `run.version` in the prop could
+ * not advance. The notice now carries its own refresh, which re-reads the run and
+ * hands it up through `onRun` — so the version the next attempt sends is the one
+ * the server holds and the retry can actually succeed.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api';
 import { CornerDownRight, Pencil, RotateCcw, TriangleAlert } from './icons';
 import {
@@ -70,7 +92,11 @@ type Outcome =
   | { kind: 'recorded'; address: string; recordedUtc: string }
   | { kind: 'unchanged'; address: string }
   | { kind: 'reverted'; address: string }
-  | { kind: 'nothing-to-revert'; address: string };
+  | { kind: 'nothing-to-revert'; address: string }
+  // A re-read is NOT a write, and it is reported in the same region because it is
+  // the answer to a failure reported there: the run on screen is the server's
+  // again, and the override the 412 refused is still not recorded.
+  | { kind: 'refreshed'; address: string };
 
 /** A write that did not happen, and the reason, as the server gave it. */
 type Failure =
@@ -80,6 +106,31 @@ type Failure =
 
 const FALLBACK_REFUSAL =
   'The server refused this override and this build could not read its reason. Nothing was written.';
+
+/**
+ * The controls focus may be moved to, keyed by kind and address.
+ *
+ * A KEY RATHER THAN A REF PER CONTROL, because the destination usually does not
+ * exist yet at the moment the move is decided: activating a control unmounts it
+ * and mounts the next one in the same commit. So a move is REQUESTED by key and
+ * resolved after the DOM has settled, against whatever is mounted then.
+ */
+const FOCUS_KEYS = {
+  /** The button that opens the override form — "Override for this run" / "Change this run's value". */
+  openTrigger: (address: string) => `open:${address}`,
+  /** The button that opens the revert confirmation — "Revert to inherited". */
+  revertTrigger: (address: string) => `revert:${address}`,
+  /** The value box inside the open override form. */
+  formInput: (address: string) => `input:${address}`,
+  /** The open form's submit — "Record override". */
+  formSubmit: (address: string) => `submit:${address}`,
+  /** The revert confirmation's own submit — "Confirm revert". */
+  confirmRevert: (address: string) => `confirm:${address}`,
+  /** The stale notice's own re-read control. */
+  refresh: (address: string) => `refresh:${address}`,
+  /** The failure notice itself, focusable only programmatically. */
+  failure: (address: string) => `failure:${address}`,
+} as const;
 
 export function RunInheritedPanel({
   experimentId,
@@ -103,6 +154,50 @@ export function RunInheritedPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
+  /** The address whose run re-read is in flight, and why the last one did not happen. */
+  const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  /*
+   * WHERE FOCUS GOES, AND WHY IT IS A QUEUE RATHER THAN A `focus()` CALL.
+   *
+   * Every destination below is mounted by the SAME render that unmounts the
+   * control the reader activated, so calling `focus()` in the handler would call
+   * it on a node that is about to be replaced. A request is therefore recorded as
+   * an ordered list of candidate keys and resolved in an effect, after commit,
+   * against the map of controls actually mounted.
+   *
+   * THE LIST IS ORDERED BECAUSE A ROW CAN LOSE THE CONTROL IT CAME FROM. Reverting
+   * an override at an address the RECORD carries nothing at removes the row
+   * entirely (`overrideRows` drops a row with no value that is no longer
+   * overridden), and a successful write replaces a row's trigger with a
+   * differently-labelled one. So each exit names its preferred destination and its
+   * honest fallbacks, and the final fallback is the panel itself — which is why it
+   * carries `tabIndex={-1}`. Landing on the panel is a deliberate, announced place
+   * beside the live region that says what happened; landing on `<body>` is what
+   * this whole mechanism exists to prevent.
+   */
+  const controls = useRef(new Map<string, HTMLElement>());
+  const [focusRequest, setFocusRequest] = useState<readonly string[] | null>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const bindControl = (key: string) => (el: HTMLElement | null) => {
+    if (el === null) controls.current.delete(key);
+    else controls.current.set(key, el);
+  };
+  const focusAfter = (...keys: readonly string[]) => setFocusRequest(keys);
+  useEffect(() => {
+    if (focusRequest === null) return;
+    for (const key of focusRequest) {
+      const el = controls.current.get(key);
+      if (el !== undefined && el.isConnected) {
+        el.focus();
+        setFocusRequest(null);
+        return;
+      }
+    }
+    sectionRef.current?.focus();
+    setFocusRequest(null);
+  }, [focusRequest]);
 
   if (rows.length === 0) return null;
 
@@ -175,9 +270,85 @@ export function RunInheritedPanel({
             : { kind: 'recorded', address: row.address, recordedUtc: res.override.recorded_utc },
         );
         closeForm();
+        /*
+         * BACK TO THE ROW'S TRIGGER, WHICH NOW SAYS SOMETHING ELSE. A successful
+         * record turns an inherited row into an overridden one, so the button that
+         * reappears where the form was reads "Change this run's value · <path>"
+         * rather than "Override for this run · <path>" — moving focus onto it
+         * therefore ANNOUNCES the row's new state through the control's own name,
+         * on top of the polite live region. The write can also remove the row (a
+         * re-record cannot, but the same exit is used by every close), so the panel
+         * is the fallback.
+         */
+        focusAfter(FOCUS_KEYS.openTrigger(row.address));
       })
-      .catch((err: unknown) => setFailure(failFrom(row.address, err)))
+      .catch((err: unknown) => {
+        setFailure(failFrom(row.address, err));
+        /*
+         * A REFUSED WRITE LEAVES THE FORM OPEN, and focus cannot usefully be left
+         * where it was: the submit sets `disabled` for the whole round trip, so the
+         * control the reader activated is not one they can act from when the answer
+         * arrives. Focus moves to the notice instead — the error-summary pattern, a
+         * `tabIndex={-1}` container the reader lands on, with the 412's own refresh
+         * one Tab away. Not back to the submit, because for `not_overridable` an
+         * identical retry cannot succeed and focusing it would suggest otherwise.
+         */
+        focusAfter(FOCUS_KEYS.failure(row.address), FOCUS_KEYS.formSubmit(row.address));
+      })
       .finally(() => setBusy(null));
+  };
+
+  /**
+   * Re-read this run and adopt the server's version — the 412's named remedy.
+   *
+   * IT IS NOT `useRunAutosave`'s REFRESH, and that is a deliberate choice rather
+   * than duplication. `refreshRun` in the autosave store DROPS every held field
+   * edit (`entry.pending = {}`) because it exists to resolve a conflict about
+   * those very edits. An override 412 is a conflict about something else entirely:
+   * the reader may have unsent text in a run field box, and discarding it to
+   * recover an override they have not recorded yet would be a second, larger loss.
+   * This re-read touches nothing but the run this panel renders — the store keeps
+   * its own token, and `useRunAutosave`'s `seedVersion` adopts the new one only
+   * when the store is idle and empty, which is exactly the case in which adopting
+   * is safe.
+   *
+   * NOTHING IS WRITTEN HERE, and the outcome says so: a re-read is not a retry,
+   * and the override the 412 refused stays unrecorded until the reader records it.
+   */
+  const refreshRun = (row: OverrideRow) => {
+    setRefreshing(row.address);
+    setRefreshError(null);
+    api
+      .getRun(experimentId, run.id)
+      .then((res) => {
+        onRun(res.run);
+        setFailure(null);
+        setOutcome({ kind: 'refreshed', address: row.address });
+        /*
+         * TO THE RETRY THE COPY NAMES. The notice the reader activated has been
+         * answered and unmounted; the form is still open, still holding their value
+         * and their ticked confirmation, so "Record override" is the single next
+         * act. If the failure came from the revert flow instead, its own confirm is
+         * that act; if neither is open, the row's trigger is.
+         */
+        focusAfter(
+          FOCUS_KEYS.formSubmit(row.address),
+          FOCUS_KEYS.confirmRevert(row.address),
+          FOCUS_KEYS.openTrigger(row.address),
+        );
+      })
+      .catch((err: unknown) => {
+        // The notice STAYS, because the 412 it reports is still true and still
+        // unresolved. Saying the re-read failed is the honest addition; silently
+        // doing nothing would make this the very control the finding warned about.
+        setRefreshError(
+          err instanceof Error
+            ? err.message
+            : 'This run could not be re-read. Nothing was written.',
+        );
+        focusAfter(FOCUS_KEYS.refresh(row.address), FOCUS_KEYS.failure(row.address));
+      })
+      .finally(() => setRefreshing(null));
   };
 
   const submitRevert = (row: OverrideRow) => {
@@ -201,13 +372,40 @@ export function RunInheritedPanel({
           address: row.address,
         });
         setReverting(null);
+        /*
+         * THE REVERT TRIGGER IS GONE — this is the one exit where the control the
+         * reader started from cannot come back, because the row no longer holds an
+         * override to revert. Focus goes to the row's remaining control, which now
+         * reads "Override for this run · <path>" and states the new state by name.
+         * And the ROW ITSELF can be gone: reverting at an address the record
+         * carries nothing at drops it from `overrideRows`, so the panel is the
+         * fallback rather than `<body>`.
+         */
+        focusAfter(FOCUS_KEYS.openTrigger(row.address));
       })
-      .catch((err: unknown) => setFailure(failFrom(row.address, err)))
+      .catch((err: unknown) => {
+        setFailure(failFrom(row.address, err));
+        // Same reasoning as the override submit: "Confirm revert" is disabled for the
+        // whole round trip, so it is not a place to leave the reader.
+        focusAfter(FOCUS_KEYS.failure(row.address), FOCUS_KEYS.confirmRevert(row.address));
+      })
       .finally(() => setBusy(null));
   };
 
   return (
-    <section className="run-inherited" aria-label="Values inherited from the record">
+    <section
+      className="run-inherited"
+      aria-label="Values inherited from the record"
+      /*
+        FOCUSABLE ONLY PROGRAMMATICALLY. `tabIndex={-1}` keeps the panel out of the
+        tab order — nothing about the sequential path through this card changes —
+        and makes it a landing place for the one case where the control a reader
+        came from no longer exists. It is a named region, so landing here announces
+        "Values inherited from the record" rather than nothing at all.
+      */
+      tabIndex={-1}
+      ref={sectionRef}
+    >
       <p className="run-inherited-eyebrow">Inherited from the record</p>
       <p className="run-inherited-note">
         These values are entered once on the record and read live by every run that does
@@ -269,7 +467,22 @@ export function RunInheritedPanel({
                     .
                   </>
                 ) : (
-                  <>The record carries no value at this address.</>
+                  /*
+                    TWO DIFFERENT FACTS, AND THIS USED TO STATE ONLY THE FIRST.
+                    `valueText` returns `null` both for an address the record
+                    carries nothing at AND for one carrying an object or an array,
+                    which no row here can render in one line without making a claim
+                    about its content. "Carries no value" is a false statement about
+                    the second, so the row says whichever one holds. Latent rather
+                    than live — every overridable `field:` address is `str`/`float`
+                    server-side today — and kept because a latent false sentence is
+                    still a false sentence, and the honest one costs a branch.
+                  */
+                  <>
+                    {row.recordUnrenderable
+                      ? 'The record carries a value at this address that this row cannot show in one line.'
+                      : 'The record carries no value at this address.'}
+                  </>
                 )}
               </p>
             )}
@@ -279,11 +492,17 @@ export function RunInheritedPanel({
                 <button
                   type="button"
                   className="btn btn-secondary"
+                  ref={bindControl(FOCUS_KEYS.openTrigger(row.address))}
                   onClick={() => {
                     setReverting(null);
                     setOutcome(null);
                     setFailure(null);
+                    setRefreshError(null);
                     setEditing(row.address);
+                    // THE FORM IS REVEALED AND FOCUS FOLLOWS IT. This button is
+                    // about to unmount; the box it revealed is what the reader
+                    // asked for and what they must type into next.
+                    focusAfter(FOCUS_KEYS.formInput(row.address));
                     /*
                      * THE BOX IS PREFILLED ONLY ON A ROW THAT IS ALREADY OVERRIDDEN,
                      * and the asymmetry is the no-guessing rule, not an inconsistency.
@@ -320,11 +539,17 @@ export function RunInheritedPanel({
                 <button
                   type="button"
                   className="btn btn-secondary"
+                  ref={bindControl(FOCUS_KEYS.revertTrigger(row.address))}
                   onClick={() => {
                     closeForm();
                     setOutcome(null);
                     setFailure(null);
+                    setRefreshError(null);
                     setReverting(row.address);
+                    // The confirmation this button revealed is the act it asked
+                    // for, and it is the destructive one — a reader must reach it
+                    // deliberately, not by tabbing back from `<body>`.
+                    focusAfter(FOCUS_KEYS.confirmRevert(row.address));
                   }}
                 >
                   Revert to inherited<span className="sr-only"> · {row.path}</span>
@@ -345,7 +570,14 @@ export function RunInheritedPanel({
                 error={entryError}
                 busy={busy === row.address}
                 onSubmit={() => submitOverride(row)}
-                onCancel={closeForm}
+                onCancel={() => {
+                  closeForm();
+                  // BACK WHERE THE READER WAS. Cancelling changes nothing, so the
+                  // control that opened the form — which reappears in the same
+                  // place, with the same name — is the honest destination.
+                  focusAfter(FOCUS_KEYS.openTrigger(row.address));
+                }}
+                bindControl={bindControl}
               />
             )}
 
@@ -366,6 +598,7 @@ export function RunInheritedPanel({
                   <button
                     type="button"
                     className="btn btn-secondary"
+                    ref={bindControl(FOCUS_KEYS.confirmRevert(row.address))}
                     onClick={() => submitRevert(row)}
                     disabled={busy === row.address}
                   >
@@ -374,7 +607,12 @@ export function RunInheritedPanel({
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => setReverting(null)}
+                    onClick={() => {
+                      setReverting(null);
+                      // Backing out changes nothing either, so focus returns to the
+                      // control that opened this confirmation.
+                      focusAfter(FOCUS_KEYS.revertTrigger(row.address));
+                    }}
                     disabled={busy === row.address}
                   >
                     Keep the override
@@ -384,7 +622,14 @@ export function RunInheritedPanel({
             )}
 
             {failure !== null && failure.address === row.address && (
-              <FailureNotice failure={failure} />
+              <FailureNotice
+                failure={failure}
+                path={row.path}
+                bindControl={bindControl}
+                onRefresh={() => refreshRun(row)}
+                refreshing={refreshing === row.address}
+                refreshError={refreshError}
+              />
             )}
           </li>
         ))}
@@ -440,36 +685,102 @@ function OutcomeText({ outcome }: { outcome: Outcome }) {
       );
     case 'nothing-to-revert':
       return <>There was no override at {path} to remove. Nothing was written.</>;
+    case 'refreshed':
+      // A RE-READ IS NOT A RETRY, and this sentence exists so the reader cannot
+      // mistake one for the other: the run on screen is the server's again, and the
+      // override the precondition refused is still not recorded.
+      return (
+        <>
+          This run was re-read from the server. Nothing was written, and the override at{' '}
+          {path} is still not recorded — record it again if you still want it.
+        </>
+      );
   }
 }
 
-function FailureNotice({ failure }: { failure: Failure }) {
+function FailureNotice({
+  failure,
+  path,
+  bindControl,
+  onRefresh,
+  refreshing,
+  refreshError,
+}: {
+  failure: Failure;
+  path: string;
+  bindControl: (key: string) => (el: HTMLElement | null) => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+  refreshError: string | null;
+}) {
+  /*
+   * `tabIndex={-1}` ON THE NOTICE, for the same reason the panel carries one: it is
+   * a programmatic landing place, not a tab stop. The control that produced this
+   * notice is disabled for the whole round trip, so the reader has to be put
+   * somewhere when the answer arrives — the error-summary pattern puts them on the
+   * message, with the remedy as the next thing in it.
+   */
+  const shell = {
+    className: 'run-inherited-failure',
+    role: 'alert',
+    tabIndex: -1,
+    ref: bindControl(FOCUS_KEYS.failure(failure.address)),
+  } as const;
   if (failure.kind === 'stale') {
     return (
-      <div className="run-inherited-failure" role="alert">
+      <div {...shell}>
         <TriangleAlert size={14} strokeWidth={2.2} aria-hidden="true" />
         <div>
           {/*
             NOT A SUCCESS, AND NOT AMBIGUOUS. The route checks the precondition inside
             the same critical section as the write, so a 412 here means this override
             was not recorded — unlike the run autosave's retry case, nothing was ever
-            handed to the server unanswered. Refreshing the card is the remedy, and it
-            is named rather than implied.
+            handed to the server unanswered.
+
+            THE REMEDY IS NAMED *AND* PRESENT, and it used to be only named. This copy
+            said "Refresh this run to load the version the server holds" while the app's
+            only refresh was `RunCard`'s, gated on an autosave conflict an override 412
+            never causes: measured on the branch's own CAS scenario, zero refresh
+            buttons and zero conflict banners were on screen, so every retry 412'd
+            forever and only a full page reload recovered. The button below is that
+            refresh — it re-reads the run, hands it up, and the retry can then succeed.
           */}
           <p className="run-inherited-failure-title">
             This run changed somewhere else — the override was not recorded.
           </p>
           <p className="run-inherited-failure-text">
-            Nothing was written. Refresh this run to load the version the server holds, then
-            record the override again if you still want it.
+            Nothing was written. Load the version the server holds, then record the override
+            again if you still want it.
           </p>
+          <div className="run-inherited-failure-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              ref={bindControl(FOCUS_KEYS.refresh(failure.address))}
+              onClick={onRefresh}
+              disabled={refreshing}
+            >
+              {refreshing ? 'Re-reading…' : 'Refresh this run'}
+              {/* The address, appended — the same WCAG 2.5.3 ordering every other
+                  control in this panel uses, and what tells this button apart from
+                  the card-level "Refresh This Run" the autosave conflict owns. */}
+              <span className="sr-only"> · {path}</span>
+            </button>
+          </div>
+          {refreshError !== null && (
+            // A control that fails silently is the defect this button was added to
+            // remove, not a smaller version of it.
+            <p className="run-inherited-failure-text">
+              This run could not be re-read: {refreshError} Nothing was written.
+            </p>
+          )}
         </div>
       </div>
     );
   }
   if (failure.kind === 'error') {
     return (
-      <div className="run-inherited-failure" role="alert">
+      <div {...shell}>
         <TriangleAlert size={14} strokeWidth={2.2} aria-hidden="true" />
         <div>
           <p className="run-inherited-failure-title">The override could not be sent.</p>
@@ -480,7 +791,7 @@ function FailureNotice({ failure }: { failure: Failure }) {
   }
   const { refusal } = failure;
   return (
-    <div className="run-inherited-failure" role="alert">
+    <div {...shell}>
       <TriangleAlert size={14} strokeWidth={2.2} aria-hidden="true" />
       <div>
         {/*
@@ -517,6 +828,7 @@ function OverrideForm({
   busy,
   onSubmit,
   onCancel,
+  bindControl,
 }: {
   row: OverrideRow;
   text: string;
@@ -527,6 +839,8 @@ function OverrideForm({
   busy: boolean;
   onSubmit: () => void;
   onCancel: () => void;
+  /** Registers the two controls the panel moves focus to — see `FOCUS_KEYS`. */
+  bindControl: (key: string) => (el: HTMLElement | null) => void;
 }) {
   const inputId = `override-${row.path.replace(/[^A-Za-z0-9]/g, '-')}`;
   const errorId = `${inputId}-error`;
@@ -557,7 +871,13 @@ function OverrideForm({
             The record says <span className="run-inherited-source-value">{row.recordText}</span>.{' '}
           </>
         ) : (
-          <>The record carries no value at this address. </>
+          // The same two facts the row above distinguishes, in the form the reader
+          // needs while entering a value: whether there is something there at all.
+          <>
+            {row.recordUnrenderable
+              ? 'The record carries a value at this address that this row cannot show in one line. '
+              : 'The record carries no value at this address. '}
+          </>
         )}
         {numeric && 'The record holds a number here, so this is sent as a number. '}
         This records only that you entered this value on this run — it is not a check that
@@ -566,6 +886,7 @@ function OverrideForm({
       <input
         id={inputId}
         className="run-input"
+        ref={bindControl(FOCUS_KEYS.formInput(row.address))}
         type="text"
         inputMode={numeric ? 'decimal' : undefined}
         value={text}
@@ -596,7 +917,12 @@ function OverrideForm({
         I am recording this as this run's own value, in place of the record's.
       </label>
       <div className="run-inherited-form-actions">
-        <button type="submit" className="btn btn-secondary" disabled={!confirmed || busy}>
+        <button
+          type="submit"
+          className="btn btn-secondary"
+          ref={bindControl(FOCUS_KEYS.formSubmit(row.address))}
+          disabled={!confirmed || busy}
+        >
           {busy ? 'Recording…' : 'Record override'}
         </button>
         <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>

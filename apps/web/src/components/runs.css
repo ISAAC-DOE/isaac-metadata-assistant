@@ -288,6 +288,18 @@
   border-radius: var(--radius-inner);
 }
 
+/* Both of these are `tabIndex={-1}` PROGRAMMATIC focus targets — the panel is where
+   focus lands when the control a reader came from no longer exists, and the failure
+   notice is where it lands when a refused write leaves it on `<body>`. Neither is in
+   the tab order; both need the visible ring the repo's other programmatic targets
+   carry (`.concept-lookup-detailpane`, `.settings-panel`), or a sighted keyboard
+   reader is moved somewhere they cannot see. */
+.run-inherited:focus-visible,
+.run-inherited-failure:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
 .run-inherited-eyebrow {
   margin: 0;
   font-size: 11px;
@@ -514,6 +526,22 @@
   margin: 3px 0 0;
   font-size: 11.5px;
   line-height: 1.5;
+}
+
+/* The stale notice's own remedy — the re-read the copy names. It sits under the
+   sentence it answers rather than beside it, so the reason and the remedy read in
+   the order a scientist needs them. */
+.run-inherited-failure-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+}
+
+.run-inherited-failure-actions .btn {
+  padding: 4px 10px;
+  font-size: 11.5px;
 }
 
 .run-inherited-findings {
