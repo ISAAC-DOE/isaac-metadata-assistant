@@ -9,6 +9,17 @@
 > repository's current `main` HEAD, and it passed on every point.** So the condition is satisfied and
 > the approval is live.
 >
+> **RE-MEASURED AT THE HANDOFF COMMIT, 2026-08-11 — see §12A.4.** §12A.3 was performed at `77820bf`;
+> `main` has advanced since (**14 first-parent commits, 53 counting merged-in branch history** —
+> `git rev-list --count [--first-parent] 77820bf..64e93c9`; an earlier revision of this line said
+> "fifteen", which is neither), so the check was repeated at
+> **`64e93c9372d16958b941569252fbc9abdc373c00`**, the commit an operator will actually check out. Both
+> hashes are unchanged, the forward SQL has had **no commit at all since `90b432d`**, and the
+> `postgres-migration` job is green at that exact commit on a `push` event. **Nothing material
+> changed; the approval applies at `64e93c9`.** §12A.4 also corrects one §12A.3 caveat that has since
+> become false: the hosted deployment **has** now been observed, and `/krish/api/health` reports
+> commit `64e93c9…` with `experiment_storage` `postgres` / `durable`.
+>
 > **What that approval is, and what it is not.** It is the *project owner's* sign-off on the
 > migration's content and on handing it to an operator. It is **not** an operator authorization and it
 > transfers no infrastructure authority: the hosted application remains Dean's act. The project rule
@@ -617,6 +628,60 @@ job is not a hosted rehearsal, that the hosted engine's build string remains unk
 the locking analysis is unmeasured. It also does not observe which image `/krish` currently serves:
 the hosted app sits behind an Authentik edge that this environment cannot authenticate to, and no
 rollout was witnessed while writing this.
+
+### 12A.4. Re-measured at the operator-handoff commit (added 2026-08-11, later than §12A.3)
+
+**Why a fourth observation.** §12A.3 discharged the approval condition at `77820bf`. `main` has since
+advanced — **14 first-parent commits, 53 counting the history merged in with them**
+(`git rev-list --count 77820bf..64e93c9`, with and without `--first-parent`) — and this packet is now
+being handed to an operator, so the evidence a reader will act on must be measured at the commit the
+operator will actually check out, not at an ancestor of it. **Both numbers are given because a single
+"N commits" is ambiguous between them, and an earlier revision of this section quoted a third number
+that was neither.** §12A, §12A.2 and §12A.3 are unaltered.
+
+| Item | Method | Result |
+|---|---|---|
+| commit measured at | `git rev-parse HEAD` | `64e93c9372d16958b941569252fbc9abdc373c00` — `main`, merge of PR [#128](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/128). Working tree clean, **0 ahead / 0 behind** `origin/main`, **0 open PRs**. |
+| **forward hash** | `shasum -a 256` | `c96e308d7fdfd508ab2c2aeffb08abcb18a88aae84db6f1d08b83f9cba8fda3e` — **unchanged**, equal to this packet's table and to §12A.2 and §12A.3. |
+| **rollback hash** | `shasum -a 256` | `0206012116a443fb301e9c161b5eb2ffcfe0e99ee6f460ce83d80e30d327cdd5` — **unchanged**. |
+| **no drift** | `git log --follow` on both files | The forward SQL has exactly two commits in its whole history — `b8f0a1a` (introduced) and `90b432d` (the in-place CHECK correction). The rollback has **one**, `b8f0a1a`. **Nothing has touched either file since `90b432d`**, which precedes Krish's approval commit `f60e910`. |
+| **PostgreSQL CI at this exact commit** | `gh run view 31506181717` | run [31506181717](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31506181717), event **`push`** on `main`, `head_sha` `64e93c9…`. Job `migration and durable repository against a real PostgreSQL` ([93828219677](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31506181717/job/93828219677)) → **success**. **All four jobs green**; the run's own conclusion is `success`, so no "judge it by the job, not the run" caveat is needed here either. |
+| **engine actually exercised** | that job's own printed line | `PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on x86_64-pc-linux-gnu` — the same build string as §12A and §12A.2. Read out of the job log, not inferred from the `postgres:18` image tag. |
+
+**Verdict: NOTHING MATERIAL CHANGED between `77820bf` and `64e93c9`. Krish's approval stands, and
+applies to the migration as it stands at `64e93c9`.** Per the terms of that approval, the owner is
+not asked again.
+
+#### One caveat in §12A.3 is now FALSE, and is corrected rather than left standing
+
+§12A.3's closing paragraph reads: *"It also does not observe which image `/krish` currently serves:
+the hosted app sits behind an Authentik edge that this environment cannot authenticate to, and no
+rollout was witnessed while writing this."*
+
+**That was true when written and is now false.** On 2026-08-11 the project owner authenticated the
+browser session, and `GET https://isaac.slac.stanford.edu/krish/api/health` was read directly:
+
+```json
+{"status":"ok","mode":"synthetic-only","core":"isaac_records","version":"0.1.0",
+ "commit":"64e93c9372d16958b941569252fbc9abdc373c00",
+ "database":{"configured":true,"classification":"isolated-app-postgres",
+             "contains_production_derived_records":true,"record_display":"closed","last_recon":null},
+ "experiment_storage":{"configured":true,"backend":"postgres","durable":true,"state":"durable"}}
+```
+
+**So the hosted deployment is serving the exact commit this packet is measured at**, and its
+`experiment_storage` is `postgres` / `durable` — the 0001-applied, 0002-pending state that §6 item 2
+describes and that §12A(2) witnessed in CI. **`last_recon` is `null`**, consistent with no
+reconnaissance having run against this pod.
+
+**What this observation does NOT establish, and the distinction is the whole point of §12B.** It is a
+read of the application's own `/api/health`, which reports what the *application* believes. It is
+**not** a database observation: it does not enumerate `isaac_schema_migrations`, does not confirm
+`0002_runs` is absent from it, and does not report the hosted engine's version. **No database
+connection was opened from this environment**, no kubeconfig, port-forward or Secret was requested or
+used, and the prohibition at
+`docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md:48-52` is untouched. Precheck 2 in §8
+remains the operator's job and is not pre-answered by this.
 
 ### 12B. What CI does **not** prove
 
