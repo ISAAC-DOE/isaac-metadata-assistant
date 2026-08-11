@@ -187,15 +187,38 @@ test.describe('R4 · reset preconditions', () => {
     await expect
       .poll(async () => (await lifecycle.readInSession(mine, SEED.fresh)).rev, { timeout: 20_000 })
       .toBe(0);
-    expect((await lifecycle.readInSession(mine, SEED.partial)).rev).toBe(0);
-    const list = await lifecycle.listInSession(mine);
-    expect(list.ids.slice().sort(), 'all five examples must be back').toEqual(
-      Object.values(SEED).slice().sort()
-    );
-    expect(
-      calls.executes().map((e) => e.status),
-      'the second, re-armed execute is the one that proceeds'
-    ).toEqual([412, 200]);
+    /*
+     * EVERY ASSERTION BELOW POLLS, for the reason the `.poll` above exists.
+     *
+     * That poll waits for ONE record — `SEED.fresh` — to reach `rev: 0`. The reset
+     * restores FIVE and its response then has to reach the client's call log, so
+     * "the record I polled for is back" implies nothing about the other four, and
+     * nothing about whether the 200 has been RECORDED yet. This suite runs with
+     * `retries: 0`, so any read-once assertion on a still-settling value is a
+     * coin-flip under CI timing.
+     *
+     * Measured, both halves, in the same CI window: the executes assertion failed
+     * with `[412]` against `[412, 200]` — the reset had demonstrably landed
+     * server-side, because the rev poll above had already passed, but the response
+     * was not yet in the log. And the identical "all five examples must be back"
+     * read-once list assertion in `tutorial-lifecycle.spec.ts` failed with four ids.
+     *
+     * NONE OF THESE IS WEAKENED. Same values, same deep equality, same sources —
+     * they are only given the bounded settle time the rev poll already had. A sixth
+     * id, a wrong id, a missing id, a third execute, or a wrong status still fails,
+     * and each still fails if the value never settles inside 20s.
+     */
+    await expect
+      .poll(async () => (await lifecycle.readInSession(mine, SEED.partial)).rev, { timeout: 20_000 })
+      .toBe(0);
+    await expect
+      .poll(async () => (await lifecycle.listInSession(mine)).ids.slice().sort(), {
+        timeout: 20_000,
+      })
+      .toEqual(Object.values(SEED).slice().sort());
+    await expect
+      .poll(() => calls.executes().map((e) => e.status), { timeout: 20_000 })
+      .toEqual([412, 200]);
   });
 
   test('an execute that omits the precondition is refused (428) and destroys nothing', async ({
