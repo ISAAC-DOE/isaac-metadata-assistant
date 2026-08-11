@@ -1693,9 +1693,22 @@ def demo_reset(
         "exported, and the exported record id when there is one. Rows for the "
         "five built-in example records also carry a derived, never-stored "
         "`scenario` label naming which example the row is; it is null for "
-        "any other record. Read-only, and it states no validity verdict."
+        "any other record. Read-only, and it states no validity verdict.\n\n"
+        "**This list is not a completeness claim, and on one deployment shape it "
+        "cannot be.** Where experiments are stored in a database, a row whose "
+        "working copy is missing — a pod restart discards it — is restored on read "
+        "before the list is built. If that database cannot be read, this operation "
+        "degrades to the working copies it can see rather than failing, so the list "
+        "may be SHORT. It never asserts that the rows it did not return do not "
+        "exist. That state is disclosed out of band: `GET /api/health` reports "
+        "`experiment_storage.state: \"unavailable\"`, and a read of one such record "
+        "by id answers `503` rather than a `404` that would claim it is gone."
     ),
-    response_description="Every experiment as a summary row.",
+    response_description=(
+        "One summary row per experiment this read could enumerate — every one of "
+        "them whenever durable storage is answering or is not configured. See the "
+        "description for the degraded case."
+    ),
     responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
 def list_experiments(scope: TutorialScopeDep) -> dict:
@@ -4407,8 +4420,9 @@ def _unit_artifact_entry(unit: ws.ExportUnit) -> dict:
         "A record with **runs** exports one official record per run "
         "(`record_id = run.id`), not one per record. In that case `record_id` and "
         "`artifact_refs` are `null` — they are singular and a fan-out has several — "
-        "and `records[]` carries one entry per run instead. A record with no runs, "
-        "which is every record this API can currently create, exports exactly one "
+        "and `records[]` carries one entry per run instead. A record with no runs — "
+        "which is how every record starts, and how it stays until a run is added "
+        "through `POST /api/experiments/{experiment_id}/runs` — exports exactly one "
         "record with `record_id` equal to its own id, unchanged.\n\n"
         "**What is guaranteed if something fails part-way.** Every run is validated "
         "before any file is written, so a validation failure on one run means no "
@@ -4559,8 +4573,9 @@ def post_export(
             # documentation ("`record_id` … `null` — they are singular and a fan-out
             # has several") and named one arbitrary run's record as though it were
             # THE record. For a fan-out the id is null and the message counts instead
-            # of naming. For a zero-run experiment — every experiment this API can
-            # create — the body is byte-identical to the one it has always returned.
+            # of naming. For a zero-run experiment — which is how every experiment
+            # starts, and how it stays until `POST .../runs` adds one — the body is
+            # byte-identical to the one it has always returned.
             if exp.runs:
                 return JSONResponse(
                     status_code=409,
@@ -4637,8 +4652,10 @@ def post_export(
         # correction we are not allowed to make — see `workspace.sibling_link_conflicts`
         # for why refusal is the answer and not a placeholder for a better one.
         #
-        # A zero-run experiment has no siblings, so this cannot fire for any
-        # experiment this API can currently create.
+        # A zero-run experiment has no siblings, so this cannot fire for one. That
+        # used to read "…for any experiment this API can currently create", which
+        # stopped being true the moment `POST .../runs` shipped: a client can add
+        # runs to a record it created, so this branch IS reachable over HTTP.
         #
         # ONE REMEDY, NOT TWO (review item F-B). The message used to end "Restore the
         # sample id, or remove the run." The second clause was measured end to end and
@@ -4781,9 +4798,12 @@ def post_export(
             # `records` lists what THIS export produced, not every record the
             # experiment owns — on a partial fan-out the already-materialised units
             # were skipped and are deliberately absent, because reporting them here
-            # would claim writes that did not happen. Nothing that exists today can
-            # reach this branch (no route creates a Run), so no client contract is
-            # being changed.
+            # would claim writes that did not happen. This used to add "nothing that
+            # exists today can reach this branch (no route creates a Run), so no
+            # client contract is being changed" — FALSE since `POST .../runs`
+            # shipped. The branch is reachable, and the shape above is the contract
+            # a fan-out client reads; it is described in this operation's own
+            # OpenAPI description rather than resting on unreachability.
             payload.pop("record", None)
             payload.pop("sidecar", None)
             payload["record_id"] = None
@@ -5261,15 +5281,24 @@ MAX_VALIDATE_RECORD_BYTES = 512 * 1024
         "Standalone validator for a candidate official ISAAC record supplied "
         "directly as a JSON request body — no experiment, no draft, and no "
         "workspace involved. Returns `ok`, a rendered summary line, the "
-        "`{path, message}` errors, and the schema version checked against.\n\n"
+        "`{path, message}` errors, the schema version checked against, and "
+        "`warnings`.\n\n"
         "It calls the same authoritative validator over the same vendored schema "
         "that the per-experiment validation operation uses, so the two verdicts "
         "agree by construction. The body is never written anywhere and its content "
-        "is never logged; only the outcome and error count are.\n\n"
+        "is never logged; only the outcome, error count and warning count are.\n\n"
+        "`warnings` is the same advisory tier the per-record warnings operation "
+        "serves, run over the supplied document. It is ADVISORY and NON-GATING: "
+        "`ok` is computed from the schema verdict alone, so a warning can never "
+        "turn a pass into a failure, and this operation is never a second "
+        "authority on validity beside the vendored schema.\n\n"
         "Send the record as a raw JSON body. The body is read in memory under a "
         "hard size limit."
     ),
-    response_description="The official-schema verdict, a rendered summary, and the errors.",
+    response_description=(
+        "The official-schema verdict, a rendered summary, the errors, and the "
+        "advisory warnings — which carry no verdict of their own."
+    ),
     responses={
         **_R_UNAUTHORIZED,
         413: {
