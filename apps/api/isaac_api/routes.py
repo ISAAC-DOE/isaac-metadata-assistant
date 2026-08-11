@@ -2739,6 +2739,30 @@ def _run_view(exp: Experiment, run: "ws.Run") -> dict:
     ``inherited`` is computed on read by :func:`workspace.resolve_inherited` and is
     never stored. Every payload it returns is already a deep copy, so nothing here
     can be written back through the response.
+
+    ``overridable`` IS THE SERVER'S OWN ANSWER TO "MAY THIS RUN OVERRIDE HERE?", and
+    it exists because the client had no way to ask. ``resolve_inherited``'s key set
+    is every address ``field_level``/``block_level`` calls experiment-level — a
+    segment-aware PREFIX test. :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` applies that
+    test AND a second gate (membership in ``EXTRACTOR_FIELD_MAP`` for a ``field:``).
+    The two sets are therefore NOT equal: ``field:system.domain`` passes the first and
+    fails the second, and the committed seed draft carries it. So the panel rendered a
+    row whose Override control could only ever return ``422 not_overridable`` — a
+    control offered to a scientist with exactly one possible outcome, which is the
+    defect.
+
+    THE FIX IS A SERVER ANSWER, NOT A CLIENT CLASSIFIER, and that is the whole point.
+    The alternative was transcribing the admissible-address set into the frontend
+    bundle, which would be a second copy of a classification the client must not own —
+    free to drift from this one silently. This flag is read from the SAME frozenset
+    :func:`_override_address` gates on, so the answer the client renders and the answer
+    the route enforces cannot disagree: they are one expression.
+
+    IT IS A DISCLOSURE, NOT A GATE. Nothing here is a permission check — the route
+    still refuses a direct request at a non-overridable address exactly as before, and
+    a client that ignores this flag gets the same typed 422 it always did. Hiding an
+    impossible control is a truthfulness fix on the READ side; the enforcement was
+    never on this side and has not moved.
     """
     draft = run.draft if isinstance(run.draft, dict) else {}
     fields = draft.get("fields")
@@ -2759,6 +2783,7 @@ def _run_view(exp: Experiment, run: "ws.Run") -> dict:
                 "payload": resolution.payload,
                 "inherited_payload": resolution.inherited_payload,
                 "displaced_payload": resolution.displaced_payload,
+                "overridable": address in EXPERIMENT_OVERRIDABLE_ADDRESSES,
             }
             for address, resolution in exp.resolve_run(run).items()
         },

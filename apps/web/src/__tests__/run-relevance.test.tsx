@@ -354,6 +354,7 @@ describe('an inherited value keeps the presentation the override slice establish
             payload: envelope('Synthetic CuO pellet'),
             inherited_payload: envelope('Synthetic CuO powder'),
             displaced_payload: envelope('Synthetic CuO powder'),
+            overridable: true,
           },
         },
       }),
@@ -406,8 +407,18 @@ describe('a run with nothing to show says so', () => {
         version: 'ra.0',
         fields: {},
         inherited: {
-          'field:sample.material.name': { state: 'absent', payload: null, inherited_payload: null },
-          'field:system.technique': { state: 'absent', payload: null, inherited_payload: null },
+          'field:sample.material.name': {
+            state: 'absent',
+            payload: null,
+            inherited_payload: null,
+            overridable: true,
+          },
+          'field:system.technique': {
+            state: 'absent',
+            payload: null,
+            inherited_payload: null,
+            overridable: true,
+          },
         },
       }),
     );
@@ -488,6 +499,10 @@ const RUN_OF_A_FRESH_EXPERIMENT = runFixture({
       payload: { contributors: [] },
       inherited_payload: { contributors: [] },
       displaced_payload: null,
+      // Overridable server-side, though this panel renders no control for a `block:`
+      // address in either case — `overrideRows` excludes them, because there is no
+      // honest one-line rendering of a whole object or list.
+      overridable: true,
     },
   },
 });
@@ -504,8 +519,14 @@ const RUN_WITH_A_TAGGED_RECORD = runFixture({
       payload: ['synthetic', 'xanes'],
       inherited_payload: ['synthetic', 'xanes'],
       displaced_payload: null,
+      overridable: true,
     },
-    'field:sample.material.name': { state: 'absent', payload: null, inherited_payload: null },
+    'field:sample.material.name': {
+      state: 'absent',
+      payload: null,
+      inherited_payload: null,
+      overridable: true,
+    },
   },
 });
 

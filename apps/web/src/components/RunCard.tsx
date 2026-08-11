@@ -29,24 +29,31 @@
  * the direction it could actually fail: a run carrying those paths in its own
  * `run.fields`.
  *
- * THAT GUARANTEE IS SECTION ONE'S, NOT THE WHOLE CARD'S, AND THIS HEADER USED TO CLAIM
- * OTHERWISE — while the card offered exactly one such control two sections down. The
- * known exception, named rather than smoothed over: section two renders one row per
- * address `workspace.resolve_inherited` reports, and that key set is every path in the
- * experiment's own draft that `field_level` calls experiment-level. `field_level` is a
- * segment-aware PREFIX test, while `EXPERIMENT_OVERRIDABLE_ADDRESSES` applies a second
- * gate — membership in `EXTRACTOR_FIELD_MAP`. `field:system.domain` passes the first
- * and fails the second, and the committed seed draft carries it, so the panel renders
- * 14 rows where 13 addresses are overridable and `system.domain`'s Override control
- * can only ever return `422 not_overridable` (verified, and pinned server-side in both
- * directions).
+ * THE GUARANTEE NOW HOLDS FOR THE WHOLE CARD, AND IT DID NOT BEFORE. This header used
+ * to record a known exception two sections down, and the exception was real: section
+ * two renders one row per address `workspace.resolve_inherited` reports, and that key
+ * set is every path in the experiment's own draft that `field_level` calls
+ * experiment-level. `field_level` is a segment-aware PREFIX test, while
+ * `EXPERIMENT_OVERRIDABLE_ADDRESSES` applies a second gate — membership in
+ * `EXTRACTOR_FIELD_MAP`. `field:system.domain` passes the first and fails the second,
+ * and the committed seed draft carries it, so the panel rendered 14 rows where 13
+ * addresses were overridable and `system.domain`'s Override control could only ever
+ * return `422 not_overridable`.
  *
- * IT IS LEFT AS IT IS, DELIBERATELY. Suppressing that one row here means either
- * transcribing the backend's admissible-address set into this bundle — a second copy
- * of a classification this file must not own, and the exact thing the paragraph above
- * refuses — or changing what the route resolves, which is a backend decision. The
- * refusal is at least rendered in the server's own words (`RunInheritedPanel` shows
- * the typed message verbatim) rather than as a generic failure.
+ * WHAT CHANGED: THE SERVER NOW ANSWERS THE QUESTION. Each `inherited` entry carries
+ * `overridable`, read from the same `EXPERIMENT_OVERRIDABLE_ADDRESSES` frozenset the
+ * override route gates on, so `RunInheritedPanel` withholds the control on a row that
+ * cannot take one. The header used to say this was "LEFT AS IT IS, DELIBERATELY",
+ * because the only fixes then available were transcribing the backend's admissible set
+ * into this bundle — a second copy of a classification this file must not own — or
+ * changing what the route resolves. Neither was needed: the third option was for the
+ * backend to say what it already knew. The row is still RENDERED (the inherited value
+ * is real and worth seeing); only the impossible control is withheld.
+ *
+ * THE REFUSAL PATH IS UNCHANGED AND STILL EXERCISED. Nothing here is a permission
+ * check: the route still returns the typed `422 not_overridable` to a direct request,
+ * and `RunInheritedPanel` still renders that message in the server's own words. This
+ * removed a trap from the UI; it removed no enforcement.
  *
  * THAT PANEL USED TO BE READ-ONLY and this
  * header used to say so ("it has no controls at all, which is the strongest

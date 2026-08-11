@@ -1927,6 +1927,10 @@ def test_every_inherited_entry_reports_state_and_never_provenance(
             "payload",
             "inherited_payload",
             "displaced_payload",
+            # ADDED WITH THE `overridable` SLICE, and the fact that this assertion had
+            # to be edited is the guard working: the entry's key set is frozen here, so
+            # a key cannot join the wire without a reviewer seeing it named.
+            "overridable",
         }, (address, entry)
 
 
@@ -2191,6 +2195,71 @@ def test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set(
     )
     assert response.status_code == 422, response.text
     assert response.json()["error"] == "not_overridable"
+
+
+def test_every_inherited_row_carries_the_servers_own_overridable_answer(
+    client, experiment_id
+):
+    """NEGATIVE-CONTROLLED IN BOTH DIRECTIONS, against the real HTTP response.
+
+    The flag exists so the client never has to re-derive the admissible-address set.
+    A test that only asserted ``overridable is True`` somewhere would pass against a
+    hard-coded ``True``, which is precisely the bug class this replaces — so both
+    polarities are required to be present in one response:
+
+    * ``field:system.domain`` is reported as inherited and MUST carry ``False``. It is
+      the live instance of the two-gates asymmetry
+      (:func:`test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set`),
+      and it is the row whose Override control could only ever return a typed 422.
+    * every other reported address MUST carry ``True``.
+
+    The expected value is computed from ``EXPERIMENT_OVERRIDABLE_ADDRESSES`` rather
+    than written out, because the whole claim is that the served flag and the gate the
+    route enforces are ONE expression. Transcribing the answer here would reintroduce
+    the second copy on the test side.
+    """
+    run = _create_run(client, experiment_id)
+    inherited = client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").json()[
+        "run"
+    ]["inherited"]
+
+    assert inherited, "the seed must resolve at least one inherited address"
+    for address, resolution in inherited.items():
+        assert "overridable" in resolution, address
+        assert resolution["overridable"] is (
+            address in routes.EXPERIMENT_OVERRIDABLE_ADDRESSES
+        ), address
+
+    # BOTH POLARITIES ARE ACTUALLY PRESENT. Without this, the loop above would pass
+    # vacuously on a response where every row happened to fall on one side.
+    served = {a: r["overridable"] for a, r in inherited.items()}
+    assert served["field:system.domain"] is False
+    assert sorted(a for a, ok in served.items() if ok is False) == ["field:system.domain"]
+    assert any(ok is True for ok in served.values())
+
+
+def test_the_overridable_flag_does_not_gate_anything_the_route_still_refuses(
+    client, experiment_id
+):
+    """The flag is a DISCLOSURE, not a permission check — enforcement has not moved.
+
+    A client that ignores the flag entirely must get exactly the behaviour it always
+    got. If this ever regressed into the flag being the gate, a caller that never reads
+    the response body would gain an override at an address the domain refuses.
+    """
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client, experiment_id, run["id"], "field:system.domain", _envelope("x")
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "not_overridable"
+
+    # And the row is still REPORTED — withholding the control must not have withheld
+    # the inherited value, which is real and is what the panel renders read-only.
+    inherited = client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").json()[
+        "run"
+    ]["inherited"]
+    assert "field:system.domain" in inherited
 
 
 def test_no_overridable_address_is_also_run_writable():
