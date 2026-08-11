@@ -83,10 +83,17 @@ describe('typed API client — parses the real backend shapes', () => {
     expect(result).toEqual(validateDryRun);
   });
 
-  it('getRecordBundle hits all eight endpoints and keeps the three signals separate', async () => {
+  it('getRecordBundle hits all nine endpoints and keeps the three signals separate', async () => {
     const calls = stubFetchRoutes(bundleRoutes());
     const bundle = await api.getRecordBundle(EXP_ID);
-    expect(calls).toHaveLength(8);
+    // NINE since the record-identity sections. The ninth is `/artifacts`, the
+    // EXISTING route the export-readiness, evidence and experiment-graph bundles
+    // already read — it is the only thing that serves an official record's own
+    // top-level values and its `links` block. No route was added for it.
+    expect(calls).toHaveLength(9);
+    expect(calls).toContain(`GET /api/experiments/${EXP_ID}/artifacts`);
+    // …and it stays a SEPARATE value, merged into no verdict, like the other eight.
+    expect(bundle.artifacts.record).toBeNull();
     // three signals arrive as three distinct values…
     expect(bundle.validate.dry_run).toBe(true);
     expect(bundle.audit.records).toEqual([]);

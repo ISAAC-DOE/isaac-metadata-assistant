@@ -1402,6 +1402,13 @@ export interface RecordBundle {
   warnings: ApiWarningsResponse;
   evidence: ApiEvidenceEntry[];
   graph: ApiGraphStatus;
+  // The exported record + sidecar, from the SAME existing `/artifacts` route the
+  // export-readiness and evidence bundles already read. It is the only source of
+  // an official record's own top-level values and of its `links` block; both are
+  // rendered by the record-identity sections on the record screen. `record` is
+  // null before export, and null for a fan-out (whose runs each write their own
+  // record) — `detail.artifact_refs.reason` is what tells those two apart.
+  artifacts: ApiArtifactsResponse;
 }
 
 // POST /answers response — the recomputed pending list + fresh derived status,
