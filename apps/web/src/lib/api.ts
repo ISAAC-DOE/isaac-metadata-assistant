@@ -397,9 +397,21 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
  * so existing callers (e.g. the export 409 branch) are unaffected. An HTML
  * intercept short-circuits: there is no conflict payload in a sign-in page.
  */
+/*
+ * 422 JOINED 412 AND 400, and the reason is a copy defect rather than a taste.
+ *
+ * `POST /edit` answers 422 with `{"error": "invalid_field_value", "key": …}` for a
+ * correction it cannot store. Without the body, every 422 looked identical to every
+ * other, so the screen could only say "could not be applied (422) … try again" — and
+ * that DROPS the one sentence a scientist needs, which is that the value they had
+ * before is still there. The body is what lets the notice say it.
+ *
+ * Additive: this only POPULATES `err.body` where it was previously `undefined`. No
+ * caller's branch changes, because none of them reads `body` on a 422 today.
+ */
 async function mutationError(res: Response, path: string): Promise<ApiError> {
   const err = httpError(res, path);
-  if (!err.htmlIntercept && (res.status === 412 || res.status === 400)) {
+  if (!err.htmlIntercept && (res.status === 412 || res.status === 400 || res.status === 422)) {
     const body = await res.json().catch(() => undefined);
     return new ApiError(err.message, {
       status: res.status,

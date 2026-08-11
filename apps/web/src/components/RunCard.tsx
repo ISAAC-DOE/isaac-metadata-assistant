@@ -9,7 +9,7 @@
  * demoting a path, because that line IS how a run is told apart from its
  * siblings.
  *
- * EXPANDED it is a short form over three run-level fields and a read-only panel
+ * EXPANDED it is a short form over five run-level fields and a read-only panel
  * of what the run inherits from its experiment. The inherited panel is not
  * styled as a disabled version of the form: it has no controls at all, which is
  * the strongest available statement that those values are not this run's to
@@ -278,11 +278,18 @@ export function RunCard({
             record-specific denominator disclosure sitting beside the figure it
             qualifies".
 
-            "1 of 3 set" said none of that. Three is the number of run-level fields
-            THIS SCREEN offers; the backend accepts five (`RUN_WRITABLE_FIELD_PATHS`),
-            and a valid ISAAC record needs far more than either, most of it inherited.
-            So "3 of 3 set" was displayable on a run whose Check Run fails — a
-            completion claim the number was never entitled to make.
+            "1 of 3 set" said none of that, and the disclosure is MORE necessary now
+            rather than less. The gap it originally named — this screen offered three
+            of the five paths `RUN_WRITABLE_FIELD_PATHS` accepts — is closed: the
+            screen offers all five. The gap that MATTERS is the one that remains and
+            is much larger: a valid ISAAC record needs far more than five fields, most
+            of them inherited from the experiment. So "5 of 5" is still displayable on
+            a run whose Check Run fails, which is exactly the completion claim the bare
+            number was never entitled to make.
+
+            Not deleted when the smaller gap closed, because the sentence a reader
+            needs is "this counts the fields on this screen, not the record" — and
+            that is true of five as it was of three.
           */}
           <span className="run-card-progress">
             {filled} of {RUN_FIELDS.length}{' '}

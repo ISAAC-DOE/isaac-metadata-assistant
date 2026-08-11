@@ -1063,7 +1063,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 45 operations, 79 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 45 operations, 80 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(45);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1397,8 +1397,22 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // never true and is corrected here rather than left to be re-derived by
     // whoever next changes this number. Nothing asserts uniqueness, which is why
     // the false count survived being written down.
-    expect(total).toBe(37527);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(79);
+    //
+    // 37,527 -> 37,757 (+230) from ONE operation description:
+    // `POST /api/experiments/{id}/edit` 490 -> 722 raw characters (+232 raw; this
+    // figure counts 230 of them, because `total` sums the split lead plus the joined
+    // sections and drops the paragraph separators). It now states that only an
+    // already-answered field can be corrected there — an asset whose hash is still an
+    // open question belongs to the answers operation — and that a recognised field
+    // carrying an unstorable value is refused before any mutation. Both were already
+    // true of the served behaviour; neither was written down. Measured, not derived:
+    // `npx vitest run src/__tests__/settings-api.test.tsx` reported
+    // `expected 37757 to be 37527` before this line was changed.
+    expect(total).toBe(37757);
+    // 79 -> 80: the `/edit` description gained a third paragraph, saying that only an
+    // already-answered field is correctable there. Measured in the same run as the
+    // total above (`expected 80 to be 79`).
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(80);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);
