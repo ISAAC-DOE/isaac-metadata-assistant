@@ -8,6 +8,56 @@
   flex-direction: column;
   gap: 20px;
 }
+
+/* THE "THIS LIST MAY BE SHORT" NOTICE.
+
+   Shape and vocabulary deliberately match `.livesync-degraded` — one notice
+   idiom to learn — but on the ADVISORY amber rather than the quiet neutral,
+   because this is not a background condition a reader may ignore: it changes
+   what the rows beneath it mean. It is NOT the reserved fail red; nothing is
+   invalid and nothing was lost, the view is incomplete. */
+.queue-incomplete {
+  display: flex;
+  align-items: flex-start;
+  /* NO BREAKPOINT, for the same reason `.exp-row` has none (see
+     `queue-row-content-pressure.test.tsx`): the notice wraps when ITS OWN text
+     runs out of room, not when the viewport crosses a number someone guessed.
+     A disclosure squeezed into a two-word column is a disclosure nobody reads. */
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner);
+  color: var(--advisory-text);
+}
+.queue-incomplete-text {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* A FLOOR, NOT `min-width: 0` — the same lesson `.exp-main` records. At zero
+     the text column would keep shrinking and the Retry button would never be
+     pushed onto its own line, so the sentence would narrow to a ribbon instead. */
+  min-width: 180px;
+}
+.queue-incomplete-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.queue-incomplete-body {
+  margin: 0;
+  max-width: 92ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.queue-incomplete-retry {
+  flex: none;
+  margin-left: auto;
+}
 .queue-group + .queue-group {
   margin-top: 2px;
 }

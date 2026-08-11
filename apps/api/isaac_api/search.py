@@ -57,6 +57,16 @@ QUERY_TOO_SHORT = "query_too_short"
 #: the two are distinguished: nothing to search, versus nothing matched. It is a
 #: REASON, not an error: the plane is available and answered correctly, and the
 #: envelope still returns ``200`` with ``available: true``.
+#:
+#: THIS MODULE REPORTS WHAT IT WAS GIVEN; THE ROUTE DECIDES WHETHER TO SAY IT.
+#: This function is pure and its statement is exact — the snapshot it received was
+#: empty. Whether that licenses "there are no records" depends on where the
+#: snapshot came from, and only the caller knows: on a deployment that could not
+#: finish restoring its working copies from the database, an empty snapshot is a
+#: SHORT READ rather than an empty workspace. ``routes._searched_scope_reason``
+#: therefore WITHHOLDS this reason while hydration is incomplete, leaving a bare
+#: ``total: 0``. Do not "fix" that by weakening the definition above — the
+#: strength of this claim is the entire reason it exists.
 SCOPE_HAS_NO_RECORDS = "scope_has_no_records"
 
 _MAX_INPUT_LEN = 256  # raw query truncated to this before normalization (determinism)

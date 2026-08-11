@@ -121,9 +121,13 @@ export function GuidedTutorial({
     let cancelled = false;
     api
       .listExperiments()
-      .then((summaries) => {
+      // Only the rows. The list's `incomplete` block cannot apply here: this read
+      // is always inside a worked-example session, whose records are materialised
+      // into the session's own directory and never restored from the database, so
+      // the server's hydration outcome for it is complete by construction.
+      .then(({ experiments }) => {
         if (cancelled) return;
-        setTutorialTargets(resolveTutorialTargets(summaries));
+        setTutorialTargets(resolveTutorialTargets(experiments));
       })
       .catch(() => {
         if (cancelled) return;

@@ -316,12 +316,30 @@ function TargetResolution({ id }: { id: string }) {
     );
   }
   if (resolution.state === 'not_in_workspace') {
+    /*
+     * TWO SENTENCES, because the list the lookup searched may itself have been short.
+     * `GET /api/experiments` discloses an unfinished hydration in band, and this
+     * surface must not turn a short list into an absence claim — that is the defect
+     * the disclosure exists to remove, and this consumer arrived after it.
+     */
     return (
       <p className="link-resolution">
         <CircleHelp size={12} strokeWidth={2} aria-hidden="true" />
-        Not in this workspace’s experiment list. That list does not include the records
-        exported per run, and never includes a record held elsewhere — so this app cannot
-        say whether the target exists, only that it did not find it here.
+        {resolution.listComplete ? (
+          <>
+            Not in this workspace’s experiment list. That list does not include the
+            records exported per run, and never includes a record held elsewhere — so
+            this app cannot say whether the target exists, only that it did not find it
+            here.
+          </>
+        ) : (
+          <>
+            Not found — but the workspace’s experiment list could not be read in full
+            this time, so it is a weaker statement than usual: the target may be in a row
+            the list is missing. It is also not a list that includes the records exported
+            per run, or any record held elsewhere.
+          </>
+        )}
       </p>
     );
   }

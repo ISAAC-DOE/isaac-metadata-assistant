@@ -468,6 +468,23 @@ def test_registered_tags_match_the_module_level_definitions(client):
 
 #: Every operation's documented response codes. Documentation edits must not move
 #: this: an entry changing here means the API contract moved, not its prose.
+#:
+#: `503` APPEARS ON 24 OPERATIONS, AND IT USED TO APPEAR ON ONE. That one was
+#: `POST /api/experiments`, for its write — while `workspace.load_experiment`
+#: raises the same durable-storage outage on every read that resolves a record by
+#: id, and `Experiment.save` on every write. So this table said
+#: `["200", "304", "401", "404", "422"]` for `GET /api/experiments/{experiment_id}`
+#: and the deployed application answered `503`, which is a contract that denies a
+#: state its own implementation produces. The set was DERIVED — every handler that
+#: reaches `ws.load_experiment` or a write-through save — not chosen by taste.
+#:
+#: THREE RECORD-TOUCHING OPERATIONS ARE DELIBERATELY NOT IN IT, and each absence
+#: is a claim that can be checked. `POST /api/demo/run` and `POST /api/demo/reset`
+#: refuse `scope is None` BEFORE they touch a record, so every read they make
+#: carries a session id, and a session-scope read never consults the database
+#: (`workspace.load_experiment` returns `None` for a session miss without
+#: hydrating). `GET /api/experiments` degrades instead of failing, on purpose, and
+#: discloses that it did — see its `incomplete` block.
 EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/about", "get"): ["200", "401"],
     ("/api/assistant/memory/query", "post"): ["200", "400", "401", "422"],
@@ -501,64 +518,38 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # `400`/`428` companions, unlike the record write operations, because a create
     # has no `If-Match` to be malformed or omitted.
     ("/api/experiments", "post"): ["201", "401", "404", "409", "412", "422", "503"],
-    ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422"],
-    ("/api/experiments/{experiment_id}/answers", "post"): [
-        "200", "400", "401", "404", "412", "422", "428",
-    ],
-    ("/api/experiments/{experiment_id}/artifacts", "get"): ["200", "401", "404", "422"],
-    ("/api/experiments/{experiment_id}/assistant/query", "post"): [
-        "200", "400", "401", "404", "422",
-    ],
-    ("/api/experiments/{experiment_id}/audit", "post"): ["200", "401", "404", "422"],
-    ("/api/experiments/{experiment_id}/draft", "get"): ["200", "401", "404", "422"],
-    ("/api/experiments/{experiment_id}/edit", "post"): [
-        "200", "400", "401", "404", "412", "422", "428",
-    ],
-    ("/api/experiments/{experiment_id}/evidence", "get"): ["200", "401", "404", "422"],
-    ("/api/experiments/{experiment_id}/evidence-classification", "get"): [
-        "200", "401", "404", "422",
-    ],
-    ("/api/experiments/{experiment_id}/export", "post"): [
-        "200", "400", "401", "404", "409", "412", "422", "428",
-    ],
-    ("/api/experiments/{experiment_id}/ingestion/csv/preview", "post"): [
-        "200", "400", "401", "403", "404", "412", "413", "422", "428",
-    ],
-    ("/api/experiments/{experiment_id}/pending", "get"): ["200", "401", "404", "422"],
+    ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/answers", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/artifacts", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/assistant/query", "post"): ["200", "400", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/audit", "post"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/draft", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/edit", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/evidence", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/evidence-classification", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/export", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/ingestion/csv/preview", "post"): ["200", "400", "401", "403", "404", "412", "413", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/pending", "get"): ["200", "401", "404", "422", "503"],
     # The Run API. Adding a run REWRITES THE RECORD, so `POST .../runs` carries the
     # record's `If-Match` and the whole 400/412/428 set with it. `PATCH
     # .../runs/{run_id}` carries THE RUN's instead — the same three codes, a
     # different validator. The two read operations and the check take none, because
     # they write nothing.
-    ("/api/experiments/{experiment_id}/runs", "get"): ["200", "401", "404", "422"],
-    ("/api/experiments/{experiment_id}/runs", "post"): [
-        "201", "400", "401", "404", "412", "422", "428",
-    ],
-    ("/api/experiments/{experiment_id}/runs/{run_id}", "get"): [
-        "200", "401", "404", "422",
-    ],
-    ("/api/experiments/{experiment_id}/runs/{run_id}", "patch"): [
-        "200", "400", "401", "404", "412", "422", "428",
-    ],
+    ("/api/experiments/{experiment_id}/runs", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/runs", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/runs/{run_id}", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/runs/{run_id}", "patch"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     # The two override operations carry THE RUN's `If-Match` exactly as the run PATCH
     # does, so they carry the same 400/412/428 set. Their `422` is the address gate,
     # the payload-shape gate and the missing confirmation; on every one of them
     # nothing is written.
-    ("/api/experiments/{experiment_id}/runs/{run_id}/overrides", "post"): [
-        "200", "400", "401", "404", "412", "422", "428",
-    ],
-    ("/api/experiments/{experiment_id}/runs/{run_id}/overrides/clear", "post"): [
-        "200", "400", "401", "404", "412", "422", "428",
-    ],
-    ("/api/experiments/{experiment_id}/runs/{run_id}/check", "post"): [
-        "200", "401", "404", "422",
-    ],
-    ("/api/experiments/{experiment_id}/source-preview", "get"): [
-        "200", "400", "401", "404", "422",
-    ],
-    ("/api/experiments/{experiment_id}/validate", "post"): ["200", "401", "404", "422"],
-    ("/api/experiments/{experiment_id}/warnings", "get"): ["200", "401", "404", "422"],
-    ("/api/experiments/{experiment_id}/warnings", "post"): ["200", "401", "404", "422"],
+    ("/api/experiments/{experiment_id}/runs/{run_id}/overrides", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/runs/{run_id}/overrides/clear", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/runs/{run_id}/check", "post"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/source-preview", "get"): ["200", "400", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/validate", "post"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/warnings", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/warnings", "post"): ["200", "401", "404", "422", "503"],
     ("/api/graph/status", "get"): ["200", "401"],
     # health stays open to unauthenticated probes, so it documents no 401.
     ("/api/health", "get"): ["200"],

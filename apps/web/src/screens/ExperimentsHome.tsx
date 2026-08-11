@@ -24,6 +24,7 @@ import { useHealth } from '../lib/useHealth';
 import { useWorkspaceScope } from '../lib/workspaceScope';
 import { subscribeWorkspaceRebuilt } from '../lib/workspaceInvalidation';
 import { queueSubcount, summariesToQueueGroups } from '../lib/adapt';
+import type { ApiListIncomplete } from '../lib/types';
 
 /**
  * Where a newly created experiment is stored, as far as this client has
@@ -94,6 +95,83 @@ function storageSentence(durability: Durability): string | null {
   // reads as a claim about the reader's data rather than about our own state.
   // This is different from `unavailable`, where something HAS been established.
   return null;
+}
+
+/**
+ * THE HEADING FOR AN INCOMPLETE LIST, by the server's `reason`.
+ *
+ * A PLAIN LOOKUP WOULD BE A BLANK SCREEN. `INCOMPLETE_HEADINGS[reason]` for a
+ * label this build has never seen is `undefined`, and rendering it is a crash on
+ * the app's primary screen — caused by the server correctly reporting a NEW
+ * degraded mode, which is the worst possible moment to render nothing. So an
+ * unrecognised reason falls back to wording that is true of any of them: we do
+ * not know what stopped it, only that it stopped.
+ *
+ * The two known headings differ because the two states differ to the person
+ * reading. `store_unavailable` is a database that is not answering — the same
+ * fact `/api/health` reports, so the durability line elsewhere on this screen
+ * agrees with it. `restore_failed` is a database that IS answering, so nothing
+ * else on the screen will say anything is wrong, and this notice is on its own.
+ *
+ * NEITHER HEADING STATES A NUMBER. The server does not know how many rows are
+ * missing and neither do we; the detail sentence beneath is the server's own.
+ */
+const INCOMPLETE_HEADINGS: Record<string, string> = {
+  store_unavailable: 'This list may be incomplete — the experiment database did not answer',
+  restore_failed: 'This list may be incomplete — restoring stored experiments did not finish',
+};
+
+const INCOMPLETE_HEADING_FALLBACK = 'This list may be incomplete';
+
+function incompleteHeading(reason: string): string {
+  return INCOMPLETE_HEADINGS[reason] ?? INCOMPLETE_HEADING_FALLBACK;
+}
+
+/**
+ * THE ONE NOTICE THAT SAYS THE QUEUE BELOW MAY BE SHORT.
+ *
+ * `role="alert"` rather than `"status"`: this is not background chatter, it is a
+ * correction to the meaning of everything under it. Without it a reader counts
+ * the rows and concludes that is what exists — which, in the mode where the
+ * database is answering normally, nothing anywhere else in the product would
+ * contradict.
+ *
+ * IT DOES NOT OFFER A COUNT AND IT DOES NOT OFFER AN "EXPECTED" TOTAL. Both would
+ * be invented (`CLAUDE.md` §5).
+ *
+ * IT OFFERS RETRY BECAUSE A FRESH READ IS THE ONLY ACTION A READER HAS HERE — not
+ * because a retry is known to work. This comment used to say the server's message
+ * "says the condition is usually temporary", and for `restore_failed` that is no
+ * longer true and should never have been assumed: a full disk or an unplaceable
+ * row survives every retry, and the server now says so in the sentence rendered
+ * below the heading. The button is not a promise, and nothing here upgrades the
+ * server's wording into one.
+ *
+ * It renders ABOVE the queue and above the empty state, so a reader meets the
+ * caveat before the thing it qualifies — an empty queue under a silent banner
+ * would be read as "there is nothing here" first and corrected second.
+ */
+function IncompleteListNote({
+  incomplete,
+  onRetry,
+}: {
+  incomplete: ApiListIncomplete;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="queue-incomplete" role="alert" data-reason={incomplete.reason}>
+      <div className="queue-incomplete-text">
+        <p className="queue-incomplete-title">{incompleteHeading(incomplete.reason)}</p>
+        {/* The server's own sentence, rendered verbatim. It is a fixed literal
+            server-side that names no host, path or credential, and re-wording it
+            here would risk saying something the backend did not. */}
+        <p className="queue-incomplete-body">{incomplete.message}</p>
+      </div>
+      <button type="button" className="btn btn-secondary queue-incomplete-retry" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
 }
 
 /**
@@ -213,7 +291,7 @@ export function ExperimentsHome() {
   } else if (result.status === 'error') {
     body = <BackendDown error={result.error} onRetry={result.reload} />;
   } else {
-    const summaries = result.data;
+    const summaries = result.data.experiments;
     subcount = queueSubcount(summaries);
     const groups = summariesToQueueGroups(summaries);
     queueIsEmpty = groups.length === 0;
@@ -376,6 +454,18 @@ export function ExperimentsHome() {
         idle), and `tutorial-flow.test.tsx` does it with a five-record stub.
       */}
       {result.status === 'data' && !queueIsEmpty && <TutorialPromotion />}
+
+      {/*
+        THE COMPLETENESS CAVEAT, ABOVE THE THING IT QUALIFIES. Gated on the loaded
+        branch only — it is a statement about rows that arrived, and there are none
+        to qualify while loading or on the error panel (which already says the read
+        did not land). It renders for BOTH the empty state and the queue: an empty
+        list is the case where a missing-rows warning matters most, because "no
+        experiments" is exactly the wrong conclusion to leave a reader with.
+      */}
+      {result.status === 'data' && result.data.incomplete !== null && (
+        <IncompleteListNote incomplete={result.data.incomplete} onRetry={result.reload} />
+      )}
 
       {body}
     </AppShell>

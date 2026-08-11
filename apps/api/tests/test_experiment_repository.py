@@ -1083,21 +1083,7 @@ def test_a_sibling_hydration_wins_the_race_our_own_read_lost_and_it_is_still_200
     assert response.json()["title"] == "Restored by a sibling"
 
 
-@pytest.mark.parametrize(
-    "rid,state_id",
-    [
-        (ws.SEED_READY_ID, ws.SEED_READY_ID),  # a canonical example id
-        ("_tutorial", "_tutorial"),  # the session namespace name
-        ("../escape", "../escape"),  # a traversal attempt
-        ("01ABCDEFGHJKMNPQRSTVWXYZ00", "01ZZZZZZZZZZZZZZZZZZZZZZZZ"),  # id/body mismatch
-    ],
-)
-def test_hydrate_refuses_a_row_it_should_never_have_stored(app, tmp_path, rid, state_id):
-    """FAIL-CLOSED on read. Nothing can put these rows there — ``persist`` refuses a
-    canonical id, and a non-record id violates the table's own CHECK — so a row of
-    this shape means something is wrong. It is skipped rather than written, which is
-    the same reading the rest of the workspace layer applies to anything it did not
-    create itself."""
+def _refusable_row(rid: str, state_id: str) -> tuple[str, str]:
     state = {
         "id": state_id,
         "title": "t",
@@ -1105,11 +1091,78 @@ def test_hydrate_refuses_a_row_it_should_never_have_stored(app, tmp_path, rid, s
         "source": {},
         "draft": {},
     }
-    conn = FakeConnection(rows=[(rid, json.dumps(state))])
+    return (rid, json.dumps(state))
+
+
+@pytest.mark.parametrize(
+    "rid,state_id",
+    [
+        (ws.SEED_READY_ID, ws.SEED_READY_ID),  # a canonical example id
+        ("_tutorial", "_tutorial"),  # the session namespace name
+        ("../escape", "../escape"),  # a traversal attempt
+    ],
+)
+def test_hydrate_refuses_a_row_it_should_never_have_stored(app, tmp_path, rid, state_id):
+    """FAIL-CLOSED on read. Nothing can put these rows there — ``persist`` refuses a
+    canonical id, and a non-record id violates the table's own CHECK — so a row of
+    this shape means something is wrong. It is skipped rather than written, which is
+    the same reading the rest of the workspace layer applies to anything it did not
+    create itself.
+
+    IT RETURNS RATHER THAN RAISING, AND THAT IS A JUDGEMENT WORTH SEEING IN A TEST.
+    None of these three shapes is an ordinary experiment this scope may hold: a
+    canonical id belongs to the worked-example namespace, and neither of the others
+    could be addressed by a request even if it were written. Reporting the ordinary
+    list as incomplete because a foreign object sits in the table would claim an
+    ordinary experiment is missing when none is — permanently, since no retry
+    removes the row. The id/body MISMATCH is the case that goes the other way; it
+    has its own test below.
+    """
+    conn = FakeConnection(rows=[_refusable_row(rid, state_id)])
     store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
     assert store.hydrate() == 0
     root = tmp_path / "ws"
     assert (sorted(p.name for p in root.iterdir()) if root.exists() else []) == []
+
+
+def test_hydrate_RAISES_on_a_row_filed_under_an_id_its_document_does_not_carry(app, tmp_path):
+    """THE SKIP THAT USED TO BE SILENT, AND THE HALF OF THE HOLE THAT STAYED OPEN.
+
+    The abort case was closed on this branch — a failing working-copy write stops
+    the loop, and the caller degrades and discloses. This one is not an abort: the
+    loop RUNS TO THE END, so ``hydrate`` returned normally, the outcome was
+    ``complete``, the list disclosed nothing, and a by-id read of the dropped row
+    answered the ``404`` the whole design exists to stop. Measured by a reviewer,
+    verbatim::
+
+        IDS ['01ABCDEFGHJKMNPQRSTVWXYZ50']   <- the other row is gone
+        HAS INCOMPLETE: False                 <- nothing disclosed
+        BY-ID of the dropped row -> 404 experiment_not_found
+
+    The refusal itself is right: a directory named one thing holding another is
+    worse than no directory. What was wrong was reporting a pass that refused a row
+    as one that finished.
+
+    IT STILL WRITES EVERY ROW IT CAN, which is what makes raising at the END of the
+    loop different from aborting inside it: the good row below is on disk before the
+    exception leaves.
+    """
+    good = "01ABCDEFGHJKMNPQRSTVWXYZ50"
+    bad = "01ABCDEFGHJKMNPQRSTVWXYZ51"
+    conn = FakeConnection(
+        rows=[_refusable_row(bad, "01ZZZZZZZZZZZZZZZZZZZZZZZZ"), (good, _durable_state(good))]
+    )
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+
+    with pytest.raises(repo.HydrationSkippedRows) as excinfo:
+        store.hydrate()
+
+    assert excinfo.value.count == 1
+    root = tmp_path / "ws"
+    assert (root / good / "experiment.json").is_file(), "the restorable row must still land"
+    assert not (root / bad).exists(), "the unplaceable row must not be written"
+    # It is not an outage and must never be recorded as one: the database answered.
+    assert repo.storage_failure() is None
 
 
 def test_a_durable_create_writes_to_the_database_before_the_filesystem(
@@ -3339,3 +3392,477 @@ def test_clearing_an_override_refused_by_the_durable_predicate_is_a_412(app, mon
     assert response.json()["error"] == "stale_write"
     reloaded = ws.load_experiment(rid)
     assert reloaded.runs[0].overrides[ws.field_address("sample.material.name")]
+
+
+# =============================================================================
+# A LIST THAT IS SHORT SAYS SO
+# =============================================================================
+#
+# THE DEFECT THESE TESTS PIN, in the words of the thing that used to be true:
+# `GET /api/experiments` degrades to the working copies on disk when hydration
+# fails, and said NOTHING about having done so. A reader counted the rows and
+# concluded that was what existed.
+#
+# TWO MODES, AND THE SECOND IS THE ONE NOTHING COULD SEE. Mode A — the `SELECT`
+# fails — was at least disclosed OUT of band: `/api/health` reports
+# `experiment_storage.state: "unavailable"` and a by-id read answers 503. Mode B
+# — the `SELECT` SUCCEEDS and one working-copy WRITE fails part-way through
+# hydration — was disclosed nowhere at all: the list came back short,
+# `/api/health` correctly reported `durable` (the database really is fine), and a
+# by-id read of an untouched durable record answered `404`. That last one is the
+# "your work is gone" claim the single-record read path was corrected for once
+# already, reappearing through a different door.
+#
+# EVERY TEST BELOW ASSERTS BOTH HALVES: that the degradation is disclosed, AND
+# that a healthy read is unchanged. A disclosure that is always on would be
+# worthless in exactly the same way silence is.
+
+
+def _durable_state(rid: str, title: str = "Durable") -> str:
+    return json.dumps(_stored_state(rid, title))
+
+
+def _ids(response) -> list[str]:
+    return [row["id"] for row in response.json()["experiments"]]
+
+
+class _WriteFailsForOneRecord:
+    """Makes ONE working-copy write fail, exactly as a full ``emptyDir`` would.
+
+    ``PostgresOrdinaryStore.hydrate`` restores each row by calling
+    ``ws.atomic_write_text``. Raising from it for one id is the smallest faithful
+    model of the real trigger: the database answered, the rows are in hand, and the
+    FILESYSTEM refused. Everything after the failing row is never restored, which
+    is the property under test — not the ``ENOSPC`` itself.
+    """
+
+    def __init__(self, monkeypatch, failing_id: str) -> None:
+        self.failing_id = failing_id
+        self.written: list[str] = []
+        self.real = ws.atomic_write_text
+        monkeypatch.setattr(ws, "atomic_write_text", self)
+
+    def __call__(self, path, text):
+        if self.failing_id in str(path):
+            raise OSError(28, "No space left on device")
+        self.written.append(str(path))
+        return self.real(path, text)
+
+
+def test_a_healthy_list_carries_no_completeness_claim_at_all(app, plain):
+    """THE GUARD AGAINST A DISCLOSURE THAT IS ALWAYS ON.
+
+    No database configured — every developer machine and every CI job but one.
+    The body must be exactly what this operation has always returned, with no
+    `incomplete` key of any kind. A key reading `{"complete": true}` would be a
+    claim, and an always-present block is one a client learns to ignore.
+    """
+    response = plain.get("/api/experiments")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"experiments": []}
+    assert "incomplete" not in response.json()
+
+
+def test_a_healthy_DURABLE_list_carries_no_completeness_claim_either(app, monkeypatch):
+    """The same guard where hydration RUNS and succeeds — the case that matters.
+
+    The previous test proves nothing about the disclosure logic (with no database
+    the hydration is a no-op). Here the `SELECT` really is issued, a row really is
+    restored, and the response must still make no claim.
+    """
+    rid = "01ABCDEFGHJKMNPQRSTVWXYZ10"
+    conn = FakeConnection(rows=[(rid, _durable_state(rid))])
+    client = _durable_client(app, monkeypatch, conn)
+
+    response = client.get("/api/experiments")
+    assert response.status_code == 200, response.text
+    assert _ids(response) == [rid], "the premise: hydration restored the row"
+    assert response.json() == {"experiments": response.json()["experiments"]}
+    assert "incomplete" not in response.json()
+
+
+def test_MODE_A_the_list_stays_a_list_and_discloses_that_the_store_did_not_answer(
+    app, tmp_path, monkeypatch
+):
+    """MODE A: the ``SELECT`` fails. The list degrades — and now says it degraded.
+
+    The `200` is as load-bearing as the disclosure. Narrowing the catch so this
+    raised would trade a quiet lie for a loud outage: the reader below has one
+    readable record and must still see it.
+    """
+    on_disk = ws.create_experiment(
+        title="On disk", source={"description": "x", "files": []}, draft=repo.blank_draft()
+    )
+    conn = FakeConnection(raise_on={repo.Q_ALL_EXPERIMENTS: RuntimeError("connection refused")})
+    client = _durable_client(app, monkeypatch, conn)
+
+    response = client.get("/api/experiments")
+    assert response.status_code == 200, response.text
+    assert _ids(response) == [on_disk.id], "the readable record must still be listed"
+    assert response.json()["incomplete"] == {
+        "reason": "store_unavailable",
+        "missing_count": None,
+        "message": ws.HYDRATION_DISCLOSURE_MESSAGES["store_unavailable"],
+    }
+    # And Mode A's out-of-band disclosure is UNCHANGED — the two agree rather than
+    # one replacing the other.
+    assert client.get("/api/health").json()["experiment_storage"]["state"] == "unavailable"
+
+
+def test_MODE_B_a_succeeding_SELECT_and_a_failing_WRITE_is_disclosed_in_band(
+    app, tmp_path, monkeypatch
+):
+    """MODE B, MEASURED. Storage IS answering; the RESTORE is what stopped.
+
+    Before this slice the observed behaviour was, verbatim::
+
+        LIST:   200  []                     <- two durable records exist
+        HEALTH: {'durable': True, 'state': 'durable'}
+        BY-ID of the UNAFFECTED durable record: 404 {'error':'experiment_not_found'}
+
+    Three statements, and the list's silence made the other two unreadable: health
+    is RIGHT (the database is fine), so nothing outside the list response could
+    ever have told the reader their list was short.
+    """
+    first = "01ABCDEFGHJKMNPQRSTVWXYZ20"
+    second = "01ABCDEFGHJKMNPQRSTVWXYZ21"
+    conn = FakeConnection(
+        rows=[(first, _durable_state(first, "First")), (second, _durable_state(second, "Second"))]
+    )
+    writes = _WriteFailsForOneRecord(monkeypatch, failing_id=first)
+    client = _durable_client(app, monkeypatch, conn)
+
+    response = client.get("/api/experiments")
+
+    # THE PREMISE, ASSERTED: the SELECT succeeded (the rows were read) and the
+    # restore stopped on the first of them, so the second was never written.
+    assert any(sql == repo.Q_ALL_EXPERIMENTS for sql, _ in conn.statements)
+    assert writes.written == [], "the loop must have aborted before any row landed"
+    assert not (tmp_path / "ws" / second / "experiment.json").exists()
+
+    assert response.status_code == 200, response.text
+    assert _ids(response) == [], "the list really is short — that is the state under test"
+    assert response.json()["incomplete"] == {
+        "reason": "restore_failed",
+        "missing_count": None,
+        "message": ws.HYDRATION_DISCLOSURE_MESSAGES["restore_failed"],
+    }
+
+    # HEALTH STILL SAYS DURABLE, AND THAT IS CORRECT, NOT A BUG. The database
+    # answered; a write against it would succeed. Reporting an outage here would
+    # send an operator to look at a healthy database — which is exactly why the
+    # disclosure had to be in band.
+    assert client.get("/api/health").json()["experiment_storage"] == {
+        "configured": True,
+        "backend": "postgres",
+        "durable": True,
+        "state": "durable",
+    }
+
+
+def test_MODE_B_a_by_id_read_of_an_UNRESTORED_record_is_503_and_never_404(
+    app, tmp_path, monkeypatch
+):
+    """THE #113 LIE, ON THE SECOND PATH. ``404`` says "it is not here". It is here.
+
+    The record asked for has a durable row and no working copy, because the
+    restore aborted on a DIFFERENT record. Nothing about that says this one does
+    not exist — it says the server could not find out, which is what ``503``
+    means and what ``404`` denies.
+
+    The cost of the other direction is a retry. The cost of the direction this
+    replaces was a scientist reading "This experiment id is not in the workspace".
+    """
+    first = "01ABCDEFGHJKMNPQRSTVWXYZ30"
+    second = "01ABCDEFGHJKMNPQRSTVWXYZ31"
+    conn = FakeConnection(
+        rows=[(first, _durable_state(first, "First")), (second, _durable_state(second, "Second"))]
+    )
+    _WriteFailsForOneRecord(monkeypatch, failing_id=first)
+    client = _durable_client(app, monkeypatch, conn)
+
+    response = client.get(f"/api/experiments/{second}")
+
+    assert not (tmp_path / "ws" / second / "experiment.json").exists(), "the premise"
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "experiment_storage_unavailable"
+    # The body describes what ACTUALLY happened. Telling an operator the database
+    # "could not be read" would point them at a database that answered perfectly,
+    # and telling a reader "nothing was saved" would report a loss that did not
+    # occur — the two mistakes the third message exists to avoid.
+    assert response.json()["message"] == repo.STORAGE_RESTORE_FAILED_MESSAGE
+
+
+def test_a_genuine_miss_is_still_404_when_hydration_COMPLETED(app, monkeypatch):
+    """THE OTHER HALF, AND WITHOUT IT THE FIX WOULD BE A BLANKET 503.
+
+    A healthy database holding a row for a DIFFERENT record: the pass completes,
+    so an absent file is an absent record and the honest ``404`` is unchanged.
+    """
+    other = "01ABCDEFGHJKMNPQRSTVWXYZ40"
+    conn = FakeConnection(rows=[(other, _durable_state(other))])
+    client = _durable_client(app, monkeypatch, conn)
+
+    response = client.get("/api/experiments/01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "experiment_not_found"
+
+
+def test_a_worked_example_list_never_claims_incompleteness(app, monkeypatch):
+    """A SESSION'S LIST IS COMPLETE BY CONSTRUCTION, even while the store is down.
+
+    A session's records are materialised into its own directory and never reach
+    the database, so there is nothing hydration could have failed to restore. A
+    disclosure here would be a warning about a risk that does not exist on this
+    path — and it would appear during the guided walkthrough, over the five
+    example records, on a deployment whose database happens to be unwell.
+    """
+    conn = FakeConnection(raise_on={repo.Q_ALL_EXPERIMENTS: RuntimeError("connection refused")})
+    client = _durable_client(app, monkeypatch, conn)
+    session = client.post("/api/tutorial/sessions").json()["session_id"]
+
+    response = client.get("/api/experiments", headers={TUTORIAL_SESSION_HEADER: session})
+    assert response.status_code == 200, response.text
+    assert len(response.json()["experiments"]) == 5
+    assert "incomplete" not in response.json()
+
+
+def test_the_disclosure_never_states_a_number_and_never_names_a_host_or_path(
+    app, tmp_path, monkeypatch
+):
+    """§5: THE COUNT IS UNKNOWN, SO IT IS REPORTED AS UNKNOWN.
+
+    A pass that aborted mid-loop does not know how many rows it never reached.
+    ``missing_count`` is `null` — carried rather than omitted, so "unknown" is
+    stated rather than left to be inferred as zero — and no digit appears in the
+    message. The two fixed sentences also carry no host, path, user or driver
+    text, for the same reason ``experiment_repository``'s storage messages do not:
+    they reach a response body.
+    """
+    conn = FakeConnection(raise_on={repo.Q_ALL_EXPERIMENTS: RuntimeError("db.invalid: refused")})
+    client = _durable_client(app, monkeypatch, conn)
+
+    block = client.get("/api/experiments").json()["incomplete"]
+    assert block["missing_count"] is None
+    assert not re.search(r"\d", block["message"]), block["message"]
+
+    for message in ws.HYDRATION_DISCLOSURE_MESSAGES.values():
+        lowered = message.lower()
+        for leak in ("db.invalid", "pghost", "postgres", "/", "password", "user="):
+            assert leak not in lowered, f"{leak!r} leaked into a disclosure message"
+
+
+def test_an_unrecognised_reason_falls_back_rather_than_raising():
+    """THE DIRECT-INDEX TRAP, ON THE SERVER SIDE.
+
+    A future label with no entry in the message table must not make the LIST path
+    raise. A ``KeyError`` while disclosing a degradation would turn the very
+    request that reports the problem into a 500 — the outcome the whole design
+    rejects.
+    """
+    outcome = ws.HydrationOutcome(reason="something_this_build_has_never_seen")
+    assert outcome.complete is False
+    assert outcome.message() == ws.HYDRATION_DISCLOSURE_FALLBACK
+    assert ws.HydrationOutcome().complete is True
+
+
+def test_the_two_incomplete_reasons_have_distinct_messages():
+    """One sentence per state, because they are different states to a reader.
+
+    Collapsing them would put "the database could not be read" in front of someone
+    whose database is answering — the precise mistake the third storage message
+    was added to avoid.
+    """
+    messages = set(ws.HYDRATION_DISCLOSURE_MESSAGES.values())
+    assert len(messages) == len(ws.HYDRATION_DISCLOSURE_MESSAGES) == 2
+    assert ws.HYDRATION_DISCLOSURE_FALLBACK not in messages
+
+
+def test_MODE_C_a_pass_that_FINISHED_but_refused_a_row_is_disclosed_too(
+    app, tmp_path, monkeypatch
+):
+    """MODE C — THE SKIP HOLE, AT THE ROUTE. Neither the SELECT nor a write failed.
+
+    Mode B aborts the loop; this one completes it. That difference is exactly why
+    the fix for Mode B did not cover this: ``hydrate`` returned normally, so the
+    outcome said ``complete``, so the list said nothing — while a row the store is
+    holding was left out of it. The reviewer's measurement was a list of ONE with a
+    second durable row silently absent and ``HAS INCOMPLETE: False``.
+
+    BOTH HALVES ARE ASSERTED. The restorable row is still listed (refusing one row
+    must not cost the scope), and the response now says the list may be short.
+    """
+    good = "01ABCDEFGHJKMNPQRSTVWXYZ60"
+    bad = "01ABCDEFGHJKMNPQRSTVWXYZ61"
+    conn = FakeConnection(
+        rows=[(good, _durable_state(good, "Good")), _refusable_row(bad, "01ZZZZZZZZZZZZZZZZZZZZZZZZ")]
+    )
+    client = _durable_client(app, monkeypatch, conn)
+
+    response = client.get("/api/experiments")
+
+    assert response.status_code == 200, response.text
+    assert _ids(response) == [good], "the placeable row must still be restored and listed"
+    assert response.json()["incomplete"] == {
+        "reason": "restore_failed",
+        "missing_count": None,
+        "message": ws.HYDRATION_DISCLOSURE_MESSAGES["restore_failed"],
+    }
+    # The database answered perfectly, so health is RIGHT to go on saying durable —
+    # which is again why the disclosure has to be in the list response itself.
+    assert client.get("/api/health").json()["experiment_storage"]["state"] == "durable"
+
+
+def test_MODE_C_a_by_id_read_while_a_row_was_refused_is_503_and_never_404(
+    app, tmp_path, monkeypatch
+):
+    """The #113 lie on the third path. The record asked for is the REFUSED one.
+
+    Its row is in the store and its working copy is not on disk, because this
+    server would not write it. ``404`` would say it does not exist; the honest
+    answer is that this server cannot place it and therefore cannot say.
+    """
+    bad = "01ABCDEFGHJKMNPQRSTVWXYZ70"
+    conn = FakeConnection(rows=[_refusable_row(bad, "01ZZZZZZZZZZZZZZZZZZZZZZZZ")])
+    client = _durable_client(app, monkeypatch, conn)
+
+    response = client.get(f"/api/experiments/{bad}")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "experiment_storage_unavailable"
+    assert response.json()["message"] == repo.STORAGE_RESTORE_FAILED_MESSAGE
+
+
+def test_the_restore_failed_messages_do_not_tell_a_reader_to_just_try_again(app):
+    """FINDING 4, IN THE COPY. A retry is not the remedy for this state.
+
+    ``store_unavailable`` keeps "usually temporary — try again", because a refused
+    connection usually is and usually does clear. ``restore_failed`` must not: a
+    full disk and an unplaceable row survive every retry, and the by-id ``503`` for
+    a genuinely absent record persists with them. Telling a reader to try again
+    there is advice that cannot work, offered by the only surface that knows
+    anything is wrong at all.
+
+    It does not claim the opposite either — "may not clear" is what is known.
+    """
+    restore = ws.HYDRATION_DISCLOSURE_MESSAGES[ws.HYDRATION_RESTORE_FAILED]
+    unavailable = ws.HYDRATION_DISCLOSURE_MESSAGES[ws.HYDRATION_STORE_UNAVAILABLE]
+
+    assert "usually temporary" in unavailable and "try again" in unavailable
+    for message in (restore, repo.STORAGE_RESTORE_FAILED_MESSAGE, ws.HYDRATION_DISCLOSURE_FALLBACK):
+        assert "usually temporary" not in message, message
+        assert "— try again" not in message, message
+    assert "may not clear" in restore and "may not clear" in repo.STORAGE_RESTORE_FAILED_MESSAGE
+
+
+def test_a_raising_ordinary_store_cannot_take_the_list_route_down(app, monkeypatch):
+    """THE GUARANTEE THE LIST DOCSTRING CLAIMS, PINNED — because it was briefly false.
+
+    ``_hydrate_ordinary_scope`` says it does not raise, and the reason that matters
+    is written directly above it: ``GET /api/experiments`` is the product's primary
+    screen and an OPTIMISATION MUST NOT BE ABLE TO TAKE A READ PATH DOWN. For one
+    revision of this branch the store was resolved OUTSIDE the guard, and a raise
+    from that one line was measured turning this route from ``200`` (base commit)
+    into ``500`` — a regression against base on precisely the property the
+    docstring exists to defend.
+
+    Operationally near-unreachable: ``ordinary_store`` reads environment variables
+    and ``PostgresOrdinaryStore.__init__`` assigns. That is why it is a small
+    finding and not why it is an acceptable one — a guarantee with a hole in it is
+    not the guarantee that was claimed.
+
+    AND THE DEGRADATION IS DISCLOSED rather than silent. Base returned a bare ``0``
+    here and said nothing; if this server cannot even resolve its store it does not
+    know whether durable rows exist, so "no claim" would be a claim.
+    """
+    def _explode(session_id):
+        raise RuntimeError("the store seam blew up")
+
+    monkeypatch.setattr(ws, "_ordinary_store", _explode)
+    client = TestClient(app)
+
+    response = client.get("/api/experiments")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["incomplete"]["reason"] == "restore_failed"
+
+
+# =============================================================================
+# SEARCH ASSERTS ABSENCE, WHICH IS STRONGER THAN WHAT THE LIST DID
+# =============================================================================
+
+
+def _workspace_group(response) -> dict:
+    return response.json()["workspace"]
+
+
+def test_search_still_says_scope_has_no_records_on_a_HEALTHY_empty_scope(app, monkeypatch):
+    """THE CONTROL, FIRST. The claim is valuable and must not be suppressed always.
+
+    An empty ordinary workspace with a healthy database really does hold nothing to
+    search, and ``scope_has_no_records`` exists to say so — it is deliberately
+    stronger than ``total: 0`` so a reader stops rephrasing a query that was never
+    going to match. Suppressing it unconditionally would delete the whole reason
+    the reason code exists.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+
+    group = _workspace_group(client.get("/api/search", params={"q": "First"}))
+    assert group["available"] is True
+    assert group["reason"] == "scope_has_no_records"
+    assert group["total"] == 0
+
+
+def test_search_WITHHOLDS_the_absence_claim_while_hydration_is_incomplete(
+    app, tmp_path, monkeypatch
+):
+    """AND THE FIX. "Nothing here" is a claim a short snapshot cannot support.
+
+    Measured on this branch before the fix, in the same Mode B state that
+    ``GET /api/experiments`` was correctly flagging as ``restore_failed`` over two
+    durable rows::
+
+        /api/search?q=First   -> 200 {"available":true,"reason":"scope_has_no_records","total":0}
+
+    So the branch closed a surface that IMPLIED absence and left one that STATES
+    it. The claim is dropped rather than replaced: a bare ``total: 0`` understates,
+    which is the safe direction, and no new reason label is invented for a state
+    the list response already describes in full.
+
+    ``available`` STAYS ``true``. The plane answered; it simply cannot assert
+    emptiness. Flipping availability would report a broken search over a working
+    one.
+    """
+    first = "01ABCDEFGHJKMNPQRSTVWXYZ80"
+    second = "01ABCDEFGHJKMNPQRSTVWXYZ81"
+    conn = FakeConnection(
+        rows=[(first, _durable_state(first, "First")), (second, _durable_state(second, "Second"))]
+    )
+    _WriteFailsForOneRecord(monkeypatch, failing_id=first)
+    client = _durable_client(app, monkeypatch, conn)
+
+    # The premise, from the operation that does disclose: this read is short.
+    assert client.get("/api/experiments").json()["incomplete"]["reason"] == "restore_failed"
+
+    group = _workspace_group(client.get("/api/search", params={"q": "First"}))
+    assert group["available"] is True
+    assert group["reason"] is None, "an absence CLAIM must not survive a short snapshot"
+    assert group["total"] == 0
+
+
+def test_a_too_short_query_still_reports_itself_while_hydration_is_incomplete(
+    app, tmp_path, monkeypatch
+):
+    """THE NARROWNESS OF THE SUPPRESSION, PINNED.
+
+    ``query_too_short`` is a fact about the REQUEST and is true whatever the scope
+    holds — a one-character query would have been refused on a perfectly healthy
+    deployment too. Suppressing it would drop the only explanation the reader gets
+    for an empty result they can actually fix.
+    """
+    conn = FakeConnection(raise_on={repo.Q_ALL_EXPERIMENTS: RuntimeError("connection refused")})
+    client = _durable_client(app, monkeypatch, conn)
+
+    group = _workspace_group(client.get("/api/search", params={"q": "a"}))
+    assert group["reason"] == "query_too_short"

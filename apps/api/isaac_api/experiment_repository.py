@@ -78,10 +78,16 @@ had acquired a hard dependency on one.
 
 THE RULE THAT REPLACES IT, and the four parts are deliberately different:
 
-* **THE LIST DEGRADES.** Hydration is an optimisation — it restores directories a
-  restart threw away. A failed hydration falls back to the filesystem view and
-  ``GET /api/experiments`` continues, so a list stays a list. A short list is
-  INCOMPLETE; it never asserts that the rows it omits do not exist.
+* **THE LIST DEGRADES, AND IT NOW SAYS SO IN BAND.** Hydration is an
+  optimisation — it restores directories a restart threw away. A failed hydration
+  falls back to the filesystem view and ``GET /api/experiments`` continues, so a
+  list stays a list. A short list is INCOMPLETE; it never asserts that the rows it
+  omits do not exist. It no longer leaves that to be inferred either: an
+  incomplete hydration pass is reported as an ``incomplete`` block on the list
+  response, naming which of the two failures occurred and stating that HOW MANY
+  rows are missing is unknown. Narrowing the catch so the list raised instead was
+  considered and rejected — a scientist with three readable records should still
+  see three. See ``workspace.HydrationOutcome``.
 * **A SINGLE-RECORD READ DOES NOT DEGRADE WHEN THE STORE MIGHT BE HOLDING THE
   RECORD, AND THAT IS A CORRECTION.** This paragraph used to say "a miss stays a
   404" and count it a virtue. It was measured wrong on the deployed application:
@@ -153,6 +159,7 @@ __all__ = [
     "NEW_EXPERIMENT_SOURCE_DESCRIPTION",
     "SQLSTATE_UNDEFINED_TABLE",
     "STORAGE_READ_FAILED_MESSAGE",
+    "STORAGE_RESTORE_FAILED_MESSAGE",
     "STORAGE_STATE_DURABLE",
     "STORAGE_STATE_EPHEMERAL",
     "STORAGE_STATE_UNAVAILABLE",
@@ -160,6 +167,7 @@ __all__ = [
     "DurableWriteConflict",
     "ExperimentRepository",
     "FilesystemExperimentRepository",
+    "HydrationSkippedRows",
     "NotPersistable",
     "PostgresExperimentRepository",
     "PostgresOrdinaryStore",
@@ -267,6 +275,45 @@ class StorageNotProvisioned(RuntimeError):
     disclosed as one; it is simply not a reason to doubt the ``404``, because on
     an unmigrated deployment there is genuinely no durable record to find.
     """
+
+
+class HydrationSkippedRows(RuntimeError):
+    """A hydration pass REFUSED a stored row it read, and finished the loop anyway.
+
+    THE OUTCOME THAT USED TO BE SILENT, AND IT IS A FIFTH ONE RATHER THAN A CASE
+    OF THE OTHER FOUR. :meth:`PostgresOrdinaryStore.hydrate` skips a row whose
+    state document is filed under an id the document itself does not carry:
+    writing a directory named one thing and holding another is worse than not
+    writing it, so the refusal is right. What was wrong is what the refusal LOOKED
+    like from outside — the loop kept running, the pass returned normally,
+    ``workspace.HydrationOutcome.complete`` was ``True``, the list disclosed
+    nothing, and a by-id read of the skipped record answered exactly the ``404``
+    this whole design exists to stop. The ABORT hole was closed and this one was
+    left open while the prose said otherwise.
+
+    SO THE SKIP IS COUNTED AND RAISED AT THE END OF THE PASS, after every row that
+    COULD be restored has been. That ordering is the difference between this and an
+    abort: one unusable row costs only itself, and every row after it still lands.
+    ``workspace._hydrate_ordinary_scope``'s "anything else" arm turns this into
+    ``restore_failed`` — which the list discloses in band and the single-record read
+    raises on.
+
+    IT IS NOT A SUBCLASS OF :class:`StorageUnavailable`, for the same reason
+    :class:`StorageNotProvisioned` is not: nothing about the storage failed. It is
+    likewise NOT recorded by :func:`storage_failure`, so ``/api/health`` goes on
+    reporting ``durable`` — truthfully, because a write against that database would
+    still succeed. The list response is again the only place the shortfall shows.
+
+    ``count`` IS NOT A COUNT OF MISSING RECORDS and must never be rendered as one.
+    It is how many rows THIS PASS refused. How many records a reader is missing is
+    a different question, and no partial pass can answer it — which is why
+    ``missing_count`` stays ``null`` on the wire.
+    """
+
+    def __init__(self, count: int) -> None:
+        super().__init__("a hydration pass refused a stored row it could not place")
+        #: How many rows this pass refused. Diagnostic only; never rendered.
+        self.count = count
 
 
 class DurableWriteConflict(RuntimeError):
@@ -408,6 +455,30 @@ STORAGE_READ_FAILED_MESSAGE = (
     "This deployment stores experiments in its own database, and that "
     "database could not be read just now. Nothing was changed, and this is "
     "usually temporary — try again."
+)
+#: THE THIRD, AND IT IS HERE FOR THE SAME REASON THE SECOND IS. A hydration pass
+#: can fail to represent every stored row with the database ANSWERING PERFECTLY:
+#: writing one working copy failed (a full ``emptyDir``), or a row was refused as
+#: unplaceable (:class:`HydrationSkippedRows`), or the store could not be resolved
+#: at all. Reporting any of those with :data:`STORAGE_READ_FAILED_MESSAGE` would
+#: tell an operator the database could not be read, sending them to look at a
+#: database that is fine; reporting them with :data:`STORAGE_WRITE_FAILED_MESSAGE`
+#: would tell a reader their save was lost when nothing was being saved. It names
+#: no path — the directory it failed to write is a server path, and none of these
+#: literals may ever carry one.
+#:
+#: IT DELIBERATELY DOES NOT SAY "usually temporary — try again", WHICH THE OTHER
+#: TWO READ-SIDE MESSAGES DO. A refused connection often clears by itself; a full
+#: disk and an unplaceable row do not, and this state persists across every retry
+#: until someone changes the deployment. Telling a reader to try again would be
+#: advice that cannot work, offered in the one state where the honest answer is
+#: that the server does not know whether their record exists. It also stops short
+#: of promising the opposite — "needs a server-side fix" is what is known.
+STORAGE_RESTORE_FAILED_MESSAGE = (
+    "This deployment stores experiments in its own database, and this server "
+    "could not finish restoring its own working copy of every stored experiment, "
+    "so it cannot say whether this record exists. Nothing was changed. Retrying "
+    "may not clear this on its own — if it persists, it needs a server-side fix."
 )
 
 
@@ -878,6 +949,38 @@ class PostgresOrdinaryStore:
         than written — the same fail-closed reading the rest of the workspace
         layer applies to anything it did not just create itself.
 
+        THREE ``continue`` ARMS, AND THEY ARE NOT THE SAME KIND OF THING. Stating
+        this precisely matters because the docstring here once said the disclosure
+        hole was closed while two of these still dropped rows in silence.
+
+        * ``state_path.exists()`` — NOT A SKIP AT ALL. The working copy is already
+          on disk, so the record IS in the list; there was nothing to do.
+        * a non-record id, or a canonical example id — A REFUSAL, AND IT IS NOT
+          REPORTED AS AN INCOMPLETE PASS. Neither shape is an ordinary experiment
+          this scope may hold: a canonical id belongs to the worked-example
+          namespace, which never reads this table, and an id that is not a record
+          id could not be addressed by a request even if it were written. Nothing
+          this application does can create either row. Declaring the ordinary list
+          incomplete because a foreign object sits in the table would be a claim in
+          the other direction — that an ordinary experiment is missing, when none
+          is — and it would be PERMANENT, since no retry removes the row. That is a
+          judgement, not an oversight; if it is ever wrong, it is wrong here.
+        * a state document whose ``id`` is not the id the row is filed under — A
+          REFUSAL THAT **IS** REPORTED. This one claims to be an ordinary record of
+          this scope, and the pass did not represent it, so the pass did not do
+          what a caller may assume it did. It is counted and raised as
+          :class:`HydrationSkippedRows` AFTER the loop, so every row that could be
+          restored still is; the caller degrades and discloses rather than losing
+          the rest of the scope to one unusable row.
+
+        RAISES :class:`HydrationSkippedRows` when the loop finished but refused a
+        row of that last shape. This application's own writes cannot produce one —
+        ``persist`` writes ``exp.id`` alongside ``json.dumps(exp.to_state())``, and
+        the document's ``["id"]`` is that same id — so it takes an out-of-band
+        write, a partial migration, or a future writer bug. It is raised rather
+        than logged because the alternative was measured: the pass looked complete,
+        and the record came back as a ``404``.
+
         RAISES :class:`StorageUnavailable` if the read fails, and the CALLER
         (``workspace._hydrate_ordinary_scope``) is what degrades. The split is
         deliberate: this method's job is to say truthfully whether it restored
@@ -899,6 +1002,7 @@ class PostgresOrdinaryStore:
         """
         root = ws.workspace_root()
         restored = 0
+        skipped = 0
         try:
             with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
                 cursor.execute(policy.check(Q_ALL_EXPERIMENTS))
@@ -920,10 +1024,19 @@ class PostgresOrdinaryStore:
                 state = json.loads(state)
             if not isinstance(state, dict) or state.get("id") != rid:
                 # The row does not describe the record it is filed under. Skip it
-                # rather than writing a directory named one thing holding another.
+                # rather than writing a directory named one thing holding another —
+                # and COUNT the skip, because a row of this shape claims to be an
+                # ordinary record of this scope and the list is about to be built
+                # without it. Silently continuing here left the pass looking
+                # complete, which is the whole defect this counter closes.
+                skipped += 1
                 continue
             ws.atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
             restored += 1
+        if skipped:
+            # AFTER the loop, deliberately: every restorable row has been restored
+            # by now, so refusing one row costs only that row. See the docstring.
+            raise HydrationSkippedRows(skipped)
         return restored
 
 
