@@ -631,6 +631,15 @@ export interface ApiValidateResult {
     ok: boolean;
     errors: { path: string; message: string }[];
     dry_run: boolean;
+    // NO VERDICT COULD BE PRODUCED — set by `_validate_unit` on the two branches
+    // whose own comment reads "no verdict, not a schema violation": an unreadable
+    // written artifact, and an exception during the dry run. `ok` is `false` on
+    // both (fail-closed), so a client keying on `ok` alone renders a refusal as a
+    // schema failure. THAT is why the flag exists, and omitting it from this type
+    // made TypeScript prevent a client from reading it — leaving the fixed English
+    // sentence in `errors[0].message` as the only reachable signal. Optional
+    // because the field is absent on every verdict that IS a verdict.
+    unavailable?: boolean;
   }[];
 }
 
