@@ -10436,7 +10436,7 @@
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "7934df61e3c3d6b14a871ea9a7d9bb3c667564baf5b8ae2274c8a2567670eb6f"
+        "sha256": "6cc242cefc58e2ad9565ac6f5b2caed891df7eba7cfc96dcd83083b75953514e"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "61b318c574fcb3279ea0ae279ec586887a180c1a4f59775042f557fe27ae27aa"
+        "sha256": "86d693d5b3eda3f8547f7e90fb7743c9169907fc37cb05a1fc7883f448d65230"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "74ba5fe2da52a76f5e289f2ea19e30ce24ed3aa2581332913eab2d76bb8fc047"
+    "served_manifest_fingerprint": "eed5a7340da30ab56a83c3a32aeccaabf60285e92fa7f21e38bfce1ff8cb4ee3"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
