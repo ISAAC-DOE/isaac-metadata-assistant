@@ -76,22 +76,43 @@ Not Running"), ``GET /api/experiments/<id>`` (a clean 404 became a 500) and
 transient outage, permanently — a read path that had never touched a database
 had acquired a hard dependency on one.
 
-THE RULE THAT REPLACES IT, and the three parts are deliberately different:
+THE RULE THAT REPLACES IT, and the four parts are deliberately different:
 
 * **THE LIST DEGRADES.** Hydration is an optimisation — it restores directories a
   restart threw away. A failed hydration falls back to the filesystem view and
   ``GET /api/experiments`` continues, so a list stays a list. A short list is
   INCOMPLETE; it never asserts that the rows it omits do not exist.
-* **A SINGLE-RECORD READ DOES NOT DEGRADE, AND THAT IS A CORRECTION.** This
-  paragraph used to say "a miss stays a 404" and count it a virtue. It was
-  measured wrong on the deployed application: moments after a rollout, a record
-  screen claimed "This experiment id is not in the workspace — it may not have
-  been created yet" about a record that answered ``200`` seconds later. An
-  ``emptyDir`` workspace plus a durable row means "no directory" no longer implies
-  "no record", so a 404 issued without reading the database is a false statement
-  about a scientist's work. ``workspace.load_experiment`` now lets the outage
-  propagate and the route renders ``503`` — true, retryable, and already typed.
-  A genuine miss, and every deployment with no database at all, is unaffected.
+* **A SINGLE-RECORD READ DOES NOT DEGRADE WHEN THE STORE MIGHT BE HOLDING THE
+  RECORD, AND THAT IS A CORRECTION.** This paragraph used to say "a miss stays a
+  404" and count it a virtue. It was measured wrong on the deployed application:
+  moments after a rollout, a record screen claimed "This experiment id is not in
+  the workspace — it may not have been created yet" about a record that answered
+  ``200`` seconds later. An ``emptyDir`` workspace plus a durable row means "no
+  directory" no longer implies "no record", so a 404 issued without reading the
+  database is a false statement about a scientist's work.
+  ``workspace.load_experiment`` lets that outage propagate and the route renders
+  ``503`` — true, retryable, and already typed.
+* **AND THE TWO FAILURES A READ CAN HIT ARE NOT THE SAME FAILURE.** The rule is
+  NOT "any storage failure becomes a 503"; it is **503 only when the store might
+  be holding the record and we could not find out**. Two cases, told apart at the
+  point the failure is classified (:func:`is_undefined_table`):
+
+  - **The relation does not exist** — the migration has not been applied. No
+    durable row *can* exist, the filesystem is the whole truth, and a miss is
+    therefore TRUE. :class:`StorageNotProvisioned` is raised, hydration reports
+    "restored nothing" — which is complete rather than ambiguous — and the honest
+    ``404`` is the answer it always was. Pinned by ``.github/workflows/ci.yml``'s
+    ``Prove the app DEGRADES when the migration has not been applied yet``.
+  - **The store did not answer** — connection refused, mid-failover, timeout,
+    driver failure. Durable rows may exist and we could not look, so a ``404``
+    would be a lie. :class:`StorageUnavailable`, rendered ``503``.
+
+  The classification FAILS CLOSED: anything not positively identified as
+  "relation absent" is treated as unavailable, because guessing "absent" re-opens
+  the exact defect above.
+
+  A genuine miss, and every deployment with no database at all, is unaffected by
+  either branch.
 * **WRITES DO NOT DEGRADE EITHER.** A failed durable write raises :class:`StorageUnavailable`,
   which ``isaac_api.app`` renders as a typed ``503``. Degrading a write to the
   filesystem would be worse than failing it: the reader has been TOLD their work
@@ -130,6 +151,7 @@ __all__ = [
     "BACKEND_FILESYSTEM",
     "BACKEND_POSTGRES",
     "NEW_EXPERIMENT_SOURCE_DESCRIPTION",
+    "SQLSTATE_UNDEFINED_TABLE",
     "STORAGE_READ_FAILED_MESSAGE",
     "STORAGE_STATE_DURABLE",
     "STORAGE_STATE_EPHEMERAL",
@@ -141,9 +163,11 @@ __all__ = [
     "NotPersistable",
     "PostgresExperimentRepository",
     "PostgresOrdinaryStore",
+    "StorageNotProvisioned",
     "StorageUnavailable",
     "blank_draft",
     "forget_storage_failure",
+    "is_undefined_table",
     "ordinary_store",
     "repository",
     "storage_failure",
@@ -202,6 +226,46 @@ class StorageUnavailable(RuntimeError):
     driver messages echo the host, the user and the connection string. The
     underlying exception is chained (``raise ... from exc``) so a server log still
     has the cause; only the CLASS NAME is ever kept in process state.
+    """
+
+
+class StorageNotProvisioned(RuntimeError):
+    """The durable store's own table does not exist, so it is holding NOTHING.
+
+    THE FOURTH FAILURE, AND IT EXISTS BECAUSE CI CAUGHT IT BEING CONFLATED WITH
+    THE SECOND. :class:`StorageUnavailable` used to cover this case as well —
+    both were "the database did not give us rows" — and once a failed READ began
+    surfacing as a ``503`` that conflation turned an honest ``404`` into a false
+    outage. The two situations are not the same fact about the world:
+
+    * :class:`StorageUnavailable` — the relation may well exist and be full of
+      rows; we could not reach it, so we DO NOT KNOW whether the record is there.
+      A ``404`` would assert something unknown, so the honest answer is ``503``.
+    * :class:`StorageNotProvisioned` — the relation does not exist. Not "we could
+      not read it": there is nothing to read, because the migration has not been
+      applied and this application has therefore never durably stored anything.
+      The workspace filesystem is the entire truth, exactly as it was before
+      durable storage existed, and a miss is TRUE. The honest answer is ``404``.
+
+    WHY IT IS DELIBERATELY NOT A SUBCLASS OF :class:`StorageUnavailable`. Every
+    handler that means "an outage happened" — ``app``'s ``503`` handler,
+    ``workspace._hydrate_ordinary_scope_or_raise``'s re-raise — is written as
+    ``except StorageUnavailable``. A subclass would be caught by all of them and
+    would silently restore the very 503 this class exists to prevent, while
+    *looking* like a distinction had been drawn.
+
+    IT IS A READ-PATH CLASSIFICATION ONLY, and that asymmetry is intentional. A
+    WRITE against an absent relation still raises :class:`StorageUnavailable` and
+    still fails loudly as a typed ``503``: for a write, "the table is not there"
+    means the work cannot be kept, which is an outage the operator must fix, not
+    a truthful nothing. Only a read can honestly conclude "there is nothing to
+    find" from an absent relation.
+
+    IT IS STILL RECORDED AS A STORAGE FAILURE (:func:`storage_failure`), so
+    ``/api/health`` reports ``durable: false`` and the UI stops promising
+    durability. An unapplied migration is a real deployment problem and it is
+    disclosed as one; it is simply not a reason to doubt the ``404``, because on
+    an unmigrated deployment there is genuinely no durable record to find.
     """
 
 
@@ -355,6 +419,75 @@ def _unavailable(exc: BaseException, message: str = STORAGE_WRITE_FAILED_MESSAGE
     """
     _note_storage_failure(exc)
     return StorageUnavailable(message)
+
+
+#: PostgreSQL's SQLSTATE for ``undefined_table``: "relation ... does not exist".
+#: The server's own code for the one failure that means THE MIGRATION HAS NOT BEEN
+#: APPLIED, as opposed to the several that mean the server did not answer.
+SQLSTATE_UNDEFINED_TABLE = "42P01"
+
+
+def is_undefined_table(exc: BaseException) -> bool:
+    """Whether ``exc`` POSITIVELY identifies "that relation does not exist".
+
+    THE MECHANISM IS THE SQLSTATE, NOT THE EXCEPTION CLASS AND NEVER THE MESSAGE.
+    Three reasons, in order of weight:
+
+    1. It is the SERVER's statement about what happened, not the driver's
+       rendering of it. ``42P01`` is fixed by the PostgreSQL protocol; a class
+       hierarchy and a message are not.
+    2. It needs NO DRIVER IMPORT. ``psycopg2`` is imported lazily throughout this
+       package precisely because it may be absent (``db_write.connect_psycopg2``
+       says so, and it is absent from the developer venv this was written in), so
+       ``except psycopg2.errors.UndefinedTable`` cannot even be written at module
+       scope here. ``db_provider.TIMEOUT_EXCEPTION_NAMES`` solves the same problem
+       by matching exception class NAMES; the SQLSTATE is strictly better where it
+       is available, because it is one exact value rather than an open set of
+       names that a driver upgrade can extend or rename.
+    3. It is identical across ``psycopg2`` (``.pgcode``, ``.diag.sqlstate``) and
+       ``psycopg`` 3 (``.sqlstate``), so all three spellings are read and no
+       version pin is implied.
+
+    A MESSAGE MATCH IS NOT USED AND MUST NOT BE ADDED. "relation ... does not
+    exist" is localised, is a substring of unrelated errors, and is exactly the
+    kind of match that turns a driver upgrade into a false ``404``.
+
+    THIS FUNCTION FAILS CLOSED. It returns ``True`` only for a value it read and
+    recognised. An exception carrying no SQLSTATE at all — a socket error, a
+    ``TimeoutError``, a driver bug, an error class this build has never seen —
+    returns ``False`` and is therefore treated as an OUTAGE. That direction is
+    chosen deliberately: a wrong "unavailable" costs a retry, while a wrong
+    "absent" tells a scientist their work does not exist, which is the defect
+    this whole branch exists to stop.
+
+    IT DOES NOT WALK ``__cause__`` OR ``__context__``. The exception it is given
+    is the driver's own, raised straight through ``db_write.write_transaction``
+    (which re-raises unwrapped). If a future layer wraps it and hides the
+    SQLSTATE, this returns ``False`` and the caller reports an outage — the safe
+    direction, and a visible one.
+    """
+    for attribute in ("pgcode", "sqlstate"):
+        if str(getattr(exc, attribute, "") or "").strip() == SQLSTATE_UNDEFINED_TABLE:
+            return True
+    diagnostics = getattr(exc, "diag", None)
+    return (
+        str(getattr(diagnostics, "sqlstate", "") or "").strip() == SQLSTATE_UNDEFINED_TABLE
+    )
+
+
+def _not_provisioned(exc: BaseException) -> StorageNotProvisioned:
+    """Record ``exc`` and build the "there is no table, so there is nothing" error.
+
+    Recorded exactly like an outage — :func:`storage_status` must report
+    ``durable: false`` on an unmigrated pod, and it is a durable-storage failure
+    by any reading. What differs is what the READ concludes from it, not whether
+    it is disclosed. The message is a fixed, path-free literal for the same reason
+    the other two are, even though this one is never rendered into a response.
+    """
+    _note_storage_failure(exc)
+    return StorageNotProvisioned(
+        "the durable experiment table does not exist in this deployment"
+    )
 
 
 # --- what a brand-new experiment contains -------------------------------------
@@ -751,6 +884,18 @@ class PostgresOrdinaryStore:
         anything, and swallowing the error here would make "restored 0" mean both
         "there was nothing to restore" and "I could not look", which is exactly
         the ambiguity that let a failed read reach a request handler as a 500.
+
+        EXCEPT FOR ONE FAILURE, WHICH IS NOT AN OUTAGE AND IS RAISED AS ITS OWN
+        TYPE. If the ``SELECT`` fails because the relation does not exist
+        (SQLSTATE ``42P01``, :func:`is_undefined_table`), the store is not
+        unreachable — it is UNPROVISIONED, holds nothing, and "restored 0" is then
+        a complete and true answer rather than an ambiguous one.
+        :class:`StorageNotProvisioned` says so, and the single-record read is what
+        acts on the difference: it must go on answering an honest ``404`` in a
+        state where no durable record can exist. THIS IS WHY THE CLASSIFICATION
+        LIVES HERE and not at the call site — this is the only frame that still
+        holds the driver exception, and one frame later there is nothing left to
+        classify. Everything else, and anything unrecognised, is an outage.
         """
         root = ws.workspace_root()
         restored = 0
@@ -758,7 +903,9 @@ class PostgresOrdinaryStore:
             with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
                 cursor.execute(policy.check(Q_ALL_EXPERIMENTS))
                 rows = cursor.fetchall() or []
-        except Exception as exc:  # noqa: BLE001 - any driver/server failure, uniformly
+        except Exception as exc:  # noqa: BLE001 - any driver/server failure, classified
+            if is_undefined_table(exc):
+                raise _not_provisioned(exc) from exc
             raise _unavailable(exc, STORAGE_READ_FAILED_MESSAGE) from exc
         _note_storage_success()
         for row in rows:

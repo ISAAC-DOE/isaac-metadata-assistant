@@ -3426,14 +3426,35 @@ def _hydrate_ordinary_scope_or_raise() -> int:
     record's directory is written, and the caller will then say "not found". It is
     a real remaining hole, it is not the one that was measured, and closing it
     means making hydration per-row fault-tolerant, which is a separate change.
+
+    AND ``StorageNotProvisioned`` IS SWALLOWED TOO, WHICH IS THE WHOLE POINT OF
+    THERE BEING TWO STORAGE ERRORS. It is not an outage: the relation does not
+    exist, so the store holds nothing, so ``0 restored`` is the COMPLETE truth
+    rather than the ambiguous "0 or unknown" this function's whole design is
+    written against. The caller may then read the absent file as an absent record
+    and answer the ``404`` it answered before durable storage existed — which is
+    what ``.github/workflows/ci.yml``'s first ``postgres-migration`` step, running
+    against a real PostgreSQL with the migration deliberately unapplied, requires.
+
+    THE THREE ``except`` CLAUSES ARE ORDERED AND NONE OF THEM IS REDUNDANT.
+    ``StorageNotProvisioned`` is deliberately NOT a subclass of
+    ``StorageUnavailable`` (see its docstring), so the order below is not what
+    makes it work — it is written most-specific-first anyway, so that a later
+    reader who makes it a subclass "for tidiness" does not silently flip a 404
+    into a 503.
     """
     store = _ordinary_store(None)
     if store is None:
         return 0
-    from .experiment_repository import StorageUnavailable  # noqa: PLC0415 - cycle
+    from .experiment_repository import (  # noqa: PLC0415 - cycle
+        StorageNotProvisioned,
+        StorageUnavailable,
+    )
 
     try:
         return store.hydrate()
+    except StorageNotProvisioned:
+        return 0  # nothing to restore, and that is KNOWN. See the docstring.
     except StorageUnavailable:
         raise
     except Exception:  # noqa: BLE001 - not an outage; see the docstring
@@ -3523,6 +3544,13 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
     ``404``, so a ``None`` that meant "I could not check" was twenty-eight false
     claims of non-existence; the narrowing is what makes those call sites correct
     without any of them changing. See the comment inside for what was measured.
+
+    "THE STORE DID NOT RESPOND" IS NOT THE SAME AS "THE STORE DOES NOT EXIST YET".
+    On a deployment whose migration has not been applied there is no relation and
+    therefore no durable row, so ``None`` is TRUE and this returns it — the
+    filesystem is the whole truth there, as it was before durable storage. Only
+    the case where rows may exist and could not be read raises. See
+    :class:`~isaac_api.experiment_repository.StorageNotProvisioned`.
     """
     state_path = scope_root(session_id) / experiment_id / "experiment.json"
     if not state_path.exists():
@@ -3545,7 +3573,9 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
         # direction — a sibling that restored a DIFFERENT record returns non-zero and
         # says nothing about this one — so it is not consulted at all.
         #
-        # A MISS NO LONGER STAYS A 404 WHEN THE DATABASE IS DOWN. That paragraph
+        # A MISS NO LONGER STAYS A 404 WHEN THE DATABASE IS DOWN — DOWN, AND NOT
+        # MERELY UNMIGRATED; the difference is drawn a paragraph below and it is
+        # the difference CI caught this branch getting wrong. That paragraph
         # used to stand here and said so approvingly: a failed hydrate returned 0,
         # wrote nothing, the re-check failed, and the route answered "not found" —
         # "which is what it answered before durable storage existed". THE SECOND
@@ -3582,6 +3612,24 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
         # `_hydrate_ordinary_scope_or_raise` returns 0 without raising and this is
         # the code it always was. A healthy database that simply has no such row
         # likewise returns normally, and the absent file is the answer.
+        #
+        # AND "DID NOT ANSWER" IS NARROWER THAN "FAILED", WHICH IS THE CORRECTION
+        # CI FORCED. An earlier version of this branch raised on ANY hydration
+        # failure, including the one where the relation does not exist because the
+        # migration has not been applied. That case is not an unknown: no durable
+        # row CAN exist, the workspace filesystem is the whole truth exactly as it
+        # was before durable storage, and the miss is TRUE. `.github/workflows/
+        # ci.yml`'s first `postgres-migration` step proves that state against a
+        # real PostgreSQL: assertion 1 is that the list still degrades to the
+        # filesystem VIEW, assertion 2 that a miss is a clean 404, assertion 3
+        # that a known id still loads from disk. This branch broke assertion 2, by
+        # treating "there is no table" as "I could not look" — and assertions 1
+        # and 3 kept passing, which is what made it a design flaw rather than a
+        # crash. `experiment_repository` now tells them
+        # apart at the driver error (SQLSTATE 42P01) and `StorageNotProvisioned`
+        # arrives here as a plain "restored 0". The rule is not "any storage
+        # failure is a 503"; it is 503 ONLY WHEN THE STORE MIGHT BE HOLDING THE
+        # RECORD AND WE COULD NOT FIND OUT.
         #
         # THE FILE IS STILL CHECKED BEFORE THE OUTAGE IS REPORTED, and that is the
         # same lesson as the paragraph above rather than a new one: the answer is

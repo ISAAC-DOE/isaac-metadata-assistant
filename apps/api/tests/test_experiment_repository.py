@@ -954,11 +954,18 @@ def test_a_durable_row_is_503_NOT_404_while_the_database_is_unreachable(
     itself, which made the ``emptyDir`` directory a cache of the database.
 
     The mechanism is SIMULATED, not asserted from copy: the connection raises on
-    ``Q_ALL_EXPERIMENTS``, which is what a cold pool, a mid-failover server or an
-    un-migrated table does to hydration.
+    ``Q_ALL_EXPERIMENTS`` with SQLSTATE ``08006``, which is what a cold pool or a
+    mid-failover server does to hydration.
+
+    IT USED TO RAISE AN UNDEFINED-TABLE ERROR HERE, WHICH IS A DIFFERENT WORLD.
+    That is the flaw CI caught: an un-migrated table is not an unreachable server.
+    The relation being absent means no durable row CAN exist, so the miss is true
+    and a 404 is honest; an unreachable server means rows may exist and we could
+    not look, which is the only case this test is about and the only case that
+    earns a 503. See ``_unreachable_connection`` and the four tests in section 10A.
     """
     rid = "01ABCDEFGHJKMNPQRSTVWXYZ02"
-    conn = _table_missing_connection()
+    conn = _unreachable_connection()
 
     monkeypatch.setenv("PGHOST", "db.invalid")
     monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
@@ -1003,7 +1010,9 @@ def test_every_sub_resource_of_that_record_is_503_too_and_not_a_missing_record(
     rid = "01ABCDEFGHJKMNPQRSTVWXYZ04"
     monkeypatch.setenv("PGHOST", "db.invalid")
     monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
-    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(_table_missing_connection()))
+    # UNREACHABLE, not un-migrated: only the case where rows may exist and could
+    # not be read is a 503. See section 10A.
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(_unreachable_connection()))
     client = TestClient(app, raise_server_exceptions=False)
 
     reads = [
@@ -1044,7 +1053,9 @@ def test_a_sibling_hydration_wins_the_race_our_own_read_lost_and_it_is_still_200
     rid = "01ABCDEFGHJKMNPQRSTVWXYZ05"
     rows = [(rid, json.dumps(_stored_state(rid, "Restored by a sibling")))]
     sibling = repo.PostgresOrdinaryStore(_env(), connect=_connector(FakeConnection(rows=rows)))
-    broken = _table_missing_connection()
+    # OUR connection hits the failure that WOULD produce a 503, so that the 200
+    # below is attributable to the file check and not to the failure being benign.
+    broken = _unreachable_connection()
 
     monkeypatch.setenv("PGHOST", "db.invalid")
     monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
@@ -1774,21 +1785,104 @@ def test_the_obfuscated_do_block_residual_is_documented_where_it_lives():
 
 
 class UndefinedTable(Exception):
-    """Stands in for ``psycopg2.errors.UndefinedTable``.
+    """Stands in for ``psycopg2.errors.UndefinedTable``, AT ITS MECHANISM.
 
-    A real driver class is not used, and not because psycopg2 is awkward to import:
-    the fix must catch ANY failure from the driver or the server, not a curated
-    list of exception types. Using an exception class the application has never
-    heard of is what proves that.
+    A real driver class is still not used — psycopg2 is imported lazily
+    everywhere in this package because it may be absent, and it IS absent from
+    the venv this file is normally run in, so a test that imported it would skip
+    rather than run. What has changed is that the stand-in now carries the thing
+    the application actually reads.
+
+    IT CARRIES ``pgcode`` BECAUSE THE APPLICATION NOW CLASSIFIES ON SQLSTATE.
+    This class used to be a bare ``Exception`` and its docstring argued that using
+    "an exception class the application has never heard of" was the point, because
+    "the fix must catch ANY failure from the driver or the server, not a curated
+    list of exception types". THAT REMAINS TRUE OF THE WRITE PATH — a write still
+    fails loudly on anything at all — AND IT WAS WRONG ABOUT THE READ PATH, which
+    is what CI caught: a read must tell "the relation does not exist, so there is
+    nothing to find" apart from "the store did not answer, so I do not know". The
+    bare exception simulated the FORM of the failure and not its CONTENT, so the
+    two were indistinguishable in this file while a real PostgreSQL distinguishes
+    them by SQLSTATE on every reply.
+
+    ``42P01`` is PostgreSQL's ``undefined_table``; psycopg2 exposes it as
+    ``.pgcode`` (and as ``.diag.sqlstate``), psycopg 3 as ``.sqlstate``. That the
+    real driver agrees is asserted separately, against the real driver, in
+    ``test_the_installed_driver_agrees_that_42P01_is_the_undefined_table_code``.
     """
+
+    pgcode = repo.SQLSTATE_UNDEFINED_TABLE
+
+
+class ConnectionFailure(Exception):
+    """Stands in for a driver/server failure that is NOT "the relation is absent".
+
+    ``08006`` is ``connection_failure``. A real psycopg2 ``OperationalError`` from
+    a refused connection or a mid-failover server carries this class of code, or
+    no code at all when the socket died before the server said anything — and
+    ``_unreachable_connection`` exercises the coded form while
+    ``test_the_classifier_fails_closed_...`` exercises the code-less one.
+
+    The important property is negative: it carries a SQLSTATE that is not
+    ``42P01``, so an application that classified by "did the driver raise" rather
+    than by "what did the server say" cannot tell it from :class:`UndefinedTable`.
+    """
+
+    pgcode = "08006"
+
+
+def _sqlstate_error(attribute: str, code: str | None) -> Exception:
+    """A driver error carrying ``code`` under ``attribute`` and nothing else.
+
+    ``attribute`` is the spelling: ``pgcode`` is psycopg2's, ``sqlstate`` is
+    psycopg 3's. Built per-case rather than as fixed classes so a row of the
+    classifier table reads as the exact shape it is testing.
+    """
+    exc = Exception("a driver error")
+    setattr(exc, attribute, code)
+    return exc
+
+
+def _diag_error(code: str | None) -> Exception:
+    """A driver error carrying the code only on ``.diag.sqlstate``, as psycopg2 does."""
+
+    class _Diagnostics:
+        sqlstate = code
+
+    exc = Exception("a driver error")
+    exc.diag = _Diagnostics()  # type: ignore[attr-defined]
+    return exc
 
 
 def _table_missing_connection():
-    """A ``FakeConnection`` on which every statement naming the app's own table raises."""
+    """A ``FakeConnection`` on which every statement naming the app's own table raises.
+
+    THE MIGRATION HAS NOT BEEN APPLIED. This is the deployed pod on a fresh
+    rollout and the state ``.github/workflows/ci.yml``'s first
+    ``postgres-migration`` step constructs for real.
+    """
     return FakeConnection(
         raise_on={
             repo.Q_ALL_EXPERIMENTS: UndefinedTable("relation does not exist"),
             repo.Q_UPSERT_EXPERIMENT: UndefinedTable("relation does not exist"),
+        }
+    )
+
+
+def _unreachable_connection():
+    """A ``FakeConnection`` whose statements fail because the SERVER did not answer.
+
+    DELIBERATELY A DIFFERENT FIXTURE FROM :func:`_table_missing_connection`, and
+    several tests below moved onto it. They were named for THIS state ("while the
+    database is unreachable", "a transient outage") and were simulating the OTHER
+    one, which is precisely how the read path came to treat them as the same
+    thing. The migration-absent relation holds nothing; an unreachable server may
+    be holding everything.
+    """
+    return FakeConnection(
+        raise_on={
+            repo.Q_ALL_EXPERIMENTS: ConnectionFailure("server closed the connection"),
+            repo.Q_UPSERT_EXPERIMENT: ConnectionFailure("server closed the connection"),
         }
     )
 
@@ -1799,6 +1893,16 @@ def pod_without_migration(app, monkeypatch):
     monkeypatch.setenv("PGHOST", "db.invalid")
     monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
     conn = _table_missing_connection()
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
+    return TestClient(app, raise_server_exceptions=False), conn
+
+
+@pytest.fixture()
+def pod_with_unreachable_store(app, monkeypatch):
+    """The same pod, migrated, with the SERVER not answering. The other failure."""
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    conn = _unreachable_connection()
     monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
     return TestClient(app, raise_server_exceptions=False), conn
 
@@ -1821,33 +1925,41 @@ def test_the_list_degrades_to_the_filesystem_view_instead_of_500ing(
     assert [row["id"] for row in response.json()["experiments"]] == [existing.id]
 
 
-def test_an_unknown_id_is_503_NOT_500_AND_NOT_404_while_the_store_cannot_be_read(
+def test_an_unknown_id_on_an_UNMIGRATED_pod_is_a_TRUE_404_and_not_a_500_or_a_503(
     pod_without_migration,
 ):
-    """THE COST OF THE FIX, STATED AS AN ASSERTION RATHER THAN LEFT IMPLICIT.
+    """THE ASSERTION CI OWNS, MIRRORED HERE — and it has been wrong twice now.
 
-    This test used to read ``..._is_still_a_404_and_not_a_500`` and argued: "a miss
-    stays a miss. 'We could not check' and 'it is not here' look the same to a
-    client holding a stale link, and only one of them is a server error." The
-    middle clause is the error. They look the same only to a client that is TOLD
-    the same thing, which was this application's choice, not the client's.
+    Version 1 read ``..._is_still_a_404_and_not_a_500`` and argued "a miss stays a
+    miss; 'we could not check' and 'it is not here' look the same to a client, and
+    only one of them is a server error". That argument WAS wrong, for the case it
+    was actually about.
 
-    AND THE HONEST PRICE IS HERE: a genuinely stale link now gets ``503`` while the
-    database is unreachable, where it used to get a correct ``404``. That is a real
-    loss of precision and it is the right trade, because while hydration cannot run
-    THE SERVER DOES NOT KNOW WHICH CASE IT IS IN. ``404`` was not more precise; it
-    was a guess that happened to be right for unknown ids and wrong for real ones,
-    and the wrong half is the one that tells a scientist their work is gone. The
-    ``503`` is retryable and self-correcting: the same request answers a true 404
-    the moment the store answers again.
+    Version 2 replaced it with ``..._is_503_NOT_500_AND_NOT_404...`` and asserted
+    a ``503`` here, calling the lost precision "the honest price". That was wrong
+    in the other direction, and ``.github/workflows/ci.yml``'s first
+    ``postgres-migration`` step — ``Prove the app DEGRADES when the migration has
+    not been applied yet``, run against a real PostgreSQL that has genuinely never
+    had ``isaac_experiments`` created — failed on exactly this assertion.
 
-    ``500`` remains excluded, which is what the old name cared about.
+    THERE IS NO PRICE TO PAY IN THIS STATE, WHICH IS WHY THE TRADE WAS FALSE. The
+    503 is earned by NOT KNOWING. Here the server knows: the relation does not
+    exist, this application has therefore never durably stored anything, and the
+    workspace filesystem is the complete truth exactly as it was before durable
+    storage. A miss is TRUE. Answering "try again, this is usually temporary"
+    about a record that cannot exist is its own false claim — a smaller one than
+    telling a scientist their work is gone, and still a claim the server has no
+    grounds for.
+
+    The 503 for the case where the store MIGHT be holding the record is asserted,
+    unchanged, in ``test_an_unreachable_store_answers_503_for_an_unknown_id``.
     """
     client, _conn = pod_without_migration
     response = client.get("/api/experiments/01ARZ3NDEKTSV4RRFFQ69G5FAV")
-    assert response.status_code == 503, response.text
-    assert response.status_code != 500
-    assert response.json()["error"] == "experiment_storage_unavailable"
+    assert response.status_code == 404, response.text
+    assert response.status_code != 500, "the un-migrated read must not be a server error"
+    assert response.status_code != 503, "an absent relation is not an unknown answer"
+    assert response.json()["error"] == "experiment_not_found"
 
 
 def test_an_unknown_id_is_a_TRUE_404_again_as_soon_as_the_store_answers(
@@ -1953,7 +2065,7 @@ def test_a_transient_outage_heals_instead_of_marking_the_pod_broken_forever(
     """
     monkeypatch.setenv("PGHOST", "db.invalid")
     monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
-    broken = _table_missing_connection()
+    broken = _unreachable_connection()  # a transient OUTAGE, which is this test's subject
     monkeypatch.setattr(dbw, "connect_psycopg2", _connector(broken))
     client = TestClient(app, raise_server_exceptions=False)
 
@@ -1998,6 +2110,263 @@ def test_the_storage_error_body_names_no_host_path_user_or_driver_message(
     text = client.post("/api/experiments", json={"title": "Doomed"}).text
     for leak in ("db.invalid", "PGHOST", "PGUSER", "PGPASSWORD", "relation does not exist"):
         assert leak not in text, leak
+
+
+# =============================================================================
+# 10A. THE TWO FAILURES A READ CAN HIT, AND WHY THEY ARE NOT ONE FAILURE
+# =============================================================================
+#
+# `.github/workflows/ci.yml`'s first `postgres-migration` step caught this branch
+# conflating them, against a real PostgreSQL with the migration genuinely
+# unapplied. The rule is NOT "any storage failure becomes a 503". It is:
+#
+#     503 ONLY WHEN THE STORE MIGHT BE HOLDING THE RECORD AND WE COULD NOT
+#     FIND OUT.
+#
+# * THE RELATION DOES NOT EXIST (SQLSTATE 42P01, the migration is unapplied). No
+#   durable row CAN exist. The filesystem is the whole truth, the miss is TRUE,
+#   and 404 is the honest answer — the one this application gave before durable
+#   storage existed, for the reason it gave it.
+# * THE STORE DID NOT ANSWER (connection refused, mid-failover, timeout, driver
+#   fault). Rows may exist and we could not look. 404 would be a lie; 503 is the
+#   honest answer, and it is the hosted defect the rest of this branch fixes.
+#
+# The four route tests below pin both branches for BOTH a miss and an id that has
+# no workspace directory. The classifier tests pin the mechanism. The two negative
+# controls pin that the distinction is LIVE rather than incidental.
+
+#: An id with no workspace directory. On an unmigrated pod no row can exist for
+#: it; on an unreachable pod one might.
+NO_DIRECTORY_ID = "01ABCDEFGHJKMNPQRSTVWXYZ06"
+UNKNOWN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+
+def test_an_absent_relation_answers_a_TRUE_404_for_an_unknown_id(pod_without_migration):
+    client, _conn = pod_without_migration
+    response = client.get(f"/api/experiments/{UNKNOWN_ID}")
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "experiment_not_found"
+
+
+def test_an_absent_relation_answers_a_TRUE_404_for_an_id_with_no_directory(
+    pod_without_migration, tmp_path
+):
+    """The id a durable row COULD have held — except that there is no table."""
+    client, _conn = pod_without_migration
+    response = client.get(f"/api/experiments/{NO_DIRECTORY_ID}")
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "experiment_not_found"
+    assert not (tmp_path / "ws" / NO_DIRECTORY_ID).exists(), "a failed hydrate wrote something"
+
+
+def test_an_unreachable_store_answers_503_for_an_unknown_id(pod_with_unreachable_store):
+    """THE SAME REQUEST, THE OTHER FAILURE, THE OPPOSITE ANSWER.
+
+    The honest price of the fix is here and it is real: a genuinely stale link
+    gets a 503 while the server is unreachable, where a 404 would have been
+    correct. It is the right trade because IN THIS STATE THE SERVER DOES NOT KNOW
+    which case it is in, and the wrong half of a guess is the half that tells a
+    scientist their work is gone. It is also self-correcting — the identical
+    request answers a true 404 the moment the store answers again, which is what
+    ``test_an_unknown_id_is_a_TRUE_404_again_as_soon_as_the_store_answers`` pins.
+    """
+    client, _conn = pod_with_unreachable_store
+    response = client.get(f"/api/experiments/{UNKNOWN_ID}")
+    assert response.status_code == 503, response.text
+    assert response.status_code != 500, "an outage is not a server fault"
+    assert response.json()["error"] == "experiment_storage_unavailable"
+
+
+def test_an_unreachable_store_answers_503_for_an_id_with_no_directory(
+    pod_with_unreachable_store,
+):
+    """THE MEASURED HOSTED DEFECT, in its smallest form.
+
+    A record created before a pod roll has a durable row and no directory. If the
+    read that goes looking cannot reach the store, the one thing it must not do is
+    announce that the record does not exist.
+    """
+    client, _conn = pod_with_unreachable_store
+    response = client.get(f"/api/experiments/{NO_DIRECTORY_ID}")
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "experiment_storage_unavailable"
+    assert response.json()["message"] == repo.STORAGE_READ_FAILED_MESSAGE
+
+
+def test_a_WRITE_against_an_absent_relation_is_still_a_loud_typed_503(
+    pod_without_migration,
+):
+    """THE ASYMMETRY, ASSERTED SO IT CANNOT BE "TIDIED" INTO SYMMETRY.
+
+    The classification is a READ-path judgement. For a write, "the table is not
+    there" is not a truthful nothing — it is work that cannot be kept, on a screen
+    that told the reader it would be. It stays :class:`StorageUnavailable`, stays
+    a typed 503, and stays CI assertion 4.
+    """
+    client, _conn = pod_without_migration
+    response = client.post("/api/experiments", json={"title": "CI unmigrated"})
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "experiment_storage_unavailable"
+    assert response.json()["message"] == repo.STORAGE_WRITE_FAILED_MESSAGE
+    # And at the seam, not only at the route: the store raises the OUTAGE type.
+    # The record is constructed directly rather than through `ws.create_experiment`,
+    # which would itself write through the store that is failing here.
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(_table_missing_connection()))
+    record = ws.Experiment(
+        id="01ABCDEFGHJKMNPQRSTVWXYZ07",
+        title="Doomed",
+        created_utc="2026-01-01T00:00:00Z",
+        source={},
+        draft={},
+        generation="g",
+    )
+    with pytest.raises(repo.StorageUnavailable) as raised:
+        store.persist(record)
+    assert not isinstance(raised.value, repo.StorageNotProvisioned)
+
+
+@pytest.mark.parametrize(
+    "exc, expected, why",
+    [
+        (UndefinedTable("relation does not exist"), True, "psycopg2 .pgcode"),
+        (_sqlstate_error("sqlstate", "42P01"), True, "psycopg 3 .sqlstate"),
+        (_diag_error("42P01"), True, "psycopg2 .diag.sqlstate"),
+        (_sqlstate_error("pgcode", "08006"), False, "connection_failure"),
+        (_sqlstate_error("pgcode", "57014"), False, "query_canceled / statement_timeout"),
+        (_sqlstate_error("pgcode", "42501"), False, "insufficient_privilege"),
+        (_sqlstate_error("pgcode", None), False, "socket died before the server spoke"),
+        (_sqlstate_error("pgcode", ""), False, "an empty code is not a code"),
+        (OSError("connection refused"), False, "no SQLSTATE anywhere"),
+        (TimeoutError("timed out"), False, "no SQLSTATE anywhere"),
+        (
+            Exception('relation "isaac_experiments" does not exist'),
+            False,
+            "THE MESSAGE TRAP: the text says it and the SQLSTATE does not",
+        ),
+    ],
+)
+def test_the_classifier_reads_the_SQLSTATE_and_fails_closed_on_everything_else(
+    exc, expected, why
+):
+    """THE MECHANISM, ONE ROW PER FAILURE THIS CODE CAN ACTUALLY MEET.
+
+    The last row is the important one. "relation ... does not exist" appears in
+    the message of a real 42P01 AND in the message of things that are not one; it
+    is localisable and it is a substring. Matching on it is how a driver upgrade
+    turns into a false 404, so the classifier must say ``False`` to a message that
+    says the right words with no code behind them.
+
+    Every ``False`` row is a FAIL-CLOSED row: the caller treats it as an outage and
+    answers 503. A wrong 503 costs a retry; a wrong 404 tells a scientist their
+    work does not exist.
+    """
+    assert repo.is_undefined_table(exc) is expected, why
+
+
+def test_the_installed_driver_agrees_that_42P01_is_the_undefined_table_code():
+    """THE ONE ASSERTION THAT IS NOT A SIMULATION — run wherever psycopg2 exists.
+
+    Everything else in this section simulates the driver's attribute contract,
+    because psycopg2 is absent from the developer venv this file is normally run
+    in (it is imported lazily throughout ``isaac_api`` for that reason). This test
+    asks the REAL driver whether ``42P01`` is the code this application is
+    matching, so CI — which installs the ``api`` extra — checks the constant
+    against the library rather than against a comment.
+
+    WHAT IT STILL DOES NOT PROVE: that a server-raised error carries ``pgcode``
+    populated. A manually constructed psycopg2 error has ``pgcode is None``, so
+    that half is only observable against a real PostgreSQL — which is the
+    ``postgres-migration`` job's, never this file's. See this file's docstring.
+    """
+    errors = pytest.importorskip("psycopg2.errors")
+    assert errors.lookup(repo.SQLSTATE_UNDEFINED_TABLE) is errors.UndefinedTable
+    assert hasattr(errors.UndefinedTable("simulated"), "pgcode")
+
+
+# --- the negative controls ----------------------------------------------------
+#
+# Two directions, because a single direction proves only that SOMETHING branches.
+# Each collapses the classifier back into one answer and asserts that the branch
+# it removed is the one that breaks — which is what makes the distinction LIVE
+# rather than incidentally satisfied by the fixtures.
+
+
+def test_NEGATIVE_CONTROL_collapsing_to_always_unavailable_breaks_the_404(
+    pod_without_migration, monkeypatch
+):
+    """DIRECTION 1: treat EVERY failure as unavailable — the state before this fix.
+
+    With the classifier forced to ``False``, the un-migrated pod answers 503 to a
+    miss. That is precisely the assertion ``.github/workflows/ci.yml``'s
+    ``Prove the app DEGRADES when the migration has not been applied yet`` failed
+    on, and this test asserts the 503 so that the 404 asserted by
+    ``test_an_absent_relation_answers_a_TRUE_404_for_an_unknown_id`` cannot be
+    passing for some reason other than the classifier.
+    """
+    monkeypatch.setattr(repo, "is_undefined_table", lambda exc: False)
+    client, _conn = pod_without_migration
+    response = client.get(f"/api/experiments/{UNKNOWN_ID}")
+    assert response.status_code == 503, (
+        "collapsed to always-unavailable and the un-migrated 404 SURVIVED — the "
+        "absent-relation branch is not what produces it"
+    )
+    assert response.json()["error"] == "experiment_storage_unavailable"
+
+
+def test_NEGATIVE_CONTROL_collapsing_to_always_absent_breaks_the_503(
+    pod_with_unreachable_store, monkeypatch
+):
+    """DIRECTION 2: treat EVERY failure as an absent relation — re-opening the defect.
+
+    With the classifier forced to ``True``, an unreachable store answers 404 to a
+    record it cannot rule out: the exact false claim measured on the deployed
+    application at ``v0.0.103``. Asserting the 404 here is what proves the 503
+    asserted by ``test_an_unreachable_store_answers_503_for_an_unknown_id`` is
+    produced by the outage branch and not by the fixture.
+    """
+    monkeypatch.setattr(repo, "is_undefined_table", lambda exc: True)
+    client, _conn = pod_with_unreachable_store
+    response = client.get(f"/api/experiments/{NO_DIRECTORY_ID}")
+    assert response.status_code == 404, (
+        "collapsed to always-absent and the outage 503 SURVIVED — the unavailable "
+        "branch is not what produces it"
+    )
+    assert response.json()["error"] == "experiment_not_found"
+
+
+def test_the_two_storage_errors_are_siblings_and_neither_inherits_the_other():
+    """A SUBCLASS WOULD SILENTLY UNDO ALL OF THE ABOVE.
+
+    ``app`` renders ``StorageUnavailable`` as a 503 and
+    ``workspace._hydrate_ordinary_scope_or_raise`` re-raises it. If
+    ``StorageNotProvisioned`` were a subclass, both would catch it, the un-migrated
+    404 would silently become a 503 again, and the classifier would still look
+    correct in isolation. Pinned so that "tidying the hierarchy" fails a test
+    rather than a CI job.
+    """
+    assert not issubclass(repo.StorageNotProvisioned, repo.StorageUnavailable)
+    assert not issubclass(repo.StorageUnavailable, repo.StorageNotProvisioned)
+
+
+def test_an_absent_relation_is_still_disclosed_on_health_as_not_durable(
+    pod_without_migration,
+):
+    """CLASSIFYING IT AS "NOT AN OUTAGE" MUST NOT CLASSIFY IT AS "FINE".
+
+    An unapplied migration is a real deployment problem: creating does not work.
+    The read is honest about the record and ``/api/health`` stays honest about the
+    deployment — ``durable: false``, ``state: unavailable``, ``backend: postgres``
+    (the app has not fallen back; it keeps trying, which is what lets it recover
+    when the operator applies the migration). This is CI assertion 5, and it is
+    what stops the UI promising durability on a pod where creating cannot work.
+    """
+    client, _conn = pod_without_migration
+    assert client.get(f"/api/experiments/{UNKNOWN_ID}").status_code == 404
+    storage = client.get("/api/health").json()["experiment_storage"]
+    assert storage["durable"] is False, storage
+    assert storage["state"] == repo.STORAGE_STATE_UNAVAILABLE, storage
+    assert storage["configured"] is True, storage
+    assert storage["backend"] == repo.BACKEND_POSTGRES, storage
 
 
 # =============================================================================
