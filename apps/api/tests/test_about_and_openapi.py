@@ -314,7 +314,11 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # 40 -> 45: the Run HTTP API. The Run domain model already existed in
     # `workspace` (one run exports one official record); these five operations
     # expose it — list, add, read, edit, and check one run.
-    assert checked == 45, f"expected 45 documented operations, found {checked}"
+    # 45 -> 47: the run OVERRIDE operations. The override machinery also already
+    # existed in `workspace` (`set_run_override` / `clear_run_override`, with
+    # `Override` recording what it displaced) and had NO caller outside its own
+    # tests; these two expose it — record one, and clear one.
+    assert checked == 47, f"expected 47 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -534,6 +538,16 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
         "200", "401", "404", "422",
     ],
     ("/api/experiments/{experiment_id}/runs/{run_id}", "patch"): [
+        "200", "400", "401", "404", "412", "422", "428",
+    ],
+    # The two override operations carry THE RUN's `If-Match` exactly as the run PATCH
+    # does, so they carry the same 400/412/428 set. Their `422` is the address gate,
+    # the payload-shape gate and the missing confirmation; on every one of them
+    # nothing is written.
+    ("/api/experiments/{experiment_id}/runs/{run_id}/overrides", "post"): [
+        "200", "400", "401", "404", "412", "422", "428",
+    ],
+    ("/api/experiments/{experiment_id}/runs/{run_id}/overrides/clear", "post"): [
         "200", "400", "401", "404", "412", "422", "428",
     ],
     ("/api/experiments/{experiment_id}/runs/{run_id}/check", "post"): [

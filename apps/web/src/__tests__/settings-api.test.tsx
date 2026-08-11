@@ -1063,8 +1063,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 45 operations, 80 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(45);
+  it('describes the contract it claims to: 47 operations, 88 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1398,21 +1398,62 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // whoever next changes this number. Nothing asserts uniqueness, which is why
     // the false count survived being written down.
     //
-    // 37,527 -> 37,757 (+230) from ONE operation description:
-    // `POST /api/experiments/{id}/edit` 490 -> 722 raw characters (+232 raw; this
-    // figure counts 230 of them, because `total` sums the split lead plus the joined
-    // sections and drops the paragraph separators). It now states that only an
+    // TWO BRANCHES MOVED THIS NUMBER FROM 37,527 AT THE SAME TIME, and the merged
+    // value is NEITHER of theirs. Both entries are kept below, because each records a
+    // real contract edit; what neither of them records is the tree this file now sits
+    // in. The merge entry after them is the only one that describes it, and it was
+    // MEASURED rather than obtained by adding the two deltas — see its note.
+    //
+    // (a) `origin/main`, via #106 — 37,527 -> 37,757 (+230) from ONE operation
+    // description: `POST /api/experiments/{id}/edit` 490 -> 722 raw characters (+232
+    // raw; this figure counts 230 of them, because `total` sums the split lead plus the
+    // joined sections and drops the paragraph separators). It now states that only an
     // already-answered field can be corrected there — an asset whose hash is still an
     // open question belongs to the answers operation — and that a recognised field
     // carrying an unstorable value is refused before any mutation. Both were already
-    // true of the served behaviour; neither was written down. Measured, not derived:
+    // true of the served behaviour; neither was written down. The post-lead paragraph
+    // count moved 79 -> 80 on that branch: the `/edit` description gained a third
+    // paragraph. Measured on that branch, not derived:
     // `npx vitest run src/__tests__/settings-api.test.tsx` reported
-    // `expected 37757 to be 37527` before this line was changed.
-    expect(total).toBe(37757);
-    // 79 -> 80: the `/edit` description gained a third paragraph, saying that only an
-    // already-answered field is correctable there. Measured in the same run as the
-    // total above (`expected 80 to be 79`).
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(80);
+    // `expected 37757 to be 37527` before its line was changed.
+    //
+    // (b) this branch, #109 — 37,527 -> 41,067 and 45 -> 47 operations: the backend now
+    // publishes the two run OVERRIDE operations — recording that one run holds its own
+    // value at one record-level address, and clearing it so the run inherits again. The
+    // override machinery already existed in the domain model and had no HTTP caller at
+    // all. The post-lead paragraph count moved 79 -> 87 on this branch: five paragraphs
+    // on the override operation (what is not copied down; what IS and is NOT recorded,
+    // since no actor is stored; the preconditions; the address and payload gates; the
+    // idempotence) and three on the clear (what inheriting again means; the
+    // preconditions; that clearing nothing is a success). Every one of the eight is
+    // post-lead and every one renders INLINE — the `collapsedOps: 0` assertion below is
+    // what proves that, and it was green on the first run rather than being made green.
+    //
+    // (c) THE MERGE — 41,297, 47 operations, 88 post-lead paragraphs. MEASURED, NOT
+    // ADDED. (a) and (b) are two measurements of the same array taken from two trees
+    // that each lacked the other's edit, so neither survives the merge and summing
+    // their deltas would be a guess that happens to look like arithmetic. The number
+    // was obtained by running the real rule over the real merged array — the same
+    // `splitPurpose` and the same `rest` this assertion uses — and cross-checked in two
+    // independent ways, exactly as every corrected total above was:
+    //
+    //   · from the SERVED document, not the copy: `create_app().openapi()` yields 47
+    //     documented operations, and the splitPurpose paragraph rule transcribed into
+    //     Python over those descriptions gives total 41,297 and 88 post-lead
+    //     paragraphs. The captured array is what this file reads, but the server is
+    //     what the screen renders, so the copy is not permitted to be the only witness.
+    //   · internal consistency: raw sum of `d.description.length` = 41,473; this figure
+    //     drops the 88 `\n\n` separators, and 41,473 - 176 = 41,297.
+    //
+    // The two branches touched DISJOINT operations — `/edit` on one side, the two new
+    // override operations on the other — which is why nothing had to be reconciled in
+    // `apiFixtures.ts` beyond keeping both. `apps/api/tests/test_contract_description_parity.py`
+    // is what proves the merged copy still matches the server in both directions, and
+    // the `contains each operation exactly once` test below is what proves the merge
+    // did not duplicate a row — the exact defect the "42 / 32,174 / 67" entry above
+    // records, which arose from resolving this same file by keeping both sides.
+    expect(total).toBe(41297);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(88);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);
