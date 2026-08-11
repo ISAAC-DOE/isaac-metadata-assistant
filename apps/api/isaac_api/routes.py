@@ -1702,12 +1702,28 @@ def demo_reset(
         "may be SHORT. It never asserts that the rows it did not return do not "
         "exist. That state is disclosed out of band: `GET /api/health` reports "
         "`experiment_storage.state: \"unavailable\"`, and a read of one such record "
-        "by id answers `503` rather than a `404` that would claim it is gone."
+        "by id answers `503` rather than a `404` that would claim it is gone.\n\n"
+        "**There is a SECOND degraded mode, and unlike the first it is NOT "
+        "disclosed anywhere.** The paragraph above describes the database being "
+        "unreadable. But restoring a working copy also WRITES one, and that write "
+        "can fail on its own — a full `emptyDir` is the realistic trigger — while "
+        "the database is answering perfectly. Hydration then raises part-way "
+        "through, the restore loop's `except Exception` swallows it, and every row "
+        "after the failing one is never restored. In that state `GET /api/health` "
+        "still reports `experiment_storage.state: \"durable\"`, this list is still "
+        "SHORT, and a read by id of an unrestored record answers **`404`, not "
+        "`503`** — a record that exists in the database reported as one that does "
+        "not exist. **Treat a short list as evidence about this read, never as an "
+        "inventory**, and do not rely on `/api/health` to tell you which mode you "
+        "are in. This is a known hole, named as one rather than papered over; "
+        "closing it is a behaviour change and is not in the scope of this "
+        "description."
     ),
     response_description=(
-        "One summary row per experiment this read could enumerate — every one of "
-        "them whenever durable storage is answering or is not configured. See the "
-        "description for the degraded case."
+        "One summary row per experiment this read could enumerate. **Not "
+        "necessarily every experiment that exists** — see the description for two "
+        "degraded modes, one of which is undisclosed and answers `404` for records "
+        "that are present in the database."
     ),
     responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
@@ -5430,7 +5446,13 @@ def post_audit(scope: TutorialScopeDep, experiment_id: ExperimentId):
     # narrower one. This route describes WHAT IS ON DISK; the export gate is where the
     # all-or-nothing aggregate belongs (contract §3 D4). For an experiment with no
     # runs the two are the same function of the same field, so the refusal below is
-    # byte-identical for every experiment this API can create.
+    # byte-identical for an experiment that has no runs — which is how every
+    # experiment starts, and how it stays until a run is added through
+    # `POST /api/experiments/{experiment_id}/runs`. (This comment used to end "for
+    # every experiment this API can create". That was true when written and stopped
+    # being true the same day, when #109 added that route. Corrected rather than
+    # deleted, because the same sentence had propagated to four other sites and only
+    # three were caught on the first pass.)
     if not exp.any_unit_exported():
         return {
             "records": [],

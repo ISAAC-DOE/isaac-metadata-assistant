@@ -1092,9 +1092,23 @@ rediscovered from scratch. All verified at `2209b8e`.
    true. A green test pinning a false claim is the failure mode this entry documents. All three
    artifacts moved together as this entry required (`routes.py` description,
    `apps/web/src/test/apiFixtures.ts`, the comment in
-   `apps/web/src/__tests__/fan-out-null-render.test.tsx`), plus two sibling comments in the same
-   export handler that asserted the fan-out branches were unreachable "(no route creates a Run)".
-   **(1), (3) and (4) below are NOT fixed** — they remain as recorded.
+   `apps/web/src/__tests__/fan-out-null-render.test.tsx`), plus **three** sibling comments in the
+   same export handler that asserted the fan-out branches were unreachable "(no route creates a
+   Run)" — two of which were justifications for NOT TESTING branches that are now reachable.
+
+   **THE FIRST PASS MARKED THIS FIXED WHILE THREE LIVE INSTANCES REMAINED, and that is recorded
+   here rather than quietly repaired, because it is the same failure this register exists to
+   catch.** An independent review found the sentence still live at `routes.py` (the
+   `any_unit_exported` refusal comment), `fan-out-null-render.test.tsx` — **the very file whose
+   other instance had just been fixed** — and `run-findings.test.tsx`. All three are now corrected.
+   An earlier revision of this bullet also said "two sibling comments" where there were three.
+
+   **Why a `rg` sweep missed them, since the next person will reach for one:** in all three the
+   phrase **wraps across a line break** ("…this API can\n currently create"), and a line-oriented
+   search cannot match it. A single-line regex returned a confident empty result. Search for a
+   distinctive *fragment* on one line, or match multiline, before concluding a phrase is gone.
+
+   **(1), (3) and (4) below are NOT fixed** — they remain as recorded, re-verified 2026-08-11.
 3. **`Run.version_token`'s docstring** (`workspace.py:925-932`) — *"No route consumes it yet."*
    **Stale.** Routes consume it at `routes.py:2423`, `:2426`, `:2511`, `:3015`, `:3231`, `:3323`, and
    `PATCH .../runs/{run_id}` takes the run's own `If-Match` (`:2364`).
