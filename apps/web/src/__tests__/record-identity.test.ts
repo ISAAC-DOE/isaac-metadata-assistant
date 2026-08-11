@@ -490,8 +490,20 @@ describe('resolveTarget — what this app can and cannot say', () => {
     },
   ];
 
+  /* The resolver now takes the whole list response, so a short list is distinguishable
+   * from a whole one. `incomplete: null` is the server's own "no claim" signal. */
+  const whole = { experiments: workspace, incomplete: null };
+  const short = {
+    experiments: workspace,
+    incomplete: {
+      reason: 'restore_failed' as const,
+      missing_count: null,
+      message: 'Some rows could not be restored.',
+    },
+  };
+
   it('names what a target points at when the workspace holds it', () => {
-    expect(resolveTarget(ID_B, workspace)).toEqual({
+    expect(resolveTarget(ID_B, whole)).toEqual({
       state: 'resolved',
       experimentId: 'exp-1',
       title: 'Exported baseline',
@@ -499,7 +511,31 @@ describe('resolveTarget — what this app can and cannot say', () => {
   });
 
   it('says only that it did not find it — never that the target is missing', () => {
-    expect(resolveTarget(ID_A, workspace)).toEqual({ state: 'not_in_workspace' });
+    expect(resolveTarget(ID_A, whole)).toEqual({
+      state: 'not_in_workspace',
+      listComplete: true,
+    });
+  });
+
+  /*
+   * A SHORT LIST MAKES "NOT FOUND" A WEAKER CLAIM, and the resolver must carry that.
+   * `GET /api/experiments` can return fewer rows than exist and discloses it in band;
+   * this resolver infers absence-from-here by failing to find an id, so collapsing the
+   * two cases would turn a disclosed short read back into a silent absence claim — on a
+   * consumer added after that disclosure landed.
+   */
+  it('reports a short list as a weaker not-found, not the same not-found', () => {
+    expect(resolveTarget(ID_A, short)).toEqual({
+      state: 'not_in_workspace',
+      listComplete: false,
+    });
+    // And a HIT is unaffected: an incomplete list that still contains the target
+    // resolves normally — the weaker claim is about absence, never about presence.
+    expect(resolveTarget(ID_B, short)).toEqual({
+      state: 'resolved',
+      experimentId: 'exp-1',
+      title: 'Exported baseline',
+    });
   });
 
   it('distinguishes an unreadable workspace list from an absent target', () => {
@@ -507,6 +543,9 @@ describe('resolveTarget — what this app can and cannot say', () => {
   });
 
   it('matches on record_id, not on the experiment id that holds it', () => {
-    expect(resolveTarget('exp-1', workspace)).toEqual({ state: 'not_in_workspace' });
+    expect(resolveTarget('exp-1', whole)).toEqual({
+      state: 'not_in_workspace',
+      listComplete: true,
+    });
   });
 });
