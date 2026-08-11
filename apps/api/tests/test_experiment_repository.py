@@ -3229,3 +3229,113 @@ def test_a_refused_write_rolls_back_run_versions_too(app, monkeypatch):
     )
     assert exp.runs[0].updated_utc == persisted_run_stamp
     assert exp.runs[0].id == run.id
+
+
+# --- the run OVERRIDE operations inherit the compare-and-swap ------------------
+#
+# WHY THESE TWO TESTS EXIST, stated precisely because the neighbouring prose is easy
+# to over-read. Both override operations persist through `_save_versioned` ->
+# `Experiment.save_versioned` -> `Experiment.save` -> `store.persist`, which is the
+# statement carrying the conflict predicate (`Q_UPSERT_EXPERIMENT`, this module) —
+# verified as a call chain rather than assumed. So a write the DATABASE refuses must
+# surface as the same 412 the header check produces, and not as a silent
+# last-writer-wins or a 500.
+#
+# WHAT IS AND IS NOT PROVEN HERE. This is the in-process fake driver described in this
+# file's own docstring: it proves the SHAPE — that a refusal reaches the client as a
+# 412 with the winner's version echoed, and that the loser's override never lands. It
+# does NOT prove the SQL is valid PostgreSQL, and it says nothing about how many
+# replicas this application runs on. Neither test claims either.
+
+
+def _run_etag_over_http(client, rid: str, run_id: str) -> str:
+    response = client.get(f"/api/experiments/{rid}/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    return response.headers["ETag"]
+
+
+def _override_envelope(value: str) -> dict:
+    return {
+        "value": value,
+        "status": "verified",
+        "evidence": [
+            {
+                "source_type": "user_confirmation",
+                "question": "q",
+                "answer": value,
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ],
+    }
+
+
+def test_an_override_refused_by_the_durable_predicate_is_a_412_and_records_nothing(
+    app, monkeypatch
+):
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Overrides"}).json()["id"]
+
+    exp = ws.load_experiment(rid)
+    run = exp.add_run(label="Cold")
+    exp.save_versioned()
+    tag = _run_etag_over_http(client, rid, run.id)
+
+    # The winner is built FROM the record being written, so it shares its id and its
+    # generation and differs only in `rev` — the one shape a real refusal has.
+    winner = dict(ws.load_experiment(rid).to_state(), rev=9)
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = winner
+
+    response = client.post(
+        f"/api/experiments/{rid}/runs/{run.id}/overrides",
+        json={
+            "confirmed_by_user": True,
+            "address": "field:sample.material.name",
+            "payload": _override_envelope("Copper(I) Oxide"),
+        },
+        headers={"If-Match": tag},
+    )
+    assert response.status_code == 412, response.text
+    body = response.json()
+    assert body["error"] == "stale_write"
+    assert body["current_rev"] == 9
+    assert response.headers["ETag"] == f'"{winner["generation"]}.9"'
+    # THE OVERRIDE NEVER LANDED. Read from the WINNER's document, which is what
+    # `_adopt_winner_locally` put on disk so a strict compare-and-swap cannot wedge.
+    reloaded = ws.load_experiment(rid)
+    assert [r.overrides for r in reloaded.runs] == [{}]
+
+
+def test_clearing_an_override_refused_by_the_durable_predicate_is_a_412(app, monkeypatch):
+    """And the override SURVIVES, which is the half that would be a data loss.
+
+    A clear reported as accepted while the database kept the override would leave a run
+    inheriting in the client's view and overriding in the store — two different answers
+    to what that run measures.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Overrides"}).json()["id"]
+
+    exp = ws.load_experiment(rid)
+    run = exp.add_run(label="Cold")
+    exp.set_run_override(
+        run, ws.field_address("sample.material.name"), _override_envelope("Copper(I) Oxide")
+    )
+    exp.save_versioned()
+    tag = _run_etag_over_http(client, rid, run.id)
+
+    winner = dict(ws.load_experiment(rid).to_state(), rev=9)
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = winner
+
+    response = client.post(
+        f"/api/experiments/{rid}/runs/{run.id}/overrides/clear",
+        json={"confirmed_by_user": True, "address": "field:sample.material.name"},
+        headers={"If-Match": tag},
+    )
+    assert response.status_code == 412, response.text
+    assert response.json()["error"] == "stale_write"
+    reloaded = ws.load_experiment(rid)
+    assert reloaded.runs[0].overrides[ws.field_address("sample.material.name")]

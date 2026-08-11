@@ -657,9 +657,24 @@ class Override:
 
     def to_state(self) -> dict:
         state: dict = {"payload": self.payload, "recorded_utc": self.recorded_utc}
-        # ABSENCE IS THE ENCODING. The key is omitted when the override displaced
-        # nothing, so "displaced no inherited value" and "displaced an inherited
-        # null" stay distinguishable on disk.
+        # ABSENCE IS THE ENCODING: the key is omitted when there is nothing to record.
+        #
+        # THE COMMENT HERE USED TO CLAIM MORE THAN THE CODE DOES, and the claim was
+        # false. It said this keeps "displaced no inherited value" and "displaced an
+        # inherited null" DISTINGUISHABLE on disk. It does not, and cannot: the
+        # condition is `is not None`, so an explicit displaced `None` omits the key
+        # exactly as nothing-displaced does, and `from_state` reads `None` back for both.
+        # MEASURED — with the record carrying `draft["tags"] = None`, an accepted
+        # `block:tags` override serialises to `{'payload': [...], 'recorded_utc': ...}`
+        # with `'displaced' in state` FALSE, byte-identical to the nothing-displaced
+        # case. This encoding cannot represent an explicit displaced null.
+        #
+        # THE BEHAVIOUR IS DELIBERATELY LEFT ALONE. It is not reachable over HTTP today
+        # (no operation can set a record-level value to `null`), the two cases mean the
+        # same thing to every current reader — "there was nothing here to bring back" —
+        # and changing an on-disk encoding is its own slice with its own compatibility
+        # question for overrides already stored. What is fixed is the comment, so a
+        # future slice does not build on a guarantee that was never here.
         if self.displaced is not None:
             state["displaced"] = self.displaced
         return state
@@ -2719,8 +2734,47 @@ class Experiment:
         Removal restores inheritance BY REFERENCE — the run goes back to carrying no
         value at that address at all, rather than to carrying a copy of whatever the
         experiment currently says.
+
+        MIRRORS :meth:`set_run_override`'S REFUSALS, and it did not used to. The body
+        was ``run.overrides.pop(address, None) is not None`` and nothing else, so it
+        would accept ``"garbage"``, ``"field:context.temperature_K"`` or ``"block:qc"``
+        without complaint — reporting ``False`` for each, which reads as "there was no
+        override there" when the honest answer is "that address could never hold one".
+        That was tolerable while the only callers were this module's own tests; it is
+        not tolerable now that a route drives it with client input, because a client
+        that misspells an address would be told its clear succeeded in the sense that
+        nothing was refused. So a non-experiment-level address raises
+        :class:`NotOverridable` and a malformed one raises ``ValueError`` from
+        :func:`parse_address`, exactly as setting one does.
+
+        THE ``bool`` RETURN AND ITS IDEMPOTENCE ARE DELIBERATELY UNCHANGED. Clearing a
+        VALID address that holds no override is ``False``, not an error — that is what
+        lets the HTTP operation be repeatable: a client that clears twice, or that
+        retries after a dropped response, gets a successful no-op rather than a refusal
+        it would have to interpret. Only "you named something that cannot be an
+        override" is an error.
+
+        A STORED KEY IS REMOVABLE WHATEVER IT SAYS, and the check order is what makes
+        that true. A guard on a REMOVAL must not be able to make stored state
+        unremovable, so a key this run actually holds is popped before the address is
+        classified at all. :meth:`set_run_override` cannot create such a key, so the
+        only ways one exists are a document written outside this module and a future
+        reclassification that moves an address off ``EXPERIMENT_LEVEL_FIELD_PATHS``
+        while runs still carry overrides at it. Both are real, and in both cases this
+        method is the repair path; refusing would leave an override visible in every
+        run view with nothing able to delete it. It leaks nothing a reader does not
+        already have — the run view publishes every override address it holds — and it
+        cannot be used to write, only to remove what is already there.
         """
-        return run.overrides.pop(address, None) is not None
+        if address in run.overrides:
+            del run.overrides[address]
+            return True
+        if address_level(address) != LEVEL_EXPERIMENT:
+            raise NotOverridable(
+                f"{address!r} is not an experiment-level address, so it cannot hold "
+                "an override to clear"
+            )
+        return False
 
     def _persisted_run_state(self) -> dict[str, tuple[str, int]]:
         """``{run_id: (authoritative signature, rev)}`` of the CURRENTLY on-disk runs.

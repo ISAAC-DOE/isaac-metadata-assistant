@@ -2018,6 +2018,1431 @@ def test_reading_one_run_returns_only_the_run(client, experiment_id):
     assert set(body) == {"run"}
 
 
+# =============================================================================
+# 11c. OVERRIDES OVER HTTP
+# =============================================================================
+#
+# The domain model was already complete, deep-copy-safe and heavily tested; the READ
+# path and the export fan-out were already reachable. The one gap was that no HTTP
+# operation could CREATE or CLEAR an override — measured: `set_run_override` and
+# `clear_run_override` had zero non-test callers in the repository.
+#
+# So the tests below are addressed at what EXPOSING them can get wrong, not at the
+# model. `test_run_domain_model.py` pins the model and `test_export_fan_out.py` pins
+# what an override does at export; what neither could pin is whether a client driving
+# this through HTTP gets the same guarantees — the same preconditions, the same
+# refusals, the same idempotence, and no write on any refusal.
+#
+# ONE PROPERTY IS ASSERTED IN ALMOST EVERY REFUSAL TEST HERE: nothing was written. It
+# is read from the STORE, never from the response, because every defect this file
+# records was a case where the response and the document disagreed.
+
+
+def _set_override(
+    client, experiment_id: str, run_id: str, address: str, payload, *, if_match=..., body=None
+):
+    headers = {}
+    tag = _run_etag(client, experiment_id, run_id) if if_match is ... else if_match
+    if tag is not None:
+        headers["If-Match"] = tag
+    request = (
+        {"confirmed_by_user": True, "address": address, "payload": payload}
+        if body is None
+        else body
+    )
+    return client.post(
+        f"/api/experiments/{experiment_id}/runs/{run_id}/overrides",
+        json=request,
+        headers=headers,
+    )
+
+
+def _clear_override(client, experiment_id: str, run_id: str, address: str, *, if_match=..., body=None):
+    headers = {}
+    tag = _run_etag(client, experiment_id, run_id) if if_match is ... else if_match
+    if tag is not None:
+        headers["If-Match"] = tag
+    request = {"confirmed_by_user": True, "address": address} if body is None else body
+    return client.post(
+        f"/api/experiments/{experiment_id}/runs/{run_id}/overrides/clear",
+        json=request,
+        headers=headers,
+    )
+
+
+def _change_record_field(client, experiment_id: str, path: str, value):
+    """Change a RECORD-level field, THROUGH THE STORE, and here is why it is not HTTP.
+
+    MEASURED AT THIS COMMIT: no HTTP operation can change a record-level field by its
+    dotted path. `POST .../answers` fills open blocking questions, and `POST .../edit`
+    routes its `answers` through `_answers_to_apply_shape`, which recognises asset URIs
+    and the four structured keys (`series`, `descriptor`, `descriptor_label`, `edge`)
+    and DISCARDS everything else — `{"sample.material.name": …}` comes back 422
+    `unrecognized_field`, "No editable field was recognized in the request."
+
+    That is a real product gap and it is recorded here rather than worked around
+    silently: the inheritance tests below need the record-level value to MOVE, so they
+    move it the only way anything in this repository can, and they remain honest about
+    the fact that a user cannot yet do this over the API. What they still establish is
+    the property that matters — a run's resolution follows the record — because the
+    resolution is computed on read by the code the HTTP read path calls.
+    """
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    envelope = copy.deepcopy(exp.draft["fields"][path])
+    envelope["value"] = value
+    exp.draft["fields"][path] = envelope
+    exp.save_versioned()
+
+
+def _resolved(client, experiment_id: str, run_id: str, address: str) -> dict:
+    response = client.get(f"/api/experiments/{experiment_id}/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    return response.json()["run"]["inherited"][address]
+
+
+#: A record-level field the fixture genuinely carries, and its address.
+_MATERIAL = "sample.material.name"
+_MATERIAL_ADDRESS = f"field:{_MATERIAL}"
+
+
+def _envelope(value):
+    return field_value(value, status="verified", evidence=[user_confirmation("q", "a", "Z")])
+
+
+# --- 11c.1 where the admissible set comes from ---------------------------------
+
+
+def test_the_overridable_addresses_are_derived_and_not_a_hand_written_list():
+    """The mirror of `test_the_run_writable_paths_are_derived_from_the_extractor_field_map`.
+
+    `EXPERIMENT_OVERRIDABLE_ADDRESSES` is derived at import time from the
+    deterministic extractor's own `FIELD_MAP`, filtered by `workspace.field_level`,
+    plus the block tuples filtered by `workspace.block_level`. Both field gates are
+    load-bearing for the same reason they are on the edit route: `field_level` is a
+    PREFIX test and would admit `sample.material.typo` on its own.
+    """
+    from isaac_records.extract.structured import FIELD_MAP
+
+    expected = {
+        ws.field_address(path)
+        for path, _coercer in FIELD_MAP.values()
+        if ws.field_level(path) == ws.LEVEL_EXPERIMENT
+    } | {
+        ws.block_address(key)
+        for key in (*ws.EXPERIMENT_LEVEL_BLOCKS, *ws.RUN_LEVEL_BLOCKS)
+        if ws.block_level(key) == ws.LEVEL_EXPERIMENT
+    }
+    assert routes.EXPERIMENT_OVERRIDABLE_ADDRESSES == expected
+    # The measured set at this commit, stated literally as well as derived: a
+    # derivation that silently emptied itself would satisfy the comparison above and
+    # would refuse every override, which is a green suite and a dead feature.
+    assert expected == {
+        "field:sample.composition.CuO2_mass_fraction",
+        "field:sample.composition.sucrose_mass_fraction",
+        "field:sample.geometry.pellet_diameter_mm",
+        "field:sample.material.formula",
+        "field:sample.material.name",
+        "field:sample.material.provenance",
+        "field:sample.sample_form",
+        "field:system.facility.beamline",
+        "field:system.facility.endstation",
+        "field:system.facility.facility_name",
+        "field:system.facility.organization",
+        "field:system.facility.site",
+        "field:system.technique",
+        "block:attribution",
+        "block:tags",
+    }
+
+
+def test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set(
+    client, experiment_id
+):
+    """MEASURED IN BOTH DIRECTIONS, because the operation's prose has to be true.
+
+    It is tempting to document this operation as "any address the run's `inherited` map
+    reports", and that sentence is false in both directions on the committed seed:
+
+    * `field:system.domain` IS reported as inherited and is NOT overridable. It is in
+      `EXPERIMENT_LEVEL_FIELD_PATHS`, so `resolve_inherited` includes it, but it is not
+      in the deterministic extractor's `FIELD_MAP`, so the membership gate refuses it.
+      That is the two-gates rule behaving as designed and failing closed — a record's
+      domain is not a per-run quantity — and it is disclosed in the operation's
+      description rather than papered over.
+    * `block:tags` IS overridable and is NOT in the map, because the seed carries no
+      tags and the resolution key set only covers addresses the record's draft holds.
+
+    Both directions are asserted against the real HTTP response, so the description
+    cannot quietly become an over-claim.
+    """
+    run = _create_run(client, experiment_id)
+    reported = set(
+        client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").json()["run"][
+            "inherited"
+        ]
+    )
+    assert sorted(reported - routes.EXPERIMENT_OVERRIDABLE_ADDRESSES) == ["field:system.domain"]
+    assert sorted(routes.EXPERIMENT_OVERRIDABLE_ADDRESSES - reported) == ["block:tags"]
+    # And the refusal for the reported-but-not-overridable one is the ordinary typed
+    # 422, not a special case.
+    response = _set_override(
+        client, experiment_id, run["id"], "field:system.domain", _envelope("x")
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "not_overridable"
+
+
+def test_no_overridable_address_is_also_run_writable():
+    """The two derived sets are disjoint, and that is the whole point of the split.
+
+    An address in both would be writable in two places, which is the second home for
+    one value that contract §2 D2 exists to prevent.
+    """
+    field_paths = {
+        ws.parse_address(a)[1]
+        for a in routes.EXPERIMENT_OVERRIDABLE_ADDRESSES
+        if a.startswith("field:")
+    }
+    assert field_paths & routes.RUN_WRITABLE_FIELD_PATHS == set()
+
+
+def test_the_overridable_field_paths_include_the_schemas_OPEN_namespaces():
+    """A DISCLOSURE, not a wish: this set deliberately cannot be schema-node-checked.
+
+    `test_every_run_writable_path_resolves_to_a_typed_node_in_the_official_schema`
+    walks every RUN-writable path through the schema's `properties` and asserts a
+    declared `type`. The same walk CANNOT be applied here, and this test says so
+    explicitly rather than leaving the asymmetry to look like an oversight:
+    `sample.composition.*`, `sample.geometry.*` and `system.configuration.*` are the
+    schema's open extension namespaces and declare no `properties` at all, so the walk
+    terminates. Three overridable paths live in two of them.
+
+    That is exactly why FIELD_MAP membership is the gate rather than a schema walk.
+    """
+    schema = json.loads(
+        (ws.REPO_ROOT / "schema" / "isaac_record_v1.json").read_text(encoding="utf-8")
+    )
+
+    def resolves(path: str) -> bool:
+        node = schema
+        for segment in path.split("."):
+            properties = node.get("properties")
+            if not isinstance(properties, dict) or segment not in properties:
+                return False
+            node = properties[segment]
+        return "type" in node
+
+    paths = {
+        ws.parse_address(a)[1]
+        for a in routes.EXPERIMENT_OVERRIDABLE_ADDRESSES
+        if a.startswith("field:")
+    }
+    unresolvable = sorted(p for p in paths if not resolves(p))
+    assert unresolvable == [
+        "sample.composition.CuO2_mass_fraction",
+        "sample.composition.sucrose_mass_fraction",
+        "sample.geometry.pellet_diameter_mm",
+    ]
+    # And every OTHER overridable path does resolve, so the exemption is bounded to
+    # the open namespaces rather than being a blanket excuse.
+    assert all(resolves(p) for p in paths - set(unresolvable))
+
+
+# --- 11c.2 preconditions: the RUN's validator, and nothing written on refusal ---
+
+
+def test_setting_an_override_without_if_match_is_428_and_records_nothing(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    before = _stored_run(client, experiment_id, run["id"])
+    response = _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("x"), if_match=None
+    )
+    assert response.status_code == 428, response.text
+    body = response.json()
+    assert body["error"] == "precondition_required"
+    assert body["run_id"] == run["id"] and body["experiment_id"] == experiment_id
+    after = _stored_run(client, experiment_id, run["id"])
+    assert after.overrides == {} == before.overrides
+    assert after.rev == before.rev
+
+
+def test_setting_an_override_with_the_records_etag_is_412_not_accepted(
+    client, experiment_id
+):
+    """The RUN's validator, not the record's — the same distinction `patch_run` draws."""
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client,
+        experiment_id,
+        run["id"],
+        _MATERIAL_ADDRESS,
+        _envelope("x"),
+        if_match=_experiment_etag(client, experiment_id),
+    )
+    assert response.status_code == 412, response.text
+    body = response.json()
+    assert body["error"] == "stale_write"
+    assert (body["experiment_id"], body["run_id"]) == (experiment_id, run["id"])
+    # The run's CURRENT validator is echoed, so a client refreshes in one hop.
+    assert response.headers["ETag"] == _run_etag(client, experiment_id, run["id"])
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+def test_setting_an_override_with_a_stale_run_etag_is_412_and_the_stored_state_holds(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    stale = _run_etag(client, experiment_id, run["id"])
+    first = _set_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("first"))
+    assert first.status_code == 200, first.text
+    recorded = first.json()["override"]["recorded_utc"]
+
+    second = _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("second"), if_match=stale
+    )
+    assert second.status_code == 412, second.text
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.overrides[_MATERIAL_ADDRESS].payload["value"] == "first"
+    assert stored.overrides[_MATERIAL_ADDRESS].recorded_utc == recorded
+
+
+@pytest.mark.parametrize("bad", ['W/"1.1"', "1.1", '"1.1', ",", "  "])
+def test_a_malformed_if_match_on_an_override_is_400_naming_both_ids(
+    client, experiment_id, bad
+):
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("x"), if_match=bad
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"] == "malformed_if_match"
+    assert (body["experiment_id"], body["run_id"]) == (experiment_id, run["id"])
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+def test_clearing_an_override_without_if_match_is_428_and_removes_nothing(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("kept")
+    ).status_code == 200
+
+    response = _clear_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, if_match=None
+    )
+    assert response.status_code == 428, response.text
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.overrides[_MATERIAL_ADDRESS].payload["value"] == "kept"
+
+
+def test_clearing_with_a_stale_run_etag_is_412_and_the_override_survives(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    stale = _run_etag(client, experiment_id, run["id"])
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("kept")
+    ).status_code == 200
+
+    response = _clear_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, if_match=stale
+    )
+    assert response.status_code == 412, response.text
+    assert _stored_run(client, experiment_id, run["id"]).overrides[_MATERIAL_ADDRESS]
+
+
+# --- 11c.3 an override is an explicit confirmed act ----------------------------
+
+
+@pytest.mark.parametrize("confirmation", [None, False, "true", 1, {}])
+def test_setting_an_override_requires_confirmed_by_user(
+    client, experiment_id, confirmation
+):
+    """`true` and nothing else. `"true"`, `1` and `{}` are truthy and are refused."""
+    run = _create_run(client, experiment_id)
+    body = {"address": _MATERIAL_ADDRESS, "payload": _envelope("x")}
+    if confirmation is not None:
+        body["confirmed_by_user"] = confirmation
+    response = _set_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS, None, body=body)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "confirmation_required"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+@pytest.mark.parametrize("confirmation", [None, False, "true"])
+def test_clearing_an_override_requires_confirmed_by_user(
+    client, experiment_id, confirmation
+):
+    run = _create_run(client, experiment_id)
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("kept")
+    ).status_code == 200
+    body = {"address": _MATERIAL_ADDRESS}
+    if confirmation is not None:
+        body["confirmed_by_user"] = confirmation
+
+    response = _clear_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS, body=body)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "confirmation_required"
+    assert _stored_run(client, experiment_id, run["id"]).overrides[_MATERIAL_ADDRESS]
+
+
+# --- 11c.4 the two 404s stay distinct -----------------------------------------
+
+
+@pytest.mark.parametrize("suffix", ["", "/clear"])
+def test_an_override_on_an_unknown_experiment_is_a_404_that_names_the_experiment(
+    client, suffix
+):
+    response = client.post(
+        f"/api/experiments/NOT-A-RECORD/runs/NOT-A-RUN/overrides{suffix}",
+        json={"confirmed_by_user": True, "address": _MATERIAL_ADDRESS, "payload": _envelope("x")},
+        headers={"If-Match": '"1.1"'},
+    )
+    assert response.status_code == 404, response.text
+    assert response.json() == {"error": "experiment_not_found", "id": "NOT-A-RECORD"}
+
+
+@pytest.mark.parametrize("suffix", ["", "/clear"])
+def test_an_override_on_an_unknown_run_is_a_404_that_names_the_run_not_the_experiment(
+    client, experiment_id, suffix
+):
+    """The two 404 bodies must not collapse — `_run_not_found` says why: one means the
+    workspace has no such record, the other means the record was read successfully and
+    holds no run under that id. Collapsing them sends a client looking in the wrong
+    place."""
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs/NOT-A-RUN/overrides{suffix}",
+        json={"confirmed_by_user": True, "address": _MATERIAL_ADDRESS, "payload": _envelope("x")},
+        headers={"If-Match": '"1.1"'},
+    )
+    assert response.status_code == 404, response.text
+    assert response.json() == {
+        "error": "run_not_found",
+        "experiment_id": experiment_id,
+        "id": "NOT-A-RUN",
+    }
+
+
+# --- 11c.5 the address gate: BOTH gates, and a typed 422 rather than a 500 ------
+#
+# `field_level` is a segment-aware PREFIX test. Applied alone it answers
+# `LEVEL_EXPERIMENT` for `sample.material.typo`, `sample.` and `sample` as readily as
+# for `sample.material.name`, which is precisely how `context.typo_K` reached disk on
+# the edit route and wedged a run's export. Membership in the derived set is the second
+# gate and this section is what holds it.
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        # 1. RUN-LEVEL — an ordinary edit on the run, never an override.
+        "field:context.temperature_K",
+        "field:timestamps.acquired_start_utc",
+        "block:qc",
+        "block:series",
+        "block:assets",
+        # 2. DELIBERATELY UNCLASSIFIED — not guessed into a level.
+        "field:system.configuration.n_scans",
+        "field:system.configuration.proposal_id",
+        "field:timestamps.created_utc",
+        "block:meta",
+        "block:pending",
+        "block:implicit",
+        "block:links",
+        "block:block_evidence",
+        # 3. EXPERIMENT-LEVEL BY PREFIX BUT NOT A REAL FIELD PATH. Every one of these
+        #    passes `field_level` and is refused only by the membership gate.
+        "field:sample.material.typo",
+        "field:sample.",
+        "field:sample",
+        "field:sample.material",
+        "field:system.facility",
+        "field:sample.material.name.evil",
+        "field:sample.<script>alert(1)</script>",
+        # 4. MALFORMED — `parse_address` would raise; this must be a 422, never a 500.
+        "garbage",
+        "sample.material.name",
+        "field:",
+        ":tags",
+        "field",
+        "",
+        "FIELD:sample.material.name",  # the namespace is not case-normalised
+        "block:Tags",  # nor is the block key
+    ],
+)
+def test_an_address_that_cannot_hold_an_override_is_a_typed_422_and_writes_nothing(
+    client, experiment_id, address
+):
+    run = _create_run(client, experiment_id)
+    before = _stored_run(client, experiment_id, run["id"])
+    response = _set_override(client, experiment_id, run["id"], address, _envelope("x"))
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "not_overridable"
+    assert body["address"] == address, "the refusal must name what was sent"
+    after = _stored_run(client, experiment_id, run["id"])
+    assert after.overrides == {} == before.overrides
+    assert after.rev == before.rev
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["field:context.temperature_K", "block:qc", "field:sample.material.typo", "garbage", ""],
+)
+def test_clearing_an_address_that_cannot_hold_an_override_is_the_same_typed_422(
+    client, experiment_id, address
+):
+    """NOT a 200 reporting `cleared: false`.
+
+    That distinction is the whole reason `clear_run_override` gained a level guard
+    before this route existed: reporting "there was no override there" about an address
+    that could never hold one tells a client its misspelling succeeded.
+    """
+    run = _create_run(client, experiment_id)
+    response = _clear_override(client, experiment_id, run["id"], address)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "not_overridable"
+    assert response.json()["address"] == address
+
+
+@pytest.mark.parametrize("address", [None, 5, [], {}, True])
+def test_a_non_string_address_is_refused_rather_than_coerced(
+    client, experiment_id, address
+):
+    run = _create_run(client, experiment_id)
+    body = {"confirmed_by_user": True, "address": address, "payload": _envelope("x")}
+    response = _set_override(client, experiment_id, run["id"], "", None, body=body)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "not_overridable"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+def test_the_not_overridable_message_does_not_repeat_the_retracted_inherited_map_claim(
+    client, experiment_id
+):
+    """THE CORRECTION HAS TO REACH THE BODY A CLIENT ACTUALLY READS.
+
+    The claim "name an address the run's `inherited` map reports" is false in both
+    directions (``test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set``
+    measures both). It was corrected in the operation's OpenAPI description — and
+    SURVIVED in this refusal message for a further review round, which is the worse
+    place for it: a client hitting a 422 reads the message, not the spec.
+
+    So the qualification is pinned where it is acted on. Asserted against both real
+    counterexamples by ADDRESS rather than by prose match, so a reworded message that
+    still tells the truth passes and one that quietly re-collapses the two sets does not.
+    """
+    run = _create_run(client, experiment_id)
+    message = _set_override(
+        client, experiment_id, run["id"], "field:system.domain", _envelope("x")
+    ).json()["message"]
+    # Neither counterexample may be presented as the rule.
+    assert "neither necessary nor sufficient" in message
+    assert "block:tags" in message and "field:system.domain" in message
+    # And the spelling — which IS what the map is good for — is still where a client is
+    # pointed, so the correction did not remove the actual guidance.
+    assert "`inherited` map spells its keys" in message
+
+
+# --- 11c.6 the payload gate ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "a bare string",
+        5,
+        None,
+        [],
+        True,
+        {},  # no status at all
+        {"value": "x"},  # still no status
+        {"value": "x", "status": "confirmed"},  # not one of the five legal statuses
+        {"value": "x", "status": "VERIFIED"},  # nor is a case variant
+        {"value": None, "status": "verified"},  # a final status with no value
+        {"value": "x", "status": "missing"},  # 'missing' with a value present
+    ],
+)
+def test_a_field_override_that_is_not_an_acceptable_envelope_is_422_and_writes_nothing(
+    client, experiment_id, payload
+):
+    """The findings are the deterministic draft validator's, not a second copy of them.
+
+    This route runs `validate_draft` over a probe draft carrying only this field and
+    keeps the findings filed against it, so the five legal statuses and the
+    value/status consistency rules cannot drift from the truth plane's version.
+    """
+    run = _create_run(client, experiment_id)
+    response = _set_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS, payload)
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "invalid_envelope"
+    assert body["address"] == _MATERIAL_ADDRESS
+    assert body["findings"], "the refusal must carry the validator's own words"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+def test_a_verified_override_carrying_no_evidence_is_refused_not_stored(
+    client, experiment_id
+):
+    """THE NO-GUESSING RULE, enforced at the boundary that writes.
+
+    `CLAUDE.md` §5: every non-null finalised draft field must have evidence or user
+    confirmation. A `verified` value with an empty evidence list is a scientific claim
+    with nothing behind it, and the refusal is the draft validator's own — this route
+    holds a reference to that rule, not a copy of it.
+    """
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client,
+        experiment_id,
+        run["id"],
+        _MATERIAL_ADDRESS,
+        {"value": "Copper(I) Oxide", "status": "verified", "evidence": []},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_envelope"
+    assert any("no observed evidence" in f for f in response.json()["findings"])
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+def test_a_needs_confirmation_envelope_with_no_evidence_is_a_legitimate_override(
+    client, experiment_id
+):
+    """The control that stops the test above from proving too much.
+
+    `needs_confirmation` is a real draft state that carries no evidence BY DESIGN, and
+    refusing it would make this operation unable to express "this run's value differs
+    and I cannot yet say what it is" — which is the honest state the no-guessing rules
+    exist to keep available.
+    """
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client,
+        experiment_id,
+        run["id"],
+        _MATERIAL_ADDRESS,
+        {"value": None, "status": "needs_confirmation", "evidence": []},
+    )
+    assert response.status_code == 200, response.text
+    assert _resolved(client, experiment_id, run["id"], _MATERIAL_ADDRESS)["state"] == "overridden"
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_a_payload_json_cannot_represent_is_refused_before_anything_is_written(
+    client, experiment_id, literal
+):
+    """`json.loads` ACCEPTS these; `json.dumps(allow_nan=False)` refuses them.
+
+    The same ingress that committed a bare `NaN` to disk through the run edit route,
+    500ed its own response and then wedged every read of that record permanently. A new
+    write path gets the same guard, and it is checked BEFORE the write.
+    """
+    run = _create_run(client, experiment_id)
+    tag = _run_etag(client, experiment_id, run["id"])
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}/overrides",
+        content=(
+            '{"confirmed_by_user": true, "address": "' + _MATERIAL_ADDRESS + '", '
+            '"payload": {"value": ' + literal + ', "status": "verified", "evidence": []}}'
+        ),
+        headers={"If-Match": tag, "Content-Type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrepresentable_value"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+    # And the run is still readable, which is the half of that defect that hurt most.
+    assert client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
+
+
+def test_a_payload_nested_deeper_than_the_limit_is_refused_before_the_write(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    deep = _nested_wide(routes._MAX_VALUE_DEPTH + 8, breadth=1)
+    response = _set_override(
+        client,
+        experiment_id,
+        run["id"],
+        _MATERIAL_ADDRESS,
+        {"value": deep, "status": "verified", "evidence": [user_confirmation("q", "a", "Z")]},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrepresentable_value"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+def test_a_payload_too_large_to_store_is_refused_even_at_legal_depth(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client,
+        experiment_id,
+        run["id"],
+        _MATERIAL_ADDRESS,
+        {
+            "value": "x" * (routes._MAX_VALUE_BYTES + 1),
+            "status": "verified",
+            "evidence": [user_confirmation("q", "a", "Z")],
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrepresentable_value"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+@pytest.mark.parametrize(
+    ("address", "payload"),
+    [
+        ("block:tags", {"not": "an array"}),
+        ("block:tags", "campaign-a"),
+        ("block:tags", 5),
+        ("block:tags", None),
+        ("block:tags", True),
+        ("block:attribution", ["not", "an", "object"]),
+        ("block:attribution", "contributors"),
+        ("block:attribution", 5),
+        ("block:attribution", None),
+        ("block:attribution", True),
+    ],
+)
+def test_a_block_override_of_the_wrong_declared_type_is_refused(
+    client, experiment_id, address, payload
+):
+    """NOT cosmetic, and NOT deferred to the export gate.
+
+    A LIST stored at `attribution` reaches a real crash: the draft validator guards its
+    server-stamped-identity check with an `isinstance` and then reads
+    `attribution.get("contributors")` unguarded, so the deterministic core raises
+    `AttributeError` — a 500 out of the truth plane — the moment anything checks that
+    run. The expected type is read from the vendored official schema rather than
+    transcribed, so it follows a schema refresh instead of disagreeing with it.
+    """
+    run = _create_run(client, experiment_id)
+    response = _set_override(client, experiment_id, run["id"], address, payload)
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "invalid_block_payload"
+    assert body["address"] == address
+    assert body["expected_type"] in ("object", "array")
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+def test_the_wrong_typed_block_override_would_otherwise_500_the_run_check(
+    client, experiment_id
+):
+    """The crash the gate above prevents, demonstrated through the STORE.
+
+    Written deliberately as a characterisation of the domain rather than of the route:
+    the route refuses this shape, so the only way to show what it is protecting is to
+    force the document past it. If a later change makes the deterministic core tolerant
+    of a wrong-typed block, this test fails and the gate's justification can be
+    re-examined instead of being taken on trust.
+    """
+    from isaac_records.draft_validator import validate_draft
+
+    run = _create_run(client, experiment_id)
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    stored = exp.get_run(run["id"])
+    stored.overrides["block:attribution"] = ws.Override(
+        payload=["not", "an", "object"], recorded_utc="2026-01-01T00:00:00Z"
+    )
+    exp.save_versioned()
+
+    # Composing is fine — it is the deterministic CHECK over the composition that
+    # raises, which is why the shape has to be refused at the write rather than caught
+    # by a verdict.
+    composed = exp.resolved_run_draft(stored)
+    assert composed["attribution"] == ["not", "an", "object"]
+    with pytest.raises(AttributeError):
+        validate_draft(composed)
+
+
+# --- 11c.6b the payload gate MAY NOT CRASH INSTEAD OF REFUSING --------------------
+#
+# FOUND BY REVIEW, AFTER THE GATE ABOVE WAS ALREADY GREEN. This operation is the first
+# HTTP caller in the repository to hand a CLIENT-AUTHORED field envelope or block to
+# `validate_draft` — `POST /edit` refuses an `attribution` answer with 422
+# `unrecognized_field` and `POST /api/validate/record` runs the OFFICIAL validator
+# instead — so the structural assumptions the deterministic validator makes about those
+# shapes had never been reachable from a request body.
+#
+# Measured with `raise_server_exceptions=False`, which is what a REAL CLIENT SEES rather
+# than what the harness re-raises: 14 of the 15 admissible addresses returned HTTP 500
+# out of the truth plane for a wrong-shaped payload (only `block:tags` survived, having
+# no crash path). That contradicted the operation's own documented contract ("a payload
+# of the wrong shape … is rejected with `422` and writes nothing"), the OpenAPI response
+# set transcribed in `test_about_and_openapi.py`, and the type gate's own stated reason
+# for existing.
+#
+# WHAT IT WAS NOT, kept here because the distinction decides how alarming it is: in every
+# case NOTHING WAS STORED, the workspace stayed byte-identical and the record stayed
+# READABLE. That is unlike the `NaN` and depth defects gate 1 exists for, which committed
+# first and then permanently 500ed every later read of the record.
+#
+# The tests below are the reviewer's reproducers. Every one asserts the 422, the empty
+# override map read from the STORE, and that the run is still readable.
+
+
+@pytest.fixture()
+def unraising(tmp_path, monkeypatch):
+    """``(client, experiment_id)`` where a server exception RENDERS as 500.
+
+    The package's ordinary `client` re-raises it, which is the right default — an
+    unexpected exception should fail a test loudly. But it makes "what status code does a
+    client get?" unaskable, and that is the exact question this section exists to answer:
+    the defect below was invisible to a suite that only ever saw the exception.
+    """
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    from isaac_api.app import create_app
+
+    client = tutorial_client(create_app(), raise_server_exceptions=False)
+    experiment_draft, _run_draft = _split_full_draft()
+    exp = client_ws(client).create_experiment(
+        "Override payload-crash fixture", {"kind": "synthetic"}, experiment_draft
+    )
+    return client, exp.id
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # `_check_envelope` does `[e for e in (env.get("evidence") or []) if …]`
+        # (`draft_validator.py:94`): a TRUTHY NON-ITERABLE gets past the `or []` and
+        # raises `TypeError: 'int' object is not iterable`.
+        {"evidence": 7},
+        {"status": "missing", "evidence": 1},
+        {"value": "x", "status": "verified", "evidence": True},
+        {"value": "x", "status": "verified", "evidence": 1.5},
+    ],
+)
+def test_a_field_envelope_whose_evidence_is_not_a_list_is_422_and_never_a_500(
+    unraising, payload
+):
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    response = _set_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS, payload)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_envelope"
+    assert response.json()["findings"] == ["must be a field envelope"]
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+    assert client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "contributors",
+    [
+        # `name, role = c.get("name"), c.get("role")` (`draft_validator.py:286`) on a
+        # non-mapping — `AttributeError`. A string and a dict are both ITERABLE, so they
+        # reach the loop and yield characters and keys respectively.
+        "abc",
+        {"a": 1},
+        [1, 2],
+        ["not-a-dict"],
+        [None],
+        [[{"name": "n", "role": "r"}]],
+        # And the `TypeError` twin one level up: `enumerate(attribution.get(
+        # "contributors") or [])` over a truthy non-iterable. Included because it is the
+        # reason the caught set needs BOTH members on the block path too, not just
+        # `AttributeError`.
+        7,
+    ],
+)
+def test_a_block_override_whose_contributors_are_the_wrong_shape_is_422_not_a_500(
+    unraising, contributors
+):
+    """The block TYPE gate passes every one of these — the block IS an object.
+
+    So this is not a duplicate of `test_a_block_override_of_the_wrong_declared_type_is_
+    refused`: that gate reads the schema-declared TOP-LEVEL type and says nothing about
+    the contents, and the crash is one level down.
+    """
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client, experiment_id, run["id"], "block:attribution", {"contributors": contributors}
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "invalid_block_payload"
+    assert body["address"] == "block:attribution"
+    assert body["expected_type"] == "object"
+    # No invented `findings`: the probe reached no verdict, so there are no validator
+    # words to quote, and every `findings` list this route returns is the validator's own.
+    assert "findings" not in body
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+    assert client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
+
+
+def test_no_admissible_address_answers_a_crash_shaped_payload_with_a_500(unraising):
+    """THE SWEEP, over the derived set rather than over a hand-picked address.
+
+    The reproducers above pin the two branches. This pins the PROPERTY, across every
+    member of `EXPERIMENT_OVERRIDABLE_ADDRESSES` — so an address added to that set later
+    without a matching guard fails here rather than shipping a 500.
+
+    Re-measured with both guards removed: 14 of the 15 answered 500, the sole survivor
+    being `block:tags`, which has no crash path (the type gate refuses a non-list, and
+    the validator's tags branch performs no check). With the guards in place: 0 of 15.
+    """
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    crashing = []
+    for address in sorted(routes.EXPERIMENT_OVERRIDABLE_ADDRESSES):
+        payload = (
+            {"evidence": 7}
+            if address.startswith(f"{ws.ADDRESS_FIELD}:")
+            else {"contributors": "abc"}
+            if address == "block:attribution"
+            else ["a-tag"]  # `block:tags` has no crash-shaped payload; a valid one
+        )
+        if _set_override(client, experiment_id, run["id"], address, payload).status_code == 500:
+            crashing.append(address)
+    assert crashing == []
+
+
+def test_a_crash_shaped_payload_leaves_the_run_byte_identical(unraising):
+    """The property the 422 alone does not establish: the refusal wrote NOTHING.
+
+    Read from the store, and across BOTH crash shapes in one run, because the two land in
+    different branches of the payload gate.
+    """
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    before = _stored_run(client, experiment_id, run["id"])
+    frozen = (before.rev, before.version_token(), json.dumps(before.to_state(), sort_keys=True))
+    for address, payload in (
+        (_MATERIAL_ADDRESS, {"evidence": 7}),
+        ("block:attribution", {"contributors": ["not-a-dict"]}),
+    ):
+        assert _set_override(
+            client, experiment_id, run["id"], address, payload
+        ).status_code == 422
+    after = _stored_run(client, experiment_id, run["id"])
+    assert (after.rev, after.version_token(), json.dumps(after.to_state(), sort_keys=True)) == frozen
+
+
+def test_the_probe_guard_does_not_swallow_a_refusal_the_validator_did_reach(unraising):
+    """The control on the guard: it must not turn a real finding into a pass.
+
+    A wrong-shaped `contributors` and an authored `attribution.uploaded_by` in ONE
+    payload. The crash site is AFTER the identity refusal is filed, so a raise discards a
+    report that CARRIED that refusal — the guard therefore has to fail closed rather than
+    degrade to "no findings, store it".
+    """
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client,
+        experiment_id,
+        run["id"],
+        "block:attribution",
+        {"uploaded_by": "attacker@example.invalid", "contributors": ["not-a-dict"]},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_block_payload"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+@pytest.mark.parametrize(
+    "contributors", [[{}], [{"name": ["a"], "role": "b"}]]
+)
+def test_a_contributor_shape_finding_is_ADMITTED_and_the_posture_is_the_disclosed_one(
+    client, experiment_id, contributors
+):
+    """WHAT THE PAYLOAD GATE DELIBERATELY DOES NOT REFUSE, pinned rather than described.
+
+    The block probe is filtered to `UPLOADED_BY_PATH`, so NO
+    `attribution.contributors[…]` finding is applied — shape or evidence. These two are
+    not crashes: the validator reaches a real finding about them and this route drops it.
+
+    That is inside the disclosed posture, and this test asserts all three parts of it so
+    the disclosure cannot decay into "it is stored and nothing notices": stored with 200,
+    VISIBLE as a failing verdict on the run check, and REMOVABLE by the clear operation.
+    """
+    run = _create_run(client, experiment_id)
+    assert _set_override(
+        client, experiment_id, run["id"], "block:attribution", {"contributors": contributors}
+    ).status_code == 200
+    assert _stored_run(client, experiment_id, run["id"]).overrides[
+        "block:attribution"
+    ].payload == {"contributors": contributors}
+
+    check = client.post(f"/api/experiments/{experiment_id}/runs/{run['id']}/check", json={})
+    assert check.status_code == 200, check.text
+    draft_report = check.json()["draft"]
+    assert draft_report["ok"] is False
+    assert [e["path"] for e in draft_report["errors"]] == ["attribution.contributors[0]"]
+
+    cleared = _clear_override(client, experiment_id, run["id"], "block:attribution")
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["cleared"] is True
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+def test_a_block_override_naming_the_server_stamped_identity_is_refused(
+    client, experiment_id
+):
+    """`attribution` is overridable; `attribution.uploaded_by` is nobody's to author.
+
+    The official schema declares it stamped from an authenticated identity at
+    ingestion, and this application has no verified identity to stamp it with. Letting
+    an override carry it would launder a client string into a field readers are told is
+    tamper-proof, and it can name a real person. The refusal is the draft validator's
+    own finding, reached through the same probe.
+    """
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client,
+        experiment_id,
+        run["id"],
+        "block:attribution",
+        {"uploaded_by": "attacker@example.invalid", "contributors": []},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_block_payload"
+    assert response.json()["findings"], "the validator's own words, not ours"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+    # Key presence, not truthiness: a null and an empty string assert authorship too.
+    for value in (None, ""):
+        assert _set_override(
+            client, experiment_id, run["id"], "block:attribution", {"uploaded_by": value}
+        ).status_code == 422
+
+
+# --- 11c.7 what a successful override records ----------------------------------
+
+
+def test_an_accepted_override_is_reported_overridden_and_records_what_it_displaced(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    inherited_before = _resolved(client, experiment_id, run["id"], _MATERIAL_ADDRESS)
+    assert inherited_before["state"] == "inherited"
+
+    response = _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("Copper(I) Oxide")
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert set(body) == {"run", "override"}
+    assert body["override"]["address"] == _MATERIAL_ADDRESS
+    assert body["override"]["recorded_utc"]
+
+    entry = body["run"]["inherited"][_MATERIAL_ADDRESS]
+    assert entry["state"] == "overridden"
+    assert entry["payload"]["value"] == "Copper(I) Oxide"
+    # What it displaced is the record's value AT CAPTURE, and the record still says it.
+    assert entry["displaced_payload"] == inherited_before["payload"]
+    assert entry["inherited_payload"] == inherited_before["payload"]
+    # The override lives in the override map, NOT in the run's own field map.
+    assert _MATERIAL not in body["run"]["fields"]
+    # The response's ETag is the run's NEW validator, and it is usable immediately.
+    assert response.headers["ETag"] == _run_etag(client, experiment_id, run["id"])
+
+
+def test_an_override_at_an_address_the_record_carries_nothing_at_displaces_nothing(
+    client, experiment_id
+):
+    """`displaced_payload` stays `null`, so "displaced nothing" and "displaced an
+    explicit null" stay distinguishable — absence is the encoding on disk.
+
+    The record is made to carry a NULL envelope at the address first, which is how the
+    `absent` state is actually reached: `resolve_inherited`'s key set is the union of
+    the addresses the record's draft HOLDS and the run's override addresses, so an
+    address the draft omits entirely does not appear at all. That is the same reachable
+    shape `test_every_inherited_entry_reports_state_and_never_provenance` uses.
+    """
+    address = "field:sample.geometry.pellet_diameter_mm"
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    exp.draft["fields"]["sample.geometry.pellet_diameter_mm"] = None
+    exp.save_versioned()
+
+    run = _create_run(client, experiment_id)
+    assert _resolved(client, experiment_id, run["id"], address)["state"] == "absent"
+
+    response = _set_override(client, experiment_id, run["id"], address, _envelope(9.5))
+    assert response.status_code == 200, response.text
+    entry = response.json()["run"]["inherited"][address]
+    assert entry["state"] == "overridden"
+    assert entry["displaced_payload"] is None
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert "displaced" not in stored.overrides[address].to_state()
+
+
+def test_re_recording_an_equal_override_does_not_restamp_or_advance_the_run(
+    client, experiment_id
+):
+    """IDEMPOTENCE, END TO END OVER HTTP.
+
+    The domain method already has the property — an equal payload returns the existing
+    override without restamping `recorded_utc`. What this pins is that the ROUTE does
+    not defeat it, which is exactly what happened on the edit route when a fresh
+    timestamp was stamped into an evidence entry on every write. Asserted three ways:
+    the reported time, the run's revision, and the stored document byte for byte.
+    """
+    run = _create_run(client, experiment_id)
+    payload = _envelope("Copper(I) Oxide")
+    first = _set_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS, payload)
+    assert first.status_code == 200, first.text
+    recorded = first.json()["override"]["recorded_utc"]
+    version = first.json()["run"]["version"]
+    document = json.dumps(_stored_run(client, experiment_id, run["id"]).to_state(), sort_keys=True)
+
+    for _ in range(3):
+        again = _set_override(
+            client, experiment_id, run["id"], _MATERIAL_ADDRESS, copy.deepcopy(payload)
+        )
+        assert again.status_code == 200, again.text
+        assert again.json()["override"]["recorded_utc"] == recorded
+        assert again.json()["run"]["version"] == version
+    assert json.dumps(
+        _stored_run(client, experiment_id, run["id"]).to_state(), sort_keys=True
+    ) == document
+
+
+def test_a_DIFFERENT_payload_at_the_same_address_does_advance_the_run(
+    client, experiment_id
+):
+    """The control for the idempotence test above: it must not pass by never writing."""
+    run = _create_run(client, experiment_id)
+    record_value = _resolved(client, experiment_id, run["id"], _MATERIAL_ADDRESS)["payload"][
+        "value"
+    ]
+    first = _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("First override")
+    )
+    assert first.status_code == 200, first.text
+    second = _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("Second override")
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["run"]["rev"] > first.json()["run"]["rev"]
+    entry = second.json()["run"]["inherited"][_MATERIAL_ADDRESS]
+    assert entry["payload"]["value"] == "Second override"
+    # `displaced` is HISTORY and is not refreshed by a second override: it still names
+    # what the RECORD carried when the FIRST one was recorded, not the first override.
+    assert entry["displaced_payload"]["value"] == record_value
+
+
+def test_a_block_override_of_tags_is_accepted_and_reported(client, experiment_id):
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client, experiment_id, run["id"], "block:tags", ["campaign-a", "rerun"]
+    )
+    assert response.status_code == 200, response.text
+    entry = response.json()["run"]["inherited"]["block:tags"]
+    assert entry["state"] == "overridden"
+    assert entry["payload"] == ["campaign-a", "rerun"]
+
+
+# --- 11c.8 the requirements the brief names, each on its own -------------------
+
+
+def test_changing_a_record_value_updates_a_run_that_still_inherits_it(
+    client, experiment_id
+):
+    """Inheritance by reference, observed over HTTP with no fan-out write."""
+    run = _create_run(client, experiment_id)
+    before = _resolved(client, experiment_id, run["id"], _MATERIAL_ADDRESS)
+    version_before = _stored_run(client, experiment_id, run["id"]).version_token()
+
+    _change_record_field(client, experiment_id, _MATERIAL, "Cuprous Oxide")
+
+    after = _resolved(client, experiment_id, run["id"], _MATERIAL_ADDRESS)
+    assert after["state"] == "inherited"
+    assert after["payload"]["value"] == "Cuprous Oxide"
+    assert before["payload"]["value"] != "Cuprous Oxide"
+    # NOTHING WAS COPIED DOWN. The run's own field map is untouched and the run's own
+    # version did not move, because no run document changed.
+    assert _MATERIAL not in client.get(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}"
+    ).json()["run"]["fields"]
+    assert _stored_run(client, experiment_id, run["id"]).version_token() == version_before
+
+
+def test_an_explicit_run_override_is_not_changed_by_a_later_record_edit(
+    client, experiment_id
+):
+    """The other half of D2, and the reason `displaced` exists.
+
+    After the record moves, the run reports THREE different payloads at one address:
+    what it holds, what the record says now, and what the override displaced. All three
+    are asserted, because an implementation that refreshed `displaced` would satisfy the
+    first two.
+    """
+    run = _create_run(client, experiment_id)
+    original = _resolved(client, experiment_id, run["id"], _MATERIAL_ADDRESS)["payload"]
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("Copper(I) Oxide")
+    ).status_code == 200
+
+    _change_record_field(client, experiment_id, _MATERIAL, "Cuprous Oxide")
+
+    entry = _resolved(client, experiment_id, run["id"], _MATERIAL_ADDRESS)
+    assert entry["state"] == "overridden"
+    assert entry["payload"]["value"] == "Copper(I) Oxide"  # the run's own, unchanged
+    assert entry["inherited_payload"]["value"] == "Cuprous Oxide"  # the record, live
+    assert entry["displaced_payload"] == original  # history, never refreshed
+
+
+def test_clearing_an_override_returns_the_run_to_inheritance(client, experiment_id):
+    """And to inheritance BY REFERENCE — not to a copy of the current record value.
+
+    Proved by moving the record AFTER the clear: a run that had been left holding a
+    copy would not follow.
+    """
+    run = _create_run(client, experiment_id)
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("Copper(I) Oxide")
+    ).status_code == 200
+
+    response = _clear_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS)
+    assert response.status_code == 200, response.text
+    assert response.json()["cleared"] is True
+    entry = response.json()["run"]["inherited"][_MATERIAL_ADDRESS]
+    assert entry["state"] == "inherited"
+    assert entry["displaced_payload"] is None
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+    _change_record_field(client, experiment_id, _MATERIAL, "Cuprous Oxide")
+    assert _resolved(client, experiment_id, run["id"], _MATERIAL_ADDRESS)["payload"][
+        "value"
+    ] == "Cuprous Oxide"
+
+
+def test_clearing_an_address_with_no_override_is_a_successful_no_op(
+    client, experiment_id
+):
+    """`cleared: false`, nothing written, and the run's revision does not advance.
+
+    This is what makes the operation repeatable: a client that clears twice, or retries
+    after a dropped response, must not have to interpret a refusal.
+    """
+    run = _create_run(client, experiment_id)
+    before = _stored_run(client, experiment_id, run["id"])
+    document = json.dumps(before.to_state(), sort_keys=True)
+
+    first = _clear_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS)
+    assert first.status_code == 200, first.text
+    assert first.json()["cleared"] is False
+    after = _stored_run(client, experiment_id, run["id"])
+    assert after.rev == before.rev
+    assert json.dumps(after.to_state(), sort_keys=True) == document
+
+    # And a second clear of an address that DID hold one is also `false`, not an error.
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("x")
+    ).status_code == 200
+    assert _clear_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS).json()[
+        "cleared"
+    ] is True
+    assert _clear_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS).json()[
+        "cleared"
+    ] is False
+
+
+def test_an_override_on_one_run_leaves_its_sibling_byte_identical(client, experiment_id):
+    """Two runs of one record are isolated. Asserted on the sibling's whole document."""
+    first = _create_run(client, experiment_id, "Run A")
+    second = _create_run(client, experiment_id, "Run B")
+    sibling_before = json.dumps(
+        _stored_run(client, experiment_id, second["id"]).to_state(), sort_keys=True
+    )
+
+    assert _set_override(
+        client, experiment_id, first["id"], _MATERIAL_ADDRESS, _envelope("Copper(I) Oxide")
+    ).status_code == 200
+
+    assert json.dumps(
+        _stored_run(client, experiment_id, second["id"]).to_state(), sort_keys=True
+    ) == sibling_before
+    assert _resolved(client, experiment_id, first["id"], _MATERIAL_ADDRESS)["state"] == "overridden"
+    assert _resolved(client, experiment_id, second["id"], _MATERIAL_ADDRESS)["state"] == "inherited"
+    # And clearing run A's override leaves run B alone too.
+    assert _clear_override(
+        client, experiment_id, first["id"], _MATERIAL_ADDRESS
+    ).status_code == 200
+    assert json.dumps(
+        _stored_run(client, experiment_id, second["id"]).to_state(), sort_keys=True
+    ) == sibling_before
+
+
+def test_a_run_override_cannot_mutate_the_records_shared_state(client, experiment_id):
+    """The RECORD's draft is byte-identical across setting and clearing an override.
+
+    The payloads involved are the record's own envelopes — `displaced` is captured from
+    `exp.draft` — so an implementation that stored a live reference and later wrote
+    through it would move the record's draft. `Override` deep-copies at capture; this
+    asserts the property from outside, over HTTP.
+    """
+    run = _create_run(client, experiment_id)
+    exp_before = json.dumps(
+        client_ws(client).load_experiment(experiment_id).draft, sort_keys=True
+    )
+
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("Copper(I) Oxide")
+    ).status_code == 200
+    assert _set_override(
+        client, experiment_id, run["id"], "block:tags", ["rerun"]
+    ).status_code == 200
+    assert json.dumps(
+        client_ws(client).load_experiment(experiment_id).draft, sort_keys=True
+    ) == exp_before
+
+    assert _clear_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS
+    ).status_code == 200
+    assert json.dumps(
+        client_ws(client).load_experiment(experiment_id).draft, sort_keys=True
+    ) == exp_before
+
+
+def test_a_run_patch_leaves_the_records_draft_byte_identical(client, experiment_id):
+    """The same property for the run EDIT route, asserted DIRECTLY.
+
+    It was only ever covered by implication — a run PATCH cannot address a
+    record-level path, so the record's draft "obviously" cannot move. That is an
+    argument, not a measurement, and it would stop holding the day the route learns to
+    write anything shared.
+    """
+    run = _create_run(client, experiment_id)
+    before = json.dumps(client_ws(client).load_experiment(experiment_id).draft, sort_keys=True)
+
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {
+            "confirmed_by_user": True,
+            "label": "Renamed",
+            "fields": {"context.temperature_K": 298.0, "context.environment": "vacuum"},
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["run"]["fields"]["context.temperature_K"]["value"] == 298.0
+
+    assert json.dumps(
+        client_ws(client).load_experiment(experiment_id).draft, sort_keys=True
+    ) == before
+
+
+def test_an_inherited_value_still_exports_into_the_runs_own_record(client, experiment_id):
+    """The end of the line: what a run EXPORTS carries the value it inherits.
+
+    The override is recorded over HTTP and the export is driven over HTTP; the two runs
+    are SEEDED through the store with the committed export-ready run-level half, exactly
+    as `test_export_fan_out.py` seeds its fixture, because a run created by
+    `POST .../runs` starts deliberately empty and an empty run has no series, qc, assets
+    or descriptors — so the export would be refused for a reason that has nothing to do
+    with inheritance. The claim is read off the WRITTEN official artifacts, not off a
+    composed draft: the export gate is what decides whether an override is real.
+    """
+    _experiment_draft, run_draft = _split_full_draft()
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    exp.add_run(label="Inheriting", draft=copy.deepcopy(run_draft))
+    exp.add_run(label="Overriding", draft=copy.deepcopy(run_draft))
+    exp.save_versioned()
+    overriding = {"id": next(r.id for r in exp.sorted_runs() if r.label == "Overriding")}
+
+    assert _set_override(
+        client, experiment_id, overriding["id"], _MATERIAL_ADDRESS, _envelope("Copper(I) Oxide")
+    ).status_code == 200
+
+    response = client.post(
+        f"/api/experiments/{experiment_id}/export",
+        json={"confirmed_by_user": True},
+        headers={"If-Match": _experiment_etag(client, experiment_id)},
+    )
+    assert response.status_code == 200, response.text
+
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    written = {}
+    for run in exp.sorted_runs():
+        assert run.record_id, f"{run.label} exported no record"
+        path = exp.records_dir / f"{run.record_id}.json"
+        assert path.is_file(), path
+        written[run.label] = json.loads(path.read_text(encoding="utf-8"))
+
+    record_value = exp.draft["fields"][_MATERIAL]["value"]
+    assert written["Inheriting"]["sample"]["material"]["name"] == record_value
+    assert written["Overriding"]["sample"]["material"]["name"] == "Copper(I) Oxide"
+    # Two records, two ids, one record-level value entered once.
+    assert len({r["record_id"] for r in written.values()}) == 2
+
+
+# --- 11c.9 the operations write nothing they were not asked to ------------------
+
+
+def test_no_override_operation_mints_a_record_id(client, experiment_id):
+    run = _create_run(client, experiment_id)
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("x")
+    ).status_code == 200
+    assert _clear_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS
+    ).status_code == 200
+
+    exp = client_ws(client).load_experiment(experiment_id)
+    assert exp.record_id is None
+    assert [r.record_id for r in exp.runs] == [None]
+
+
+def test_an_override_does_not_disturb_the_records_own_version(client, experiment_id):
+    """A run's override bumps THE RUN. The record's `generation.rev` moves only because
+    runs live inside its document, and the record's DRAFT does not move at all — so the
+    record's own content is not being rewritten by a run-level act."""
+    run = _create_run(client, experiment_id)
+    draft_before = json.dumps(
+        client_ws(client).load_experiment(experiment_id).draft, sort_keys=True
+    )
+    run_rev_before = _stored_run(client, experiment_id, run["id"]).rev
+
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("x")
+    ).status_code == 200
+
+    exp = client_ws(client).load_experiment(experiment_id)
+    assert exp.get_run(run["id"]).rev == run_rev_before + 1
+    assert json.dumps(exp.draft, sort_keys=True) == draft_before
+
+
+def test_the_override_operations_do_not_weaken_tutorial_isolation(client, experiment_id):
+    """A worked-example session's runs stay unpersistable after an override is recorded.
+
+    These operations add no storage path of their own — an override lives inside its
+    run, which lives inside its record's state document — so the guard that refuses to
+    write a session record to the database is the guard that refuses its overrides.
+    Asserted rather than assumed, because it is the invariant a new write path is most
+    likely to break silently.
+    """
+    from isaac_api.experiment_repository import NotPersistable, PostgresOrdinaryStore
+
+    run = _create_run(client, experiment_id)
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("x")
+    ).status_code == 200
+
+    exp = client_ws(client).load_experiment(experiment_id)
+    assert exp.session_id == client.tutorial_session_id
+    assert exp.runs[0].overrides, "the fixture must actually hold an override"
+    with pytest.raises(NotPersistable):
+        PostgresOrdinaryStore.refuse_if_not_persistable(exp)
+
+
 # --- 12. INVARIANT 7 + tutorial isolation -------------------------------------
 
 
