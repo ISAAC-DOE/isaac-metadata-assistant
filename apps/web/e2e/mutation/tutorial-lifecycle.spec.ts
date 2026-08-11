@@ -117,10 +117,25 @@ test.describe('worked-example session lifecycle', () => {
       .toBe(0);
     const mineAfter = await lifecycle.readInSession(mine, SEED.fresh);
     expect(mineAfter.pendingCount, 'the reset must reopen the questions it discarded').toBe(5);
-    const mineList = await lifecycle.listInSession(mine);
-    expect(mineList.ids.slice().sort(), 'all five examples must be back').toEqual(
-      Object.values(SEED).slice().sort()
-    );
+    /*
+     * POLL THE LIST, exactly as the two later assertions in this file already poll.
+     *
+     * The `.poll` above waits for ONE record — `SEED.fresh` — to reach `rev: 0`. The
+     * reset re-materialises FIVE. So "the record I polled for is back" does not imply
+     * "all five are back", and a single immediate read here can legitimately observe an
+     * intermediate state. Measured: this assertion failed in CI with FOUR ids while the
+     * `pendingCount` assertion one line above passed, which is precisely that window.
+     *
+     * THE ASSERTION IS UNCHANGED — same set equality, same source — it is only given
+     * the same bounded time to settle that `:180` and `:218` already give theirs. It is
+     * NOT weakened into "at least five" or "eventually contains": a sixth id, a wrong
+     * id, or a missing id still fails, and it still fails if the set never settles.
+     */
+    await expect
+      .poll(async () => (await lifecycle.listInSession(mine)).ids.slice().sort(), {
+        timeout: 20_000,
+      })
+      .toEqual(Object.values(SEED).slice().sort());
 
     // THE ISOLATION ASSERTION: the other session is exactly as it was.
     const otherAfter = await lifecycle.readInSession(other, SEED.fresh);

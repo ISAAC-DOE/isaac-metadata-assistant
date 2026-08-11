@@ -688,9 +688,13 @@ describe('Export Readiness · the section renders on the real screen', () => {
   });
 
   /**
-   * THE REGRESSION GUARD. A zero-run record — every record this API can currently
-   * create — must render exactly what it rendered before this slice. `validate`
-   * carries no `runs` key at all there, so the gate is the absence of the prop.
+   * THE REGRESSION GUARD. A zero-run record — how every record starts, and how it
+   * stays until a run is added through `POST /api/experiments/{experiment_id}/runs`
+   * — must render exactly what it rendered before this slice. `validate` carries no
+   * `runs` key at all there, so the gate is the absence of the prop.
+   *
+   * (This read "every record this API can currently create". True when written,
+   * false since #109 added the run-creation route.)
    */
   it('REGRESSION — a zero-run experiment renders exactly as before', async () => {
     stubFetchRoutes(exportReadyRoutes('demo'));
