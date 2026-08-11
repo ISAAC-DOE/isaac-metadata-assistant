@@ -19,13 +19,20 @@ import type { ApiValidateResult, ApiWarningsResponse } from '../lib/types';
  * reader saw one run's schema errors with nothing saying which run they belonged
  * to, and no route to the other four.
  *
- * THE THREE PROPERTIES THIS FILE PINS. Each has a NEGATIVE CONTROL that was
- * EXECUTED — the source was broken, the suite run, the named assertion observed
- * failing, and the source restored. The observed messages are quoted verbatim.
+ * THE PROPERTIES THIS FILE PINS. Each has a NEGATIVE CONTROL that was EXECUTED —
+ * the source was broken, this file run, the named assertion observed failing, and
+ * the source restored (byte-compared against a backup). The observed messages are
+ * quoted verbatim.
  *
- *  NC1 · key a run's row on `ok` alone (replace `runFindingState`'s body with
- *        `run.ok ? 'pass' : 'fail'`, deleting the `isValidationUnavailable`
- *        branch). 5 of 30 tests failed. The named one:
+ * THE DENOMINATOR IS 39, MEASURED. An earlier revision of this header reported
+ * "of 30" against a file that held 31, and put NC3 at 17 when it was 18 — counts
+ * carried forward rather than read off a run. Every figure below was read from
+ * the run that produced it: `Tests  N failed | M passed (39)`.
+ *
+ *  NC1 · key a run's row on `ok` alone (replace `runFindingState`'s non-pass
+ *        branch with a bare `return 'fail'`, deleting BOTH the `unavailable`
+ *        flag read and the `isValidationUnavailable` fallback).
+ *        9 of 39 failed. The named one:
  *        "an unavailable run is NOT rendered as a schema failure" ->
  *        `Unable to find an element with the text: No verdict`; the run rendered
  *        `Failed` instead. And the tally: `expected '2 runs: 1 passed · 1 did not
@@ -34,19 +41,52 @@ import type { ApiValidateResult, ApiWarningsResponse } from '../lib/types';
  *        verdict at all. This is the exact defect `unavailable: true` was added
  *        to `_validate_unit` to fix (routes.py, the `_validate_unit` comment).
  *
- *  NC2 · fold the advisory count into the state (`'fail'` when a passing run
- *        carries warnings). 2 of 30 failed:
+ *  NC2 · fold the advisory count into the state (`'fail'` when a run at that
+ *        position carries warnings). 2 of 39 failed:
  *        "an advisory warning never turns a PASS into a FAIL" ->
  *        `Unable to find an element with the text: Passed`, and
  *        "the tally counts runs by verdict state" ->
  *        `expected '1 run: 1 did not pass.' to be '1 run: 1 passed.'`.
  *        Advisory is `advisory: true, gating: false`, hardcoded server-side.
  *
+ *        SCOPE, corrected: the tally assertion is a "second, independent"
+ *        assertion only for a break located in `states`, which is what this
+ *        control breaks. An independent reviewer broke the ROW state alone,
+ *        leaving `states` intact — 1 of 31 failed and the tally test did not
+ *        catch it. The two assertions share `states`; they are independent of
+ *        each other's ELEMENT (the word vs. the count line), not of its source.
+ *
  *  NC3 · render only the flat `validate.errors` (early `return null` from
- *        `RunFindings`, which is exactly what shipped). 17 of 30 failed,
+ *        `RunFindings`, which is exactly what shipped). 24 of 39 failed,
  *        including the named one:
  *        "each run's errors are addressed to THAT run, verbatim" ->
  *        `no run group rendered for "Run 2"`.
+ *
+ * THREE FURTHER CONTROLS, for the three defects an independent review found in
+ * the first version of this component. Each was executed the same way.
+ *
+ *  NC-F1 · restore the subject line unguarded, keyed on `dry_run` alone (the
+ *        shipped defect). 1 of 39 failed — exactly the assertion added for it:
+ *        "a no-verdict run claims NO document was checked — neither branch" ->
+ *        `expected <p class="run-finding-subject"></p> to be null`. The old code
+ *        rendered "Checked the written official record." over the
+ *        materialised-UNREADABLE branch, whose `dry_run: false` means "no dry run
+ *        happened", not "the written record was checked".
+ *
+ *  NC-F2 · read the fixed English sentence instead of the machine-readable flag
+ *        (drop `run.unavailable === true ||`). 2 of 39 failed:
+ *        "the `unavailable` FLAG decides, even when the sentence differs" ->
+ *        `expected 'fail' to be 'unavailable'`, and
+ *        "a caption that introduces findings is not written when there are none"
+ *        -> `expected 'FailedRun 3 · 600 K…' to contain 'this is not a schema
+ *        failure'`. Latent against today's backend only because it emits the
+ *        exact literal on both branches — which is the coupling the flag removed.
+ *
+ *  NC-F3 · match advice by `record_id` anywhere in the list (`warningRuns.find`)
+ *        instead of by position. 1 of 39 failed:
+ *        "advice is never attributed to a second run that shares a record_id" ->
+ *        `expected …(2) to have a length of 1 but got 2` — the same advisory
+ *        block rendered under both runs.
  *
  * The polarity assertions are explicit and two-sided. A test in this repository
  * has already shipped INVERTED and passed (`upload-claim-parity.test.tsx`'s first
@@ -97,6 +137,13 @@ const FAILING: RunVerdict = {
   dry_run: true,
 };
 
+/**
+ * `_validate_unit`'s MATERIALISED-UNREADABLE branch, verbatim. Note `dry_run:
+ * false` — the route's own comment reads "no dry run happened", NOT "the written
+ * record was checked"; it is returned exactly because that record could not be
+ * read. And `unavailable: true`, which is the field a client is supposed to key
+ * on.
+ */
 const UNAVAILABLE: RunVerdict = {
   run_id: '01JQZ0FIXTURERUNTHREE00001',
   run_label: 'Run 3 · 600 K',
@@ -104,14 +151,28 @@ const UNAVAILABLE: RunVerdict = {
   ok: false,
   errors: [UNAVAILABLE_ERROR],
   dry_run: false,
+  unavailable: true,
 };
 
+/**
+ * One `warnings.runs` entry. `_fan_out_warnings_payload` builds `runs` as
+ * `[_unit_warnings_entry(unit) for unit in exp.export_units()]` — ONE ENTRY PER
+ * UNIT, in the same order as `/validate`'s `runs`, so the two lists are 1:1 and
+ * a run with nothing to advise carries an entry with an EMPTY `warnings` list
+ * rather than no entry. Fixtures here follow that shape.
+ */
 const ADVICE_FOR = (recordId: string): RunWarnings => ({
   run_id: recordId,
-  run_label: 'ignored — matching is on record_id',
+  run_label: 'ignored — matching is positional, confirmed by record_id',
   record_id: recordId,
   warnings: [{ code: 'NO_LINKS', where: 'record.links', message: 'no relationships declared' }],
   dry_run: false,
+});
+
+/** The same entry with nothing to advise — what the route emits for a clean run. */
+const NO_ADVICE_FOR = (recordId: string): RunWarnings => ({
+  ...ADVICE_FOR(recordId),
+  warnings: [],
 });
 
 function renderFindings(runs: RunVerdict[], warningRuns?: RunWarnings[]) {
@@ -178,6 +239,41 @@ describe('Validate & Review · one group per run', () => {
     );
     expect(groupFor(container as HTMLElement, 'Run 2').textContent).toContain(
       'in-memory candidate record',
+    );
+  });
+
+  /**
+   * A LIVE FALSE CLAIM THIS FILE DID NOT COVER, and the reason the assertion is
+   * on the RENDERED SENTENCE rather than on a flag.
+   *
+   * `dry_run` does not mean the same thing on an `unavailable` entry.
+   * `_validate_unit`'s materialised-unreadable branch returns `dry_run: false`
+   * with the comment "no dry run happened" — it is returned BECAUSE the written
+   * record could not be read. Keying the subject line on `dry_run` alone
+   * therefore rendered "Checked the written official record." over a run whose
+   * record was never opened, and then contradicted it one line later with "No
+   * verdict could be produced for this run". Neither unavailable branch checked
+   * any document, so NO document is claimed for either.
+   */
+  it('a no-verdict run claims NO document was checked — neither branch', () => {
+    const dryCrash: RunVerdict = { ...UNAVAILABLE, dry_run: true }; // the export-raised branch
+    for (const run of [UNAVAILABLE, dryCrash]) {
+      const { container } = renderFindings([run]);
+      const group = groupFor(container as HTMLElement, 'Run 3');
+      expect(group.querySelector('.run-finding-subject')).toBeNull();
+      expect(group.textContent).not.toContain('Checked the written official record');
+      expect(group.textContent).not.toContain('Checked an in-memory candidate record');
+      // …and the refusal is still stated, so suppressing the line hides nothing.
+      expect(group.textContent).toContain('No verdict could be produced for this run');
+    }
+    // POLARITY — the line is suppressed for the no-verdict state ONLY, not
+    // removed. A run that really was checked still says which document.
+    const checked = groupFor(
+      renderFindings([PASSING]).container as HTMLElement,
+      'Run 1',
+    );
+    expect(checked.querySelector('.run-finding-subject')!.textContent).toBe(
+      'Checked the written official record.',
     );
   });
 
@@ -274,7 +370,10 @@ describe('Validate & Review · a failing run is distinguished, and owns its erro
     // so instead of asserting one. This is the polarity that matters: the guard
     // must fail if the caption ever hard-codes the official schema again.
     expect(dryCaption).not.toMatch(/^Official ISAAC schema errors/);
-    expect(dryCaption).toMatch(/does not say whether a finding came from/);
+    expect(dryCaption).toMatch(/does not record which findings came from/);
+    // …in the screen's own vocabulary. "The response" is API vocabulary on a
+    // product screen (CLAUDE.md §11) and the earlier draft used it here.
+    expect(dryCaption).not.toMatch(/\bthe response\b/i);
     // …and the findings themselves are still shown verbatim in both cases.
     expect(groupFor(renderFindings([dry]).container as HTMLElement, 'Run 2').textContent).toContain(
       "'series' is a required property",
@@ -296,7 +395,9 @@ describe('Validate & Review · "no verdict" is not a schema failure (NC1)', () =
     expect(group.querySelector('.run-finding-state-fail')).toBeNull();
     // …and it SAYS so, rather than leaving a reader to infer it.
     expect(group.textContent).toContain('this is not a schema failure');
-    // The server's own sentence is still shown — the refusal is not hidden.
+    // The server's own sentence is still shown — the refusal is not hidden —
+    // and it is introduced, so the reader knows whose words follow.
+    expect(group.textContent).toContain('this is not a schema failure. What the check reported:');
     expect(group.textContent).toContain(UNAVAILABLE_ERROR.message);
   });
 
@@ -318,6 +419,83 @@ describe('Validate & Review · "no verdict" is not a schema failure (NC1)', () =
     expect(runFindingState(UNAVAILABLE)).toBe('unavailable');
     // A server PASS is a pass regardless of anything else on the entry.
     expect(runFindingState({ ...UNAVAILABLE, ok: true })).toBe('pass');
+    expect(runFindingState({ ...UNAVAILABLE, ok: true, unavailable: true })).toBe('pass');
+  });
+
+  /**
+   * THE MACHINE-READABLE FLAG IS THE SIGNAL, and this is the assertion that says
+   * so. `unavailable` was added to `_validate_unit` precisely because the fixed
+   * English sentence in `errors[0].message` was the only thing a client could
+   * key on — so keying on that sentence is keying on the very coupling the flag
+   * removed. One comma in the message and the server's explicit refusal renders
+   * as `Failed`: a schema verdict over an entry on which no verdict was given.
+   * `RunCard` already reads the flag (`data.official?.unavailable === true`).
+   */
+  it('the `unavailable` FLAG decides, even when the sentence differs', () => {
+    const reworded: RunVerdict = {
+      ...UNAVAILABLE,
+      unavailable: true,
+      errors: [{ path: '$', message: 'Validation could not be completed (record unreadable).' }],
+    };
+    expect(runFindingState(reworded)).toBe('unavailable');
+
+    const group = groupFor(renderFindings([reworded]).container as HTMLElement, 'Run 3');
+    expect(group.getAttribute('data-state')).toBe('unavailable');
+    expect(within(group).getByText('No verdict')).toBeInTheDocument();
+    expect(within(group).queryByText('Failed')).toBeNull();
+    // The server's own sentence is shown verbatim whatever it says.
+    expect(group.textContent).toContain('Validation could not be completed (record unreadable).');
+  });
+
+  it('the sentence remains a live FALLBACK when the flag is absent', () => {
+    // A response that predates `unavailable` — or any path that omits it —
+    // still must not read as a schema failure. Keeping this asserted is what
+    // stops the helper becoming dead code that no longer works.
+    const flagless: RunVerdict = { ...UNAVAILABLE };
+    delete (flagless as { unavailable?: boolean }).unavailable;
+    expect('unavailable' in flagless).toBe(false);
+    expect(runFindingState(flagless)).toBe('unavailable');
+
+    const group = groupFor(renderFindings([flagless]).container as HTMLElement, 'Run 3');
+    expect(within(group).getByText('No verdict')).toBeInTheDocument();
+  });
+
+  it('POLARITY — neither signal makes a real schema failure a no-verdict', () => {
+    // The two guards above must not have been bought by never saying "Failed".
+    expect(runFindingState({ ...FAILING, unavailable: false })).toBe('fail');
+    expect(runFindingState(FAILING)).toBe('fail');
+    // …including a failure whose message merely MENTIONS the sentinel wording.
+    expect(
+      runFindingState({
+        ...FAILING,
+        errors: [{ path: '$', message: 'Validation could not be completed for two of five units.' }],
+      }),
+    ).toBe('fail');
+  });
+
+  /**
+   * DEFENSIVE, and stated as such: `{ok: false, errors: []}` is NOT reachable
+   * through this API — `export_draft` returns `official_report=None` only when
+   * `not draft_report.ok`, and `OfficialReport.ok` is `not self.errors`. The
+   * captions both end in a colon, so a caption with nothing after it would be a
+   * dangling promise on a validation screen.
+   */
+  it('a caption that introduces findings is not written when there are none', () => {
+    const noErrors = groupFor(
+      renderFindings([{ ...FAILING, errors: [] }]).container as HTMLElement,
+      'Run 2',
+    );
+    expect(noErrors.querySelector('.run-finding-caption')).toBeNull();
+    expect(noErrors.textContent).not.toContain('Findings reported for this run');
+    expect(noErrors.textContent).not.toMatch(/:\s*$/);
+
+    const noVerdict = groupFor(
+      renderFindings([{ ...UNAVAILABLE, errors: [] }]).container as HTMLElement,
+      'Run 3',
+    );
+    // The refusal is still stated — only the lead-in to an empty list is dropped.
+    expect(noVerdict.textContent).toContain('this is not a schema failure');
+    expect(noVerdict.textContent).not.toContain('What the check reported');
   });
 });
 
@@ -365,9 +543,10 @@ describe('Validate & Review · advisory is separate and non-gating (NC2)', () =>
   });
 
   it('advice is matched to its OWN run, and a run with none shows none', () => {
+    // The wire shape: one entry per unit, in order, the clean run's empty.
     const { container } = renderFindings(
       [PASSING, FAILING],
-      [ADVICE_FOR(FAILING.record_id)],
+      [NO_ADVICE_FOR(PASSING.record_id), ADVICE_FOR(FAILING.record_id)],
     );
     expect(
       groupFor(container as HTMLElement, 'Run 1').querySelector('.run-finding-advisory'),
@@ -389,6 +568,41 @@ describe('Validate & Review · advisory is separate and non-gating (NC2)', () =>
   it('absent warnings.runs is a valid state — no advice, no claim', () => {
     const { container } = renderFindings([PASSING, FAILING], undefined);
     expect((container as HTMLElement).querySelectorAll('.run-finding-advisory')).toHaveLength(0);
+  });
+
+  /**
+   * ADVICE IS MATCHED BY POSITION, THEN CONFIRMED BY `record_id`.
+   *
+   * Both lists come from `exp.export_units()` in the same order, so position is
+   * the primary key. A `find` on `record_id` alone attached the SAME advisory
+   * block to every entry sharing a `record_id` — and to both entries when two
+   * runs carry `''`. That shape is not reachable through the API today
+   * (`workspace.py` drops empty/duplicate run ids on load, `add_run` refuses
+   * duplicates, and `record_id == unit.target_id == run.id`), so this pins a
+   * guard against a WRONG ATTRIBUTION on a validation screen, not a live bug.
+   */
+  it('advice is never attributed to a second run that shares a record_id', () => {
+    const a: RunVerdict = { ...PASSING, run_id: 'R1', run_label: 'Run A', record_id: 'SAME' };
+    const b: RunVerdict = { ...PASSING, run_id: 'R2', run_label: 'Run B', record_id: 'SAME' };
+    const { container } = renderFindings([a, b], [ADVICE_FOR('SAME')]);
+
+    // Exactly ONE advisory block, and it belongs to the run at that position.
+    expect((container as HTMLElement).querySelectorAll('.run-finding-advisory')).toHaveLength(1);
+    expect(groupFor(container as HTMLElement, 'Run A').querySelector('.run-finding-advisory')).not.toBeNull();
+    expect(groupFor(container as HTMLElement, 'Run B').querySelector('.run-finding-advisory')).toBeNull();
+  });
+
+  it('a positional entry naming a DIFFERENT record shows no advice at all', () => {
+    // Position agrees, `record_id` does not — so nothing is shown, rather than
+    // another run's advice being attached to this one.
+    const { container } = renderFindings([PASSING], [ADVICE_FOR('01JQZSOMEOTHERRECORD0001')]);
+    expect((container as HTMLElement).querySelectorAll('.run-finding-advisory')).toHaveLength(0);
+  });
+
+  it('a shorter warnings.runs leaves the trailing runs with no advice', () => {
+    const { container } = renderFindings([PASSING, FAILING], [ADVICE_FOR(PASSING.record_id)]);
+    expect(groupFor(container as HTMLElement, 'Run 1').querySelector('.run-finding-advisory')).not.toBeNull();
+    expect(groupFor(container as HTMLElement, 'Run 2').querySelector('.run-finding-advisory')).toBeNull();
   });
 });
 
@@ -417,7 +631,13 @@ describe('Export Readiness · the section renders on the real screen', () => {
           gating: false,
           warnings: ADVICE_FOR(FAILING.record_id).warnings,
           dry_run: true,
-          runs: [ADVICE_FOR(FAILING.record_id)],
+          // 1:1 with `runs` above, in `export_units()` order — the shape
+          // `_fan_out_warnings_payload` actually returns.
+          runs: [
+            NO_ADVICE_FOR(PASSING.record_id),
+            ADVICE_FOR(FAILING.record_id),
+            NO_ADVICE_FOR(UNAVAILABLE.record_id),
+          ],
         },
       },
     };

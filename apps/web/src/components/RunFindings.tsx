@@ -32,14 +32,16 @@ import type { ApiValidateResult, ApiWarningsResponse } from '../lib/types';
  *     — and this section never borrows its classes or its words.
  *
  *  2. `unavailable` IS NOT `ok: false`. `_validate_unit` returns
- *     `unavailable: true` with the fixed message `Validation could not be
- *     completed.` to say NO VERDICT COULD BE PRODUCED — the written record could
- *     not be read — as distinct from the schema rejecting it. `ok` stays false
- *     either way, so a client keying on `ok` alone renders a non-verdict as a
- *     schema failure, which is exactly the defect the flag was added to fix. The
- *     check is the shared helper `isValidationUnavailable`, the TypeScript twin
- *     of `assistant_paths.is_validation_unavailable`, and NOT a local
- *     re-implementation.
+ *     `unavailable: true` to say NO VERDICT COULD BE PRODUCED — the written
+ *     record could not be read, or the dry run raised — as distinct from the
+ *     schema rejecting it. `ok` stays false either way, so a client keying on
+ *     `ok` alone renders a non-verdict as a schema failure, which is exactly the
+ *     defect the flag was added to fix. The MACHINE-READABLE FLAG is what is
+ *     read, as `RunCard` already reads it (`data.official?.unavailable === true`);
+ *     the shared helper `isValidationUnavailable` — the TypeScript twin of
+ *     `assistant_paths.is_validation_unavailable`, never a local
+ *     re-implementation — is retained only as a fallback for a response that
+ *     predates the flag.
  *
  *  3. AN ADVISORY WARNING NEVER TOUCHES A VERDICT. `_fan_out_warnings_payload`
  *     hardcodes `advisory: true, gating: false`. Warnings render in their own
@@ -64,12 +66,22 @@ export type RunFindingState = 'pass' | 'fail' | 'unavailable';
  * The state of one run's entry, from the server's own fields only.
  *
  * Order matters. `ok` decides a pass, so nothing here can turn a server PASS
- * into anything else. A non-`ok` entry is a NO-VERDICT when it carries the
- * validation-crash sentinel, and only otherwise a schema failure.
+ * into anything else. A non-`ok` entry is a NO-VERDICT when the server SAYS so,
+ * and only otherwise a schema failure.
+ *
+ * THE FLAG IS READ FIRST, AND THE STRING MATCH IS ONLY A FALLBACK. `unavailable`
+ * is the field `_validate_unit` added precisely because the fixed English
+ * sentence in `errors[0].message` was the only signal a client had; keying on
+ * that sentence again would re-create the coupling the flag exists to remove —
+ * one comma in that message and a refusal renders as a schema failure. The
+ * helper stays for a response that carries the sentence but not the flag, so
+ * neither signal alone is load-bearing.
  */
 export function runFindingState(run: RunVerdict): RunFindingState {
   if (run.ok) return 'pass';
-  return isValidationUnavailable(run.errors) ? 'unavailable' : 'fail';
+  return run.unavailable === true || isValidationUnavailable(run.errors)
+    ? 'unavailable'
+    : 'fail';
 }
 
 const STATE_WORD: Record<RunFindingState, string> = {
@@ -132,8 +144,22 @@ export function RunFindings({
     .filter((state) => tally(state) > 0)
     .map((state) => `${tally(state)} ${STATE_CLAUSE[state]}`);
 
-  const warningsFor = (run: RunVerdict): RunWarnings | undefined =>
-    warningRuns?.find((entry) => entry.record_id === run.record_id);
+  /*
+   * Advice for the run at THIS POSITION, and only if it names the same record.
+   *
+   * Both lists come from `exp.export_units()` in the same order, so position is
+   * the primary key; `record_id` is then checked as well, so a re-ordered or
+   * short `warnings.runs` shows NO advice rather than another run's. A `find` on
+   * `record_id` alone attached the same advisory block to every entry sharing a
+   * `record_id` — including two runs that both carry `''`. The API does not
+   * currently produce that shape (`workspace.py` drops empty/duplicate run ids on
+   * load and `add_run` refuses duplicates), so this is a guard against a wrong
+   * attribution, not a fix for a live one.
+   */
+  const adviceFor = (run: RunVerdict, i: number): RunWarnings | undefined => {
+    const entry = warningRuns?.[i];
+    return entry && entry.record_id === run.record_id ? entry : undefined;
+  };
 
   return (
     <section className="run-findings card" aria-labelledby={headingId}>
@@ -156,7 +182,7 @@ export function RunFindings({
           const state = states[i];
           const Icon = STATE_ICON[state];
           const label = labelFor(run);
-          const advice = warningsFor(run);
+          const advice = adviceFor(run, i);
           return (
             <li className="run-finding" key={`${i}:${run.record_id}`} data-state={state}>
               <div className="run-finding-head">
@@ -177,17 +203,31 @@ export function RunFindings({
 
               {/* WHICH DOCUMENT was checked, per unit — the same distinction the
                   route makes. `dry_run: false` is the strong claim that a WRITTEN
-                  record was checked, so it is only made when the server makes it. */}
-              <p className="run-finding-subject">
-                {run.dry_run
-                  ? 'Checked an in-memory candidate record — nothing was written.'
-                  : 'Checked the written official record.'}
-              </p>
+                  record was checked, so it is only made when the server makes it.
+
+                  AND IT IS NOT MADE AT ALL FOR A NO-VERDICT RUN. `dry_run` does not
+                  mean the same thing on an `unavailable` entry: `_validate_unit`'s
+                  materialised-unreadable branch returns `dry_run: false` to say NO
+                  DRY RUN HAPPENED (its own comment), not that the written record was
+                  checked — it is returned exactly because that record could NOT be
+                  read. Rendering this line there turned the server's refusal into an
+                  affirmative claim that the very document it failed to open had been
+                  checked, contradicted one line later by the caption. Nothing was
+                  checked on either unavailable branch, so nothing is claimed: the
+                  caption below is the whole statement. */}
+              {state !== 'unavailable' && (
+                <p className="run-finding-subject">
+                  {run.dry_run
+                    ? 'Checked an in-memory candidate record — nothing was written.'
+                    : 'Checked the written official record.'}
+                </p>
+              )}
 
               {state === 'unavailable' && (
                 <p className="run-finding-caption">
-                  No verdict could be produced for this run — this is not a schema failure. What the
-                  check reported:
+                  No verdict could be produced for this run — this is not a schema failure.
+                  {/* The lead-in is only written when there is something to lead into. */}
+                  {run.errors.length > 0 ? ' What the check reported:' : ''}
                 </p>
               )}
               {/* WHOSE FINDINGS THESE ARE, and the two cases are not the same
@@ -197,11 +237,17 @@ export function RunFindings({
                   DRAFT report's errors when the export never reached the official
                   validator — same `{path, message}` shape, no discriminator on the
                   wire. So the dry-run caption names neither validator rather than
-                  claiming the wrong one. */}
-              {state === 'fail' && (
+                  claiming the wrong one.
+
+                  Both captions end in a colon, so both are guarded on there being
+                  something after it. `{ok: false, errors: []}` is not reachable
+                  today — `export_draft` returns `official_report=None` only when
+                  `not draft_report.ok`, and `OfficialReport.ok` is `not
+                  self.errors` — so this is defensive, not a live fix. */}
+              {state === 'fail' && run.errors.length > 0 && (
                 <p className="run-finding-caption">
                   {run.dry_run
-                    ? 'Findings reported for this run’s candidate record. The response does not say whether a finding came from the no-guessing checks or from the official ISAAC schema, so neither is claimed:'
+                    ? 'Findings reported for this run’s candidate record. This check does not record which findings came from the no-guessing checks and which came from the official ISAAC schema, so neither is claimed:'
                     : 'Official ISAAC schema errors reported for this run’s written record:'}
                 </p>
               )}
