@@ -1075,7 +1075,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * Both numbers are now 92, re-measured from `create_app().openapi()` after that merge.
    * If you change the assertion, change this line in the same edit.
    */
-  it('describes the contract it claims to: 47 operations, 94 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 47 operations, 95 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1510,8 +1510,55 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     drops the 91 `\n\n` separators, and 43,557 - 182 = 43,375.
     // A third witness, before either line was changed: `npx vitest run` reported
     // `expected 43375 to be 42371`.
-    expect(total).toBe(45126);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(94);
+    // (f) THE LIST DEGRADATION IS NOW DISCLOSED IN BAND, so the description that
+    //     NAMED an undisclosed hole had to stop naming it — leaving a contract
+    //     advertising a defect that no longer exists is the same class of false
+    //     claim as the completeness claim entry (d) removed, only inverted.
+    //
+    //     `GET /api/experiments` — net -30 characters, +1 post-lead paragraph, ONE
+    //     operation touched. The second-mode paragraph ("unlike the first it is
+    //     NOT disclosed anywhere … a read by id of an unrestored record answers
+    //     404, not 503") is gone, because both statements are now false: the
+    //     response carries an `incomplete` block in that mode, and the by-id read
+    //     answers 503. What replaces it documents the block itself — when it is
+    //     present, its two `reason` values, and why `missing_count` is always
+    //     null. It is deliberately SHORTER than the hole it described.
+    //
+    // MEASURED the same two independent ways every corrected total above was, and
+    // NOT by adding -30 to 45126:
+    //
+    //   · from the SERVED document: the splitPurpose paragraph rule transcribed
+    //     into Python over `create_app().openapi()`'s 47 descriptions gives total
+    //     45,096 and 95 post-lead paragraphs.
+    //   · internal consistency: raw sum of `d.description.length` = 45,286; this
+    //     figure drops the 95 `\n\n` separators, and 45,286 - 190 = 45,096.
+    // (g) THE SAME OPERATION AGAIN, ONE REVIEW LATER, and the correction is that
+    //     entry (f) described `restore_failed` as one failure when it is three.
+    //     A reviewer measured a fourth degraded mode the branch had not closed —
+    //     a hydration pass that FINISHES having refused a row filed under an id
+    //     its own document does not carry — and closing it made `restore_failed`
+    //     the label for every way a restore can fail to represent a stored row:
+    //     an unwritable working copy, an unplaceable row, or a store that could
+    //     not be resolved. The description said "the database answered and this
+    //     server could not finish writing its own working copies", which is now
+    //     true of only one of the three, so it names the residue instead. It also
+    //     stops implying that a retry clears it: for a full disk or an
+    //     unplaceable row it does not, and the served body no longer says so
+    //     either.
+    //
+    //     `GET /api/experiments` — net +160 characters, ONE operation touched,
+    //     paragraph count UNCHANGED at 95 (this edit rewrote a sentence inside an
+    //     existing paragraph and added none).
+    //
+    // MEASURED the same two independent ways, and NOT by adding +160 to 45,096:
+    //
+    //   · from the SERVED document: the splitPurpose paragraph rule transcribed
+    //     into Python over `create_app().openapi()` gives 47 operations, total
+    //     45,256 and 95 post-lead paragraphs.
+    //   · internal consistency: raw sum of `d.description.length` = 45,446; this
+    //     figure drops the 95 `\n\n` separators, and 45,446 - 190 = 45,256.
+    expect(total).toBe(45256);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(95);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so
     //     `GET /api/experiments/{id}/evidence-classification` now names six classes

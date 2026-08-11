@@ -310,6 +310,18 @@ jobs:
           ids = [row["id"] for row in listed.json()["experiments"]]
           assert ids == [rid], ids
 
+          # 1b. AND IT RAISES NO FALSE ALARM. An unmigrated deployment is not an
+          #     INCOMPLETE one: no relation exists, so no durable row can exist,
+          #     so the filesystem view is the WHOLE truth and "restored nothing"
+          #     is a complete answer rather than an ambiguous one. A list that
+          #     told this reader some experiments might be missing would be
+          #     warning them about rows that cannot exist — and it would do it on
+          #     the state this very job exists to reproduce. Against a REAL
+          #     PostgreSQL, which is what makes this worth asserting here:
+          #     `StorageNotProvisioned` is classified from the server's own
+          #     SQLSTATE 42P01, and nothing in the unit suite can produce one.
+          assert "incomplete" not in listed.json(), listed.text[:400]
+
           # 2. A MISS STAYS A 404. It was a clean 404 before durable storage existed
           #    and it must not have become a server error.
           missing = client.get("/api/experiments/01ARZ3NDEKTSV4RRFFQ69G5FAV")

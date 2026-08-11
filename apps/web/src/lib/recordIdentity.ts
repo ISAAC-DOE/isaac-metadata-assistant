@@ -127,7 +127,7 @@ import type {
   ApiArtifactsResponse,
   ApiDraftGroup,
   ApiExperimentDetail,
-  ApiExperimentSummary,
+  ApiExperimentList,
 } from './types';
 
 /* ────────────────────────── record ids ────────────────────────────────────── */
@@ -589,18 +589,36 @@ export function readLinks(record: Record<string, unknown> | null): LinkView[] {
  * anywhere else. The copy at the call site names that limit instead of implying
  * the target does not exist.
  */
+/*
+ * `not_in_workspace` CARRIES WHETHER THE LIST IT SEARCHED WAS COMPLETE, and that is
+ * not decoration.
+ *
+ * This resolver infers absence-from-here by failing to find an id in the experiment
+ * list. `GET /api/experiments` can return FEWER rows than exist and now says so, in
+ * band, via `incomplete` — so "I did not find it" has two materially different
+ * meanings: I searched everything the workspace holds and it was not there, or I
+ * searched a list that is itself known to be short. Collapsing them would reproduce
+ * on this surface the exact defect the list disclosure exists to remove, and it would
+ * do it in a NEW consumer added after the disclosure landed.
+ *
+ * The `unreadable` state is still separate: a list that could not be read at all is a
+ * third thing, and merging it into "short" would overstate what is known.
+ */
 export type TargetResolution =
   | { state: 'resolved'; experimentId: string; title: string }
-  | { state: 'not_in_workspace' }
+  | { state: 'not_in_workspace'; listComplete: boolean }
   | { state: 'unreadable' };
 
 export function resolveTarget(
   id: string,
-  experiments: readonly ApiExperimentSummary[] | null,
+  list: ApiExperimentList | null,
 ): TargetResolution {
-  if (experiments === null) return { state: 'unreadable' };
-  const hit = experiments.find((e) => e.record_id === id);
-  return hit === undefined
-    ? { state: 'not_in_workspace' }
-    : { state: 'resolved', experimentId: hit.id, title: hit.title };
+  if (list === null) return { state: 'unreadable' };
+  const hit = list.experiments.find((e) => e.record_id === id);
+  if (hit !== undefined) {
+    return { state: 'resolved', experimentId: hit.id, title: hit.title };
+  }
+  // `incomplete` is present ONLY when the server could not finish hydration, so its
+  // absence is the server's own "no claim" signal and means the list is whole.
+  return { state: 'not_in_workspace', listComplete: list.incomplete === null };
 }

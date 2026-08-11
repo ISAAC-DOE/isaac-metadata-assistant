@@ -30,16 +30,92 @@ describe('typed API client — parses the real backend shapes', () => {
     );
   });
 
-  it('listExperiments unwraps the {experiments: []} envelope', async () => {
+  /*
+   * IT NO LONGER UNWRAPS TO A BARE ARRAY, and this test was rewritten rather than
+   * relaxed. `GET /api/experiments` degrades instead of failing when the server
+   * cannot restore its working copies, so the rows alone cannot be told apart from
+   * a smaller workspace; the completeness answer travels beside them and
+   * unwrapping discarded it. Every assertion the old version made about the rows
+   * is still made below, with `incomplete` added.
+   */
+  it('listExperiments returns the rows and NO completeness claim when the server makes none', async () => {
     stubFetchRoutes({ 'GET /api/experiments': { body: { experiments: [experimentSummary] } } });
     const list = await api.listExperiments();
-    expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({
+    expect(list.experiments).toHaveLength(1);
+    expect(list.experiments[0]).toMatchObject({
       id: EXP_ID,
       status: 'needs_attention',
       pending_count: 5,
       exported: false,
       record_id: null,
+    });
+    // The response the server sends for a WHOLE list carries no `incomplete` key
+    // at all, and that absence must decode to `null` — never to a truthy object
+    // that would raise a "may be missing records" banner over a complete list.
+    expect(list.incomplete).toBeNull();
+  });
+
+  it('listExperiments decodes the incomplete block the server sends for a SHORT list', async () => {
+    stubFetchRoutes({
+      'GET /api/experiments': {
+        body: {
+          experiments: [],
+          incomplete: {
+            reason: 'restore_failed',
+            missing_count: null,
+            message: 'The database answered, but this server could not finish restoring.',
+          },
+        },
+      },
+    });
+    const list = await api.listExperiments();
+    expect(list.experiments).toEqual([]);
+    expect(list.incomplete).toEqual({
+      reason: 'restore_failed',
+      missing_count: null,
+      message: 'The database answered, but this server could not finish restoring.',
+    });
+  });
+
+  /*
+   * THE DECODER FAILS TOWARDS SILENCE, and the direction is the assertion. Each
+   * of these shapes is something a broken server, a proxy error page, or a future
+   * contract could produce; none of them is a server SAYING the list is short, so
+   * none of them may put a warning on the primary screen. The last case is the one
+   * that matters most: a `missing_count` that arrives as a number must not be
+   * turned into a rendered figure by the client — but it must also not suppress a
+   * disclosure that is otherwise well formed.
+   */
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['a bare true', true],
+    ['a string', 'restore_failed'],
+    ['no reason', { message: 'something' }],
+    ['an empty reason', { reason: '', message: 'something' }],
+    ['no message', { reason: 'restore_failed' }],
+    ['a non-string message', { reason: 'restore_failed', message: 7 }],
+  ])('listExperiments treats %s as no completeness claim', async (_label, incomplete) => {
+    stubFetchRoutes({
+      'GET /api/experiments': { body: { experiments: [], incomplete } },
+    });
+    expect((await api.listExperiments()).incomplete).toBeNull();
+  });
+
+  it('listExperiments never invents missing_count, and never drops a real disclosure over it', async () => {
+    stubFetchRoutes({
+      'GET /api/experiments': {
+        body: {
+          experiments: [],
+          incomplete: { reason: 'store_unavailable', message: 'x' },
+        },
+      },
+    });
+    // `missing_count` absent -> `null` ("unknown"), never 0.
+    expect((await api.listExperiments()).incomplete).toEqual({
+      reason: 'store_unavailable',
+      missing_count: null,
+      message: 'x',
     });
   });
 
