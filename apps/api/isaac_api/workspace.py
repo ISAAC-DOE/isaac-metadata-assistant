@@ -42,7 +42,7 @@ A *scope* is a DIRECTORY NAMESPACE, not a filter. There are exactly two kinds:
 Exclusion of the worked examples from a normal read is therefore STRUCTURAL —
 they are not in the directory being enumerated — rather than a predicate some
 future caller could forget to apply. ``_tutorial`` is a safe namespace name
-because ``isaac_records.ids.RECORD_ID_RE`` (``^[0-9A-Z]{26}$``) can never match a
+because ``isaac_records.ids.RECORD_ID_RE`` (``\\A[0-9A-Z]{26}\\Z``) can never match a
 ``_``-prefixed name, so no record id can ever collide with it; ``_experiment_dirs``
 additionally skips ``_``-prefixed entries as a stated rule rather than relying on
 that.
@@ -135,7 +135,7 @@ def workspace_root() -> Path:
 
 #: The single directory under ``workspace_root()`` that holds every tutorial
 #: session. Chosen ``_``-prefixed so it can never be mistaken for (or collide
-#: with) a record id: ``RECORD_ID_RE`` is ``^[0-9A-Z]{26}$``.
+#: with) a record id: ``RECORD_ID_RE`` is ``\A[0-9A-Z]{26}\Z``.
 TUTORIAL_NAMESPACE = "_tutorial"
 
 #: The per-session marker file. It sits at the session ROOT, never inside an
@@ -294,7 +294,7 @@ def _lock_key(experiment_id: str, session_id: str | None) -> str:
     lock, a mutation in one session would serialise against — and could be delayed
     indefinitely by — an unrelated mutation in another. Injective by construction:
     neither a session id (``[A-Za-z0-9_-]{16,64}``) nor a record id
-    (``^[0-9A-Z]{26}$``) can contain ``/``, so the two halves cannot be confused.
+    (``\\A[0-9A-Z]{26}\\Z``) can contain ``/``, so the two halves cannot be confused.
     """
     return f"{session_id or ''}/{experiment_id}"
 
@@ -3379,7 +3379,7 @@ def _experiment_dirs(root: Path) -> list[Path]:
     rather than left to the ``experiment.json`` existence check below: today
     ``_tutorial/`` holds no ``experiment.json`` of its own, so that check would
     already exclude it, but that is an accident of layout and not a guarantee.
-    ``RECORD_ID_RE`` (``^[0-9A-Z]{26}$``) can never match a ``_``-prefixed name, so
+    ``RECORD_ID_RE`` (``\\A[0-9A-Z]{26}\\Z``) can never match a ``_``-prefixed name, so
     no ``_``-prefixed directory can ever legitimately be a record in ANY scope, and
     the skip is therefore unconditional.
     """

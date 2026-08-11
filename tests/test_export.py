@@ -84,6 +84,24 @@ def test_bad_record_id_rejected(draft):
     assert not result.ok
 
 
+def test_record_id_with_a_trailing_newline_is_rejected_at_export(draft):
+    """The downstream consequence of the ``ids.RECORD_ID_RE`` exactness fix.
+
+    ``RECORD_ID_RE`` was ``^[0-9A-Z]{26}$`` applied with ``.match()``, and Python's
+    ``$`` also matches immediately before a trailing newline — so this 27-character
+    id passed ``is_record_id``, was NOT refused here, and then validated **ok**
+    against the official schema, whose own pattern is lenient the same way. The gate
+    is this predicate; the shape matrix is in ``tests/test_ids.py``.
+    """
+    bad = RID + "\n"
+    assert len(bad) == 27 and bad[-1] == "\n"
+    assert not is_record_id(bad)
+    result = export_draft(draft, ROOT, record_id=bad)
+    assert not result.ok
+    assert not result.draft_report.ok
+    assert result.record is None, "no record may be built from a malformed id"
+
+
 def test_generated_record_id_is_ulid(draft):
     result = export_draft(draft, ROOT)
     assert result.ok
