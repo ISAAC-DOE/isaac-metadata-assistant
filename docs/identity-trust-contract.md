@@ -713,8 +713,10 @@ would leave the next session free to repeat it.
 `Q20` has meant **"may JSON Schema `format` enforcement be armed in the official validator?"** since
 before 2026-08-05. That meaning is not merely documented — it is **load-bearing in committed code**:
 `authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` (`apps/api/isaac_api/authorization.py:118`) is
-`False`, `APPROVAL_QUESTION_REFERENCE` points at `docs/dean-authorization-packet.md`, and seven
-further files under `apps/api/` reference it. The question has also **already been put to Dean** in
+`False`, `APPROVAL_QUESTION_REFERENCE` points at `docs/dean-authorization-packet.md`, and **seven
+files under `apps/api/` reference `Q20` in total — six besides `authorization.py` itself**
+(`grep -rl '\bQ20\b' apps/api/`). An earlier revision said "seven *further* files", which
+double-counted `authorization.py`; the number is quoted here at the precision the command supports. The question has also **already been put to Dean** in
 that packet, alongside `Q19` — which is answered — so `Q20` is an identifier that has left the
 repository and is awaiting an external answer.
 

@@ -124,7 +124,27 @@ The runner enforces the database name itself: it refuses unless `PGDATABASE` is 
 
 ## C. Prechecks — run these and read the output
 
-Run inside the ISAAC pod, where the standard libpq environment variables are already set.
+**WHERE TO RUN THEM — read this before the first command, because the obvious location does
+not work.** Run these **from a shell where the five `PG*` environment variables point at the
+database**, held by someone who already has a SLAC cluster context, **with a checkout of this
+repository** — the same shell the `0001_experiments` packet specifies.
+
+**Do NOT run them inside the ISAAC pod.** That container has **neither `psql` nor
+`scripts/db_migrate.py`**, and this is measured rather than assumed:
+
+```bash
+grep -c apt-get Dockerfile   # -> 0 : the runtime is python:3.11-slim with no postgresql-client
+grep -n '^COPY scripts' Dockerfile
+# -> one line, copying scripts/check_graphify_freshness.py and nothing else
+```
+
+So in the pod, every `psql` command below and every `scripts/db_migrate.py` invocation fails with
+"not found". Verify both facts yourself at the checkout from step A before choosing where to run.
+
+If the only access available is `kubectl exec` into the pod, **the `psql` prechecks and postchecks
+cannot be run there at all** — use the module-level invocation in step D for the apply, and STOP and
+tell Dean that the verification steps need a shell with `psql`. Do not skip them silently, and do not
+substitute a different tool for them.
 
 ```bash
 # 1. Confirm the target. Must print exactly: metadata_assistant
@@ -168,9 +188,13 @@ its bookkeeping row is missing from this database: **stop and find out why** bef
 apply itself is still safe — `CREATE ... IF NOT EXISTS` — but a missing bookkeeping row means
 something unexpected happened to this database.)
 
-**If `scripts/db_migrate.py` is not in the container image** — it is deliberately excluded from the
-Dockerfile's COPY allowlist — use the module-level invocation, which is the documented operator path
-and bypasses no gate, because every gate lives in the module rather than the wrapper:
+**`scripts/db_migrate.py` IS NOT in the container image** — measured, not conditional: the
+Dockerfile's `COPY scripts/...` line is an allowlist of exactly one file and this is not it. So if
+you are applying by `kubectl exec` rather than from a shell with a checkout, use the module-level
+invocation. It is the documented operator path and **bypasses no gate**, because every gate — the
+`PGDATABASE == metadata_assistant` check and the server-side `current_database()` re-verification —
+lives in the module, not in the wrapper. The wrapper adds only configuration detection and exit-code
+mapping:
 
 ```bash
 kubectl -n <namespace-you-discovered> exec deploy/<deployment-you-discovered> -- python -c "
