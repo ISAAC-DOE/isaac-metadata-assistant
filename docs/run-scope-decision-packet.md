@@ -152,7 +152,7 @@ only where the mapping is documented, which the table cites.
 
 | Field · type (from the `FIELD_MAP` coercer, **not** the schema) | Current extractor behaviour | If YES (run-level) | If NO (experiment-level) | Consequence if the answer is wrong | Recommendation |
 |---|---|---|---|---|---|
-| `system.configuration.detector_model` · `str` | `docs/extraction.md:132` — open namespace, no canonical slot; coerced `str` | the run workspace can offer it; a run that swapped detectors records its own value | entered once; a run that differs must file an audited override | **Experiment-level while detectors were in fact swapped** → every run's record names the one detector, and there is today no way to record the divergence: `Experiment.set_run_override` exists (`apps/api/isaac_api/workspace.py:2528`) but **no HTTP route reaches it** (`apps/web/src/components/RunCard.tsx:464` records the same). **Run-level while the detector never changed** → the same string is re-entered on every run and nothing checks that the entries agree. | **None.** A scientific judgement with no evidence in this repository (`CLAUDE.md` §5); it is the question being asked. |
+| `system.configuration.detector_model` · `str` | `docs/extraction.md:132` — open namespace, no canonical slot; coerced `str` | the run workspace can offer it; a run that swapped detectors records its own value | entered once; a run that differs must file an audited override | **Experiment-level while detectors were in fact swapped** → every run's record names the one detector. ~~and there is today no way to record the divergence: `Experiment.set_run_override` exists (`apps/api/isaac_api/workspace.py:2528`) but **no HTTP route reaches it**~~ — **that clause is FALSE as of 2026-08-11 and is struck rather than deleted, because it was load-bearing for this row's cost.** `POST /experiments/{experiment_id}/runs/{run_id}/overrides` reaches `set_run_override` (`apps/api/isaac_api/routes.py:3802`, `:3917`), merged in [#109](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/109). **So the divergence IS now recordable**, as an audited per-run override that keeps the displaced value. **Run-level while the detector never changed** → the same string is re-entered on every run and nothing checks that the entries agree. | **None.** A scientific judgement with no evidence in this repository (`CLAUDE.md` §5); it is the question being asked. |
 | `system.configuration.monochromator_crystal` · `str` | `docs/extraction.md:132` — open namespace; coerced `str` | same | same | **Experiment-level while the crystal was changed mid-experiment** → every run's record names one crystal, so a run taken after the change is recorded with the optic it was not taken with, and the record gives a reader no way to tell. **Run-level while it never changed** → re-entered per run, with no cross-run check. | **None.** A scientific judgement with no evidence in this repository (`CLAUDE.md` §5); it is the question being asked. |
 | `system.configuration.spectrometer_geometry` · `str` | `docs/extraction.md:131` — open namespace; coerced `str` | same | same | Same shape as the two above. It is additionally the one of the six that `field_level`'s prose omitted until this change (§6), so anyone who checked the docstring rather than the extractor would not have known it was in question at all. | **None.** A scientific judgement with no evidence in this repository (`CLAUDE.md` §5); it is the question being asked. |
 | `system.configuration.n_scans` · `int` | `docs/extraction.md:133` — open namespace, no canonical slot; coerced `int` — the only non-`str` of the six | the run workspace can offer it and each run records its own count — which is what "number of scans **for this run**" reads like, though reading like it is not evidence | entered once; one value for the whole set | **Experiment-level while it varies** → every run reports the same count, exported as a definite integer, so a shared value is indistinguishable in the record from a measured one. **Run-level while it is one number for the set** → re-entered per run, and two runs may silently disagree about a count that describes the whole set. | **None.** The name reads per-run, and reading like it is not evidence (`CLAUDE.md` §5). |
@@ -184,6 +184,40 @@ unclassified keeps behaving exactly as it does today: refused by the run PATCH r
 422, inherited by nobody, and offered nowhere in the UI. That is not cost-free, though — §5 measures
 what it costs.
 
+### 4.1. One input to this decision has CHANGED, and it makes a wrong answer cheaper (added 2026-08-11)
+
+**Read this before answering.** When §4's table was written, choosing **experiment-level** for a field
+that in fact varies per run was close to irreversible: every run's record would name the one value and
+*"there is today no way to record the divergence"*, because `set_run_override` had no HTTP caller. The
+struck clauses in §4 and §5 record that.
+
+**That is no longer true.** `POST /experiments/{experiment_id}/runs/{run_id}/overrides` and
+`…/overrides/clear` reach the override machinery
+([#109](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/109), merged — `routes.py:3802`,
+`:3917`). A run whose detector, crystal, geometry or scan count genuinely differed can hold its own
+value at that address, and the override records what it displaced.
+
+**What that does and does not change for your answer:**
+
+- **A wrong EXPERIMENT-LEVEL answer is now recoverable per run**, as an audited override rather than
+  an unrecordable loss. The asymmetry §4 relied on is smaller than it was.
+- **A wrong RUN-LEVEL answer is unchanged.** Overrides do not help there — the failure mode is the
+  same value re-typed on every run with nothing comparing the entries, and no override exists to
+  reconcile them.
+- **This is NOT an argument for defaulting everything to experiment-level.** An override is a
+  deliberate, audited act by a scientist; a default that is wrong for most runs converts routine
+  recording into routine overriding, which is a worse experience and produces records whose
+  provenance is noisier. It lowers the *cost of being wrong*; it does not supply the *evidence* for
+  being right.
+- **It changes none of the six recommendations, which remain "no evidence-backed recommendation".**
+  Nothing in this repository has become evidence about beamline practice. The question in §7 is
+  unchanged and still needs a scientist.
+
+**Honest scope of this note:** the *routes* are merged and tested. The scientist-facing override UI is
+[#122](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/122), **open and under review** — so
+today the recovery path exists over HTTP but is not yet a control on a screen. Do not read this
+section as saying a scientist can already do this in the app.
+
 ---
 
 ## 5. What each answer unlocks, so the cost of leaving it open is visible
@@ -193,9 +227,14 @@ what it costs.
   card. No new *product* machinery — but two committed tests encode today's answer and one of them
   cannot simply be updated; see §7 step 3.
 - **experiment-level** → the field becomes inheritable, appears in a run's *Inherited from Experiment*
-  panel, and becomes eligible for the override path. `Experiment.set_run_override` already exists and
+  panel, and becomes eligible for the override path. ~~`Experiment.set_run_override` already exists and
   is tested; **no HTTP route reaches it yet**, so overrides are a separate slice regardless of this
-  answer.
+  answer.~~ **UPDATED 2026-08-11 — the override path is no longer hypothetical.**
+  `POST /experiments/{experiment_id}/runs/{run_id}/overrides` and its `…/overrides/clear` sibling
+  reach `set_run_override` / `clear_run_override` ([#109](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/109),
+  merged; `routes.py:3802`, `:3917`). The scientist-facing UI is
+  [#122](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/122), **open and under review at
+  the time of writing — do not read this bullet as claiming it has shipped.**
 - **unclassified (status quo)** → six extracted fields stay invisible in the Run workspace, and they
   are **exported only when the record has no runs**. On the fan-out path **they are dropped from every
   run's record** — the same provenance loss §3 records for `created_utc`, by the same mechanism.
