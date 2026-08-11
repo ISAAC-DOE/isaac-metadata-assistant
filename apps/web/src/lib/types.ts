@@ -523,6 +523,47 @@ export interface ApiExperimentSummary {
   record_id: string | null;
 }
 
+/**
+ * WHY THE EXPERIMENT LIST COULD BE SHORT — present ONLY when it could be.
+ *
+ * `GET /api/experiments` restores working copies from this deployment's database
+ * before it enumerates them, and that restore can fail two ways. The list does not
+ * fail with it (a reader with three readable records should still see three), so
+ * without this block a short list is indistinguishable from a small workspace.
+ *
+ * `store_unavailable` — the database did not answer. `/api/health` reports
+ * `experiment_storage.state: "unavailable"` in this state too.
+ * `restore_failed` — the database ANSWERED and this server could not finish
+ * writing its own working copies. The database is healthy, so `/api/health`
+ * correctly still says `durable`, and this response is the ONLY place the
+ * shortfall is visible. That is the mode this type exists for.
+ *
+ * `missing_count` is always `null`, and it is carried rather than omitted because
+ * "unknown" is the answer: a restore that stopped part-way does not know how many
+ * rows it never reached, and the client must never render a number for it.
+ */
+export type ApiListIncompleteReason = 'store_unavailable' | 'restore_failed';
+
+export interface ApiListIncomplete {
+  /** A reason this build recognises, or any other string a later server sends. */
+  reason: string;
+  /** Always `null` — the count is genuinely unknown. Never rendered as a number. */
+  missing_count: number | null;
+  /** The server's own fixed sentence. Names no host, path or credential. */
+  message: string;
+}
+
+/**
+ * The `GET /api/experiments` envelope. `incomplete` is `null` when the server
+ * said nothing about completeness — which is what a whole list looks like, and
+ * also what a server too old to carry the block looks like. Both mean "no claim
+ * that anything is missing", which is the only reading the UI acts on.
+ */
+export interface ApiExperimentList {
+  experiments: ApiExperimentSummary[];
+  incomplete: ApiListIncomplete | null;
+}
+
 // P27.5 — the optimistic-concurrency version triplet the backend now returns on
 // record detail and on every accepted mutation (POST /answers, POST /export).
 // `version` is the opaque If-Match token the client echoes back (wrapped in

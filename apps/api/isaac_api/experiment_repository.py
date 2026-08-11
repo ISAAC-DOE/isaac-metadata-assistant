@@ -78,10 +78,16 @@ had acquired a hard dependency on one.
 
 THE RULE THAT REPLACES IT, and the four parts are deliberately different:
 
-* **THE LIST DEGRADES.** Hydration is an optimisation — it restores directories a
-  restart threw away. A failed hydration falls back to the filesystem view and
-  ``GET /api/experiments`` continues, so a list stays a list. A short list is
-  INCOMPLETE; it never asserts that the rows it omits do not exist.
+* **THE LIST DEGRADES, AND IT NOW SAYS SO IN BAND.** Hydration is an
+  optimisation — it restores directories a restart threw away. A failed hydration
+  falls back to the filesystem view and ``GET /api/experiments`` continues, so a
+  list stays a list. A short list is INCOMPLETE; it never asserts that the rows it
+  omits do not exist. It no longer leaves that to be inferred either: an
+  incomplete hydration pass is reported as an ``incomplete`` block on the list
+  response, naming which of the two failures occurred and stating that HOW MANY
+  rows are missing is unknown. Narrowing the catch so the list raised instead was
+  considered and rejected — a scientist with three readable records should still
+  see three. See ``workspace.HydrationOutcome``.
 * **A SINGLE-RECORD READ DOES NOT DEGRADE WHEN THE STORE MIGHT BE HOLDING THE
   RECORD, AND THAT IS A CORRECTION.** This paragraph used to say "a miss stays a
   404" and count it a virtue. It was measured wrong on the deployed application:
@@ -153,6 +159,7 @@ __all__ = [
     "NEW_EXPERIMENT_SOURCE_DESCRIPTION",
     "SQLSTATE_UNDEFINED_TABLE",
     "STORAGE_READ_FAILED_MESSAGE",
+    "STORAGE_RESTORE_FAILED_MESSAGE",
     "STORAGE_STATE_DURABLE",
     "STORAGE_STATE_EPHEMERAL",
     "STORAGE_STATE_UNAVAILABLE",
@@ -408,6 +415,21 @@ STORAGE_READ_FAILED_MESSAGE = (
     "This deployment stores experiments in its own database, and that "
     "database could not be read just now. Nothing was changed, and this is "
     "usually temporary — try again."
+)
+#: THE THIRD, AND IT IS HERE FOR THE SAME REASON THE SECOND IS. A hydration pass
+#: can stop part-way with the database ANSWERING PERFECTLY: the ``SELECT``
+#: succeeded and writing one working copy failed (a full ``emptyDir``, a row this
+#: build cannot parse). Reporting that with :data:`STORAGE_READ_FAILED_MESSAGE`
+#: would tell an operator the database could not be read, sending them to look at
+#: a database that is fine; reporting it with :data:`STORAGE_WRITE_FAILED_MESSAGE`
+#: would tell a reader their save was lost when nothing was being saved. It names
+#: no path — the directory it failed to write is a server path, and none of these
+#: literals may ever carry one.
+STORAGE_RESTORE_FAILED_MESSAGE = (
+    "This deployment stores experiments in its own database. The database "
+    "answered, but this server could not finish restoring its own working copy "
+    "of every stored experiment, so it cannot say whether this record exists. "
+    "Nothing was changed, and this is usually temporary — try again."
 )
 
 

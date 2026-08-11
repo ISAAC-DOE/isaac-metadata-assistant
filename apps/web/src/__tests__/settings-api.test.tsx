@@ -1075,7 +1075,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * Both numbers are now 92, re-measured from `create_app().openapi()` after that merge.
    * If you change the assertion, change this line in the same edit.
    */
-  it('describes the contract it claims to: 47 operations, 94 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 47 operations, 95 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1510,8 +1510,30 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     drops the 91 `\n\n` separators, and 43,557 - 182 = 43,375.
     // A third witness, before either line was changed: `npx vitest run` reported
     // `expected 43375 to be 42371`.
-    expect(total).toBe(45126);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(94);
+    // (f) THE LIST DEGRADATION IS NOW DISCLOSED IN BAND, so the description that
+    //     NAMED an undisclosed hole had to stop naming it — leaving a contract
+    //     advertising a defect that no longer exists is the same class of false
+    //     claim as the completeness claim entry (d) removed, only inverted.
+    //
+    //     `GET /api/experiments` — net -30 characters, +1 post-lead paragraph, ONE
+    //     operation touched. The second-mode paragraph ("unlike the first it is
+    //     NOT disclosed anywhere … a read by id of an unrestored record answers
+    //     404, not 503") is gone, because both statements are now false: the
+    //     response carries an `incomplete` block in that mode, and the by-id read
+    //     answers 503. What replaces it documents the block itself — when it is
+    //     present, its two `reason` values, and why `missing_count` is always
+    //     null. It is deliberately SHORTER than the hole it described.
+    //
+    // MEASURED the same two independent ways every corrected total above was, and
+    // NOT by adding -30 to 45126:
+    //
+    //   · from the SERVED document: the splitPurpose paragraph rule transcribed
+    //     into Python over `create_app().openapi()`'s 47 descriptions gives total
+    //     45,096 and 95 post-lead paragraphs.
+    //   · internal consistency: raw sum of `d.description.length` = 45,286; this
+    //     figure drops the 95 `\n\n` separators, and 45,286 - 190 = 45,096.
+    expect(total).toBe(45096);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(95);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so
     //     `GET /api/experiments/{id}/evidence-classification` now names six classes

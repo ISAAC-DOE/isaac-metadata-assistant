@@ -33,10 +33,12 @@ import type {
   ApiEvidenceEntry,
   ApiEvidenceResponse,
   ApiExperimentDetail,
+  ApiExperimentList,
   ApiExperimentSummary,
   ApiExportResponse,
   ApiGraphStatus,
   ApiHealth,
+  ApiListIncomplete,
   ApiMemoryConceptResponse,
   ApiMemoryConceptsResponse,
   ApiMemoryFileResponse,
@@ -393,6 +395,35 @@ function isResetResult(body: unknown): body is ApiDemoResetResult {
   return status === 'ok' || status === 'refused';
 }
 
+/**
+ * Decode the `incomplete` block of a list response, or `null`.
+ *
+ * FAIL-CLOSED TOWARDS SILENCE, DELIBERATELY, and the direction is the whole
+ * decision. This block drives a warning on the primary screen, so a body this
+ * client cannot read must not raise one: an unreadable `incomplete` is treated as
+ * NO CLAIM, exactly as an absent one is. The opposite choice would let any
+ * malformed response — an edge intercept, a proxy's error page decoded as JSON,
+ * a future server sending a different shape — tell every reader their list might
+ * be missing records when nothing said so.
+ *
+ * `reason` IS NOT VALIDATED AGAINST THE TWO KNOWN LABELS. A label this build has
+ * never seen is still a server saying "this list may be short", which is true and
+ * worth showing; the RENDERER is what must not index a lookup table with it. See
+ * `ExperimentsHome`'s `incompleteHeading`.
+ */
+function decodeListIncomplete(raw: unknown): ApiListIncomplete | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { reason, message, missing_count: missingCount } = raw as Record<string, unknown>;
+  if (typeof reason !== 'string' || reason === '') return null;
+  if (typeof message !== 'string' || message === '') return null;
+  return {
+    reason,
+    message,
+    // Passed through, never defaulted. `null` is the server's honest "unknown".
+    missing_count: typeof missingCount === 'number' ? missingCount : null,
+  };
+}
+
 /** The header the backend resolves the workspace scope from. Must match
  *  `TUTORIAL_SESSION_HEADER` in `apps/api/isaac_api/routes.py`. */
 export const TUTORIAL_SESSION_HEADER = 'X-Isaac-Tutorial-Session';
@@ -631,10 +662,35 @@ export const api = {
     throw err;
   },
 
-  // S1 — the experiment queue.
-  async listExperiments(): Promise<ApiExperimentSummary[]> {
-    const body = await getJson<{ experiments: ApiExperimentSummary[] }>('/experiments');
-    return body.experiments;
+  /**
+   * S1 — the experiment queue, AND WHETHER IT IS WHOLE.
+   *
+   * IT NO LONGER UNWRAPS TO A BARE ARRAY, and that is the point rather than a
+   * refactor. The server degrades this list rather than failing it when it cannot
+   * restore its working copies from the database, so the array alone cannot be
+   * told apart from a smaller workspace — the shortfall travels in a sibling key
+   * and unwrapping threw it away before any screen could see it.
+   *
+   * `incomplete` IS DECODED, NOT TRUSTED. Only an object carrying a string
+   * `reason` and a string `message` is accepted; anything else — absent, null, a
+   * bare `true`, a number where a message should be — becomes `null`, which means
+   * "no claim that anything is missing". Failing closed the other way would let a
+   * malformed body put a permanent warning banner on the primary screen.
+   *
+   * `missing_count` is passed through as whatever the server sent and is NEVER
+   * defaulted to a number here: the contract says it is unknown, and a client
+   * that substituted 0 would be inventing the one figure the server refuses to
+   * invent.
+   */
+  async listExperiments(): Promise<ApiExperimentList> {
+    const body = await getJson<{
+      experiments: ApiExperimentSummary[];
+      incomplete?: unknown;
+    }>('/experiments');
+    return {
+      experiments: body.experiments,
+      incomplete: decodeListIncomplete(body.incomplete),
+    };
   },
 
   /**

@@ -307,6 +307,39 @@ _R_EXPERIMENT_NOT_FOUND: dict = {
     },
 }
 
+#: THE DURABLE-STORAGE OUTAGE, DECLARED WHEREVER IT CAN HAPPEN.
+#:
+#: It was declared on ONE operation — ``POST /api/experiments``, and only for its
+#: write — while ``workspace.load_experiment`` can raise it on every read that
+#: resolves a record by id, and ``Experiment.save`` on every write. The contract
+#: therefore said ``200, 304, 401, 404, 422`` for ``GET /api/experiments/{id}``
+#: and the deployment answered ``503``: a client written against the document had
+#: no reason to expect the one status that means "retry" rather than "your record
+#: is gone", which is the same class of defect as the ``404`` that provoked all of
+#: this — a true state the contract does not admit exists.
+#:
+#: THE SET IT IS APPLIED TO IS DERIVED, NOT CHOSEN: every operation whose handler
+#: reaches ``ws.load_experiment`` or a write-through save. Two operations that
+#: touch records are deliberately NOT in it. ``POST /api/demo/run`` refuses
+#: ``scope is None`` before it loads anything, so its ``load_experiment`` always
+#: carries a session id, and a session-scope read never consults the database.
+#: ``POST /api/demo/reset`` addresses a session for the same reason. The
+#: LIST-shaped reads (``GET /api/experiments``, ``GET /api/search``,
+#: ``GET /api/runtime/records``) are not in it either, and that is the whole
+#: design: they degrade rather than fail.
+_R_STORAGE_UNAVAILABLE: dict = {
+    503: {
+        "description": (
+            "This deployment stores experiments in its own database, and that "
+            "database did not answer. Nothing was changed. The record may well "
+            "exist — this response says the server could not find out, which is "
+            "why it is not a `404`. It is usually temporary: the next request "
+            "opens a fresh connection. The body names no host, path or "
+            "credential."
+        )
+    },
+}
+
 #: The optimistic-concurrency preconditions every write operation shares.
 _R_PRECONDITION: dict = {
     400: {
@@ -1692,6 +1725,35 @@ def demo_reset(
 # --- 3. list ------------------------------------------------------------------
 
 
+def _hydration_disclosure(outcome: ws.HydrationOutcome) -> dict | None:
+    """The `incomplete` block for a list response, or ``None`` when it is whole.
+
+    ``None`` RATHER THAN ``{"complete": true}``, and the choice is deliberate. An
+    absent key is the honest shape for "this response makes no completeness
+    claim": the presence of the block is the machine-readable signal, so a client
+    branches on one thing rather than on a flag it has to read correctly, and a
+    healthy list is byte-identical to the one this operation has always returned.
+
+    NO COUNT IS INVENTED. ``missing_count`` is ``None`` and says so explicitly
+    rather than being omitted — "unknown" is the answer, and an absent field would
+    leave a reader to decide whether it means zero. A pass that stopped part-way
+    genuinely does not know how many rows it never reached, and ``CLAUDE.md`` §5
+    forbids supplying a number for it.
+
+    IT CANNOT RAISE. The message comes from
+    ``HydrationOutcome.message()``, which falls back rather than indexing — this
+    is the LIST path, and a disclosure that could 500 while disclosing a
+    degradation would be worse than the degradation.
+    """
+    if outcome.complete:
+        return None
+    return {
+        "reason": outcome.reason,
+        "missing_count": None,
+        "message": outcome.message(),
+    }
+
+
 @router.get(
     "/experiments",
     tags=[TAG_EXPERIMENTS],
@@ -1705,40 +1767,46 @@ def demo_reset(
         "`scenario` label naming which example the row is; it is null for "
         "any other record. Read-only, and it states no validity verdict.\n\n"
         "**This list is not a completeness claim, and on one deployment shape it "
-        "cannot be.** Where experiments are stored in a database, a row whose "
-        "working copy is missing — a pod restart discards it — is restored on read "
-        "before the list is built. If that database cannot be read, this operation "
-        "degrades to the working copies it can see rather than failing, so the list "
-        "may be SHORT. It never asserts that the rows it did not return do not "
-        "exist. That state is disclosed out of band: `GET /api/health` reports "
-        "`experiment_storage.state: \"unavailable\"`, and a read of one such record "
-        "by id answers `503` rather than a `404` that would claim it is gone.\n\n"
-        "**There is a SECOND degraded mode, and unlike the first it is NOT "
-        "disclosed anywhere.** The paragraph above describes the database being "
-        "unreadable. But restoring a working copy also WRITES one, and that write "
-        "can fail on its own — a full `emptyDir` is the realistic trigger — while "
-        "the database is answering perfectly. Hydration then raises part-way "
-        "through, the restore loop's `except Exception` swallows it, and every row "
-        "after the failing one is never restored. In that state `GET /api/health` "
-        "still reports `experiment_storage.state: \"durable\"`, this list is still "
-        "SHORT, and a read by id of an unrestored record answers **`404`, not "
-        "`503`** — a record that exists in the database reported as one that does "
-        "not exist. **Treat a short list as evidence about this read, never as an "
-        "inventory**, and do not rely on `/api/health` to tell you which mode you "
-        "are in. This is a known hole, named as one rather than papered over; "
-        "closing it is a behaviour change and is not in the scope of this "
-        "description."
+        "cannot be — so it tells you when it is short.** Where experiments are "
+        "stored in a database, a row whose working copy is missing — a pod restart "
+        "discards it — is restored on read before the list is built. If that "
+        "restore does not finish, this operation degrades to the working copies it "
+        "can see rather than failing, so the list may be SHORT. It never asserts "
+        "that the rows it did not return do not exist, and it no longer leaves that "
+        "to be inferred: the response then carries an `incomplete` object, and a "
+        "read of one such record by id answers `503` rather than a `404` that would "
+        "claim it is gone.\n\n"
+        "**`incomplete` is ABSENT when the list is whole**, so its presence is the "
+        "signal — a client does not have to interpret a flag. When present it "
+        "carries a `reason` of `store_unavailable` (the database did not answer; "
+        "`GET /api/health` reports `experiment_storage.state: \"unavailable\"` in "
+        "that state too) or `restore_failed` (the database answered and this "
+        "server could not finish writing its own working copies — a full "
+        "`emptyDir` is the realistic trigger). The second is why this disclosure "
+        "exists in band at all: the database is healthy there, so `/api/health` "
+        "correctly goes on reporting `durable`, and nothing outside this response "
+        "can tell you the list is short. `missing_count` is always `null` — a "
+        "restore that stopped part-way does not know how many rows it did not "
+        "reach, and a number would be invented. `message` is a fixed sentence "
+        "naming no host, path or credential.\n\n"
+        "**Treat a short list as evidence about this read, never as an "
+        "inventory.**"
     ),
     response_description=(
-        "One summary row per experiment this read could enumerate. **Not "
-        "necessarily every experiment that exists** — see the description for two "
-        "degraded modes, one of which is undisclosed and answers `404` for records "
-        "that are present in the database."
+        "One summary row per experiment this read could enumerate, and — only when "
+        "the list may be short — an `incomplete` object saying so. **Rows are "
+        "never silently dropped:** if hydration could not complete, the response "
+        "says it could not."
     ),
     responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
 def list_experiments(scope: TutorialScopeDep) -> dict:
-    return {"experiments": [_summary(e) for e in ws.list_experiments(scope)]}
+    experiments, hydration = ws.list_experiments_with_hydration(scope)
+    body: dict = {"experiments": [_summary(e) for e in experiments]}
+    disclosure = _hydration_disclosure(hydration)
+    if disclosure is not None:
+        body["incomplete"] = disclosure
+    return body
 
 
 # --- 3b. create ---------------------------------------------------------------
@@ -1933,6 +2001,7 @@ def create_experiment_route(
     ),
     response_description="The experiment detail bundle, with the current `ETag`.",
     responses={
+        **_R_STORAGE_UNAVAILABLE,
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         304: {
@@ -1986,7 +2055,7 @@ def get_experiment(
         "record's current `ETag`."
     ),
     response_description="The draft's fields, grouped, with the current `ETag`.",
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
     exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -2023,7 +2092,7 @@ def _example_scope(experiment_id: str) -> bool:
         "carries the record's current `ETag`."
     ),
     response_description="The open blocking questions, with the current `ETag`.",
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
     exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -2156,6 +2225,7 @@ def _answers_to_apply_shape(
         "and the downstream invalidation, with the new `ETag`."
     ),
     responses={
+        **_R_STORAGE_UNAVAILABLE,
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
@@ -2323,6 +2393,7 @@ def _fields_the_shape_carries(apply_shape: dict, submitted_fields: list[str]) ->
         "and the downstream invalidation, with the new `ETag`."
     ),
     responses={
+        **_R_STORAGE_UNAVAILABLE,
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
@@ -3104,7 +3175,7 @@ def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
         "The record's runs in canonical order, with the record's current revision "
         "and `ETag`."
     ),
-    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
 def list_runs(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
     exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -3140,7 +3211,7 @@ def list_runs(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Re
         "The newly created run and the record's new revision, with the record's "
         "new `ETag`."
     ),
-    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
 )
 def post_run(
     scope: TutorialScopeDep,
@@ -3202,7 +3273,7 @@ def post_run(
         "Inherited content is resolved on read and is never stored on the run."
     ),
     response_description="The run, with the run's own current `ETag`.",
-    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
 )
 def get_run(
     scope: TutorialScopeDep,
@@ -3247,7 +3318,7 @@ def get_run(
         "nothing and does not advance the run's revision."
     ),
     response_description="The refreshed run, with the run's new `ETag`.",
-    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
 )
 def patch_run(
     scope: TutorialScopeDep,
@@ -3871,7 +3942,7 @@ def _override_address(body: dict) -> tuple[str, str, str] | None:
         "The refreshed run and the override's recorded time, with the run's new "
         "`ETag`."
     ),
-    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
 )
 def post_run_override(
     scope: TutorialScopeDep,
@@ -3991,7 +4062,7 @@ def post_run_override(
         "The refreshed run and whether an override was removed, with the run's "
         "current `ETag`."
     ),
-    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
 )
 def post_run_override_clear(
     scope: TutorialScopeDep,
@@ -4081,7 +4152,7 @@ def post_run_override_clear(
         "when no verdict could be reached at all, which is not the same as the "
         "schema rejecting the document."
     ),
-    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
 )
 def post_run_check(
     scope: TutorialScopeDep,
@@ -4488,6 +4559,7 @@ def _unit_artifact_entry(unit: ws.ExportUnit) -> dict:
         "`ok: false` means the gate refused and nothing was written."
     ),
     responses={
+        **_R_STORAGE_UNAVAILABLE,
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
@@ -4934,6 +5006,7 @@ async def _read_bounded_body(request: Request, max_bytes: int) -> bytes:
         "Nothing was changed."
     ),
     responses={
+        **_R_STORAGE_UNAVAILABLE,
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
@@ -5192,7 +5265,7 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
         "the refusal without softening it."
     ),
     response_description="The official-schema verdict, its errors, and whether it was a dry run.",
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -5505,7 +5578,7 @@ async def post_validate_record(request: Request):
         "message saying so, rather than an error. Read-only."
     ),
     response_description="The audit rows and the rendered text report.",
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def post_audit(scope: TutorialScopeDep, experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -5702,7 +5775,7 @@ _WARNINGS_RESPONSE_DESCRIPTION = (
     summary="Get a Record's Advisory Warnings",
     description=_WARNINGS_DESCRIPTION,
     response_description=_WARNINGS_RESPONSE_DESCRIPTION,
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_warnings(scope: TutorialScopeDep, experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -5717,7 +5790,7 @@ def get_warnings(scope: TutorialScopeDep, experiment_id: ExperimentId):
     summary="Re-Check a Record's Advisory Warnings",
     description=_WARNINGS_DESCRIPTION,
     response_description=_WARNINGS_RESPONSE_DESCRIPTION,
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def post_warnings(scope: TutorialScopeDep, experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -5743,7 +5816,7 @@ def post_warnings(scope: TutorialScopeDep, experiment_id: ExperimentId):
         "evidence envelopes, which are the sidecar's own source. Read-only."
     ),
     response_description="One evidence entry per field carrying a value.",
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_evidence(scope: TutorialScopeDep, experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -5841,7 +5914,7 @@ _EVIDENCE_CLASSES = (
         "The per-field classifications, the six-class histogram, and the "
         "revision they describe."
     ),
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_evidence_classification(
     scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response
@@ -5885,6 +5958,7 @@ def get_evidence_classification(
     ),
     response_description="The file's lines, its media type, and the cited line numbers.",
     responses={
+        **_R_STORAGE_UNAVAILABLE,
         **_R_UNAUTHORIZED,
         400: {
             "description": (
@@ -5968,7 +6042,7 @@ def get_source_preview(
         "The record and sidecar JSON with their filenames, or nulls when nothing "
         "has been exported."
     ),
-    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
     """Return the written record + sidecar JSON for an exported experiment.
@@ -6878,6 +6952,7 @@ _ASSISTANT_BODY_DESCRIPTION = (
     ),
     response_description="The resolved answer with the grounding it was derived from, or an honest refusal.",
     responses={
+        **_R_STORAGE_UNAVAILABLE,
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         400: {
