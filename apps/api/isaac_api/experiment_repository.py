@@ -76,12 +76,23 @@ Not Running"), ``GET /api/experiments/<id>`` (a clean 404 became a 500) and
 transient outage, permanently — a read path that had never touched a database
 had acquired a hard dependency on one.
 
-THE RULE THAT REPLACES IT, and the two halves are deliberately different:
+THE RULE THAT REPLACES IT, and the three parts are deliberately different:
 
-* **READS DEGRADE.** Hydration is an optimisation — it restores directories a
-  restart threw away. A failed hydration therefore falls back to the filesystem
-  view and the read continues, so a list stays a list and a miss stays a 404.
-* **WRITES DO NOT.** A failed durable write raises :class:`StorageUnavailable`,
+* **THE LIST DEGRADES.** Hydration is an optimisation — it restores directories a
+  restart threw away. A failed hydration falls back to the filesystem view and
+  ``GET /api/experiments`` continues, so a list stays a list. A short list is
+  INCOMPLETE; it never asserts that the rows it omits do not exist.
+* **A SINGLE-RECORD READ DOES NOT DEGRADE, AND THAT IS A CORRECTION.** This
+  paragraph used to say "a miss stays a 404" and count it a virtue. It was
+  measured wrong on the deployed application: moments after a rollout, a record
+  screen claimed "This experiment id is not in the workspace — it may not have
+  been created yet" about a record that answered ``200`` seconds later. An
+  ``emptyDir`` workspace plus a durable row means "no directory" no longer implies
+  "no record", so a 404 issued without reading the database is a false statement
+  about a scientist's work. ``workspace.load_experiment`` now lets the outage
+  propagate and the route renders ``503`` — true, retryable, and already typed.
+  A genuine miss, and every deployment with no database at all, is unaffected.
+* **WRITES DO NOT DEGRADE EITHER.** A failed durable write raises :class:`StorageUnavailable`,
   which ``isaac_api.app`` renders as a typed ``503``. Degrading a write to the
   filesystem would be worse than failing it: the reader has been TOLD their work
   is durable, and a silent ephemeral write takes that promise away without
@@ -119,9 +130,11 @@ __all__ = [
     "BACKEND_FILESYSTEM",
     "BACKEND_POSTGRES",
     "NEW_EXPERIMENT_SOURCE_DESCRIPTION",
+    "STORAGE_READ_FAILED_MESSAGE",
     "STORAGE_STATE_DURABLE",
     "STORAGE_STATE_EPHEMERAL",
     "STORAGE_STATE_UNAVAILABLE",
+    "STORAGE_WRITE_FAILED_MESSAGE",
     "DurableWriteConflict",
     "ExperimentRepository",
     "FilesystemExperimentRepository",
@@ -309,13 +322,39 @@ def forget_storage_failure() -> None:
     _note_storage_success()
 
 
-def _unavailable(exc: BaseException) -> StorageUnavailable:
-    """Record ``exc`` and build the fixed, path-free error the caller should raise."""
+#: The two fixed, path-free bodies a durable-storage outage can produce. BOTH are
+#: literals rather than one formatted string, so neither can acquire a host, a
+#: path, a user or a driver message by accident — the property
+#: ``test_the_storage_error_body_names_no_host_path_user_or_driver_message``
+#: asserts.
+#:
+#: THERE ARE TWO OF THEM BECAUSE THERE WAS ONE, AND IT WAS WRONG HALF THE TIME.
+#: The single message said "did not accept the write. Nothing was saved" and was
+#: raised by :meth:`PostgresOrdinaryStore.hydrate` as well — a READ. That never
+#: reached a client while a failed read was swallowed, so the inaccuracy was
+#: invisible; the moment a failed read became a ``503`` (see
+#: ``workspace.load_experiment``) it would have told a reader their save had been
+#: lost when nothing had been saved and nothing was at risk. A reader who is told
+#: their work was not saved does something about it.
+STORAGE_WRITE_FAILED_MESSAGE = (
+    "This deployment stores experiments in its own database, and that "
+    "database did not accept the write. Nothing was saved."
+)
+STORAGE_READ_FAILED_MESSAGE = (
+    "This deployment stores experiments in its own database, and that "
+    "database could not be read just now. Nothing was changed, and this is "
+    "usually temporary — try again."
+)
+
+
+def _unavailable(exc: BaseException, message: str = STORAGE_WRITE_FAILED_MESSAGE) -> StorageUnavailable:
+    """Record ``exc`` and build the fixed, path-free error the caller should raise.
+
+    ``message`` defaults to the WRITE wording so every existing raise site keeps
+    the body it had; the read path passes :data:`STORAGE_READ_FAILED_MESSAGE`.
+    """
     _note_storage_failure(exc)
-    return StorageUnavailable(
-        "This deployment stores experiments in its own database, and that "
-        "database did not accept the write. Nothing was saved."
-    )
+    return StorageUnavailable(message)
 
 
 # --- what a brand-new experiment contains -------------------------------------
@@ -720,7 +759,7 @@ class PostgresOrdinaryStore:
                 cursor.execute(policy.check(Q_ALL_EXPERIMENTS))
                 rows = cursor.fetchall() or []
         except Exception as exc:  # noqa: BLE001 - any driver/server failure, uniformly
-            raise _unavailable(exc) from exc
+            raise _unavailable(exc, STORAGE_READ_FAILED_MESSAGE) from exc
         _note_storage_success()
         for row in rows:
             rid = str(row[0] or "").strip()

@@ -3409,6 +3409,37 @@ def _ordinary_store(session_id: str | None):
     return ordinary_store()
 
 
+def _hydrate_ordinary_scope_or_raise() -> int:
+    """:func:`_hydrate_ordinary_scope`, except that an OUTAGE PROPAGATES.
+
+    Same work, same return value; the difference is the one caller that must be
+    able to tell "there is no such record" apart from "I could not look".
+
+    RAISES :class:`~isaac_api.experiment_repository.StorageUnavailable` when the
+    configured database did not answer. Every other failure inside hydration is
+    still swallowed and reported as 0 restored — a row this build cannot parse, or
+    a workspace write that failed for SOME OTHER record, says nothing about the
+    record the caller is asking about, and turning either into an outage would
+    report a deployment problem for a data problem. That is a narrower catch than
+    "anything went wrong", and the gap is deliberate rather than overlooked: a
+    poison row early in the result set can still abort the loop before this
+    record's directory is written, and the caller will then say "not found". It is
+    a real remaining hole, it is not the one that was measured, and closing it
+    means making hydration per-row fault-tolerant, which is a separate change.
+    """
+    store = _ordinary_store(None)
+    if store is None:
+        return 0
+    from .experiment_repository import StorageUnavailable  # noqa: PLC0415 - cycle
+
+    try:
+        return store.hydrate()
+    except StorageUnavailable:
+        raise
+    except Exception:  # noqa: BLE001 - not an outage; see the docstring
+        return 0
+
+
 def _hydrate_ordinary_scope() -> int:
     """Restore any durably-stored ordinary record whose directory is missing.
 
@@ -3441,13 +3472,18 @@ def _hydrate_ordinary_scope() -> int:
 
     ``Exception`` and not ``BaseException``: a cancellation or a ``KeyboardInterrupt``
     is not a storage outage and must not be swallowed as one.
+
+    THIS IS NOW THE **LIST** PATH'S HYDRATION, AND ONLY ITS. A single-record read
+    goes through :func:`_hydrate_ordinary_scope_or_raise` instead, because the two
+    reads make different claims and only one of them can honestly be silent. A
+    list that shows fewer rows is INCOMPLETE — it never says the missing ones do
+    not exist. A single-record read that answers ``None`` becomes a ``404``, which
+    says exactly that, about a record that may be sitting in the database. See
+    :func:`load_experiment`.
     """
-    store = _ordinary_store(None)
-    if store is None:
-        return 0
     try:
-        return store.hydrate()
-    except Exception:  # noqa: BLE001 - see the docstring; reads must never 500 on this
+        return _hydrate_ordinary_scope_or_raise()
+    except Exception:  # noqa: BLE001 - see the docstring; the LIST must never 500 on this
         return 0
 
 
@@ -3479,6 +3515,14 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
     NEVER seeds. A canonical worked-example id therefore resolves to ``None`` in the
     normal scope, which is what makes a normal-scope request for one a 404 rather
     than a silent cross-scope read.
+
+    ``None`` MEANS "THIS SCOPE HAS NO SUCH RECORD" AND NOTHING ELSE. It is never
+    the answer to "the store did not respond": in that case this raises
+    :class:`~isaac_api.experiment_repository.StorageUnavailable`, which every route
+    already renders as a typed ``503``. Twenty-eight call sites turn ``None`` into
+    ``404``, so a ``None`` that meant "I could not check" was twenty-eight false
+    claims of non-existence; the narrowing is what makes those call sites correct
+    without any of them changing. See the comment inside for what was measured.
     """
     state_path = scope_root(session_id) / experiment_id / "experiment.json"
     if not state_path.exists():
@@ -3501,18 +3545,71 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
         # direction — a sibling that restored a DIFFERENT record returns non-zero and
         # says nothing about this one — so it is not consulted at all.
         #
-        # AND A MISS STILL STAYS A 404 WHEN THE DATABASE IS DOWN, by the same line
-        # rather than despite it. `_hydrate_ordinary_scope` returns 0 rather than
-        # raising on a failed read and writes nothing, so the file is still absent, the
-        # re-check fails and the route answers "not found" — which is what it answered
-        # before durable storage existed. It must not become a 500: "we could not
-        # check" and "it is not here" look identical to a client holding a stale link,
-        # and only one of them is a server error.
+        # A MISS NO LONGER STAYS A 404 WHEN THE DATABASE IS DOWN. That paragraph
+        # used to stand here and said so approvingly: a failed hydrate returned 0,
+        # wrote nothing, the re-check failed, and the route answered "not found" —
+        # "which is what it answered before durable storage existed". THE SECOND
+        # HALF OF THAT SENTENCE IS TRUE AND THE CONCLUSION IS WRONG, and it was
+        # measured wrong on the deployed application: moments after a rollout to
+        # `v0.0.103`, `/record/01KZNWCXS0WYAGHRQJ37KZFCFD` rendered the definitive
+        # panel "This experiment id is not in the workspace — it may not have been
+        # created yet" about a record that answered 200 to a direct read seconds
+        # later and rendered completely on reload.
+        #
+        # BEFORE DURABLE STORAGE THAT 404 WAS TRUE. The workspace directory was
+        # everything there was, so "no directory" and "no record" were the same
+        # fact, and answering from the filesystem alone lost nothing. Durable
+        # storage moved the authoritative copy into the database and left the
+        # directory as a CACHE of it (`experiment_repository`'s module docstring),
+        # and from that moment "no directory" stopped implying "no record" — a pod
+        # roll empties an `emptyDir` workspace while every row is still there. So
+        # the unchanged answer is not continuity; it is the same code saying
+        # something that used to be true and no longer is.
+        #
+        # THE HONEST ANSWER WHEN THE STORE CANNOT BE READ IS 503, NOT 404. "We
+        # could not check" and "it is not here" do NOT look the same to a client —
+        # that is the argument this branch used to make, and it is an argument
+        # about the SERVER's convenience. To the reader they are opposite claims:
+        # one says come back, the other says your work is gone. 503 is also the
+        # true one, and the deployment already renders it as a typed, path-free
+        # `experiment_storage_unavailable` (`routes.storage_unavailable_handler`)
+        # that says try again — which is correct, because the next read opens a
+        # fresh connection and recovers by itself, exactly as the reload did.
+        #
+        # A GENUINE MISS IS STILL A 404, and nothing below softens it: the raise
+        # happens only when the store was asked and did not answer. With no
+        # database configured — every developer machine, every CI job but one —
+        # `_hydrate_ordinary_scope_or_raise` returns 0 without raising and this is
+        # the code it always was. A healthy database that simply has no such row
+        # likewise returns normally, and the absent file is the answer.
+        #
+        # THE FILE IS STILL CHECKED BEFORE THE OUTAGE IS REPORTED, and that is the
+        # same lesson as the paragraph above rather than a new one: the answer is
+        # the FILE, never the count — and never the exception either. A sibling
+        # read hydrating on its own connection can restore this record while ours
+        # fails, and answering 503 with the record on disk would be its own false
+        # claim.
         if session_id is not None:
             return None
-        _hydrate_ordinary_scope()
-        if not state_path.exists():
-            return None
+        #
+        # `Exception` AND NOT THE ONE CLASS: today only `StorageUnavailable`
+        # escapes `_hydrate_ordinary_scope_or_raise`, so naming it would read
+        # better and behave identically. `Exception` is used because nothing is
+        # swallowed here — every arm either re-raises or falls through to a file
+        # that exists — so the broad catch cannot hide anything, while the narrow
+        # one would let a future exception escaping hydration go back to producing
+        # a false 404, which is the defect this branch exists to stop.
+        try:
+            _hydrate_ordinary_scope_or_raise()
+        except Exception:
+            if not state_path.exists():
+                raise
+            # A sibling restored it while ours failed. Fall through and read it.
+        else:
+            # Hydration COMPLETED. An absent file now means an absent record, and
+            # that is the honest 404 this branch must go on producing.
+            if not state_path.exists():
+                return None
     return Experiment.from_state(
         json.loads(state_path.read_text(encoding="utf-8")), session_id=session_id
     )

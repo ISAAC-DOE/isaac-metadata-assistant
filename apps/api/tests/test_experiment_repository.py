@@ -829,14 +829,14 @@ def test_a_record_a_concurrent_read_restored_is_200_and_not_404(app, tmp_path, m
     # Record what THIS request's own hydrate returned, so the assertions below can say
     # the 200 came from the file check and not from a count that happened to be non-zero.
     hydrate_counts: list[int] = []
-    real_hydrate = ws._hydrate_ordinary_scope
+    real_hydrate = ws._hydrate_ordinary_scope_or_raise
 
     def spy() -> int:
         got = real_hydrate()
         hydrate_counts.append(got)
         return got
 
-    monkeypatch.setattr(ws, "_hydrate_ordinary_scope", spy)
+    monkeypatch.setattr(ws, "_hydrate_ordinary_scope_or_raise", spy)
     client = TestClient(app, raise_server_exceptions=False)
 
     state_path = tmp_path / "ws" / rid / "experiment.json"
@@ -909,9 +909,9 @@ def test_a_worked_example_scope_miss_never_hydrates_the_ordinary_root(app, tmp_p
     monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
 
     calls: list[str] = []
-    real_hydrate = ws._hydrate_ordinary_scope
+    real_hydrate = ws._hydrate_ordinary_scope_or_raise
     monkeypatch.setattr(
-        ws, "_hydrate_ordinary_scope", lambda: (calls.append("hydrate"), real_hydrate())[1]
+        ws, "_hydrate_ordinary_scope_or_raise", lambda: (calls.append("hydrate"), real_hydrate())[1]
     )
 
     assert ws.load_experiment(rid, session_id="sess-does-not-exist") is None
@@ -924,19 +924,38 @@ def test_a_worked_example_scope_miss_never_hydrates_the_ordinary_root(app, tmp_p
     assert calls == ["hydrate"]
 
 
-def test_a_durable_row_is_still_404_while_the_database_is_unreachable(app, tmp_path, monkeypatch):
-    """THE KNOWN, ACCEPTED DEGRADATION — pinned so that changing it stays deliberate.
+def test_a_durable_row_is_503_NOT_404_while_the_database_is_unreachable(
+    app, tmp_path, monkeypatch
+):
+    """THE DECISION THIS TEST WAS LEFT HERE TO MAKE VISIBLE, NOW MADE.
 
-    A record with a durable row and no directory answers 404 for as long as the
-    database cannot be read. That is a real limitation: the record exists and the
-    server says it does not. It is accepted on the reasoning at
-    ``workspace._hydrate_ordinary_scope`` — a read that had no database dependency
-    before durable storage existed must not be able to 500 — and it is a SEPARATE
-    decision from the concurrency defect above, which is why the fix for that one
-    deliberately did not touch it.
+    This test used to be named ``..._is_still_404_...`` and pinned the opposite
+    assertion as "the known, accepted degradation", ending: "If a future slice
+    decides 'we could not check' should stop looking like 'it is not here', this
+    test is where that decision becomes visible." This is that slice, and this is
+    that decision — recorded by rewriting the test rather than by adding a second
+    one beside it, so no two tests disagree about what the contract is.
 
-    If a future slice decides "we could not check" should stop looking like "it is
-    not here", this test is where that decision becomes visible.
+    WHAT WAS MEASURED, and it is why the acceptance did not survive contact. On the
+    deployed application at hosted commit ``842530d`` (image ``v0.0.103``,
+    2026-08-10), moments after a pod rollout, ``/record/01KZNWCXS0WYAGHRQJ37KZFCFD``
+    rendered the definitive panel "Record Not Found — This experiment id is not in
+    the workspace — it may not have been created yet", while a direct
+    ``GET /api/experiments/01KZNWCXS0WYAGHRQJ37KZFCFD`` in the same authenticated
+    session answered ``200`` with the full record seconds later, and a reload
+    recovered the screen completely.
+
+    THE OLD REASONING WAS "a read that had no database dependency before durable
+    storage existed must not be able to 500". Both halves are true and the
+    conclusion does not follow: a ``503`` is not a ``500``. It says the dependency
+    did not answer and to come back — which is exactly what happened — while the
+    ``404`` said the scientist's work does not exist. The premise that made the
+    ``404`` honest ("no directory" = "no record") was retired by durable storage
+    itself, which made the ``emptyDir`` directory a cache of the database.
+
+    The mechanism is SIMULATED, not asserted from copy: the connection raises on
+    ``Q_ALL_EXPERIMENTS``, which is what a cold pool, a mid-failover server or an
+    un-migrated table does to hydration.
     """
     rid = "01ABCDEFGHJKMNPQRSTVWXYZ02"
     conn = _table_missing_connection()
@@ -948,9 +967,109 @@ def test_a_durable_row_is_still_404_while_the_database_is_unreachable(app, tmp_p
 
     response = client.get(f"/api/experiments/{rid}")
 
-    assert response.status_code == 404, response.text
-    assert response.json()["error"] == "experiment_not_found"
+    assert response.status_code == 503, response.text
+    body = response.json()
+    assert body["error"] == "experiment_storage_unavailable"
+    # It must NOT be the 404 discriminator under a different status, and it must
+    # not be the 500 the old reasoning feared.
+    assert body["error"] != "experiment_not_found"
     assert not (tmp_path / "ws" / rid).exists(), "a failed hydrate must write nothing"
+    # THE BODY DESCRIBES A READ. The one shared message said "did not accept the
+    # write. Nothing was saved" — invisible while a failed read was swallowed, and
+    # a lie about a scientist's saved work the moment it reached a response body.
+    assert body["message"] == repo.STORAGE_READ_FAILED_MESSAGE
+    assert "Nothing was saved" not in body["message"]
+    for leak in ("db.invalid", "PGHOST", "PGUSER", "PGPASSWORD", "relation does not exist"):
+        assert leak not in response.text, leak
+
+
+def test_every_sub_resource_of_that_record_is_503_too_and_not_a_missing_record(
+    app, monkeypatch
+):
+    """ONE `load_experiment`, TWENTY-EIGHT CALL SITES, and they all had to move.
+
+    The record screen does not issue one read; it issues a `Promise.all` of seven
+    per-record reads (`apps/web/src/lib/api.ts::getRecordBundle`), plus `/runs` from
+    `RunsSection`. Whichever rejects FIRST is the error the screen renders, so
+    fixing only `GET /experiments/{id}` would have left the same false panel
+    reachable through any of the other seven — and on this frontend base
+    `isRecordPath` is unanchored (`/^\\/experiments\\/[^/]/`), so a 404 from ANY of
+    them renders "Record Not Found".
+
+    None of those routes changed. They all funnel through `ws.load_experiment`,
+    which is why narrowing what its `None` MEANS corrects all of them at once —
+    and this test is what stops a future change fixing the detail read alone.
+    """
+    rid = "01ABCDEFGHJKMNPQRSTVWXYZ04"
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(_table_missing_connection()))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    reads = [
+        ("GET", f"/api/experiments/{rid}"),
+        ("GET", f"/api/experiments/{rid}/draft"),
+        ("GET", f"/api/experiments/{rid}/pending"),
+        ("POST", f"/api/experiments/{rid}/validate"),
+        ("POST", f"/api/experiments/{rid}/audit"),
+        ("GET", f"/api/experiments/{rid}/warnings"),
+        ("GET", f"/api/experiments/{rid}/evidence"),
+        ("GET", f"/api/experiments/{rid}/runs"),
+    ]
+    for method, path in reads:
+        response = client.request(method, path)
+        assert response.status_code == 503, f"{method} {path} -> {response.status_code}"
+        assert response.json()["error"] == "experiment_storage_unavailable", path
+
+
+def test_a_sibling_hydration_wins_the_race_our_own_read_lost_and_it_is_still_200(
+    app, tmp_path, monkeypatch
+):
+    """THE OUTAGE IS NOT THE ANSWER EITHER — THE FILE IS. The 2026-08-10 restatement
+    of the lesson `test_a_record_a_concurrent_read_restored_is_200_and_not_404`
+    already taught about the COUNT.
+
+    Seven concurrent reads share one empty workspace. It is entirely possible for a
+    sibling's connection to succeed and ours to fail — they are separate
+    connections, opened at slightly different moments, and a cold pool or a
+    mid-failover server does not fail them all identically. If this read reported
+    the outage without re-checking the file, it would answer 503 for a record
+    sitting on disk: a second false claim, replacing the first.
+
+    Simulated deterministically: OUR connection raises, and the sibling's real
+    hydrate — its own store, its own healthy connection — runs at the moment ours
+    is dialled, which is exactly the window between "we are about to fail" and "we
+    decide what to say".
+    """
+    rid = "01ABCDEFGHJKMNPQRSTVWXYZ05"
+    rows = [(rid, json.dumps(_stored_state(rid, "Restored by a sibling")))]
+    sibling = repo.PostgresOrdinaryStore(_env(), connect=_connector(FakeConnection(rows=rows)))
+    broken = _table_missing_connection()
+
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+
+    raced: list[int] = []
+    broken_connector = _connector(broken)
+
+    def connect_and_let_the_sibling_win(*a, **kw):
+        if not raced:
+            raced.append(sibling.hydrate())
+        return broken_connector(*a, **kw)
+
+    monkeypatch.setattr(dbw, "connect_psycopg2", connect_and_let_the_sibling_win)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    state_path = tmp_path / "ws" / rid / "experiment.json"
+    assert not state_path.exists(), "the roll left the workspace empty; that is the premise"
+
+    response = client.get(f"/api/experiments/{rid}")
+
+    assert raced == [1], "the sibling must actually have restored the file, else this proves nothing"
+    assert state_path.is_file()
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == rid
+    assert response.json()["title"] == "Restored by a sibling"
 
 
 @pytest.mark.parametrize(
@@ -1702,10 +1821,72 @@ def test_the_list_degrades_to_the_filesystem_view_instead_of_500ing(
     assert [row["id"] for row in response.json()["experiments"]] == [existing.id]
 
 
-def test_an_unknown_id_is_still_a_404_and_not_a_500(pod_without_migration):
-    """A miss stays a miss. "We could not check" and "it is not here" look the same
-    to a client holding a stale link, and only one of them is a server error."""
+def test_an_unknown_id_is_503_NOT_500_AND_NOT_404_while_the_store_cannot_be_read(
+    pod_without_migration,
+):
+    """THE COST OF THE FIX, STATED AS AN ASSERTION RATHER THAN LEFT IMPLICIT.
+
+    This test used to read ``..._is_still_a_404_and_not_a_500`` and argued: "a miss
+    stays a miss. 'We could not check' and 'it is not here' look the same to a
+    client holding a stale link, and only one of them is a server error." The
+    middle clause is the error. They look the same only to a client that is TOLD
+    the same thing, which was this application's choice, not the client's.
+
+    AND THE HONEST PRICE IS HERE: a genuinely stale link now gets ``503`` while the
+    database is unreachable, where it used to get a correct ``404``. That is a real
+    loss of precision and it is the right trade, because while hydration cannot run
+    THE SERVER DOES NOT KNOW WHICH CASE IT IS IN. ``404`` was not more precise; it
+    was a guess that happened to be right for unknown ids and wrong for real ones,
+    and the wrong half is the one that tells a scientist their work is gone. The
+    ``503`` is retryable and self-correcting: the same request answers a true 404
+    the moment the store answers again.
+
+    ``500`` remains excluded, which is what the old name cared about.
+    """
     client, _conn = pod_without_migration
+    response = client.get("/api/experiments/01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    assert response.status_code == 503, response.text
+    assert response.status_code != 500
+    assert response.json()["error"] == "experiment_storage_unavailable"
+
+
+def test_an_unknown_id_is_a_TRUE_404_again_as_soon_as_the_store_answers(
+    app, tmp_path, monkeypatch
+):
+    """THE OTHER HALF OF THAT TRADE, AND THE ONE THAT KEEPS 404 MEANINGFUL.
+
+    ``CLAUDE.md`` §5's no-guessing rule cuts both ways here: the fix must not hide
+    real absences behind a reassuring "maybe it is still loading". A HEALTHY
+    database with no such row is a definite answer, and the route gives the
+    definite answer — 404, ``experiment_not_found``, no 503, no retry advice.
+
+    This is also what makes the 503 above self-correcting rather than a permanent
+    downgrade: the identical request, against a store that answers, is a 404 again.
+    """
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(FakeConnection(rows=[])))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    unknown = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    response = client.get(f"/api/experiments/{unknown}")
+
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "experiment_not_found"
+    assert not (tmp_path / "ws" / unknown).exists()
+
+
+def test_with_no_database_at_all_a_miss_is_the_404_it_has_always_been(app, monkeypatch):
+    """THE BLAST RADIUS, PINNED AT ZERO for every deployment without a database.
+
+    Every developer machine, every CI job but the Postgres one, and any pod with
+    ``PGHOST`` unset: ``_hydrate_ordinary_scope_or_raise`` returns 0 without
+    dialling anything, so this branch is byte-for-byte the code it always was. A
+    fix for a durable-storage defect must not be able to change the answer where
+    there is no durable storage.
+    """
+    monkeypatch.delenv("PGHOST", raising=False)
+    client = TestClient(app, raise_server_exceptions=False)
     response = client.get("/api/experiments/01ARZ3NDEKTSV4RRFFQ69G5FAV")
     assert response.status_code == 404, response.text
     assert response.json()["error"] == "experiment_not_found"
