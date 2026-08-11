@@ -330,12 +330,17 @@ _R_EXPERIMENT_NOT_FOUND: dict = {
 _R_STORAGE_UNAVAILABLE: dict = {
     503: {
         "description": (
-            "This deployment stores experiments in its own database, and that "
-            "database did not answer. Nothing was changed. The record may well "
-            "exist — this response says the server could not find out, which is "
-            "why it is not a `404`. It is usually temporary: the next request "
-            "opens a fresh connection. The body names no host, path or "
-            "credential."
+            "This deployment stores experiments in its own database, and this "
+            "server could not find out whether that database is holding this "
+            "record — either it did not answer, or it answered and the server "
+            "could not finish restoring its own working copies. Nothing was "
+            "changed. The record may well exist; this response says the server "
+            "could not find out, which is why it is not a `404`. **Whether a "
+            "retry helps depends on which of the two happened, and the body says "
+            "which**: a database that did not answer is usually temporary, since "
+            "the next request opens a fresh connection, while a restore that "
+            "could not finish generally needs a server-side fix. The body names "
+            "no host, path or credential."
         )
     },
 }
@@ -1780,15 +1785,17 @@ def _hydration_disclosure(outcome: ws.HydrationOutcome) -> dict | None:
         "signal — a client does not have to interpret a flag. When present it "
         "carries a `reason` of `store_unavailable` (the database did not answer; "
         "`GET /api/health` reports `experiment_storage.state: \"unavailable\"` in "
-        "that state too) or `restore_failed` (the database answered and this "
-        "server could not finish writing its own working copies — a full "
-        "`emptyDir` is the realistic trigger). The second is why this disclosure "
-        "exists in band at all: the database is healthy there, so `/api/health` "
-        "correctly goes on reporting `durable`, and nothing outside this response "
-        "can tell you the list is short. `missing_count` is always `null` — a "
-        "restore that stopped part-way does not know how many rows it did not "
-        "reach, and a number would be invented. `message` is a fixed sentence "
-        "naming no host, path or credential.\n\n"
+        "that state too) or `restore_failed` (everything else that can stop the "
+        "restore: a working copy that could not be written, with a full "
+        "`emptyDir` the realistic trigger; a stored row the server refused as "
+        "unplaceable; or a store it could not resolve at all). The second is why "
+        "this disclosure exists in band at all: the database is typically healthy "
+        "there, so `/api/health` correctly goes on reporting `durable`, and "
+        "nothing outside this response can tell you the list is short. "
+        "`missing_count` is always `null` — a restore that did not finish does "
+        "not know how many rows it did not reach, and a number would be invented. "
+        "`message` is a fixed sentence naming no host, path or credential, and it "
+        "does NOT promise that retrying clears a `restore_failed`.\n\n"
         "**Treat a short list as evidence about this read, never as an "
         "inventory.**"
     ),
@@ -6571,6 +6578,37 @@ def get_memory_graph_detail() -> dict:
 _SEARCH_SCOPES = ("all", "workspace", "memory")
 
 
+def _searched_scope_reason(reason: str | None, hydration: ws.HydrationOutcome) -> str | None:
+    """The workspace group's ``reason``, with one ASSERTION withheld when it is unsafe.
+
+    ``scope_has_no_records`` IS NOT "no rows matched" — it exists precisely to be
+    STRONGER than ``total: 0``. Its own definition (``search.SCOPE_HAS_NO_RECORDS``)
+    is "the scope searched holds NO RECORDS AT ALL", and the reason it was added is
+    to stop a reader rephrasing a query that was never going to match anything.
+
+    Which makes it the one thing on this route that a short snapshot turns into a
+    false statement. When hydration could not finish, the search core is handed
+    whatever working copies exist and correctly reports that IT saw none — but "the
+    search core saw no records" and "there are no records" are different claims,
+    and only the second one reaches a person. Measured on this branch before the
+    fix: two durable rows that ``GET /api/experiments`` was simultaneously flagging
+    as possibly missing, and ``GET /api/search`` answering
+    ``{"available": true, "reason": "scope_has_no_records", "total": 0}``.
+
+    SO THE CLAIM IS DROPPED, NOT REPLACED. A bare ``total: 0`` understates — it
+    says nothing about whether anything exists — and understating is the safe
+    direction here. Inventing a third reason label would be a contract change and a
+    new thing for every client to learn, for a state the list response already
+    describes in full.
+
+    ``query_too_short`` IS DELIBERATELY LEFT ALONE. It is a fact about the REQUEST
+    and is true whatever the scope holds.
+    """
+    if reason == search.SCOPE_HAS_NO_RECORDS and not hydration.complete:
+        return None
+    return reason
+
+
 def _blank_group_rows(group: dict) -> dict:
     """Report a group's availability/reason but with no rows (out-of-scope plane)."""
     group["results"] = []
@@ -6610,7 +6648,12 @@ def search_records(
                 "returns no rows with the reason `query_too_short` in both groups. "
                 "When the workspace being searched holds no records at all, the "
                 "`workspace` group reports the reason `scope_has_no_records` — "
-                "distinct from a query that simply matched nothing."
+                "distinct from a query that simply matched nothing. That reason is "
+                "WITHHELD, leaving a bare `total: 0`, whenever this read could not "
+                "restore every stored working copy (the state "
+                "`GET /api/experiments` reports as `incomplete`): 'there is "
+                "nothing here' is a stronger claim than a short snapshot can "
+                "support."
             )
         ),
     ] = "",
@@ -6649,7 +6692,10 @@ def search_records(
     normalized_query = search.normalize((q or "")[:256])
     query_too_short = False
     try:
-        exps = ws.list_experiments(tutorial_session)  # hardened, read-race-safe snapshot
+        # WITH the hydration outcome, because ONE of this group's reasons is an
+        # assertion about the world rather than about the query. See
+        # ``_searched_scope_reason``.
+        exps, hydration = ws.list_experiments_with_hydration(tutorial_session)
         wres = search.workspace_search(q, exps, limit=limit, offset=offset)
         normalized_query = wres.normalized_query
         query_too_short = wres.reason == search.QUERY_TOO_SHORT
@@ -6657,7 +6703,7 @@ def search_records(
             "plane": search.PLANE,
             "provider": search.PROVIDER,
             "available": True,
-            "reason": wres.reason,
+            "reason": _searched_scope_reason(wres.reason, hydration),
             "total": wres.total,
             "returned": wres.returned,
             "limit": wres.limit,

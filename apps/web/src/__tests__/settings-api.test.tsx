@@ -1532,7 +1532,32 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     45,096 and 95 post-lead paragraphs.
     //   · internal consistency: raw sum of `d.description.length` = 45,286; this
     //     figure drops the 95 `\n\n` separators, and 45,286 - 190 = 45,096.
-    expect(total).toBe(45096);
+    // (g) THE SAME OPERATION AGAIN, ONE REVIEW LATER, and the correction is that
+    //     entry (f) described `restore_failed` as one failure when it is three.
+    //     A reviewer measured a fourth degraded mode the branch had not closed —
+    //     a hydration pass that FINISHES having refused a row filed under an id
+    //     its own document does not carry — and closing it made `restore_failed`
+    //     the label for every way a restore can fail to represent a stored row:
+    //     an unwritable working copy, an unplaceable row, or a store that could
+    //     not be resolved. The description said "the database answered and this
+    //     server could not finish writing its own working copies", which is now
+    //     true of only one of the three, so it names the residue instead. It also
+    //     stops implying that a retry clears it: for a full disk or an
+    //     unplaceable row it does not, and the served body no longer says so
+    //     either.
+    //
+    //     `GET /api/experiments` — net +160 characters, ONE operation touched,
+    //     paragraph count UNCHANGED at 95 (this edit rewrote a sentence inside an
+    //     existing paragraph and added none).
+    //
+    // MEASURED the same two independent ways, and NOT by adding +160 to 45,096:
+    //
+    //   · from the SERVED document: the splitPurpose paragraph rule transcribed
+    //     into Python over `create_app().openapi()` gives 47 operations, total
+    //     45,256 and 95 post-lead paragraphs.
+    //   · internal consistency: raw sum of `d.description.length` = 45,446; this
+    //     figure drops the 95 `\n\n` separators, and 45,446 - 190 = 45,256.
+    expect(total).toBe(45256);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(95);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so

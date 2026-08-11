@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "b1f905be05e483bc1bc4f5b3479ba9f45059e733dbc3a07e4c208db5be5e3d6f"
+        "sha256": "4fa64724f6129745feb30b6c7665a2f3bf3cf3ecf03ba08905d3de2a3f7ccdae"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "c73cdf3daea77ac2739e9f736678ca2d87552f23aaaba35579a78067f02b6e1e"
+        "sha256": "6bdc69a3dd1f19d115c2c68cff9490930714f590290b253fe4dc21d38ef3d4b0"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "955932d8e14cda44d672919101aacfbd5cfed1c83fa7589b56c59aaeefcf1fb4"
+        "sha256": "1edb6793fdf9eda6d5d9cf673247f3b22edff368f1b984862e4aab41dc6abfa7"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10540,7 +10540,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "766d06a7e4ac453bf4df30b94a72450afc9a4d69c90dc8ba51cad5366d0f9dfa"
+        "sha256": "63dff03054e41f65e0fc0d012f10e68000981f99a66fdb3692bef0e92ad464ea"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "13b07ca537f7de3f2baa9b24e45b8e391b27e5f492eaacb38d06d4951b4c7151"
+        "sha256": "dceb82c3cb0283fbb38e5f96027f8e62ae1138262b1247784a501b3b1ecf5576"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "bf849907bb5289a160d70b181c0a99ae35833b4366f4e8ebfe156c10f67494b7"
+    "served_manifest_fingerprint": "e87527eb08c62cbcc3036681d4d6f621b9dc60238f229f0a5dbf256da9774e72"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

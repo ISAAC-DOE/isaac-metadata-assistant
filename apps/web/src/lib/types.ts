@@ -533,10 +533,12 @@ export interface ApiExperimentSummary {
  *
  * `store_unavailable` — the database did not answer. `/api/health` reports
  * `experiment_storage.state: "unavailable"` in this state too.
- * `restore_failed` — the database ANSWERED and this server could not finish
- * writing its own working copies. The database is healthy, so `/api/health`
- * correctly still says `durable`, and this response is the ONLY place the
- * shortfall is visible. That is the mode this type exists for.
+ * `restore_failed` — everything else that stops the restore: a working copy that
+ * could not be written, a stored row the server refused as unplaceable, or a
+ * store it could not resolve. The database is typically healthy in all three, so
+ * `/api/health` correctly still says `durable`, and this response is the ONLY
+ * place the shortfall is visible. That is the mode this type exists for. Its
+ * message deliberately does not promise that retrying clears it.
  *
  * `missing_count` is always `null`, and it is carried rather than omitted because
  * "unknown" is the answer: a restore that stopped part-way does not know how many

@@ -63,10 +63,10 @@ const STORE_UNAVAILABLE_MESSAGE =
   'Experiments stored durably may be missing from it. Nothing has been deleted, and this is ' +
   'usually temporary — try again.';
 const RESTORE_FAILED_MESSAGE =
-  'This deployment stores experiments in its own database. The database answered, but this ' +
-  'server could not finish restoring its own working copies, so this list may be missing ' +
-  'experiments that are stored durably. Nothing has been deleted, and this is usually ' +
-  'temporary — try again.';
+  'This deployment stores experiments in its own database, and this server could not finish ' +
+  'restoring its own working copies of what is stored there, so this list may be missing ' +
+  'experiments. Nothing has been deleted. Retrying may not clear this on its own — if the ' +
+  'list stays short, it needs a server-side fix.';
 
 const row = {
   id: '01KZ0READABLERECORD0000001',

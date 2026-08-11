@@ -3492,14 +3492,26 @@ def _ordinary_store(session_id: str | None):
 #: "unavailable"``), because :meth:`PostgresOrdinaryStore.hydrate` records the
 #: failure before raising.
 #:
-#: ``restore_failed`` — the ``SELECT`` SUCCEEDED and the restore did not finish.
-#: Writing a working copy is a filesystem write and can fail on its own (a full
-#: ``emptyDir`` is the realistic trigger; so is a row this build cannot parse),
-#: and the loop then stops with every later row unrestored. THE DATABASE IS
-#: HEALTHY IN THIS STATE, so ``/api/health`` correctly goes on reporting
-#: ``durable`` — which is exactly why this label has to exist. It was the mode
-#: nothing disclosed: a short list, a health block saying everything is fine, and
-#: a by-id read answering ``404`` for a record the database is holding.
+#: ``restore_failed`` — EVERYTHING ELSE THE PASS CAN FAIL AT, and there are three
+#: of them rather than the one this comment used to name. It is deliberately not
+#: subdivided further: they differ in cause and not in what a reader can do.
+#:
+#:   * writing a working copy failed part-way (a full ``emptyDir`` is the
+#:     realistic trigger) and the loop stopped, leaving every later row unrestored;
+#:   * the loop FINISHED and refused a row it could not place — one filed under an
+#:     id its own state document does not carry
+#:     (:class:`~isaac_api.experiment_repository.HydrationSkippedRows`). Every
+#:     other row was restored; that one was not, and it claimed to be an ordinary
+#:     record of this scope, so the pass cannot be called complete;
+#:   * resolving the store raised before a query was ever issued.
+#:
+#: THE DATABASE IS TYPICALLY HEALTHY IN THIS STATE — it is answering in the first
+#: two and was never asked in the third — so ``/api/health`` correctly goes on
+#: reporting ``durable``, which is exactly why this label has to exist. It was the
+#: mode nothing disclosed: a short list, a health block saying everything is fine,
+#: and a by-id read answering ``404`` for a record the database is holding.
+#: Note the asymmetry with ``store_unavailable``, and do not "tidy" it away: that
+#: label names one measured fact, this one names a residue.
 HYDRATION_STORE_UNAVAILABLE = "store_unavailable"
 HYDRATION_RESTORE_FAILED = "restore_failed"
 
@@ -3509,6 +3521,14 @@ HYDRATION_RESTORE_FAILED = "restore_failed"
 #: message. Neither of them states a NUMBER — how many rows are missing is exactly
 #: what an aborted pass does not know, and inventing one would be the guess
 #: ``CLAUDE.md`` §5 forbids.
+#:
+#: ONLY ONE OF THEM SAYS "try again", AND THE ASYMMETRY IS THE POINT. A database
+#: that did not answer usually answers on the next request, so telling a reader to
+#: retry is advice that works. A restore that could not finish usually cannot
+#: finish next time either — a full disk stays full and an unplaceable row stays
+#: unplaceable — so the same sentence there would be advice that cannot work,
+#: offered by the only surface that knows anything is wrong. Neither message
+#: promises the opposite either: "may not clear on its own" is what is known.
 HYDRATION_DISCLOSURE_MESSAGES = {
     HYDRATION_STORE_UNAVAILABLE: (
         "This deployment stores experiments in its own database, and that database "
@@ -3517,20 +3537,23 @@ HYDRATION_DISCLOSURE_MESSAGES = {
         "it. Nothing has been deleted, and this is usually temporary — try again."
     ),
     HYDRATION_RESTORE_FAILED: (
-        "This deployment stores experiments in its own database. The database "
-        "answered, but this server could not finish restoring its own working "
-        "copies, so this list may be missing experiments that are stored durably. "
-        "Nothing has been deleted, and this is usually temporary — try again."
+        "This deployment stores experiments in its own database, and this server "
+        "could not finish restoring its own working copies of what is stored "
+        "there, so this list may be missing experiments. Nothing has been deleted. "
+        "Retrying may not clear this on its own — if the list stays short, it "
+        "needs a server-side fix."
     ),
 }
 
 #: The sentence for a label this build does not recognise. It exists so that
 #: rendering a disclosure can never be the thing that fails: the list path must
-#: not raise, and a direct dictionary index on a future label would make it.
+#: not raise, and a direct dictionary index on a future label would make it. It
+#: claims nothing about whether a retry helps, because for an unknown reason that
+#: is unknown too.
 HYDRATION_DISCLOSURE_FALLBACK = (
     "This list may be missing experiments: restoring this server's working copies "
-    "from the database did not finish. Nothing has been deleted, and this is "
-    "usually temporary — try again."
+    "from the database did not finish. Nothing has been deleted. This build cannot "
+    "say whether trying again will clear it."
 )
 
 
@@ -3583,7 +3606,18 @@ def _hydrate_ordinary_scope() -> HydrationOutcome:
     """Restore any durably-stored ordinary record whose directory is missing.
 
     Returns a :class:`HydrationOutcome`: how many directories were written, and
-    whether the pass finished. It NEVER RAISES.
+    whether the pass finished.
+
+    IT DOES NOT RAISE FOR ANYTHING THE STORAGE SEAM CAN DO, and the guard now
+    covers RESOLVING the store as well as using it. It did not, for one revision:
+    ``_ordinary_store(None)`` sat outside the ``try``, and a raise from it —
+    reading the environment, constructing the store — took ``GET /api/experiments``
+    from ``200`` to ``500``. Measured against the base commit, which wrapped the
+    equivalent call in a blanket catch, so it was a REGRESSION on the exact
+    property the paragraph below exists to defend, not merely a gap. It is
+    near-unreachable operationally; it was still the one line that could disprove
+    the sentence above it. The only statement left outside the guard is the lazy
+    import of a module this application already imported at startup.
 
     WHY ON EVERY ORDINARY READ rather than once at boot. A pod restart is not the
     only way the workspace and the database diverge — an ``emptyDir`` is per-pod,
@@ -3609,7 +3643,17 @@ def _hydrate_ordinary_scope() -> HydrationOutcome:
     ``Exception`` and not ``BaseException``: a cancellation or a ``KeyboardInterrupt``
     is not a storage outage and must not be swallowed as one.
 
-    THE FOUR OUTCOMES, AND NONE OF THE CLAUSES IS REDUNDANT.
+    THE OUTCOMES, AND NONE OF THE CLAUSES IS REDUNDANT. An earlier revision of
+    this docstring called them FOUR and called the hole closed. There were five —
+    a pass could also FINISH having skipped a row, which is neither an abort nor a
+    success — and a reviewer measured that fifth one producing exactly the defect
+    the other four were fixed for: a row dropped, ``complete`` still ``True``,
+    nothing disclosed, and a ``404`` for a record the database is holding. The
+    skip is now counted and raised at the end of the pass, so it lands in the last
+    clause below and is disclosed like any other unfinished pass. THE LIST IS NOT
+    "EXHAUSTIVE BY CONSTRUCTION"; it is exhaustive as far as it has been checked,
+    which is a weaker and more honest claim, and a new refusal added inside
+    ``hydrate`` must be counted there or it will be silent here.
 
     * NO DATABASE — every developer machine and every CI job but one. Complete;
       the filesystem is the whole truth.
@@ -3633,22 +3677,22 @@ def _hydrate_ordinary_scope() -> HydrationOutcome:
       cannot parse, or a workspace write that failed for SOME OTHER record, says
       nothing about the record a caller is asking about. The premise is true and
       the conclusion was wrong: whatever it says about one record, it says the
-      LOOP STOPPED, so every row after the failing one was never restored. The
-      old docstring named that "a real remaining hole"; an independent reviewer
-      then measured it — a succeeding ``SELECT`` plus one failing working-copy
-      write produced an empty list, ``/api/health`` reporting ``durable``, and a
-      ``404`` for an untouched durable record. It is a hole no longer: the pass
-      says it did not finish, and both callers act on that.
+      pass did not represent everything the store holds. An independent reviewer
+      measured both ways that happens — a succeeding ``SELECT`` plus one failing
+      working-copy write produced an empty list, ``/api/health`` reporting
+      ``durable``, and a ``404`` for an untouched durable record; and a completed
+      loop that skipped one unplaceable row did the same while looking, from the
+      outside, like an ordinary healthy read. Both now land here.
     """
-    store = _ordinary_store(None)
-    if store is None:
-        return HydrationOutcome()
     from .experiment_repository import (  # noqa: PLC0415 - cycle
         StorageNotProvisioned,
         StorageUnavailable,
     )
 
     try:
+        store = _ordinary_store(None)
+        if store is None:
+            return HydrationOutcome()
         return HydrationOutcome(restored=store.hydrate())
     except StorageNotProvisioned:
         return HydrationOutcome()  # nothing to restore, and that is KNOWN.
@@ -3672,9 +3716,13 @@ def _hydrate_ordinary_scope_or_raise() -> int:
 
     ``restore_failed`` raises a NEW ``StorageUnavailable`` carrying
     ``STORAGE_RESTORE_FAILED_MESSAGE``, chained from the original. It must not
-    reuse the read message, because in this mode the database WAS read
-    successfully and telling an operator otherwise sends them to look at a healthy
-    database. This is the same lesson ``experiment_repository`` records for having
+    reuse the read message, because in this mode the database was typically read
+    successfully — it answered, or was never asked — and telling an operator
+    otherwise sends them to look at a healthy database. Note that the message says
+    only that the RESTORE did not finish; it does not assert that the database
+    answered, because one of the three producers of this label (a store that could
+    not be resolved) never issued a query at all. This is the same lesson
+    ``experiment_repository`` records for having
     once had a single message for a read and a write: a body that reaches a person
     has to describe what actually happened. AND IT IS NOT RECORDED AS A STORAGE
     FAILURE (:func:`~isaac_api.experiment_repository.storage_failure` is untouched
@@ -3711,9 +3759,18 @@ def list_experiments_with_hydration(
     """:func:`list_experiments`, and WHETHER THE LIST CAN BE TRUSTED TO BE WHOLE.
 
     The rows are exactly what :func:`list_experiments` returns. The second value is
-    the hydration pass that ran before them, which is the only thing that knows
-    whether a row could be missing — the directory scan itself cannot tell an empty
-    workspace from a workspace whose restore stopped half way.
+    the hydration pass that ran before them — the only signal a CALLER has for
+    whether a durably-stored row could be missing, because the directory scan
+    itself cannot tell an empty workspace from a workspace whose restore stopped
+    half way.
+
+    STATED THAT WAY DELIBERATELY, RATHER THAN AS "the only thing that knows whether
+    a row could be missing", WHICH WOULD BE FALSE. The scan below also drops a
+    directory that disappears between listing it and reading it. That row is not
+    missing in the sense this block reports — it was removed while the read was in
+    flight, so the workspace no longer holds it — and it is not disclosed. If that
+    ever stops being benign, it needs its own signal; it must not be folded into
+    this one, which is specifically about the DATABASE and the working copies.
 
     A TUTORIAL SCOPE NEVER HYDRATES, so its outcome is always complete. That is
     not a special case for callers: a session's records are materialised into its
@@ -3744,9 +3801,27 @@ def list_experiments(session_id: str | None = None) -> list[Experiment]:
     IT DISCARDS THE COMPLETENESS ANSWER, and every caller of it therefore MUST NOT
     present its result as an inventory. A caller that shows these rows to a person
     should use :func:`list_experiments_with_hydration` and disclose what it gets —
-    ``GET /api/experiments`` does. This signature is kept for the derived read
-    models (search, statistics, the record projection), which is a real remaining
-    gap rather than a decision that they are exempt.
+    ``GET /api/experiments`` does.
+
+    TWO CALL SITES REMAIN, FEEDING THREE USER-FACING SURFACES, and the arithmetic
+    is deliberately not one-to-one — an earlier revision of this docstring said
+    "search, statistics, the record projection" and so implied three call sites,
+    which is wrong twice over.
+
+    * ``GET /api/search`` (``routes.search_records``) — the search dialog's
+      workspace results. This is the one that made an ABSENCE CLAIM: an empty
+      snapshot produced ``reason: "scope_has_no_records"``, whose own contract is
+      that it is STRONGER than ``total: 0`` ("there is nothing here to search", so
+      do not bother rephrasing). It is now withheld while hydration is incomplete —
+      the route asks for the outcome and suppresses the claim, falling back to a
+      bare ``total: 0``, which understates rather than misstates.
+    * ``GET /api/runtime/records`` (``routes.runtime_record_projection``) — TWO
+      surfaces, not one: the Statistics page and the search dialog's cross-record
+      triage both read this endpoint. **Statistics is not a call site**; it has no
+      access to this function at all. This endpoint asserts nothing — a short
+      projection is a bare ``total: 0`` — so it understates rather than lying, but
+      it still discloses nothing, and that IS a real remaining gap rather than a
+      decision that it is exempt.
     """
     return list_experiments_with_hydration(session_id)[0]
 

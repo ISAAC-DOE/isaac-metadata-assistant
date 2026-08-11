@@ -137,8 +137,15 @@ function incompleteHeading(reason: string): string {
  * contradict.
  *
  * IT DOES NOT OFFER A COUNT AND IT DOES NOT OFFER AN "EXPECTED" TOTAL. Both would
- * be invented (`CLAUDE.md` §5). It offers Retry, because the server's own message
- * says the condition is usually temporary and a fresh read is the entire remedy.
+ * be invented (`CLAUDE.md` §5).
+ *
+ * IT OFFERS RETRY BECAUSE A FRESH READ IS THE ONLY ACTION A READER HAS HERE — not
+ * because a retry is known to work. This comment used to say the server's message
+ * "says the condition is usually temporary", and for `restore_failed` that is no
+ * longer true and should never have been assumed: a full disk or an unplaceable
+ * row survives every retry, and the server now says so in the sentence rendered
+ * below the heading. The button is not a promise, and nothing here upgrades the
+ * server's wording into one.
  *
  * It renders ABOVE the queue and above the empty state, so a reader meets the
  * caveat before the thing it qualifies — an empty queue under a silent banner
