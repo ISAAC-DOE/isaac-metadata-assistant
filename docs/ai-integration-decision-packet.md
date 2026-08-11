@@ -456,6 +456,27 @@ D1, D2, D3/D4/D5 (as one line, "Institutional Anthropic API credential + billing
 D7 and D8 are separated out here because a credential decision is not a data-governance decision**,
 and the capture spec's §9 gate table does not name them individually.
 
+> ### DO NOT RENUMBER D1–D9. Added 2026-08-11, because a renumbering was proposed.
+>
+> A continuation prompt proposed a list in which `D1` is *authoritative identity*, `D2` is *apply
+> `0002_runs`*, and D3–D9 are **this table's D1–D7 shifted down by two** — so its `D5` is this
+> document's `D3` (model provider), its `D9` is this document's `D7` (retention), and this document's
+> D8 and D9 fall off the end. **Both lists are internally coherent; adopting the second on top of the
+> first is what would do the damage.** These identifiers have left the repository: they are the labels
+> Dean and Angel are being asked to answer against, and a shifted `D5` silently redirects an answer
+> about *retention* onto *which provider*. That failure is silent by construction — every row still
+> reads plausibly.
+>
+> **So the two genuinely new decisions were added where they belong, not by shifting these:**
+>
+> | Proposed label | Where it actually lives | Why there |
+> |---|---|---|
+> | *authoritative identity* | `identity-trust-contract.md` §7, **Q5 / Q10 / Q17 / Q18** (principal, stamping, UID lifecycle, untrusted headers), **Q6 / Q7** for authorization, plus new **Q20** for ISAAC's own override / submission / revision actor columns | That document asks the question **more precisely than a single "D1" can**. It already separates *which claim arrives* (observed, §6A) from *whether the claim is trustworthy* (Q18) from *whether the identifier survives a rename or rehire* (Q5, Q17) — three different answers from three different kinds of authority. Collapsing them into one row would lose the distinction that §6A.1 exists to protect. |
+> | *apply `0002_runs`* | `migration-approval-packet-0002.md`, STATUS + §12A.3 | It is not an open question any more. Krish approved it on 2026-08-11 and the condition on that approval is discharged. What remains is an **operator action with a runbook** (§8 → §9 → §10), not a decision needing a packet row. |
+>
+> The rule, stated so it survives the next continuation: **an identifier that has been sent to an
+> external decision-maker is append-only.** Add `D10`, `Q21`. Never shift.
+
 ---
 
 ### D1 — MCP public reachability
