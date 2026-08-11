@@ -2,7 +2,9 @@
  * ONE COLLAPSIBLE SECTION INSIDE AN EXPANDED RUN CARD.
  *
  * WHY THIS EXISTS. An expanded run card used to be one flat list: five field
- * controls, then up to thirteen inherited rows with two controls each. Nothing in
+ * controls, then fourteen inherited rows with two controls each — measured against the
+ * committed seed draft, which resolves one more address than the thirteen that are
+ * actually overridable (`RunCard`'s header names that exception). Nothing in
  * it could be put away, so the reader who wanted the run's own conditions scrolled
  * past everything the record supplied, and the reader checking what is inherited
  * scrolled past the form. This is the disclosure that lets each half be put away —

@@ -40,6 +40,16 @@ import type { ApiRunInherited, ApiRunView, RunInheritedState } from './types';
 export const FIELD_ADDRESS_PREFIX = 'field:';
 
 /**
+ * The namespace prefix a record-level BLOCK address carries on the wire.
+ *
+ * Nothing on this surface RENDERS a block — see {@link overrideRows} — but the
+ * addresses have to be enumerable, because the sentences that describe an empty
+ * inherited section used to speak for the record as a whole while counting only
+ * `field:`. See {@link InheritedTally.blocks}.
+ */
+export const BLOCK_ADDRESS_PREFIX = 'block:';
+
+/**
  * The scalar inside a `field:` payload, or `null`.
  *
  * A `field:` payload is a draft field envelope; a `block:` payload is the block
@@ -179,9 +189,12 @@ export function overrideRows(run: ApiRunView): OverrideRow[] {
  * panel renders, which matters because the empty state is chosen from this tally and
  * the rows are rendered from that function.
  *
- * `block:` ADDRESSES ARE NOT COUNTED, for the same reason {@link overrideRows}
- * excludes them: they are not on this surface at all, so counting them would
- * describe rows nobody can see.
+ * `block:` ADDRESSES ARE NOT COUNTED AMONG THE FIELD NUMBERS, for the same reason
+ * {@link overrideRows} excludes them: they are not rendered on this surface, so
+ * counting them in `resolved` would make that number describe rows nobody can see.
+ * They ARE enumerated separately, in {@link InheritedTally.blocks}, and that
+ * separation is the fix to a measured defect rather than a stylistic choice —
+ * read {@link InheritedTally.blocks} before folding the two together.
  */
 export interface InheritedTally {
   /** Every `field:` address the SERVER resolved for this run. */
@@ -202,18 +215,51 @@ export interface InheritedTally {
    * second holds. Latent today; see {@link isUnrenderableValue}.
    */
   withheld: number;
+  /**
+   * The `block:` ADDRESSES THE SERVER RESOLVED FOR THIS RUN, names only, sorted.
+   *
+   * WHY THIS EXISTS, because every other number here is deliberately field-only and
+   * this list is the exception that keeps them honest. Measured against the running
+   * app — `POST /api/experiments` then `POST …/runs` then `GET …/runs` — a freshly
+   * created experiment's run comes back with `inherited` holding EXACTLY ONE entry,
+   * `block:attribution`, in state `inherited`. Every field count above is therefore
+   * zero for the commonest run in the product, and the three sentences the empty
+   * section used to render all said the RECORD carried nothing at the addresses a run
+   * inherits — contradicted by the server's own resolution in the same response.
+   *
+   * IT IS NAMES, NOT A COUNT OF VALUES, and that is the whole discipline of it. The
+   * name is the server's own address with its namespace removed; nothing here opens a
+   * block payload, decides whether it is "empty", or claims the record carries
+   * anything at it. `{contributors: []}` is exactly the payload today's live app
+   * returns, and "the record carries a value here" would be a false statement about
+   * it — while "this run resolves an address called `attribution` that this list does
+   * not show" is what the response actually says.
+   *
+   * DO NOT FOLD THESE INTO `resolved`/`absent`/`withheld`. Beyond making those
+   * numbers count unrenderable rows, an empty block would land in `withheld`, whose
+   * sentence sends the reader to the record to read a value — and for
+   * `{contributors: []}` there is nothing there to read. Keeping the block addresses
+   * as names lets the copy state less and state it truly.
+   */
+  blocks: string[];
 }
 
 export function inheritedTally(run: ApiRunView): InheritedTally {
   const rows = overrideRows(run);
   let resolved = 0;
   let absent = 0;
+  const blocks: string[] = [];
   for (const [address, resolution] of Object.entries(run.inherited ?? {})) {
-    if (!address.startsWith(FIELD_ADDRESS_PREFIX)) continue;
     if (!resolution) continue;
+    if (address.startsWith(BLOCK_ADDRESS_PREFIX)) {
+      blocks.push(address.slice(BLOCK_ADDRESS_PREFIX.length));
+      continue;
+    }
+    if (!address.startsWith(FIELD_ADDRESS_PREFIX)) continue;
     resolved += 1;
     if (resolution.state === 'absent') absent += 1;
   }
+  blocks.sort((a, b) => a.localeCompare(b));
   return {
     resolved,
     shown: rows.length,
@@ -223,6 +269,7 @@ export function inheritedTally(run: ApiRunView): InheritedTally {
     // Whatever the server resolved that is neither absent nor on screen. Derived by
     // subtraction rather than by a third pass, so it cannot drift from the other two.
     withheld: Math.max(0, resolved - absent - rows.length),
+    blocks,
   };
 }
 

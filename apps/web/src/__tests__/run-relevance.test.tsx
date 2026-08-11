@@ -15,12 +15,20 @@
  * value genuinely arrives from the extractor. So every fixture below puts the
  * unclassified paths in `run.fields` and the test asserts they still do not surface.
  *
+ * ITS SECOND SUBJECT, ADDED AFTER REVIEW (§6): WHAT AN EMPTY SECTION SAYS ABOUT THE
+ * RECORD. That is a no-guessing assertion rather than a layout one. Three sentences on
+ * this card used to claim the record carried nothing at the addresses a run inherits,
+ * for a run whose `inherited` map the server had filled — so the fixtures in §6 are
+ * measured off the running app rather than composed, and a detector plus a canary keep
+ * the four retired sentences from coming back.
+ *
  * MUTATION-TESTED. Each load-bearing assertion here was verified by breaking the
  * component in the exact way it claims to catch and confirming the failure; the
- * mutations and their output are in the slice report. `the assertion helper itself
- * bites` below is the standing canary: it runs the same detector over a DOM that DOES
- * contain a forbidden path, so a helper that silently stopped detecting anything
- * cannot leave this file green.
+ * mutations and their output are in the slice report. TWO standing canaries: `the
+ * assertion helper itself bites` runs the path detector over a DOM that DOES contain a
+ * forbidden path, and `the claim detector itself bites` runs the claim detector over
+ * the four sentences this branch retired. Either detector going quiet fails its own
+ * canary instead of passing the file vacuously.
  *
  * WHAT THIS FILE DOES NOT DO: it never re-derives a classification. The levels are
  * the backend's, `RUN_FIELDS` is pinned against `RUN_WRITABLE_FIELD_PATHS` by
@@ -295,6 +303,17 @@ describe('the run body is sections, not one dump', () => {
     );
   });
 
+  /*
+   * A KNOWN LIMIT OF THIS GUARD, recorded rather than fixed, because narrowing the
+   * pattern would weaken it. `/\d\s*%/` cannot distinguish a FABRICATED completion
+   * figure ("60% complete") from a scientific value that legitimately contains a
+   * percent sign — `"5% H2 in Ar"` at `context.thermodynamics.atmosphere` is a real
+   * atmosphere string and would fail this test if a run carried it. That trade is
+   * deliberate: a false failure is a visible, one-line diagnosis, while a percentage
+   * this app invented about a scientist's record is the defect the repo's denominator
+   * rule exists to prevent. If it ever fires on a legitimate value, scope the assertion
+   * to the summary/header text — do not relax the pattern.
+   */
   it('states no completion percentage anywhere on the card', async () => {
     const card = await showRun(RUN_WITH_UNCLASSIFIED);
     expect(card.textContent ?? '').not.toMatch(/\d\s*%/);
@@ -369,9 +388,11 @@ describe('a run with nothing to show says so', () => {
     const body = document.getElementById(
       sectionButton(card, 'Values this run inherits').getAttribute('aria-controls')!,
     )!;
-    expect(body.textContent).toContain('The record carries no values at the addresses a run inherits');
+    expect(body.textContent).toContain(
+      'The record carries no values at the record-level field addresses this list shows',
+    );
     expect(sectionButton(card, 'Values this run inherits').textContent).toContain(
-      'nothing for this run to inherit',
+      'no record-level fields in this list',
     );
     // And the card-level note, for the run that holds none of its own values either.
     expect(card.textContent).toContain('This run holds none of its own values yet');
@@ -393,10 +414,10 @@ describe('a run with nothing to show says so', () => {
     const body = document.getElementById(
       sectionButton(card, 'Values this run inherits').getAttribute('aria-controls')!,
     )!;
-    expect(body.textContent).toContain('This run resolves 2 record-level addresses');
+    expect(body.textContent).toContain('This run resolves 2 record-level field addresses');
     expect(body.textContent).toContain('none of them holds a value');
     // NOT the other sentence — the record did resolve addresses.
-    expect(body.textContent).not.toContain('The record carries no values at the addresses');
+    expect(body.textContent).not.toContain('The record carries no values at the record-level');
   });
 
   it('never claims "carries nothing" about a value it merely cannot render in one line', async () => {
@@ -422,5 +443,163 @@ describe('a run with nothing to show says so', () => {
     expect(body.textContent).not.toContain('carries no values');
     // The card-level note is withheld here: the record DOES carry something.
     expect(card.textContent).not.toContain('This run holds none of its own values yet');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6 — the shape the SERVER actually sends, and the sentences it contradicts
+// ---------------------------------------------------------------------------
+
+/*
+ * WHY THIS SECTION EXISTS, and why every fixture in it is measured rather than
+ * composed. Section 5's fixtures use `inherited: {}` and `field:`-only maps, and both
+ * are shapes the running app does not produce for the commonest run in the product.
+ * Measured through the real app — `POST /api/experiments`, then `POST …/runs` with the
+ * experiment's `If-Match`, then `GET …/runs` — a freshly created experiment's run comes
+ * back with `inherited` holding EXACTLY ONE entry:
+ *
+ *   {'block:attribution': {'state': 'inherited', 'payload': {'contributors': []},
+ *                          'inherited_payload': {'contributors': []},
+ *                          'displaced_payload': None}}
+ *
+ * `inheritedTally` counts only `field:` addresses, so every field number was zero and
+ * the card rendered three sentences that all spoke for THE RECORD — that it carries
+ * nothing at the addresses a run inherits — while the server had resolved something at
+ * `block:attribution`, an address that IS in `routes.EXPERIMENT_OVERRIDABLE_ADDRESSES`
+ * and IS resolved by `workspace.resolve_inherited` (both measured).
+ *
+ * THE SECOND FIXTURE'S SHAPE IS MEASURED TOO. `resolve_inherited` on a draft carrying
+ * `tags: ['synthetic', 'xanes']` emits `block:tags` with the BARE LIST as its payload —
+ * not an envelope — which is why nothing here wraps it in `{value: …}`. The `absent`
+ * field address beside it is the wire state `routes._resolution_state` returns when the
+ * payload is `None`, which is reachable through a stored override at an address the
+ * experiment no longer carries (its docstring says so); it is not an invented state.
+ */
+
+/** EXACTLY what `GET …/runs` returns for a run of a freshly created experiment. */
+const RUN_OF_A_FRESH_EXPERIMENT = runFixture({
+  id: 'RUNAAA',
+  label: 'Run 1',
+  version: 'ra.0',
+  fields: {},
+  inherited: {
+    'block:attribution': {
+      state: 'inherited',
+      payload: { contributors: [] },
+      inherited_payload: { contributors: [] },
+      displaced_payload: null,
+    },
+  },
+});
+
+/** A record whose only content is a tags block, plus one address that resolves absent. */
+const RUN_WITH_A_TAGGED_RECORD = runFixture({
+  id: 'RUNAAA',
+  label: 'Run 1',
+  version: 'ra.0',
+  fields: {},
+  inherited: {
+    'block:tags': {
+      state: 'inherited',
+      payload: ['synthetic', 'xanes'],
+      inherited_payload: ['synthetic', 'xanes'],
+      displaced_payload: null,
+    },
+    'field:sample.material.name': { state: 'absent', payload: null, inherited_payload: null },
+  },
+});
+
+/**
+ * SENTENCES THAT SPEAK FOR THE WHOLE RECORD. Every one of these was rendered by this
+ * branch for the fixtures above, and every one was contradicted by the same response.
+ * They are matched as text, lower-cased and whitespace-collapsed, because JSX breaks a
+ * sentence across text nodes and a naive `includes` would miss it.
+ */
+const CLAIMS_ABOUT_THE_WHOLE_RECORD = [
+  'the record carries nothing at the addresses a run inherits',
+  'the record carries no values at the addresses a run inherits',
+  'nothing for this run to inherit',
+  'nothing was hidden',
+] as const;
+
+function unscopedClaimsIn(el: HTMLElement): string[] {
+  const text = (el.textContent ?? '').toLowerCase().replace(/\s+/g, ' ');
+  return CLAIMS_ABOUT_THE_WHOLE_RECORD.filter((claim) => text.includes(claim));
+}
+
+describe('an empty inherited section never speaks for the record', () => {
+  it('says nothing the server contradicts for a run that inherits only a block', async () => {
+    const card = await showRun(RUN_OF_A_FRESH_EXPERIMENT);
+    expect(unscopedClaimsIn(card)).toEqual([]);
+
+    const body = document.getElementById(
+      sectionButton(card, 'Values this run inherits').getAttribute('aria-controls')!,
+    )!;
+    // What is NOT shown is named, with the server's own address name.
+    expect(body.textContent).toContain('also resolves 1 whole-block address that this list does not show');
+    expect(body.textContent).toContain('attribution');
+    // …and no claim is made about what that block holds. `{contributors: []}` holds nothing.
+    expect(body.textContent).not.toContain('The record carries 1 value');
+
+    // The collapsed summary describes THIS LIST, and discloses the address it omits.
+    const summary = sectionButton(card, 'Values this run inherits').textContent ?? '';
+    expect(summary).toContain('no record-level fields in this list');
+    expect(summary).toContain('1 whole-block address not shown here');
+
+    // The card-level note is scoped to the addresses this card can show.
+    expect(card.textContent).toContain(
+      'the record carries nothing at the record-level field addresses this card shows',
+    );
+  });
+
+  it('counts what it says it counts, and stops claiming nothing was hidden', async () => {
+    const card = await showRun(RUN_WITH_A_TAGGED_RECORD);
+    expect(unscopedClaimsIn(card)).toEqual([]);
+
+    const body = document.getElementById(
+      sectionButton(card, 'Values this run inherits').getAttribute('aria-controls')!,
+    )!;
+    // ONE field address resolved, and the sentence names the set it counted. The old
+    // copy said "1 record-level address" while two addresses had resolved.
+    expect(body.textContent).toContain('This run resolves 1 record-level field address and');
+    expect(body.textContent).not.toContain('resolves 2 record-level');
+    // The block IS disclosed, by name, rather than covered by "nothing was hidden".
+    expect(body.textContent).toContain('also resolves 1 whole-block address');
+    expect(body.textContent).toContain('tags');
+    // And no claim about the two tag values, which this surface cannot render.
+    expect(body.textContent).not.toContain('synthetic, xanes');
+  });
+
+  /*
+   * THE CANARY. It asserts nothing about the product: it renders the four sentences
+   * this branch used to ship and checks that `unscopedClaimsIn` reports all four, then
+   * checks that it reports none over the replacement copy. A detector that stopped
+   * detecting — a phrase edited on one side only, a `textContent` that no longer
+   * reaches, a normalisation bug — would make the two tests above pass vacuously, and
+   * this is what fails instead.
+   */
+  it('the claim detector itself bites', () => {
+    const old = document.createElement('div');
+    old.innerHTML = `
+      <p>This run holds none of its own values yet, and the record carries nothing at
+         the addresses a run inherits.</p>
+      <p>The record carries no values at the addresses a run inherits, so there is
+         nothing for this run to inherit yet.</p>
+      <p>Nothing was hidden and nothing failed to load.</p>`;
+    expect(unscopedClaimsIn(old).slice().sort()).toEqual(
+      [...CLAIMS_ABOUT_THE_WHOLE_RECORD].sort(),
+    );
+
+    const replacement = document.createElement('div');
+    replacement.innerHTML = `
+      <p>This run holds none of its own values yet, and the record carries nothing at the
+         record-level field addresses this card shows.</p>
+      <p>The record carries no values at the record-level field addresses this list shows,
+         so there is nothing in this list yet.</p>
+      <p>This run resolves 1 record-level field address and none of them holds a value.
+         Nothing here failed to load.</p>
+      <p>This run also resolves 1 whole-block address that this list does not show —
+         attribution.</p>`;
+    expect(unscopedClaimsIn(replacement)).toEqual([]);
   });
 });

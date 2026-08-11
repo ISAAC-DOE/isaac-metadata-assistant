@@ -13,19 +13,40 @@
  * first is the short form over the five run-level fields the run may hold itself;
  * the second is what it inherits from its record. Each carries a count of something
  * enumerated in its own button, so a collapsed section says what is in it, and each
- * can be put away — a card with thirteen inherited rows above a five-field form was
- * a wall the reader had to scroll past to reach whichever half they came for.
+ * can be put away — a card with fourteen inherited rows above a five-field form was
+ * a wall the reader had to scroll past to reach whichever half they came for. (Fourteen
+ * is measured against the committed seed draft, not the thirteen overridable addresses:
+ * see the exception named below.)
  *
- * WHAT THE CARD OFFERS A CONTROL FOR IS DECIDED ELSEWHERE, and that is the point.
+ * WHAT SECTION ONE OFFERS A CONTROL FOR IS DECIDED ELSEWHERE, and that is the point.
  * The field list is `RUN_FIELDS`, which is the frontend transcription of
  * `routes.RUN_WRITABLE_FIELD_PATHS` — pinned against it by
  * `apps/api/tests/test_run_api.py`, not re-derived here. An UNCLASSIFIED field
  * (`workspace.field_level`'s real third answer: the six `system.configuration.*`
- * paths and `timestamps.created_utc`) therefore never becomes a control, because a
- * control at one of those has exactly one possible outcome — a typed 422 — and
- * handing a scientist one is the defect. `run-relevance.test.tsx` pins it, from the
- * direction it could actually fail: a run carrying those paths in its own
+ * paths and `timestamps.created_utc`) therefore never becomes a control THERE,
+ * because a control at one of those has exactly one possible outcome — a typed 422 —
+ * and handing a scientist one is the defect. `run-relevance.test.tsx` pins it, from
+ * the direction it could actually fail: a run carrying those paths in its own
  * `run.fields`.
+ *
+ * THAT GUARANTEE IS SECTION ONE'S, NOT THE WHOLE CARD'S, AND THIS HEADER USED TO CLAIM
+ * OTHERWISE — while the card offered exactly one such control two sections down. The
+ * known exception, named rather than smoothed over: section two renders one row per
+ * address `workspace.resolve_inherited` reports, and that key set is every path in the
+ * experiment's own draft that `field_level` calls experiment-level. `field_level` is a
+ * segment-aware PREFIX test, while `EXPERIMENT_OVERRIDABLE_ADDRESSES` applies a second
+ * gate — membership in `EXTRACTOR_FIELD_MAP`. `field:system.domain` passes the first
+ * and fails the second, and the committed seed draft carries it, so the panel renders
+ * 14 rows where 13 addresses are overridable and `system.domain`'s Override control
+ * can only ever return `422 not_overridable` (verified, and pinned server-side in both
+ * directions).
+ *
+ * IT IS LEFT AS IT IS, DELIBERATELY. Suppressing that one row here means either
+ * transcribing the backend's admissible-address set into this bundle — a second copy
+ * of a classification this file must not own, and the exact thing the paragraph above
+ * refuses — or changing what the route resolves, which is a backend decision. The
+ * refusal is at least rendered in the server's own words (`RunInheritedPanel` shows
+ * the typed message verbatim) rather than as a generic failure.
  *
  * THAT PANEL USED TO BE READ-ONLY and this
  * header used to say so ("it has no controls at all, which is the strongest
@@ -439,12 +460,21 @@ export function RunCard({
             record DOES carry something at an inherited address, and "the record
             carries none" would then be false. That branch is stated by the inherited
             section's own empty text instead, which is where the fact lives.
+
+            AND THE SENTENCE IS SCOPED TO THE FIELD ADDRESSES THIS CARD SHOWS, which is
+            a correction rather than a wording preference. It used to end "the record
+            carries nothing at the addresses a run inherits", and a freshly created
+            experiment's run resolves `block:attribution` — measured on the running app —
+            so the claim was contradicted by the server's own resolution while every
+            number in `tally` stayed zero. The condition is unchanged: the note is most
+            useful in exactly that case, and the block addresses are named by the
+            inherited section's own disclosure below rather than denied here.
           */}
           {filled === 0 && tally.shown === 0 && tally.withheld === 0 && (
             <p className="run-section-note">
-              This run holds none of its own values yet, and the record carries nothing at
-              the addresses a run inherits. The fields below are the ones this run can hold;
-              everything else on the record is entered on the record.
+              This run holds none of its own values yet, and the record carries nothing at the
+              record-level field addresses this card shows. The fields below are the ones this
+              run can hold; everything else on the record is entered on the record.
             </p>
           )}
 
@@ -647,10 +677,25 @@ export function RunCard({
  * and the zero is stated rather than omitted: "0 overridden on this run" is a fact a
  * reader can act on, while an absent clause is indistinguishable from a clause this
  * build forgot to render.
+ *
+ * THE EMPTY SUMMARY USED TO READ "nothing for this run to inherit", AND THAT WAS
+ * FALSE FOR THE COMMONEST RUN IN THE PRODUCT. A freshly created experiment's run
+ * resolves exactly one address — `block:attribution` — which this list does not
+ * render, so `shown` was 0 while the run inherited something (measured; see
+ * {@link InheritedTally.blocks}). This summary now describes THIS LIST, which is all
+ * it can see, and names the block addresses it is not showing rather than denying
+ * they exist.
  */
 function inheritedSummary(tally: InheritedTally): string {
-  if (tally.shown === 0) return 'nothing for this run to inherit';
-  return `${tally.inherited} inherited · ${tally.overridden} overridden on this run`;
+  if (tally.shown > 0) {
+    return `${tally.inherited} inherited · ${tally.overridden} overridden on this run`;
+  }
+  if (tally.blocks.length > 0) {
+    return `no record-level fields in this list · ${tally.blocks.length} whole-block address${
+      tally.blocks.length === 1 ? '' : 'es'
+    } not shown here`;
+  }
+  return 'no record-level fields in this list';
 }
 
 /**
@@ -659,42 +704,102 @@ function inheritedSummary(tally: InheritedTally): string {
  * The three cases are genuinely different facts about a scientist's record, and a
  * single sentence would state one of them when another holds:
  *
- *   * NOTHING RESOLVED — the record carries no experiment-level value at all, so
- *     there is not yet anything to inherit.
- *   * EVERYTHING RESOLVED IS `absent` — the server resolved N addresses and neither
- *     the record nor this run carries anything at any of them. That is a different
- *     statement from the first, and the count is the server's own.
+ *   * NOTHING RESOLVED — the record carries no value at any record-level FIELD
+ *     address, so there is nothing in this list yet.
+ *   * EVERYTHING RESOLVED IS `absent` — the server resolved N field addresses and
+ *     neither the record nor this run carries anything at any of them. That is a
+ *     different statement from the first, and the count is the server's own.
  *   * SOMETHING IS WITHHELD — the record DOES carry a value at one or more of those
  *     addresses, and this surface has no honest one-line rendering for it (an object
  *     or an array). Saying "carries nothing" here would be false; see
  *     `isUnrenderableValue`.
+ *
+ * EVERY ONE OF THE THREE IS SCOPED TO THE FIELD ADDRESSES THIS LIST SHOWS, and that
+ * scoping is a FIX, measured against the running app rather than reasoned about. All
+ * three used to be claims about THE RECORD — "the record carries no values at the
+ * addresses a run inherits", "nothing was hidden" — while `inheritedTally` counted
+ * only `field:` addresses. A freshly created experiment's run resolves exactly
+ * `block:attribution` (state `inherited`), an address that IS in
+ * `routes.EXPERIMENT_OVERRIDABLE_ADDRESSES` and IS resolved by
+ * `workspace.resolve_inherited`, so all three sentences contradicted the server's own
+ * answer in the same response. Two repairs were possible and the choice is deliberate:
+ * counting blocks in the field numbers would make them count rows nobody can see and
+ * would route an EMPTY block through the withheld sentence, which sends the reader to
+ * the record to read a value that is not there. Scoping states less and states it
+ * truly — and the block addresses are then NAMED rather than denied.
+ *
+ * WHAT WAS DELETED AND NOT REPLACED: "Nothing was hidden". It was false as written —
+ * `overrideRows` excludes every `block:` address by design — and the honest form of it
+ * is the disclosure sentence below, which says what is not shown instead of asserting
+ * that nothing is.
+ *
+ * ITS ONE KNOWN LIMIT, stated because the reader of this file should not have to
+ * discover it: the block disclosure appears only when this section would otherwise be
+ * EMPTY. A section with field rows still drops its block addresses silently, exactly
+ * as it drops `withheld` rows — the same pre-existing gap, deliberately not widened
+ * or narrowed here.
  *
  * None of the three says anything about whether the run is complete, valid or ready.
  */
 function InheritedEmpty({ tally }: { tally: InheritedTally }) {
   if (tally.withheld > 0) {
     return (
-      <p className="run-section-empty">
-        The record carries {tally.withheld} value
-        {tally.withheld === 1 ? '' : 's'} at an address this run inherits that this list cannot
-        show in one line. Nothing is hidden from the record itself — open the record to read it.
-      </p>
+      <>
+        <p className="run-section-empty">
+          The record carries {tally.withheld} value
+          {tally.withheld === 1 ? '' : 's'} at an address this run inherits that this list cannot
+          show in one line. Nothing is hidden from the record itself — open the record to read it.
+        </p>
+        <InheritedBlocksNote tally={tally} />
+      </>
     );
   }
   if (tally.resolved === 0) {
     return (
-      <p className="run-section-empty">
-        The record carries no values at the addresses a run inherits, so there is nothing for
-        this run to inherit yet. Record-level values are entered on the record, and every run
-        reads them live.
-      </p>
+      <>
+        <p className="run-section-empty">
+          The record carries no values at the record-level field addresses this list shows, so
+          there is nothing in this list yet. Record-level values are entered on the record, and
+          every run reads them live.
+        </p>
+        <InheritedBlocksNote tally={tally} />
+      </>
     );
   }
   return (
+    <>
+      <p className="run-section-empty">
+        This run resolves {tally.resolved} record-level field address
+        {tally.resolved === 1 ? '' : 'es'} and none of them holds a value — neither the record nor
+        this run carries anything at those. Nothing here failed to load.
+      </p>
+      <InheritedBlocksNote tally={tally} />
+    </>
+  );
+}
+
+/**
+ * THE ADDRESSES THIS LIST DOES NOT SHOW, named — not a count of values.
+ *
+ * It states two things and neither is about content: how many `block:` addresses the
+ * server resolved for this run, and what they are called. It does NOT say the record
+ * carries a value at any of them, because it cannot: `{contributors: []}` is the live
+ * payload of the commonest one and there is nothing in it to read.
+ *
+ * THE VERB IS "resolves", COPIED FROM THE SERVER'S OWN WORD, and not "inherits". A
+ * block address is overridable server-side (`block:attribution`, `block:tags` are both
+ * in `EXPERIMENT_OVERRIDABLE_ADDRESSES`), so a run reached over the API may hold its
+ * own value at one — "inherits" would then be false, while "resolves" is true in every
+ * state the server reports.
+ */
+function InheritedBlocksNote({ tally }: { tally: InheritedTally }) {
+  if (tally.blocks.length === 0) return null;
+  const plural = tally.blocks.length !== 1;
+  return (
     <p className="run-section-empty">
-      This run resolves {tally.resolved} record-level address
-      {tally.resolved === 1 ? '' : 'es'} and none of them holds a value — neither the record nor
-      this run carries anything there. Nothing was hidden and nothing failed to load.
+      This run also resolves {tally.blocks.length} whole-block address{plural ? 'es' : ''} that
+      this list does not show — {tally.blocks.join(', ')}. A block is an object or a list, and
+      this surface has no honest one-line rendering for one.
     </p>
   );
 }
