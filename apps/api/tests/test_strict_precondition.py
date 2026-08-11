@@ -188,3 +188,54 @@ def test_no_deprecation_header_on_successful_mutation(client):
     )
     assert r.status_code == 200
     assert not r.headers.get("X-ISAAC-Deprecation"), "grace signal must be gone in strict mode"
+
+
+# --- the strong-validator pattern is exact by construction --------------------
+
+
+def test_the_strong_validator_pattern_carries_its_exactness_in_the_pattern():
+    """`_STRONG_TAG_RE` was `^"[^"\\]+"$` applied with `.match()`, and Python's `$`
+    also matches immediately before a trailing newline — so `'"abc"\n'` was accepted
+    as a well-formed strong validator.
+
+    STATED HONESTLY: that was NOT reachable over HTTP. An ASGI server will not deliver
+    a header value containing LF, and both call sites feed this `part.strip()`, which
+    removes the newline before the pattern sees it — so this test is a unit test of the
+    constant, not an end-to-end regression, and there is no HTTP case to add. The
+    pattern is anchored anyway so that a third caller reading a validator from anywhere
+    other than a header cannot reopen the hole; that is the same decision
+    `draft_validator._SHA256_RE` and `format_shadow._RFC3339_SHAPE` took.
+
+    The `.match`/`.fullmatch` agreement is the property being pinned. Note the ONE
+    thing this does NOT change and never claimed to: `[^"\\]` still admits an embedded
+    newline INSIDE the quotes, so `'"a\nb"'` matches before and after. That is a
+    separate question about the character class, deliberately left alone.
+    """
+    from isaac_api.routes import _STRONG_TAG_RE
+
+    # Anchors, not the `^` of the negated class `[^"\\]` — hence startswith/endswith
+    # rather than a substring test, which the class's own `^` would have defeated.
+    assert _STRONG_TAG_RE.pattern.startswith("\\A")
+    assert _STRONG_TAG_RE.pattern.endswith("\\Z")
+    assert "$" not in _STRONG_TAG_RE.pattern
+
+    assert _STRONG_TAG_RE.match('"abc"'), "a legitimate strong validator must still pass"
+    assert _STRONG_TAG_RE.match('"1.7"'), "the real token shape must still pass"
+
+    for label, bad in (
+        ("trailing LF — the regression", '"abc"\n'),
+        ("trailing CR", '"abc"\r'),
+        ("trailing space", '"abc" '),
+        ("trailing junk", '"abc"x'),
+        ("leading LF", '\n"abc"'),
+        ("leading space", ' "abc"'),
+        ("weak validator", 'W/"abc"'),
+        ("unquoted", "abc"),
+        ("empty token", '""'),
+    ):
+        assert _STRONG_TAG_RE.match(bad) is None, f"{label} accepted: {bad!r}"
+
+    for candidate in ('"abc"', '"abc"\n', '\n"abc"', "abc", '""', ""):
+        assert (_STRONG_TAG_RE.match(candidate) is not None) == (
+            _STRONG_TAG_RE.fullmatch(candidate) is not None
+        ), repr(candidate)

@@ -3516,16 +3516,11 @@ _TRUTH_PATH_FILES = (
 #: describes has landed. The alternative — failing on entries that no longer match a real
 #: diff — was considered and rejected: it turns every innocent branch cut after such a
 #: merge red, which is the same "fires on an unrelated slice" defect this rescope fixes.
+#: The ``draft_validator.py`` sha256-exactness entry that lived here has LANDED on
+#: ``main`` (#118), so by the deletion rule stated above it is gone — leaving it would
+#: have left that truth-path file editable, unguarded, by every branch cut afterwards.
+#: The two entries below are THIS branch's, and are deleted the same way once landed.
 _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
-    "src/isaac_records/draft_validator.py": (
-        "sha256 exactness: `_SHA256_RE` was `^[0-9a-f]{64}$`, and Python's `$` also "
-        "matches before a trailing newline, so the 65-character string `\"9\"*64 + \"\\n\"` "
-        "passed the draft gate and — the official schema declaring `sha256` as bare "
-        "`{\"type\": \"string\"}` with no pattern — exported into an official record that "
-        "then validated ok. The pattern is now `\\A[0-9a-f]{64}\\Z`, so the exactness is "
-        "in the constant and no future `.match()` caller can reopen the hole. Delete this "
-        "entry once the change has landed on main."
-    ),
     "src/isaac_records/export.py": (
         "Anchored-pattern EXACTNESS gate. All five `pattern` gates in the vendored "
         "official schema are written `^...$`, and Python's `$` also matches before a "

@@ -548,7 +548,16 @@ def _not_found(experiment_id: str) -> JSONResponse:
 # or error body.
 
 #: A strong ETag validator: a double-quoted opaque token, no ``W/`` prefix.
-_STRONG_TAG_RE = re.compile(r'^"[^"\\]+"$')
+#:
+#: ``\A``/``\Z`` NOT ``^``/``$``: Python's ``$`` also matches immediately before a
+#: trailing newline, so ``^"..."$`` applied with ``.match()`` accepted ``'"abc"\n'``
+#: as a well-formed strong validator. STATED HONESTLY, that was not reachable over
+#: HTTP today — an ASGI server will not deliver a header value containing LF, and
+#: both call sites below feed this ``part.strip()``, which removes a trailing newline
+#: before the pattern ever sees it. The pattern is anchored anyway so the exactness
+#: belongs to the constant rather than to two callers that happen to strip: a third
+#: caller that reads a validator from anywhere but a header cannot reopen the hole.
+_STRONG_TAG_RE = re.compile(r'\A"[^"\\]+"\Z')
 
 
 def _expected_rev_from_token(token: str | None) -> int | None:
