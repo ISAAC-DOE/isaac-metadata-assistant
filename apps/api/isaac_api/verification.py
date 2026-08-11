@@ -655,10 +655,23 @@ def _string_leaves(node: Any) -> tuple[str, ...]:
 #: The EXACT shape :func:`build_report` emits for ``generated_at``. It is a
 #: necessary condition, never a sufficient one — see
 #: :func:`_structural_string_audit` for why shape alone was a hole.
-_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+#:
+#: ``\A``/``\Z`` NOT ``^``/``$``: Python's ``$`` also matches immediately before a
+#: trailing newline, so ``^...Z$`` applied with ``.match()`` accepted
+#: ``"2026-01-01T00:00:00Z\n"``. This one IS payload-reachable —
+#: :func:`_structural_string_audit` reads ``metadata.generated_at`` straight out of
+#: the report and, on a match, adds that string to the ``accountable`` allowlist. So
+#: the tolerance widened an ADMISSION rule in the one string-level privacy check
+#: that covers the datastore mode.
+_TIMESTAMP_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 #: The exact shape of a sha256 hex digest, used only to sanity-check the ONE
 #: value that is independently recomputed. Not an admission rule.
-_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+#:
+#: Anchored the same way for the same reason. Unlike the timestamp above, the value
+#: checked here is a ``hexdigest()`` this process computed, so no input can carry a
+#: newline into it — the exactness is in the pattern anyway, so that a future caller
+#: pointing this constant at caller-supplied text does not reopen the hole.
+_SHA256_HEX_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 #: Cache for the parsed vendored schema, keyed the way ``format_shadow`` and
 #: ``official`` key theirs: resolved path plus ``st_mtime_ns`` plus size. Same
