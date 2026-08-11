@@ -469,6 +469,53 @@ test.describe('per-run overrides of inherited record values', () => {
     ).toBe('');
   });
 
+  test('the two section disclosures carry no axe violation, open or collapsed', async ({
+    page,
+  }) => {
+    /*
+     * SCOPED TO `.run-section-heading`, FOR THE SAME REASON THE SCAN ABOVE IS SCOPED
+     * TO `section.run-inherited`: the two section disclosures are a subtree the
+     * relevance/disclosure slice CREATED, so a clean assertion is appropriate and
+     * anything axe reports there is that slice's. It is deliberately NOT a scan of
+     * `article.run-card`, which carries pre-existing markup this slice did not write
+     * and has no baseline entry of its own — scanning it would either inherit
+     * somebody else's debt or invite a baseline edit, and `e2e/a11y-baseline.ts` is
+     * not this slice's to touch.
+     *
+     * BOTH STATES ARE SCANNED. A collapse changes `aria-expanded` and puts the body
+     * behind `hidden`, so the second scan is the one that would catch an
+     * `aria-controls` pointing at nothing or a name that vanished with the content.
+     *
+     * WHAT IT IS NOT: not a substitute for the repository's Linux-CI a11y baseline,
+     * and not a node COUNT. It asserts a property — zero violations inside one
+     * subtree — and disables no rule. Neither does it see focus movement or contrast
+     * inside SVG, both of which axe cannot evaluate.
+     */
+    await openRunsSection(page, SEED.fresh);
+    const card = await addAndExpand(page, 1);
+    const headings = card.locator('.run-section-heading');
+    await expect(headings).toHaveCount(2);
+
+    const open = await scan(page, { include: '.run-section-heading' });
+    expect(
+      open.violations.map(formatViolation).join('\n\n'),
+      'the section disclosures, both expanded',
+    ).toBe('');
+
+    for (const nth of [0, 1]) {
+      await headings.nth(nth).getByRole('button').click();
+      await expect(headings.nth(nth).getByRole('button')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+    }
+    const collapsed = await scan(page, { include: '.run-section-heading' });
+    expect(
+      collapsed.violations.map(formatViolation).join('\n\n'),
+      'the section disclosures, both collapsed',
+    ).toBe('');
+  });
+
   test('the confirmation gate is real: nothing is sent until the box is ticked', async ({
     page,
     request,

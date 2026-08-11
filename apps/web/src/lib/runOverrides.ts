@@ -164,6 +164,68 @@ export function overrideRows(run: ApiRunView): OverrideRow[] {
   return rows;
 }
 
+/**
+ * HOW MANY OF WHAT, for the inherited section's header and its empty state.
+ *
+ * EVERY NUMBER HERE IS A COUNT OF SOMETHING ENUMERATED, and that is the whole
+ * reason this function exists rather than a percentage being computed at the call
+ * site. `CLAUDE.md` §5 and this repo's own denominator rule
+ * (`docs/evidence-sidecar-audit.md:172`) forbid a completion figure that is not
+ * derived from the record's own content, and a "% complete" over inheritance would
+ * be exactly that: there is no denominator for "how much should this run inherit".
+ *
+ * `shown` IS `overrideRows(run).length` BY CONSTRUCTION — it is computed by calling
+ * it, not by re-implementing its rules. The two cannot disagree about which rows the
+ * panel renders, which matters because the empty state is chosen from this tally and
+ * the rows are rendered from that function.
+ *
+ * `block:` ADDRESSES ARE NOT COUNTED, for the same reason {@link overrideRows}
+ * excludes them: they are not on this surface at all, so counting them would
+ * describe rows nobody can see.
+ */
+export interface InheritedTally {
+  /** Every `field:` address the SERVER resolved for this run. */
+  resolved: number;
+  /** The rows the panel actually renders. Always `overrideRows(run).length`. */
+  shown: number;
+  /** Shown rows this run reads live from the record. */
+  inherited: number;
+  /** Shown rows this run holds its own value at. */
+  overridden: number;
+  /** Resolved addresses where NEITHER the run nor the record carries anything. */
+  absent: number;
+  /**
+   * Resolved, not absent, not overridden — and carrying a value this surface has no
+   * honest one-line rendering for (an object or an array). Counted separately
+   * because "nothing is there" and "something is there that cannot be shown here"
+   * are different sentences, and the empty state must not state the first when the
+   * second holds. Latent today; see {@link isUnrenderableValue}.
+   */
+  withheld: number;
+}
+
+export function inheritedTally(run: ApiRunView): InheritedTally {
+  const rows = overrideRows(run);
+  let resolved = 0;
+  let absent = 0;
+  for (const [address, resolution] of Object.entries(run.inherited ?? {})) {
+    if (!address.startsWith(FIELD_ADDRESS_PREFIX)) continue;
+    if (!resolution) continue;
+    resolved += 1;
+    if (resolution.state === 'absent') absent += 1;
+  }
+  return {
+    resolved,
+    shown: rows.length,
+    inherited: rows.filter((row) => row.state === 'inherited').length,
+    overridden: rows.filter((row) => row.state === 'overridden').length,
+    absent,
+    // Whatever the server resolved that is neither absent nor on screen. Derived by
+    // subtraction rather than by a third pass, so it cannot drift from the other two.
+    withheld: Math.max(0, resolved - absent - rows.length),
+  };
+}
+
 /* ── the payload ───────────────────────────────────────────────────────────── */
 
 /** What {@link buildOverridePayload} produces: something sendable, or a refusal. */

@@ -188,6 +188,99 @@
   padding: 4px 0 14px;
 }
 
+/* ---- collapsible sections inside an expanded card ----------------------- */
+
+/*
+ * A quieter version of the card header, deliberately: a section is a level BELOW
+ * the run it sits in, so it borrows the geometry and drops the weight. No new
+ * token, no new hue, no new radius — see this file's header.
+ */
+.run-section {
+  border-top: 1px solid var(--border-hair);
+}
+
+.run-section:first-of-type {
+  border-top: 0;
+}
+
+.run-section-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.run-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  background: none;
+  border: 0;
+  text-align: left;
+}
+
+.run-section-header:hover {
+  background: var(--surface-subtle);
+}
+
+/*
+ * `--text-slate` (5.46:1 on a card's `--surface` #ffffff), NOT `--text-quaternary`
+ * (2.53:1) and NOT `--text-tertiary` (~3.9:1). This chevron is a section's only
+ * visual expand/collapse affordance, so WCAG 1.4.11 applies to it as a graphical
+ * object — `aria-hidden` exempts it from name computation, not from contrast, and
+ * axe's `color-contrast` rule does not scan SVG, so no baseline here would catch a
+ * wrong token. Same reasoning, same figure, as `.run-card-chevron` above.
+ */
+.run-section-chevron {
+  color: var(--text-slate);
+  flex: none;
+  transform: translateY(1px);
+}
+
+.run-section-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-primary);
+  flex: none;
+}
+
+/* The grounded count. Demoted by size and weight — `--text-muted` #5b6570 is 5.93:1
+   against a card's `--surface` #ffffff, so nothing here is demoted by contrast. */
+.run-section-summary {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.run-section-body[hidden] {
+  display: none;
+}
+
+/* The inherited panel's own margin is `12px 16px 0` — set when it was the last thing
+   in the card body. Inside a section it needs the bottom one too, or it butts against
+   the next section's rule. Its own rule is left alone; see `RunCard`. */
+.run-section-body > .run-inherited {
+  margin-bottom: 12px;
+}
+
+/* The honest alternative to an empty section, and the card-level note that says a
+   run holds nothing yet. Prose, so it wraps at a readable measure. */
+.run-section-empty,
+.run-section-note {
+  margin: 0;
+  padding: 2px 16px 12px;
+  max-width: 66ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.run-section-note {
+  padding-top: 12px;
+}
+
 /* ---- the run's own fields ---------------------------------------------- */
 
 .run-field {

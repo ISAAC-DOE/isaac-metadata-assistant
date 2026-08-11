@@ -9,8 +9,25 @@
  * demoting a path, because that line IS how a run is told apart from its
  * siblings.
  *
- * EXPANDED it is a short form over five run-level fields, plus a panel of what
- * the run inherits from its record. THAT PANEL USED TO BE READ-ONLY and this
+ * EXPANDED it is TWO COLLAPSIBLE SECTIONS, and it used to be one flat list. The
+ * first is the short form over the five run-level fields the run may hold itself;
+ * the second is what it inherits from its record. Each carries a count of something
+ * enumerated in its own button, so a collapsed section says what is in it, and each
+ * can be put away — a card with thirteen inherited rows above a five-field form was
+ * a wall the reader had to scroll past to reach whichever half they came for.
+ *
+ * WHAT THE CARD OFFERS A CONTROL FOR IS DECIDED ELSEWHERE, and that is the point.
+ * The field list is `RUN_FIELDS`, which is the frontend transcription of
+ * `routes.RUN_WRITABLE_FIELD_PATHS` — pinned against it by
+ * `apps/api/tests/test_run_api.py`, not re-derived here. An UNCLASSIFIED field
+ * (`workspace.field_level`'s real third answer: the six `system.configuration.*`
+ * paths and `timestamps.created_utc`) therefore never becomes a control, because a
+ * control at one of those has exactly one possible outcome — a typed 422 — and
+ * handing a scientist one is the defect. `run-relevance.test.tsx` pins it, from the
+ * direction it could actually fail: a run carrying those paths in its own
+ * `run.fields`.
+ *
+ * THAT PANEL USED TO BE READ-ONLY and this
  * header used to say so ("it has no controls at all, which is the strongest
  * available statement that those values are not this run's to edit here"). It is
  * no longer true and is not softened: a run may now record its own value at one
@@ -41,6 +58,8 @@ import './runs.css';
 import { useEffect, useId, useRef, useState } from 'react';
 import { StatusChip } from './StatusChip';
 import { RunInheritedPanel } from './RunInheritedPanel';
+import { RunSection } from './RunSection';
+import { inheritedTally, type InheritedTally } from '../lib/runOverrides';
 import { Check, ChevronDown, ChevronRight, CircleAlert, RotateCcw, TriangleAlert } from './icons';
 import { api } from '../lib/api';
 import {
@@ -191,6 +210,17 @@ export function RunCard({
   const conditions = runConditionsSummary(run);
   const filled = runFilledCount(run);
   const Chevron = expanded ? ChevronDown : ChevronRight;
+
+  /*
+   * WHAT THIS RUN INHERITS, COUNTED — never guessed and never a percentage.
+   *
+   * `inheritedTally` calls `overrideRows` for the numbers about rows, so the count in
+   * the section header and the rows inside it are the same list read twice rather
+   * than two readings of the same data. It is also what chooses the empty state
+   * below: `shown === 0` is precisely "the panel would render nothing", because the
+   * panel renders `overrideRows` and nothing else.
+   */
+  const tally = inheritedTally(run);
 
   /*
    * A CLIENT-REFUSED FIELD IS A CARD-LEVEL FACT, for exactly the reason a
@@ -398,72 +428,120 @@ export function RunCard({
 
       {expanded && (
         <div id={panelId} className="run-card-body" role="region" aria-labelledby={headerId}>
-          <div className="run-fields">
-            {RUN_FIELDS.map((spec) => {
-              const fieldId = `${baseId}-${spec.path}`;
-              const errorId = `${fieldId}-error`;
-              const hintId = `${fieldId}-hint`;
-              const error = fieldErrors[spec.path];
-              const value = draft[spec.path] ?? envelopeText(run.fields?.[spec.path]);
-              const describedBy =
-                [error ? errorId : null, spec.hint ? hintId : null].filter(Boolean).join(' ') ||
-                undefined;
-              return (
-                <div className="run-field" key={spec.path}>
-                  <label className="run-field-label" htmlFor={fieldId}>
-                    {spec.label}
-                    {spec.unit ? <span className="run-field-unit"> ({spec.unit})</span> : null}
-                  </label>
-                  <div className="run-field-control">
-                    {spec.kind === 'enum' ? (
-                      <select
-                        id={fieldId}
-                        className="run-input"
-                        value={value}
-                        aria-invalid={error !== undefined || undefined}
-                        aria-describedby={describedBy}
-                        onChange={(e) => onFieldChange(spec, e.target.value)}
-                      >
-                        {/* The empty option is how a value is CLEARED. It is not
-                            a placeholder: choosing it sends `null`. */}
-                        <option value="">Not set</option>
-                        {spec.options?.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        id={fieldId}
-                        className="run-input"
-                        type="text"
-                        inputMode={spec.kind === 'number' ? 'decimal' : undefined}
-                        value={value}
-                        aria-invalid={error !== undefined || undefined}
-                        aria-describedby={describedBy}
-                        onChange={(e) => onFieldChange(spec, e.target.value)}
-                      />
-                    )}
-                    <span className="run-field-path">{spec.path}</span>
-                    {spec.hint && (
-                      <span className="run-field-hint" id={hintId}>
-                        {spec.hint}
-                      </span>
-                    )}
-                    {error && (
-                      <span className="run-field-error" id={errorId}>
-                        <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
-                        {error}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {/*
+            A RUN WITH NOTHING TO SHOW SAYS SO, rather than presenting five empty
+            boxes under a heading and letting the reader work out whether that is the
+            product or a rendering failure.
+
+            THE CONDITION IS NARROW ON PURPOSE. It is stated only when this run holds
+            none of its own values AND the panel below would render nothing AND
+            nothing was withheld as unrenderable — because in the withheld case the
+            record DOES carry something at an inherited address, and "the record
+            carries none" would then be false. That branch is stated by the inherited
+            section's own empty text instead, which is where the fact lives.
+          */}
+          {filled === 0 && tally.shown === 0 && tally.withheld === 0 && (
+            <p className="run-section-note">
+              This run holds none of its own values yet, and the record carries nothing at
+              the addresses a run inherits. The fields below are the ones this run can hold;
+              everything else on the record is entered on the record.
+            </p>
+          )}
 
           {/*
+            SECTION ONE — THE RUN'S OWN FIELDS, AND ONLY THOSE.
+            The list is `RUN_FIELDS`, and it is iterated as a closed list rather than
+            derived from `run.fields`. That is the whole relevance filter for this
+            half of the card, and it is a load-bearing choice rather than a
+            convenience: `run.fields` is the run's raw draft field map, so anything a
+            future extractor writes into it would become a control here — including
+            `system.configuration.*` and `timestamps.created_utc`, which
+            `workspace.field_level` classifies as UNCLASSIFIED and which
+            `RUN_WRITABLE_FIELD_PATHS` therefore excludes. A control at one of those
+            paths would have exactly one possible outcome, a typed 422, so it must
+            never be offered. Pinned by `run-relevance.test.tsx`.
+          */}
+          <RunSection
+            title="Conditions for this run"
+            /*
+              A COUNT OF THINGS ENUMERATED, WITH ITS SCOPE ATTACHED. `filled` counts
+              `RUN_FIELDS` entries this run carries a value for and the denominator is
+              that list's own length, so both halves are read off the list rendered
+              below. It is deliberately NOT a completion figure: a valid ISAAC record
+              needs far more than these five, most of them entered on the record — the
+              same disclosure the collapsed header carries, for the same reason.
+            */
+            summary={`${filled} of ${RUN_FIELDS.length} recorded — the run-level fields on this screen`}
+          >
+            <div className="run-fields">
+              {RUN_FIELDS.map((spec) => {
+                const fieldId = `${baseId}-${spec.path}`;
+                const errorId = `${fieldId}-error`;
+                const hintId = `${fieldId}-hint`;
+                const error = fieldErrors[spec.path];
+                const value = draft[spec.path] ?? envelopeText(run.fields?.[spec.path]);
+                const describedBy =
+                  [error ? errorId : null, spec.hint ? hintId : null].filter(Boolean).join(' ') ||
+                  undefined;
+                return (
+                  <div className="run-field" key={spec.path}>
+                    <label className="run-field-label" htmlFor={fieldId}>
+                      {spec.label}
+                      {spec.unit ? <span className="run-field-unit"> ({spec.unit})</span> : null}
+                    </label>
+                    <div className="run-field-control">
+                      {spec.kind === 'enum' ? (
+                        <select
+                          id={fieldId}
+                          className="run-input"
+                          value={value}
+                          aria-invalid={error !== undefined || undefined}
+                          aria-describedby={describedBy}
+                          onChange={(e) => onFieldChange(spec, e.target.value)}
+                        >
+                          {/* The empty option is how a value is CLEARED. It is not
+                              a placeholder: choosing it sends `null`. */}
+                          <option value="">Not set</option>
+                          {spec.options?.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id={fieldId}
+                          className="run-input"
+                          type="text"
+                          inputMode={spec.kind === 'number' ? 'decimal' : undefined}
+                          value={value}
+                          aria-invalid={error !== undefined || undefined}
+                          aria-describedby={describedBy}
+                          onChange={(e) => onFieldChange(spec, e.target.value)}
+                        />
+                      )}
+                      <span className="run-field-path">{spec.path}</span>
+                      {spec.hint && (
+                        <span className="run-field-hint" id={hintId}>
+                          {spec.hint}
+                        </span>
+                      )}
+                      {error && (
+                        <span className="run-field-error" id={errorId}>
+                          <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
+                          {error}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </RunSection>
+
+          {/*
+            SECTION TWO — WHAT THE RUN INHERITS, WITH #122's PRESENTATION UNTOUCHED.
+
             THE INHERITED PANEL IS NO LONGER READ-ONLY, and the copy it used to carry
             was already false for a row it could render. It said, flatly, "Change an
             inherited value on the experiment, not here", while `inheritedFieldRows`
@@ -473,8 +551,32 @@ export function RunCard({
             miss. Both routes exist now, so the panel drives them and says what they
             actually do; see `RunInheritedPanel` for the four domain properties it has
             to stay faithful to.
+
+            NOTHING ABOUT THE PANEL ITSELF IS CHANGED HERE — not a label, not a
+            treatment, not a control. It is wrapped in a disclosure and given an
+            honest alternative for the case where it would render nothing at all,
+            which is the one thing it could not say for itself: `overrideRows` empty
+            made the whole panel `return null`, so a run inheriting nothing showed no
+            heading, no sentence and no explanation, and the reader could not tell
+            that apart from a section that failed to load.
+
+            THE SECTION TITLE IS NOT THE PANEL'S OWN EYEBROW, and the difference is
+            deliberate rather than a near-miss. `RunInheritedPanel` names itself
+            "Inherited from the record" (eyebrow) and "Values inherited from the
+            record" (region), both set by #122 and neither touched here; repeating
+            either verbatim one line above them would read as a rendering fault. This
+            names the same thing from the RUN's side, which is whose card it is.
           */}
-          <RunInheritedPanel experimentId={experimentId} run={run} onRun={onRun} />
+          <RunSection
+            title="Values this run inherits"
+            summary={inheritedSummary(tally)}
+          >
+            {tally.shown > 0 ? (
+              <RunInheritedPanel experimentId={experimentId} run={run} onRun={onRun} />
+            ) : (
+              <InheritedEmpty tally={tally} />
+            )}
+          </RunSection>
 
           {autosave.status === 'conflict' && (
             <div className="run-conflict" role="alert">
@@ -535,6 +637,65 @@ export function RunCard({
         </div>
       )}
     </article>
+  );
+}
+
+/**
+ * The inherited section's one-line summary. COUNTS ONLY — never a completion figure.
+ *
+ * Both numbers are read off the rows the panel renders (see {@link inheritedTally}),
+ * and the zero is stated rather than omitted: "0 overridden on this run" is a fact a
+ * reader can act on, while an absent clause is indistinguishable from a clause this
+ * build forgot to render.
+ */
+function inheritedSummary(tally: InheritedTally): string {
+  if (tally.shown === 0) return 'nothing for this run to inherit';
+  return `${tally.inherited} inherited · ${tally.overridden} overridden on this run`;
+}
+
+/**
+ * WHAT AN EMPTY INHERITED SECTION SAYS, and why it is three sentences and not one.
+ *
+ * The three cases are genuinely different facts about a scientist's record, and a
+ * single sentence would state one of them when another holds:
+ *
+ *   * NOTHING RESOLVED — the record carries no experiment-level value at all, so
+ *     there is not yet anything to inherit.
+ *   * EVERYTHING RESOLVED IS `absent` — the server resolved N addresses and neither
+ *     the record nor this run carries anything at any of them. That is a different
+ *     statement from the first, and the count is the server's own.
+ *   * SOMETHING IS WITHHELD — the record DOES carry a value at one or more of those
+ *     addresses, and this surface has no honest one-line rendering for it (an object
+ *     or an array). Saying "carries nothing" here would be false; see
+ *     `isUnrenderableValue`.
+ *
+ * None of the three says anything about whether the run is complete, valid or ready.
+ */
+function InheritedEmpty({ tally }: { tally: InheritedTally }) {
+  if (tally.withheld > 0) {
+    return (
+      <p className="run-section-empty">
+        The record carries {tally.withheld} value
+        {tally.withheld === 1 ? '' : 's'} at an address this run inherits that this list cannot
+        show in one line. Nothing is hidden from the record itself — open the record to read it.
+      </p>
+    );
+  }
+  if (tally.resolved === 0) {
+    return (
+      <p className="run-section-empty">
+        The record carries no values at the addresses a run inherits, so there is nothing for
+        this run to inherit yet. Record-level values are entered on the record, and every run
+        reads them live.
+      </p>
+    );
+  }
+  return (
+    <p className="run-section-empty">
+      This run resolves {tally.resolved} record-level address
+      {tally.resolved === 1 ? '' : 'es'} and none of them holds a value — neither the record nor
+      this run carries anything there. Nothing was hidden and nothing failed to load.
+    </p>
   );
 }
 
