@@ -1,6 +1,21 @@
 # Migration approval packet — `0002_runs`
 
-> ## STATUS: **AWAITING APPROVAL. Nothing has been applied to any DEPLOYED database.**
+> ## STATUS: **APPROVED BY KRISH 2026-08-11. AWAITING OPERATOR APPLICATION. Nothing has been applied to any DEPLOYED database.**
+>
+> **The previous status line read "AWAITING APPROVAL", and it is superseded rather than deleted.**
+> Krish approved this migration for hosted application on 2026-08-11, conditional on the exact
+> forward SQL, rollback SQL and packet being reverified as unchanged from the reviewed form before an
+> operator executes anything. **That reverification has been performed — §12A.3 records it, at the
+> repository's current `main` HEAD, and it passed on every point.** So the condition is satisfied and
+> the approval is live.
+>
+> **What that approval is, and what it is not.** It is the *project owner's* sign-off on the
+> migration's content and on handing it to an operator. It is **not** an operator authorization and it
+> transfers no infrastructure authority: the hosted application remains Dean's act. The project rule
+> at `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md:48-52` is untouched by it — no
+> agent may connect to that database, and no kubeconfig, port-forward or Secret was requested or used
+> in preparing or reverifying this packet. **Read §8 → §9 → §10 in order; do not skip the prechecks
+> because the migration is now approved.**
 >
 > `0001_experiments` was applied to the hosted database by Dean on 2026-08-09
 > ([evidence](evidence/hosted-0001-verification-2026-08-09.md)). **That changes nothing about this
@@ -571,6 +586,37 @@ requested or used; `0002_runs` remains unapplied on the hosted database. Every l
 below stands **exactly** as written — a green job at `main` HEAD removes uncertainty about *which
 bytes* were exercised and *on which commit*, and removes none about the hosted server, its roles, its
 grants, or its real data.
+
+### 12A.3. Pre-operator reverification (added 2026-08-11) — the condition on Krish's approval
+
+**Why this subsection exists.** Krish's approval (see STATUS, above) is explicitly conditional: it
+applies to *the reviewed migration*, and lapses if anything material changed. This is the check that
+discharges that condition. §12A and §12A.2 are unaltered; this adds a third observation at a newer
+HEAD and records the approval-condition verdict item by item.
+
+| Item checked | Method | Result |
+|---|---|---|
+| commit reverified against | `git rev-parse HEAD` | `77820bff69a52fb7f9901bf0975307f9740a600a` — `main`, merge of PR [#113](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/113). Working tree clean, `0 ahead / 0 behind origin/main`. |
+| **exact forward hash** | `shasum -a 256` | `c96e308d7fdfd508ab2c2aeffb08abcb18a88aae84db6f1d08b83f9cba8fda3e` — **equals** the digest in this packet's table. |
+| **exact rollback hash** | `shasum -a 256` | `0206012116a443fb301e9c161b5eb2ffcfe0e99ee6f460ce83d80e30d327cdd5` — **equals** the digest in this packet's table. |
+| **no drift since the packet** | `git ls-tree -r <c> -- …/0002_runs.sql` | blob `28a8c43b9e1422224158fe7f47c254e3708cf261` at `90b432d`, `2613cb8` **and `77820bf`**, and `git hash-object` of the working file is the same. It differs only at `b8f0a1a`, which predates the in-place CHECK correction — exactly as §12A.2 and the header record. |
+| **PostgreSQL CI proof at this exact commit** | `gh api …/runs/31461704487/jobs` | job `migration and durable repository against a real PostgreSQL` ([93686356986](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31461704487/job/93686356986)) → **success**, `head_sha` `77820bf…`, event **`push`** (so no merge commit is interposed). **All four jobs in that run are green** and the run's own conclusion is `success` — so no "judge it by the job, not the run" caveat is needed for this observation. |
+| **no CASCADE** | read the forward SQL | Confirmed, and *stronger than "no CASCADE"*: `isaac_runs_experiment_fk` carries **no `ON DELETE` clause at all**, so the action is the SQL default `NO ACTION`, which for this non-deferrable constraint refuses a parent delete. §3 argues this at length. |
+| **no protected `records`** | read the forward SQL + rollback | The identifier `records` appears in neither statement of either file, in any position. `test_no_committed_migration_may_reference_the_production_table` reads the file off disk and pins this. |
+| **no data movement / backfill** | read the forward SQL | Zero DML. Two statements, both `CREATE … IF NOT EXISTS` (table, then index). No `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP` or `TRUNCATE` anywhere. |
+| **locking analysis present** | §5 of this packet | Present and unchanged: `SHARE ROW EXCLUSIVE` on `isaac_experiments` via the FK is the only lock that can block, and it conflicts with neither `SELECT` nor ordinary DML. **Still reasoned, not measured** — §12B's caveat stands verbatim. |
+| **rollback procedure** | read `0002_runs.rollback.sql` | Four lines inside one transaction: `BEGIN; DROP TABLE IF EXISTS isaac_runs; DELETE FROM isaac_schema_migrations WHERE version = '0002_runs'; COMMIT;`. §11's ordering rule for rolling back **both** migrations is unchanged and still applies. |
+
+**Verdict: NOTHING MATERIAL CHANGED. The approval applies to the migration as it stands at
+`77820bf`.** Per the terms of the approval, the owner is not asked again.
+
+**What this reverification did NOT establish, stated so the green row above is not over-read.** It
+contacted no database. It is a check of *bytes, history and CI*, not of the hosted server — every
+limitation in §12B below applies to it exactly as written, including that a green `postgres-migration`
+job is not a hosted rehearsal, that the hosted engine's build string remains unknown here, and that
+the locking analysis is unmeasured. It also does not observe which image `/krish` currently serves:
+the hosted app sits behind an Authentik edge that this environment cannot authenticate to, and no
+rollout was witnessed while writing this.
 
 ### 12B. What CI does **not** prove
 
