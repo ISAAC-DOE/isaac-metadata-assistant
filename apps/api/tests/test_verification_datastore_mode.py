@@ -458,6 +458,66 @@ def test_the_audit_rejects_strings_that_merely_LOOK_like_report_content(
     assert verification._structural_string_audit(tampered, ROOT) is False
 
 
+@pytest.mark.parametrize(
+    "label,suffix",
+    [
+        ("LF — the one `$` was lenient about", "\n"),
+        ("CR", "\r"),
+        ("CRLF", "\r\n"),
+        ("space", " "),
+        ("tab", "\t"),
+        ("NUL", "\x00"),
+        ("NEL U+0085", "\x85"),
+        ("LINE SEPARATOR U+2028", " "),
+    ],
+)
+def test_a_generated_at_with_trailing_whitespace_is_not_admitted(
+    label, suffix, private_report
+):
+    """`_TIMESTAMP_RE` was `^\\d{4}-...Z$` applied with `.match()`, and Python's `$`
+    also matches immediately before a trailing newline.
+
+    This is the payload-reachable half of that defect, and the reason it matters more
+    here than in most places: `metadata.generated_at` is read STRAIGHT OUT OF THE
+    PAYLOAD and, on a match, added to the `accountable` allowlist. So the tolerance
+    widened an ADMISSION rule inside the only string-level privacy check that covers
+    the datastore mode, where `_leak_scan` cannot run.
+
+    The pattern is now `\\A...\\Z`. Only the LF case ever passed; the rest are
+    asserted alongside it so nobody "generalises" the fix into a strip-then-match,
+    which would admit all of them.
+    """
+    tampered = json.loads(json.dumps(private_report))
+    stamp = tampered["metadata"]["generated_at"]
+    assert verification._TIMESTAMP_RE.match(stamp), "the fixture must carry a real stamp"
+    tampered["metadata"]["generated_at"] = stamp + suffix
+    assert verification._TIMESTAMP_RE.match(stamp + suffix) is None, (
+        f"a stamp with a trailing {label} still matches the shape gate"
+    )
+    assert verification._structural_string_audit(tampered, ROOT) is False
+
+
+def test_both_shape_gates_carry_their_exactness_in_the_pattern(private_report):
+    """`.match` and `.fullmatch` must now agree, so a future `.match()` caller cannot
+    reopen the hole — the same decision `draft_validator._SHA256_RE` and
+    `format_shadow._RFC3339_SHAPE` took."""
+    for name in ("_TIMESTAMP_RE", "_SHA256_HEX_RE"):
+        pattern = getattr(verification, name)
+        assert "$" not in pattern.pattern and "^" not in pattern.pattern, name
+        for candidate in (
+            private_report["metadata"]["generated_at"],
+            private_report["schema_fingerprint"],
+            "0" * 64,
+            "0" * 64 + "\n",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z\n",
+            "",
+        ):
+            assert (pattern.match(candidate) is not None) == (
+                pattern.fullmatch(candidate) is not None
+            ), (name, candidate)
+
+
 def test_the_audit_still_admits_the_two_values_this_run_really_emitted(private_report):
     """The other half: the tightening must not make a correct report fail.
 
