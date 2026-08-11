@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "45850af6bd4a789083bf11969c2d1374d50c98f17348f2cb9676b9505c97b9c6"
+        "sha256": "e23b328e59f5ac77eed5b13f6c41eb40a3a8885d7ae80a4333bc8ce581da76f4"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "6973938b200b8c132d9f3ed364f40c602ed5e88de4e7476f397540ce396cf23f"
+        "sha256": "8f3d8a597e3a50d9099477d544ea9122db16fea7a865a4fd4511ca22f8aa0e38"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "d546c417eee90e50d1b1f659795a1cca3cf23c998509a488ccc90f416c9cd425"
+    "served_manifest_fingerprint": "989b7da39b66f584107f54081bb49b802025d5e3b684af57e4e32532a6f1bd8d"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
