@@ -645,9 +645,24 @@ class Override:
 
     def to_state(self) -> dict:
         state: dict = {"payload": self.payload, "recorded_utc": self.recorded_utc}
-        # ABSENCE IS THE ENCODING. The key is omitted when the override displaced
-        # nothing, so "displaced no inherited value" and "displaced an inherited
-        # null" stay distinguishable on disk.
+        # ABSENCE IS THE ENCODING: the key is omitted when there is nothing to record.
+        #
+        # THE COMMENT HERE USED TO CLAIM MORE THAN THE CODE DOES, and the claim was
+        # false. It said this keeps "displaced no inherited value" and "displaced an
+        # inherited null" DISTINGUISHABLE on disk. It does not, and cannot: the
+        # condition is `is not None`, so an explicit displaced `None` omits the key
+        # exactly as nothing-displaced does, and `from_state` reads `None` back for both.
+        # MEASURED — with the record carrying `draft["tags"] = None`, an accepted
+        # `block:tags` override serialises to `{'payload': [...], 'recorded_utc': ...}`
+        # with `'displaced' in state` FALSE, byte-identical to the nothing-displaced
+        # case. This encoding cannot represent an explicit displaced null.
+        #
+        # THE BEHAVIOUR IS DELIBERATELY LEFT ALONE. It is not reachable over HTTP today
+        # (no operation can set a record-level value to `null`), the two cases mean the
+        # same thing to every current reader — "there was nothing here to bring back" —
+        # and changing an on-disk encoding is its own slice with its own compatibility
+        # question for overrides already stored. What is fixed is the comment, so a
+        # future slice does not build on a guarantee that was never here.
         if self.displaced is not None:
             state["displaced"] = self.displaced
         return state

@@ -2430,6 +2430,33 @@ def test_a_non_string_address_is_refused_rather_than_coerced(
     assert _stored_run(client, experiment_id, run["id"]).overrides == {}
 
 
+def test_the_not_overridable_message_does_not_repeat_the_retracted_inherited_map_claim(
+    client, experiment_id
+):
+    """THE CORRECTION HAS TO REACH THE BODY A CLIENT ACTUALLY READS.
+
+    The claim "name an address the run's `inherited` map reports" is false in both
+    directions (``test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set``
+    measures both). It was corrected in the operation's OpenAPI description — and
+    SURVIVED in this refusal message for a further review round, which is the worse
+    place for it: a client hitting a 422 reads the message, not the spec.
+
+    So the qualification is pinned where it is acted on. Asserted against both real
+    counterexamples by ADDRESS rather than by prose match, so a reworded message that
+    still tells the truth passes and one that quietly re-collapses the two sets does not.
+    """
+    run = _create_run(client, experiment_id)
+    message = _set_override(
+        client, experiment_id, run["id"], "field:system.domain", _envelope("x")
+    ).json()["message"]
+    # Neither counterexample may be presented as the rule.
+    assert "neither necessary nor sufficient" in message
+    assert "block:tags" in message and "field:system.domain" in message
+    # And the spelling — which IS what the map is good for — is still where a client is
+    # pointed, so the correction did not remove the actual guidance.
+    assert "`inherited` map spells its keys" in message
+
+
 # --- 11c.6 the payload gate ----------------------------------------------------
 
 
@@ -2644,6 +2671,229 @@ def test_the_wrong_typed_block_override_would_otherwise_500_the_run_check(
     assert composed["attribution"] == ["not", "an", "object"]
     with pytest.raises(AttributeError):
         validate_draft(composed)
+
+
+# --- 11c.6b the payload gate MAY NOT CRASH INSTEAD OF REFUSING --------------------
+#
+# FOUND BY REVIEW, AFTER THE GATE ABOVE WAS ALREADY GREEN. This operation is the first
+# HTTP caller in the repository to hand a CLIENT-AUTHORED field envelope or block to
+# `validate_draft` — `POST /edit` refuses an `attribution` answer with 422
+# `unrecognized_field` and `POST /api/validate/record` runs the OFFICIAL validator
+# instead — so the structural assumptions the deterministic validator makes about those
+# shapes had never been reachable from a request body.
+#
+# Measured with `raise_server_exceptions=False`, which is what a REAL CLIENT SEES rather
+# than what the harness re-raises: 14 of the 15 admissible addresses returned HTTP 500
+# out of the truth plane for a wrong-shaped payload (only `block:tags` survived, having
+# no crash path). That contradicted the operation's own documented contract ("a payload
+# of the wrong shape … is rejected with `422` and writes nothing"), the OpenAPI response
+# set transcribed in `test_about_and_openapi.py`, and the type gate's own stated reason
+# for existing.
+#
+# WHAT IT WAS NOT, kept here because the distinction decides how alarming it is: in every
+# case NOTHING WAS STORED, the workspace stayed byte-identical and the record stayed
+# READABLE. That is unlike the `NaN` and depth defects gate 1 exists for, which committed
+# first and then permanently 500ed every later read of the record.
+#
+# The tests below are the reviewer's reproducers. Every one asserts the 422, the empty
+# override map read from the STORE, and that the run is still readable.
+
+
+@pytest.fixture()
+def unraising(tmp_path, monkeypatch):
+    """``(client, experiment_id)`` where a server exception RENDERS as 500.
+
+    The package's ordinary `client` re-raises it, which is the right default — an
+    unexpected exception should fail a test loudly. But it makes "what status code does a
+    client get?" unaskable, and that is the exact question this section exists to answer:
+    the defect below was invisible to a suite that only ever saw the exception.
+    """
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    from isaac_api.app import create_app
+
+    client = tutorial_client(create_app(), raise_server_exceptions=False)
+    experiment_draft, _run_draft = _split_full_draft()
+    exp = client_ws(client).create_experiment(
+        "Override payload-crash fixture", {"kind": "synthetic"}, experiment_draft
+    )
+    return client, exp.id
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # `_check_envelope` does `[e for e in (env.get("evidence") or []) if …]`
+        # (`draft_validator.py:94`): a TRUTHY NON-ITERABLE gets past the `or []` and
+        # raises `TypeError: 'int' object is not iterable`.
+        {"evidence": 7},
+        {"status": "missing", "evidence": 1},
+        {"value": "x", "status": "verified", "evidence": True},
+        {"value": "x", "status": "verified", "evidence": 1.5},
+    ],
+)
+def test_a_field_envelope_whose_evidence_is_not_a_list_is_422_and_never_a_500(
+    unraising, payload
+):
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    response = _set_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS, payload)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_envelope"
+    assert response.json()["findings"] == ["must be a field envelope"]
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+    assert client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "contributors",
+    [
+        # `name, role = c.get("name"), c.get("role")` (`draft_validator.py:286`) on a
+        # non-mapping — `AttributeError`. A string and a dict are both ITERABLE, so they
+        # reach the loop and yield characters and keys respectively.
+        "abc",
+        {"a": 1},
+        [1, 2],
+        ["not-a-dict"],
+        [None],
+        [[{"name": "n", "role": "r"}]],
+        # And the `TypeError` twin one level up: `enumerate(attribution.get(
+        # "contributors") or [])` over a truthy non-iterable. Included because it is the
+        # reason the caught set needs BOTH members on the block path too, not just
+        # `AttributeError`.
+        7,
+    ],
+)
+def test_a_block_override_whose_contributors_are_the_wrong_shape_is_422_not_a_500(
+    unraising, contributors
+):
+    """The block TYPE gate passes every one of these — the block IS an object.
+
+    So this is not a duplicate of `test_a_block_override_of_the_wrong_declared_type_is_
+    refused`: that gate reads the schema-declared TOP-LEVEL type and says nothing about
+    the contents, and the crash is one level down.
+    """
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client, experiment_id, run["id"], "block:attribution", {"contributors": contributors}
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "invalid_block_payload"
+    assert body["address"] == "block:attribution"
+    assert body["expected_type"] == "object"
+    # No invented `findings`: the probe reached no verdict, so there are no validator
+    # words to quote, and every `findings` list this route returns is the validator's own.
+    assert "findings" not in body
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+    assert client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
+
+
+def test_no_admissible_address_answers_a_crash_shaped_payload_with_a_500(unraising):
+    """THE SWEEP, over the derived set rather than over a hand-picked address.
+
+    The reproducers above pin the two branches. This pins the PROPERTY, across every
+    member of `EXPERIMENT_OVERRIDABLE_ADDRESSES` — so an address added to that set later
+    without a matching guard fails here rather than shipping a 500.
+
+    Re-measured with both guards removed: 14 of the 15 answered 500, the sole survivor
+    being `block:tags`, which has no crash path (the type gate refuses a non-list, and
+    the validator's tags branch performs no check). With the guards in place: 0 of 15.
+    """
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    crashing = []
+    for address in sorted(routes.EXPERIMENT_OVERRIDABLE_ADDRESSES):
+        payload = (
+            {"evidence": 7}
+            if address.startswith(f"{ws.ADDRESS_FIELD}:")
+            else {"contributors": "abc"}
+            if address == "block:attribution"
+            else ["a-tag"]  # `block:tags` has no crash-shaped payload; a valid one
+        )
+        if _set_override(client, experiment_id, run["id"], address, payload).status_code == 500:
+            crashing.append(address)
+    assert crashing == []
+
+
+def test_a_crash_shaped_payload_leaves_the_run_byte_identical(unraising):
+    """The property the 422 alone does not establish: the refusal wrote NOTHING.
+
+    Read from the store, and across BOTH crash shapes in one run, because the two land in
+    different branches of the payload gate.
+    """
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    before = _stored_run(client, experiment_id, run["id"])
+    frozen = (before.rev, before.version_token(), json.dumps(before.to_state(), sort_keys=True))
+    for address, payload in (
+        (_MATERIAL_ADDRESS, {"evidence": 7}),
+        ("block:attribution", {"contributors": ["not-a-dict"]}),
+    ):
+        assert _set_override(
+            client, experiment_id, run["id"], address, payload
+        ).status_code == 422
+    after = _stored_run(client, experiment_id, run["id"])
+    assert (after.rev, after.version_token(), json.dumps(after.to_state(), sort_keys=True)) == frozen
+
+
+def test_the_probe_guard_does_not_swallow_a_refusal_the_validator_did_reach(unraising):
+    """The control on the guard: it must not turn a real finding into a pass.
+
+    A wrong-shaped `contributors` and an authored `attribution.uploaded_by` in ONE
+    payload. The crash site is AFTER the identity refusal is filed, so a raise discards a
+    report that CARRIED that refusal — the guard therefore has to fail closed rather than
+    degrade to "no findings, store it".
+    """
+    client, experiment_id = unraising
+    run = _create_run(client, experiment_id)
+    response = _set_override(
+        client,
+        experiment_id,
+        run["id"],
+        "block:attribution",
+        {"uploaded_by": "attacker@example.invalid", "contributors": ["not-a-dict"]},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_block_payload"
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
+
+
+@pytest.mark.parametrize(
+    "contributors", [[{}], [{"name": ["a"], "role": "b"}]]
+)
+def test_a_contributor_shape_finding_is_ADMITTED_and_the_posture_is_the_disclosed_one(
+    client, experiment_id, contributors
+):
+    """WHAT THE PAYLOAD GATE DELIBERATELY DOES NOT REFUSE, pinned rather than described.
+
+    The block probe is filtered to `UPLOADED_BY_PATH`, so NO
+    `attribution.contributors[…]` finding is applied — shape or evidence. These two are
+    not crashes: the validator reaches a real finding about them and this route drops it.
+
+    That is inside the disclosed posture, and this test asserts all three parts of it so
+    the disclosure cannot decay into "it is stored and nothing notices": stored with 200,
+    VISIBLE as a failing verdict on the run check, and REMOVABLE by the clear operation.
+    """
+    run = _create_run(client, experiment_id)
+    assert _set_override(
+        client, experiment_id, run["id"], "block:attribution", {"contributors": contributors}
+    ).status_code == 200
+    assert _stored_run(client, experiment_id, run["id"]).overrides[
+        "block:attribution"
+    ].payload == {"contributors": contributors}
+
+    check = client.post(f"/api/experiments/{experiment_id}/runs/{run['id']}/check", json={})
+    assert check.status_code == 200, check.text
+    draft_report = check.json()["draft"]
+    assert draft_report["ok"] is False
+    assert [e["path"] for e in draft_report["errors"]] == ["attribution.contributors[0]"]
+
+    cleared = _clear_override(client, experiment_id, run["id"], "block:attribution")
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["cleared"] is True
+    assert _stored_run(client, experiment_id, run["id"]).overrides == {}
 
 
 def test_a_block_override_naming_the_server_stamped_identity_is_refused(

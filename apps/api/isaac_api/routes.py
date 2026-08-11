@@ -3324,10 +3324,30 @@ def _official_block_type(key: str) -> str | None:
     core the moment anything checks that run. That is a 500 out of the truth plane
     reached from a stored document, so the type is gated before the write.
 
+    THE GATE IS THE BLOCK'S TOP-LEVEL TYPE AND NOTHING ELSE — stated because the
+    paragraph above reads as a broader promise than it keeps. A LIST at ``attribution``
+    is refused here; a DICT at ``attribution`` whose ``contributors`` is a string, a
+    number, or a list of non-objects satisfies this gate completely and still reaches
+    the same class of crash one level down (``draft_validator.py:286``). That second
+    exposure is closed separately, by :data:`_PROBE_STRUCTURAL_ERRORS` around the probes
+    in :func:`_refuse_override_payload`, and neither mechanism subsumes the other.
+
     Reading the schema rather than transcribing it means the gate follows a schema
     refresh instead of silently disagreeing with it. ``None`` means the schema
     declares no type for that key, which the caller treats as fail-closed — see
     :func:`_refuse_override_payload`.
+
+    THE CACHE MAKES THE FAIL-CLOSED ANSWER STICK, and the direction is why that is
+    acceptable. ``lru_cache`` memoizes ``None`` as readily as a type name, so a single
+    transient ``OSError`` on the vendored schema — a file briefly unreadable during a
+    deployment, say — refuses every later override of THAT KEY for the lifetime of the
+    process rather than for one request, and only a restart clears it. (Per key: the
+    cache is keyed on ``key``, so both block overrides are disabled only if both were
+    first resolved during the outage.) That is refusing writes that would have been
+    accepted, never accepting writes that should have been refused, so the worst case is
+    an operation temporarily unavailable and typed ``422`` rather than a wrong-typed
+    block reaching the truth plane. Not worth a cache-invalidation mechanism; worth
+    saying out loud so nobody debugs it twice.
     """
     try:
         schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
@@ -3337,14 +3357,72 @@ def _official_block_type(key: str) -> str | None:
     return declared if isinstance(declared, str) else None
 
 
+#: The exceptions a CLIENT-AUTHORED payload can raise out of the deterministic draft
+#: validator, caught around the two probes in :func:`_refuse_override_payload` and
+#: turned into the typed 422 that function already returns.
+#:
+#: THIS SET IS CHOSEN, NOT SWEPT. Both members were measured, on this route, with
+#: ``raise_server_exceptions=False`` — so this is what a real client saw, not what a
+#: test harness re-raised:
+#:
+#: * ``TypeError`` — the validator iterates something a client made non-iterable.
+#:   ``{"evidence": 7}`` reaches ``[e for e in (env.get("evidence") or [])]``
+#:   (``draft_validator.py:94``) and raises ``'int' object is not iterable``; so does
+#:   ``{"contributors": 7}`` at ``enumerate(attribution.get("contributors") or [])``.
+#: * ``AttributeError`` — the validator calls ``.get`` on something a client made a
+#:   non-mapping. ``{"contributors": ["not-a-dict"]}`` reaches
+#:   ``name, role = c.get("name"), c.get("role")`` (``draft_validator.py:286``) and
+#:   raises ``'str' object has no attribute 'get'``.
+#:
+#: Those two cover every case measured on this route, and the claim is exactly that —
+#: not a proof that no third exists. It is a bounded surface: the validator was never
+#: handed a client-authored envelope or block over HTTP before this operation (`/edit`
+#: refuses an `attribution` answer with 422 `unrecognized_field`, and
+#: `POST /api/validate/record` runs the OFFICIAL validator instead), and reading the two
+#: branches it reaches finds no other unguarded structural assumption. If a third
+#: appears it will appear as a 500 in the logs, which is the outcome this set is
+#: deliberately shaped to keep possible.
+#:
+#: WHAT IS DELIBERATELY NOT CAUGHT, and why the tempting wider catch is worse. A bare
+#: ``except Exception`` would convert a genuine defect in the truth plane — a
+#: ``KeyError`` from a rule that forgot a guard, a ``ValueError`` from a real
+#: computation, a ``RecursionError`` — into a 422 that blames the client for the
+#: server's bug, and the 500 that would otherwise be investigated would never be seen.
+#: Either member alone leaves the other crash live — measured by removing each guard
+#: separately and running ``test_run_api.py``: the field probe alone, 6 red; the block
+#: probe alone, 10 red; both, 14 red; every failure ``500 != 422``. So narrowing to one
+#: member would fix half the exposure. ``RecursionError`` in particular is
+#: already unreachable here — ``_is_storable_value`` caps depth above — and it is not a
+#: statement about the payload's shape, so it stays a 500.
+#:
+#: The guard is around the CALL, not inside the validator: hardening
+#: ``draft_validator.py`` is a truth-path change (``CLAUDE.md`` §13) and belongs in its
+#: own slice. Nothing about the truth plane's behaviour changes here; only this route
+#: stops letting its exception escape as HTTP 500.
+_PROBE_STRUCTURAL_ERRORS = (AttributeError, TypeError)
+
+
 def _not_overridable(address: object) -> JSONResponse:
     """A 422 naming the address, for anything that cannot carry an override.
 
     ONE refusal for four distinct causes, deliberately: a malformed address, a
     run-level one, one the contract classifies as neither level, and a well-formed
     record-level-LOOKING path that is not a real official field. A client's remedy is
-    the same in all four — name an address the run view actually reports under
-    ``inherited`` — so splitting them would be four names for one repair.
+    the same in all four — name an address from the overridable set, spelt as the run
+    view spells the keys of its ``inherited`` map — so splitting them would be four
+    names for one repair.
+
+    THE QUALIFICATION IS CARRIED HERE TOO, and it is not decoration. An earlier
+    revision of this docstring, and of the message below, told a client to name "an
+    address the run view actually reports under ``inherited``". That is FALSE IN BOTH
+    DIRECTIONS on the committed seed and was already corrected in the operation's
+    OpenAPI description — but a client reading a refusal never sees that description,
+    so the retracted claim survived in the one place it would actually be acted on.
+    Measured: ``field:system.domain`` IS reported under ``inherited`` and is NOT
+    overridable, and ``block:tags`` IS overridable and is absent from the map until the
+    record carries a tag. The map is where the SPELLING is read; it is neither necessary
+    nor sufficient for membership. Pinned by
+    ``test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set``.
     """
     return JSONResponse(
         status_code=422,
@@ -3353,9 +3431,13 @@ def _not_overridable(address: object) -> JSONResponse:
             "address": str(address),
             "message": (
                 "This address cannot hold a run override. Only a record-level value "
-                "a run INHERITS can be overridden, named exactly as the run's "
-                "`inherited` map reports it — `field:<official.dotted.path>` or "
-                "`block:attribution` / `block:tags`. A run's own fields are edited on "
+                "a run INHERITS can be overridden — `field:<official.dotted.path>`, "
+                "`block:attribution` or `block:tags`, spelt exactly as the run's "
+                "`inherited` map spells its keys. Appearing in that map is where the "
+                "spelling is read, and it is neither necessary nor sufficient: "
+                "`block:tags` is overridable but is absent from the map until the "
+                "record carries a tag, and `field:system.domain` is reported there but "
+                "is not overridable. A run's own fields are edited on "
                 "the run instead, a misspelt or invented path is refused rather than "
                 "stored, and an address the contract assigns to neither level is not "
                 "guessed into one. Nothing was written."
@@ -3390,7 +3472,21 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
        record-type stamp and that is not this field's problem.
 
        The block check is the schema-declared JSON type (:func:`_official_block_type`),
-       fail-closed when the schema declares none.
+       fail-closed when the schema declares none. It is the block's TOP-LEVEL type only
+       — see that function on why the contents need a second guard.
+
+       NEITHER PROBE MAY ESCAPE AS A 500, and it took a review to notice that both did.
+       The validator makes structural assumptions this route is the first HTTP caller to
+       hand a client-authored value against, so a wrong-shaped payload — ``evidence`` a
+       bare number, ``contributors`` a string or a list of non-objects — raised out of
+       the deterministic core and rendered as HTTP 500 on 14 of the 15 admissible
+       addresses. Both probes are now wrapped in :data:`_PROBE_STRUCTURAL_ERRORS`, which
+       documents the exception set and what it deliberately does not catch, and a
+       malformed payload falls through to the typed 422 this function already returns.
+       Worth being exact about what that defect was NOT: nothing was stored, the
+       workspace stayed byte-identical, and the record stayed readable — unlike the
+       ``NaN`` and depth defects gate 1 exists for, which committed first and then
+       permanently 500ed every subsequent read.
 
     3. **The server-stamped identity is refused even inside a block.** ``attribution``
        is overridable and ``attribution.uploaded_by`` is a field no client may author:
@@ -3401,11 +3497,24 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
        the validator's attribution branch would raise on a non-dict.
 
     WHAT THIS DOES NOT DO. It does not decide whether the value is scientifically
-    right, and it does not run the block-evidence coverage checks. Those legitimately
-    depend on evidence the EXPERIMENT carries — a contributor's provenance lives in the
-    experiment's ``block_evidence``, which a probe draft holding one block does not
-    have — so running them here would refuse a perfectly good override for evidence
-    that is present. The run check and the export gate remain the authority, and an
+    right, and — stated more accurately than an earlier revision of this docstring,
+    which said only "the block-evidence coverage checks" — it applies NO
+    ``attribution.contributors[...]`` finding at all, SHAPE OR EVIDENCE. The block probe
+    is filtered to ``UPLOADED_BY_PATH``, so every finding filed against a contributor
+    index is dropped, including the two shape refusals the validator does reach:
+    measured, ``{"contributors": [{}]}`` and
+    ``{"contributors": [{"name": ["a"], "role": "b"}]}`` are both STORED with 200, and
+    the run check then reports ``ok: false`` over each — the first "contributor missing
+    name/role — cannot key its evidence", the second "contributor has no evidence"
+    (a list-valued ``name`` is truthy, so it passes the name/role check and is then keyed
+    under something nothing covers). Both are removable by the clear operation.
+
+    That is deliberate for the evidence half: coverage legitimately depends on evidence
+    the EXPERIMENT carries — a contributor's provenance lives in the experiment's
+    ``block_evidence``, which a probe draft holding one block does not have — so running
+    it here would refuse a perfectly good override for evidence that is present. The
+    shape half rides along with it, and the posture is the same either way: the run check
+    and the export gate remain the authority, and an
     override they refuse is stored, visible, refused at the gate, and removable by the
     clear operation below. That is the same posture as any other unfinished draft
     content, and it is fail-closed at the boundary that mints an official record.
@@ -3432,11 +3541,20 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
 
     if kind == ws.ADDRESS_FIELD:
         where = f"fields.{name}"
-        findings = [
-            message
-            for at, message in validate_draft({"fields": {name: payload}}).errors
-            if at == where
-        ]
+        try:
+            findings = [
+                message
+                for at, message in validate_draft({"fields": {name: payload}}).errors
+                if at == where
+            ]
+        except _PROBE_STRUCTURAL_ERRORS:
+            # QUOTED from `draft_validator.py:186`, which files exactly this finding for
+            # a payload that is not a dict at all. A dict whose `evidence` is a bare
+            # number gets PAST that guard and then crashes inside the envelope check, so
+            # the same words are the honest answer for the same reason: this is not a
+            # field envelope. It is a quotation in a refusal message, not a second copy
+            # of a rule — nothing branches on it.
+            findings = ["must be a field envelope"]
         if findings:
             return JSONResponse(
                 status_code=422,
@@ -3482,11 +3600,37 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
             },
         )
 
-    identity_findings = [
-        message
-        for at, message in validate_draft({name: payload}).errors
-        if at == UPLOADED_BY_PATH
-    ]
+    try:
+        identity_findings = [
+            message
+            for at, message in validate_draft({name: payload}).errors
+            if at == UPLOADED_BY_PATH
+        ]
+    except _PROBE_STRUCTURAL_ERRORS:
+        # THE PROBE COULD NOT REACH A VERDICT, so nothing it would have checked may be
+        # treated as cleared. The crash site is AFTER the server-stamped-identity
+        # refusal is filed, so a raise discards a report that may have carried it —
+        # this cannot degrade to "no findings, store it". Refused, and the body does
+        # NOT carry a `findings` key, because there are none: every `findings` list this
+        # route returns is the validator's own words and an invented one would break
+        # that. Measured shape: `attribution.contributors` must be a list of
+        # contributor objects.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_block_payload",
+                "address": ws.block_address(name),
+                "expected_type": declared,
+                "message": (
+                    "This block override is the type the official schema declares, but "
+                    "its CONTENTS are not a shape the deterministic checks can read — "
+                    "`attribution.contributors` must be a list of contributor objects, "
+                    "each an object. It is refused rather than stored: the checks that "
+                    "would have run over it could not reach a verdict, so nothing in it "
+                    "is treated as cleared. Nothing was written."
+                ),
+            },
+        )
     if identity_findings:
         return JSONResponse(
             status_code=422,
