@@ -487,11 +487,26 @@ and the capture spec's §9 gate table does not name them individually.
 > guessed rather than measured. The command:
 >
 > ```bash
-> grep -rhoE '\b(Q|D)[0-9]{1,3}\b' docs/ apps/ src/ | sort -u -V | tail -5
+> grep -rhoE '\bQ[0-9]{1,3}\b' docs/ apps/ src/ | sort -u -V | tail -3
+> grep -rhoE '\bD[0-9]{1,3}\b' docs/ apps/ src/ | sort -u -V | tail -5
 > ```
 >
-> At the time of writing that yields `Q24` as the highest `Q` in use, so `Q25` is next — which is
-> why the actor question is `Q25`. `D9` remains the highest `D`, so `D10` is still correct.
+> **Two commands, not one, and that is a correction too.** A combined
+> `'\b(Q|D)[0-9]{1,3}\b' … | tail -5` was written here first; `sort -V` orders every `D` before
+> every `Q`, so it **can never report a `D`**, and a `D` claim attributed to it did not come from it.
+>
+> At the time of writing the first yields `Q24` as the highest `Q` in use, so `Q25` is next — which
+> is why the actor question is `Q25`.
+>
+> **`D10` is still correct FOR THIS DOCUMENT'S SERIES, and the qualifier is load-bearing.** The
+> second command reports `D12` repo-wide: `D10`–`D12` are live Phase-33 UI decisions in
+> `docs/superpowers/plans/2026-07-23-phase-33-ui-refinement.md`, a different series that never leaves
+> the repository. `D9` is the highest in **§5's** series, the one Dean and Angel answer against.
+>
+> **And a cross-namespace `D7` collision already exists**, so this is not hypothetical: §5's `D7` is
+> *Retention*, while `migration-approval-packet-0002.md` and `0002_runs.sql` cite *"contract §8
+> DECISION D7"* for *should Runs be relational*. Both are established; neither moves. **Name the
+> document whenever you quote a `D`.**
 
 ---
 

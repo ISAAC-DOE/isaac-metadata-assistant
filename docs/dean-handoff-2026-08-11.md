@@ -23,13 +23,21 @@ Every figure here was measured on 2026-08-11 at the commit named; none is recall
 | canonical repository | `https://github.com/ISAAC-DOE/isaac-metadata-assistant` | `git remote -v` (`origin`) |
 | `main` HEAD | `64e93c9372d16958b941569252fbc9abdc373c00` | `git rev-parse HEAD` |
 | working tree | clean, **0 ahead / 0 behind** `origin/main` | `git status -sb`, `git rev-list --left-right --count` |
-| open PRs | **0** | `gh pr list --state open` |
+| open PRs | **0** *at the moment of measurement, 2026-08-11 ~16:59 UTC* | `gh pr list --state open`. **Do not expect to reproduce this**: the PR carrying this document was opened minutes later, so the command now returns at least one. The row records the state `main` was measured against, not a standing claim. |
 | CI at that commit | **success, all four jobs** — run [31506181717](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31506181717), event `push` | `gh run view` |
 | PostgreSQL proof | job `migration and durable repository against a real PostgreSQL` ([93828219677](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31506181717/job/93828219677)) → **success**, engine `PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1)` printed by the server itself | `gh run view --job … --log` |
 | hosted application | `https://isaac.slac.stanford.edu/krish/` serving commit **`64e93c9…`**, `mode: synthetic-only`, `experiment_storage: {backend: postgres, durable: true}`, `record_display: closed`, `last_recon: null` | authenticated browser read of `/krish/api/health` |
 
 **The hosted deployment is running the exact commit this handoff is measured at.** That is unusually
 clean and worth stating: there is no version skew to reason about.
+
+**THE `/api/health` ROW IS AN APPLICATION CLAIM, NOT A DATABASE OBSERVATION — do not let it stand
+next to "PostgreSQL proof" and be read as one.** It reports what the *application* believes about its
+own configuration. It does **not** enumerate `isaac_schema_migrations`, does **not** confirm that
+`0002_runs` is absent from it, and says nothing about the hosted engine's version. `postgres` /
+`durable` means 0001 is applied and the repository is wired up; it is **not** evidence about 0002.
+Precheck 2 in the operator flow is the only thing that establishes the migration state, and it
+remains the operator's job.
 
 **No database connection was opened from this environment.** No kubeconfig, port-forward or Kubernetes
 Secret was requested or used, in preparing this document or anything it references. The rule at
@@ -80,8 +88,12 @@ Two statements, both `CREATE … IF NOT EXISTS`:
   is SQL's default `NO ACTION`, which for this non-deferrable constraint **refuses** a parent delete.
 - **No `ALTER`, no `TRUNCATE`, no forward `DROP`.**
 - **No DML of any kind** — no `INSERT`, `UPDATE`, `DELETE`. No backfill, no data movement.
-- **The protected `records` table is not named**, in any position, in either file. Pinned by
-  `test_no_committed_migration_may_reference_the_production_table`.
+- **The protected `records` table is not named in any STATEMENT of either file.** Stated at that
+  precision deliberately: the identifier does appear in the explanatory comments of both files, and
+  the pinning test (`test_no_committed_migration_may_reference_the_production_table`) tokenises the
+  output of `db_migrate.split_statements`, which drops every `--` line. So what is pinned — and what
+  matters — is that no executable statement reaches a table named `records`. A file-level "the word
+  never appears" claim would be false and was made in an earlier revision.
 - **It does not move the currently-embedded Runs** out of the experiment document, and **it changes no
   application behaviour**: no statement this application can issue names `isaac_runs`, pinned by
   `test_0002_is_inert_for_this_build_no_statement_names_isaac_runs`. The app behaves identically with
@@ -95,7 +107,9 @@ to an empty database; a second apply is a no-op; the bookkeeping rows are delete
 with an identical `information_schema.columns` digest across all three states; exactly the three
 application-owned tables are added and none removed; a stand-in `records` table is byte-identical
 afterwards; **twelve negative controls are each refused by the expected named object**, including the
-foreign key refusing a parent delete; two deliberate admissions behave as designed; and both rollback
+foreign key refusing a parent delete; **three** deliberate admissions behave as designed (a second
+run at the same ordinal, a document with no `id`, and a document whose `experiment_id` is the empty
+string — the last being the legacy shape the application actually produces); and both rollback
 orders behave as documented — wrong order fails loudly and destroys nothing.
 
 ### NOT proven until Dean applies it — do not let the green check blur this
@@ -236,13 +250,37 @@ guessed instead of measured:
    `D10`, `Q21`"* while `Q21` was already in use (`portal-identity-and-metrics-audit.md:133`). Now
    corrected to name the measuring command instead of a guessed number.
 
-Measure the next free identifier before adding one:
+Measure the next free identifier before adding one — **and measure each series separately**:
 
 ```bash
-grep -rhoE '\b(Q|D)[0-9]{1,3}\b' docs/ apps/ src/ | sort -u -V | tail -5
+grep -rhoE '\bQ[0-9]{1,3}\b' docs/ apps/ src/ | sort -u -V | tail -3
+grep -rhoE '\bD[0-9]{1,3}\b' docs/ apps/ src/ | sort -u -V | tail -5
 ```
 
-At `64e93c9` the highest in use are **`Q25`** and **`D9`** — so the next free are `Q26` and `D10`.
+**A combined one-line version of this command was here and was wrong twice, which is worth one
+paragraph because it is the third instance of this section's own failure mode.** It read
+`grep -rhoE '\b(Q|D)[0-9]{1,3}\b' … | tail -5` and concluded *"the highest in use are `Q25` and
+`D9`"*. `sort -V` orders every `D` before every `Q`, so **`tail -5` can never show a `D` at all** —
+the `D9` half was not produced by the command it was attributed to. And at `64e93c9` the highest
+`Q` was **`Q24`**; `Q25` did not exist until it was created for the actor question, so quoting it as
+already-highest inverted cause and effect.
+
+**Scope matters as much as the number, and this is the part the command cannot tell you.** Repo-wide
+the `D` series runs to **`D12`** — `D10`, `D11` and `D12` are live Phase-33 UI decisions in
+`docs/superpowers/plans/2026-07-23-phase-33-ui-refinement.md`. `D9` is the highest only **inside the
+`ai-integration-decision-packet.md` §5 namespace**, which is the series Dean and Angel answer
+against. So "the next free `D` is `D10`" is true of that packet and false of the repository.
+
+**A cross-namespace collision already exists, and is disclosed rather than fixed here:**
+`ai-integration-decision-packet.md` §5 `D7` is *Retention*, while `migration-approval-packet-0002.md`
+and `0002_runs.sql` cite *"contract §8 DECISION D7"* for *should Runs be relational*. Both are
+established and both have left the repository. **Always name the document when quoting a `D`.** The
+handoff and the Dean prompt do this: workstream 4's `D3`–`D9` are cited as
+`ai-integration-decision-packet.md` §5 and nowhere else.
+
+So: **the next free `Q` is `Q26`** (Q1–Q25 in use), and the next free `D` **in the AI packet's
+series** is `D10`. Re-measure rather than quoting these — this very sentence puts `Q26` and `D10`
+into the grep's output.
 
 **Do not renumber `D1`–`D9`.** A previous continuation prompt proposed a list that shifted them by
 two, which would have silently redirected an answer about *retention* onto *which provider*. The

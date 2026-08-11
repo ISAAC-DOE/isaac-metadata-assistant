@@ -10,7 +10,9 @@
 > the approval is live.
 >
 > **RE-MEASURED AT THE HANDOFF COMMIT, 2026-08-11 — see §12A.4.** §12A.3 was performed at `77820bf`;
-> `main` has advanced fifteen commits since, so the check was repeated at
+> `main` has advanced since (**14 first-parent commits, 53 counting merged-in branch history** —
+> `git rev-list --count [--first-parent] 77820bf..64e93c9`; an earlier revision of this line said
+> "fifteen", which is neither), so the check was repeated at
 > **`64e93c9372d16958b941569252fbc9abdc373c00`**, the commit an operator will actually check out. Both
 > hashes are unchanged, the forward SQL has had **no commit at all since `90b432d`**, and the
 > `postgres-migration` job is green at that exact commit on a `push` event. **Nothing material
@@ -630,9 +632,12 @@ rollout was witnessed while writing this.
 ### 12A.4. Re-measured at the operator-handoff commit (added 2026-08-11, later than §12A.3)
 
 **Why a fourth observation.** §12A.3 discharged the approval condition at `77820bf`. `main` has since
-advanced by fifteen commits, and this packet is now being handed to an operator — so the evidence a
-reader will act on must be measured at the commit the operator will actually check out, not at an
-ancestor of it. §12A, §12A.2 and §12A.3 are unaltered.
+advanced — **14 first-parent commits, 53 counting the history merged in with them**
+(`git rev-list --count 77820bf..64e93c9`, with and without `--first-parent`) — and this packet is now
+being handed to an operator, so the evidence a reader will act on must be measured at the commit the
+operator will actually check out, not at an ancestor of it. **Both numbers are given because a single
+"N commits" is ambiguous between them, and an earlier revision of this section quoted a third number
+that was neither.** §12A, §12A.2 and §12A.3 are unaltered.
 
 | Item | Method | Result |
 |---|---|---|
