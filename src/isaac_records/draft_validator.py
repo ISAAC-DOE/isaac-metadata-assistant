@@ -15,7 +15,20 @@ import re
 from dataclasses import dataclass, field as dc_field
 
 # A sha256 digest: exactly 64 lowercase hex chars (strict — no uppercase).
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+#
+# ``\A``/``\Z``, not ``^``/``$``: Python's ``$`` also matches immediately BEFORE a
+# trailing newline, so ``^[0-9a-f]{64}$`` accepted the 65-character string
+# ``"a"*64 + "\n"`` — measured — and nothing downstream caught it. The official
+# schema declares ``assets.items.properties.sha256`` as bare ``{"type": "string"}``
+# (no pattern, no length bound), so the malformed digest exported into an official
+# record and passed ``validate_official`` clean. A hash that is not a hash is
+# exactly the guessed/unverifiable value this module exists to refuse.
+#
+# The exactness lives in the PATTERN rather than in a ``fullmatch`` call site so
+# that every present and future consumer of this constant is exact by construction;
+# a new ``.match()`` caller cannot reintroduce the hole. ``format_shadow``'s
+# ``_RFC3339_SHAPE`` took the same decision for the same reason.
+_SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 FINAL_STATUSES = ("verified", "inferred")
 
