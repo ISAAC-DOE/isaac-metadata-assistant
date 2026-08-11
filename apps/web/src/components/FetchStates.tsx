@@ -411,6 +411,23 @@ export function downCopy(
    * what is true of the id and of how worked-example workspaces work, and asserts
    * nothing about what any other scope holds.
    *
+   * THE SCOPE SIGNAL IS PER-TAB, AND THE COPY IS WORDED TO MATCH — this is the one
+   * thing to get right here, and the first draft got it wrong. `scope === null` comes
+   * from `readTutorialSession()`, which reads **`sessionStorage`** (`lib/tutorialSession.ts`),
+   * chosen deliberately so the pointer dies with the tab. So `null` means "THIS TAB
+   * holds no session", NOT "no session exists". A reader with the walkthrough open in
+   * tab A who opens a bookmarked example link in tab B lands here while their
+   * walkthrough is very much alive — and that is the ORDINARY way to arrive, since a
+   * pasted link is the motivating case for this branch existing at all.
+   *
+   * An earlier revision said "and none is open" and told that reader the API had
+   * discarded "anything answered or exported inside it". Both were false in tab B, in
+   * the same direction as the defect this branch removes — a per-tab fact stated as a
+   * global one. The lines now say "this browser tab is not in one" and name the
+   * possibility explicitly, so they are true whether the walkthrough ended or is still
+   * running somewhere this page cannot see. `HelpAndTutorial.tsx` already draws the
+   * same distinction ("if the check THIS TAB …"); this matches it.
+   *
    * IT PROMISES NO RECOVERY. The discarded workspace is gone; the third line offers
    * a fresh walkthrough and says in the same breath that it is a new start, so the
    * one affordance named cannot be mistaken for a way back to the lost one.
@@ -420,9 +437,9 @@ export function downCopy(
       kind: 'example_workspace_ended',
       title: 'Worked Example Not Open',
       lines: [
-        'This id belongs to one of the five built-in worked-example records. Those records exist only inside an open worked-example walkthrough, and none is open — so this id names nothing in the workspace you are viewing.',
-        'A worked-example workspace is temporary: the ISAAC API discards it when the walkthrough ends, along with anything answered or exported inside it. Nothing on this page can bring that workspace back.',
-        `Starting the walkthrough again from ${LABELS.navSettings} → ${LABELS.settingsTabHelp} opens a fresh worked-example workspace with new copies of these five records — a new start, not a recovery of the one that ended.`,
+        'This id belongs to one of the five built-in worked-example records. Those records exist only inside a worked-example walkthrough, and this browser tab is not in one — so this id names nothing in the workspace you are viewing.',
+        'A worked-example workspace is reachable only from the tab that opened it, and it is temporary: when that walkthrough ends the ISAAC API discards it, along with anything answered or exported inside it. If one is still open in another tab, carry on there — this page cannot reach it.',
+        `Starting the walkthrough again from ${LABELS.navSettings} → ${LABELS.settingsTabHelp} opens a fresh worked-example workspace with new copies of these five records — a new start, not a way back into an earlier one.`,
       ],
       showRunCommand: false,
       offerReload: false,
@@ -545,6 +562,16 @@ export function downCopy(
    * the API inherits it. It is deliberately NOT fixed here — widening `isHtml` is a
    * change to how every API response is classified, which does not belong in a copy
    * correction — so treat this as a known, bounded limit of the intercept guard.
+   *
+   * WHAT THE WORKED-EXAMPLE BRANCH CHANGES ABOUT THAT GAP, recorded because it is a
+   * real widening and not merely one more inheritor. An undetected intercept on an
+   * example deep link used to produce the VAGUE claim ("may not have been created
+   * yet"); it now produces a DETAILED and confident narrative about a discarded
+   * walkthrough, for a response that never reached ISAAC. The frequency is unchanged
+   * and no new path is opened — the guard is the same `isHtml` — but a wrong answer
+   * stated confidently is worse than the same wrong answer stated vaguely, so the
+   * cost of leaving `isHtml` alone went up by this branch, and a future decision to
+   * widen it should count this among its reasons.
    *
    * NEITHER DOES A READ UNDER `/experiments/{id}/…` — that is the branch immediately
    * above, which can at least name the part that was read.
@@ -752,6 +779,15 @@ export function DownTechnicalDetails({ error }: { error: ApiError }) {
  * would make the failure state depend on a provider being present — exactly the
  * kind of coupling that turns one broken fetch into a blank page. Guarded, so a
  * non-browser environment yields the honest placeholder instead of throwing.
+ *
+ * THE MODULE NOW IMPORTS `Link`, AND THAT IS NOT AN EXCEPTION TO THE ABOVE — the
+ * sentence would misdescribe its own module if it stopped here, so: the rule is
+ * "no hook that THROWS without a provider". `useInRouterContext()` is
+ * provider-optional by contract — it returns `false` outside a Router rather than
+ * throwing — so it is used to DECIDE whether a `Link` may render, and the whole
+ * actions wrapper is skipped when it cannot. `useLocation`/`useNavigate` would
+ * throw and are still barred here. The bare-render path is exercised by tests,
+ * because several suites mount `BackendDown` outside a Router.
  */
 function currentRoute(): string {
   try {

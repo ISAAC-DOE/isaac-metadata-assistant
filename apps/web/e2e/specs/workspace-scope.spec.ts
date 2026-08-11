@@ -176,7 +176,12 @@ test.describe('@interaction the ordinary workspace', () => {
     await expect(alert).toContainText(/Worked Example Not Open/i);
     await expect(alert).toContainText(/one of the five built-in worked-example records/i);
     // No claim that the record survived, and no route back into a dead workspace.
-    await expect(alert).toContainText(/Nothing on this page can bring that workspace back/i);
+    await expect(alert).toContainText(/this page cannot reach it/i);
+    // …and the claim stays scoped to THIS TAB. The signal is `sessionStorage`, which is
+    // per-tab, so "none is open" would be false for a reader whose walkthrough is
+    // running in another tab — the same defect this panel exists to remove.
+    await expect(alert).toContainText(/this browser tab is not in one/i);
+    await expect(alert).not.toContainText(/none is open/i);
     // Not a record: no field group. And no scope was silently entered to reach one
     // — the worked-example bar renders only while a session is open.
     await expect(page.locator('.fg-header')).toHaveCount(0);

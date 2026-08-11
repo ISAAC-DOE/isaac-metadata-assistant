@@ -1039,14 +1039,19 @@ describe('worked-example session — scope handling', () => {
 
     // The honest backend state, not a blank record and not a fabricated one — and now
     // with the RIGHT account of it: this id is a worked-example id, worked-example
-    // records live only in a temporary workspace, and none is open.
+    // records live only in a temporary workspace, and THIS TAB is not in one.
     await waitFor(() => expect(view.getByText('Worked Example Not Open')).toBeInTheDocument());
     const shown = view.container.textContent ?? '';
     expect(shown).toMatch(/one of the five built-in worked-example records/i);
-    // The panel is honest that the workspace is GONE — no weaker than the sentence it
-    // replaces, and it must not hint that the record is still reachable.
-    expect(shown).toMatch(/Nothing on this page can bring that workspace back/i);
+    // The panel is honest that the workspace is UNREACHABLE FROM HERE — no weaker than
+    // the sentence it replaces, and it must not hint that the record is still reachable.
+    expect(shown).toMatch(/this page cannot reach it/i);
     expect(shown).not.toMatch(/still (exists|available)|try again later/i);
+    // …but it must NOT overreach into a global claim. The scope signal is `sessionStorage`
+    // and therefore per-tab, so "none is open" would be a lie to a reader whose
+    // walkthrough is running in another tab — the same defect this panel replaces.
+    expect(shown).toMatch(/this browser tab is not in one/i);
+    expect(shown).not.toMatch(/none is open/i);
     // The old, wrong explanation is gone rather than merely joined.
     expect(view.queryByText('Record Not Found')).toBeNull();
     expect(shown).not.toMatch(/may not have been created yet/i);

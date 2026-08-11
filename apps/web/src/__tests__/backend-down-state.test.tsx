@@ -1020,19 +1020,42 @@ describe('an example-record 404 with no worked-example session open', () => {
     expect(copy.title).toBe('Worked Example Not Open');
     const lines = copy.lines.join(' ');
     expect(lines).toContain('one of the five built-in worked-example records');
-    expect(lines).toContain('none is open');
+    expect(lines).toContain('this browser tab is not in one');
     // The withdrawn explanation, in either build's wording.
     expect(lines).not.toMatch(/may not have been created yet/i);
     expect(lines).not.toMatch(/experiment id is not in the/i);
   });
 
+  /*
+   * THE SCOPE SIGNAL IS PER-TAB, SO THE COPY MAY NOT SPEAK FOR OTHER TABS.
+   *
+   * `scope === null` comes from `sessionStorage`, which dies with the tab. A reader
+   * with the walkthrough open in tab A who opens a bookmarked example link in tab B
+   * reaches this panel while their walkthrough is alive. An earlier revision told
+   * that reader "none is open" and that the API had discarded "anything answered or
+   * exported inside it" — a per-tab fact stated globally, which is the same defect
+   * this panel exists to remove. These assertions pin the correction in BOTH
+   * directions so it cannot regress to the confident wording.
+   */
+  it('does not speak for tabs it cannot see', () => {
+    const lines = downCopy(missing(`/experiments/${EXAMPLE}`), true, null).lines.join(' ');
+    // It must NOT assert a global absence…
+    expect(lines).not.toMatch(/none is open/i);
+    expect(lines).not.toMatch(/no worked.example is open\b/i);
+    // …it must scope the claim to this tab…
+    expect(lines).toContain('this browser tab is not in one');
+    // …and it must name the still-open-elsewhere case rather than deny it.
+    expect(lines).toMatch(/still open in another tab/i);
+  });
+
   it('says the workspace is gone and promises no way back to it', () => {
     const lines = downCopy(missing(`/experiments/${EXAMPLE}`), true, null).lines.join(' ');
-    // Honest about the loss…
-    expect(lines).toContain('discards it when the walkthrough ends');
-    expect(lines).toContain('Nothing on this page can bring that workspace back');
-    // …and explicit that a replay is a new start, not a recovery.
-    expect(lines).toContain('not a recovery of the one that ended');
+    // Honest about the loss, conditioned on the walkthrough actually having ended…
+    expect(lines).toMatch(/when that walkthrough ends the ISAAC API discards it/i);
+    expect(lines).toContain('anything answered or exported inside it');
+    expect(lines).toContain('this page cannot reach it');
+    // …and explicit that a replay is a new start, not a way back.
+    expect(lines).toContain('not a way back into an earlier one');
     // No claim that the record is still there or retrievable.
     expect(lines).not.toMatch(/still (exists|available)|try again later|restore your/i);
   });
