@@ -10280,7 +10280,7 @@
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "db3c236e7ed22fef12189ede82b7d805210c1c227ee3f581b0c40b4b8c5413f9"
+        "sha256": "ce91fcb2f0380c08926561f9f431bad1a4fa3acbc1b1aafa26767b3dd7966543"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10420,11 +10420,11 @@
       },
       {
         "path": "apps/web/src/components/EvidenceRow.tsx",
-        "sha256": "1134fdd622ff37fbe56625ec97e530631acc8b069e673e7232a7fd569e98ef07"
+        "sha256": "fc65a48e1717de6d23632263ca14428762509fead0d60f304acd46083a4b80f3"
       },
       {
         "path": "apps/web/src/components/EvidenceTrailPanel.tsx",
-        "sha256": "07a85956535a0bcb2ed232439cee9efc47a41c252e5cb0aadc2819000226fee5"
+        "sha256": "4eef28e758e89730cc0acc1e49d6ab317bfa39a1ba3b091ec5b6f13bd727184e"
       },
       {
         "path": "apps/web/src/components/ExperimentQueue.tsx",
@@ -10468,7 +10468,7 @@
       },
       {
         "path": "apps/web/src/components/SourcePreview.tsx",
-        "sha256": "bcf8219547ddbf838e17f5084cb29a6eacc0a29c541fb3095906ab7a8aa9ef30"
+        "sha256": "98817ec0ce051f61187e1a790dc26d3c811e984be132b5ed29012606bdc13d19"
       },
       {
         "path": "apps/web/src/components/StagedRunner.tsx",
@@ -10496,15 +10496,15 @@
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "88b5a448de2d76a2417f842fdb5ad17087bae0ff8c3282d9b66f690d8c72c44e"
+        "sha256": "53ea32792292d634609642d456193dc84ed890e1f71a6931876ec4aa106cf18c"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "15e8a32faae3112df37acf0dea4bcaaa6960ac9ab082accc90b2e0b9b537bae5"
+        "sha256": "b2b614a06a1069e64a742321416e27e486de844debc30e3a9902690dcbd96149"
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "566b23f1d31266063afed9553819df075dae0b3add91b3b7620c93264e99cd7b"
+        "sha256": "b7917b74f9f5faa11a6907b3a817bf029d930d1d4efa563e30ca78a423f0cdcd"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "e23b328e59f5ac77eed5b13f6c41eb40a3a8885d7ae80a4333bc8ce581da76f4"
+        "sha256": "4d8b813088dcdebce6c5e86f726ea85a70ec209ba0bd6d0297f288104dafeb14"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "9f414ce6aa932f57d0a60db6a0971407026bc0ca3ccbd4a52f78bd8b1ffa05b9"
+    "served_manifest_fingerprint": "d007ee632215ded3c10616b0dc706a0533e6d5e669ee6e49450fa952dbdf7f8a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

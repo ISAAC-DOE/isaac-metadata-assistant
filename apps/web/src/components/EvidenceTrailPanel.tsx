@@ -1,5 +1,5 @@
 import './evidence.css';
-import { SOURCE_ICON, Check } from './icons';
+import { SOURCE_ICON, sourceIcon, Check, CircleAlert } from './icons';
 import { LABELS } from '../lib/labels';
 import type { EvidenceTrailEntry } from '../lib/types';
 
@@ -116,18 +116,29 @@ function TrailEntryRow({
   selected: boolean;
   onSelect: (key: string) => void;
 }) {
-  const LeadIcon = SOURCE_ICON[entry.sourceTypes[0] ?? 'file_listing'];
+  // `sourceIcon` rather than a direct `SOURCE_ICON[...]` index: an entry citing a
+  // source type this build does not list used to make this component render
+  // `undefined` as an element type, which took the whole screen down. See
+  // `icons.tsx :: sourceIcon`.
+  const LeadIcon = entry.unavailable
+    ? CircleAlert
+    : sourceIcon(entry.sourceTypes[0] ?? 'file_listing');
   return (
     <div role="listitem" className="trail-item">
       <button
         type="button"
-        className={`trail-entry${selected ? ' selected' : ''}`}
+        className={`trail-entry${selected ? ' selected' : ''}${entry.unavailable ? ' unavailable' : ''}`}
         aria-pressed={selected}
         onClick={() => onSelect(entry.key)}
       >
         <LeadIcon size={14} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--text-tertiary)', flex: 'none' }} />
         <span className="trail-key">{entry.key}</span>
-        {entry.namespaced ? (
+        {/* The failed entry stays in the list and says so in TEXT, not by colour
+            or glyph alone — it is not dropped, hidden, or quietly re-labelled as
+            a normal entry with no citations. */}
+        {entry.unavailable ? (
+          <span className="trail-unavailable">unavailable</span>
+        ) : entry.namespaced ? (
           <span className="trail-dots" aria-hidden="true">
             {entry.sourceTypes.map((st) => (
               <span key={st} className={`trail-dot ${st}`} />

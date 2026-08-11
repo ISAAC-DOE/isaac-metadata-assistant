@@ -288,39 +288,217 @@ def _status_from_evidence(evidence) -> str:
     return "verified"
 
 
+# --- per-item isolation (one bad entry must not take the trail down) -----------
+#
+# MEASURED DEFECT this section exists to fix. Both builders below used to read
+# each stored evidence payload with no shape check at all, so ONE malformed entry
+# destroyed the WHOLE trail — and the trail is the whole Evidence screen:
+#
+#   * a payload that is not iterable (``{"system.facility.beamline": 7}`` in a
+#     sidecar, or ``implicit: [7]`` in a draft) raised out of ``get_evidence``,
+#     i.e. an unhandled 500 on a GET. Measured on `77820bf`: with 36 good sidecar
+#     entries and one ``7``, ``GET /experiments/{id}/evidence`` raised
+#     ``TypeError: 'int' object is not iterable`` and returned NOTHING. In the
+#     browser that GET shares a ``Promise.all`` with four siblings, so the whole
+#     bundle rejected and the screen rendered "Backend Not Running" — a false
+#     statement about the server, caused by one field's stored evidence.
+#   * a payload that is iterable but not a list of objects (a dict, a string, a
+#     list containing a string) did NOT raise here; it was passed through
+#     verbatim and crashed the CLIENT instead. Also measured: the Evidence view
+#     rendered as an EMPTY DOM.
+#   * a draft field envelope that is not a dict was silently ``continue``d — the
+#     field vanished from the trail with no statement that anything was dropped,
+#     which is the failure mode a scientist cannot even notice.
+#
+# The rule now: an entry whose stored evidence cannot be read is still SERVED,
+# still carries its own identity (path/id/position) and whatever else about it
+# IS readable, and says so explicitly via ``unavailable`` + ``unavailable_reason``.
+# Nothing is invented for it — no value, no source, no citation, no status that
+# implies support it does not have (CLAUDE.md §5).
+#
+# A BUNDLE-level failure is deliberately NOT absorbed here. If ``draft["fields"]``
+# or ``sidecar["evidence"]`` is not a mapping at all, there is no per-item
+# question to answer and these functions still raise, so the caller fails the
+# whole read instead of reporting a misleading partial success. (The route's own
+# artifact-pair tolerance — ``routes._read_artifact_json`` — is unchanged and
+# still degrades an unreadable sidecar to the draft trail.)
+
+#: ``status`` for an entry whose stored evidence yielded NO readable support.
+#: A separate value rather than one of the draft's own statuses: the trail's
+#: ``status`` is a statement about the support behind the entry, and no such
+#: statement can be made about evidence that could not be read. "verified" — what
+#: ``_status_from_evidence`` returns for an empty list — would have been a claim
+#: this code is in no position to make. The field's own stored status is not lost:
+#: ``/experiments/{id}/draft`` carries it independently.
+UNAVAILABLE_STATUS = "unavailable"
+
+#: Neutral English for a JSON type, for the reason string. The stored VALUE is
+#: never interpolated — the reader is told what shape was found, not handed
+#: arbitrary content to read as if it were a citation.
+_JSON_KIND = {
+    bool: "a boolean",
+    int: "a number",
+    float: "a number",
+    str: "a string",
+    dict: "an object",
+    list: "a list",
+    type(None): "null",
+}
+
+
+def _kind(value) -> str:
+    return _JSON_KIND.get(type(value), "an unreadable value")
+
+
+def _readable_evidence(payload) -> tuple[list[dict], str | None]:
+    """Split a stored evidence payload into (readable entries, reason it is partial).
+
+    ``None``/absent is NOT a failure — a field legitimately carries no citation,
+    and reporting that as unavailable would cry wolf on every uncited entry.
+    """
+    if payload is None:
+        return [], None
+    if isinstance(payload, list):
+        readable = [e for e in payload if isinstance(e, dict)]
+        if len(readable) == len(payload):
+            return readable, None
+        unreadable = len(payload) - len(readable)
+        return readable, (
+            f"{unreadable} of {len(payload)} stored evidence entries cannot be "
+            f"shown: not an evidence object"
+        )
+    return [], (
+        f"the stored evidence for this entry is {_kind(payload)}, not a list of "
+        f"evidence entries"
+    )
+
+
+def _trail_entry(path: str, value, status, payload) -> dict:
+    """One trail entry, with its evidence read defensively.
+
+    ``status`` is the caller's own answer for a well-formed entry; it is replaced
+    by :data:`UNAVAILABLE_STATUS` only when the payload yielded no readable
+    support at all. A PARTIALLY readable payload keeps the status its readable
+    entries justify AND still discloses what could not be shown — the status then
+    describes exactly what is on screen, and the reason names the rest.
+    """
+    readable, reason = _readable_evidence(payload)
+    entry = {
+        "path": path,
+        "value": value,
+        "status": UNAVAILABLE_STATUS if reason is not None and not readable else status,
+        "evidence": readable,
+    }
+    if reason is not None:
+        entry["unavailable"] = True
+        entry["unavailable_reason"] = reason
+    return entry
+
+
+def _unreadable_entry(path: str, reason: str) -> dict:
+    """An entry nothing could be read from except its position in the document.
+
+    Kept in the trail on purpose. Dropping it would silently shorten a scientist's
+    evidence trail; ``value``/``evidence`` stay empty because inventing either is
+    exactly what CLAUDE.md §5 forbids.
+    """
+    return {
+        "path": path,
+        "value": None,
+        "status": UNAVAILABLE_STATUS,
+        "evidence": [],
+        "unavailable": True,
+        "unavailable_reason": reason,
+    }
+
+
+#: Shape errors a single malformed stored entry can raise. Narrow on purpose (the
+#: reasoning is ``routes._read_artifact_json``'s): a ``MemoryError`` or a genuine
+#: programming error must not be reported to a scientist as "this item's evidence
+#: is malformed", because that would be a false statement about their record.
+_ITEM_SHAPE_ERRORS = (AttributeError, TypeError, ValueError, KeyError, IndexError)
+
+
 def evidence_trail_from_draft(draft: dict) -> list[dict]:
-    """Evidence trail for a not-yet-exported experiment: read the draft envelopes."""
+    """Evidence trail for a not-yet-exported experiment: read the draft envelopes.
+
+    Every entry is read in isolation: one malformed envelope, implicit claim or
+    asset becomes ONE entry marked unavailable, never a lost trail. See the
+    section comment above for the measured defect.
+    """
     entries: list[dict] = []
     for path, env in (draft.get("fields") or {}).items():
         if not isinstance(env, dict):
+            # Was `continue` — a silent drop. The field is stated as unreadable
+            # instead, so its absence from the record's evidence is visible.
+            entries.append(
+                _unreadable_entry(
+                    str(path),
+                    f"this field's stored draft envelope is {_kind(env)}, not an "
+                    f"evidence envelope",
+                )
+            )
             continue
-        entries.append(
-            {
-                "path": path,
-                "value": env.get("value"),
-                "status": env.get("status"),
-                "evidence": env.get("evidence") or [],
-            }
-        )
-    for imp in draft.get("implicit") or []:
-        entries.append(
-            {
-                "path": f"implicit:{imp.get('about', '?')}",
-                "value": imp.get("value"),
-                "status": _status_from_evidence(imp.get("evidence")),
-                "evidence": imp.get("evidence") or [],
-            }
-        )
-    for asset in draft.get("assets") or []:
+        try:
+            entries.append(
+                _trail_entry(path, env.get("value"), env.get("status"), env.get("evidence"))
+            )
+        except _ITEM_SHAPE_ERRORS as exc:
+            entries.append(
+                _unreadable_entry(
+                    str(path), f"this field's stored evidence could not be read ({type(exc).__name__})"
+                )
+            )
+    for index, imp in enumerate(draft.get("implicit") or []):
+        if not isinstance(imp, dict):
+            entries.append(
+                _unreadable_entry(
+                    f"implicit:#{index}",
+                    f"the stored implicit claim at position {index} is {_kind(imp)}, "
+                    f"not an implicit claim; it has no recorded subject to name",
+                )
+            )
+            continue
+        path = f"implicit:{imp.get('about', '?')}"
+        try:
+            payload = imp.get("evidence")
+            entries.append(
+                _trail_entry(path, imp.get("value"), _status_from_evidence(_readable_evidence(payload)[0]), payload)
+            )
+        except _ITEM_SHAPE_ERRORS as exc:
+            entries.append(
+                _unreadable_entry(
+                    path, f"this implicit claim could not be read ({type(exc).__name__})"
+                )
+            )
+    for index, asset in enumerate(draft.get("assets") or []):
+        if not isinstance(asset, dict):
+            entries.append(
+                _unreadable_entry(
+                    f"assets:#{index}",
+                    f"the stored asset at position {index} is {_kind(asset)}, not an "
+                    f"asset; it has no recorded id or URI to name",
+                )
+            )
+            continue
         aid = asset.get("asset_id", asset.get("uri", "?"))
-        entries.append(
-            {
-                "path": f"assets:{aid}",
-                "value": asset.get("sha256"),
-                "status": _status_from_evidence(asset.get("evidence")),
-                "evidence": asset.get("evidence") or [],
-            }
-        )
+        try:
+            payload = asset.get("evidence")
+            entries.append(
+                _trail_entry(
+                    f"assets:{aid}",
+                    asset.get("sha256"),
+                    _status_from_evidence(_readable_evidence(payload)[0]),
+                    payload,
+                )
+            )
+        except _ITEM_SHAPE_ERRORS as exc:
+            entries.append(
+                _unreadable_entry(
+                    f"assets:{aid}",
+                    f"this asset's stored evidence could not be read ({type(exc).__name__})",
+                )
+            )
     return entries
 
 
@@ -330,31 +508,40 @@ def evidence_trail_from_sidecar(sidecar: dict, record: dict) -> list[dict]:
     Sidecar keys are official dotted paths, or ``assets:``/``descriptors:``/``implicit:``
     namespaced keys. ``implicit:`` values are ``{value, evidence}``; the rest are evidence
     lists. Values are resolved from the record so sha256s are visible post-export.
+
+    Read per key, in isolation: one malformed payload becomes ONE entry marked
+    unavailable — keyed by the sidecar key it was stored under, so which entry
+    failed and where it came from stay answerable. See the section comment above.
     """
     assets_by_id = {
         a.get("asset_id"): a for a in (record.get("assets") or []) if isinstance(a, dict)
     }
     entries: list[dict] = []
     for key, payload in (sidecar.get("evidence") or {}).items():
-        if key.startswith("implicit:"):
-            value = payload.get("value") if isinstance(payload, dict) else None
-            evidence = payload.get("evidence") if isinstance(payload, dict) else payload
-        else:
-            evidence = payload
-            if ":" in key:
-                namespace, _, name = key.partition(":")
-                if namespace == "assets":
-                    value = (assets_by_id.get(name) or {}).get("sha256")
-                else:
-                    value = None
+        try:
+            if key.startswith("implicit:"):
+                value = payload.get("value") if isinstance(payload, dict) else None
+                evidence = payload.get("evidence") if isinstance(payload, dict) else payload
             else:
-                value, _found = get_path(record, key)
-        entries.append(
-            {
-                "path": key,
-                "value": value,
-                "status": _status_from_evidence(evidence),
-                "evidence": evidence or [],
-            }
-        )
+                evidence = payload
+                if ":" in key:
+                    namespace, _, name = key.partition(":")
+                    if namespace == "assets":
+                        value = (assets_by_id.get(name) or {}).get("sha256")
+                    else:
+                        value = None
+                else:
+                    value, _found = get_path(record, key)
+            entries.append(
+                _trail_entry(
+                    key, value, _status_from_evidence(_readable_evidence(evidence)[0]), evidence
+                )
+            )
+        except _ITEM_SHAPE_ERRORS as exc:
+            entries.append(
+                _unreadable_entry(
+                    str(key),
+                    f"this sidecar entry could not be read ({type(exc).__name__})",
+                )
+            )
     return entries

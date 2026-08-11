@@ -154,7 +154,23 @@ function SidecarEntryDetails({ entry }: { entry: EvidenceTrailEntry }) {
       {isHash(entry.value) && <HashField k="value" value={entry.value} />}
 
       <div className="sidecar-obj">
-        {entry.evidence.length === 0 && <div className="sidecar-none">No citations recorded.</div>}
+        {/* THREE states, and two of them used to be one. "No citations recorded"
+            is a claim about the record; it is FALSE for an entry whose citations
+            exist but could not be read. An unavailable entry therefore gets its
+            own truthful statement, carrying the reason verbatim — and no
+            placeholder citation, value or source is drawn in its place. */}
+        {entry.unavailable ? (
+          <div className="sidecar-unavailable" role="note">
+            Evidence unavailable for this entry — {entry.unavailableReason ?? 'it could not be read'}.
+            {entry.evidence.length > 0
+              ? ' The entries below are the part that could be read.'
+              : ' Nothing is shown in its place.'}
+          </div>
+        ) : (
+          entry.evidence.length === 0 && (
+            <div className="sidecar-none">No citations recorded.</div>
+          )
+        )}
         {entry.evidence.map((ev, i) => (
           <EvidenceObject key={i} ev={ev} />
         ))}
