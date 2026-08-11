@@ -1012,7 +1012,7 @@ describe('worked-example session — scope handling', () => {
   it('a deep link to an example record with no session fails safely', async () => {
     const base = `/api/experiments/${CANONICAL_RESET_IDS[0]}`;
     /*
-     * ALL SEVEN READS THE RECORD SCREEN ISSUES ARE STUBBED, with the body the real
+     * ALL EIGHT READS THE RECORD SCREEN ISSUES ARE STUBBED, with the body the real
      * backend sends (`routes.py::_not_found`). This fixture used to stub only
      * `GET {base}`, which left the other six hitting the stub's "no route" TypeError
      * and arriving as `unreachable` — so the assertion below was decided by which
@@ -1034,6 +1034,11 @@ describe('worked-example session — scope handling', () => {
       [`POST ${base}/audit`]: missing,
       [`GET ${base}/warnings`]: missing,
       [`GET ${base}/evidence`]: missing,
+      // The eighth: the record screen reads `/artifacts` for the record-identity
+      // sections. Unstubbed it becomes the stub's "no route" TypeError, which
+      // arrives as `unreachable` and wins the `Promise.all` race — the exact
+      // fixture artifact this comment was written about.
+      [`GET ${base}/artifacts`]: missing,
     } as never);
     const view = renderAt(`/record/${CANONICAL_RESET_IDS[0]}`);
 

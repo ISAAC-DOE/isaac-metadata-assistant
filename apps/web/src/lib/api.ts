@@ -1291,10 +1291,20 @@ export const api = {
     return readJson<ApiUploadsBlocked>(res, '/uploads');
   },
 
-  // S3 — the full record bundle in one concurrent load. The eight endpoints stay
+  // S3 — the full record bundle in one concurrent load. The nine endpoints stay
   // separate values in the result; nothing is merged into a single verdict.
+  //
+  // `artifacts` is the NINTH, added for the record-identity sections (Record Info
+  // + Relationships). It is the SAME EXISTING ROUTE `getExportReadiness`,
+  // `getEvidenceBundle` and `getExperimentGraphBundle` already read — no backend
+  // route was added or changed — and it is the only thing that serves an official
+  // record's own top-level values (`isaac_record_version`, `record_id`, the
+  // classification trio, `timestamps.created_utc`) and its `links` block. It is
+  // fetched with the bundle rather than lazily because those sections render from
+  // the same load as the field blocks beside them, and a second load would let the
+  // two disagree about the same record.
   async getRecordBundle(id: string): Promise<RecordBundle> {
-    const [detail, groups, pending, validate, audit, warnings, evidence, graph] =
+    const [detail, groups, pending, validate, audit, warnings, evidence, graph, artifacts] =
       await Promise.all([
         this.getExperiment(id),
         this.getDraftGroups(id),
@@ -1304,8 +1314,9 @@ export const api = {
         this.getWarnings(id),
         this.getEvidence(id),
         this.getGraphStatus(),
+        this.getArtifacts(id),
       ]);
-    return { detail, groups, pending, validate, audit, warnings, evidence, graph };
+    return { detail, groups, pending, validate, audit, warnings, evidence, graph, artifacts };
   },
 
   // S6 — the export readiness view: the three signals + the gate inputs, each
