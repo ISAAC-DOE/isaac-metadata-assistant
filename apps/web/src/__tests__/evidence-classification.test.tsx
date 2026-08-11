@@ -125,6 +125,7 @@ describe('P28.5 · EvidenceClassificationPanel (evidence-support axis)', () => {
         insufficient_evidence: 0,
         conflicting_evidence: 0,
         unknown: 0,
+        unreadable: 0,
       },
     });
     expect(getByText(/No fields to classify yet/)).toBeInTheDocument();

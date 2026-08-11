@@ -101,13 +101,17 @@ const WORKFLOW_BARS: [string, string][] = [
   ['All Steps Complete', '1'],
 ];
 
-/** The five evidence classes in SEVERITY precedence (not by count). */
+/** The six evidence classes in SEVERITY precedence (not by count).
+ *  `Evidence Unreadable` is a read failure, never folded into `Unknown` — and it
+ *  is listed at 0 here because these fixtures carry no unreadable entry; the
+ *  non-zero exercise of the class lives in `statistics-model.test.ts`. */
 const EVIDENCE_CHIPS: [string, string][] = [
   ['Supported', '30'],
   ['Inferred Candidate', '3'],
   ['Insufficient Evidence', '2'],
   ['Conflicting Evidence', '2'],
   ['Unknown', '3'],
+  ['Evidence Unreadable', '0'],
 ];
 
 /* `openApiFixture` documents 7 operations across 6 groups: 4 GET
@@ -741,15 +745,15 @@ describe('Workflow Distribution', () => {
 // --- Evidence and Validation ---------------------------------------------
 
 describe('Evidence and Validation', () => {
-  it('renders the five evidence classes in severity precedence, NOT sorted by count', async () => {
+  it('renders the six evidence classes in severity precedence, NOT sorted by count', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
     expect(chipRows('Evidence and Validation')).toEqual(EVIDENCE_CHIPS);
 
-    // The discriminator: this fixture's counts (30,3,2,2,3) are NOT in
+    // The discriminator: this fixture's counts (30,3,2,2,3,0) are NOT in
     // descending order, so a page that re-sorted by count would read
-    // 30,3,3,2,2 and fail the list comparison above. Stated explicitly so the
+    // 30,3,3,2,2,0 and fail the list comparison above. Stated explicitly so the
     // property is not an accident of the numbers.
     const counts = EVIDENCE_CHIPS.map(([, n]) => Number(n));
     expect([...counts].sort((a, b) => b - a)).not.toEqual(counts);

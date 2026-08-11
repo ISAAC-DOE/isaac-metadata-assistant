@@ -9,6 +9,7 @@ import {
   CornerDownRight,
   CircleDashed,
   CircleAlert,
+  EyeOff,
   TriangleAlert,
   Shield,
   ShieldCheck,
@@ -65,6 +66,10 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   evInsufficient: CircleAlert,
   evConflicting: TriangleAlert,
   evUnknown: CircleHelp,
+  // `EyeOff`, not `CircleHelp`: "unknown" is a question about the record, this is
+  // the server saying it could not SEE what is stored. Distinct from every other
+  // glyph on this axis, so the two are never told apart by colour alone.
+  evUnreadable: EyeOff,
   // Reconciliation axis (P31.3) — distinct glyphs so the state is never signalled
   // by color alone, and an absent value never wears the confirmed check.
   reconMatch: Check,
@@ -83,12 +88,33 @@ export const SOURCE_ICON: Record<SourceType, LucideIcon> = {
   web_form: FileText,
 };
 
+/**
+ * The glyph for a source type, for a value that MIGHT NOT BE IN THE MAP.
+ *
+ * `SOURCE_ICON[st]` is typed total over `SourceType`, and that type is a
+ * compile-time promise about server data — which is not a promise at all.
+ * Measured on `77820bf`: one evidence entry citing an unlisted source type (a
+ * plain `instrument_log`) made `SOURCE_ICON[...]` `undefined`, React threw
+ * "Element type is invalid", and because there is no ErrorBoundary anywhere in
+ * this app the ENTIRE Evidence view rendered as an empty DOM — every valid entry
+ * lost to one unknown string.
+ *
+ * `CircleHelp` is deliberate and is not a placeholder for the source type: the
+ * type itself is still rendered verbatim next to it at every call site, so the
+ * reader sees the real stored string and a glyph that says "this client does not
+ * know this kind" — never a guess at which kind it might be.
+ */
+export function sourceIcon(sourceType: string | undefined): LucideIcon {
+  return SOURCE_ICON[sourceType as SourceType] ?? CircleHelp;
+}
+
 export {
   Check,
   UserCheck,
   CornerDownRight,
   CircleDashed,
   CircleAlert,
+  EyeOff,
   TriangleAlert,
   Shield,
   ShieldCheck,

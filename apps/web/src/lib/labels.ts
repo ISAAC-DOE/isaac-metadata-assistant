@@ -223,6 +223,9 @@ export const LABELS = {
   chipEvInsufficient: 'Insufficient Evidence',
   chipEvConflicting: 'Conflicting Evidence',
   chipEvUnknown: 'Unknown',
+  // NOT "Unknown": that class asserts nothing defensible is recorded, while this
+  // one says the server could not read what IS recorded. Two different facts.
+  chipEvUnreadable: 'Evidence Unreadable',
 
   // CSV reconciliation states (P31.3) — a separate axis again. These never mean
   // valid / complete / exportable; they only compare a proposed CSV value to the

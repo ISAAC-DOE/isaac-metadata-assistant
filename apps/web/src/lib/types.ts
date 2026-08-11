@@ -193,11 +193,15 @@ export interface EvidenceTrailEntry {
   key: string; // dotted path OR namespaced (assets: / descriptors: / implicit:)
   label: string;
   value?: string;
-  status: FieldStatus;
+  status: EvidenceEntryStatus;
   sourceTypes: SourceType[];
-  evidence: FieldEvidence[]; // raw entries, passed through faithfully
+  evidence: FieldEvidence[]; // raw readable entries, passed through faithfully
   namespaced: boolean; // outside the N/N coverage count
   resolved: boolean;
+  /** This ONE entry could not be fully read — rendered as unavailable, never dropped. */
+  unavailable?: boolean;
+  /** The truthful reason, from the backend when it has one, else this client's own. */
+  unavailableReason?: string;
 }
 
 export interface SourcePreviewLine {
@@ -710,11 +714,29 @@ export interface ApiWarningsResponse {
   }[];
 }
 
+/**
+ * `status` on a trail entry is NOT the draft's `FieldStatus` alone. The backend
+ * serves `'unavailable'` for an entry whose stored evidence it could not read
+ * (`serialize.UNAVAILABLE_STATUS`) — a distinct value on purpose, so an
+ * unreadable entry can never be mistaken for a verified one. Kept out of
+ * `FieldStatus` itself because a DRAFT field's status can never take this value.
+ */
+export type EvidenceEntryStatus = FieldStatus | 'unavailable';
+
 export interface ApiEvidenceEntry {
   path: string; // dotted path OR namespaced (assets: / descriptors: / implicit:)
   value?: unknown;
-  status: FieldStatus;
-  evidence: FieldEvidence[]; // raw entries, passed through faithfully
+  status: EvidenceEntryStatus;
+  evidence: FieldEvidence[]; // raw readable entries, passed through faithfully
+  /**
+   * Present (and `true`) when part or all of this ONE entry's stored evidence
+   * could not be read. The entry is still served, still carries its own path,
+   * and carries no invented value or citation in place of what failed. Every
+   * other entry in the same trail is unaffected — that isolation is the point.
+   */
+  unavailable?: boolean;
+  /** Why this entry is unavailable, in the backend's own words. Never generic. */
+  unavailable_reason?: string;
 }
 
 export interface ApiEvidenceResponse {
@@ -732,9 +754,14 @@ export type EvidenceClass =
   | 'inferred_candidate'
   | 'insufficient_evidence'
   | 'conflicting_evidence'
-  | 'unknown';
+  | 'unknown'
+  // The entry's stored evidence could not be read, so its support is UNKNOWN TO
+  // THE SERVER. Deliberately not folded into `unknown`, which asserts that
+  // nothing defensible is recorded — see `evidence_classify._classify_entry`
+  // rule 0.
+  | 'unreadable';
 
-export type EvidenceValueState = 'confirmed' | 'candidate' | 'none';
+export type EvidenceValueState = 'confirmed' | 'candidate' | 'none' | 'unreadable';
 
 // One safe, already-present source reference (never a raw answer/quote/secret/
 // absolute path — the backend strips those in evidence_classify._safe_locator).
@@ -754,7 +781,7 @@ export interface ApiFieldClassification {
 export interface ApiEvidenceClassification {
   record_rev: number; // authoritative rev the view is bound to
   field_results: ApiFieldClassification[];
-  // same-axis histogram of the 5 classes (sum === field_results.length).
+  // same-axis histogram of the 6 classes (sum === field_results.length).
   counts: Record<EvidenceClass, number>;
 }
 
