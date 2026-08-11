@@ -5806,14 +5806,17 @@ def get_evidence(scope: TutorialScopeDep, experiment_id: ExperimentId):
 
 # --- 12b. evidence classification (P28.5, evidence-support axis, read-only) ----
 
-#: The five evidence-support classes, in the display precedence used everywhere.
-#: The single source for the ``counts`` histogram key set.
+#: The six evidence-support classes, in the display precedence used everywhere.
+#: The single source for the ``counts`` histogram key set. ``unreadable`` is a
+#: bucket of its own — see ``runtime_records.EVIDENCE_CLASSES`` for why it is not
+#: folded into ``unknown``.
 _EVIDENCE_CLASSES = (
     "supported",
     "inferred_candidate",
     "insufficient_evidence",
     "conflicting_evidence",
     "unknown",
+    "unreadable",
 )
 
 
@@ -5823,16 +5826,19 @@ _EVIDENCE_CLASSES = (
     summary="Classify a Record's Evidence Support",
     description=(
         "Per-field evidence-support classification for this record's current "
-        "state, plus a histogram over the five classes — `supported`, "
-        "`inferred_candidate`, `insufficient_evidence`, `conflicting_evidence` and "
-        "`unknown` — bound to the authoritative `record_rev` so a client can tell "
-        "when its view is stale.\n\n"
+        "state, plus a histogram over the six classes — `supported`, "
+        "`inferred_candidate`, `insufficient_evidence`, `conflicting_evidence`, "
+        "`unknown` and `unreadable` — bound to the authoritative `record_rev` so a "
+        "client can tell when its view is stale.\n\n"
+        "`unreadable` means this entry's stored evidence could not be read, so its "
+        "evidence support is unknown to the server. It is deliberately NOT "
+        "`unknown`, which asserts that nothing defensible is recorded.\n\n"
         "This carries the evidence-support axis only. It deliberately reports no "
         "validity, completion, exportability, or advisory verdict; those live in "
         "their own operations. Read-only, and it takes no lock."
     ),
     response_description=(
-        "The per-field classifications, the five-class histogram, and the "
+        "The per-field classifications, the six-class histogram, and the "
         "revision they describe."
     ),
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},

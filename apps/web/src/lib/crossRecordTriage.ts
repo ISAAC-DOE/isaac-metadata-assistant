@@ -43,6 +43,8 @@ export interface RuntimeRecord {
     insufficient_evidence: number;
     conflicting_evidence: number;
     unknown: number;
+    /** Stored evidence that could not be READ — never a claim that none exists. */
+    unreadable: number;
   };
   artifact_state: string;
   record_rev: number;

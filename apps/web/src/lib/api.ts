@@ -46,6 +46,8 @@ import type {
   ApiPendingResponse,
   ApiRunCheckResponse,
   ApiRunCreated,
+  ApiRunOverrideCleared,
+  ApiRunOverrideResponse,
   ApiRunResponse,
   ApiRunsResponse,
   ApiSchemaResponse,
@@ -828,6 +830,70 @@ export const api = {
     throw await mutationError(res, path);
   },
 
+  /*
+   * ---- Per-run overrides of inherited record-level values ----------------
+   *
+   * TWO WRITES, AND NEITHER OF THEM CONFIRMS ON THE READER'S BEHALF. Both
+   * operations refuse with `422 confirmation_required` unless the body carries
+   * `confirmed_by_user: true`, and both functions below take that flag as an
+   * ARGUMENT and send exactly what they were given. That is deliberately unlike
+   * `updateRun`/`editField`, which send `true` unconditionally because their only
+   * caller is a box the reader typed into: recording an override displaces a
+   * value the record supplied, and the contract makes it an explicitly confirmed
+   * act. Passing `true` is the CALLER's assertion that a confirmation gesture
+   * happened, and the screen is where that gesture lives.
+   *
+   * THE `If-Match` IS THE RUN'S, NOT THE RECORD'S — the same trap `updateRun`
+   * carries, and the route's own description spells it out. Guarded on
+   * truthiness exactly as every other write here: an empty token is sent as
+   * ABSENT (the server's 428, which is the honest refusal) rather than as
+   * `If-Match: ""`, which is a malformed token and would report a client bug as
+   * a precondition failure.
+   *
+   * A 412 MEANS THE OVERRIDE WAS NOT RECORDED. `mutationError` attaches the
+   * parsed body, so the screen can show the server's `current_version` and say
+   * so; it must never present a stale write as a success.
+   */
+
+  async setRunOverride(
+    experimentId: string,
+    runId: string,
+    body: { address: string; payload: unknown; confirmedByUser: boolean },
+    runVersion: string,
+  ): Promise<ApiRunOverrideResponse> {
+    const path = `/experiments/${enc(experimentId)}/runs/${enc(runId)}/overrides`;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify({
+        confirmed_by_user: body.confirmedByUser,
+        address: body.address,
+        payload: body.payload,
+      }),
+      ...(runVersion ? { headers: { 'If-Match': `"${runVersion}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiRunOverrideResponse>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  async clearRunOverride(
+    experimentId: string,
+    runId: string,
+    body: { address: string; confirmedByUser: boolean },
+    runVersion: string,
+  ): Promise<ApiRunOverrideCleared> {
+    const path = `/experiments/${enc(experimentId)}/runs/${enc(runId)}/overrides/clear`;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify({
+        confirmed_by_user: body.confirmedByUser,
+        address: body.address,
+      }),
+      ...(runVersion ? { headers: { 'If-Match': `"${runVersion}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiRunOverrideCleared>(res, path);
+    throw await mutationError(res, path);
+  },
+
   /**
    * Check one run. READ-ONLY: it sends no `If-Match` because it writes nothing,
    * and the contract states its response advances no ETag. It is a POST only
@@ -1248,12 +1314,23 @@ export const api = {
 } as const;
 
 /** Distinct source-file basenames referenced by any evidence entry (order kept). */
+/**
+ * The source fixtures the trail cites, read DEFENSIVELY, per entry.
+ *
+ * This is inside `getEvidenceBundle`'s async body, which is why its shape
+ * assumptions were load-bearing in the worst way: on `77820bf` a single entry
+ * whose `evidence` was not an array (measured with `evidence: 7`) threw here,
+ * the WHOLE bundle promise rejected, and the Evidence view rendered the
+ * "Backend Not Running" alert — blaming the server for one malformed item in one
+ * record. One bad entry now contributes no cited files and nothing else changes.
+ */
 function citedSourceFiles(evidence: ApiEvidenceEntry[]): string[] {
   const seen: string[] = [];
-  for (const entry of evidence) {
-    for (const ev of entry.evidence ?? []) {
-      const file = ev.source_file;
-      if (file && !seen.includes(file)) seen.push(file);
+  for (const entry of Array.isArray(evidence) ? evidence : []) {
+    const list = entry && Array.isArray(entry.evidence) ? entry.evidence : [];
+    for (const ev of list) {
+      const file = ev && typeof ev === 'object' ? ev.source_file : undefined;
+      if (typeof file === 'string' && file && !seen.includes(file)) seen.push(file);
     }
   }
   return seen;

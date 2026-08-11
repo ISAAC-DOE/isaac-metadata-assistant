@@ -774,3 +774,143 @@ describe('typed API client — the typed 404 reason', () => {
     }
   });
 });
+
+/*
+ * THE OVERRIDE CLIENT DOES NOT CONFIRM ON ANYBODY'S BEHALF.
+ *
+ * `updateRun` and `editField` send `confirmed_by_user: true` unconditionally, and
+ * that is defensible for them: their only caller is a box the reader typed into.
+ * The two override operations are different — recording one displaces a value the
+ * RECORD supplied, and the route makes it an explicitly confirmed act — so the flag
+ * is an ARGUMENT, and these tests pin that it is passed through rather than
+ * manufactured. The `false` case cannot occur through the panel (its submit stays
+ * disabled until the box is ticked), and that is exactly why it is pinned HERE: a
+ * future caller that forgets the gesture must reach the server's own refusal, not a
+ * `true` this module supplied for it.
+ */
+describe("per-run override client — confirmation and the RUN's If-Match", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function captureFetch(response: { ok?: boolean; status?: number; body?: unknown }) {
+    const seen: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push({ url: String(input), init: init ?? {} });
+        return {
+          ok: response.ok ?? true,
+          status: response.status ?? 200,
+          json: async () => response.body ?? {},
+        } as Response;
+      }),
+    );
+    return seen;
+  }
+
+  const bodyOf = (init: RequestInit) => JSON.parse(String(init.body)) as Record<string, unknown>;
+
+  it('setRunOverride sends exactly the confirmation it was given — true', async () => {
+    const seen = captureFetch({
+      body: { run: {}, override: { address: 'field:a', recorded_utc: 'Z' } },
+    });
+    await api.setRunOverride(
+      EXP_ID,
+      'RUN-1',
+      { address: 'field:sample.material.name', payload: { value: 'x' }, confirmedByUser: true },
+      'ra.3',
+    );
+    expect(seen[0].url).toContain(`/experiments/${EXP_ID}/runs/RUN-1/overrides`);
+    expect(bodyOf(seen[0].init)).toEqual({
+      confirmed_by_user: true,
+      address: 'field:sample.material.name',
+      payload: { value: 'x' },
+    });
+    // THE RUN'S token, not the record's.
+    expect((seen[0].init.headers as Record<string, string>)['If-Match']).toBe('"ra.3"');
+  });
+
+  it("setRunOverride sends FALSE unchanged, so the server's own refusal is what is seen", async () => {
+    const seen = captureFetch({ body: {} });
+    await api.setRunOverride(
+      EXP_ID,
+      'RUN-1',
+      { address: 'field:a', payload: { value: 'x' }, confirmedByUser: false },
+      'ra.3',
+    );
+    expect(bodyOf(seen[0].init).confirmed_by_user).toBe(false);
+  });
+
+  it('clearRunOverride likewise passes the confirmation through, both ways', async () => {
+    const yes = captureFetch({ body: { run: {}, cleared: true } });
+    await api.clearRunOverride(
+      EXP_ID,
+      'RUN-1',
+      { address: 'field:a', confirmedByUser: true },
+      'ra.4',
+    );
+    expect(bodyOf(yes[0].init)).toEqual({ confirmed_by_user: true, address: 'field:a' });
+    expect((yes[0].init.headers as Record<string, string>)['If-Match']).toBe('"ra.4"');
+    vi.unstubAllGlobals();
+
+    const no = captureFetch({ body: { run: {}, cleared: false } });
+    await api.clearRunOverride(
+      EXP_ID,
+      'RUN-1',
+      { address: 'field:a', confirmedByUser: false },
+      'ra.4',
+    );
+    expect(bodyOf(no[0].init).confirmed_by_user).toBe(false);
+  });
+
+  it('omits If-Match entirely for a blank token, so the server answers 428 rather than 400', async () => {
+    // An empty `If-Match: ""` is a MALFORMED token (400) and would report a client
+    // bug as a precondition failure. Absent is the honest refusal.
+    const seen = captureFetch({ body: { run: {}, cleared: false } });
+    await api.clearRunOverride(EXP_ID, 'RUN-1', { address: 'field:a', confirmedByUser: true }, '');
+    expect((seen[0].init.headers ?? {}) as Record<string, string>).not.toHaveProperty('If-Match');
+  });
+
+  it('a 412 on an override throws ApiError{status:412} carrying the conflict body', async () => {
+    captureFetch({
+      ok: false,
+      status: 412,
+      body: { error: 'stale_write', current_version: 'ra.9' },
+    });
+    await expect(
+      api.setRunOverride(
+        EXP_ID,
+        'RUN-1',
+        { address: 'field:a', payload: {}, confirmedByUser: true },
+        'ra.3',
+      ),
+    ).rejects.toMatchObject({
+      status: 412,
+      body: { error: 'stale_write', current_version: 'ra.9' },
+    });
+  });
+
+  it("a 422 refusal carries the server's typed body so the screen can quote it", async () => {
+    captureFetch({
+      ok: false,
+      status: 422,
+      body: {
+        error: 'not_overridable',
+        address: 'field:system.domain',
+        message: 'This address cannot hold a run override.',
+      },
+    });
+    await expect(
+      api.setRunOverride(
+        EXP_ID,
+        'RUN-1',
+        { address: 'field:system.domain', payload: {}, confirmedByUser: true },
+        'ra.3',
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      body: { error: 'not_overridable', address: 'field:system.domain' },
+    });
+  });
+});

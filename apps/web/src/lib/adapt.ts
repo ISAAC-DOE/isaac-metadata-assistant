@@ -599,22 +599,63 @@ function trailValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-/** Map the live /evidence entries onto the browsable Evidence Trail entries. */
+/**
+ * Map the live /evidence entries onto the browsable Evidence Trail entries.
+ *
+ * PER-ITEM ISOLATION, and it is not belt-and-braces over the backend's own
+ * isolation (`serialize._trail_entry`) — it is the layer that was MEASURED to
+ * blank this screen. On `77820bf`, one entry with `evidence: 7` or `path: null`
+ * threw inside this map, and with no ErrorBoundary anywhere in the app
+ * (`main.tsx` renders `<App/>` bare) React unmounted the whole tree: the
+ * Evidence view rendered as an EMPTY DOM. So a wrong-shaped entry from any
+ * source — an older backend, a hand-edited sidecar, a future field this client
+ * does not know — degrades to ITSELF here.
+ *
+ * Nothing is fabricated for a bad entry: no value, no source type, no citation.
+ * It keeps whatever identity it has (its path, or its position when the path is
+ * not even a string) and says why it is unavailable.
+ */
 export function evidenceEntriesToTrail(entries: ApiEvidenceEntry[]): EvidenceTrailEntry[] {
-  return entries.map((e) => {
-    const namespaced = e.path.includes(':');
-    const evidence = e.evidence ?? [];
+  return (Array.isArray(entries) ? entries : []).map((raw, i) => {
+    const e = (raw ?? {}) as ApiEvidenceEntry;
+    // The path is this entry's identity AND its provenance, so a non-string one
+    // is named by position rather than dropped or coerced into a plausible key.
+    const hasPath = typeof e.path === 'string' && e.path !== '';
+    const key = hasPath ? e.path : `(unreadable path · entry ${i + 1})`;
+    const namespaced = hasPath && e.path.includes(':');
+
+    // A non-array `evidence` is the shape that used to throw. Read only the
+    // entries that are objects; count the rest as undisplayable rather than
+    // guessing what they meant.
+    const stored = e.evidence;
+    const list = Array.isArray(stored) ? stored : [];
+    const evidence = list.filter((ev): ev is FieldEvidence => !!ev && typeof ev === 'object');
+
+    const clientReason = !hasPath
+      ? "this entry's stored path is not a string, so it cannot be identified by path"
+      : stored !== undefined && stored !== null && !Array.isArray(stored)
+        ? 'the stored evidence for this entry is not a list of evidence entries'
+        : evidence.length !== list.length
+          ? `${list.length - evidence.length} of ${list.length} stored evidence entries cannot be shown: not an evidence object`
+          : undefined;
+    // The backend's reason wins when it has one — it read the record; this
+    // client only read the response.
+    const unavailableReason = e.unavailable_reason ?? clientReason;
+    const unavailable = e.unavailable === true || clientReason !== undefined;
+
     return {
-      key: e.path,
-      label: trailLabel(e.path, namespaced),
+      key,
+      label: hasPath ? trailLabel(e.path, namespaced) : key,
       value: trailValue(e.value),
-      status: e.status,
+      status: unavailable && evidence.length === 0 ? 'unavailable' : e.status,
       sourceTypes: distinctSourceTypes(evidence),
       evidence,
       namespaced,
       // A dotted path with no resolved value is a dangling/integrity case; every
       // path we render here resolves, so "resolved" tracks a non-null value.
       resolved: e.value !== null && e.value !== undefined,
+      ...(unavailable ? { unavailable: true } : {}),
+      ...(unavailableReason ? { unavailableReason } : {}),
     };
   });
 }
@@ -655,6 +696,11 @@ export function provenanceFor(entry: EvidenceTrailEntry): string {
   const phrases = entry.sourceTypes
     .map((st) => _SOURCE_PHRASE[st] ?? `cited from ${st}`)
     .filter(Boolean);
+  // "carries no citation" would be a FALSE claim about an entry whose citations
+  // exist but could not be read. Two different facts, so two different sentences.
+  if (entry.unavailable && phrases.length === 0) {
+    return `This entry's evidence is unavailable: ${entry.unavailableReason ?? 'it could not be read'}. Nothing is shown in its place.`;
+  }
   if (phrases.length === 0) return 'This entry carries no citation.';
   const joined =
     phrases.length === 1
@@ -665,9 +711,15 @@ export function provenanceFor(entry: EvidenceTrailEntry): string {
   const hasBoth =
     entry.sourceTypes.includes('user_confirmation') &&
     entry.sourceTypes.some((st) => st !== 'user_confirmation');
-  return hasBoth
+  const sentence = hasBoth
     ? `${joined} Two sources are preserved side by side — the machine lead and the human confirmation.`
     : joined;
+  // A PARTIALLY readable entry: the sentence above describes exactly what is on
+  // screen, so the part that is missing has to be said as well — otherwise the
+  // provenance reads complete when it is not.
+  return entry.unavailable
+    ? `${sentence} Part of this entry's evidence is unavailable: ${entry.unavailableReason ?? 'it could not be read'}.`
+    : sentence;
 }
 
 // --- S2 demo runner -----------------------------------------------------

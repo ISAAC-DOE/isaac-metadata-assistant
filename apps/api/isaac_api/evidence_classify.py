@@ -13,8 +13,14 @@ field ``supported`` here does not make a record exportable, and classifying it
 ``inferred_candidate`` does not block export; those decisions stay in the frozen
 truth core (``official.py`` / ``export.py`` / ``audit.py``), unchanged.
 
-Five classes, precedence highest-first:
+Six classes, precedence highest-first:
 
+  unreadable             the stored evidence for this entry could not be read at
+                         all (``serialize`` marked it ``unavailable`` and salvaged
+                         nothing), so its evidence support is UNKNOWN — a separate
+                         class because "could not be read" and "has nothing" are
+                         different facts and only one of them is a finding about
+                         the science
   conflicting_evidence   >=2 evidence entries assert incompatible non-null values
   supported              value present AND (observed OR user_confirmation OR a
                          documented derivation rule) — all defensible, all export
@@ -26,7 +32,9 @@ Five classes, precedence highest-first:
   insufficient_evidence  needs_confirmation with >=1 evidence entry but the value
                          is not established
   unknown                needs_confirmation / missing / rejected with no defensible
-                         evidence; plainly absent
+                         evidence; plainly absent — a POSITIVE claim that nothing
+                         defensible is recorded, which is why an unreadable entry
+                         must never land here
 
 Pure, non-mutating, deterministic, stdlib + existing project reads only
 (Graphify-free). Read-only imports of ``draft_validator.OBSERVED_SOURCE_TYPES``
@@ -48,12 +56,22 @@ _OBSERVED = frozenset(OBSERVED_SOURCE_TYPES)
 _FINAL_STATUSES = frozenset({"verified", "inferred"})
 
 _EXPLANATIONS = {
+    "unreadable": "This entry's stored evidence could not be read, so its evidence support cannot be classified.",
     "conflicting_evidence": "Evidence asserts incompatible values; needs human resolution.",
     "inferred_candidate": "Proposed by a derivation rule; unconfirmed — not entered as fact.",
     "insufficient_evidence": "Evidence present but the value is not established.",
     "unknown": "No defensible value.",
     # `supported` is tailored deterministically below by evidence kind.
 }
+
+#: Appended when SOME of an entry's stored evidence was readable and some was
+#: not. The class then describes only the readable part, which is a true
+#: statement about less than the whole entry — so the rest is said out loud
+#: rather than left to read as completeness.
+_PARTIAL_DISCLOSURE = (
+    "Part of this entry's stored evidence could not be read; this describes only "
+    "the part that could."
+)
 
 
 def _is_derivation_with_rule(evidence: list) -> bool:
@@ -123,12 +141,27 @@ def _sources(evidence: list) -> list[dict]:
 def _classify_entry(entry: dict) -> tuple[str, str]:
     """Compose (field-status + source_type) -> (classification, value_state).
 
-    Precedence: conflicting_evidence > supported > inferred_candidate >
-    insufficient_evidence > unknown.
+    Precedence: unreadable > conflicting_evidence > supported > inferred_candidate
+    > insufficient_evidence > unknown.
     """
     evidence = entry.get("evidence") or []
     value = entry.get("value")
     status = entry.get("status")
+
+    # 0. unreadable — `serialize` could not read this entry's stored evidence and
+    #    salvaged none of it, so there is no evidence to compose with. Every rule
+    #    below would read the resulting empty list as an OBSERVATION about the
+    #    record and fall through to `unknown` / "No defensible value." — a
+    #    positive claim that nothing defensible is recorded, asserted about an
+    #    entry whose evidence may well be there and merely unreadable. Measured on
+    #    `ba8e38e`: both `{"a.b": 7}` and
+    #    `{"c.d": {"value": "V", "status": "verified", "evidence": 7}}` classified
+    #    `unknown` / "No defensible value.", and `{"value": "V"}` had a value
+    #    right there. On base `77820bf` the first was silently absent and the
+    #    second raised a 500, so BOTH a crash and an omission had become a
+    #    confident false statement. CLAUDE.md §5: state what is true, or refuse.
+    if entry.get("unavailable") and not evidence:
+        return "unreadable", "unreadable"
 
     value_present = value is not None
     observed = any(
@@ -159,7 +192,33 @@ def _classify_entry(entry: dict) -> tuple[str, str]:
     return "unknown", "none"
 
 
-def _explanation(classification: str, evidence: list) -> str:
+def _explanation(classification: str, evidence: list, entry: dict | None = None) -> str:
+    """The deterministic sentence for a classification, given the entry it came from.
+
+    ``entry`` is optional only so the older two-argument call shape keeps working;
+    without it the unreadability disclosures cannot be composed, because the
+    ``unavailable`` flag and its reason live on the trail entry rather than on the
+    evidence list.
+    """
+    entry = entry or {}
+    reason = entry.get("unavailable_reason")
+    if classification == "unreadable":
+        base = _EXPLANATIONS["unreadable"]
+        # The reason names the SHAPE found, never the stored value — `serialize`
+        # builds it from `_kind` alone. Passing it through keeps the row
+        # actionable without quoting anything the reader could mistake for a
+        # citation.
+        return f"{base[:-1]}: {reason}." if isinstance(reason, str) and reason else base
+    text = _explanation_for_readable(classification, evidence)
+    if entry.get("unavailable"):
+        # Reached only with SOME readable evidence (no readable evidence is
+        # `unreadable` above), so the sentence is true of what was read and
+        # silent about the rest until this is appended.
+        return f"{text} {_PARTIAL_DISCLOSURE}"
+    return text
+
+
+def _explanation_for_readable(classification: str, evidence: list) -> str:
     if classification == "supported":
         observed_nonuc = any(
             isinstance(e, dict)
@@ -196,7 +255,7 @@ def classify_fields(draft: dict) -> list[dict]:
                 "field": entry.get("path"),
                 "classification": classification,
                 "value_state": value_state,
-                "explanation": _explanation(classification, evidence),
+                "explanation": _explanation(classification, evidence, entry),
                 "sources": _sources(evidence),
             }
         )

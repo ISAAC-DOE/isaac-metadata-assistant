@@ -183,6 +183,7 @@ export const graphClassification: ApiEvidenceClassification = {
     insufficient_evidence: 0,
     conflicting_evidence: 0,
     unknown: 0,
+    unreadable: 0,
   },
 };
 

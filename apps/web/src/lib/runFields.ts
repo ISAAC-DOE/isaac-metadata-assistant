@@ -269,36 +269,16 @@ export function runFindingText(finding: ApiRunCheckFinding): string | null {
   return typeof text === 'string' && text.trim() !== '' ? text.trim() : null;
 }
 
-/**
- * The `field:`-addressed inherited entries, in a stable order, for display.
+/*
+ * `inheritedFieldRows` LIVED HERE AND HAS MOVED, rather than been duplicated.
  *
- * `block:` addresses (`attribution`, `tags`) are excluded: their payloads are
- * whole objects and arrays, and this surface has no honest one-line rendering
- * for them — showing a truncated one would be a claim about their content.
- * `absent` entries are excluded too: nothing was inherited, so there is nothing
- * to attribute to the experiment.
+ * Its successor is `overrideRows` in `lib/runOverrides.ts`, which returns the same
+ * `field:`-addressed, `absent`-excluded, path-sorted list plus the two payloads a
+ * row now has to show (what the RECORD says, and what an override displaced). It
+ * is in that module because it is read by the panel that drives the two override
+ * operations, and keeping one row model there is what stops a second, subtly
+ * different reading of `run.inherited` growing beside it.
+ *
+ * This file stays what it always was: the RUN-LEVEL writable field set and the
+ * entry parsing for it. Nothing here reads inheritance.
  */
-export function inheritedFieldRows(
-  run: ApiRunView,
-): { address: string; path: string; state: string; text: string }[] {
-  const entries = Object.entries(run.inherited ?? {});
-  const rows: { address: string; path: string; state: string; text: string }[] = [];
-  for (const [address, resolution] of entries) {
-    if (!address.startsWith('field:')) continue;
-    if (!resolution || resolution.state === 'absent') continue;
-    const payload = resolution.payload;
-    const value =
-      payload !== null && typeof payload === 'object' && 'value' in payload
-        ? (payload as { value: unknown }).value
-        : payload;
-    if (value === null || value === undefined) continue;
-    rows.push({
-      address,
-      path: address.slice('field:'.length),
-      state: resolution.state,
-      text: String(value),
-    });
-  }
-  rows.sort((a, b) => a.path.localeCompare(b.path));
-  return rows;
-}

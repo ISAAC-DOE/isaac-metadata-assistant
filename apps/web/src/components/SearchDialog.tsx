@@ -27,6 +27,7 @@ import { Search } from './icons';
 import { crossRecordTriage } from '../lib/crossRecordTriage';
 import type { TriageIntent, TriageResult } from '../lib/crossRecordTriage';
 import type { ApiSearchMatch, ApiSearchResponse } from '../lib/types';
+import { useWorkspaceScope } from '../lib/workspaceScope';
 
 /**
  * The four cross-record triage intents, each with its display label and the
@@ -400,7 +401,14 @@ export function SearchDialog() {
  * (not `alert`) — the dialog already has the reader's attention.
  */
 function SearchDown({ error }: { error: ApiError }) {
-  const copy = downCopy(error);
+  /* The same third argument `BackendDown` passes, so the two sites cannot drift on
+     the `example_workspace_ended` branch either. The palette's own reads are search
+     reads, so that branch is unreachable from here today — passing the scope keeps
+     the "ONE source of copy" property true rather than true by coincidence. The
+     palette renders no navigation of its own; the copy names the walkthrough's home
+     in words, which needs no link. */
+  const scope = useWorkspaceScope();
+  const copy = downCopy(error, isHostedBuild, scope);
   return (
     <div className="search-down" role="status">
       <p className="search-down-title">

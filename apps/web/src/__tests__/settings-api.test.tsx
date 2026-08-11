@@ -1063,7 +1063,19 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 47 operations, 93 post-lead paragraphs', () => {
+  /*
+   * THE NUMBER IN THIS TITLE DRIFTED ONCE, AND A TITLE CANNOT FAIL.
+   *
+   * The prose-truth pass (#119) moved the assertion below from 90 to 91 and left this
+   * name reading "90 post-lead paragraphs". Nothing caught it, because a test NAME is
+   * not an assertion — it is prose that happens to sit next to one, and it stated a
+   * figure the test itself disproved on the next screenful. It was found only when a
+   * later merge conflicted on the same two lines.
+   *
+   * Both numbers are now 92, re-measured from `create_app().openapi()` after that merge.
+   * If you change the assertion, change this line in the same edit.
+   */
+  it('describes the contract it claims to: 47 operations, 94 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1498,8 +1510,18 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     drops the 91 `\n\n` separators, and 43,557 - 182 = 43,375.
     // A third witness, before either line was changed: `npx vitest run` reported
     // `expected 43375 to be 42371`.
-    expect(total).toBe(44912);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(93);
+    expect(total).toBe(45126);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(94);
+    // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
+    //     histogram gained a SIXTH class, `unreadable`, so
+    //     `GET /api/experiments/{id}/evidence-classification` now names six classes
+    //     in its lead and carries one NEW paragraph saying what `unreadable` means
+    //     and that it is deliberately not `unknown`. +214 characters, +1 paragraph,
+    //     one operation touched. MEASURED the same way as (c) — the paragraph rule
+    //     re-implemented in Python over `create_app().openapi()`, restricted to the
+    //     47 operations this array names, not read off the captured copy:
+    //         total 41,511 · post-lead 89 · raw sum of descriptions 41,689
+    //         internal consistency: 41,689 - (2 x 89 separators) = 41,511.
     // (e) THE ANCHORED-PATTERN EXACTNESS GATE.
     // One description grew: `POST /api/validate/record`. It had said the standalone and
     // per-experiment validators "agree by construction", full stop, which the ISAAC
