@@ -162,12 +162,25 @@ test.describe('@interaction the ordinary workspace', () => {
 
   test('a canonical example id is a real 404 here — the scope boundary, not a bug', async ({ page, app }) => {
     // This is the load-bearing consequence of the change: an id that resolves
-    // inside a session must NOT resolve outside one. The app states it as the
-    // "record not found" state rather than inventing a record or falling back.
+    // inside a session must NOT resolve outside one. The app states it as a
+    // failure state rather than inventing a record or falling back.
+    //
+    // THE STATE IS NOW THE EXAMPLE-SPECIFIC ONE, and that is the whole point: for
+    // a canonical id "Record Not Found — it may not have been created yet" was the
+    // wrong explanation of a record that WAS created, in a temporary workspace that
+    // has since been discarded. The safety claim is unchanged and is asserted
+    // below — nothing of the record is served — while the sentence is the true one.
     await app.goto(`/record/${SEED.partial}`);
     const alert = page.getByRole('alert');
     await expect(alert).toBeVisible({ timeout: 20_000 });
-    await expect(alert).toContainText(/Record Not Found/i);
+    await expect(alert).toContainText(/Worked Example Not Open/i);
+    await expect(alert).toContainText(/one of the five built-in worked-example records/i);
+    // No claim that the record survived, and no route back into a dead workspace.
+    await expect(alert).toContainText(/Nothing on this page can bring that workspace back/i);
+    // Not a record: no field group. And no scope was silently entered to reach one
+    // — the worked-example bar renders only while a session is open.
+    await expect(page.locator('.fg-header')).toHaveCount(0);
+    await expect(page.locator('aside.tutorial-session-bar')).toHaveCount(0);
   });
 
   test('the same canonical id DOES resolve inside the worked-example session', async ({ page, app }) => {

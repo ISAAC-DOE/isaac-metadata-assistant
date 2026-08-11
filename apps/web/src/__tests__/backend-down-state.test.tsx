@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -10,6 +11,7 @@ import {
   SUB_RESOURCE_LABELS,
 } from '../components/FetchStates';
 import { ApiError, RUN_COMMAND } from '../lib/api';
+import { EXAMPLE_RECORD_IDS } from '../lib/exampleRecords';
 
 /*
  * P36V.2 — the hosted down state.
@@ -564,7 +566,11 @@ describe('both render sites guard the run command at build time', () => {
 
   it('SearchDialog renders the SHARED copy, not its own local-only wording', () => {
     const source = readFileSync(resolve(SRC, 'components/SearchDialog.tsx'), 'utf8');
-    expect(source).toContain('downCopy(error)');
+    // `downCopy(error…` rather than `downCopy(error)`: the palette now passes the
+    // same `hosted` and `scope` arguments `BackendDown` passes, which is MORE
+    // sharing, not less. What this pins is that the copy comes from the shared
+    // function at all — the wording assertions below are what stop it drifting.
+    expect(source).toMatch(/downCopy\(error[,)]/);
     expect(source).toContain('DownTechnicalDetails');
     expect(source).not.toContain('The local ISAAC API is not responding');
   });
@@ -975,5 +981,160 @@ describe('experiment_not_found is honoured only under /experiments/{id}', () => 
         expect(copy.kind).toBe('record_part_not_found');
       }
     }
+  });
+});
+
+/*
+ * AN ENDED WORKED EXAMPLE IS NOT A RECORD THAT WAS NEVER CREATED.
+ *
+ * THE DEFECT. For one of the five built-in worked-example ids, "this experiment id
+ * is not in the workspace — it may not have been created yet" is the wrong account
+ * of what happened: that record WAS created, inside a worked-example session, and
+ * the backend discarded the session's workspace when the walkthrough ended. The
+ * hedge made it literally not-false and still left a scientist reading a
+ * malfunction.
+ *
+ * WHY IT IS REACHABLE AT ALL. `useWorkspaceScopeChanged` is a DELTA detector, so a
+ * COLD MOUNT in the ordinary workspace (`null` → `null`) is not a change and the
+ * usual bounce to My Experiments cannot fire. `finishTutorial` + Back, and a pasted
+ * or bookmarked example link, both land here.
+ *
+ * WHAT THESE TESTS PIN, in order of how load-bearing it is:
+ *   1. the new copy is scoped to EXACTLY that case — example id AND no open
+ *      walkthrough. An ordinary id keeps today's copy verbatim; the same example id
+ *      inside a live session keeps it too;
+ *   2. the copy does not claim the record exists, is retrievable, or can be
+ *      restored;
+ *   3. no request is made to find out — the whole decision is a build-time set
+ *      membership test, so the backend is never asked to cross a scope.
+ */
+describe('an example-record 404 with no worked-example session open', () => {
+  const EXAMPLE = EXAMPLE_RECORD_IDS[0];
+  const ORDINARY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const missing = (path: string) =>
+    new ApiError('x', { status: 404, path, reason: 'experiment_not_found' });
+
+  it('explains the ended worked example instead of “may not have been created yet”', () => {
+    const copy = downCopy(missing(`/experiments/${EXAMPLE}`), true, null);
+    expect(copy.kind).toBe('example_workspace_ended');
+    expect(copy.title).toBe('Worked Example Not Open');
+    const lines = copy.lines.join(' ');
+    expect(lines).toContain('one of the five built-in worked-example records');
+    expect(lines).toContain('none is open');
+    // The withdrawn explanation, in either build's wording.
+    expect(lines).not.toMatch(/may not have been created yet/i);
+    expect(lines).not.toMatch(/experiment id is not in the/i);
+  });
+
+  it('says the workspace is gone and promises no way back to it', () => {
+    const lines = downCopy(missing(`/experiments/${EXAMPLE}`), true, null).lines.join(' ');
+    // Honest about the loss…
+    expect(lines).toContain('discards it when the walkthrough ends');
+    expect(lines).toContain('Nothing on this page can bring that workspace back');
+    // …and explicit that a replay is a new start, not a recovery.
+    expect(lines).toContain('not a recovery of the one that ended');
+    // No claim that the record is still there or retrievable.
+    expect(lines).not.toMatch(/still (exists|available)|try again later|restore your/i);
+  });
+
+  it('applies on a sub-resource path too, because the bundle read is a race', () => {
+    // `getRecordBundle` fires seven reads at once; whichever rejects first reaches
+    // the panel. The explanation must not depend on which one won.
+    const copy = downCopy(missing(`/experiments/${EXAMPLE}/draft`), true, null);
+    expect(copy.kind).toBe('example_workspace_ended');
+  });
+
+  it('leaves an ordinary missing id on today’s copy, unchanged', () => {
+    const copy = downCopy(missing(`/experiments/${ORDINARY}`), true, null);
+    expect(copy.kind).toBe('not_found');
+    expect(copy.title).toBe('Record Not Found');
+    expect(copy.lines).toEqual([
+      'This experiment id is not in the workspace — it may not have been created yet.',
+    ]);
+    expect(copy.offerExperimentsLink).toBe(false);
+    // and the local build's wording is likewise untouched
+    expect(downCopy(missing(`/experiments/${ORDINARY}`), false, null).lines).toEqual([
+      'This experiment id is not in the local workspace — it may not have been created yet.',
+    ]);
+  });
+
+  it('leaves an example id INSIDE a live session on today’s copy', () => {
+    // A 404 for an example id while a walkthrough IS open is a different fact —
+    // that session really does not hold it — and this branch must not speak for it.
+    const copy = downCopy(missing(`/experiments/${EXAMPLE}`), true, 'sess-abc');
+    expect(copy.kind).toBe('not_found');
+  });
+
+  it('does not fire when the caller supplied no scope at all', () => {
+    // Omission is fail-safe: an unaware caller keeps today's copy rather than
+    // gaining a claim it never supplied evidence for.
+    expect(downCopy(missing(`/experiments/${EXAMPLE}`), true).kind).toBe('not_found');
+  });
+
+  it('does not weaken the tutorial_session_not_found discrimination', () => {
+    // That reason is raised by the scope dependency BEFORE any record work, so it is
+    // evidence about a dead session and none about the record. It must keep falling
+    // through to the generic branch even for an example id — this branch is reached
+    // only from `experiment_not_found` (or from no reason at all on a bare record
+    // path), never from a dead-session 404.
+    const copy = downCopy(
+      new ApiError('x', {
+        status: 404,
+        path: `/experiments/${EXAMPLE}`,
+        reason: 'tutorial_session_not_found',
+      }),
+      true,
+      null,
+    );
+    expect(copy.kind).toBe('path_not_found');
+    expect(copy.lines.join(' ')).not.toMatch(/worked-example|may not have been created yet/i);
+  });
+
+  it('decides without issuing any request', () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (() => {
+      throw new Error('downCopy must never fetch');
+    }) as typeof fetch;
+    try {
+      expect(downCopy(missing(`/experiments/${EXAMPLE}`), true, null).kind).toBe(
+        'example_workspace_ended',
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('offers My Experiments as a keyboard-operable link, inside a router', () => {
+    const view = render(
+      <MemoryRouter>
+        <BackendDown error={missing(`/experiments/${EXAMPLE}`)} />
+      </MemoryRouter>,
+    );
+    const link = view.getByRole('link', { name: 'My Experiments' });
+    expect(link).toHaveAttribute('href', '/experiments');
+    // A real link: reachable and activatable by keyboard with no handler of ours.
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    // No reload is offered — reloading renders exactly this panel again.
+    expect(view.queryByRole('button', { name: 'Reload' })).toBeNull();
+  });
+
+  it('names the panel by its title for assistive technology', () => {
+    const view = render(
+      <MemoryRouter>
+        <BackendDown error={missing(`/experiments/${EXAMPLE}`)} />
+      </MemoryRouter>,
+    );
+    expect(view.getByRole('alert', { name: 'Worked Example Not Open' })).toBeInTheDocument();
+  });
+
+  it('renders the explanation, minus the link, with no router present', () => {
+    // `BackendDown` is unit-rendered bare in this very file. A failure state that
+    // crashed the page it is explaining would be the worst possible regression.
+    const view = render(<BackendDown error={missing(`/experiments/${EXAMPLE}`)} />);
+    expect(view.getByText('Worked Example Not Open')).toBeInTheDocument();
+    expect(view.queryByRole('link', { name: 'My Experiments' })).toBeNull();
+    // The walkthrough's home is still named in words, so nothing is lost.
+    expect(view.container.textContent).toContain('Settings & API → Help & Tutorial');
   });
 });
