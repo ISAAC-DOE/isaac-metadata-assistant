@@ -248,3 +248,78 @@ describe('Evidence trail · one bad item degrades to itself', () => {
     expect(evidenceEntriesToTrail(undefined as unknown as ApiEvidenceEntry[])).toEqual([]);
   });
 });
+
+/*
+ * Review follow-ups. Two of the three blocking findings were BACKEND honesty
+ * defects; what lands here is the client half: the fallback class the unknown-
+ * source-type fix wrote but never defined, and the sixth evidence-support class
+ * the classifier now emits — which reaches `CHIP_META[EVIDENCE_CLASS_CHIP[cls]]`
+ * and `CLASS_GUIDANCE[cls]` by direct index, so an unmapped class is not a
+ * styling nit, it is `undefined.label` and another blank screen.
+ */
+describe('the unknown-source fallback and the unreadable class are both real', () => {
+  const cssFiles = import.meta.glob('../**/*.css', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }) as Record<string, string>;
+  const cssFor = (name: string): string =>
+    Object.entries(cssFiles).find(([path]) => path.endsWith(`/${name}`))?.[1] ?? '';
+  // Comments are stripped so a rule can never be "satisfied" by prose naming it.
+  const selectors = (name: string): string[] =>
+    [...cssFor(name).replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) =>
+      m[1].trim(),
+    );
+
+  it('defines .src-unknown, the class the fallback actually writes', () => {
+    // `EvidenceRow.tsx` writes `SRC_CLASS[sourceType] ?? 'src-unknown'`; before
+    // this, that name appeared NOWHERE else in the stylesheet, so the one case
+    // the fallback exists for got no rule at all.
+    expect(selectors('evidence.css').some((s) => s.includes('.src-unknown'))).toBe(true);
+    // …and it must stay NEUTRAL: borrowing a known source hue would make the
+    // colour a claim about which kind of source an unrecognised string is.
+    const rule = selectors('evidence.css').find((s) => s.includes('.src-unknown'))!;
+    const body = /\.src-unknown[^{]*\{([^{}]*)\}/.exec(
+      cssFor('evidence.css').replace(/\/\*[\s\S]*?\*\//g, ''),
+    )![1];
+    expect(rule).toBeTruthy();
+    expect(body).not.toMatch(/--src-(spreadsheet|filelisting|derivation|userconf)/);
+  });
+
+  it('gives the sixth evidence-support class a chip, a glyph and guidance', async () => {
+    const { EVIDENCE_CLASS_CHIP, CHIP_META } = await import('../lib/status');
+    const { CHIP_ICON } = await import('../components/icons');
+
+    const kind = EVIDENCE_CLASS_CHIP.unreadable;
+    expect(kind).toBeDefined();
+    expect(CHIP_META[kind]).toBeDefined();
+    expect(CHIP_ICON[kind]).toBeDefined();
+    // Its own words and its own glyph — never "Unknown", which is a DIFFERENT
+    // claim (nothing defensible is recorded) about an entry nobody could read.
+    expect(CHIP_META[kind].label).not.toBe(CHIP_META.evUnknown.label);
+    expect(CHIP_ICON[kind]).not.toBe(CHIP_ICON.evUnknown);
+    expect(selectors('signals.css').some((s) => s.includes(CHIP_META[kind].className))).toBe(true);
+  });
+
+  it('sums the sixth class into the workspace totals rather than dropping it', async () => {
+    const { deriveEvidenceTotals, EVIDENCE_CLASSES } = await import('../lib/statisticsModel');
+    expect(EVIDENCE_CLASSES.map((c) => c.key)).toContain('unreadable');
+    // `deriveEvidenceTotals` sums only the classes this array names, so omitting
+    // one silently shrinks `totalFields` — and `totalFields` is the stacked
+    // bar's denominator, i.e. the claim that the parts are the whole.
+    const totals = deriveEvidenceTotals([
+      {
+        evidence_counts: {
+          supported: 1,
+          inferred_candidate: 0,
+          insufficient_evidence: 0,
+          conflicting_evidence: 0,
+          unknown: 0,
+          unreadable: 2,
+        },
+      } as Parameters<typeof deriveEvidenceTotals>[0][number],
+    ]);
+    expect(totals.unreadable).toBe(2);
+    expect(totals.totalFields).toBe(3);
+  });
+});

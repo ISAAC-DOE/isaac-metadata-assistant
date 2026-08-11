@@ -26,6 +26,13 @@
 .src-filelisting svg { color: var(--src-filelisting); }
 .src-derivation svg { color: var(--src-derivation); }
 .src-userconf svg { color: var(--src-userconf); }
+/* A source type this build has no mapping for. `EvidenceRow.tsx` falls back to
+   this class name, which was previously written but never DEFINED — so the one
+   case the fallback exists for got no rule at all. Deliberately NEUTRAL: an
+   unrecognised kind must not borrow one of the four known source hues, because
+   the hue is a claim about which kind of source it is. The chip frame and mono
+   label still come from `.src-token`, so it reads as a token, not as nothing. */
+.src-unknown svg { color: var(--text-tertiary); }
 
 /* ---- EvidenceRow (compact citation) -------------------------------- */
 .ev-row {

@@ -39,6 +39,11 @@
 .chip-ev-insufficient { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border); }
 .chip-ev-conflicting  { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);      font-weight: 600; }
 .chip-ev-unknown      { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);   border-style: dashed; }
+/* `unreadable` is a READ FAILURE, not a finding about the record: it borrows the
+ * needs-you palette (a human has to look) rather than the missing palette that
+ * `unknown` wears, so the two are not one shade apart from each other. Dashed
+ * for the same reason as the two above — nothing here is established support. */
+.chip-ev-unreadable   { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border);  border-style: dashed; }
 
 /* Reconciliation axis (P31.3). An absent value is DASHED so it never reads as an
  * established fact; a conflict borrows the fail palette (needs human review). */

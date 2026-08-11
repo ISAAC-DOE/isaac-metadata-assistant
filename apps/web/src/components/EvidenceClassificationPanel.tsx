@@ -22,6 +22,11 @@ import type {
 
 // Fixed display order = the backend precedence (highest-severity concern first).
 const CLASS_ORDER: EvidenceClass[] = [
+  // First: the server could not read this entry, so no class below it can be
+  // asserted about it at all. It is a read failure, not a severity ranking of
+  // the science, and it is listed first because it is the one a person must
+  // resolve before any of the others mean anything for that entry.
+  'unreadable',
   'conflicting_evidence',
   'insufficient_evidence',
   'inferred_candidate',
@@ -53,6 +58,13 @@ const CLASS_GUIDANCE: Record<EvidenceClass, { meaning: string; next: string }> =
   unknown: {
     meaning: 'There is no defensible value and no supporting evidence.',
     next: 'Provide a value with evidence, or leave it honestly missing.',
+  },
+  unreadable: {
+    // Says what is NOT known, and does not slip into saying the evidence is
+    // absent. Evidence may well be recorded here; it could not be read.
+    meaning:
+      'This entry is recorded, but its stored evidence could not be read — so how well it is supported is not known. It is not a finding that evidence is missing.',
+    next: 'Open the evidence trail: it states what shape was found where the evidence should be.',
   },
 };
 

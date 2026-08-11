@@ -17,19 +17,19 @@ import { crossRecordTriage, type RuntimeRecord } from '../lib/crossRecordTriage'
 const RECS: RuntimeRecord[] = [
   { experiment_id: 'A', title: 'Alpha', status: 'needs_attention', pending_count: 5, exported: false, record_id: null,
     workflow: { current_step: 'complete_metadata', blocked: true, reopened: false },
-    evidence_counts: { supported: 3, inferred_candidate: 1, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 2 },
+    evidence_counts: { supported: 3, inferred_candidate: 1, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 2, unreadable: 0 },
     artifact_state: 'none', record_rev: 4, updated_utc: '2026-07-01T00:00:00Z', navigate_to: '/record/A' },
   { experiment_id: 'B', title: 'Beta', status: 'ready_to_export', pending_count: 0, exported: false, record_id: null,
     workflow: { current_step: 'export', blocked: false, reopened: false },
-    evidence_counts: { supported: 9, inferred_candidate: 0, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 0 },
+    evidence_counts: { supported: 9, inferred_candidate: 0, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 0, unreadable: 0 },
     artifact_state: 'none', record_rev: 7, updated_utc: '2026-07-02T00:00:00Z', navigate_to: '/record/B' },
   { experiment_id: 'C', title: 'Gamma', status: 'in_review', pending_count: 0, exported: false, record_id: null,
     workflow: { current_step: 'review_export_readiness', blocked: false, reopened: true },
-    evidence_counts: { supported: 5, inferred_candidate: 0, insufficient_evidence: 1, conflicting_evidence: 2, unknown: 0 },
+    evidence_counts: { supported: 5, inferred_candidate: 0, insufficient_evidence: 1, conflicting_evidence: 2, unknown: 0, unreadable: 0 },
     artifact_state: 'none', record_rev: 11, updated_utc: '2026-07-03T00:00:00Z', navigate_to: '/record/C' },
   { experiment_id: 'D', title: 'Delta', status: 'done', pending_count: 0, exported: true, record_id: 'D',
     workflow: { current_step: null, blocked: false, reopened: false },
-    evidence_counts: { supported: 9, inferred_candidate: 0, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 0 },
+    evidence_counts: { supported: 9, inferred_candidate: 0, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 0, unreadable: 0 },
     artifact_state: 'stale', record_rev: 13, updated_utc: '2026-07-04T00:00:00Z', navigate_to: '/record/D' },
 ];
 

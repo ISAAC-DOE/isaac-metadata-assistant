@@ -1063,7 +1063,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 47 operations, 88 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 47 operations, 89 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1452,8 +1452,19 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // the `contains each operation exactly once` test below is what proves the merge
     // did not duplicate a row — the exact defect the "42 / 32,174 / 67" entry above
     // records, which arose from resolving this same file by keeping both sides.
-    expect(total).toBe(41297);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(88);
+    //
+    // (d) 41,297 -> 41,511, and 88 -> 89 post-lead paragraphs: the evidence-support
+    //     histogram gained a SIXTH class, `unreadable`, so
+    //     `GET /api/experiments/{id}/evidence-classification` now names six classes
+    //     in its lead and carries one NEW paragraph saying what `unreadable` means
+    //     and that it is deliberately not `unknown`. +214 characters, +1 paragraph,
+    //     one operation touched. MEASURED the same way as (c) — the paragraph rule
+    //     re-implemented in Python over `create_app().openapi()`, restricted to the
+    //     47 operations this array names, not read off the captured copy:
+    //         total 41,511 · post-lead 89 · raw sum of descriptions 41,689
+    //         internal consistency: 41,689 - (2 x 89 separators) = 41,511.
+    expect(total).toBe(41511);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(89);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

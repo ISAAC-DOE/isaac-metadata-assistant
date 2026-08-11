@@ -25,13 +25,15 @@ export type ChipKind =
   | 'mentorReview'
   | 'draft'
   // P28.5 — the evidence-SUPPORT axis (distinct from field status above). These
-  // five never mean schema-valid / complete / exportable; they describe only how
-  // well a value is backed by evidence.
+  // six never mean schema-valid / complete / exportable; they describe only how
+  // well a value is backed by evidence — or, for `evUnreadable`, that the server
+  // could not read the evidence and so states nothing about its support.
   | 'evSupported'
   | 'evCandidate'
   | 'evInsufficient'
   | 'evConflicting'
   | 'evUnknown'
+  | 'evUnreadable'
   // P31.3 — the CSV reconciliation axis (RECONCILIATION-ONLY). These describe
   // only how a proposed CSV value compares to the CURRENT record; they never
   // mean valid / complete / exportable, and no reconciled field is editable.
@@ -62,6 +64,10 @@ export const CHIP_META: Record<ChipKind, ChipMeta> = {
   evInsufficient: { label: LABELS.chipEvInsufficient, className: 'chip-ev-insufficient' },
   evConflicting: { label: LABELS.chipEvConflicting, className: 'chip-ev-conflicting' },
   evUnknown: { label: LABELS.chipEvUnknown, className: 'chip-ev-unknown' },
+  // Dashed like `evUnknown`/`evCandidate`, because this is likewise not
+  // established support — but its own palette and its own words, so a reader is
+  // never told "Unknown" about an entry that was merely unreadable.
+  evUnreadable: { label: LABELS.chipEvUnreadable, className: 'chip-ev-unreadable' },
   // Reconciliation axis (P31.3). `reconAbsent` is dashed so an unmatched value is
   // never styled as an established fact.
   reconMatch: { label: LABELS.chipReconMatch, className: 'chip-recon-match' },
@@ -92,6 +98,7 @@ export const EVIDENCE_CLASS_CHIP: Record<EvidenceClass, ChipKind> = {
   insufficient_evidence: 'evInsufficient',
   conflicting_evidence: 'evConflicting',
   unknown: 'evUnknown',
+  unreadable: 'evUnreadable',
 };
 
 /** Map a core field envelope status to the UI chip kind. */

@@ -9,6 +9,7 @@ import {
   CornerDownRight,
   CircleDashed,
   CircleAlert,
+  EyeOff,
   TriangleAlert,
   Shield,
   ShieldCheck,
@@ -65,6 +66,10 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   evInsufficient: CircleAlert,
   evConflicting: TriangleAlert,
   evUnknown: CircleHelp,
+  // `EyeOff`, not `CircleHelp`: "unknown" is a question about the record, this is
+  // the server saying it could not SEE what is stored. Distinct from every other
+  // glyph on this axis, so the two are never told apart by colour alone.
+  evUnreadable: EyeOff,
   // Reconciliation axis (P31.3) — distinct glyphs so the state is never signalled
   // by color alone, and an absent value never wears the confirmed check.
   reconMatch: Check,
@@ -109,6 +114,7 @@ export {
   CornerDownRight,
   CircleDashed,
   CircleAlert,
+  EyeOff,
   TriangleAlert,
   Shield,
   ShieldCheck,

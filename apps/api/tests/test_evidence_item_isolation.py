@@ -31,6 +31,18 @@ WHAT IS ASSERTED HERE
    that is not a mapping raises rather than being reported as a partial success.
 5. The pre-existing bundle-level tolerance is unchanged: an unparseable sidecar
    still degrades to the draft trail (``routes._read_artifact_json``).
+6. NO CONSUMER of the trail turns "could not be read" into a claim about the
+   record. The evidence-support classifier calls it ``unreadable``, never
+   ``unknown``/"No defensible value."; the deterministic Assistant refuses the
+   question instead of answering "has no cited source". Both of those were
+   REGRESSIONS INTRODUCED BY THIS SLICE — making a previously-absent entry
+   visible made two downstream surfaces confident about it — and both are
+   pinned here rather than in the surfaces' own files, because it is this
+   slice's ``unavailable`` flag they must read.
+7. A DRAFT container (``implicit``/``assets``) that is not a list is a
+   bundle-level failure like ``fields``/``evidence``, not N per-item ones.
+   ``enumerate`` walked a dict's keys and a string's characters and invented a
+   row per key/character; it now raises.
 
 Truth core (``src/isaac_records/``) untouched. Every fixture is a committed
 synthetic seed; nothing real is read.
@@ -44,6 +56,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from isaac_api import assistant_query as aq
 from isaac_api import serialize
 
 from conftest import client_ws, tutorial_client
@@ -254,20 +267,163 @@ def test_evidence_classification_survives_an_unreadable_draft_payload(client):
     non-iterable payload reaching it, ``GET /evidence-classification`` raised too.
     Normalising inside the trail builder fixes both from one place, and this
     pins that it stays fixed.
+
+    STRENGTHENED after review. The first version of this test asserted ONLY
+    ``status_code == 200`` and the count-sum invariant — i.e. it pinned
+    NON-CRASH and nothing about what was said. It therefore passed while the row
+    read ``classification: "unknown"`` / ``"No defensible value."``, a positive
+    claim about a record nobody could read; the count-sum invariant is preserved
+    below rather than dropped, so nothing here is weaker than it was.
     """
     exp_id = _seed_id(client)
-    _corrupt_draft(
-        client,
-        exp_id,
-        lambda d: d["fields"].__setitem__(
-            next(iter(d["fields"])), {"value": "x", "status": "verified", "evidence": 7}
-        ),
-    )
+    victim = None
+
+    def corrupt(d):
+        nonlocal victim
+        victim = next(iter(d["fields"]))
+        d["fields"][victim] = {"value": "x", "status": "verified", "evidence": 7}
+
+    _corrupt_draft(client, exp_id, corrupt)
 
     resp = client.get(f"/api/experiments/{exp_id}/evidence-classification")
     assert resp.status_code == 200
     body = resp.json()
+    # The original two assertions, unchanged.
     assert sum(body["counts"].values()) == len(body["field_results"])
+
+    row = next(r for r in body["field_results"] if r["field"] == victim)
+    assert row["classification"] == "unreadable", (
+        "an entry that could not be READ is not an entry with no defensible value"
+    )
+    assert "No defensible value" not in row["explanation"]
+    assert "could not be read" in row["explanation"]
+    assert row["value_state"] == "unreadable"
+    # …and the histogram must not quietly bucket it with the plainly-absent.
+    assert body["counts"]["unreadable"] >= 1
+    unknown_fields = [
+        r["field"] for r in body["field_results"] if r["classification"] == "unknown"
+    ]
+    assert victim not in unknown_fields
+
+
+def test_a_non_dict_draft_envelope_is_classified_unreadable_not_unknown(client):
+    """The OTHER shape the review measured: ``{"fields": {"a.b": 7}}``.
+
+    On base ``77820bf`` this field was silently absent from the classification
+    (the trail builder ``continue``d it). On ``ba8e38e`` it arrived classified
+    ``unknown`` / "No defensible value." So an OMISSION had become a positive
+    false claim — the opposite direction from the 500 above, same wrong answer.
+    """
+    exp_id = _seed_id(client)
+    victim = None
+
+    def corrupt(d):
+        nonlocal victim
+        victim = next(iter(d["fields"]))
+        d["fields"][victim] = 7
+
+    _corrupt_draft(client, exp_id, corrupt)
+
+    body = client.get(f"/api/experiments/{exp_id}/evidence-classification").json()
+    row = next(r for r in body["field_results"] if r["field"] == victim)
+    assert row["classification"] == "unreadable"
+    assert "No defensible value" not in row["explanation"]
+    # The reason names the SHAPE, and the classifier passes it through verbatim.
+    assert "not an evidence envelope" in row["explanation"]
+
+
+def test_a_partially_readable_entry_keeps_its_class_and_discloses_the_rest(client):
+    """Partial readability is NOT reclassified — it is classified and disclosed.
+
+    Reclassifying an entry with genuine observed evidence as ``unreadable`` would
+    be its own false statement (the support IS there and IS readable). What must
+    not happen is the explanation reading as if it described the whole entry.
+    """
+    exp_id = _seed_id(client)
+    victim = None
+
+    def corrupt(d):
+        nonlocal victim
+        victim = next(
+            k for k, v in d["fields"].items() if isinstance(v, dict) and v.get("evidence")
+        )
+        d["fields"][victim]["evidence"] = list(d["fields"][victim]["evidence"]) + [7]
+
+    _corrupt_draft(client, exp_id, corrupt)
+
+    body = client.get(f"/api/experiments/{exp_id}/evidence-classification").json()
+    row = next(r for r in body["field_results"] if r["field"] == victim)
+    assert row["classification"] != "unreadable", "readable support is still support"
+    assert "could not be read" in row["explanation"], (
+        "the class describes only the readable part, so the rest must be said"
+    )
+
+
+def test_the_classification_explanation_never_quotes_the_stored_value(client):
+    """The pass-through reason must stay a statement about SHAPE, not content."""
+    exp_id = _seed_id(client)
+
+    _corrupt_draft(
+        client,
+        exp_id,
+        lambda d: d["fields"].__setitem__(
+            next(iter(d["fields"])),
+            {"value": "x", "status": "verified", "evidence": "SECRET-LOOKING-STRING"},
+        ),
+    )
+
+    text = client.get(f"/api/experiments/{exp_id}/evidence-classification").text
+    assert "SECRET-LOOKING-STRING" not in text
+
+
+# --- 2b. a BUNDLE-level container failure in a DRAFT --------------------------
+
+
+@pytest.mark.parametrize(
+    "key, container",
+    [
+        # The two shapes the review measured fabricating rows on `ba8e38e`:
+        # a dict enumerated its KEYS (2 rows, "position 0"/"position 1"), and a
+        # string enumerated its CHARACTERS (3 rows for "abc").
+        ("implicit", {"x": 1, "y": 2}),
+        ("implicit", "abc"),
+        ("implicit", 7),
+        ("implicit", True),
+        ("implicit", ""),
+        ("assets", {"x": 1, "y": 2}),
+        ("assets", "ab"),
+        ("assets", 7),
+        ("assets", 0),
+    ],
+)
+def test_a_draft_container_that_is_not_a_list_fails_the_whole_read(key, container):
+    """A container is not N items. Base ``77820bf`` raised on every one of these.
+
+    ``{"implicit": {"x": 1, "y": 2}}`` produced TWO entries on ``ba8e38e``, each
+    saying "the stored implicit claim at position 0 is a string, not an implicit
+    claim" — a per-position statement about positions that do not exist, built
+    out of dict KEYS. That is a plausible-looking partial success, which is
+    strictly worse than the failure it replaced, and it contradicted this
+    section's own comment that a bundle-level failure is not absorbed here.
+
+    The falsy containers (``""``, ``0``) are included deliberately: ``or []``
+    answered "this is not a container" with "this container is empty".
+    """
+    with pytest.raises(TypeError):
+        serialize.evidence_trail_from_draft({"fields": {}, key: container})
+
+
+@pytest.mark.parametrize("key", ["implicit", "assets"])
+def test_an_absent_or_null_draft_container_is_still_legal(key):
+    """The guard must not turn an OPTIONAL key into a required one.
+
+    Both keys are genuinely optional in a draft, and ``None`` is what an absent
+    one reads as. Raising here would convert every ordinary draft into a failed
+    read — the opposite over-correction.
+    """
+    assert serialize.evidence_trail_from_draft({"fields": {}, key: None}) == []
+    assert serialize.evidence_trail_from_draft({"fields": {}}) == []
+    assert serialize.evidence_trail_from_draft({"fields": {}, key: []}) == []
 
 
 # --- 3. a genuine BUNDLE failure must still fail the bundle -------------------
@@ -381,3 +537,157 @@ def test_the_reason_never_quotes_the_stored_value():
     )
     assert "SECRET-LOOKING-STRING" not in entries[0]["unavailable_reason"]
     assert "is a string" in entries[0]["unavailable_reason"]
+
+
+# --- 5. the deterministic Assistant must not ANSWER what it could not read ----
+#
+# The review's most serious finding: this slice created a REGRESSION on a surface
+# it did not touch. Making the unreadable entry visible in the trail made
+# `_match_field_entry` succeed where it used to return None, and both answer
+# functions read `entry["evidence"]` without ever reading `entry["unavailable"]`.
+# Measured on `ba8e38e` with `{"fields": {"sample.name": 7}}`:
+#
+#   base `77820bf`  trail []            -> no match -> `insufficient_context`
+#                                          "No cited source is recorded for a
+#                                          field yet."
+#   branch `ba8e38e` 1 unavailable entry -> MATCH    -> `answered`
+#                                          "Name has no cited source recorded
+#                                          yet."
+#
+# A refusal became a confident FALSE claim. The browser side of this same branch
+# already refused that exact sentence (`adapt.ts::provenanceFor`).
+
+
+class _Classified:
+    def __init__(self, field):
+        self.extracted = {"field": field}
+
+
+class _Ctx:
+    def __init__(self, trail):
+        self.evidence_trail = trail
+
+
+_UNREADABLE = {
+    "path": "sample.name",
+    "value": None,
+    "status": serialize.UNAVAILABLE_STATUS,
+    "evidence": [],
+    "unavailable": True,
+    "unavailable_reason": "this field's stored draft envelope is a number, not an evidence envelope",
+}
+
+_PARTIAL = {
+    "path": "sample.name",
+    "value": "x",
+    "status": "verified",
+    "evidence": [{"source_type": "spreadsheet"}],
+    "unavailable": True,
+    "unavailable_reason": "1 of 2 stored evidence entries cannot be shown: not an evidence object",
+}
+
+
+@pytest.mark.parametrize("fn", [aq._provenance, aq._evidence])
+def test_assistant_refuses_a_field_whose_evidence_could_not_be_read(fn):
+    """Never "has no cited source" / "has no evidence" — the entry may have both."""
+    text, result, grounding, citations, _ = fn(
+        _Classified("name"), _Ctx([_UNREADABLE]), "/r/1", []
+    )
+
+    assert result == "insufficient_context", (
+        "this question was not answered from grounded evidence; recording it as "
+        "`answered` would make the outcome field itself a false statement"
+    )
+    assert "could not be read" in text
+    assert "no cited source" not in text.lower()
+    assert "has no evidence" not in text.lower()
+    assert "no separate evidence entries" not in text.lower()
+    # The reason is passed through — it names the SHAPE, never the stored value.
+    assert "not an evidence envelope" in text
+    assert grounding == ["files"]
+    # A route to the surface that reports the same failure per entry. It asserts
+    # nothing about the evidence; it lets the user go look.
+    assert citations and citations[0]["navigate_to"] == "/r/1/evidence"
+
+
+@pytest.mark.parametrize("fn", [aq._provenance, aq._evidence])
+def test_assistant_answers_a_partially_readable_field_and_discloses_the_rest(fn):
+    """The readable entries DO answer the question; the gap is named, not hidden.
+
+    Deliberately still `answered` — refusing here would throw away real, readable
+    provenance, which is over-refusal rather than honesty.
+    """
+    text, result, _, citations, _ = fn(
+        _Classified("name"), _Ctx([_PARTIAL]), "/r/1", []
+    )
+
+    assert result == "answered"
+    assert "spreadsheet" in text, "what WAS readable is still stated"
+    assert "unavailable" in text.lower(), "and what was not is stated too"
+    assert "cannot be shown" in text
+    assert citations and citations[0]["navigate_to"] == "/r/1/evidence"
+
+
+@pytest.mark.parametrize("fn", [aq._provenance, aq._evidence])
+def test_assistant_unmatched_fallback_does_not_claim_the_trail_is_empty(fn):
+    """The no-labels fallback was the SAME false sentence, one branch over.
+
+    `_traceable_labels` excludes an unreadable entry (correctly — it cannot be
+    traced), so a trail of nothing but unreadable entries produced an empty label
+    list and fell through to "No cited source is recorded for a field yet." Every
+    entry in that trail HAS one; none of them could be read.
+    """
+    text, result, _, _, _ = fn(_Classified(None), _Ctx([_UNREADABLE]), "/r/1", [])
+
+    assert result == "insufficient_context"
+    assert "could not be read" in text
+    assert "no cited source is recorded" not in text.lower()
+    assert "no field has recorded evidence entries" not in text.lower()
+
+
+@pytest.mark.parametrize("fn", [aq._provenance, aq._evidence])
+def test_assistant_still_says_nothing_is_recorded_when_nothing_is(fn):
+    """The honest negative must survive: an empty trail is genuinely empty.
+
+    Without this, the fix above could have been "never say it is empty", which
+    would be over-refusal in the one case where the claim is true.
+    """
+    text, result, _, _, _ = fn(_Classified(None), _Ctx([]), "/r/1", [])
+
+    assert result == "insufficient_context"
+    assert "could not be read" not in text
+    assert "yet." in text
+
+
+def test_traceable_labels_excludes_the_unreadable_but_keeps_the_partial():
+    """Consistency with the answer path, asserted rather than assumed.
+
+    An entry this surface cannot trace is not offered as traceable; an entry it
+    CAN partly trace is offered, and the answer for it discloses the rest.
+    """
+    assert aq._traceable_labels([_UNREADABLE]) == []
+    assert aq._traceable_labels([_PARTIAL]) == ["Name"]
+    assert aq._unreadable_trail_count([_UNREADABLE, _PARTIAL]) == 1
+
+
+def test_assistant_endpoint_refuses_end_to_end_for_an_unreadable_field(client):
+    """The unit assertions above, proven through the real route and real draft."""
+    exp_id = _seed_id(client)
+    victim = None
+
+    def corrupt(d):
+        nonlocal victim
+        victim = next(iter(d["fields"]))
+        d["fields"][victim] = 7
+
+    _corrupt_draft(client, exp_id, corrupt)
+
+    token = victim.split(".")[-1].split(":")[-1].replace("_", " ")
+    body = client.post(
+        f"/api/experiments/{exp_id}/assistant/query",
+        json={"question": f"where did the {token} come from"},
+    ).json()
+
+    assert body["result"] == "insufficient_context", body
+    assert "could not be read" in body["answer"]
+    assert "no cited source" not in body["answer"].lower()

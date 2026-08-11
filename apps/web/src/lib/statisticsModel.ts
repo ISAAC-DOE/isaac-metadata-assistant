@@ -230,41 +230,56 @@ export interface EvidenceTotals {
   insufficientEvidence: number;
   conflictingEvidence: number;
   unknown: number;
-  /** The sum of the five — a count of FIELDS across records, never of records. */
+  /** Entries whose stored evidence could not be READ — not a claim that none exists. */
+  unreadable: number;
+  /** The sum of the six — a count of FIELDS across records, never of records. */
   totalFields: number;
   /** How many records contributed to the sums above. */
   recordsCounted: number;
 }
 
 /**
- * The five evidence-support classes in DISPLAY PRECEDENCE — the order
- * `apps/api/isaac_api/runtime_records.py:30-38` declares them, which is NOT
- * sorted by count. Each entry pairs the backend's own histogram key with the
- * {@link EvidenceTotals} field carrying its sum, so a consumer iterates the
- * five in precedence order without restating the order itself.
+ * The six evidence-support classes in DISPLAY PRECEDENCE — the order
+ * `apps/api/isaac_api/runtime_records.py` declares them, which is NOT sorted by
+ * count. Each entry pairs the backend's own histogram key with the
+ * {@link EvidenceTotals} field carrying its sum, so a consumer iterates the six
+ * in precedence order without restating the order itself.
+ *
+ * `unreadable` is listed because omitting it would have been a silent
+ * undercount: `deriveEvidenceTotals` sums only what this array names, so an
+ * unlisted backend class would vanish from both the per-class row AND
+ * `totalFields`, and the stacked bar's denominator would quietly stop being the
+ * whole.
  */
 export const EVIDENCE_CLASSES: readonly {
   readonly key: keyof RuntimeRecord['evidence_counts'];
-  readonly field: 'supported' | 'inferredCandidate' | 'insufficientEvidence' | 'conflictingEvidence' | 'unknown';
+  readonly field:
+    | 'supported'
+    | 'inferredCandidate'
+    | 'insufficientEvidence'
+    | 'conflictingEvidence'
+    | 'unknown'
+    | 'unreadable';
 }[] = [
   { key: 'supported', field: 'supported' },
   { key: 'inferred_candidate', field: 'inferredCandidate' },
   { key: 'insufficient_evidence', field: 'insufficientEvidence' },
   { key: 'conflicting_evidence', field: 'conflictingEvidence' },
   { key: 'unknown', field: 'unknown' },
+  { key: 'unreadable', field: 'unreadable' },
 ] as const;
 
 /**
  * Evidence support across the workspace, in FIELDS.
  *
- * Mirrors `apps/api/isaac_api/runtime_records.py:61-73` (`_evidence_counts`) —
- * the 5-class histogram of `evidence_classify.classify_fields`, counts only.
+ * Mirrors `apps/api/isaac_api/runtime_records.py` (`_evidence_counts`) —
+ * the 6-class histogram of `evidence_classify.classify_fields`, counts only.
  * Per-field classifications, values, evidence bodies and source locators never
  * leave the server, and nothing here reconstructs them.
  *
  * Summing across records is arithmetically valid because the classification is
  * per-field and exhaustive: every classified field of every record falls in
- * exactly one of the five classes. The unit is therefore FIELDS, and
+ * exactly one of the six classes. The unit is therefore FIELDS, and
  * `recordsCounted` is carried alongside so a label can never quietly read the
  * field total as a record total.
  */
@@ -275,6 +290,7 @@ export function deriveEvidenceTotals(records: readonly RuntimeRecord[]): Evidenc
     insufficientEvidence: 0,
     conflictingEvidence: 0,
     unknown: 0,
+    unreadable: 0,
     totalFields: 0,
     recordsCounted: records.length,
   };

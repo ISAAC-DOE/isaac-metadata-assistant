@@ -754,9 +754,14 @@ export type EvidenceClass =
   | 'inferred_candidate'
   | 'insufficient_evidence'
   | 'conflicting_evidence'
-  | 'unknown';
+  | 'unknown'
+  // The entry's stored evidence could not be read, so its support is UNKNOWN TO
+  // THE SERVER. Deliberately not folded into `unknown`, which asserts that
+  // nothing defensible is recorded — see `evidence_classify._classify_entry`
+  // rule 0.
+  | 'unreadable';
 
-export type EvidenceValueState = 'confirmed' | 'candidate' | 'none';
+export type EvidenceValueState = 'confirmed' | 'candidate' | 'none' | 'unreadable';
 
 // One safe, already-present source reference (never a raw answer/quote/secret/
 // absolute path — the backend strips those in evidence_classify._safe_locator).
@@ -776,7 +781,7 @@ export interface ApiFieldClassification {
 export interface ApiEvidenceClassification {
   record_rev: number; // authoritative rev the view is bound to
   field_results: ApiFieldClassification[];
-  // same-axis histogram of the 5 classes (sum === field_results.length).
+  // same-axis histogram of the 6 classes (sum === field_results.length).
   counts: Record<EvidenceClass, number>;
 }
 

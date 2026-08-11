@@ -317,11 +317,23 @@ def _status_from_evidence(evidence) -> str:
 # implies support it does not have (CLAUDE.md §5).
 #
 # A BUNDLE-level failure is deliberately NOT absorbed here. If ``draft["fields"]``
-# or ``sidecar["evidence"]`` is not a mapping at all, there is no per-item
-# question to answer and these functions still raise, so the caller fails the
-# whole read instead of reporting a misleading partial success. (The route's own
-# artifact-pair tolerance — ``routes._read_artifact_json`` — is unchanged and
-# still degrades an unreadable sidecar to the draft trail.)
+# or ``sidecar["evidence"]`` is not a mapping at all — or ``draft["implicit"]`` /
+# ``draft["assets"]`` is not a list — there is no per-item question to answer and
+# these functions still raise, so the caller fails the whole read instead of
+# reporting a misleading partial success. (The route's own artifact-pair
+# tolerance — ``routes._read_artifact_json`` — is unchanged and still degrades an
+# unreadable sidecar to the draft trail.)
+#
+# ``implicit``/``assets`` needed an EXPLICIT guard where the two mappings did not.
+# ``(draft.get("fields") or {}).items()`` raises on its own for any non-mapping,
+# but ``enumerate(draft.get("implicit") or [])`` happily walks a dict's KEYS or a
+# string's CHARACTERS. Measured on `ba8e38e` before this guard existed:
+# ``{"implicit": {"x": 1, "y": 2}}`` produced TWO entries ``implicit:#0`` and
+# ``implicit:#1``, each stating "the stored implicit claim at position 0 is a
+# string, not an implicit claim" — a per-position claim about positions that do
+# not exist, invented out of dict keys. ``{"implicit": "abc"}`` produced THREE,
+# one per character. That is a fabricated partial success, which is worse than the
+# failure it replaced (base `77820bf` raised on all of them).
 
 #: ``status`` for an entry whose stored evidence yielded NO readable support.
 #: A separate value rather than one of the draft's own statuses: the trail's
@@ -378,9 +390,28 @@ def _trail_entry(path: str, value, status, payload) -> dict:
 
     ``status`` is the caller's own answer for a well-formed entry; it is replaced
     by :data:`UNAVAILABLE_STATUS` only when the payload yielded no readable
-    support at all. A PARTIALLY readable payload keeps the status its readable
-    entries justify AND still discloses what could not be shown — the status then
-    describes exactly what is on screen, and the reason names the rest.
+    support at all.
+
+    A PARTIALLY readable payload KEEPS ``status`` and additionally discloses what
+    could not be shown. What that status means then depends on which caller
+    supplied it, and the two are not the same — an earlier revision of this
+    docstring said "keeps the status its readable entries justify", which is true
+    of only two of the three callers:
+
+    * implicit claims and assets, and every sidecar key, pass
+      ``_status_from_evidence(_readable_evidence(payload)[0])`` — a status
+      RE-DERIVED from the readable entries alone, so it does describe exactly
+      what is on screen.
+    * a draft ``fields`` envelope passes ``env.get("status")`` VERBATIM. Nothing
+      is re-derived, so the status is the author's stored answer about the whole
+      payload, not about its readable part. Measured: ``evidence: [<good>, 7]``
+      stored ``verified`` is served ``status: "verified"`` with
+      ``unavailable: true``.
+
+    The draft-fields behaviour is deliberate — the stored status is the author's
+    own record and this view does not overwrite it — and it is defensible only
+    BECAUSE ``unavailable``/``unavailable_reason`` travel with it. Nothing here
+    may present that status as fully justified support.
     """
     readable, reason = _readable_evidence(payload)
     entry = {
@@ -419,6 +450,30 @@ def _unreadable_entry(path: str, reason: str) -> dict:
 _ITEM_SHAPE_ERRORS = (AttributeError, TypeError, ValueError, KeyError, IndexError)
 
 
+def _bundle_list(draft: dict, key: str, noun: str) -> list:
+    """A draft's ``implicit``/``assets`` container, or a BUNDLE-level failure.
+
+    The mirror of what ``(draft.get("fields") or {}).items()`` does for free: a
+    container that is not a list is not N unreadable items, it is one unreadable
+    container, and there is no position to key an entry by. Raising is the same
+    answer ``fields``/``evidence`` give and the same answer base ``77820bf`` gave.
+
+    ``None``/absent stays legal (the key is optional). A non-list — dict, string,
+    number, boolean — raises, INCLUDING the falsy ones (``""``, ``0``, ``False``):
+    "the container is empty" and "the container is not a container" are different
+    facts, and ``or []`` used to answer the second with the first.
+    """
+    container = draft.get(key)
+    if container is None:
+        return []
+    if isinstance(container, list):
+        return container
+    raise TypeError(
+        f"draft[{key!r}] is {_kind(container)}, not a list of {noun} — a "
+        f"bundle-level failure, not a per-item one"
+    )
+
+
 def evidence_trail_from_draft(draft: dict) -> list[dict]:
     """Evidence trail for a not-yet-exported experiment: read the draft envelopes.
 
@@ -449,7 +504,7 @@ def evidence_trail_from_draft(draft: dict) -> list[dict]:
                     str(path), f"this field's stored evidence could not be read ({type(exc).__name__})"
                 )
             )
-    for index, imp in enumerate(draft.get("implicit") or []):
+    for index, imp in enumerate(_bundle_list(draft, "implicit", "implicit claims")):
         if not isinstance(imp, dict):
             entries.append(
                 _unreadable_entry(
@@ -471,7 +526,7 @@ def evidence_trail_from_draft(draft: dict) -> list[dict]:
                     path, f"this implicit claim could not be read ({type(exc).__name__})"
                 )
             )
-    for index, asset in enumerate(draft.get("assets") or []):
+    for index, asset in enumerate(_bundle_list(draft, "assets", "assets")):
         if not isinstance(asset, dict):
             entries.append(
                 _unreadable_entry(
