@@ -28,13 +28,14 @@ improvement. This test pins the crash being gone, and pins that nothing was writ
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 from fastapi.testclient import TestClient
 
 from isaac_api.app import create_app
 
-from conftest import tutorial_client
+from conftest import tutorial_client, tutorial_ws
 
 PARTIAL = "01SYNTHXANESSEED0000000002"
 
@@ -391,3 +392,314 @@ def test_an_empty_series_correction_cannot_reach_an_exported_record(client):
     assert isinstance(series, list) and len(series) > 0, (
         "an exported official record must not describe an empty measurement series"
     )
+
+
+# --- the asset-sha256 hole the type guard did not cover -----------------------
+
+
+def _asset_uri(client: TestClient, rid: str) -> str:
+    """The uri of a still-PENDING asset blocker — the `/answers` fill path's key."""
+    pending = client.get(f"/api/experiments/{rid}/pending").json()["pending"]
+    uris = [e["id"] for e in pending if e["kind"] == "asset"]
+    assert uris, "this test needs a record with a pending asset blocker"
+    return uris[0]
+
+
+def _stored_asset_uri(client: TestClient, rid: str) -> str:
+    """The uri of an asset ALREADY IN THE DRAFT — the `/edit` correction path's key.
+
+    A SEPARATE HELPER FROM `_asset_uri`, and the distinction is the whole of the second
+    defect found on this route. `/edit` can only overwrite a value that exists, so a
+    pending uri and a stored uri are not interchangeable there: a pending one names no
+    editable field. Using the pending helper for a `/edit` test measures the
+    `unrecognized_field` refusal while appearing to measure the value refusal.
+    """
+    assets = tutorial_ws().load_experiment(rid).draft.get("assets") or []
+    uris = [a["uri"] for a in assets if a.get("uri")]
+    assert uris, "this test needs a record with an asset already stored in the draft"
+    return uris[0]
+
+
+@pytest.mark.parametrize(
+    "sha,why",
+    [
+        ("Z" * 64, "64 characters, not hex"),
+        ("abc", "far too short"),
+        ("5" * 63, "63 hex characters"),
+        ("5" * 65, "65 hex characters"),
+        ("3" * 64 + " ", "one trailing SPACE"),
+        ("3" * 64 + "\n", "one trailing NEWLINE — 65 chars, and `$` used to match it"),
+        ("A" * 64, "uppercase hex, which the stored form is not"),
+    ],
+)
+def test_a_malformed_asset_sha_is_refused_rather_than_answered_200(client, sha, why):
+    """A CORRECTION THAT CANNOT BE STORED MUST NOT BE REPORTED AS SAVED.
+
+    The `/edit` guard originally asked only `isinstance(value, str)` of an asset sha, so
+    every value below passed it, was then declined by `apply_corrections` for being
+    malformed, and the route answered **200 with `rev` unmoved and nothing written**.
+    Measured before the fix on the first six.
+
+    That is the outcome this route's own comment calls forbidden — "a body that names
+    [a recognised field] and gives it an unusable value" gets a typed refusal — closed
+    for `series` and `descriptor`, where malformation is a question of TYPE, and left
+    open here, where it is a question of FORMAT.
+
+    A scientist correcting a hash with a typo was told it was saved. Nothing was
+    destroyed and nothing was invented, which is why no other test caught it.
+
+    THE SEVENTH CASE IS NOT LIKE THE OTHER SIX, and it is why the label on the space
+    case now says SPACE. A trailing space was refused all along; a trailing NEWLINE was
+    not, because `_SHA256_RE` was `$`-anchored and Python's `$` also matches before a
+    final newline. So the parametrize named the category "trailing whitespace" while
+    covering only the half of it that already worked. Measured on the `$` pattern:
+    `POST /edit` returned 200, stored `'999…9\\n'`, `POST /validate` reported `ok: true`,
+    and `POST /export` produced an official record with `official_report.ok: true`.
+
+    ADDRESSED AT A STORED ASSET, not a pending one. A pending uri is not an editable
+    field on this route at all (see the two tests below), so aiming this test at one
+    would measure the `unrecognized_field` refusal while appearing to measure this one —
+    and would keep passing if the value guard were deleted.
+    """
+    rid = "01SYNTHXANESSEED0000000003"
+    uri = _stored_asset_uri(client, rid)
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    before = client.get(f"/api/experiments/{rid}").json()["rev"]
+    stored_before = copy.deepcopy(tutorial_ws().load_experiment(rid).draft["assets"])
+
+    res = client.post(
+        f"/api/experiments/{rid}/edit",
+        json={"confirmed_by_user": True, "answers": {uri: sha}},
+        headers={"If-Match": etag},
+    )
+
+    assert res.status_code == 422, f"{why}: {res.status_code} {res.text}"
+    assert res.json()["error"] == "invalid_field_value"
+    assert res.json()["key"] == uri
+    assert client.get(f"/api/experiments/{rid}").json()["rev"] == before
+    # …and the hash that WAS there is byte-identical, not merely un-advanced.
+    assert tutorial_ws().load_experiment(rid).draft["assets"] == stored_before
+
+
+def test_the_refusal_message_names_no_field_class_but_the_offending_one(client):
+    """THE 422's PROSE MUST NOT NAME A CAUSE THE RESPONSE HAS NOT ESTABLISHED.
+
+    Measured on the shipped message, for a body whose only offending key was an ASSET
+    URI: "These corrections are not the shape the record can store, so nothing was
+    written: `series` must be a list of objects and `descriptor` must be an object."
+    Two field classes named, neither of them the one that was refused — and the same
+    text came back for `descriptor_label`.
+
+    The refusal was widened to new key classes without the sentence being touched, so its
+    honesty depended on the ONE client that reads the `error` code and writes its own
+    copy. Every other consumer — curl, the generated OpenAPI, the Assistant — was handed
+    the false text. `key`/`keys` already say which field was refused; the prose says only
+    what is true of all of them.
+    """
+    rid = "01SYNTHXANESSEED0000000003"
+    uri = _stored_asset_uri(client, rid)
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+
+    res = client.post(
+        f"/api/experiments/{rid}/edit",
+        json={"confirmed_by_user": True, "answers": {uri: "not-a-hash"}},
+        headers={"If-Match": etag},
+    )
+
+    assert res.status_code == 422, res.text
+    body = res.json()
+    assert body["error"] == "invalid_field_value"
+    assert body["key"] == uri and body["keys"] == [uri]
+    message = body["message"]
+    # The offending key is an asset uri. The message may not name a DIFFERENT key class.
+    assert "series" not in message, message
+    assert "descriptor" not in message, message
+    # It must still say the two things that are true and that a reader needs.
+    assert "nothing was written" in message.lower()
+    assert "unchanged" in message.lower()
+
+
+def test_a_still_pending_asset_uri_is_not_an_editable_field_on_the_edit_path(client):
+    """A WELL-FORMED HASH FOR A PENDING ASSET WAS ANSWERED 200 WITH NOTHING STORED.
+
+    The same defect class as the malformed-hash one above, on the same route and the same
+    key, and reachable with a value that is beyond reproach. Measured before this fix:
+
+        POST /edit {"<a still-pending asset uri>": "9" * 64}
+        -> 200 · rev 0 -> 0 · stored sha256 None
+        -> invalidation.reason "No change — the submitted value was identical;
+                                nothing was invalidated."
+
+    The value was not identical. It was never stored. `apply_corrections` iterates
+    `draft["assets"]`, and a pending asset is by construction not in it — `apply_answers`
+    is what creates the asset entry from the blocker — so the correction path could never
+    have written it.
+
+    `unrecognized_field`, deliberately, and NOT `invalid_field_value`: the value was
+    fine. The dedicated client notice for `invalid_field_value` says "this field still
+    holds the value it held before", which would be a third false claim about a field
+    that holds no value yet. The generic notice claims less, and less is what is known.
+    """
+    rid = "01SYNTHXANESSEED0000000001"
+    uri = _asset_uri(client, rid)
+    assert uri not in [
+        a["uri"] for a in (tutorial_ws().load_experiment(rid).draft.get("assets") or [])
+    ], "this test needs a uri that is pending and NOT already stored"
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    rev_before = client.get(f"/api/experiments/{rid}").json()["rev"]
+
+    res = client.post(
+        f"/api/experiments/{rid}/edit",
+        json={"confirmed_by_user": True, "answers": {uri: "9" * 64}},
+        headers={"If-Match": etag},
+    )
+
+    assert res.status_code == 422, res.text
+    assert res.json()["error"] == "unrecognized_field"
+    # Nothing written, nothing invented, and no 200 asserting a cause.
+    assert client.get(f"/api/experiments/{rid}").json()["rev"] == rev_before
+    after = tutorial_ws().load_experiment(rid).draft
+    assert (after.get("assets") or []) == []
+    assert "9" * 64 not in json.dumps(after)
+
+
+def test_the_same_pending_uri_is_still_accepted_by_the_answers_path(client):
+    """THE OTHER DIRECTION, so the refusal above cannot have been a blanket narrowing.
+
+    `POST /answers` is SUPPOSED to accept a still-pending asset uri — that is the fill
+    path, and it is the only path that can materialise the asset at all. The `edit_only`
+    narrowing must not touch it. Same record, same uri, same hash as the test above.
+    """
+    rid = "01SYNTHXANESSEED0000000001"
+    uri = _asset_uri(client, rid)
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+
+    res = client.post(
+        f"/api/experiments/{rid}/answers",
+        json={"confirmed_by_user": True, "answers": {uri: "9" * 64}},
+        headers={"If-Match": etag},
+    )
+
+    assert res.status_code == 200, res.text
+    after = tutorial_ws().load_experiment(rid).draft
+    stored = {a["uri"]: a["sha256"] for a in (after.get("assets") or [])}
+    assert stored.get(uri) == "9" * 64, "the answers path must still fill a pending asset"
+    assert uri not in _pending_kinds(client, rid), "the blocker must be resolved, not left open"
+    assert res.json()["invalidation"]["changed_fields"] == [uri]
+
+
+def test_changed_fields_names_only_what_the_apply_shape_carried(client):
+    """A KEY THE ROUTE DROPPED WAS REPORTED BACK AS AN UPDATED FIELD.
+
+    `changed_fields` was `submitted_fields` — every non-blank REQUEST-BODY key — so a
+    ride-along key was not merely ignored, it was ASSERTED. Measured before the fix:
+
+        POST /edit {"<a stored asset uri>": "9" * 64,
+                    "totally_made_up_field": "invented"}
+        -> 200 · changed_fields ["<uri>", "totally_made_up_field"]
+        -> reason "Updated 2 field(s); no downstream steps reopened."
+
+    and `totally_made_up_field` appears nowhere in the stored draft. `qc` behaved the
+    same way and is worse, because it is a real field name: `apply_corrections` handles
+    it, `_answers_to_apply_shape` does not forward it, so it was reported as updated
+    while `draft["qc"]["status"]` never moved.
+
+    This is the counter-argument to this whole slice being over-strict. The slice's
+    premise is that answering 200 to a request that changed nothing is silent; a
+    ride-along key is worse than silent, because the response makes a claim.
+    """
+    rid = "01SYNTHXANESSEED0000000003"
+    uri = _stored_asset_uri(client, rid)
+    qc_before = (tutorial_ws().load_experiment(rid).draft.get("qc") or {}).get("status")
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+
+    res = client.post(
+        f"/api/experiments/{rid}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {
+                uri: "9" * 64,
+                "totally_made_up_field": "invented",
+                "qc": {"status": "failed"},
+            },
+        },
+        headers={"If-Match": etag},
+    )
+
+    assert res.status_code == 200, res.text
+    inv = res.json()["invalidation"]
+    assert inv["changed"] is True
+    assert inv["changed_fields"] == [uri], inv["changed_fields"]
+    assert "Updated 1 field(s)" in inv["reason"], inv["reason"]
+
+    after = tutorial_ws().load_experiment(rid).draft
+    assert "totally_made_up_field" not in json.dumps(after)
+    assert "invented" not in json.dumps(after)
+    # `qc` was reported as updated and never was; it must be reported neither way now.
+    assert (after.get("qc") or {}).get("status") == qc_before
+
+
+def test_a_wellformed_asset_sha_still_applies_and_re_sending_it_is_a_no_op(client):
+    """THE OTHER HALF, so the refusal above cannot be satisfied by refusing everything.
+
+    A well-formed hash is applied and advances `rev`. Re-sending the SAME hash answers
+    200 with `rev` unmoved — and that 200 is CORRECT, not the defect above: the value
+    was storable, and the byte-stable no-op is documented behaviour. The distinction the
+    fix draws is between "unchanged because equal" and "unchanged because unusable".
+    """
+    rid = "01SYNTHXANESSEED0000000001"
+    uri = _asset_uri(client, rid)
+
+    # Fill it through the answers path first, so `/edit` is genuinely a correction.
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    filled = client.post(
+        f"/api/experiments/{rid}/answers",
+        json={"confirmed_by_user": True, "answers": {uri: "3" * 64}},
+        headers={"If-Match": etag},
+    )
+    assert filled.status_code == 200, filled.text
+    after_fill = client.get(f"/api/experiments/{rid}").json()["rev"]
+
+    # A different well-formed hash applies.
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    corrected = client.post(
+        f"/api/experiments/{rid}/edit",
+        json={"confirmed_by_user": True, "answers": {uri: "7" * 64}},
+        headers={"If-Match": etag},
+    )
+    assert corrected.status_code == 200, corrected.text
+    advanced = client.get(f"/api/experiments/{rid}").json()["rev"]
+    assert advanced > after_fill, "a real correction must advance the revision"
+
+    # The same hash again is a no-op, and stays a 200.
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    again = client.post(
+        f"/api/experiments/{rid}/edit",
+        json={"confirmed_by_user": True, "answers": {uri: "7" * 64}},
+        headers={"If-Match": etag},
+    )
+    assert again.status_code == 200, again.text
+    assert client.get(f"/api/experiments/{rid}").json()["rev"] == advanced
+
+
+def test_the_answers_path_is_deliberately_unchanged_by_the_sha_guard(client):
+    """`POST /answers` still leaves the blocker OPEN for a malformed sha.
+
+    It does not borrow `/edit`'s typed refusal, and that asymmetry is the design: there
+    the response already tells the caller the question was not answered, so nothing is
+    silent. Pinned here because the fix above touches the shared predicate.
+    """
+    rid = "01SYNTHXANESSEED0000000001"
+    uri = _asset_uri(client, rid)
+    before = _pending_kinds(client, rid)
+
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{rid}/answers",
+        json={"confirmed_by_user": True, "answers": {uri: "Z" * 64}},
+        headers={"If-Match": etag},
+    )
+
+    assert res.status_code == 200, res.text
+    assert uri in _pending_kinds(client, rid), "a malformed sha must leave the blocker open"
+    assert _pending_kinds(client, rid) == before

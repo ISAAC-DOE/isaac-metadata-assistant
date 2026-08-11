@@ -21,8 +21,30 @@ from __future__ import annotations
 import copy
 import re
 
-# A well-formed sha256 answer: 64 lowercase hex chars (mirrors draft_validator).
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+# A well-formed sha256 answer: 64 lowercase hex chars — and EXACTLY 64, which the
+# previous pattern did not enforce.
+#
+# It was `r"^[0-9a-f]{64}$"`, and in Python `$` also matches immediately BEFORE a
+# trailing newline. So a 65-character string — `"9" * 64 + "\n"` — matched, and the
+# consequence was measured end to end over the app's own HTTP surface (a local
+# `TestClient` against the seeded worked-example corpus — NOT the deployed pod, which
+# this environment cannot reach): `POST /edit` answered 200, `rev` advanced, the value
+# was STORED as `'999…9\n'`, `POST /validate` then reported `ok: true`, and
+# `POST /export` produced an official record whose `official_report.ok` was `true`. A
+# sha256 that is not a sha256 reached an exported official ISAAC record. Nothing
+# downstream could catch it: the official schema declares `sha256: {"type": "string"}`
+# with NO `pattern`.
+#
+# `\A` / `\Z` rather than `^` / `$` because this module reaches the pattern through
+# `.match()` in two places as well as through `is_sha256_shaped`; anchoring the PATTERN
+# makes every one of them exact, instead of leaving the correctness of each call site to
+# depend on which method it happens to use. (Python's `\Z` is the absolute end of the
+# string — it is not Perl's `\Z`.)
+#
+# `draft_validator._SHA256_RE` still carries the `$` form. That file is a `CLAUDE.md` §13
+# truth-path file and is deliberately NOT touched here; the quirk there is reported for
+# its own reviewed slice.
+_SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 # The official measurement.qc.status enum — a qc answer outside this set is rejected.
 _QC_STATUSES = {"valid", "compromised", "failed", "pending"}
@@ -234,6 +256,39 @@ def is_series_shaped(value) -> bool:
     return True
 
 
+def is_sha256_shaped(value) -> bool:
+    """Is this a sha256 the asset paths will actually STORE — 64 lowercase hex chars?
+
+    EXPORTED FOR THE SAME REASON THE OTHER TWO ARE, and added because a reviewer found
+    the gap they left. ``routes.py``'s ``/edit`` guard asked only ``isinstance(value,
+    str)`` of an asset sha, so a malformed one — ``"Z" * 64``, ``"abc"``, 63 or 65 hex
+    chars — passed the guard, was then declined by :func:`apply_corrections` for being
+    malformed, and the route answered **200 having changed nothing**. Measured: 200,
+    ``rev`` unmoved, nothing written.
+
+    That is precisely the outcome the ``/edit`` route's own comment calls forbidden. It
+    was closed for ``series`` and ``descriptor``, where malformation is a question of
+    TYPE, and left open here, where it is a question of FORMAT.
+
+    ``_SHA256_RE`` rather than a second pattern: the route imports this so there is one
+    definition of "a storable hash", exactly as ``is_series_shaped`` exists so the route
+    does not carry a copy of the series rule.
+
+    Note what this deliberately does NOT do: re-sending the SAME valid hash still
+    answers 200 with nothing changed, and that is correct — the value was usable, and
+    the byte-stable no-op is documented behaviour. The defect was answering 200 about a
+    value that could never be stored at all.
+
+    ``fullmatch``, and the docstring above is the reason. The first version of this
+    predicate used ``.match`` against a ``$``-anchored pattern and therefore accepted a
+    **65-character** string, ``"9" * 64 + "\\n"``, while claiming "64 lowercase hex
+    chars". The pattern is now anchored with ``\\A``/``\\Z`` as well, so both defences
+    are in place and neither call site depends on the other being right. See the
+    ``_SHA256_RE`` comment for the measured end-to-end consequence.
+    """
+    return isinstance(value, str) and bool(_SHA256_RE.fullmatch(value))
+
+
 def is_descriptor_shaped(value) -> bool:
     """Can a descriptor correction be stored — a NON-EMPTY mapping?
 
@@ -261,9 +316,21 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
     value, never invented). An unrecognized key writes nothing. Pure and
     non-mutating (deep-copies ``draft``); imports nothing but stdlib.
 
-    Accepts the SAME ``apply_answers`` input shape (produced by the route's
-    ``_answers_to_apply_shape``): ``asset_sha256`` (``{uri: sha}``), ``series``,
-    ``descriptor`` / ``descriptor_label``, ``edge``, ``qc``.
+    Accepts the SAME ``apply_answers`` input shape: ``asset_sha256`` (``{uri: sha}``),
+    ``series``, ``descriptor`` / ``descriptor_label``, ``edge``, ``qc``.
+
+    ONE OF THOSE IS NOT REACHABLE OVER HTTP, and this sentence used to hide it. The list
+    above was introduced as "the shape *produced by the route's*
+    ``_answers_to_apply_shape``" — but that function recognises only ``asset_sha256``,
+    ``series``, ``descriptor``, ``descriptor_label`` and ``edge``. It has never forwarded
+    ``qc``, so no ``POST /answers`` or ``POST /edit`` request can reach the ``qc`` branch
+    below; a ``qc`` key in an edit body was dropped while being reported back in
+    ``invalidation.changed_fields`` as an updated field (fixed at the route). The branch
+    is kept — it is exercised directly by the completion path's own tests and by callers
+    that build the shape themselves — but it is documented here as function-level input,
+    NOT as a route-level capability. Adding it to the route would be a new accepted input
+    on two mutation paths, with an evidence-trail write, and belongs to a slice that can
+    review that on its own terms.
     """
     draft = copy.deepcopy(draft)
     answers = answers or {}
