@@ -169,14 +169,14 @@ category by elimination) was armed throughout and simply had no input.
 
 **One row is asserted, not measured, and saying so is the point of this table.**
 `export_gating_unchanged` is a fixed literal in the report builder
-(`apps/api/isaac_api/verification.py:1187`). Its backing is real but static: this module
+(`apps/api/isaac_api/verification.py:1200`). Its backing is real but static: this module
 imports nothing from the export path and writes nothing, and a test asserts that
 import-absence mechanically. That is a good guarantee — but it is a property of the code,
 established in CI, **not a measurement taken during this run**, and it would not notice a
 change made after the test last ran.
 
 Contrast `official_validator_unchanged` immediately above it, which *is* a runtime probe
-(`verification.py:1181`, calling `_official_validator_is_unchanged`): it loads the official
+(`verification.py:1194`, calling `_official_validator_is_unchanged`): it loads the official
 validator on the running deployment and checks it is still format-blind, so it would flip to
 `unverified` in production rather than only failing a test.
 
@@ -328,7 +328,7 @@ not all checked. This section states, for every condition, one of three verdicts
 | # | Condition | Verdict | Basis |
 |---|---|---|---|
 | C14 | No private value appears in the served payload | **measured per-run** | `private_values_exposed: verified`, computed over the **assembled** payload by a structural string allowlist plus a planted-sentinel canary that proves the allowlist is not a no-op |
-| C15 | **The corpus leak scan does not run in this mode** | **DISCLOSURE — not a check that ran** | `_leak_scan` compares the payload against the corpus's own strings, so it *requires the corpus*. In this mode the corpus is consumed and dropped as the sweep proceeds (C13) — it is ~~never available to scan against~~ **not retained past the sweep, and therefore unavailable at report-assembly time**, which is when this scan would run — so **it did not run**. Two precisions the earlier wording elided. First, the raw page IS held whole while the sweep runs (C13); the property being relied on is non-retention afterwards, not an impossibility of holding it. Second, **the skip is a DESIGN DECISION, not a physical impossibility**: `run_verification` sets `records = None` for this mode (`apps/api/isaac_api/verification.py:1072`), and the corpus *could* be retained to make the scan runnable. It deliberately is not, because non-retention is worth more than the scan. `_structural_string_audit` stands in, asking the complementary question — *is every served string accountable to public information?* — which needs no corpus. That substitution is documented in the engine and is arguably the stronger question, since it catches a string arriving by a route nobody anticipated. **It was nevertheless undisclosed on this page until 2026-08-08, and that omission mattered**: a reader comparing this run to the public one would reasonably assume the same two scans ran in both, and they did not |
+| C15 | **The corpus leak scan does not run in this mode** | **DISCLOSURE — not a check that ran** | `_leak_scan` compares the payload against the corpus's own strings, so it *requires the corpus*. In this mode the corpus is consumed and dropped as the sweep proceeds (C13) — it is ~~never available to scan against~~ **not retained past the sweep, and therefore unavailable at report-assembly time**, which is when this scan would run — so **it did not run**. Two precisions the earlier wording elided. First, the raw page IS held whole while the sweep runs (C13); the property being relied on is non-retention afterwards, not an impossibility of holding it. Second, **the skip is a DESIGN DECISION, not a physical impossibility**: `run_verification` sets `records = None` for this mode (`apps/api/isaac_api/verification.py:1085`), and the corpus *could* be retained to make the scan runnable. It deliberately is not, because non-retention is worth more than the scan. `_structural_string_audit` stands in, asking the complementary question — *is every served string accountable to public information?* — which needs no corpus. That substitution is documented in the engine and is arguably the stronger question, since it catches a string arriving by a route nobody anticipated. **It was nevertheless undisclosed on this page until 2026-08-08, and that omission mattered**: a reader comparing this run to the public one would reasonably assume the same two scans ran in both, and they did not |
 | C16 | No private value appears in **logs** | **holds by structural ABSENCE** | there is **no logging call on this path** — neither the verification engine nor the datastore provider emits a log record, a warning or a print. So the condition holds because there is nothing that could log, which is *not* the same as a check that inspected log output and found it clean. No log was captured, examined, or asserted about |
 | C17 | Aggregate only — no identifier, title, field value, evidence entry or per-record outcome | **holds structurally, plus enforced at publication** | the report builder projects every block through a frozen key allowlist, and the published artifact is additionally scanned by a closed allowlist with poisoned controls |
 | C18 | Disclosure floor applied unconditionally | **armed, not exercised** | both distributions were empty (§2), so the suppression machinery had **no input**. Arming is structural; this run is not evidence that it suppresses correctly |
@@ -337,8 +337,8 @@ not all checked. This section states, for every condition, one of three verdicts
 
 | # | Condition | Verdict | Basis |
 |---|---|---|---|
-| C19 | The official validator is unchanged | **measured per-run** | runtime probe of the loaded validator (`verification.py:1181`), so it would flip on the running deployment rather than only in a unit test |
-| C20 | Export gating is unchanged | **not measured — asserted** | a fixed literal at `verification.py:1187`, backed by a mechanical import-absence test in CI. **Already disclosed in §3**, which explains why the distinction matters; repeated here so the twenty-condition walk does not appear to add a measurement it does not have |
+| C19 | The official validator is unchanged | **measured per-run** | runtime probe of the loaded validator (`verification.py:1194`), so it would flip on the running deployment rather than only in a unit test |
+| C20 | Export gating is unchanged | **not measured — asserted** | a fixed literal at `verification.py:1200`, backed by a mechanical import-absence test in CI. **Already disclosed in §3**, which explains why the distinction matters; repeated here so the twenty-condition walk does not appear to add a measurement it does not have |
 
 ### Summary of the walk
 
