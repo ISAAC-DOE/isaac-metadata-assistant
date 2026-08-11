@@ -8,6 +8,7 @@ import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
+import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RunsSection } from '../components/RunsSection';
 import { disposeExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
@@ -517,6 +518,40 @@ function LoadedWorkbench({
           }
         />
       ))}
+
+      {/*
+        THE TWO RECORD-LEVEL SECTIONS — the record's own identity, and the
+        relationships it declares to other records.
+
+        THEY ARE MOUNTED ONCE, HERE, AND NEVER INSIDE A RUN, because both are
+        record-level and that is measured rather than assumed: `links` is on the
+        fail-closed "not overridable" list in
+        `routes.EXPERIMENT_OVERRIDABLE_ADDRESSES` and `workspace.py` records it as
+        neither inherited nor copied into a run's export draft; the classification
+        trio lives in the draft's `meta`, which the same module calls "the same for
+        every run by construction"; and `timestamps.created_utc` is on the
+        unclassified list too, so it is not inherited either
+        (`docs/run-scope-decision-packet.md` §2–§3). `RunCard` and `RunsSection`
+        are untouched by this slice.
+
+        WHY THEY CLOSE THE COLUMN RATHER THAN OPEN IT. The blocks above are the
+        science the reader came for, and the runs above those are the action; what
+        a record IS, and what it points at, is reference material about the whole
+        of it, so it reads as a footer rather than as a preamble. Both are
+        collapsed on arrival like every block above them, so the cost of being
+        wrong about that is one line each.
+
+        A SECOND, SMALLER REASON, STATED RATHER THAN HIDDEN: four existing specs
+        address "the first `.fg-header` on the screen" as a way of reaching the
+        first DRAFT block (`live-screens`, `record-session`,
+        `p33-hqa-6-heading-and-header`). Mounting these sections above the blocks
+        silently re-pointed that selector at a section those specs know nothing
+        about. Ordering was not decided BY the tests — the paragraph above is the
+        reason — but rewriting four unrelated specs to keep a placement that was
+        already the weaker of the two would have been collateral churn.
+      */}
+      <RecordInfoPanel detail={detail} groups={bundle.groups} artifacts={bundle.artifacts} />
+      <RecordLinksPanel artifacts={bundle.artifacts} />
         </div>
       )}
     </AppShell>
