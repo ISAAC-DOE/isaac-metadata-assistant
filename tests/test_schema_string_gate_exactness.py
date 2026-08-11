@@ -267,6 +267,159 @@ def test_describe_characters_names_without_emitting():
 
 
 # --------------------------------------------------------------------------
+# Part B2 — WHERE the pattern sits. The gate's own docstring promises that "an
+# upstream schema refresh that adds, moves or removes a pattern is covered
+# without anyone remembering to update this file". These tests are the evidence
+# for that promise, and the pin on the one place it does NOT hold.
+#
+# The defect they close: `check_exactness` kept only errors whose `validator` was
+# literally `"pattern"`. `anyOf`/`oneOf` do not re-raise their branch errors — the
+# error carries the composition keyword's own name and the branch errors hang off
+# `.context` — so a pattern moved under one of them had its finding SILENTLY
+# DISCARDED and the gate reported a clean PASS. Nothing in the vendored schema
+# sits there today; a refresh could put one there tomorrow, which is exactly the
+# case the promise covers.
+# --------------------------------------------------------------------------
+
+#: `^\S(.*\S)?$` — the `tags` gate, the one whose leniency is sharpest. Reused
+#: verbatim from `GATES` so a schema refresh that changes it fails in ONE place.
+_TAGS_PATTERN = GATES["/properties/tags/items"][0]
+
+#: How the tags item subschema is REWRITTEN for each placement under test. Every
+#: one of these is a legal way to express "a tag is a string matching the gate",
+#: so a record that satisfies the gate must validate under all of them and the
+#: leniency must be reported under all of them.
+_PLACEMENTS = {
+    "bare": {"type": "string", "pattern": _TAGS_PATTERN},
+    "allOf": {"allOf": [{"type": "string", "pattern": _TAGS_PATTERN}]},
+    "if_then": {
+        "type": "string",
+        "if": {"type": "string"},
+        "then": {"pattern": _TAGS_PATTERN},
+    },
+    # The two that were dropped.
+    "anyOf": {"anyOf": [{"type": "string", "pattern": _TAGS_PATTERN}, {"type": "integer"}]},
+    "oneOf": {"oneOf": [{"type": "string", "pattern": _TAGS_PATTERN}, {"type": "integer"}]},
+    # Composition inside composition: the walk has to recurse, not peek one level.
+    "anyOf_in_anyOf": {
+        "anyOf": [
+            {"anyOf": [{"type": "string", "pattern": _TAGS_PATTERN}, {"type": "boolean"}]},
+            {"type": "integer"},
+        ]
+    },
+}
+
+
+def _root_with_tags_items(tmp_path: Path, items_subschema: dict) -> Path:
+    """A repo-root-shaped directory whose vendored schema places the tags gate
+    at ``items_subschema`` instead of where upstream currently puts it.
+
+    A REAL root and the REAL ``check_exactness``, not a hand-built validator: the
+    thing under test is what the function does when handed a refreshed schema
+    document, and a test that reached past the loader would not have caught the
+    defect this section exists for.
+    """
+    schema = copy.deepcopy(SCHEMA)
+    schema["properties"]["tags"]["items"] = items_subschema
+    (tmp_path / "schema").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "schema" / "isaac_record_v1.json").write_text(
+        json.dumps(schema), encoding="utf-8"
+    )
+    return tmp_path
+
+
+@pytest.mark.parametrize("placement", sorted(_PLACEMENTS))
+def test_the_gate_finds_a_pattern_wherever_the_schema_puts_it(placement, tmp_path):
+    """Every placement reports the leniency. Two of them used to report nothing."""
+    root = _root_with_tags_items(tmp_path, _PLACEMENTS[placement])
+    record = _sample_record()
+    record["tags"] = ["campaign\n"]
+
+    # PREMISE, asserted rather than assumed: the schema as written still ACCEPTS
+    # this value at this placement. Without it, a placement that happened to make
+    # the record invalid would give a passing test for the opposite reason.
+    assert validate_official(record, root).ok, (
+        f"premise lost at {placement}: the rewritten schema refuses this record, so "
+        "there is no leniency left to detect"
+    )
+
+    report = check_exactness(record, root)
+    assert not report.ok, (
+        f"{placement}: the finding was DISCARDED — the gate reported a clean PASS on a "
+        "value the pattern's own text refuses"
+    )
+    assert [e.path for e in report.errors] == ["tags.0"], (
+        f"{placement}: reported at the wrong path — a finding an operator cannot locate "
+        "is barely better than no finding"
+    )
+    assert "U+000A LINE FEED" in report.errors[0].message
+
+
+@pytest.mark.parametrize("placement", sorted(_PLACEMENTS))
+def test_no_placement_over_refuses_a_legitimate_tag(placement, tmp_path):
+    """The control. Recursing into `context` must not manufacture findings."""
+    root = _root_with_tags_items(tmp_path, _PLACEMENTS[placement])
+    record = _sample_record()
+    record["tags"] = ["campaign", "two words", "trailing-dash-"]
+    assert validate_official(record, root).ok
+    assert check_exactness(record, root).ok
+
+
+def test_one_value_is_reported_once_even_when_two_branches_carry_the_pattern(tmp_path):
+    """Deduplication, and why it is not cosmetic.
+
+    Both branches of this ``anyOf`` fail on the same value for the same reason, so
+    both findings reach ``context``. Reported straight through, one bad tag would
+    produce two identical refusal sentences and a report reading ``FAIL (2 inexact
+    pattern matches)`` — overstating what was found, on a surface whose entire job
+    is to state precisely what is wrong.
+    """
+    root = _root_with_tags_items(
+        tmp_path,
+        {
+            "anyOf": [
+                {"type": "string", "pattern": _TAGS_PATTERN},
+                {"type": "string", "pattern": _TAGS_PATTERN},
+            ]
+        },
+    )
+    record = _sample_record()
+    record["tags"] = ["campaign\n"]
+    assert validate_official(record, root).ok
+
+    report = check_exactness(record, root)
+    assert len(report.errors) == 1, [e.path for e in report.errors]
+    assert "FAIL (1 inexact pattern matches)" in report.render()
+
+
+def test_a_pattern_a_sibling_branch_validates_around_is_invisible(tmp_path):
+    """CHARACTERIZATION of the ONE case the coverage promise does not cover.
+
+    ``anyOf`` succeeds the moment any branch succeeds. Here the second branch —
+    plain ``{"type": "string"}`` — accepts the value, so jsonschema emits NO error
+    at all and there is nothing for ``_pattern_findings`` to walk. This is not a
+    collection bug and no amount of recursing fixes it; closing it would mean
+    walking the schema by hand to locate patterns, which is the second traversal
+    engine ``exactness.py`` explains why it does not build.
+
+    Pinned so the limitation is a recorded fact. If someone later closes it, this
+    test fails and makes them read the rationale first — the same discipline
+    ``test_exactness_is_silent_on_the_nul_defect`` applies to the NUL gap.
+    """
+    root = _root_with_tags_items(
+        tmp_path,
+        {"anyOf": [{"type": "string", "pattern": _TAGS_PATTERN}, {"type": "string"}]},
+    )
+    record = _sample_record()
+    record["tags"] = ["campaign\n"]
+    assert validate_official(record, root).ok
+    assert check_exactness(record, root).ok, (
+        "the documented limitation has been closed — read the 'NOT FIXED' section of "
+        "exactness.py's docstring before changing this pin"
+    )
+
+
+# --------------------------------------------------------------------------
 # Part C — ISAAC's gate: applied to records and to export
 # --------------------------------------------------------------------------
 

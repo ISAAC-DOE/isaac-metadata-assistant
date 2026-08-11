@@ -514,8 +514,26 @@ Current state:
     deleted an evidenced `qc` verdict for `series: []` AND suppressed the advisory that would have
     caught it. `portal_warnings.NO_MEASUREMENT_SERIES` now discloses an empty series; it is
     **advisory and non-gating** and deliberately does not classify the science.
-  - **`POST /api/validate/record` runs the advisory tier.** `ok` stays computed from schema
-    validation ALONE — a warning must never turn a PASS into a FAIL.
+  - **`POST /api/validate/record` runs the advisory tier.** ~~`ok` stays computed from schema
+    validation ALONE~~ — **corrected 2026-08-11, and the old wording is kept struck through
+    because it read as a standing guarantee.** The half that still holds, and is the reason the
+    sentence existed: **a warning must never turn a PASS into a FAIL.** That is unchanged.
+    What changed is the other half — `ok` is now `schema_ok AND exactness_ok`. The route also
+    applies the anchored-pattern **exactness gate** (`src/isaac_records/exactness.py`), which
+    refuses a value satisfying one of the vendored schema's five `^...$` patterns only because
+    Python's `$` also matches before a trailing newline. Three things about it that a future
+    session must not collapse back together: the schema's own verdict is preserved beside `ok`
+    as **`schema_ok`**, the findings are a **separate `exactness_errors` list** never merged
+    into `errors`, and the gate is **ISAAC's, not upstream's** — §1 makes the schema not ours to
+    speak for, so no surface may report an exactness refusal as an official-schema error. The
+    Validator screen did exactly that for one commit (`FAIL — Invalid against official ISAAC
+    schema v1.05 — 0 errors` above `schema_ok: true` and an empty error list); it now branches
+    on `schema_ok` and renders the findings under their own heading, pinned by
+    `apps/web/src/__tests__/validator-exactness.test.tsx`. The exactness gate is a **hard** gate
+    and is the ONE non-schema input to `ok`; `portal_warnings` remains advisory and still cannot
+    move it. **Known divergence, deliberate and unfixed:** the per-experiment validate route's
+    already-exported branch reports the schema verdict alone, so a record with such a value reads
+    `ok: false` here and `ok: true` there.
   - **`complete.py` type-guards `series` and `descriptor`** (matching what `qc` already did). A
     wrong-typed structured answer used to return **HTTP 500** from the truth core. A typed 422 is a
     deliberate follow-up, not an oversight.

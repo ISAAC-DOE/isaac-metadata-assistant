@@ -5270,12 +5270,31 @@ MAX_VALIDATE_RECORD_BYTES = 512 * 1024
     description=(
         "Standalone validator for a candidate official ISAAC record supplied "
         "directly as a JSON request body — no experiment, no draft, and no "
-        "workspace involved. Returns `ok`, a rendered summary line, the "
-        "`{path, message}` errors, and the schema version checked against.\n\n"
-        "It calls the same authoritative validator over the same vendored schema "
-        "that the per-experiment validation operation uses, so the two verdicts "
-        "agree by construction. The body is never written anywhere and its content "
-        "is never logged; only the outcome and error count are.\n\n"
+        "workspace involved. Returns `ok`, the official schema's own `schema_ok`, "
+        "a rendered summary line, the `{path, message}` schema errors, the "
+        "separately-listed `exactness_errors`, and the schema version checked "
+        "against.\n\n"
+        "**Two gates, reported separately.** `schema_ok` and `errors` are the "
+        "vendored official schema's verdict, produced by the same authoritative "
+        "validator the per-experiment validation operation calls — those agree by "
+        "construction. `ok` is narrower: it is `schema_ok` AND ISAAC's "
+        "anchored-pattern exactness gate, which refuses a value that satisfies one "
+        "of the schema's `^...$` patterns only because Python's `$` also matches "
+        "before a trailing newline. That gate is ISAAC's own, not the official "
+        "schema's, so its findings are listed in `exactness_errors` and are never "
+        "merged into `errors`.\n\n"
+        "**A correction, kept visible.** This description used to say that this "
+        "operation and the per-experiment one 'agree by construction', full stop. "
+        "That is true of the schema verdict and false of the top-level `ok`, which "
+        "is why the sentence is now scoped. This operation is the stricter of the "
+        "two: `export_draft` applies the exactness gate, so the per-experiment "
+        "operation applies it on its dry-run branch, while validating an "
+        "ALREADY-EXPORTED record reports the schema verdict alone. A record "
+        "carrying such a value therefore reads `ok: false` here and `ok: true` "
+        "there. Read `schema_ok` to ask whether the official schema accepts the "
+        "record, and `ok` to ask whether ISAAC would export it.\n\n"
+        "The body is never written anywhere and its content is never logged; only "
+        "the outcome and error count are.\n\n"
         "Send the record as a raw JSON body. The body is read in memory under a "
         "hard size limit."
     ),
@@ -5302,8 +5321,27 @@ async def post_validate_record(request: Request):
 
     REUSES the same authoritative ``isaac_records.official.validate_official``
     (over the same ``REPO_ROOT``-resolved schema) that ``post_validate`` above
-    calls for exported records — verdict parity is by construction (same
+    calls for exported records — SCHEMA-verdict parity is by construction (same
     function, same schema), not a second reimplementation.
+
+    THAT PARITY IS NARROWER THAN IT USED TO BE, AND THE OLD WORDING SAID SO TOO
+    BROADLY. It read "verdict parity is by construction"; that now holds of
+    ``schema_ok``/``errors`` and NOT of the top-level ``ok``, because this route
+    also applies ``check_exactness`` and ``post_validate``'s already-exported
+    branch does not (its dry-run branch does, through ``export_draft``). MEASURED
+    divergence on a record whose ``tags`` entry ends in a newline: ``ok: false``
+    here, ``ok: true`` there.
+
+    That divergence is DELIBERATE HERE and is a REPORTED FINDING THERE, and this
+    slice does not change ``post_validate``. Deliberate here: this route answers
+    "is this candidate good?" about a record nobody has exported, and answering
+    yes to something ``export_draft`` refuses would make the standalone validator
+    the one surface that contradicts the product. A finding there: an exported
+    artifact written BEFORE this gate existed, or edited out of band, can hold
+    such a value and ``post_validate`` will report it clean while ``isaac validate
+    --official`` on the same bytes exits 1. Closing that means deciding whether an
+    immutable already-written record should be re-judged by a rule that postdates
+    it — a scope decision, not a side effect of this change.
 
     Read-only and side-effect-free: the body is never written anywhere (no
     workspace file, no temp file, no record mutation), and nothing about its

@@ -137,15 +137,18 @@ as verified.
 Manual sequence: [`docs/krish-manual-verification-checklist.md`](../../krish-manual-verification-checklist.md).
 QA files: `qa/validator-upload-package/`; the archive is
 `qa/validator-upload-package/isaac-validator-qa-files.zip`, sha256
-`8a2d4948825c56bbcd9f707d70133c3dd3ba39092b8b17474a0155e1b9bf7170`, 66133 bytes.
+`daee2ebc7bfa9dc0abbb167f575b02ab2477f384c38bcacbff63f1b124a66d04`, 66823 bytes.
 
-*(That digest was `71c23034…` when this closure record was written. The archive was
-rebuilt afterwards to remove a machine-specific absolute path from the shipped
-`MANIFEST.json` and to make `unsupported-file.txt` state its own provenance. The
-digest is quoted here as a live instruction to an operator, not as a historical
-measurement, so it is kept current rather than frozen — and it is now pinned by
-`tests/test_validator_qa_package.py` alongside the copy in
-`docs/krish-manual-verification-checklist.md`.)*
+*(That digest was `71c23034…` when this closure record was written, then `8a2d4948…`.
+The first rebuild removed a machine-specific absolute path from the shipped
+`MANIFEST.json` and made `unsupported-file.txt` state its own provenance. The second
+(2026-08-11) corrected two now-false sentences in `MANIFEST.json` — "so the verdicts
+agree by construction" and "`ok` is computed from schema validation alone" — which the
+anchored-pattern exactness gate falsified; both are scoped in place rather than deleted,
+and the eighteen files themselves are unchanged. The digest is quoted here as a live
+instruction to an operator, not as a historical measurement, so it is kept current
+rather than frozen — and it is pinned by `tests/test_validator_qa_package.py` alongside
+the copy in `docs/krish-manual-verification-checklist.md`.)*
 
 **Check `/krish/api/health`'s `commit` against `origin/main` first.** If Flux has not rolled, every
 subsequent observation describes the previous image.

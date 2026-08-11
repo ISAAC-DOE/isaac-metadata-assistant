@@ -49,12 +49,28 @@ function byteLength(s: string): number {
   return new TextEncoder().encode(s).length;
 }
 
+/**
+ * The response, mapped WITHOUT losing which gate refused.
+ *
+ * This used to drop `schema_ok` and `exactness_errors` on the floor — they were
+ * absent from `ApiValidateRecordResult`, so TypeScript actively prevented reading
+ * them — and the card downstream had only `ok` and an empty `errors` to work with.
+ * It said "Invalid against official ISAAC schema v1.05 — 0 errors" about a record
+ * the same response reported as `schema_ok: true`. The only statement of the real
+ * reason was inside the collapsed "Full validator summary" disclosure below.
+ *
+ * `?? v.ok` and `?? []` are the compatibility path for a response predating the
+ * exactness gate: absent `schema_ok` means `ok` IS the schema verdict, which is
+ * what it was.
+ */
 function toValidationResult(v: ApiValidateRecordResult): ValidationResult {
   return {
     verdict: v.ok ? 'pass' : 'fail',
     ok: v.ok,
+    schemaOk: v.schema_ok ?? v.ok,
     schemaVersion: v.schema_version,
     errors: v.errors,
+    exactnessErrors: v.exactness_errors ?? [],
   };
 }
 

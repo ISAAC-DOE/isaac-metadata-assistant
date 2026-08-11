@@ -121,6 +121,18 @@
 .schema-error-row:first-of-type { border-top: 0; }
 .schema-error-path { color: var(--fail-text); }
 
+/* ---- The ISAAC exactness gate — a SEPARATE finding group ------------
+   Same row vocabulary as the schema errors above (one way to render "a path and
+   what is wrong with it"), deliberately NOT the same heading and NOT the same
+   list. The official schema accepts these values; only ISAAC refuses them, and a
+   surface that let a reader think otherwise would attribute a local policy to the
+   upstream schema (CLAUDE.md §1). The explanatory note leads the rows because the
+   heading alone cannot carry that distinction. */
+.exactness-errors .exactness-note {
+  margin: 0 0 10px;
+}
+.exactness-errors .schema-error-row:first-of-type { border-top: 1px solid var(--border-hair); }
+
 /* ---- CoverageBadge — neutral slate, NOT a verdict ------------------- */
 .coverage {
   padding: 16px 18px;

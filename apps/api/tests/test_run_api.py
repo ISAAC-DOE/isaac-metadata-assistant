@@ -3541,7 +3541,13 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "NOT made stricter, so the official-schema verdict, the audit, `diagnose` and "
         "the corpus-mutation oracle are all unchanged. Same commit also corrects the "
         "record_id rejection message, which cited `^[0-9A-Z]{26}$` — a pattern that in "
-        "Python MATCHES the newline-suffixed string it was rejecting. Covered by "
+        "Python MATCHES the newline-suffixed string it was rejecting. Review follow-up "
+        "on the same branch: `exactness.check_exactness` (NOT itself a §13 truth-path "
+        "file, and export.py's call site is unchanged) now walks `err.context` "
+        "recursively, because `anyOf`/`oneOf` wrap their branch errors and the flat "
+        "`validator == 'pattern'` filter DISCARDED such findings silently — nothing in "
+        "the vendored schema sits there today, so no export verdict moves, but the "
+        "module promised refresh-proof coverage and did not have it. Covered by "
         "tests/test_schema_string_gate_exactness.py. Delete this entry once landed."
     ),
     "src/isaac_records/cli.py": (

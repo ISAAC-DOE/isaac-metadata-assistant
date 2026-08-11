@@ -67,7 +67,44 @@ is left alone: JSON Schema legitimately permits substring patterns, and demandin
 ``fullmatch`` of one would be over-refusal. The rule is derived from the schema
 document at run time rather than from a hand-copied list of five paths, so an
 upstream schema refresh that adds, moves or removes a pattern is covered without
-anyone remembering to update this file.
+anyone remembering to update this file — with ONE stated exception, immediately
+below.
+
+THE LIMIT OF THAT COVERAGE CLAIM, STATED RATHER THAN IMPLIED
+============================================================
+"Covered without anyone remembering to update this file" was written as an
+unqualified promise and it is not one. Two separate things break it, and only ONE
+of them is fixed here.
+
+FIXED — findings wrapped by a composition keyword. ``anyOf``/``oneOf`` do not
+re-raise their branch errors: the error they yield carries their OWN keyword name
+(``err.validator == "anyOf"``) and hangs the branch errors off ``err.context``.
+``check_exactness`` used to keep only ``err.validator == "pattern"`` at the top
+level, so a pattern that MOVED under one of those keywords in a schema refresh
+would have had its finding SILENTLY DISCARDED — no error, no warning, a clean
+PASS from a gate that had stopped looking. Measured before the fix: bare,
+``items``, ``allOf`` and ``if``/``then`` placements all arrive as
+``validator == "pattern"`` and were kept; ``anyOf`` and ``oneOf`` were dropped.
+``_pattern_findings`` below now walks ``context`` recursively. (``absolute_path``
+on a context error already resolves through its parent, so the reported path is
+right at any depth — measured with jsonschema 4.26.0, not assumed.)
+
+NOT FIXED, AND NOT FIXABLE THIS WAY — a pattern in one branch of an ``anyOf``
+where ANOTHER branch validates the value. ``anyOf`` succeeds as soon as one branch
+succeeds, so jsonschema emits NO error at all and there is nothing to walk; the
+same holds for ``oneOf`` when exactly one, different, branch matches. A finding in
+that position is invisible to this mechanism however the errors are collected,
+because the traversal never reports a failure to collect from. Closing it would
+mean walking the schema by hand to locate patterns — the second traversal engine
+the ``_ExactnessValidator`` comment below explains why we do not build. It is
+pinned as characterization in ``tests/test_schema_string_gate_exactness.py`` so
+the gap is a recorded fact rather than a surprise.
+
+Neither case is live: the vendored schema's five patterns all sit under plain
+``properties``/``items``, with no ``anyOf`` or ``oneOf`` anywhere on the path to
+one. The first is nevertheless fixed and the second is nevertheless written down,
+because a silent drop inside a gate whose entire subject is "a rule that looks
+like it holds and does not" is the same defect one level up.
 
 KNOWN, DELIBERATELY UNFIXED — a NUL byte in a tag
 =================================================
@@ -266,6 +303,33 @@ def combined_summary(schema_summary: str, report: ExactnessReport) -> str:
     return f"{schema_summary}\n\n{EXACTNESS_HEADING}\n{report.render()}"
 
 
+def _pattern_findings(errors) -> "list[ValidationError]":
+    """Every ``_exact_pattern`` finding in a tree of validation errors.
+
+    RECURSIVE ON ``context``, AND THAT IS THE WHOLE POINT. This used to be a flat
+    ``if err.validator == "pattern"`` filter over ``iter_errors``, which is correct
+    only while every pattern in the schema sits somewhere jsonschema reports
+    directly. ``anyOf`` and ``oneOf`` do not report their branch errors: they yield
+    ONE error carrying their own keyword name and hang the branch errors off
+    ``.context``. Under the flat filter the top-level error was discarded for not
+    being ``"pattern"`` and the real finding inside it was never looked at — a gate
+    that silently stopped gating, reporting PASS.
+
+    Every OTHER keyword's errors are still dropped by the caller: they belong to
+    ``validate_official``, which reports them in its own words. This function
+    selects, it does not judge.
+    """
+    found: list[ValidationError] = []
+    for err in errors:
+        if err.validator == "pattern":
+            found.append(err)
+            continue
+        # `context` is None for every non-composition error, so this recursion is
+        # a no-op on the ordinary path and costs one attribute read.
+        found.extend(_pattern_findings(err.context or ()))
+    return found
+
+
 def check_exactness(record: dict, root: Path) -> ExactnessReport:
     """Report every anchored-pattern gate the record passes only by leniency.
 
@@ -275,17 +339,17 @@ def check_exactness(record: dict, root: Path) -> ExactnessReport:
     """
     schema = load_official_validator(root).schema
     validator = _ExactnessValidator(schema)
-    errors = [
-        ExactnessError(
-            path=".".join(str(p) for p in err.absolute_path) or "$",
-            message=err.message,
+    # DEDUPLICATED on (path, message). Composition keywords can present the same
+    # finding more than once — two `anyOf` branches that both carry the same
+    # pattern each fail, and both failures reach `context`. One value, one
+    # sentence: reporting it twice would overstate what was found. The sort
+    # includes the message so ordering is total, not merely stable-by-accident,
+    # for the several-findings-at-one-path case.
+    seen: dict[tuple[tuple[str, ...], str], ExactnessError] = {}
+    for err in _pattern_findings(validator.iter_errors(record)):
+        segments = tuple(str(p) for p in err.absolute_path)
+        seen.setdefault(
+            (segments, err.message),
+            ExactnessError(path=".".join(segments) or "$", message=err.message),
         )
-        for err in sorted(
-            validator.iter_errors(record),
-            key=lambda e: list(map(str, e.absolute_path)),
-        )
-        # Only findings from `_exact_pattern` above. Every other keyword's errors
-        # belong to `validate_official`, which reports them in its own words.
-        if err.validator == "pattern"
-    ]
-    return ExactnessReport(errors)
+    return ExactnessReport([seen[key] for key in sorted(seen)])
