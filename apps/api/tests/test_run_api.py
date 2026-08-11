@@ -3615,3 +3615,106 @@ def test_the_run_api_does_not_weaken_tutorial_isolation(client, experiment_id):
     )
     with pytest.raises(NotPersistable):
         PostgresOrdinaryStore.refuse_if_not_persistable(ordinary)
+
+
+# --- 11c.10 the CHECK reads the resolved value, not the record's -----------------
+#
+# WHY THIS TEST EXISTS AND WHAT IT IS NOT. Every other invariant of the override
+# feature was already pinned somewhere in this file or in `test_export_fan_out.py`
+# when the scientist-facing UI was built on top of them — isolation between siblings,
+# non-mutation of the record, live inheritance, live inheritance restored after a
+# clear, the typed 422s, the 412, the idempotent re-record, and the EXPORTED record
+# carrying the resolved value (`test_an_inherited_value_still_exports_into_the_runs_own_record`,
+# and `test_an_override_displaces_the_inherited_value_for_that_run_only` in
+# `test_export_fan_out.py`).
+#
+# The one that was NOT pinned is VALIDATION. `POST .../runs/{id}/check` composes the
+# unit through `Experiment.export_units` → `resolved_run_draft`, so it reads the same
+# resolved document the export does — but nothing asserted that an override actually
+# reaches the verdict, and "it uses the same function" is an argument about the code
+# rather than an observation of the behaviour. A future change that made the check
+# read `run.draft` directly would leave every other test in this file green while a
+# scientist's Check Run silently validated a value the run does not hold.
+#
+# THE PROBE IS A TYPE VIOLATION, chosen because it is unambiguous and cannot be
+# produced by anything else in the fixture: `sample.material.name` is declared
+# `{"type": "string"}` by the vendored official schema, and the override stores a
+# NUMBER there. A number is a perfectly storable value (it survives
+# `_is_storable_value`) inside a perfectly acceptable envelope (the draft validator
+# has nothing to say about the JSON type of a value), so the write is accepted and the
+# ONLY thing that can object is official validation of the resolved document.
+#
+# The sibling is the control. It inherits, its resolved document carries the record's
+# string, and its check must NOT report the error — otherwise the test would pass just
+# as well against an implementation that validated the RECORD for every run.
+
+
+def _check(client, experiment_id: str, run_id: str) -> dict:
+    response = client.post(f"/api/experiments/{experiment_id}/runs/{run_id}/check")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _official_messages(check: dict) -> list[str]:
+    return [error["message"] for error in (check.get("official") or {}).get("errors", [])]
+
+
+def test_the_run_check_validates_the_RESOLVED_value_and_not_the_records(
+    client, experiment_id
+):
+    """Invariant: validation reads what the run RESOLVES to.
+
+    Asserted in both directions on one record, so neither half can pass by accident:
+    the overriding run's verdict gains an error about the overridden path, and its
+    sibling's verdict does not have one.
+    """
+    inheriting = _create_run(client, experiment_id, "Inheriting")
+    overriding = _create_run(client, experiment_id, "Overriding")
+
+    def complains_about_material(run_id: str) -> bool:
+        return any("not of type 'string'" in m for m in _official_messages(_check(client, experiment_id, run_id)))
+
+    # BEFORE: neither run is valid (both are empty), and NEITHER complains about this
+    # path — so the error asserted below is caused by the override and by nothing else.
+    assert complains_about_material(inheriting["id"]) is False
+    assert complains_about_material(overriding["id"]) is False
+
+    assert _set_override(
+        client,
+        experiment_id,
+        overriding["id"],
+        _MATERIAL_ADDRESS,
+        _envelope(12345),  # a NUMBER where the official schema declares a string
+    ).status_code == 200
+
+    assert complains_about_material(overriding["id"]) is True
+    assert complains_about_material(inheriting["id"]) is False
+
+    # And clearing it takes the finding away again, because the run resolves from the
+    # record once more — the read half of D2, observed through the verdict.
+    assert _clear_override(
+        client, experiment_id, overriding["id"], _MATERIAL_ADDRESS
+    ).json()["cleared"] is True
+    assert complains_about_material(overriding["id"]) is False
+
+
+def test_the_run_check_writes_nothing_when_it_reads_an_override(client, experiment_id):
+    """The check stays read-only over a run that holds one.
+
+    `test_check_run_moves_no_version_at_all` already holds this for an ordinary run;
+    this is the same claim for the composition path an override goes through, because
+    `resolved_run_draft` builds a document by merging stored state and a mistake there
+    would write through a read. Asserted on the whole stored document, not on a version.
+    """
+    run = _create_run(client, experiment_id)
+    assert _set_override(
+        client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("Copper(I) Oxide")
+    ).status_code == 200
+
+    exp_before = client_ws(client).load_experiment(experiment_id)
+    document_before = json.dumps(exp_before.to_state(), sort_keys=True)
+
+    _check(client, experiment_id, run["id"])
+
+    exp_after = client_ws(client).load_experiment(experiment_id)
+    assert json.dumps(exp_after.to_state(), sort_keys=True) == document_before

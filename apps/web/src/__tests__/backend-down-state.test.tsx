@@ -613,9 +613,12 @@ describe('both render sites guard the run command at build time', () => {
  *
  * HOW. Every per-record path in that module is a single-line template literal of the
  * form `` `/experiments/${enc(…)}…` ``, so those literals are collected and each is
- * required to be either the bare record path or a sub-read. Measured at the time of
- * writing: 21 literals → 2 bare + 17 distinct sub-read suffixes → 15 distinct first
- * segments. Those counts are asserted, so adding a sub-read fails this file.
+ * required to be either the bare record path or a sub-read. Measured, and re-measured
+ * when the two per-run override writes were added: 23 literals → 2 bare + 19 distinct
+ * sub-read suffixes → 15 distinct first segments. (Was 21 → 2 + 17 → 15; the two new
+ * suffixes are `runs/${…}/overrides` and `runs/${…}/overrides/clear`, and the segment
+ * count is unchanged because both sit under `runs`, which was already covered.) Those
+ * counts are asserted, so adding a sub-read fails this file.
  *
  * WHAT THIS CANNOT SEE, stated precisely because the obvious reading of the previous
  * paragraph is too generous. `unclassifiedLiterals` catches a literal that STARTS
@@ -661,9 +664,9 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // An unexpected interior shape in one of these literals would silently shrink
     // both guards below — see the limits paragraph above for what this misses.
     expect(unclassifiedLiterals).toEqual([]);
-    expect(experimentPathLiterals.length).toBe(21);
+    expect(experimentPathLiterals.length).toBe(23);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(17);
+    expect(SUB_READ_SUFFIXES).toHaveLength(19);
     expect(SUB_READ_SEGMENTS).toHaveLength(15);
     // Spot-check the two shapes that are easiest to derive wrongly.
     expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');

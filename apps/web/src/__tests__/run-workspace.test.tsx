@@ -268,18 +268,27 @@ describe('run card accordion semantics', () => {
     expect(document.getElementById(panelId!)).toBeNull();
   });
 
-  it('shows the inherited experiment values as inherited, and gives them no controls', async () => {
+  /*
+   * THIS TEST USED TO ASSERT THAT THE PANEL HAD NO CONTROLS AT ALL, and the panel
+   * now has two — Override and, on an overridden row, Revert. The assertion is
+   * NARROWED rather than deleted, to the property that is still true and still
+   * worth holding: a value in this panel is never EDITABLE IN PLACE. There is no
+   * input, select or textarea in the resting state, so nothing here can be changed
+   * by typing into it; recording an override is a separate act with its own
+   * deliberately-opened form. The per-row override behaviour itself is
+   * `run-overrides.test.tsx`.
+   */
+  it('shows the inherited record values as inherited, with no value editable in place', async () => {
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
     await screen.findByRole('button', { name: /Add Run/ });
     await expand('RUNAAA');
 
     const inherited = within(cardFor('RUNAAA')).getByRole('region', {
-      name: 'Values inherited from the experiment',
+      name: 'Values inherited from the record',
     });
     expect(within(inherited).getByText('sample.material.name')).toBeInTheDocument();
     expect(within(inherited).getByText('Synthetic CuO powder')).toBeInTheDocument();
-    expect(within(inherited).getAllByText('Inherited from Experiment').length).toBeGreaterThan(0);
-    // Read-only by construction: no input, select or textarea lives in there.
+    expect(within(inherited).getAllByText(/Inherited from record/).length).toBeGreaterThan(0);
     expect(inherited.querySelectorAll('input, select, textarea')).toHaveLength(0);
   });
 });
