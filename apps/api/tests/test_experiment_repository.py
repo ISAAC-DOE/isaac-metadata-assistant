@@ -452,6 +452,21 @@ class FakeCursor:
         boom = self._connection.raise_on.get(sql)
         if boom is not None:
             raise boom
+        if not self._connection.run_table and "isaac_runs" in sql.lower():
+            # THE FAKE MUST PUNISH A STATEMENT THE REAL SERVER WOULD PUNISH, or the
+            # guard it exists to test is untestable. With `run_table=False` the
+            # relation does not exist, so any statement NAMING it raises
+            # `undefined_table` — SQLSTATE and all — exactly as `postgres:18` does
+            # in the "Apply 0001 ONLY" CI step. Without this, deleting the guard in
+            # `persist` would make the 0001-only tests pass rather than fail: the
+            # fake would cheerfully answer a `SELECT` against a table it does not
+            # have, and the mutation check would report a green that means nothing.
+            #
+            # It is keyed on the SQL TEXT, so it catches all three run statements
+            # and — deliberately — NOT `Q_RUN_TABLE_PRESENT`, which carries the
+            # table name as a PARAMETER because asking whether a relation exists is
+            # the one thing that must work when it does not.
+            raise UndefinedTable("relation \"isaac_runs\" does not exist")
         self.rowcount = -1
         if sql == dbw.Q_CURRENT_DATABASE:
             self._pending = [(self._connection.database,)]
@@ -473,6 +488,16 @@ class FakeCursor:
             state = self._connection.stored.get(params[0]) if params else None
             self._pending = [] if state is None else [(json.dumps(state),)]
             self.rowcount = len(self._pending)
+        elif sql == repo.Q_RUN_TABLE_PRESENT:
+            # `to_regclass` ANSWERS; IT DOES NOT RAISE. That is the whole reason the
+            # application can ask this question before writing, so the fake must
+            # model it the same way: a row holding `None` for a name that does not
+            # resolve, a row holding the name for one that does. A fake that raised
+            # here would prove the opposite of what the probe is for.
+            self._pending = [
+                (repo.RUN_TABLE if self._connection.run_table else None,)
+            ]
+            self.rowcount = 1
         elif sql == repo.Q_EXPERIMENT_RUN_ROWS:
             # Column order MUST match the statement: run_id, ordinal, state, rev,
             # generation. `state` is returned as a DICT, which is what psycopg2's
@@ -536,7 +561,18 @@ class FakeConnection:
         refuse_upsert=(),
         stored=None,
         runs=None,
+        run_table=True,
     ) -> None:
+        #: Whether migration `0002_runs` has been applied to this database.
+        #:
+        #: DEFAULTS TO `True` SO EVERY EXISTING CASE KEEPS ASSERTING WHAT IT
+        #: ASSERTED. `False` is the deployment between a merge and the operator's
+        #: `--apply`, and the one a `0002` rollback leaves — the relation is gone,
+        #: so `to_regclass` answers NULL and every statement naming the table
+        #: raises `undefined_table`. It is MUTABLE, because the transition from
+        #: absent to present happens under a running pod and is the case the
+        #: negative half of the application's cache exists for.
+        self.run_table = run_table
         self.database = dbw.EXPECTED_DATABASE if database is None else database
         self.rows = list(rows)
         self.applied = set(applied)
@@ -709,6 +745,11 @@ _READ_STATEMENTS = [
     repo.Q_ONE_EXPERIMENT,
     repo.Q_ALL_EXPERIMENTS,
     repo.Q_EXPERIMENT_RUN_ROWS,
+    # A READ, and of the CATALOG rather than of any application row. It is listed
+    # here because the `dir()` completeness check below reads this list, and
+    # because classifying it as a write would say something false about it: it
+    # returns whether a relation resolves and touches no data at all.
+    repo.Q_RUN_TABLE_PRESENT,
 ]
 _WRITE_STATEMENTS = [
     dbw.Q_SET_STATEMENT_TIMEOUT,
@@ -1142,6 +1183,342 @@ def test_a_projection_failure_is_not_relabelled_as_a_database_outage():
         store.persist(exp)
     assert conn.statements == [], "a connection was opened before the projection ran"
     assert repo.storage_failure() is None
+
+
+# =============================================================================
+# 7c. the deployment-order guard — `0002` is pending, and a save must still work
+# =============================================================================
+#
+# WHY THIS SECTION EXISTS, AND IT IS NOT A HYPOTHETICAL FAILURE. The image rolls
+# out on merge (Flux); migrations are applied SEPARATELY AND BY HAND by the
+# operator. A new image therefore runs against a database its own migration has
+# not reached as a matter of routine — that is the window between a merge and an
+# `--apply`, and it is also the state a deliberate `0002` rollback leaves.
+#
+# Unguarded, the shadow write addressed a relation that did not exist, PostgreSQL
+# raised `undefined_table`, and — because an error aborts the whole transaction —
+# the experiment upsert rolled back with it. Every save failed, and durable
+# storage broke, FOR A TABLE NOTHING READS. `.github/workflows/ci.yml`'s "Apply
+# 0001 ONLY, and prove the app is unaffected while 0002 is pending" step caught it
+# against a real `postgres:18`; these cases are the in-process half.
+#
+# WHAT THE FAKE CAN AND CANNOT SAY HERE, since the temptation to over-read is the
+# same as in 7b. `run_table=False` makes `to_regclass` answer NULL and makes every
+# statement naming the table raise `UndefinedTable` — the SQLSTATE the application
+# classifies on. So these prove WHICH STATEMENTS ARE ISSUED and what the caller
+# sees. They do NOT prove that `to_regclass(%s::text)` is valid PostgreSQL, that
+# the parameter binds, or that a real server answers NULL rather than raising. CI
+# is where a real engine answers those.
+
+
+def _probe_count(conn) -> int:
+    """How many times this connection was asked whether `isaac_runs` exists."""
+    return [sql for sql, _ in conn.statements].count(repo.Q_RUN_TABLE_PRESENT)
+
+
+def test_a_save_writes_the_experiment_and_SKIPS_the_runs_when_0002_is_pending():
+    """THE DEFECT, AS A TEST. Every claim in it was false before the guard.
+
+    MUTATION-CHECKED. Deleting the `if _run_table_available(...)` guard in
+    `PostgresOrdinaryStore.persist` turns this RED: the fake raises
+    `UndefinedTable` from `Q_EXPERIMENT_RUN_ROWS` exactly as the server does, the
+    transaction rolls back, and `persist` raises `StorageUnavailable` — which is
+    the 503 CI saw. It was run and it does.
+    """
+    exp = _exp_with_runs("Run 1", "Run 2")
+    conn = FakeConnection(run_table=False)
+
+    repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(exp)
+
+    # 1. THE SAVE SUCCEEDED AND THE EXPERIMENT WAS WRITTEN. The document is the
+    #    durable state; it carries `runs` and is authoritative with or without the
+    #    table.
+    assert conn.commits == 1 and conn.rollbacks == 0
+    upserts = [p for sql, p in conn.statements if sql == repo.Q_UPSERT_EXPERIMENT]
+    assert len(upserts) == 1 and upserts[0][0] == exp.id
+    assert json.loads(upserts[0][1])["runs"], "the runs left the document too"
+
+    # 2. NOT ONE STATEMENT NAMED THE ABSENT TABLE. Asserted on the SQL text, which
+    #    is the property CI asserts too, and which the probe is parameterized to
+    #    keep true.
+    assert _run_statements(conn) == [], "a statement addressed a table that is absent"
+
+    # 3. THE SKIP WAS A DECISION, NOT AN ACCIDENT — it asked, and it asked about
+    #    the right relation.
+    probes = [p for sql, p in conn.statements if sql == repo.Q_RUN_TABLE_PRESENT]
+    assert probes == [(repo.RUN_TABLE,)], probes
+
+    # 4. AND IT IS NOT RECORDED AS A DEGRADATION. A pending migration for a shadow
+    #    table is not a storage failure, so nothing may make `/api/health` say so.
+    assert repo.storage_failure() is None
+    assert repo.run_table_seen() is False
+
+
+def test_health_still_reports_durable_while_0002_is_pending(app, monkeypatch):
+    """THE HONESTY REQUIREMENT, over HTTP. `durable: true` is TRUE here — the
+    experiment row is in the database and survives the pod — so the claim must not
+    be withdrawn because a shadow nothing reads is missing a table.
+
+    This is the in-process mirror of the CI step's own assertion, which makes the
+    same claim against a real `postgres:18` migrated to 0001 only.
+    """
+    conn = FakeConnection(run_table=False)
+    client = _durable_client(app, monkeypatch, conn)
+
+    created = client.post("/api/experiments", json={"title": "0002 pending"})
+    assert created.status_code == 201, created.text
+    rid = created.json()["id"]
+
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    added = client.post(
+        f"/api/experiments/{rid}/runs", json={"label": "R1"}, headers={"If-Match": etag}
+    )
+    assert added.status_code == 201, added.text
+
+    assert client.get("/api/health").json()["experiment_storage"] == {
+        "configured": True,
+        "backend": repo.BACKEND_POSTGRES,
+        "durable": True,
+        "state": repo.STORAGE_STATE_DURABLE,
+    }
+    assert [row["id"] for row in client.get("/api/experiments").json()["experiments"]] == [rid]
+    assert _run_statements(conn) == []
+
+
+def test_the_normal_case_is_untouched_and_costs_exactly_one_extra_statement():
+    """THE OTHER DIRECTION. With the table present the write is what it was, and
+    the guard's whole cost on a migrated deployment is ONE catalog lookup, ONCE.
+
+    The full statement sequence is asserted rather than only the run statements,
+    because "unchanged" is a claim about the transaction as a whole.
+    """
+    exp = _exp_with_runs("Run 1")
+    conn = _persist(exp)
+
+    assert [sql for sql, _ in conn.statements] == [
+        dbw.Q_SET_STATEMENT_TIMEOUT,
+        dbw.Q_SET_LOCK_TIMEOUT,
+        dbw.Q_CURRENT_DATABASE,
+        repo.Q_UPSERT_EXPERIMENT,
+        repo.Q_RUN_TABLE_PRESENT,
+        repo.Q_EXPERIMENT_RUN_ROWS,
+        repo.Q_UPSERT_RUN,
+    ]
+    assert set(conn.runs) == {exp.runs[0].id}
+    # The probe is inside the accepted branch, so it is asked AFTER the
+    # compare-and-swap and never on behalf of a writer that lost.
+    order = [sql for sql, _ in conn.statements]
+    assert order.index(repo.Q_UPSERT_EXPERIMENT) < order.index(repo.Q_RUN_TABLE_PRESENT)
+
+
+def test_a_refused_upsert_does_not_even_ask_whether_the_table_exists():
+    """The accepted gate still comes first. A writer that lost the compare-and-swap
+    issues no run statement AND no probe — it has nothing to write, so it has no
+    question to ask."""
+    exp = _exp_with_runs("Run 1")
+    conn = FakeConnection(refuse_upsert={exp.id}, stored={exp.id: exp.to_state()})
+    with pytest.raises(repo.DurableWriteConflict):
+        repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(exp)
+    assert _probe_count(conn) == 0
+    assert repo.run_table_seen() is False
+
+
+def test_the_table_APPEARING_mid_process_starts_writing_rows_with_no_restart():
+    """THE TRANSITION, AND IT IS WHY THE NEGATIVE ANSWER IS NEVER CACHED.
+
+    The operator applies the migration BY HAND, against a pod that keeps running.
+    Nothing restarts it. If a "no" were remembered, `isaac_runs` would stay
+    permanently empty on precisely the deployment that was just migrated — and
+    silently, because no read path would ever notice.
+
+    MUTATION-CHECKED. Making the cache symmetric — remembering the negative
+    alongside the positive, e.g. a three-state cache set on both answers — turns
+    this RED at the second save: no probe is issued, no rows are written, and the
+    row set stays empty. It was run and it does.
+    """
+    exp = _exp_with_runs("Run 1", "Run 2")
+    conn = FakeConnection(run_table=False)
+
+    _persist(exp, conn)
+    assert conn.runs == {}, "rows were written against a table that does not exist"
+    assert repo.run_table_seen() is False
+
+    # The operator applies `0002`. Same process, same module state, no restart.
+    conn.run_table = True
+    conn.statements.clear()
+    _persist(exp, conn)
+
+    assert set(conn.runs) == {run.id for run in exp.runs}
+    assert [sql for sql, _ in _run_statements(conn)] == [
+        repo.Q_EXPERIMENT_RUN_ROWS,
+        repo.Q_UPSERT_RUN,
+        repo.Q_UPSERT_RUN,
+    ]
+    assert repo.run_table_seen() is True
+
+
+def test_a_pending_migration_is_re_probed_on_EVERY_save_until_it_lands():
+    """The cost of never caching a "no", stated as a measurement rather than left
+    implicit: one extra statement per save, for as long as the table is absent."""
+    exp = _exp_with_runs("Run 1")
+    conn = FakeConnection(run_table=False)
+    for _ in range(3):
+        _persist(exp, conn)
+    assert _probe_count(conn) == 3
+    assert _run_statements(conn) == []
+
+
+def test_the_positive_answer_is_cached_so_later_saves_do_not_re_probe():
+    """THE STEADY STATE COSTS NOTHING, and this is the assertion that keeps it so.
+
+    A migration cannot un-apply itself, so a confirmed table stays confirmed for
+    the life of the process. Without the cache every save on every healthy
+    deployment would pay a catalog round trip, forever, to re-learn a fact that
+    cannot change on its own.
+    """
+    exp = _exp_with_runs("Run 1")
+    conn = _persist(exp)
+    assert _probe_count(conn) == 1
+
+    for _ in range(3):
+        exp.add_run(label="another")
+        _persist(exp, conn)
+    assert _probe_count(conn) == 1, "the probe was re-asked after a positive answer"
+    assert len(conn.runs) == 4
+
+
+def test_the_cache_is_process_wide_and_not_per_store_instance():
+    """`ordinary_store()` builds a NEW store for every call, so an instance-level
+    cache would be a cache that never hits. Two independent stores, one process."""
+    first = _exp_with_runs("Run 1")
+    conn = FakeConnection()
+    repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(first)
+    assert _probe_count(conn) == 1
+
+    second = _exp_with_runs("Run 1", rid="01BBBBBBBBBBBBBBBBBBBBBBBB")
+    repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(second)
+    assert _probe_count(conn) == 1
+
+
+@pytest.mark.parametrize("statement_name", ["Q_EXPERIMENT_RUN_ROWS", "Q_UPSERT_RUN"])
+def test_a_BROKEN_run_write_against_a_PRESENT_table_still_fails_loudly(statement_name):
+    """THE NEGATIVE CONTROL, AND THE MOST IMPORTANT CASE IN THIS SECTION.
+
+    A guard that skipped the run writes whenever they went wrong would have turned
+    a broken shadow write into silence — and silence is unrecoverable here, because
+    no read path would ever surface a row that failed to be written. So: the table
+    EXISTS, the write fails for a reason that is not "the table is absent", and the
+    save must fail exactly as it did before this guard was added.
+
+    Both statements are exercised: the diff's `SELECT` and the upsert. A guard that
+    caught either would pass a test that only tried the other.
+    """
+    exp = _exp_with_runs("Run 1")
+    boom = ConnectionFailure("server closed the connection")
+    conn = FakeConnection(raise_on={getattr(repo, statement_name): boom})
+
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    with pytest.raises(repo.StorageUnavailable):
+        store.persist(exp)
+
+    assert conn.rollbacks == 1 and conn.commits == 0
+    assert conn.runs == {} and conn.stored == {}, "the experiment upsert survived"
+    assert repo.storage_failure() == "ConnectionFailure"
+    # The table WAS there, and the guard has no opinion about a write that broke
+    # for any other reason.
+    assert repo.run_table_seen() is True
+    repo.forget_storage_failure()
+
+
+def test_a_0002_ROLLBACK_under_a_running_pod_fails_once_and_then_skips():
+    """THE POSITIVE CACHE'S ONE FAILURE MODE, HANDLED WHERE IT IS OBSERVED.
+
+    An operator can roll `0002` back under a live pod, which is the only way a
+    confirmed table stops existing. The cached "yes" is then wrong, and the save
+    that discovers it CANNOT be rescued — the transaction is already aborted by the
+    server. So the first save after the rollback fails loudly, exactly like any
+    other durable failure; what must not happen is that every save after it fails
+    too, waiting for a restart nobody is going to perform.
+
+    The cache is dropped only on the server's own SQLSTATE `42P01`
+    (`is_undefined_table`, which fails closed), so the case above — a broken write
+    against a table that exists — leaves it alone.
+    """
+    exp = _exp_with_runs("Run 1")
+    conn = _persist(exp)
+    assert repo.run_table_seen() is True and conn.runs != {}
+
+    # The operator runs `0002_runs.rollback.sql`. The table is gone.
+    conn.run_table = False
+    conn.runs.clear()
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    with pytest.raises(repo.StorageUnavailable):
+        store.persist(exp)
+    assert conn.rollbacks == 1, "the failed save was not rolled back"
+    assert repo.run_table_seen() is False, "a contradicted cache was still believed"
+
+    # ...and the next save works, with the run rows skipped. (`commits` counts the
+    # first save too; what this asserts is that a SECOND one happened.)
+    conn.statements.clear()
+    repo.forget_storage_failure()
+    _persist(exp, conn)
+    assert conn.commits == 2 and conn.rollbacks == 1
+    assert _run_statements(conn) == []
+    assert repo.storage_failure() is None
+
+
+def test_the_probe_passes_the_write_statement_policy():
+    """It goes through `policy.check` like every other statement, so an over-broad
+    refusal filter would refuse the app's own probe here rather than in production.
+    """
+    assert (
+        dbw.WriteStatementPolicy().check(repo.Q_RUN_TABLE_PRESENT)
+        == repo.Q_RUN_TABLE_PRESENT
+    )
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT count(*) FROM information_schema.tables WHERE table_name = %s",
+        "SELECT 1 FROM pg_catalog.pg_class WHERE relname = %s",
+    ],
+)
+def test_the_catalog_views_this_probe_deliberately_does_not_use_are_REFUSED(sql):
+    """WHY `to_regclass` AND NOT THE OBVIOUS THING, MEASURED RATHER THAN ASSERTED.
+
+    `information_schema` and `pg_catalog` are the two ways anyone would first reach
+    for "does this table exist", and both are REFUSED: neither is in
+    `db_write.OWNED_TABLES`, and the policy refuses an unowned table by design.
+    Widening `OWNED_TABLES` to admit a probe would weaken the guard that keeps this
+    application away from `records`, which is not a trade worth making for a
+    question `to_regclass` answers with no table reference at all.
+    """
+    with pytest.raises(dbw.WriteRefused):
+        dbw.WriteStatementPolicy().check(sql)
+
+
+def test_the_bookkeeping_table_is_the_WRONG_oracle_and_CI_proves_it():
+    """THE OTHER REJECTED DESIGN, AND THE REASON IS IN THIS REPOSITORY.
+
+    Reading `isaac_schema_migrations` for a `0002_runs` row PASSES the policy, so
+    the objection is not feasibility — it is that the row and the relation can
+    disagree. CI itself builds a state where they do: the idempotence step runs
+    `DELETE FROM isaac_schema_migrations` while both tables still stand, and the
+    migration files are `CREATE ... IF NOT EXISTS` precisely so that re-applying
+    over a table whose bookkeeping was lost is a no-op.
+
+    A bookkeeping-based probe would read that state as "0002 is pending" and skip
+    the run writes FOREVER against a table that is right there — silently, because
+    nothing reads it. Asserted here so the rejected design cannot quietly return.
+    """
+    bookkeeping = "SELECT 1 FROM isaac_schema_migrations WHERE version = %s"
+    assert dbw.WriteStatementPolicy().check(bookkeeping) == bookkeeping
+    workflow = (
+        Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
+    assert "DELETE FROM isaac_schema_migrations" in workflow
+    assert "isaac_schema_migrations" not in repo.Q_RUN_TABLE_PRESENT
 
 
 # --- tutorial isolation, at run granularity -----------------------------------
@@ -2198,6 +2575,24 @@ def test_0002_is_now_written_by_the_write_path_and_by_nothing_else():
         if sql is repo.Q_EXPERIMENT_RUN_ROWS:
             continue
         assert "isaac_runs" not in sql.lower(), sql
+
+    # ── A FOURTH STATEMENT REFERS TO THE TABLE AND IS NOT IN `naming`, WHICH
+    # ── WOULD BE A HOLE IN THIS ENUMERATION IF IT WERE NOT SAID OUT LOUD. ────────
+    # `Q_RUN_TABLE_PRESENT` asks the catalog whether the relation exists, and it
+    # carries the name as a PARAMETER — so it is invisible to a text scan, by
+    # design: "a save on a 0001-only deployment issues no statement naming
+    # isaac_runs" has to stay checkable by exactly that scan. The counterpart of
+    # that decision is this assertion, which pins the parameter instead, so the
+    # probe cannot become a fourth writer without being noticed here.
+    assert repo.RUN_TABLE == "isaac_runs"
+    assert repo.RUN_TABLE not in repo.Q_RUN_TABLE_PRESENT
+    assert "%s" in repo.Q_RUN_TABLE_PRESENT
+    assert "to_regclass" in repo.Q_RUN_TABLE_PRESENT
+    # It reads the catalog and nothing else: no application table is named, in any
+    # form, so it cannot be the statement that touches a row.
+    assert not any(
+        table in repo.Q_RUN_TABLE_PRESENT for table in dbw.OWNED_TABLES
+    ), repo.Q_RUN_TABLE_PRESENT
 
 
 def test_the_app_serves_READS_identically_whether_or_not_0002_is_applied(

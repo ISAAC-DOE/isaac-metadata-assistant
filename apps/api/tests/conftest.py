@@ -82,7 +82,7 @@ def _neutralize_packaged_snapshot(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _clear_storage_observation():
-    """No test may inherit another's durable-storage outage.
+    """No test may inherit another's durable-storage outage, or its schema cache.
 
     ``experiment_repository`` records the last durable-storage failure in a MODULE
     GLOBAL, deliberately — it is how ``/api/health`` reports a database problem
@@ -91,12 +91,23 @@ def _clear_storage_observation():
     ``storage_status`` reporting ``durable: false`` for every case that ran after
     it, and the resulting failure would name an innocent test.
 
+    THE SECOND GLOBAL IS ``_run_table_seen`` AND IT LEAKS IN THE MORE DANGEROUS
+    DIRECTION. It caches "this process has seen ``isaac_runs`` exist", and the
+    cache is deliberately one-way: once set, nothing re-probes. Left uncleared, the
+    first case that persists against a normal fake would make every later case
+    believe the table is there — so every test of the 0002-pending deployment would
+    pass for the wrong reason, or fail while naming the wrong test. It is a
+    process-wide bit in the application, so it needs a process-wide reset here
+    rather than a per-test one where it happens to be remembered.
+
     Cleared BEFORE and AFTER: before, so a test's starting state is stated rather
     than inherited; after, so a failing test cannot poison the rest of the run.
     """
     _repo.forget_storage_failure()
+    _repo.forget_run_table_presence()
     yield
     _repo.forget_storage_failure()
+    _repo.forget_run_table_presence()
 
 
 def tutorial_client(app, **kwargs) -> TestClient:

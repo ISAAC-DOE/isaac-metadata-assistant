@@ -174,10 +174,12 @@ __all__ = [
     "StorageNotProvisioned",
     "StorageUnavailable",
     "blank_draft",
+    "forget_run_table_presence",
     "forget_storage_failure",
     "is_undefined_table",
     "ordinary_store",
     "repository",
+    "run_table_seen",
     "storage_failure",
     "storage_status",
 ]
@@ -918,6 +920,156 @@ Q_DELETE_ABSENT_RUNS = (
 )
 
 
+# --- is the table even there yet? the deployment-order guard -------------------
+
+#: The relation the three statements above name. It is a NAMED CONSTANT because
+#: :data:`Q_RUN_TABLE_PRESENT` passes it as a parameter rather than writing it into
+#: the statement text, and a table name that appears nowhere in any SQL string is a
+#: table name nobody greps up.
+#: ``test_0002_is_now_written_by_the_write_path_and_by_nothing_else`` pins this
+#: constant beside the three statements, in the one place that enumerates them.
+RUN_TABLE = "isaac_runs"
+
+
+#: "DOES ``isaac_runs`` EXIST YET?", ASKED BEFORE ANYTHING WRITES TO IT.
+#:
+#: WHAT IT PREVENTS, AND IT IS NOT A HYPOTHETICAL. In this project the image rolls
+#: out on merge (Flux) and migrations are applied SEPARATELY AND BY HAND by the
+#: operator — ``0001_experiments`` was applied to the hosted database on 2026-08-09
+#: and ``0002_runs`` on 2026-08-12, each by the owner, neither by a deployment. So a
+#: new image ROUTINELY runs against a database its own migration has not reached:
+#: that window is the hosted deployment's normal state between a merge and an
+#: operator's ``--apply``, its width is however long the operator takes, and the
+#: same state is what a deliberate ``0002`` rollback leaves behind. Unguarded, the
+#: run writes address a relation that does not exist, the server raises
+#: ``undefined_table``, and — see the next paragraph — the experiment upsert dies
+#: with it. EVERY SAVE WOULD FAIL,
+#: AND DURABLE STORAGE WOULD BREAK, FOR A TABLE NOTHING READS.
+#: ``.github/workflows/ci.yml``'s "Apply 0001 ONLY" step caught exactly that, which
+#: is what this constant exists to answer.
+#:
+#: WHY A PRE-CHECK AND NOT A ``try``/``except`` AROUND THE RUN STATEMENTS. In
+#: PostgreSQL a failed statement POISONS THE WHOLE TRANSACTION: every later command
+#: is refused with "current transaction is aborted, commands ignored until end of
+#: transaction block", so "swallow the error and commit the experiment anyway" is
+#: not something the server permits — the experiment upsert would roll back with
+#: the run write. ``db_write.write_transaction`` independently rolls back on ANY
+#: exception, so the shape is refused twice over. That leaves exactly two designs
+#: that can work: a ``SAVEPOINT`` around the run writes, or asking first.
+#:
+#: SAVEPOINTS WERE EVALUATED AND REJECTED, on three counts rather than on taste.
+#: They pass the statement policy (measured), so the objection is not feasibility.
+#: (1) They cost TWO extra statements on EVERY save, forever, where this probe
+#: costs zero once the table has been seen. (2) ``ROLLBACK TO SAVEPOINT`` catches
+#: every error alike, so a genuinely broken run write would be silently discarded
+#: as "the table must be missing" — the one thing this guard must not do. (3)
+#: Recovering that distinction means re-classifying the SQLSTATE afterwards anyway,
+#: at which point the savepoint has bought nothing but round trips.
+#:
+#: WHY ``to_regclass`` AND NOT THE TWO OBVIOUS ALTERNATIVES:
+#:
+#: * ``information_schema.tables`` and ``pg_catalog.pg_class`` are REFUSED by
+#:   :class:`~isaac_api.db_write.WriteStatementPolicy` — neither is in
+#:   ``OWNED_TABLES``, and the policy refuses an unowned table by design and
+#:   should not be widened for a probe. Measured, not assumed:
+#:   ``test_the_catalog_views_this_probe_deliberately_does_not_use_are_REFUSED``.
+#: * ``isaac_schema_migrations`` PASSES the policy and is THE WRONG ORACLE. The
+#:   bookkeeping row and the relation can disagree, and CI itself builds a state
+#:   where they do: the idempotence step runs ``DELETE FROM
+#:   isaac_schema_migrations`` while both tables still stand. A bookkeeping-based
+#:   probe would then skip the run writes forever against a table that is right
+#:   there — silently, because nothing reads it.
+#:
+#: ``to_regclass`` RETURNS NULL for a name that does not resolve instead of raising
+#: (``'isaac_runs'::regclass`` raises, which is the failure being avoided), and it
+#: resolves through the same ``search_path`` the unqualified names in the three
+#: statements above use — so it answers the question those statements actually ask,
+#: rather than a similar question about a hardcoded schema.
+#:
+#: THE TABLE NAME IS A PARAMETER, AND THAT IS NOT AN EVASION OF ANYTHING.
+#: ``isaac_runs`` is owned, so the literal form passes the policy too. It is a
+#: parameter so that "a save on a 0001-only deployment issues no statement naming
+#: ``isaac_runs``" stays a MECHANICALLY CHECKABLE property — in the tests and in
+#: CI — instead of a property carrying an exception. The cost is discoverability,
+#: and :data:`RUN_TABLE` above plus its pinning test are what pay it.
+Q_RUN_TABLE_PRESENT = "SELECT to_regclass(%s::text)"
+
+
+#: HAS THIS PROCESS SEEN ``isaac_runs`` EXIST? One bit, module-level for the same
+#: reason ``_storage_failure`` is one: :func:`ordinary_store` builds a new store per
+#: call, so a per-instance cache would be a cache that never hits.
+#:
+#: THE ASYMMETRY IS THE DESIGN, NOT AN OPTIMISATION DETAIL, and each half is here
+#: for a different failure.
+#:
+#: ``True`` IS CACHED FOR THE LIFE OF THE PROCESS. A migration cannot un-apply
+#: itself; "the table exists" stops being true only if an operator deliberately
+#: rolls it back, and :meth:`PostgresOrdinaryStore.persist` handles that case from
+#: the server's own SQLSTATE rather than by re-asking on the chance of it. So the
+#: steady state — the deployment everyone actually runs — costs ZERO extra
+#: statements per save.
+#:
+#: ``False`` IS NEVER CACHED. The operator applies the migration BY HAND AGAINST A
+#: RUNNING POD, and no restart follows; a negative cache would leave ``isaac_runs``
+#: permanently empty on exactly the deployment that was just migrated, silently,
+#: because nothing reads the table to notice. One probe per save while the table is
+#: genuinely absent is the price of not needing that restart, and it is paid only
+#: in a window that is meant to be short.
+_run_table_seen = False
+
+
+def run_table_seen() -> bool:
+    """Whether this process has confirmed ``isaac_runs`` exists.
+
+    An OBSERVATION for tests and reports. Nothing in the application branches on
+    it — :func:`_run_table_available` is what decides, and it decides against the
+    open transaction.
+    """
+    return _run_table_seen
+
+
+def forget_run_table_presence() -> None:
+    """Drop the cached "the table is there" observation. TWO REAL CALLERS.
+
+    The tests, so one case cannot inherit another's cache — the same reason
+    :func:`forget_storage_failure` exists and is cleared by an autouse fixture.
+
+    And :meth:`PostgresOrdinaryStore.persist`, when the server answers
+    ``undefined_table`` from a run statement after this process had already seen
+    the table. That means the operator rolled ``0002`` back under a live pod. The
+    save still FAILS — the transaction is already aborted and nothing is being
+    swallowed — but the next one re-probes, finds the table gone, and skips the run
+    writes, so saves recover after one failure instead of after a restart nobody
+    is watching for.
+    """
+    global _run_table_seen
+    _run_table_seen = False
+
+
+def _run_table_available(cursor, policy) -> bool:
+    """Whether ``isaac_runs`` exists, asked at most once per process once it does.
+
+    Uses the transaction ALREADY OPEN, so the answer is the one this transaction's
+    own statements would get, from the same ``search_path``, at the same instant.
+
+    IT SWALLOWS NOTHING, and that is the property that keeps "the table is absent"
+    and "the write is broken" distinguishable. ``to_regclass`` ANSWERS ``NULL`` for
+    an absent relation — it does not raise — so a ``False`` here is a fact the
+    server stated. If the probe itself fails, that exception propagates exactly as
+    any other statement's would and :meth:`PostgresOrdinaryStore.persist` reports
+    the outage it is. There is no ``except`` anywhere on this path.
+    """
+    global _run_table_seen
+    if _run_table_seen:
+        return True
+    cursor.execute(policy.check(Q_RUN_TABLE_PRESENT), (RUN_TABLE,))
+    row = cursor.fetchone()
+    if not row or row[0] is None:
+        return False
+    _run_table_seen = True
+    return True
+
+
 def _run_row_params(experiment_id: str, run: "ws.Run") -> tuple:
     """THE ONE PLACE A ``Run`` BECOMES AN ``isaac_runs`` ROW.
 
@@ -1099,6 +1251,18 @@ class PostgresOrdinaryStore:
         remains the authoritative copy that every read path uses. See
         :data:`Q_EXPERIMENT_RUN_ROWS` and the three statements beside it.
 
+        IT WRITES THEM ONLY IF THE TABLE IS THERE, AND THAT IS A DEPLOYMENT FACT
+        RATHER THAN A DEFENSIVE HABIT. The image rolls out on merge and an operator
+        applies migrations by hand afterwards, so a build runs against a database
+        missing its own table as a matter of course. When ``isaac_runs`` is absent
+        the run rows are SKIPPED and everything else is unchanged: the experiment
+        row is written, the transaction commits, and ``/api/health`` goes on
+        reporting ``durable: true`` — which is TRUE, because the experiment
+        document is the durable state and it is stored. The rows are a shadow
+        nothing reads, so their absence must never fail a save or downgrade the
+        claim made about one. :data:`Q_RUN_TABLE_PRESENT` is the check and carries
+        the reasoning.
+
         THE TUTORIAL RULE IS SATISFIED BY ARCHITECTURE, NOT BY A FOURTH CHECK. The
         run write lives after :meth:`refuse_if_not_persistable`, in the one method
         the isolation guards already protect, so it inherits all three of them by
@@ -1144,7 +1308,36 @@ class PostgresOrdinaryStore:
                     # strictly inside the accepted branch, and
                     # `test_a_refused_experiment_upsert_writes_no_run_statement_at_all`
                     # goes RED if they are moved out of it.
-                    self._write_run_rows(cursor, policy, exp.id, desired, desired_ids)
+                    #
+                    # ── AND THE SECOND GATE: DOES THE TABLE EXIST YET? ───────────
+                    # The image rolls out on merge; the operator applies migrations
+                    # by hand afterwards. So this build routinely runs against a
+                    # database where `0002` is still pending, and the run writes
+                    # would address a relation that is not there — aborting the
+                    # transaction and taking the experiment upsert down with it.
+                    # A save that fails for a table NOTHING READS is the whole
+                    # defect; see `Q_RUN_TABLE_PRESENT` for why this is a
+                    # pre-check and not a `try`/`except`.
+                    if _run_table_available(cursor, policy):
+                        try:
+                            self._write_run_rows(
+                                cursor, policy, exp.id, desired, desired_ids
+                            )
+                        except Exception as exc:  # noqa: BLE001 - re-raised below
+                            # NOT A RECOVERY, AND NOT A CONTINUE. The transaction
+                            # is already aborted and this save is already lost; the
+                            # `raise` is unconditional and one line down. All that
+                            # happens here is that a POSITIVE cache which the server
+                            # has just contradicted stops being believed — the
+                            # operator rolled `0002` back under a running pod, and
+                            # without this the pod would keep failing every save
+                            # until someone restarted it. Classified from the
+                            # server's own SQLSTATE, which `is_undefined_table`
+                            # reads fail-closed, so a broken write against a table
+                            # that DOES exist changes nothing here and still raises.
+                            if is_undefined_table(exc):
+                                forget_run_table_presence()
+                            raise
                 else:
                     cursor.execute(policy.check(Q_ONE_EXPERIMENT), (exp.id,))
                     stored = _row_state(cursor.fetchone())
@@ -1169,6 +1362,13 @@ class PostgresOrdinaryStore:
         :meth:`refuse_if_not_persistable` and the accepted gate. It is a private
         method rather than a class because a class is what a future caller
         instantiates.
+
+        IT ASSUMES THE TABLE EXISTS, DELIBERATELY. Its one caller has already
+        established that through :func:`_run_table_available`, so nothing here
+        tolerates an absent relation and nothing here should start to: a
+        ``try``/``except`` in this method could not work anyway (an error aborts
+        the transaction, so the experiment upsert would roll back with it), and a
+        second check would only make the first one look optional.
 
         THE DIFF IS REQUIRED, NOT AN OPTIMISATION. Rewriting all N rows on every
         save would issue N+1 statements under a 15-second per-statement timeout —

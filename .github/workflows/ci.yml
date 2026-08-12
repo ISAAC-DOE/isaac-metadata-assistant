@@ -440,8 +440,50 @@ jobs:
           listed = client.get("/api/experiments").json()["experiments"]
           assert [row["id"] for row in listed] == [rid], listed
           assert client.get(f"/api/experiments/{rid}").status_code == 200
-          # Durability is still claimed, because it is still true: nothing this
-          # application does touches the table 0002 has not created yet.
+
+          # ── A SAVE THAT ACTUALLY HAS RUNS TO SHADOW. ────────────────────────
+          # THIS STEP CAUGHT THE DEFECT WITH THE CREATE ALONE, and it is
+          # strengthened rather than left at that, because a create is the WEAKEST
+          # save this assertion could make: a brand-new record holds no runs, so it
+          # would still pass against a build that skipped only the empty case.
+          # Adding a run is the write that has rows to maintain, and on a 0001-only
+          # database it is the one a future regression would break first.
+          #
+          # THE PROOF THAT NO STATEMENT NAMED `isaac_runs` IS THE SERVER ITSELF.
+          # The relation does not exist here; any statement naming it would raise
+          # `undefined_table`, abort the transaction, take the experiment upsert
+          # down with it and surface as a 503. A 201 is therefore not merely "the
+          # save worked" — it is proof the shadow write was skipped rather than
+          # attempted. (`Q_RUN_TABLE_PRESENT` names the table only as a PARAMETER,
+          # which is why the probe is not itself such a statement.)
+          etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+          added = client.post(
+              f"/api/experiments/{rid}/runs",
+              json={"label": "run while 0002 is pending"},
+              headers={"If-Match": etag},
+          )
+          assert added.status_code == 201, added.text
+          # The run is real, durable and readable — it lives in the experiment
+          # DOCUMENT, which is the authoritative copy with or without `isaac_runs`.
+          listed_runs = client.get(f"/api/experiments/{rid}/runs").json()
+          assert [r["id"] for r in listed_runs["runs"]] == [
+              added.json()["run"]["id"]
+          ], listed_runs
+
+          # A SECOND save, because the negative answer is deliberately never
+          # cached: the app must go on asking, and must go on succeeding.
+          etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+          second = client.post(
+              f"/api/experiments/{rid}/runs",
+              json={"label": "and another"},
+              headers={"If-Match": etag},
+          )
+          assert second.status_code == 201, second.text
+          assert repo.run_table_seen() is False, "the app thinks isaac_runs exists"
+
+          # Durability is still claimed, because it is still true: the experiment
+          # rows ARE in the database. Nothing this application does touches the
+          # table 0002 has not created yet.
           after = client.get("/api/health").json()["experiment_storage"]
           assert after == {
               "configured": True,
@@ -449,8 +491,14 @@ jobs:
               "durable": True,
               "state": repo.STORAGE_STATE_DURABLE,
           }, after
-          print("0001-only database: create, read and list all work with 0002 pending")
+          print("0001-only database: create, read, list and RUN SAVES all work with 0002 pending")
           PY
+          # AND THE APPLICATION DID NOT CREATE THE TABLE BEHIND THE MIGRATION'S
+          # BACK. The skip must be a skip; a build that quietly ran a `CREATE TABLE`
+          # of its own would satisfy every assertion above and would put a schema
+          # into the operator's database that no approved migration text describes.
+          count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
+          [ "$count" = "0" ] || { echo "::error::the application created isaac_runs itself"; exit 1; }
           # Leave the table as the later steps expect to find it: empty.
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments"
           rm -rf /tmp/isaac-pg-0001-only
@@ -1028,6 +1076,113 @@ jobs:
           left=$(psql -Atc "select count(*) from isaac_runs where experiment_id = '$parent'")
           [ "$left" = "0" ] || { echo "::error::this step left rows behind"; exit 1; }
           echo "0002 constraints: every one behaves as the approval packet describes"
+
+      # THE DEPLOYMENT-ORDER GUARD, AGAINST A REAL ENGINE AND IN ONE PROCESS.
+      #
+      # WHY IT IS HERE AND NOT ONLY IN `test_experiment_repository.py`. The unit
+      # suite proves the guard's LOGIC against a fake; only a real server can say
+      # that `SELECT to_regclass(%s::text)` is valid SQL, that psycopg2 binds the
+      # parameter, and — the part that matters most — that PostgreSQL ANSWERS NULL
+      # for an absent relation instead of raising. If it raised, the pre-check
+      # would be the very failure it exists to avoid, and every test in this
+      # repository would still be green.
+      #
+      # WHY IT ROLLS `0002` BACK TO GET THERE. The absent-table state exists only
+      # before the migration, and by this point in the job the migration has been
+      # applied and exercised. The rollback file is the operator's own documented
+      # tool for exactly this, so the step reaches the state the way an operator
+      # would rather than by hand-crafting a DROP. It re-applies `0002` before
+      # finishing, so every later step finds the database exactly as it left it.
+      #
+      # AND THE TRANSITION IS THE POINT. The operator applies migrations BY HAND
+      # against a pod that keeps running; nothing restarts it. So the same process
+      # must save with the table absent AND start writing rows once it appears.
+      # That is why the application caches a positive answer and never a negative
+      # one, and this is the only place a real engine confirms it.
+      - name: Prove a save survives 0002 being absent, then starts writing rows live
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-transition
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0002_runs.rollback.sql
+          gone=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
+          [ "$gone" = "0" ] || { echo "::error::the rollback left isaac_runs behind"; exit 1; }
+          python - <<'PY'
+          import os, sys
+          sys.path.insert(0, "apps/api")
+          from fastapi.testclient import TestClient
+          from isaac_api import db_migrate
+          import isaac_api.db_write as dbw
+          import isaac_api.experiment_repository as repo
+          import isaac_api.workspace as ws
+          from isaac_api.app import create_app
+
+          client = TestClient(create_app())
+          assert repo.run_table_seen() is False, "a fresh process began with a cached answer"
+
+          def add_run(rid, label):
+              etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+              added = client.post(
+                  f"/api/experiments/{rid}/runs",
+                  json={"label": label},
+                  headers={"If-Match": etag},
+              )
+              assert added.status_code == 201, added.text
+              return added.json()["run"]["id"]
+
+          def run_rows(rid):
+              with dbw.write_transaction(os.environ) as (cur, pol):
+                  cur.execute(pol.check(repo.Q_EXPERIMENT_RUN_ROWS), (rid,))
+                  return {row[0]: row for row in cur.fetchall()}
+
+          # ── 0002 IS ABSENT. The save must work and must claim durability. ──
+          created = client.post("/api/experiments", json={"title": "CI transition"})
+          assert created.status_code == 201, created.text
+          rid = created.json()["id"]
+          before_apply = [add_run(rid, "before the migration")]
+          assert client.get("/api/health").json()["experiment_storage"]["durable"] is True
+          assert repo.run_table_seen() is False, "the app believes an absent table exists"
+
+          # ── THE OPERATOR APPLIES IT. Same process. No restart. ──────────────
+          assert db_migrate.migrate(os.environ) == ["0002_runs"], "0002 did not apply"
+
+          after_apply = add_run(rid, "after the migration")
+          assert repo.run_table_seen() is True, "the app never noticed the table appear"
+
+          # EVERY run is now shadowed, not only the one added after the migration:
+          # the write is a diff against the CURRENT row set, and that set was empty,
+          # so the save that followed the migration wrote all of them.
+          rows = run_rows(rid)
+          assert sorted(rows) == sorted(before_apply + [after_apply]), rows
+          held = {run.id: run for run in ws.load_experiment(rid).sorted_runs()}
+          for run_id, row in rows.items():
+              _rid, ordinal, state, rev, generation = row
+              run = held[run_id]
+              assert (ordinal, rev, generation) == (run.ordinal, run.rev, run.generation), row
+              assert state == run.to_state(), (run_id, state)
+
+          print("0002 absent -> save works; 0002 applied mid-process -> rows appear, no restart")
+          with open("/tmp/isaac-transition-experiment.txt", "w") as handle:
+              handle.write(rid)
+          PY
+          # WHAT THIS STEP LEAVES BEHIND, STATED EXACTLY RATHER THAN AS "nothing".
+          # It removes its OWN rows and its own workspace, and it leaves the schema
+          # fully migrated — both asserted below. It does NOT restore the run rows
+          # the earlier repository step created: the rollback dropped the table and
+          # those rows with it, and re-applying `0002` brings back an EMPTY table.
+          # That is safe here and only here, because the assertion that counted
+          # those rows has already run, and every step after this one reads the
+          # table SET and the `records` digest rather than this application's rows.
+          # A future step that needs them must run before this one.
+          rid=$(cat /tmp/isaac-transition-experiment.txt)
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_runs WHERE experiment_id = '$rid'"
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$rid'"
+          rm -rf /tmp/isaac-pg-transition
+          plan=$(python scripts/db_migrate.py --plan)
+          [ "$plan" = "pending: (none)" ] || {
+            echo "::error::this step did not leave the database fully migrated: $plan"; exit 1; }
+          left=$(psql -Atc "select count(*) from isaac_runs")
+          [ "$left" = "0" ] || { echo "::error::this step left $left run row(s) behind"; exit 1; }
 
       # ROLLBACK ORDER IS NOT A DETAIL. `0001_experiments.rollback.sql` drops
       # `isaac_experiments` WITHOUT `CASCADE`, and `isaac_runs` references it — so
