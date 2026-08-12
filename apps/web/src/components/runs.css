@@ -53,8 +53,78 @@
 }
 
 .runs-count {
+  margin: 0;
   font-size: 12px;
   color: var(--text-slate);
+}
+
+/*
+ * THE BROWSER CONTROLS — a search box and two filters, on one line at desk width
+ * and wrapping to as many as they need below it. No new token, no new control
+ * shape: the box and the two selects are `.run-input`, which is the input this
+ * surface already uses inside a card, so a scientist meets one text field on this
+ * screen rather than two that differ by a pixel.
+ *
+ * EVERY CONTROL CARRIES A REAL LABEL rather than a placeholder. A placeholder
+ * disappears the moment there is a value in the box, which is exactly when a
+ * reader coming back to a filtered list needs to be told what the box IS.
+ */
+.runs-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.runs-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.runs-control-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+}
+
+.runs-control-hint {
+  max-width: 44ch;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* A statement about what just happened to the reader's criteria — quiet, but not
+   hidden: a create that clears a filter must not be silent. */
+.runs-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-inner);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-slate);
+}
+
+/* Load More, with the honesty note about offset paging beside it rather than
+   buried in a tooltip nobody opens. */
+.runs-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.runs-more-note {
+  flex: 1 1 32ch;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .runs-empty {
@@ -65,6 +135,10 @@
   border-radius: var(--radius-card);
   font-size: 13px;
   color: var(--text-slate);
+}
+
+.runs-empty p {
+  margin: 0 0 10px;
 }
 
 .runs-error {
@@ -94,10 +168,55 @@
   overflow: hidden;
 }
 
+/*
+ * The header LINE: the accordion heading, and — in the list, never in the focused
+ * view — the Focus control beside it. A flex wrapper rather than a control tucked
+ * inside the heading's button, because a button inside a button is not valid
+ * markup and the accordion button already spans the row.
+ */
+.run-card-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .run-card-heading {
   margin: 0;
+  flex: 1;
+  min-width: 0;
   font-size: inherit;
   font-weight: inherit;
+}
+
+/*
+ * Quiet by default and unmistakable on focus. `--text-slate` is 5.46:1 against a
+ * card's `--surface` #ffffff, so this is demoted by weight and size rather than by
+ * contrast — the same rule the chevron note above states.
+ */
+.run-card-focus {
+  flex: none;
+  margin-right: 10px;
+  padding: 4px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+  cursor: pointer;
+}
+
+.run-card-focus:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.run-card-focus:focus-visible {
+  outline: none;
+  border-color: var(--action);
+  box-shadow: var(--ring-active);
+  color: var(--text-primary);
 }
 
 .run-card-header {

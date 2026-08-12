@@ -3483,8 +3483,16 @@ def list_runs(
     # it is returned on every one, and any run add or delete moves it — and re-read
     # from the start when it changes. That is the intended remedy, and it was
     # undocumented until an independent review named this as the most likely way the
-    # slice is wrong in production. `apps/web` dedupes by run id when appending for
-    # the same reason.
+    # slice is wrong in production.
+    #
+    # `apps/web` DOES dedupe by run id when appending a page, in `RunsBrowser` — and
+    # this sentence is corrected rather than left alone because when it was first
+    # written it was NOT TRUE. The comment shipped in the paging slice, one slice
+    # ahead of the browser that implements it; at that moment the only append in the
+    # frontend was a plain `[...prev, res.run]` after Add Run, and an independent
+    # reader checked and found the claim unsupported. It is true as of this commit.
+    # A comment asserting a behaviour a sibling slice has not landed yet is the same
+    # defect class as a UI claiming a value is verified because it looks plausible.
     #
     # A QUERY MAKES THIS STRICTLY WORSE, and the honest reading is that filtering
     # widens the window rather than opening a new hole: a run edited concurrently can

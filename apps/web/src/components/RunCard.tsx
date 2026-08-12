@@ -124,6 +124,7 @@ export function RunCard({
   onRun,
   focusOnMount,
   onFocused,
+  onFocusRun,
 }: {
   experimentId: string;
   run: ApiRunView;
@@ -134,6 +135,14 @@ export function RunCard({
   /** True for the run that was just added — focus moves to its header. */
   focusOnMount?: boolean;
   onFocused?: () => void;
+  /**
+   * Isolate this run on the record screen. Supplied by the LIST and deliberately
+   * not by the focused view — a control that puts the reader where they already
+   * are is a dead control, and this surface has a written rule against offering
+   * one (see the `RUN_FIELDS` note above about a control whose only outcome is a
+   * 422). Absent means the card renders no such button at all.
+   */
+  onFocusRun?: () => void;
 }) {
   const baseId = useId();
   const headerId = `${baseId}-header`;
@@ -316,6 +325,15 @@ export function RunCard({
 
   return (
     <article className="run-card" data-run-id={run.id}>
+      {/*
+        THE HEADER ROW IS A FLEX WRAPPER AND NOT JUST THE HEADING, because the
+        Focus control cannot live inside the heading's button — a button inside a
+        button is not valid, and the accordion button already owns the whole row.
+        It is a SIBLING of the heading, in the same visual line, so it is reachable
+        by keyboard on a COLLAPSED card: isolating one run out of a page of fifty
+        must not require expanding it first.
+      */}
+      <div className="run-card-top">
       <h3 className="run-card-heading">
         <button
           ref={headerRef}
@@ -376,6 +394,24 @@ export function RunCard({
           {showHeldInvalid && <StatusChip kind="needsYou" label={notSentLabel} />}
         </button>
       </h3>
+        {onFocusRun && (
+          /*
+            THE ACCESSIBLE NAME CARRIES THE RUN, the visible word does not need to.
+            Fifty cards each offering a button called "Focus" is fifty identically
+            named controls in a screen reader's list; `aria-label` names which run,
+            and it CONTAINS the visible word, so WCAG 2.5.3 (label in name) still
+            holds and speech input still reaches it by saying "Focus".
+          */
+          <button
+            type="button"
+            className="run-card-focus"
+            aria-label={`Focus run ${run.label}`}
+            onClick={onFocusRun}
+          >
+            Focus
+          </button>
+        )}
+      </div>
 
       {/*
         THE AUTOSAVE READOUT — one live region per card, OUTSIDE the collapsible

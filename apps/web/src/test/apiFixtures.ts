@@ -116,7 +116,23 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
     const method = init?.method ?? 'GET';
     const key = `${method} ${url.replace(/^https?:\/\/[^/]+/, '')}`;
     calls.push(key);
-    const hit = routes[key];
+    /*
+     * A QUERY STRING FALLS BACK TO THE BARE PATH, and this is a routing rule
+     * rather than a convenience.
+     *
+     * The Runs listing became a PAGED read (`?limit=50&offset=0`, plus `q` and
+     * the filters), so its key stopped matching the `GET …/runs` every existing
+     * record-screen fixture registers. Without this fallback, roughly a hundred
+     * tests that care nothing about paging would suddenly render the Runs section
+     * as a backend failure — a suite going red for a reason that has nothing to
+     * do with what any of it asserts.
+     *
+     * The EXACT key still wins, so a test that wants to pin the query string
+     * registers it in full and gets exactly that route; only an unmatched query
+     * falls through to the path. `calls` always records the full key including
+     * the query, so what was actually requested stays assertable either way.
+     */
+    const hit = routes[key] ?? routes[key.replace(/\?.*$/, '')];
     if (!hit) throw new TypeError(`fetch stub: no route for ${key}`);
     // A whole-route thunk resolves the descriptor once per fetch (status/body/etag
     // in sync); a plain StubbedRoute is used as-is, and its `body` may itself be a
@@ -295,9 +311,33 @@ export function runFixture(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-export const runsEmpty = { runs: [], experiment_version: VERSION_FIELDS.version };
+/**
+ * A runs LISTING, with the four numbers the real route always sends.
+ *
+ * `total`, `matched`, `returned` and `offset` are not optional on the wire, and a
+ * fixture that omits them models a response the backend does not produce — which
+ * is how a UI that reads `total` gets tested against `undefined` and passes.
+ * `matched` defaults to `total` because that is what the server itself reports
+ * when nothing is filtering; a test about filtering passes it explicitly.
+ */
+export function runsPage(
+  runs: unknown[],
+  over: { total?: number; matched?: number; offset?: number } = {},
+) {
+  const total = over.total ?? runs.length;
+  return {
+    runs,
+    experiment_version: VERSION_FIELDS.version,
+    total,
+    matched: over.matched ?? total,
+    returned: runs.length,
+    offset: over.offset ?? 0,
+  };
+}
 
-export const runsOne = { runs: [runFixture()], experiment_version: VERSION_FIELDS.version };
+export const runsEmpty = runsPage([]);
+
+export const runsOne = runsPage([runFixture()]);
 
 export const draftResponse = {
   groups: [
