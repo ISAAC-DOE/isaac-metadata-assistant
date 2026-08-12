@@ -111,11 +111,23 @@ migration, or anything that changes governance.
 
 ## 6. Exact external actions
 
-| Action | Owner | Blocks |
-|---|---|---|
-| Decide whether the MCP path may be internet-reachable | Dean / SLAC infrastructure | any connector at all |
-| Choose the auth model — ISAAC-hosted OAuth AS vs. edge-accepted static token on the MCP path | Dean / SLAC infrastructure | `Connect Your Agent` showing a real connection |
-| Institutional Anthropic API credential + billing | Dean / Angel | the **native** embedded assistant — a wholly separate question from everything above |
+| Action | Owner | Blocks | Status |
+|---|---|---|---|
+| Decide whether the MCP path may be internet-reachable | Dean / SLAC infrastructure | any connector at all | **DEFERRED 2026-08-12** (= D1) |
+| Choose the auth model — ISAAC-hosted OAuth AS vs. edge-accepted static token on the MCP path | Dean / SLAC infrastructure | `Connect Your Agent` showing a real connection | **DEFERRED 2026-08-12** (= D2) |
+| Institutional Anthropic API credential + billing | Dean / Angel | the **native** embedded assistant — a wholly separate question from everything above | **DEFERRED 2026-08-12** (= D3/D4/D5) |
+
+> **DEAN DEFERRED ALL THREE, 2026-08-12** — *"leave AI integration as future work rather than
+> increasing scope at this point."* He is away for roughly a week. **None of them is approved,
+> narrowed, or conditionally approved**, and every "blocks" entry above is still in force.
+>
+> **Separately, and by a different decision-maker:** the project owner has elected to **continue
+> implementing** the MCP server, Connect Your Agent, the native assistant and the provider
+> architecture against **deterministic fake providers**. That authorizes code, APIs, UI, the auth and
+> provider abstractions, tests, error handling and security boundaries — and authorizes **no**
+> internet-reachable path, **no** credential, **no** billing, and **no** real connection. §6.1 of
+> `ai-integration-decision-packet.md` still forbids any screen implying a `Connected` state. See that
+> document's head-of-file block for both facts stated in full.
 
 ---
 

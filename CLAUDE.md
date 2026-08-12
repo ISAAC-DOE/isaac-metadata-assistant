@@ -691,7 +691,19 @@ Current MVP scope:
 - evidence sidecar
 - optional Graphify memory/query
 - free-form deterministic Assistant Q&A shipped (Phase 34, `d69d0ed`): bounded intent catalog only,
-  no LLM; Tier-2 LLM/generative Q&A remains out of scope unless explicitly approved
+  no LLM; a **production** Tier-2 LLM/generative provider remains out of scope unless explicitly
+  approved — see the narrowing immediately below
+- **AI / MCP / voice IMPLEMENTATION against deterministic fake providers — authorized by the project
+  owner 2026-08-12.** MCP, Connect Your Agent, the native LLM assistant, transcription/voice and the
+  provider architecture may be **built**: code, APIs, UI, auth abstraction, provider abstraction,
+  tests, error handling, security boundaries. **Dean DEFERRED D1–D9 on the same day** — *"leave AI
+  integration as future work rather than increasing scope at this point"* — so **no production
+  endpoint, credential, network path, billing arrangement or provider approval exists or is
+  authorized**, and none may be created. *Implementation complete* and *production provider
+  configured* are different milestones; the absence of the second is not a reason to skip the first,
+  and reaching the first is not permission to claim the second. `ai-integration-decision-packet.md`
+  §6 binds in full — above all **no fake `Connected` state** and **no model output in the truth
+  path** — as does §9's *"build nothing that implies any of it exists"*
 - org-canonical single-image `/krish` deployment on SLAC S3DF Kubernetes (Phase 35, `8a10ed5`):
   synthetic-only, ephemeral (`emptyDir`), Authentik-edge-authenticated; deploy via push to org `main`
   → GHCR image + Flux
@@ -718,6 +730,15 @@ Out of scope unless explicitly approved:
   sanitized **aggregate** output is authorized (Slice 2A, see the readiness table below). Reads from a
   laptop or from CI, ~~writes of any kind~~, and per-record hosted display remain out of scope.
 
+  *Narrowed again 2026-08-12, for AI only:* "external model provider / LLM" above continues to mean a
+  **production** provider — an endpoint, a credential, an outbound call, a charge — and that stays out
+  of scope, reinforced rather than relaxed by Dean's deferral of D1–D9. **Building the capability
+  against a deterministic fake provider is separately authorized by the project owner**; see the
+  in-scope entry above. **Identity/role enforcement is likewise still out of scope**, and Dean's
+  2026-08-12 authorization of username stamping does not change that: it is conditional on a trusted
+  authentication boundary ISAAC has not built, and Q4's answer is that the Service can be reached
+  in-cluster without traversing Authentik at all.
+
   ***Narrowed again 2026-08-07 — "any database write" is NO LONGER a blanket prohibition.*** The
   project owner lifted it **narrowly**, for one bounded feature: **durable Create Experiment
   persistence in the existing app-owned PostgreSQL database**, plus the minimum supporting persistence
@@ -741,7 +762,11 @@ Out of scope unless explicitly approved:
   **The hard stop:** implementation and local/CI testing are authorized; **applying any migration to
   the hosted environment is NOT.** The owner reviews the migration text before it is applied. Do not
   request a kubeconfig, a port-forward, or a Secret, and do not connect to the SLAC database — the
-  rule at `2026-07-24-phase-37-readiness-plan.md:48-52` is untouched by this lift. CI proves the
+  rule at `2026-07-24-phase-37-readiness-plan.md:48-52` is untouched by this lift. **This hard stop is
+  UNCHANGED by the fact that both `0001` and `0002` are now applied to the hosted database
+  (2026-08-09 and 2026-08-12, both by Dean).** Two migrations having been applied *by the
+  infrastructure owner* is not a precedent, a delegation, or a standing permission; `0003` and later
+  each need their own packet, their own owner approval, and their own operator action. CI proves the
   migration against a `postgres:18` service container (`.github/workflows/ci.yml` →
   `postgres-migration`), which is **not** the same as proving it against the hosted database with its
   real data; see `docs/create-experiment-persistence.md`.
@@ -791,7 +816,8 @@ amended §2 for exactly what is and is not permitted.
 | **2 (local execution)** — running that script from a laptop against the SLAC database | **NOT authorized.** Do not request a kubeconfig, port-forward, or Secret; do not run recon locally. The prohibition is the project rule at `2026-07-24-phase-37-readiness-plan.md:48-52`. ~~"and architecturally impossible … the DB is unreachable from outside the cluster"~~ — **corrected 2026-08-01**: Dean's guide says the opposite, documenting `kubectl port-forward -n isaac-psql svc/isaac-psql-rw 5432:5432` as a working optional convenience for anyone who already holds a SLAC cluster context (`:8-13`, `:83-96`). The rule binds regardless; it never depended on impossibility. |
 | **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. **Caveat below:** five shipped aggregates went beyond Dean's enumerated list and have since been withheld from the response — see the G3 note after this table. |
 | **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. **Do not read this row as covering the 2026-08-07 lift**: that authorizes storing experiments THIS APPLICATION CREATES in its own new tables. It authorizes no repository over `records`, no record loading, and no upload write. |
-| **Create Experiment durable persistence** (`isaac_experiments`) | **authorized 2026-08-07**, narrowly — see the scope note above. Implementation and local/CI testing only; **applying the migration to the hosted database is the owner's act, not the agent's.** Dean applied `0001_experiments` to the hosted database on **2026-08-09** ([`docs/evidence/hosted-0001-verification-2026-08-09.md`](docs/evidence/hosted-0001-verification-2026-08-09.md)) — which changes nothing about `0002` (still unapplied and unauthorized for hosted application), gate **G2**, gate **G3**, or the prohibition on an agent connecting to that database. |
+| **Create Experiment durable persistence** (`isaac_experiments`) | **authorized 2026-08-07**, narrowly — see the scope note above. Implementation and local/CI testing only; **applying the migration to the hosted database is the owner's act, not the agent's.** Dean applied `0001_experiments` to the hosted database on **2026-08-09** ([evidence](docs/evidence/hosted-0001-verification-2026-08-09.md)) — which changes nothing about gate **G2**, gate **G3**, or the prohibition on an agent connecting to that database. ~~which changes nothing about `0002` (still unapplied and unauthorized for hosted application)~~ — **superseded 2026-08-12, see the next row.** |
+| **`0002_runs`** (the `isaac_runs` table) | **APPLIED TO THE HOSTED DATABASE BY DEAN, 2026-08-12 00:30 UTC** ([evidence](docs/evidence/hosted-0002-verification-2026-08-12.md); packet [`docs/migration-approval-packet-0002.md`](docs/migration-approval-packet-0002.md), STATUS + §12C). Both SHA-256 digests Dean reported were **recomputed here and MATCH** the committed files, so the bytes applied are the bytes Krish approved on 2026-08-11. Verified from the hosted server: table, PK, FK, five CHECKs, the index, no `ON DELETE`/`CASCADE`, row count **0**, idempotent re-run, app health OK / `postgres` / `durable`. **Operator testimony, not a captured artifact** — no agent connected to that database. **NOT reported, and named as gaps:** the `records` and `isaac_experiments` before/after counts (packet postchecks 1 and 2) and the hosted engine build string. **The table existing is NOT permission to write it** — the run write path is a later, separately-reviewed slice, and `db_write.OWNED_TABLES` listing `isaac_runs` "grants nothing on its own". |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
 Two separate **questions**, which Dean's guide is explicit about not conflating: **writing** to this
@@ -889,10 +915,105 @@ conclusion more firmly than §6A supports, in the file that is read at the start
   bypassing Authentik?) is untouched by this and remains Dean's. Nothing observed proves the caller was
   authenticated.
 
-**`X-authentik-uid` is present**, so it is now a live candidate for ISAAC's canonical internal key
+~~**`X-authentik-uid` is present**, so it is now a live candidate for ISAAC's canonical internal key
 alongside the username, which remains the required compatibility key for upstream ownership/ACL rows.
 **Neither is confirmed** — UID permanence is **Q17**, username non-reassignability is **Q5**, and both
-are institutional lifecycle facts no observation can settle.
+are institutional lifecycle facts no observation can settle.~~ **Superseded 2026-08-12 — see the next
+block.**
+
+### DEAN ANSWERED THE IDENTITY QUESTIONS, 2026-08-12 — and the trust boundary went the UNSAFE way
+
+**Everything in this block is OPERATOR TESTIMONY ABOUT INFRASTRUCTURE CONFIGURATION**, relayed by the
+project owner. It is **not** an observation by this repository and no artifact backing it is committed
+here. Durable record, with every qualification:
+[`docs/identity-trust-contract.md`](docs/identity-trust-contract.md) §2, §6A.1, §7, §10.1.
+
+**Read the bad news first, because everything else is conditional on it.** Dean **reconfirmed the
+bypass**: the Service is a **plain ClusterIP with no NetworkPolicy**, so any in-cluster pod can reach
+the app directly and **can forge forwarded identity headers**.
+
+> **THE PRESENCE OF `X-authentik-username` ALONE DOES NOT PROVE AUTHENTICATED EDGE TRAVERSAL.**
+
+That is **Q4, answered against us.** The resolution pattern Dean named is the existing portal
+precedent — **trusted-edge mechanism for browser/UI traffic, independent Bearer validation for
+API/service traffic** — and **ISAAC has neither today.** Do not write or imply anywhere that edge
+headers are sufficient proof of authentication.
+
+The rest, each also testimony:
+
+- **The edge injects/overwrites exactly five headers** — `X-authentik-username`, `X-authentik-groups`,
+  `X-authentik-email`, `X-authentik-name`, `X-authentik-uid`; **only those are overwritten.** This
+  **resolves** the "does not follow that the client's copy was removed" ambiguity above **for the edge
+  path only** — the paragraph is kept struck-through-in-place rather than deleted because it was right
+  about what the *probe* could prove, and remains right about a direct in-cluster caller, who never
+  meets the edge at all. **`X-authentik-entitlements` and `X-Isaac-Edge` remain UNTRUSTED** (Q18
+  answered; ISAAC's existing permanent disqualification is confirmed as also Dean's intent).
+- **Actor stamping is AUTHORIZED, and blocked in practice.** Server-stamp the canonical Authentik
+  **username** for `attribution.uploaded_by`, **Run overrides, submissions and revision-history rows**
+  — **provided the request's identity was established through the trusted authentication boundary.**
+  **Client-supplied username is never authoritative.** Q10 and Q25 both close on that one answer. Since
+  no such boundary exists in ISAAC, **nothing may be stamped yet**; the actor seam stays unset/unknown
+  exactly as built.
+- **Usernames are not reassigned; the username is canonical** (**Q5** answered). **Q17 — UID
+  permanence — should NOT be reopened absent contradictory evidence, and NO UID↔username
+  infrastructure should be introduced.** So the "probable design keeps both keys" line above is
+  withdrawn: **one key, the username.** UID lifecycle is still an unestablished fact; it has simply
+  stopped being a question ISAAC needs answered.
+- **Groups: `admin` and `researcher`** are the relevant ISAAC groups at the authenticated edge
+  (**Q7**). **`bl152-users` and `bl152-staff` are NOT ISAAC roles.** `X-authentik-groups` is
+  authoritative **ONLY for a request known to have traversed the authenticated edge** (**Q6**) — a
+  condition ISAAC cannot currently establish for any request.
+- **Session expiry (Q8):** an expired/unauthenticated `/krish/*` request gets a **302 to Authentik**; a
+  browser `fetch` **follows it** and lands on an **HTML login response**. `FetchStates.tsx` already
+  handles exactly that.
+- **Logout (Q9): `/outpost.goauthentik.io/sign_out`** is a valid logout path. Whether ISAAC should
+  surface it is a product decision Dean was not asked and did not make — **still open, and Krish's**.
+- **Q20 (`format` enforcement) is ANSWERED and is a SEPARATE question from all of the above** —
+  see the next block.
+
+**NOT addressed by this response, and therefore exactly as open as before:** **Q11**, **Q13**,
+**Q14/G6**, **Q16**, gate **G2** (per-record display — still closed by default) and gate **G3** (the
+five withdrawn aggregates). Silence is not assent.
+
+### Q20 — ANSWERED 2026-08-12. Two halves; never quote one without the other.
+
+- **ALLOWED:** JSON Schema `format` enforcement **in shadow mode** — read-only, **aggregates only**,
+  **non-gating**, **outside the truth plane**. Those four are **conditions**, not description.
+- **NOT AUTHORIZED:** **arming `format` enforcement in the official validator.**
+
+`authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` stays `False` and is now **confirmed correct** rather
+than pending. The shipped behaviour already matched the ruling in both directions, so **no code
+changed**. Q20(f) (does the portal enforce `format`?) was not addressed; Q20(e) is answered only by
+implication. See [`docs/dean-authorization-packet.md`](docs/dean-authorization-packet.md) and
+[`docs/evidence/2026-08-05-q19-q20-authorization.md`](docs/evidence/2026-08-05-q19-q20-authorization.md).
+
+### AI / MCP / voice — DEAN DEFERRED; THE OWNER ELECTED TO CONTINUE. Both facts, kept separate.
+
+**1. Dean's recommendation, unsoftened.** He **deferred D1–D9** — MCP reachability and auth, model
+provider, credential, billing, egress, retention, data policy, transcription provider. His words:
+***"leave AI integration as future work rather than increasing scope at this point."*** He is away for
+roughly a week. **He approved none of it. Do not record any D-row as approved, narrowed, or closed.**
+
+**2. The project owner's decision, attributed to Krish.** Krish has **explicitly elected to CONTINUE
+implementing the original scope** — MCP, Connect Your Agent, the native LLM assistant,
+transcription/voice, and the provider architecture. **The roadmap is NOT cancelled and must not be
+recorded as cancelled.**
+
+Both are true, because they are about different things:
+
+| | Covers | Status |
+|---|---|---|
+| **Implementation complete** | code, APIs, UI, auth abstraction, provider abstraction, tests, **deterministic fake providers**, error handling, security boundaries | **owner-authorized; PROCEEDING** |
+| **Production provider configured** | institutional endpoint, credential, network path, billing, provider approval | **genuinely external; DEFERRED by Dean** |
+
+> **The absence of the second is not a reason to skip the first.**
+
+**What still binds the continued work:** `ai-integration-decision-packet.md` §6 in full — **no fake
+`Connected` state**, external agents cannot submit, **no model output may enter the truth path**, and
+the no-guessing rule applies to the assistant's own answers — plus §9's ***"build nothing that implies
+any of it exists."*** Building a capability and advertising it are different acts; the first is
+authorized, the second is not. **No real endpoint, credential, outbound model call, or charge is
+authorized by this**, and the out-of-scope entry for an external model provider below stands.
 
 **Baseline restoration (started 2026-07-31).** The authoritative definition of "baseline" — which
 capabilities are required, which are deliberately deferred, and who owns each external gate — is

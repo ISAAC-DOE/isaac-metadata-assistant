@@ -1,5 +1,36 @@
 # Dean handoff — 2026-08-11
 
+> # RESPONSE RECEIVED — 2026-08-12. This handoff has been ANSWERED IN PART.
+>
+> **This document is preserved as the record of what was asked.** Nothing below is edited to match the
+> answers; the answers live where the questions live.
+>
+> | Workstream | Outcome |
+> |---|---|
+> | **1 — apply `0002_runs`** | **DONE.** Applied by Dean 2026-08-12 00:30 UTC. Both digests re-measured here and **matching**. Evidence: [`evidence/hosted-0002-verification-2026-08-12.md`](evidence/hosted-0002-verification-2026-08-12.md); packet STATUS + §12C. **§3's requested report arrived incomplete** — see below. |
+> | **2 — authoritative identity** | **ANSWERED** for Q1, Q4, Q5, Q6, Q7, Q8, Q9, Q10, Q17, Q18, Q25. **Q4 went the unsafe way**: the Service is a plain ClusterIP with no NetworkPolicy, so `X-authentik-username`'s presence does **not** prove edge traversal. Stamping is authorized *conditional on a trusted boundary ISAAC has not built.* See [`identity-trust-contract.md`](identity-trust-contract.md) §2, §6A.1, §7, §10.1. |
+> | **3 — MCP reachability + auth (D1, D2)** | **DEFERRED.** |
+> | **4 — native AI + transcription (D3–D9)** | **DEFERRED.** Dean: *"leave AI integration as future work rather than increasing scope at this point."* He is away for roughly a week. **Separately, the project owner has elected to continue IMPLEMENTING** against deterministic fake providers — see [`ai-integration-decision-packet.md`](ai-integration-decision-packet.md), head of document. Dean did not approve D1–D9 and must not be recorded as having done so. |
+> | **appendix — six `system.configuration.*` fields** | **Not addressed.** Still Angel's. |
+>
+> **Also answered, though it was not routed by this document:** **Q20** — `format` enforcement is
+> **allowed in shadow mode** (read-only, aggregates only, non-gating, outside the truth plane) and
+> **NOT authorized to be armed** in the official validator.
+>
+> **§3 asked for a specific sanitized operator report. Four items did not come back:** the `records`
+> count before/after, the `isaac_experiments` count before/after, the `isaac_schema_migrations` rows
+> quoted verbatim, and the hosted engine build string. The first two are the migration packet's
+> postchecks 1 and 2, and postcheck 1 is the one it calls *"the one that matters"*. **No mechanism
+> exists by which those counts could have moved** — the migration issues zero DML and names `records`
+> in no statement — **but that is an argument, not a measurement, and this repository must not report
+> the corpus as verified unchanged across `0002`.**
+>
+> **All of it is OPERATOR TESTIMONY**, relayed by the project owner. No transcript, response body or
+> log is committed here. The one re-checkable item is the pair of migration digests, which were
+> recomputed with `shasum -a 256` and match.
+>
+> **Still unanswered and not addressed:** Q11, Q13, Q14/G6, Q16, gate G2, gate G3.
+
 **What this is.** A single index for everything ISAAC currently needs from Dean, assembled so that
 Krish can send one message and one self-contained prompt, and Dean's Claude can act without any
 conversational history from Krish's session.

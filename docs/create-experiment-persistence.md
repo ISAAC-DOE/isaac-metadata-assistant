@@ -10,9 +10,27 @@ its limits attached:
 *Status before that: "implemented and tested. NOT applied to the hosted database." Applying the
 migration was the owner's act, and this document is what he reviewed first.*
 
-**Two things that did not change with it.** Migration `0002` is still unapplied and still
+~~**Two things that did not change with it.** Migration `0002` is still unapplied and still
 unauthorized for hosted application, and it needs its own packet. And **pod-restart durability
-has not been measured** — see §0's closing note and the evidence page §4.
+has not been measured** — see §0's closing note and the evidence page §4.~~
+
+**BOTH HALVES OF THAT SENTENCE ARE NOW SUPERSEDED, and it is kept visible rather than replaced.**
+
+- **`0002_runs` HAS been applied to the hosted database** — by Dean, 2026-08-12 00:30 UTC. It did get
+  its own packet ([`migration-approval-packet-0002.md`](migration-approval-packet-0002.md)) and its
+  own owner approval first, which is why the sentence above was the right thing to say at the time.
+  Evidence, with every gap named:
+  [`evidence/hosted-0002-verification-2026-08-12.md`](evidence/hosted-0002-verification-2026-08-12.md).
+  **This changes nothing for this feature**: `isaac_runs` is empty, no statement this application can
+  issue names it, and the create-experiment path behaves identically with `0002` applied and
+  unapplied — pinned by `test_0002_is_inert_for_this_build_no_statement_names_isaac_runs`.
+- **Pod-restart durability HAS been measured** — see the 0001 evidence page §4.1, which supersedes its
+  own §4 after a deployment replaced the pod on its own.
+
+**What has NOT changed:** applying a migration to the hosted database remains **the owner's act, not
+an agent's**; `0003` and later each need their own packet and their own approval; and the prohibition
+on an agent connecting to that database (`2026-07-24-phase-37-readiness-plan.md:48-52`) is untouched by
+either application.
 
 ---
 
@@ -28,6 +46,11 @@ has not been measured** — see §0's closing note and the evidence page §4.
 > (re-checked 2026-08-09: `Dockerfile:42` still copies exactly one file out of `scripts/`, and the
 > base image still has no `psql`). So option A was **not** taken in this repository, and the
 > section is kept because the same question returns verbatim for `0002`.
+>
+> **It did return for `0002`, and it got the same non-answer (2026-08-12).** Dean applied `0002_runs`
+> and reported the namespace, deployment, database and CNPG primary — but **not which of options A–E
+> he used**. So this remains an open, honestly-named gap for both migrations. Ask him if it matters
+> for `0003`.
 >
 > **The one row that IS superseded** is the third: applying a migration to hosted was not
 > authorized *for this agent*, and still is not. It was applied by the operator, which is the path

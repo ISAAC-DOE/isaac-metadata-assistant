@@ -83,7 +83,10 @@ Upload in manifest order. For each: click **Upload JSON File**, pick the file, c
    that it passes, and the app now says so out loud. Before this phase it was a silent
    PASS with no signal at all.
 2. **File 5 `invalid-date-time.json`** → **PASS**. Also correct-and-a-finding: declared
-   `format` is not enforced. Do **not** "fix" the file. This is Dean question **Q20**.
+   `format` is not enforced. Do **not** "fix" the file. This is Dean question **Q20** — **answered
+   2026-08-12: shadow mode is allowed; arming the official validator is NOT authorized.** So this
+   file's behaviour is now correct **by decision**, not merely unresolved, and it stays as the
+   reproducer.
 3. **Every JSON file that parses** shows an advisory `NO_LINKS`. Expected — each declares
    `links: []`, which the schema permits. File 15 `malformed-json.json` is the exception and
    is not a failure of this check: it cannot be parsed, so it is refused as unreadable with
@@ -247,7 +250,7 @@ your eyes. Gross layout breakage at those widths would already have failed CI.
 | Item | Status |
 |---|---|
 | Search results / evidence previews show `Synthetic XANES campaign…`, `mock_campaign.csv`, `01SYNTHXANESSEED…` | **Not fixed.** Backend-sourced. `MANAGED_SOURCE_DESCRIPTION` feeds `classify_experiment`, which decides what reset may delete — renaming it is a behaviour change to the destructive path and needs its own reviewed slice. **Check it from §2b step 5, inside the worked example.** The ordinary workspace has nothing to search, so a search run there returns zero hits and would read as this being fixed. |
-| `invalid-date-time.json` passes | Declared `format` is unenforced. **Dean — Q20.** |
+| `invalid-date-time.json` passes | Declared `format` is unenforced. **Dean — Q20, ANSWERED 2026-08-12: not authorized to be armed.** Expected, permanent, and not a defect to report. |
 | Real-record display | **Closed by default** by the database owner. Not a gap to close here. |
 | Upload that creates a record | `POST /api/uploads` is an unconditional 403 with no implementation behind it. Governance, not a bug. |
 | Wrong-typed API answer returns no typed 422 | It no longer returns 500 (fixed). A precise 422 is a follow-up. |

@@ -1,4 +1,4 @@
-# Authorization record — Q19 approved, Q20 unanswered
+# Authorization record — Q19 approved; Q20 ~~unanswered~~ answered 2026-08-12 (shadow allowed, arming refused)
 
 **Date recorded:** 2026-08-05
 **Source:** relayed by the project owner; no direct agent-to-owner communication occurred.
@@ -81,18 +81,48 @@ the flag and asserts the guard **fails**.
 
 ---
 
-## Q20 — NOT ANSWERED
+## Q20 — ~~NOT ANSWERED~~ ANSWERED 2026-08-12
 
-Arming JSON Schema `format` enforcement in the official validator is a **separate decision**. The
-packet states the two questions are independent and should not be bundled
-(`docs/dean-authorization-packet.md:6`). No answer to Q20 has been relayed.
+> **This section's heading and body were written on 2026-08-05 and are kept below.** The status
+> changed on 2026-08-12; the superseded text is preserved rather than replaced, per this
+> repository's standing practice, because it is the record of the state several other documents
+> were written under.
 
-`authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` is therefore `False`, the official validator remains
-format-blind, and the format shadow remains advisory: it never decides validity, never gates export,
-and never overrides the official result.
+**Dean's answer has two halves, and neither may be quoted without the other:**
 
-`tests/test_truthpath_characterization.py` is the permanent record of that behaviour and was **not
-modified** by the work this file authorizes.
+| | |
+|---|---|
+| **ALLOWED** | JSON Schema `format` enforcement **in shadow mode** — read-only, **aggregates only**, **non-gating**, **outside the truth plane**. |
+| **NOT AUTHORIZED** | **Arming `format` enforcement in the official validator.** |
+
+**Consequence for code: none.** `authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` stays `False`, the
+official validator stays format-blind, and the shadow stays advisory. The shipped behaviour already
+matched the ruling in both directions, so the answer **confirms** the default rather than changing
+it. No flag, test or module was modified when this was recorded.
+
+**The four qualifiers on the allowed half are CONDITIONS, not description.** A future change that
+lets the shadow decide validity, gate export, emit per-record output, or run inside
+`src/isaac_records/` would exceed this authorization even while calling itself "shadow mode".
+
+**Not answered:** Q20(f) — whether the upstream portal enforces `format` — was not addressed, so the
+"local defect vs. divergence" classification stays open. Q20(e) — a one-off corpus-wide count — is
+answered only *by implication* from "aggregates only".
+
+**Standing:** the same as Q19's — **operator testimony relayed by the project owner**, not a captured
+artifact. No agent spoke to the database owner and no transcript exists in this repository.
+
+### The superseded 2026-08-05 text
+
+> Arming JSON Schema `format` enforcement in the official validator is a **separate decision**. The
+> packet states the two questions are independent and should not be bundled
+> (`docs/dean-authorization-packet.md:6`). No answer to Q20 has been relayed.
+>
+> `authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` is therefore `False`, the official validator remains
+> format-blind, and the format shadow remains advisory: it never decides validity, never gates export,
+> and never overrides the official result.
+>
+> `tests/test_truthpath_characterization.py` is the permanent record of that behaviour and was **not
+> modified** by the work this file authorizes.
 
 ---
 
@@ -117,7 +147,7 @@ authorize, and must not be cited as authorizing:
   `vocabulary_term_count`. Gate **G3** remains open.
 - **Caller-parameterized aggregation, cross-tabulation**, or any histogram cell below the
   disclosure floor.
-- **Arming `format` enforcement** (Q20, above).
+- **Arming `format` enforcement** (Q20, above). **Still true after 2026-08-12** — Dean allowed the *shadow* and explicitly did **not** authorize arming the official validator.
 - **Phase 37 as a feature phase** — portal integration, persistence, API keys, identity/role
   enforcement, or an external model provider.
 

@@ -57,11 +57,32 @@ Escalating any of these wastes the infrastructure owner's time.
 | D5 | Registering ISAAC as an OAuth client | *Would you register ISAAC as an Authentik application with a redirect URI under `/krish`?* — ask only after §4 authorizes building the client. |
 | D6 | Per-record display (**G2**) | *May ISAAC display individual record content in the hosted UI, and to whom?* |
 | D7 | The five withdrawn aggregates (**G3**) | *Were they within your intent when you authorized aggregate output?* |
-| D8 | Identity permanence (**Q17**, **Q5**) | *Is `X-authentik-uid` permanent, and is a username never reassigned?* |
+| ~~D8~~ | Identity permanence (**Q17**, **Q5**) | ~~*Is `X-authentik-uid` permanent, and is a username never reassigned?*~~ **ANSWERED 2026-08-12: usernames are NOT reassigned; the username is canonical; Q17 should NOT be reopened and no UID↔username infrastructure should be introduced.** The UID half was declined rather than answered — see `identity-trust-contract.md` §7 Q17. |
+
+> **STATUS OF THIS TABLE AFTER DEAN'S 2026-08-12 RESPONSE.** **D3 is answered, and answered badly for
+> us:** yes, any in-cluster caller can reach the Service directly — plain ClusterIP, no NetworkPolicy
+> — so forwarded identity headers are forgeable and **`X-authentik-username`'s presence does not prove
+> authenticated edge traversal**. Dean named the resolution pattern (trusted-edge for browser/UI
+> traffic, independent Bearer validation for API/service traffic), which bears directly on **D1**,
+> **D2** and **D4** — but he did **not** answer any of those three, nor **D5**, **D6 (G2)** or **D7
+> (G3)**. Do not read the pattern as an approval of a specific mechanism. **These `D` identifiers are
+> local to this audit** and are a different series from `ai-integration-decision-packet.md` §5's
+> D1–D9, which Dean deferred wholesale; see that document's DO-NOT-RENUMBER box.
 
 ## 4. Blocked on authorization, not engineering — needs Krish, not Dean
 
 Per-user API keys · **any durable persistence** (a hard prerequisite for the credential store, so API keys are *doubly* blocked) · identity/role enforcement · external LLM · portal integration · **Q20** format enforcement (`authorization.py:118` = `False`) · any `isaac-k8` change.
+
+**Amended 2026-08-12.** Two entries move without leaving the list. **`Q20` format enforcement is now
+answered — and answered "no"**: shadow mode is allowed (read-only, aggregates only, non-gating,
+outside the truth plane), arming the official validator is **not** authorized, so `authorization.py`'s
+`False` is confirmed rather than pending and the entry stays blocked by decision instead of by
+silence. **"External LLM"** stays blocked for a *production* provider — Dean **deferred D1–D9** — while
+the project owner has separately authorized **implementing** the provider architecture against
+deterministic fake providers; building it is not connecting it. **Durable persistence** is no longer
+blanket-blocked either: `isaac_experiments` and `isaac_runs` are both applied to the hosted database
+(2026-08-09, 2026-08-12), under the narrow 2026-08-07 lift — which still authorizes no credential
+store, so per-user API keys remain blocked on their own merits.
 
 ---
 

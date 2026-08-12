@@ -801,7 +801,7 @@ docstrings now state the limit rather than the guarantee.
 | G4 | Responsive / 200%-zoom human sign-off | **Krish** | [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 2 — 4 viewports + real 200% zoom. Automated coverage runs locally only, **and for 200% it is a viewport-halving model of zoom rather than zoom itself** — probed directly, Chromium exposes no automation surface for its own zoom control at all. This gate is not closable by any amount of further automation | Quality row stays open |
 | G5 | Personal-deploy retirement | **Krish** | Approve the disable-not-delete operation | Cosmetic; no functional effect |
 | **G6** | **Personal data in the seeded records** *(new, 2026-08-01)* | **Dean** | "Do the 30 seeded records contain real personal identifiers in `data->'attribution'` — `uploaded_by`, `contributors[].email`, `contributors[].orcid`, `contributors[].name` — and does the G2 visibility decision cover **personal data** as distinct from scientific content?" | G2 as worded would not surface it. Nothing is currently exposed — the `dataset` projection is aggregate-only and `by_schema_path` reports *schema* locations, never instance values — so this is a gap in the **question**, not a live leak |
-| **G7** | **Identity trust boundary** *(new, 2026-08-01)* | **Dean** | The 15 questions in [`docs/identity-trust-contract.md`](../../identity-trust-contract.md) §7. The four that gate everything else: which header names the Authentik outpost injects; which reach the app via `auth-response-headers`; whether the ingress strips client-supplied copies; and whether anything in-cluster can reach the Service directly, bypassing Authentik | **Blocks all of users, groups, memberships, roles, authorization and per-actor attribution.** Not a scheduling preference — building an identity reader before the trust boundary is known would be unsafe, not merely premature |
+| ~~**G7**~~ | **Identity trust boundary** — **ANSWERED BY DEAN 2026-08-12, and the answer is not the reassuring one** | **Dean** → now **ISAAC engineering** | ~~The 15 questions in `identity-trust-contract.md` §7. The four that gate everything else…~~ **Answered:** the edge injects/overwrites exactly `X-authentik-username`, `-groups`, `-email`, `-name`, `-uid`, and **only those**; `X-authentik-entitlements` and `X-Isaac-Edge` remain **untrusted**; the **canonical principal is the username** and usernames are **not reassigned**; groups are `admin`/`researcher` and are authoritative **only for an edge-traversed request**; server-stamping the username for `uploaded_by`, Run overrides, submissions and revision rows is **authorized, provided identity was established through the trusted authentication boundary**; client-supplied username is never authoritative. **AND — the part that governs everything else — Dean RECONFIRMED the bypass:** the Service is a **plain ClusterIP with no NetworkPolicy**, so any in-cluster pod can reach the app directly and forge forwarded identity headers, and **`X-authentik-username`'s presence does NOT prove authenticated edge traversal.** Operator testimony about configuration, **not** an observation by this repository. | **The gate has MOVED, not closed.** What blocked it was an unanswered external question; what blocks it now is an **unbuilt trusted authentication boundary** — Dean named the pattern (trusted-edge for browser/UI traffic, independent Bearer validation for API/service traffic) and ISAAC has neither. **Still blocks per-actor attribution, roles and authorization**, and now blocks them on our own engineering rather than on Dean. **Nothing may be stamped until that boundary exists.** |
 
 **Why G6 exists, stated so it is not read as alarm.** Chaining three documented facts: the seed is
 *"the 30 earliest **real** records from production"* (guide `:23-24`); `data` holds the complete record
@@ -822,6 +822,20 @@ $ rg -n -i -e 'PII' -e 'personal data' -e 'personally identifiable' -e 'email' -
 ```
 
 G2 is worded entirely around *"titles, scientific values, evidence, full JSON"*.
+
+> **STATUS AFTER DEAN'S 2026-08-12 RESPONSE.** **G7 is answered** (row above) — and answered in a way
+> that converts it from an external gate into an internal engineering prerequisite, so it is struck
+> through in the `#` column but **not** removed. **G2 and G3 are UNTOUCHED and remain OPEN**: the
+> response addressed neither per-record visibility nor the five withdrawn aggregates. **G6 is
+> likewise unaddressed.** Applying a migration is not a visibility decision, and **silence on G2, G3
+> and G6 must never be read as assent** — that is the exact misreading the G3 entry exists to record,
+> since `v0.0.32` shipped five aggregates by assuming intent. G1, G4 and G5 are Krish's and are
+> unaffected.
+>
+> **Separately, and outside this table:** Dean **deferred D1–D9** (AI/MCP/voice) with the
+> recommendation to *"leave AI integration as future work rather than increasing scope at this
+> point"*; the **project owner has elected to continue implementing** against deterministic fake
+> providers. Neither fact touches G1–G7. See `docs/ai-integration-decision-packet.md`.
 
 None of G1–G7 is resolvable by this agent. G1 and G4 require credentials the agent must not use; G2
 and G3 require the database owner's decision; G5 requires account access the agent must not exercise;
@@ -861,7 +875,7 @@ obligation baseline work carries is *not to foreclose it*. The seams that matter
 | Seam | What baseline must avoid |
 |---|---|
 | Record identity | Keep the ULID `record_id` the stable external key. Do not introduce a second, surface-local identifier that a future ownership model would have to reconcile. |
-| Authorship / actor | The app currently has no concept of an actor. **Do not invent one** as a side effect of another feature — no implicit "current user" derived from Authentik headers, because role mapping is an unmade decision (readiness plan §3). |
+| Authorship / actor | The app currently has no concept of an actor. **Do not invent one** as a side effect of another feature — no implicit "current user" derived from Authentik headers. ~~because role mapping is an unmade decision (readiness plan §3)~~ **AMENDED 2026-08-12: the stated REASON is now partly obsolete, and the RULE is unchanged and if anything stronger.** Dean has answered role mapping (`admin`/`researcher`) and has **authorized** server-stamping the canonical Authentik username for `uploaded_by`, Run overrides, submissions and revision rows. But he authorized it **only for a request whose identity was established through the trusted authentication boundary** — and in the same response reconfirmed that the Service is a plain ClusterIP with no NetworkPolicy, so **a header's presence does not prove the request came through Authentik.** So "do not invent an actor" now rests on a *sharper* reason than an unmade decision: **an actor derived from an Authentik header today would be forgeable by any in-cluster caller.** Nothing may be stamped until ISAAC builds the boundary. See `docs/identity-trust-contract.md` §2 and §7 Q4/Q10/Q25. |
 | Mutation history | `record_history` exists in the database schema but the app never writes it. Baseline stays read-only, so no write path can accidentally define a history semantics that a real review workflow would then inherit. |
 | Evidence authority | The sidecar is **advisory and has no formal schema**. Do not strengthen its authority; a future reviewer-approval flow would need it to be authoritative, and quietly promoting it now would pre-decide that. |
 | Workflow state | `derive_workflow` is **fully derived** from record state with no human-review step. Do not add a stored, mutable workflow status — that is the seam a review/approval feature would occupy. |
@@ -919,8 +933,15 @@ that change the shape of that phase, recorded here so they are not re-derived:
    consequences" item 1. So attribution does **not** need a home
    outside the record. But `contributors[].role` is `data_owner|performed_measurement|performed_analysis|curated_record`
    — a **scientific contribution** enum. It **cannot** double as an authorization role.
-5. **Identity is absent and its trust boundary is unproven** — the full evidence is in
-   [`docs/identity-trust-contract.md`](../../identity-trust-contract.md), and the gate is **G7**.
+5. **Identity is absent and its trust boundary is ~~unproven~~ now stated by Dean — as bypassable.**
+   Amended 2026-08-12: G7's questions are answered, and the answer that governs is Q4 — the Service is
+   a plain ClusterIP with no NetworkPolicy, so forwarded identity headers are forgeable in-cluster and
+   **a header's presence does not prove authenticated edge traversal.** Stamping the canonical
+   Authentik username is authorized *only* for a request established through a trusted authentication
+   boundary, which ISAAC has not built. **Identity remains absent from the app, and the finding stands
+   with a sharper reason.** Full evidence:
+   [`docs/identity-trust-contract.md`](../../identity-trust-contract.md); the gate is **G7**, moved
+   from external to internal.
 
 **The seam table above remains binding, and item 1 does not weaken it.** In particular the
 "Authorship / actor" row stands: the existence of a conflict contract is not permission to populate it

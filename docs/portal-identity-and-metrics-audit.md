@@ -111,8 +111,14 @@ evidence, not inherited.
   ISAAC was the outlier; the schema was right.
 - **A username is a fragile primary key for ownership.** Where ownership relations are keyed on a
   username and no immutable internal identifier is stored, a rename at the identity provider silently
-  transfers ownership. That is the substance of open questions **Q5** and **Q17**, and it is why the
-  choice of canonical internal key is not a detail.
+  transfers ownership. ~~That is the substance of open questions **Q5** and **Q17**~~ — **both are
+  now closed (2026-08-12) and the risk this bullet names was accepted rather than eliminated.** Dean:
+  **usernames are not reassigned**, the **username is canonical**, **Q17 should not be reopened**, and
+  **no UID↔username infrastructure should be introduced.** So ISAAC will key on the username and will
+  store no immutable internal identifier — the configuration this bullet calls fragile, chosen
+  deliberately on an institutional guarantee that renames do not reassign. The bullet stays because it
+  names exactly what that guarantee is load-bearing for. Standing: operator testimony, not observed
+  here.
 - **ISAAC has no telemetry of its own.** No request, usage, visit, session, error-rate or latency
   data exists: one middleware plus CORS, zero metrics dependencies, no counter identifier anywhere,
   and three test suites that actively forbid the Statistics page from implying otherwise. So an ISAAC
@@ -130,14 +136,21 @@ ISAAC needs, and none of them is a report about another system.
 
 | # | Question | Blocks |
 |---|---|---|
-| **Q21** | The schema (2026-06-15) requires `uploaded_by` to be server-stamped from the authenticated identity. **Which identifier string is that** — an Authentik UID, an Authentik username, an ORCID subject, or something else? A username is the likely compatibility answer for existing upstream ownership rows, but see Q5/Q17. ISAAC currently stamps nothing. | Server-stamping; record ownership. Sharpens **Q10** |
+| ~~Q21~~ | ~~The schema (2026-06-15) requires `uploaded_by` to be server-stamped from the authenticated identity. **Which identifier string is that** — an Authentik UID, an Authentik username, an ORCID subject, or something else?~~ **ANSWERED 2026-08-12: the canonical Authentik USERNAME.** Dean also stated that usernames are **not reassigned** (Q5) and that **Q17 should not be reopened** — so the "likely compatibility answer" this row guessed at is the actual answer, and it is one key, not a UID-plus-alias pair. **But the authorization is conditional**: stamp only for a request whose identity was established through the **trusted authentication boundary**, and **client-supplied username is never authoritative**. ISAAC has no such boundary, so **ISAAC still stamps nothing** and that last sentence of the original row remains true. | Server-stamping; record ownership. Closes with **Q10** |
 | **Q22** | Are `/portal` and `/krish` served by the same Authentik application and the same forwarded-header policy? ISAAC's own observation on the `/krish` path suggests **not**, while `deployment.md` asserts they are. | Whether any header evidence gathered on one path transfers to the other |
 | **Q23** | Should ISAAC consume aggregate usage metrics from elsewhere, or instrument its own requests? If consuming: which aggregates are approved for an ordinary signed-in user versus an administrator, and is a minimum aggregation threshold required? | General ISAAC usage metrics |
 | **Q24** | May a signed-in user see **their own** API activity? This is distinct from record ownership and must not be conflated with it. | A bounded "My API Activity" section |
 
-Also unchanged and still open: **Q4** (can an in-cluster caller reach the Service bypassing
-Authentik?) — which gates everything identity-derived — plus **Q5**/**Q17** on identifier lifecycle,
-and **Q19**/**Q20** in [`dean-authorization-packet.md`](dean-authorization-packet.md).
+~~Also unchanged and still open: **Q4** … plus **Q5**/**Q17** on identifier lifecycle, and
+**Q19**/**Q20**.~~ **SUPERSEDED 2026-08-12 — all of those are now answered, and Q4's answer is the
+bad one.** **Q4: YES** — the Service is a plain ClusterIP with no NetworkPolicy, an in-cluster caller
+can reach it directly, and forwarded identity headers can be forged, so **a header's presence does not
+prove authenticated edge traversal.** **Q5/Q17:** usernames are not reassigned; the username is
+canonical; do not reopen Q17; introduce no UID↔username infrastructure. **Q19:** approved (2026-08-05).
+**Q20:** `format` enforcement allowed **in shadow mode only** — read-only, aggregates only,
+non-gating, outside the truth plane — and **not authorized to be armed**. **Q22, Q23 and Q24 above
+were NOT addressed and remain open.** See [`identity-trust-contract.md`](identity-trust-contract.md)
+§7 and §10.1.
 
 ---
 

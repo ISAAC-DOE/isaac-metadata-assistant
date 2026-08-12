@@ -12,6 +12,40 @@ It exists so that no later slice re-derives the record mapping, and so that the 
 requested feature that have *no legal implementation path today* are named before anyone builds
 a UI that implies otherwise.
 
+> ### UPDATE 2026-08-12 — two of this contract's external blockers moved. Read both, they move in opposite directions.
+>
+> **1. Migration `0002` is APPLIED to the hosted database** (Dean, 2026-08-12 00:30 UTC —
+> [`../../evidence/hosted-0002-verification-2026-08-12.md`](../../evidence/hosted-0002-verification-2026-08-12.md)).
+> **DECISION D7's table now exists.** That is *strictly* what changed: `isaac_runs` is empty, no
+> statement this application can issue names it, and **the table existing is not permission to write
+> it.** The run write path — the upsert, the per-run compare-and-swap, and the backfill of runs out of
+> the experiment document — is still a later, separately-reviewed slice. The other five tables D7 names
+> (`isaac_experiment_revisions`, `isaac_run_revisions`, `isaac_assets`, `isaac_run_assets`,
+> `isaac_submissions`) are **still uncreated**, and a test still pins their absence.
+>
+> **2. `Q25` — the actor on Run overrides, submissions and revision rows — is ANSWERED, and the
+> capability is still blocked.** Dean, 2026-08-12: server-stamp the **canonical Authentik username**
+> for `attribution.uploaded_by`, **Run overrides, submissions, and revision-history rows** —
+> **provided the request's identity was established through the trusted authentication boundary.**
+> **Client-supplied username is never authoritative.**
+>
+> **Read the proviso as a hard precondition.** In the same response Dean **reconfirmed the bypass**:
+> the Service is a plain ClusterIP with no NetworkPolicy, so any in-cluster pod can reach the app
+> directly and forge forwarded identity headers, and **`X-authentik-username`'s presence does NOT
+> prove authenticated edge traversal.** ISAAC has no mechanism that distinguishes an edge-traversed
+> request from a direct one. **So nothing may be stamped**, the actor seam stays **unset/unknown**
+> exactly as this contract built it, and an *attributed* submission or revision row still cannot ship.
+>
+> **What genuinely changed for D3/D4** is the shape of the blocker, not its presence: it was an
+> unanswered external question and is now a named engineering prerequisite — Dean's referenced pattern
+> is a trusted-edge mechanism for browser/UI traffic and independent Bearer validation for API/service
+> traffic. **Leaving `submitted_by` unset remains correct**, and is now correct for a documented
+> reason rather than for want of an answer.
+>
+> **Standing:** operator testimony about infrastructure configuration, relayed by the project owner;
+> not an observation by this repository. Full record:
+> [`../../identity-trust-contract.md`](../../identity-trust-contract.md) §2, §6A.1, §7.
+
 Every claim is cited to `file:line` in this repository at `a5601e9`, or to a measured hosted
 observation. Where something is inferred, it says so.
 

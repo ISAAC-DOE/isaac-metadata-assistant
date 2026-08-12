@@ -1,5 +1,67 @@
 # AI & voice integration — decision packet
 
+> # RESPONSE RECEIVED 2026-08-12 — TWO SEPARATE FACTS, AND BOTH ARE TRUE
+>
+> **This block exists because the two facts below are easy to collapse into one, and collapsing them
+> in either direction misrepresents somebody.** Read them as two.
+>
+> ### FACT 1 — Dean DEFERRED D1–D9. This is his recommendation and it is recorded unsoftened.
+>
+> Dean's exact recommendation was to
+>
+> > *"leave AI integration as future work rather than increasing scope at this point"*
+>
+> **He did not approve D1–D9. He did not partially approve them. He did not ask for more
+> information.** He recommended deferral of the whole external decision list — MCP reachability and
+> auth (D1, D2), model provider, credential, billing (D3–D5), egress, retention, data policy
+> (D6–D8), and transcription provider (D9). He is away for roughly a week.
+>
+> **Nothing in this document may be rewritten to read as though he approved any of it.** Every "until
+> answered, ISAAC displays…" line in §5 is still the operative behaviour, and every **BLOCKED** row in
+> §7 is still blocked.
+>
+> ### FACT 2 — The project owner (Krish) has elected to CONTINUE IMPLEMENTING the original scope.
+>
+> **Krish's decision, attributed to Krish and not to Dean:** implementation of MCP, "Connect Your
+> Agent", the native LLM assistant, transcription/voice, and the provider architecture **continues**.
+> The roadmap is **not cancelled and must not be recorded as cancelled.**
+>
+> These two facts are compatible because the thing Dean deferred and the thing Krish is continuing
+> **are not the same thing** — which is the distinction §1 of this document already exists to protect,
+> now applied to the programme itself:
+>
+> | | Meaning | Status |
+> |---|---|---|
+> | **Implementation complete** | code, APIs, UI, the auth abstraction, the provider abstraction, tests, **deterministic fake providers**, error handling, security boundaries | **Krish's call. PROCEEDING.** |
+> | **Production provider configured** | the institutional endpoint, the credential, the network path, billing, provider approval | **Genuinely external, genuinely unavailable, and Dean has deferred it.** |
+>
+> > **The absence of the second is not a reason to skip the first.** A capability whose provider seam
+> > is exercised only by a deterministic fake is a real, testable, reviewable capability; what it is
+> > not is *connected*. Building it does not create a connection, incur a charge, send data anywhere,
+> > or pre-empt any decision in §5.
+>
+> ### The invariants this decision does NOT relax — read them as binding on the continued work
+>
+> **§6 holds in full, and is the reason Fact 2 is safe.** In particular: **§6.1 no fake `Connected`
+> state** — a screen may never imply a provider exists; **§6.2 external agents cannot submit**;
+> **§6.3 no model output may enter the truth path**; **§6.4 the no-guessing rule applies to the
+> assistant's own answers.** And §9's closing line — ***"build nothing that implies any of it
+> exists"*** — is **not** overridden by Fact 2. Building the capability and advertising the
+> capability are different acts; the first is authorized here, the second is not.
+>
+> **`CLAUDE.md` §15 still lists an external model provider / LLM as out of scope.** Fact 2 is an
+> owner decision about *implementation*, recorded here and in `CLAUDE.md` §15; it does not by itself
+> authorize a production provider, an outbound call to one, or a credential.
+>
+> **Standing:** Dean's recommendation is **operator testimony relayed by the project owner** — no
+> transcript is committed here. Krish's decision is a **direct instruction from the project owner**,
+> which is the top of the source-of-truth hierarchy and needs no external corroboration.
+>
+> **D1–D9 are NOT renumbered, NOT deleted, and NOT marked closed.** They are **deferred, unanswered,
+> and still the labels an eventual answer will be given against.** See the DO-NOT-RENUMBER box in §5,
+> which this response makes more relevant, not less: a deferred identifier is still an identifier that
+> has left the repository.
+
 **Audience.** Krish, to carry to Dean and Angel. Every item below is an external decision this
 repository cannot make for itself. Nothing here asks for code approval; the code questions are
 settled and recorded elsewhere.
@@ -437,19 +499,31 @@ excluded**, and the honest product state is D6's: no provider configured, so no 
 asked, what ISAAC does today without it, what becomes possible with it, the risk or cost, and what
 ISAAC displays until it is answered.
 
+> **STATUS OF EVERY ROW IN THIS SECTION, 2026-08-12: DEFERRED BY DEAN — none answered.** His
+> recommendation was to *"leave AI integration as future work rather than increasing scope at this
+> point"*, and he is away for roughly a week. **No row below has been approved, conditionally
+> approved, or narrowed.** Each "Today without it" and "Until answered, ISAAC displays" line remains
+> the operative behaviour.
+>
+> **Separately and by a different decision-maker:** the project owner has elected to continue
+> **implementing** MCP, Connect Your Agent, the native LLM assistant, transcription/voice and the
+> provider architecture against **deterministic fake providers**. That decision is Krish's, is
+> recorded in the block at the head of this document, and **changes no row here** — a fake provider
+> answers none of D1–D9, because every one of them is a question about a *real* one.
+
 **Summary table** (detail follows; the detail is the substance).
 
-| # | Decision | Owner | Capability it unblocks |
-|---|---|---|---|
-| **D1** | MCP public reachability | Dean / SLAC infrastructure | A — any connector at all |
-| **D2** | MCP auth model | Dean / SLAC infrastructure | A — a real, verifiable connection |
-| **D3** | Model provider (which one) | Dean / Angel | B |
-| **D4** | API credential — who holds it, where it lives | Dean / Angel | B |
-| **D5** | Billing | Dean / Angel | B (and C, if the provider is metered) |
-| **D6** | Approved egress — what data may leave SLAC, to whom | Dean / Angel + whoever owns data governance | B and C |
-| **D7** | Retention — what the provider retains | Dean / Angel (with the provider's terms in hand) | B and C |
-| **D8** | Data policy — what may be sent at all | Dean / Angel | B and C |
-| **D9** | Transcription provider | Dean / Angel | C — any voice capture at all |
+| # | Decision | Owner | Capability it unblocks | Status 2026-08-12 |
+|---|---|---|---|---|
+| **D1** | MCP public reachability | Dean / SLAC infrastructure | A — any connector at all | **DEFERRED** by Dean |
+| **D2** | MCP auth model | Dean / SLAC infrastructure | A — a real, verifiable connection | **DEFERRED** by Dean |
+| **D3** | Model provider (which one) | Dean / Angel | B | **DEFERRED** by Dean |
+| **D4** | API credential — who holds it, where it lives | Dean / Angel | B | **DEFERRED** by Dean |
+| **D5** | Billing | Dean / Angel | B (and C, if the provider is metered) | **DEFERRED** by Dean |
+| **D6** | Approved egress — what data may leave SLAC, to whom | Dean / Angel + whoever owns data governance | B and C | **DEFERRED** by Dean |
+| **D7** | Retention — what the provider retains | Dean / Angel (with the provider's terms in hand) | B and C | **DEFERRED** by Dean |
+| **D8** | Data policy — what may be sent at all | Dean / Angel | B and C | **DEFERRED** by Dean |
+| **D9** | Transcription provider | Dean / Angel | C — any voice capture at all | **DEFERRED** by Dean |
 
 `docs/mcp-capability-audit.md` §6 and `…-capture-data-contract.md` §9 already record the owners for
 D1, D2, D3/D4/D5 (as one line, "Institutional Anthropic API credential + billing") and D9; **D6,
@@ -526,8 +600,12 @@ and the capture spec's §9 gate table does not name them individually.
 - **Risk / cost:** exposing an application path to the public internet, on infrastructure this
   repository does not own or track (`docs/identity-trust-contract.md:678-681` — `isaac-k8` holds
   every Kubernetes, ingress and Authentik manifest, is **not in this working tree**, and is Dean's).
-  Also note Q4 remains open: whether an in-cluster workload can already reach the Service directly,
-  bypassing Authentik (`:688`). **unknown; Dean.**
+  ~~Also note Q4 remains open: whether an in-cluster workload can already reach the Service directly,
+  bypassing Authentik (`:688`). **unknown; Dean.**~~ **ANSWERED 2026-08-12, and it makes D1 harder,
+  not easier: YES.** The Service is a plain ClusterIP with **no NetworkPolicy**, so an in-cluster
+  workload can already reach the app directly, bypassing Authentik, and **can forge forwarded
+  identity headers**. Exposing an MCP path publicly would add a second unauthenticated route to an
+  application that already has one from inside the cluster. **operator-testimony; Dean.**
 - **Until answered, ISAAC displays:** `Requires organization configuration`, naming public
   reachability as the specific missing item. **Not** a connection state, and not a retry.
 
@@ -813,13 +891,15 @@ of capability B, not a nicety.
 | No browser-side secret; `VITE_API_KEY` seam removed and inverse pinned | **IMPLEMENTED** | measured — `api.ts:104`; `__tests__/api.test.ts:168-169` |
 | MCP server | **NOT IMPLEMENTED** — specified + audited only | measured — `rg … 'mcp'` over `apps/api apps/web/src src scripts pyproject.toml apps/web/package.json` → exit 1 |
 | `Requires organization configuration` display state | **NOT IMPLEMENTED** — specified only | measured — `rg …` over `apps/web/src apps/api src` → exit 1 |
-| Native model-backed assistant | **NOT IMPLEMENTED**, and **out of scope by project rule** | measured (no provider, no outbound call site) + `CLAUDE.md:695-698` |
+| Native model-backed assistant | **NOT IMPLEMENTED.** A **production provider** remains out of scope by project rule and is **DEFERRED by Dean** (2026-08-12). **Implementation against a deterministic fake provider is authorized by the project owner** — see the head-of-document block; that authorization covers code, the provider abstraction and tests, and covers no real endpoint, credential or outbound call | measured (no provider, no outbound call site) + `CLAUDE.md:695-698` + owner decision 2026-08-12 |
 | Voice capture / recorder / ASR | **NOT IMPLEMENTED** — DECISION D6 specified only | measured — zero audio APIs in any source file |
 | Audio `source_type` | **NOT IMPLEMENTED**, and a **truth-core change** if pursued | measured — `models.py:29-37` (7, closed); 3 total maps + 2 enumerations |
 | Transcript persistence in `state` jsonb | **SPECIFIED, needs no migration** | from-doc — `…-capture-data-contract.md:471-473` (`from_state` is legacy-tolerant; adding optional keys needs no migration) |
 | MCP connector actually working end-to-end | **BLOCKED** on D1 + D2 | from-doc — `docs/mcp-capability-audit.md` §3, §6 |
 | Any voice capability at all | **BLOCKED** on D9 (+ D6, D7, D8) | from-doc — `…-capture-data-contract.md:509` |
 | Any native inference | **BLOCKED** on D3–D8 | from-doc — `…-capture-data-contract.md:510`; `docs/mcp-capability-audit.md:118` |
+| **Any of the three CONNECTED to a real provider** | **BLOCKED, and now also DEFERRED** — D1–D9 were all deferred by Dean on 2026-08-12, so these rows have no pending answer to wait on | Dean's recommendation, relayed 2026-08-12 |
+| **The same capabilities built against deterministic FAKE providers** | **AUTHORIZED BY THE PROJECT OWNER, 2026-08-12** — code, APIs, UI, auth abstraction, provider abstraction, tests, error handling, security boundaries. Subject to §6 in full, and to §9's *"build nothing that implies any of it exists"* | owner decision; see the head-of-document block |
 
 ---
 
@@ -920,3 +1000,25 @@ Not a decision — a sequencing suggestion, offered because the decisions are no
 
 **In the meantime, build nothing that implies any of it exists.** The one thing this packet is for
 is that ISAAC's screens keep telling the truth while these questions are open.
+
+> ### AMENDED 2026-08-12 — the sequence is deferred; the sentence above is NOT.
+>
+> Dean deferred **all nine** decisions, so steps 1–4 of this recommended order have no one to be
+> asked of for roughly a week. The order is kept because it will be the right order when the
+> questions are re-put; nothing about it was wrong.
+>
+> **The project owner has nonetheless elected to continue implementing** MCP, Connect Your Agent, the
+> native assistant, transcription/voice and the provider architecture, against **deterministic fake
+> providers** (see the block at the head of this document). That is compatible with the closing
+> sentence above, and the compatibility is exact rather than convenient:
+>
+> - *"Build nothing that implies any of it exists"* constrains **what the product claims**, not what
+>   the repository contains. §6.1's no-fake-`Connected`-state invariant is the enforceable form of it
+>   and is untouched.
+> - A provider seam exercised only by a fake **implies nothing**, because nothing user-facing may
+>   announce it. If a screen would have to say a provider exists in order for the work to be visible,
+>   that screen is out of scope until D3–D8 are answered.
+>
+> **Step 3 is the one item here that is NOT blocked by the deferral.** The `SpeechRecognition` vendor
+> audit (§4.1) needs web access and a reader, not an institutional decision. It remains cheap, useful,
+> and available now.

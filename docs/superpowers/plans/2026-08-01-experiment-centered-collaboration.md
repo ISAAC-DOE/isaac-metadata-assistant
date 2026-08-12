@@ -188,7 +188,19 @@ content** (`draft_validator.py:171-185` requires evidence per contributor;
 `export.py:99-100`; `audit.py:83-84` keys sidecar evidence as `attribution:{name}|{role}`). A future
 feature must not quietly convert that from *authored, evidenced content* into *system-derived identity*.
 
-### 1.5 Identity is absent and its trust boundary is unproven
+### 1.5 Identity is absent and its trust boundary is ~~unproven~~ NOW STATED BY DEAN — and the answer is that it can be bypassed
+
+> **AMENDED 2026-08-12.** The heading's "unproven" is superseded: Dean answered. **The section's
+> conclusion is not superseded — it is strengthened.** He **reconfirmed** that the Service is a
+> **plain ClusterIP with no NetworkPolicy**, so any in-cluster pod can reach the app directly and
+> **forge forwarded identity headers**, and therefore **`X-authentik-username`'s presence does NOT
+> prove authenticated edge traversal** (Q4, answered against us). He also stated that the edge
+> injects/overwrites exactly five headers and that the **canonical principal is the Authentik
+> username**, and he **authorized server-stamping it** — *conditional on the request's identity having
+> been established through the trusted authentication boundary*, which ISAAC has not built. So slices
+> D–G below stay **BLOCKED**, now on ISAAC's own engineering rather than on Dean's silence. Operator
+> testimony about configuration; not observed here. Full record:
+> [`identity-trust-contract.md`](../../identity-trust-contract.md) §2, §6A.1, §7.
 
 Full evidence in [`identity-trust-contract.md`](../../identity-trust-contract.md). The short form:
 zero identity headers appear anywhere (0 matches / 498 files searched, excluding the two docs that
@@ -236,9 +248,14 @@ existing portal ownership, ACL, and audit row is already keyed to it
 (`records.data->'attribution'->>'uploaded_by'`, `record_history.actor`, `record_acl.grantee_identity`,
 `record_acl.granted_by`, `api_requests.username`, `portal_access_log.username`,
 `hyp_project_shares.identity`; established by direct audit of the **public** upstream source).
-Institutional confirmation is still required that usernames are **non-reassignable across rename,
+~~Institutional confirmation is still required that usernames are **non-reassignable across rename,
 departure, and rehire** — that is Q5, and it is unanswered, so username is a *technical stable-ID
-candidate*, **not** a lifecycle guarantee. **Do not introduce a second identity namespace based on
+candidate*, **not** a lifecycle guarantee.~~ **RECEIVED 2026-08-12: Dean states usernames are NOT
+reassigned and the username is canonical.** The distinction this sentence drew was the right one, and
+the thing it asked for is exactly what arrived — an *institutional* statement, not a technical
+inference. **Q17 should not be reopened and no UID↔username infrastructure should be introduced**, so
+the `sub` warning immediately below is now a settled prohibition rather than a caution. Operator
+testimony, not observed here. **Do not introduce a second identity namespace based on
 `sub` without an explicit migration and compatibility plan** — two principals for one person, with
 every existing row keyed to the one ISAAC would not be using, is the expensive mistake here. Never
 email (trust contract §9). **Never ORCID**: it is scientific-credit metadata and must never confer
@@ -367,7 +384,7 @@ block in `readiness-plan:48-52` and `CLAUDE.md` §15 must be lifted.
 |---|---|---|---|
 | **A** | Debt cleanup + backlog. No collaboration semantics | **AUTHORIZED — done this session** | — |
 | **B** | Record location and access report | **AUTHORIZED — done this session** (`where-the-30-records-are.md`) | — |
-| **C** | Identity trust contract | **DOCUMENT AUTHORIZED — done** (`identity-trust-contract.md`). **CODE BLOCKED** | **G7** (Q1–Q4, Q6) |
+| **C** | Identity trust contract | **DOCUMENT AUTHORIZED — done** (`identity-trust-contract.md`). **CODE STILL BLOCKED** | ~~**G7** (Q1–Q4, Q6)~~ **G7's questions were ANSWERED 2026-08-12** — Q1, Q4, Q5, Q6, Q7, Q8, Q9, Q10, Q17, Q18, Q25. **The gate MOVED rather than closed:** Q4's answer is that an in-cluster caller *can* bypass Authentik, and every authorization Dean gave is conditional on a **trusted authentication boundary ISAAC has not built**. D–G below stay blocked |
 | **D** | `/api/me` + frontend session context | **BLOCKED** | G7 — cannot return a current user when no user can be safely identified |
 | **E** | Users / groups / memberships persistence | **BLOCKED** | G7 + 4 of 6 migration approvals. ~~+ **Q12**~~ — **Q12 answered "No" 2026-08-01** (no upstream identity service exists; trust contract §5.1), so this is no longer a blocker on E, and option A no longer waits on it |
 | **F** | Group navigation and membership UX | **BLOCKED** | depends on E; membership administration policy is institution-owned |
