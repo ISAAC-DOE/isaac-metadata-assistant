@@ -1075,7 +1075,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * Both numbers are now 92, re-measured from `create_app().openapi()` after that merge.
    * If you change the assertion, change this line in the same edit.
    */
-  it('describes the contract it claims to: 47 operations, 95 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 47 operations, 96 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1557,8 +1557,27 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     45,256 and 95 post-lead paragraphs.
     //   · internal consistency: raw sum of `d.description.length` = 45,446; this
     //     figure drops the 95 `\n\n` separators, and 45,446 - 190 = 45,256.
-    expect(total).toBe(45256);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(95);
+    //
+    // 45,256 -> 45,861 and 95 -> 96 paragraphs: SERVER-SIDE RUN SEARCH AND FILTERING.
+    // `GET /api/experiments/{experiment_id}/runs` gained `q`, `overrides` and
+    // `exported`, and one NEW paragraph saying what they do — that they narrow the
+    // list ON THE SERVER, that `matched` and `total` mean different things, and that
+    // `q` is literal text over identifiers and never a search of scientific values.
+    // +605 characters, +1 paragraph, ONE operation touched.
+    //
+    // The paragraph is here rather than only on the parameters because the Endpoint
+    // Explorer renders the OPERATION's prose first, and an operation described only
+    // as an unbounded read would understate what the endpoint now does.
+    //
+    // MEASURED the same two independent ways, and NOT by adding +605 to 45,256:
+    //
+    //   · from the SERVED document: the splitPurpose paragraph rule transcribed
+    //     into Python over `create_app().openapi()`, restricted to the 47 operations
+    //     this array names, gives total 45,861 and 96 post-lead paragraphs.
+    //   · internal consistency: raw sum of `d.description.length` = 46,053; this
+    //     figure drops the 96 `\n\n` separators, and 46,053 - 192 = 45,861.
+    expect(total).toBe(45861);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(96);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so
     //     `GET /api/experiments/{id}/evidence-classification` now names six classes

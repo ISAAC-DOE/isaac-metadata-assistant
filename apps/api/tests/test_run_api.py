@@ -2353,6 +2353,452 @@ def test_a_paged_run_view_is_byte_identical_to_its_unpaged_self(client, experime
     assert paged == full[2:4]
 
 
+# --- 10b. server-side search and filtering ------------------------------------
+#
+# ONE CONFUSION IS WHAT THESE TESTS ARE MOSTLY ADDRESSED AT: `total` and `matched`
+# are different numbers and must stay so. `total` is how many runs EXIST; `matched`
+# is how many the current query selected. An implementation that repurposes `total`
+# as the filtered count passes every "the search works" test and quietly tells a
+# scientist their record shrank when they typed in a box.
+
+
+def _list_runs(client, experiment_id: str, **params):
+    response = client.get(f"/api/experiments/{experiment_id}/runs", params=params)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _mark_exported(client, experiment_id: str, run_id: str, record_id: str) -> None:
+    """Give a run a `record_id`, THROUGH THE STORE, because no route here will.
+
+    Invariant 6 of this file's contract is that none of these five operations mints a
+    `record_id`, and `test_no_operation_in_this_api_mints_a_record_id` pins it. The
+    `exported` filter nonetheless has to be exercised against runs that carry one, so
+    this writes it the way `_change_record_field` writes a record-level value —
+    directly, and disclosed here rather than worked around silently.
+    """
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    exp.get_run(run_id).record_id = record_id
+    exp.save_versioned()
+
+
+def _set_ordinal(client, experiment_id: str, run_id: str, ordinal: int) -> None:
+    """Move a run's `ordinal`, through the store. `add_run` only ever issues the next one."""
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    exp.get_run(run_id).ordinal = ordinal
+    exp.save_versioned()
+
+
+#: 26 characters of `[0-9A-Z]`, which is all `is_record_id` asks — and unmistakably
+#: not a real ULID, so it can never be read as a record this project actually minted.
+_FAKE_RECORD_IDS = (
+    "00000000000000000SYNTHETIC",
+    "11111111111111111SYNTHETIC",
+)
+
+
+def test_an_unfiltered_run_list_is_what_it_always_was_plus_a_matched_count(
+    client, experiment_id
+):
+    """THE DEFAULT SHAPE IS UNCHANGED, and `matched` is the only addition to it.
+
+    Search and filtering are opt-in. A caller that sends none of the three new
+    parameters must get the same list, in the same order, with the same counts it got
+    before they existed — the key set is asserted exactly, so an accidental extra key
+    or a rename is a failure rather than something a client discovers in production.
+    `matched == total` is what "no query" MEANS, and it is the equality every other
+    test in this section is allowed to break.
+    """
+    for _ in range(3):
+        _create_run(client, experiment_id)
+
+    body = _list_runs(client, experiment_id)
+    assert set(body) == {
+        "runs",
+        "experiment_version",
+        "total",
+        "matched",
+        "returned",
+        "offset",
+    }
+    assert body["total"] == 3
+    assert body["matched"] == 3, "with no query, `matched` is the whole record"
+    assert body["returned"] == len(body["runs"]) == 3
+    assert body["offset"] == 0
+
+
+def test_a_search_matches_a_label_substring_regardless_of_case(client, experiment_id):
+    """The query and the label are deliberately in DIFFERENT cases, in both directions.
+
+    A test that searched `"pellet"` for a label reading `"pellet"` would pass against
+    an implementation that never folded case at all. Here the query is upper and the
+    label lower on one run, and lower against an upper label on another, so a
+    case-sensitive `in` fails on both.
+    """
+    _create_run(client, experiment_id, label="oxidised pellet")
+    _create_run(client, experiment_id, label="REDUCED PELLET")
+    _create_run(client, experiment_id, label="blank holder")
+
+    upper = _list_runs(client, experiment_id, q="OXIDISED")
+    assert [r["label"] for r in upper["runs"]] == ["oxidised pellet"]
+
+    lower = _list_runs(client, experiment_id, q="reduced")
+    assert [r["label"] for r in lower["runs"]] == ["REDUCED PELLET"]
+
+    # ...and a substring shared by two labels selects both, so the match really is a
+    # substring test and not an accidental equality that happened to fold case.
+    both = _list_runs(client, experiment_id, q="PeLLeT")
+    assert {r["label"] for r in both["runs"]} == {"oxidised pellet", "REDUCED PELLET"}
+    assert both["matched"] == 2
+    assert both["total"] == 3, "searching must not change how many runs EXIST"
+
+
+def test_a_search_that_matches_nothing_still_reports_the_true_run_count(
+    client, experiment_id
+):
+    """THE NEGATIVE CONTROL FOR CONFLATING `total` WITH `matched`.
+
+    An implementation that filtered the list and then reported its length as `total`
+    is indistinguishable from a correct one on every happy-path search — both return
+    the right runs. It separates here: a query matching nothing would report a record
+    with five runs as a record with none, which is a UI telling a scientist their work
+    is gone because they mistyped a search box.
+    """
+    for _ in range(5):
+        _create_run(client, experiment_id)
+
+    body = _list_runs(client, experiment_id, q="no-run-is-called-this")
+    assert body["runs"] == []
+    assert body["matched"] == 0
+    assert body["returned"] == 0
+    assert body["total"] == 5, "an empty result set must not claim the record is empty"
+
+
+@pytest.mark.parametrize("blank", ["", " ", "   \t \n "])
+def test_a_blank_search_is_an_ABSENT_search_and_not_a_search_for_nothing(
+    client, experiment_id, blank
+):
+    """A search box empties itself between keystrokes, and that must not empty the list.
+
+    The tempting implementation treats `q=""` as a filter whose needle is `""` — which
+    happens to match everything — but treats a whitespace-only `q` as a needle of
+    spaces, which matches nothing. This pins both to the same behaviour as omitting
+    `q` entirely, so clearing a search restores the list rather than emptying it.
+    """
+    for _ in range(4):
+        _create_run(client, experiment_id)
+
+    unfiltered = _list_runs(client, experiment_id)
+    body = _list_runs(client, experiment_id, q=blank)
+    assert body["runs"] == unfiltered["runs"]
+    assert body["matched"] == body["total"] == 4
+
+
+def test_a_digit_search_selects_a_run_by_its_number(client, experiment_id):
+    """Scientists say "run 12", so a query of digits also matches the ORDINAL.
+
+    THE FIXTURE IS BUILT SO THIS CANNOT PASS WITHOUT THE ORDINAL RULE. Run ids are
+    ULIDs and are full of digits, so any small number is likely to appear inside one
+    by chance and a naive test would pass on substring matching alone. The ordinal
+    used here is therefore CHOSEN AFTER the ids exist, as a three-digit string that
+    appears in none of them and in no label — so the target run matches on its number
+    or not at all, and deleting the ordinal rule leaves this query with zero results.
+    """
+    alpha = _create_run(client, experiment_id, label="alpha")
+    beta = _create_run(client, experiment_id, label="beta")
+    gamma = _create_run(client, experiment_id, label="gamma")
+
+    ids = [alpha["id"], beta["id"], gamma["id"]]
+    number = next(
+        n
+        for n in range(100, 1000)
+        # The whole number appears in no id, so the positive assertion below can only
+        # be satisfied by the ordinal rule; and its two-digit prefix appears in no id
+        # EITHER, so the exactness assertion cannot be defeated by a chance substring.
+        if not any(str(n) in i for i in ids) and not any(str(n)[:2] in i for i in ids)
+    )
+    _set_ordinal(client, experiment_id, beta["id"], number)
+
+    body = _list_runs(client, experiment_id, q=str(number))
+    assert [r["id"] for r in body["runs"]] == [beta["id"]]
+    assert body["matched"] == 1
+    assert body["total"] == 3
+
+    # An ordinal match is EXACT, not a prefix match: the run numbered `number` must
+    # not answer to a query for a shorter number that its own merely starts with.
+    prefix = _list_runs(client, experiment_id, q=str(number)[:2])
+    assert prefix["matched"] == 0
+
+
+def test_a_search_containing_regex_metacharacters_is_treated_as_literal_text(
+    client, experiment_id
+):
+    """`q` IS NEVER COMPILED, and the two halves of that claim are both asserted.
+
+    If the needle reached `re.search`, `.*` would match every run — the loudest
+    possible version of this bug, since it looks like "search is broken and returns
+    everything" rather than like a security property. And a label that genuinely
+    contains bracket and quantifier characters would become unfindable, because the
+    query for it would be read as a pattern rather than as the text a scientist
+    copied off their own screen.
+    """
+    literal = "sample (batch [7]) 100%_a"
+    _create_run(client, experiment_id, label=literal)
+    _create_run(client, experiment_id, label="plain run")
+    _create_run(client, experiment_id, label="another plain run")
+
+    for pattern in (".*", "[a-z]+", "(plain|sample)", "a?", ".", "^"):
+        body = _list_runs(client, experiment_id, q=pattern)
+        assert body["matched"] == 0, f"{pattern!r} was interpreted, not matched literally"
+        assert body["total"] == 3
+
+    # ...and the characters a SQL-shaped implementation would treat as wildcards or as
+    # quoting are equally inert. There is no SQL on this path — runs live in the
+    # experiment's state document — and these assert that no one added an escape layer
+    # that would drop a run whose label contains them.
+    for fragment in ("(batch [7])", "100%", "%_a", "[7]", "'", '"', "\\"):
+        body = _list_runs(client, experiment_id, q=fragment)
+        expected = 1 if fragment in literal else 0
+        assert body["matched"] == expected, (fragment, body["matched"])
+
+
+def test_a_search_longer_than_the_bound_is_refused_by_the_route(client, experiment_id):
+    """NEGATIVE CONTROL on the query bound, asserted as an exact `422`.
+
+    A query no run can match is still work the server does against every run, so the
+    length is refused before the scan rather than during it. The maximum itself is
+    asserted to be ACCEPTED as well, so this is a bound rather than an off-by-one that
+    refuses its own documented ceiling.
+    """
+    _create_run(client, experiment_id)
+
+    too_long = client.get(
+        f"/api/experiments/{experiment_id}/runs",
+        params={"q": "x" * (routes.RUN_QUERY_MAX + 1)},
+    )
+    assert too_long.status_code == 422, too_long.text[:200]
+
+    ok = client.get(
+        f"/api/experiments/{experiment_id}/runs",
+        params={"q": "x" * routes.RUN_QUERY_MAX},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["matched"] == 0
+
+
+def test_the_overrides_filter_PARTITIONS_the_run_set(client, experiment_id):
+    """A PARTITION, asserted as one: disjoint, and covering. Not two counts that agree.
+
+    Two independent assertions — "`any` returns 2" and "`none` returns 3" — are both
+    satisfied by an implementation that drops a run from both sides, or lists one on
+    both. Asserting disjointness and union directly is what makes those unreachable,
+    and a run holding an override is a run whose inherited value a scientist
+    deliberately displaced: it must never fall out of both views of the list.
+    """
+    runs = [_create_run(client, experiment_id) for _ in range(5)]
+    for run in runs[:2]:
+        assert (
+            _set_override(
+                client, experiment_id, run["id"], _MATERIAL_ADDRESS, _envelope("x")
+            ).status_code
+            == 200
+        )
+    # The fixture must actually be MIXED, read from the store rather than inferred
+    # from the responses: a partition of a set that is entirely on one side is true
+    # for free, and would hide a filter that ignores its argument.
+    stored = client_ws(client).load_experiment(experiment_id).sorted_runs()
+    assert [bool(r.overrides) for r in stored].count(True) == 2
+
+    everything = {r["id"] for r in _list_runs(client, experiment_id)["runs"]}
+    with_any = _list_runs(client, experiment_id, overrides="any")
+    with_none = _list_runs(client, experiment_id, overrides="none")
+
+    any_ids = {r["id"] for r in with_any["runs"]}
+    none_ids = {r["id"] for r in with_none["runs"]}
+    assert any_ids & none_ids == set(), "a run appeared in both halves of the partition"
+    assert any_ids | none_ids == everything, "a run fell out of both halves"
+    assert any_ids == {runs[0]["id"], runs[1]["id"]}
+    assert with_any["matched"] == 2 and with_none["matched"] == 3
+    assert with_any["total"] == with_none["total"] == 5
+
+
+def test_the_exported_filter_PARTITIONS_the_run_set(client, experiment_id):
+    """The same partition property for `exported`, for the same reason.
+
+    "Which runs still need exporting?" is the question this axis exists to answer, and
+    an answer that silently omits a run is worse than no answer: it reports work as
+    finished that has not been done.
+    """
+    runs = [_create_run(client, experiment_id) for _ in range(4)]
+    for run, record_id in zip(runs[:2], _FAKE_RECORD_IDS):
+        _mark_exported(client, experiment_id, run["id"], record_id)
+
+    everything = {r["id"] for r in _list_runs(client, experiment_id)["runs"]}
+    yes = _list_runs(client, experiment_id, exported="true")
+    no = _list_runs(client, experiment_id, exported="false")
+
+    yes_ids = {r["id"] for r in yes["runs"]}
+    no_ids = {r["id"] for r in no["runs"]}
+    assert yes_ids & no_ids == set()
+    assert yes_ids | no_ids == everything
+    assert yes_ids == {runs[0]["id"], runs[1]["id"]}
+    assert all(r["record_id"] is not None for r in yes["runs"])
+    assert all(r["record_id"] is None for r in no["runs"])
+    assert yes["matched"] == 2 and no["matched"] == 2
+    assert yes["total"] == no["total"] == 4
+
+
+def test_a_search_and_a_filter_combine_with_AND_and_not_with_OR(client, experiment_id):
+    """THE FIXTURE MAKES `AND` AND `OR` GIVE DIFFERENT ANSWERS, which is the whole test.
+
+    Four runs across the two axes: matching the search and exported, matching the
+    search and not, exported and not matching, neither. `AND` selects exactly one of
+    them; `OR` would select three; ignoring the second parameter entirely would select
+    two. All three implementations are distinguishable here, and only one passes.
+    """
+    hit_exported = _create_run(client, experiment_id, label="pellet A")
+    hit_draft = _create_run(client, experiment_id, label="pellet B")
+    miss_exported = _create_run(client, experiment_id, label="foil C")
+    _create_run(client, experiment_id, label="foil D")
+
+    _mark_exported(client, experiment_id, hit_exported["id"], _FAKE_RECORD_IDS[0])
+    _mark_exported(client, experiment_id, miss_exported["id"], _FAKE_RECORD_IDS[1])
+
+    body = _list_runs(client, experiment_id, q="pellet", exported="true")
+    assert [r["id"] for r in body["runs"]] == [hit_exported["id"]]
+    assert body["matched"] == 1
+    assert body["total"] == 4
+    assert hit_draft["id"] not in {r["id"] for r in body["runs"]}
+
+    # The third axis joins the same conjunction rather than replacing one of the others.
+    assert (
+        _set_override(
+            client, experiment_id, hit_exported["id"], _MATERIAL_ADDRESS, _envelope("x")
+        ).status_code
+        == 200
+    )
+    narrowed = _list_runs(
+        client, experiment_id, q="pellet", exported="true", overrides="none"
+    )
+    assert narrowed["runs"] == []
+    assert narrowed["matched"] == 0
+    assert narrowed["total"] == 4
+
+
+def test_paging_a_FILTERED_query_walks_the_matches_exactly_once(client, experiment_id):
+    """FILTER FIRST, THEN PAGE — and the counts must not swap meaning mid-walk.
+
+    The failure this defends against is paging the whole list and filtering the page:
+    a page of 3 that happens to contain 1 match returns 1 row, so a client reading
+    `returned` as "the page was short, so this is the end" stops on the first page and
+    never sees the rest. Walking every page and comparing the concatenation against
+    the single-request filtered read catches that, along with a lost or repeated match
+    at a boundary. `matched` and `total` are asserted on EVERY page, because a count
+    that is right on page one and wrong on page two is the version that ships.
+    """
+    for index in range(9):
+        kind = "pellet" if index % 2 == 0 else "foil"
+        _create_run(client, experiment_id, label=f"{kind} {index}")
+
+    filtered = _list_runs(client, experiment_id, q="pellet")
+    assert filtered["matched"] == 5
+    assert filtered["total"] == 9
+
+    walked: list[str] = []
+    offset = 0
+    while True:
+        page = _list_runs(client, experiment_id, q="pellet", limit=2, offset=offset)
+        assert page["total"] == 9, "`total` must stay the record's size on every page"
+        assert page["matched"] == 5, "`matched` must stay the query's size on every page"
+        assert page["offset"] == offset
+        assert page["returned"] == len(page["runs"]) <= 2
+        if not page["runs"]:
+            break
+        walked.extend(r["id"] for r in page["runs"])
+        offset += 2
+
+    assert walked == [r["id"] for r in filtered["runs"]], "paging lost, repeated or reordered a match"
+    assert len(walked) == len(set(walked)) == 5
+
+    # An offset past the end of the MATCHED list is clamped, exactly as it is for the
+    # unfiltered list — the same race, now reachable by narrowing a search as well as
+    # by a concurrent delete.
+    past = _list_runs(client, experiment_id, q="pellet", limit=2, offset=99)
+    assert past["runs"] == [] and past["returned"] == 0
+    assert past["matched"] == 5 and past["total"] == 9
+
+
+def test_an_unknown_overrides_value_is_refused_by_the_route(client, experiment_id):
+    """NEGATIVE CONTROL on the enum: an unrecognised value is a `422`, never "no filter".
+
+    Silently ignoring a value it does not understand is the dangerous failure here,
+    because the response looks successful: a client asking for overridden runs and
+    misspelling it would be shown every run and have no way to tell.
+    """
+    _create_run(client, experiment_id)
+    for bad in ("maybe", "ANY", "true", "1", ""):
+        res = client.get(
+            f"/api/experiments/{experiment_id}/runs", params={"overrides": bad}
+        )
+        assert res.status_code == 422, (bad, res.status_code, res.text[:200])
+
+    for good in ("any", "none"):
+        res = client.get(
+            f"/api/experiments/{experiment_id}/runs", params={"overrides": good}
+        )
+        assert res.status_code == 200, (good, res.text[:200])
+
+
+def test_the_search_reads_a_runs_identifiers_and_never_its_science(
+    client, experiment_id
+):
+    """WHAT IS SEARCHED IS BOUNDED, and the bound is the project's no-guessing rule.
+
+    A run's id and record id are searchable because a scientist pastes them; its
+    label is searchable because they wrote it. Its measured values are NOT, and this
+    asserts the absence directly: the fixture's inherited material name is a real
+    string sitting in the run view that a "search everything" implementation would
+    match on. Matching it would make the result set depend on a scientific
+    classification this server has no grounds to make.
+    """
+    run = _create_run(client, experiment_id, label="run without the word")
+    exp = client_ws(client).load_experiment(experiment_id)
+    value = exp.draft["fields"][_MATERIAL]["value"]
+    assert isinstance(value, str) and value, "the fixture must carry a material name"
+    assert value.lower() not in run["label"].lower()
+
+    by_value = _list_runs(client, experiment_id, q=value)
+    assert by_value["matched"] == 0, "a scientific value must not be searchable"
+    assert by_value["total"] == 1
+
+    # The identifiers ARE searchable, and the id half is asserted so this test cannot
+    # pass by the search matching nothing at all.
+    assert _list_runs(client, experiment_id, q=run["id"])["matched"] == 1
+    assert _list_runs(client, experiment_id, q=run["id"].lower())["matched"] == 1
+
+
+def test_a_record_id_is_searchable_so_a_pasted_export_id_finds_its_run(
+    client, experiment_id
+):
+    """The id a scientist has in hand is often the EXPORTED record's, not the run's.
+
+    A run that has been exported is usually referred to by the artifact it produced,
+    so the record id is searchable too — and a partial paste of it must still land,
+    which is why this asserts a substring of the id rather than only the whole thing.
+    """
+    runs = [_create_run(client, experiment_id) for _ in range(3)]
+    _mark_exported(client, experiment_id, runs[1]["id"], _FAKE_RECORD_IDS[0])
+
+    whole = _list_runs(client, experiment_id, q=_FAKE_RECORD_IDS[0])
+    assert [r["id"] for r in whole["runs"]] == [runs[1]["id"]]
+
+    partial = _list_runs(client, experiment_id, q=_FAKE_RECORD_IDS[0][-9:].lower())
+    assert [r["id"] for r in partial["runs"]] == [runs[1]["id"]]
+    assert partial["matched"] == 1 and partial["total"] == 3
+
+
 def test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set(
     client, experiment_id
 ):
