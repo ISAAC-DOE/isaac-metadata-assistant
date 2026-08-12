@@ -1576,7 +1576,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     this array names, gives total 45,861 and 96 post-lead paragraphs.
     //   · internal consistency: raw sum of `d.description.length` = 46,053; this
     //     figure drops the 96 `\n\n` separators, and 46,053 - 192 = 45,861.
-    expect(total).toBe(45861);
+    //
+    // 45,861 -> 45,974, paragraph count UNCHANGED at 96: the `q` prose was corrected,
+    // not extended. An adversarial review measured that a SUBSTRING match against a
+    // run id returned every run in the record -- ULIDs share a ~10-character timestamp
+    // prefix -- so ids now match WHOLE, and the description had to stop saying
+    // "substring search over each run's label, id and record id", which was now false
+    // in the published contract. +113 characters, ONE operation touched, no new
+    // paragraph.
+    //
+    // MEASURED the same two independent ways, and NOT by adding +113 to 45,861:
+    //
+    //   . from the SERVED document: the splitPurpose rule re-implemented in Python
+    //     over `create_app().openapi()`, restricted to these 47 operations, gives
+    //     total 45,974 and 96 post-lead paragraphs.
+    //   . internal consistency: raw sum of `d.description.length` = 46,166; this drops
+    //     the 96 `\n\n` separators, and 46,166 - 192 = 45,974.
+    expect(total).toBe(45974);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(96);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so

@@ -3020,12 +3020,14 @@ _RUN_OFFSET_DESC = (
 RUN_QUERY_MAX = 200
 
 _RUN_QUERY_DESC = (
-    "Case-insensitive substring search over each run's label, id and record id — "
-    "and, when the whole query is digits, an exact match on the run's number. "
-    "Literal text only: no regex, no fuzzy matching, no ranking, and no searching "
-    "of scientific values. Omitted or blank filters nothing. Results stay in "
-    "canonical run order; `matched` reports how many the query selected and `total` "
-    "still reports how many runs EXIST."
+    "Case-insensitive search: a substring of a run's LABEL, or a WHOLE run id or "
+    "record id, or — when the whole query is digits — an exact match on the run's "
+    "number. Ids match whole rather than by substring because they are ULIDs: runs "
+    "created together share a ~10-character prefix, so a substring test against an "
+    "id matched every run in the record. Literal text only: no regex, no fuzzy "
+    "matching, no ranking, and no searching of scientific values. Omitted or blank "
+    "filters nothing. Results stay in canonical run order; `matched` reports how "
+    "many the query selected and `total` still reports how many runs EXIST."
 )
 
 _RUN_OVERRIDES_DESC = (
@@ -3072,10 +3074,38 @@ def _run_matches_query(run: "ws.Run", needle: str, ordinal: int | None) -> bool:
     a given offset changed with what was typed, and paging over a list that
     re-orders itself is how a client loses rows between pages. Canonical order is
     the contract, and the caller keeps it.
+
+    IDS MATCH WHOLE, LABELS MATCH BY SUBSTRING, AND THAT ASYMMETRY IS THE FIX FOR A
+    MEASURED DEFECT. An adversarial review found that ``q=1`` returned 120 runs of
+    120 — and so did ``0``, ``01`` and ``z``. The cause is what a ULID IS: 26
+    Crockford-base32 characters whose leading ~10 encode the millisecond, so every
+    run created in one session shares that prefix, and its alphabet makes most
+    single characters near-certain to appear somewhere in all of them. A substring
+    test against an id is therefore not a weak search, it is a match-everything.
+
+    A MINIMUM QUERY LENGTH DOES NOT FIX IT, which is why it was not chosen: the
+    shared prefix is ~10 characters, so any threshold short enough to accept a
+    partial paste is still long enough to match every run in the record.
+
+    So an id is compared WHOLE. That is also what the affordance actually is — a
+    human does not mean a fragment of a ULID, they paste one they copied, and a
+    pasted id still matches with surrounding whitespace and in any case because the
+    caller trims and case-folds before this runs. Labels keep substring matching
+    because a label is prose a scientist wrote, where "300 K" genuinely is a
+    fragment of something they might type.
+
+    THE ORDINAL RULE IS WHAT MAKES SHORT QUERIES USEFUL, and it was already correct
+    and simply being swamped: ``q=1`` now finds run 1 by number, plus any label
+    containing "1", instead of the whole record.
     """
-    if needle in run.label.lower() or needle in run.id.lower():
+    if needle in run.label.lower():
         return True
-    if run.record_id is not None and needle in run.record_id.lower():
+    # Whole-id equality, never a substring — see the docstring. `needle` is already
+    # trimmed and lowercased by the caller, so a pasted id matches in any case and
+    # with surrounding whitespace.
+    if needle == run.id.lower():
+        return True
+    if run.record_id is not None and needle == run.record_id.lower():
         return True
     return ordinal is not None and run.ordinal == ordinal
 
@@ -3373,8 +3403,10 @@ def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
         "and paging applies to what they matched: `matched` is how many runs the "
         "query selected and `total` remains how many runs EXIST, so a client can "
         "always say \"3 of 240 runs match\" without a second request. `q` is a "
-        "literal, case-insensitive substring search over each run's label, id and "
-        "record id — plus its number when the query is digits. It is not a regex, "
+        "case-insensitive search over a run's label by substring, and over a whole "
+        "run id or record id — plus its number when the query is digits. Ids match "
+        "whole because they are ULIDs sharing a timestamp prefix, so a substring "
+        "matched everything. It is not a regex, "
         "it does not rank, and it does not search scientific values: no measured "
         "quantity is classified here."
     ),

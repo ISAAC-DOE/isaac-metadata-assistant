@@ -2785,8 +2785,23 @@ def test_a_record_id_is_searchable_so_a_pasted_export_id_finds_its_run(
     """The id a scientist has in hand is often the EXPORTED record's, not the run's.
 
     A run that has been exported is usually referred to by the artifact it produced,
-    so the record id is searchable too — and a partial paste of it must still land,
-    which is why this asserts a substring of the id rather than only the whole thing.
+    so the record id is searchable — WHOLE, in any case, and tolerant of the
+    whitespace a paste brings with it.
+
+    A PARTIAL ID DELIBERATELY DOES NOT MATCH, and this assertion was REVERSED after
+    an adversarial review measured what substring matching on an id actually does:
+    `q=1` returned 120 runs of 120, and so did `0`, `01` and `z`. A ULID is 26
+    Crockford-base32 characters whose leading ~10 encode the millisecond, so every
+    run created in one session shares that prefix and most single characters appear
+    somewhere in all of them. Substring-matching an id is not a lenient search, it
+    is a match-everything — and a minimum query length cannot rescue it, because the
+    shared prefix is longer than any threshold short enough to accept a partial
+    paste.
+
+    So the earlier version of this test was asserting a behaviour that made the
+    search useless, and the friendliness it was protecting was imaginary: nobody
+    types nine characters of a ULID from memory. Labels keep substring matching,
+    because a label is prose someone wrote.
     """
     runs = [_create_run(client, experiment_id) for _ in range(3)]
     _mark_exported(client, experiment_id, runs[1]["id"], _FAKE_RECORD_IDS[0])
@@ -2794,9 +2809,48 @@ def test_a_record_id_is_searchable_so_a_pasted_export_id_finds_its_run(
     whole = _list_runs(client, experiment_id, q=_FAKE_RECORD_IDS[0])
     assert [r["id"] for r in whole["runs"]] == [runs[1]["id"]]
 
+    # A paste brings whitespace and often the wrong case; both still land.
+    pasted = _list_runs(client, experiment_id, q=f"  {_FAKE_RECORD_IDS[0].lower()}  ")
+    assert [r["id"] for r in pasted["runs"]] == [runs[1]["id"]]
+
+    # THE NEGATIVE CONTROL, and the whole point of the change.
     partial = _list_runs(client, experiment_id, q=_FAKE_RECORD_IDS[0][-9:].lower())
-    assert [r["id"] for r in partial["runs"]] == [runs[1]["id"]]
-    assert partial["matched"] == 1 and partial["total"] == 3
+    assert partial["runs"] == []
+    assert partial["matched"] == 0 and partial["total"] == 3
+
+
+def test_a_short_query_does_not_match_every_run_through_its_ULID(
+    client, experiment_id
+):
+    """THE DEFECT THAT REVERSED THE TEST ABOVE, pinned so it cannot come back.
+
+    Measured before the fix: over 120 runs whose labels contained no digits, each of
+    `0`, `1`, `01` and `z` matched 120 of 120. Run ids are ULIDs — Crockford base32,
+    with a shared millisecond prefix across runs created together — so a substring
+    test against them matches everything. The most natural query a scientist can
+    type, `1` to find run 1, returned the entire record.
+
+    The ordinal rule was always correct and was simply being swamped. Asserted here
+    against ids that are REAL, minted by the create route, rather than against a
+    fixture chosen to avoid the collision — the previous digit test had to pick an
+    ordinal appearing in no id precisely because this defect existed.
+    """
+    runs = [_create_run(client, experiment_id, label=f"Sample {chr(65 + i)}")
+            for i in range(4)]
+    assert all(not any(c.isdigit() for c in r["label"]) for r in runs), (
+        "the labels must carry no digits, or a digit query could match through them"
+    )
+
+    for needle in ("0", "1", "01", "z"):
+        page = _list_runs(client, experiment_id, q=needle)
+        assert page["matched"] < len(runs), (
+            f"q={needle!r} matched {page['matched']} of {len(runs)} — a short query "
+            f"is matching runs through their ULIDs again"
+        )
+
+    # ...and the ordinal rule still does its job: run 2 by its number, exactly.
+    by_number = _list_runs(client, experiment_id, q="2")
+    assert [r["ordinal"] for r in by_number["runs"]] == [2]
 
 
 def test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set(
