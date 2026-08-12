@@ -3006,6 +3006,153 @@ _RUN_OFFSET_DESC = (
     "the end."
 )
 
+#: Longest ``q`` the run list accepts, enforced by the route as a `422`.
+#:
+#: A BOUND ON WHAT IS SCANNED, refused before the scan rather than during it. The
+#: match is a substring test run against every run in the record, so the work is
+#: proportional to `runs x len(q)`, and an unbounded `q` is a way to make the server
+#: do arbitrary work for a query nothing can satisfy.
+#:
+#: 200 IS SET AGAINST WHAT IS ACTUALLY SEARCHED: a run id and a record id are 26
+#: characters, and a label is capped at `_MAX_LABEL_BYTES` (512). So the only thing
+#: this ceiling gives up is quoting the WHOLE of an unusually long label — and any
+#: substring of that label still finds it, which is what a search box is for.
+RUN_QUERY_MAX = 200
+
+_RUN_QUERY_DESC = (
+    "Case-insensitive search: a substring of a run's LABEL, or a WHOLE run id or "
+    "record id, or — when the whole query is digits — an exact match on the run's "
+    "number. Ids match whole rather than by substring because they are ULIDs: runs "
+    "created together share a ~10-character prefix, so a substring test against an "
+    "id matched every run in the record. Literal text only: no regex, no fuzzy "
+    "matching, no ranking, and no searching of scientific values. Omitted or blank "
+    "filters nothing. Results stay in canonical run order; `matched` reports how "
+    "many the query selected and `total` still reports how many runs EXIST."
+)
+
+_RUN_OVERRIDES_DESC = (
+    "`any` for runs holding at least one recorded override, `none` for runs holding "
+    "none. Omit to filter nothing on this axis."
+)
+
+_RUN_EXPORTED_DESC = (
+    "`true` for runs that have been exported to an official record, `false` for runs "
+    "that have not. Omit to filter nothing on this axis."
+)
+
+#: What makes a ``q`` a RUN NUMBER as well as a substring.
+#:
+#: ``str.isdigit()`` is deliberately not what this is: it is true of ``"٣"`` and of
+#: ``"²"``, and ``int()`` accepts both — so a query nobody could read as "run 3"
+#: would select run 3. The grounded rule is the ASCII numerals a scientist types on
+#: the way to "show me run 12", and this pattern is that rule stated exactly.
+_ASCII_DIGITS_ONLY = re.compile(r"[0-9]+")
+
+
+def _run_matches_query(run: "ws.Run", needle: str, ordinal: int | None) -> bool:
+    """Whether one run matches ``q``. A LITERAL SUBSTRING TEST, and nothing more.
+
+    WHAT IS SEARCHED IS THE RUN'S IDENTIFIERS, NOT ITS SCIENCE — its label, its id,
+    and its record id when it has one. A run's own fields, its inherited
+    resolutions and its evidence are deliberately excluded. Matching on a measured
+    value would make membership of the result set depend on a classification this
+    server has no grounds to make, which is the project's no-guessing rule applied
+    to search; it would also mean every keystroke resolved inheritance for every
+    run, turning a list into a full evaluation.
+
+    THERE IS NO INJECTION SURFACE HERE, and that is worth stating rather than
+    leaving to be inferred from its absence: runs live inside the experiment's
+    state document, not in a table, so ``q`` is never interpolated into SQL and
+    ``%`` and ``_`` are not wildcards to escape. It is never compiled as a regex
+    either — the test is Python's ``in`` over two plain strings — so ``.*``,
+    ``[``, ``(``, ``?``, a quote and a backslash are ordinary characters that match
+    only themselves. A scientist searching for a label containing ``(`` finds that
+    label, and a query of ``.*`` matches the runs whose text literally contains
+    ``.*``, which is normally none of them.
+
+    IT RETURNS A BOOLEAN, NEVER A SCORE. Ranking by relevance would mean the run at
+    a given offset changed with what was typed, and paging over a list that
+    re-orders itself is how a client loses rows between pages. Canonical order is
+    the contract, and the caller keeps it.
+
+    IDS MATCH WHOLE, LABELS MATCH BY SUBSTRING, AND THAT ASYMMETRY IS THE FIX FOR A
+    MEASURED DEFECT. An adversarial review found that ``q=1`` returned 120 runs of
+    120 — and so did ``0``, ``01`` and ``z``. The cause is what a ULID IS: 26
+    Crockford-base32 characters whose leading ~10 encode the millisecond, so every
+    run created in one session shares that prefix, and its alphabet makes most
+    single characters near-certain to appear somewhere in all of them. A substring
+    test against an id is therefore not a weak search, it is a match-everything.
+
+    A MINIMUM QUERY LENGTH DOES NOT FIX IT, which is why it was not chosen: the
+    shared prefix is ~10 characters, so any threshold short enough to accept a
+    partial paste is still long enough to match every run in the record.
+
+    So an id is compared WHOLE. That is also what the affordance actually is — a
+    human does not mean a fragment of a ULID, they paste one they copied, and a
+    pasted id still matches with surrounding whitespace and in any case because the
+    caller trims and case-folds before this runs. Labels keep substring matching
+    because a label is prose a scientist wrote, where "300 K" genuinely is a
+    fragment of something they might type.
+
+    THE ORDINAL RULE IS WHAT MAKES SHORT QUERIES USEFUL, and it was already correct
+    and simply being swamped: ``q=1`` now finds run 1 by number, plus any label
+    containing "1", instead of the whole record.
+    """
+    if needle in run.label.lower():
+        return True
+    # Whole-id equality, never a substring — see the docstring. `needle` is already
+    # trimmed and lowercased by the caller, so a pasted id matches in any case and
+    # with surrounding whitespace.
+    if needle == run.id.lower():
+        return True
+    if run.record_id is not None and needle == run.record_id.lower():
+        return True
+    return ordinal is not None and run.ordinal == ordinal
+
+
+def _select_runs(
+    ordered: "list[ws.Run]",
+    *,
+    q: str | None,
+    overrides: str | None,
+    exported: bool | None,
+) -> "list[ws.Run]":
+    """``ordered``, narrowed by the search and the filters, IN THE ORDER GIVEN.
+
+    THE AXES ARE INDEPENDENT AND COMBINE WITH ``AND``. They are three parameters
+    rather than one repeated ``filter=`` enum precisely so that contradictory
+    requests are not expressible: there is no way to spell "overridden and not
+    overridden", because the axis holds one value.
+
+    A BLANK ``q`` IS AN ABSENT ``q``, NOT A QUERY THAT MATCHES NOTHING. A search box
+    empties itself between keystrokes, and answering the empty box with an empty
+    list would tell a scientist their record has no runs. Whitespace is trimmed for
+    the same reason a trailing space in a pasted id must not lose the match.
+
+    "HOLDS AN OVERRIDE" IS READ FROM STORED STATE — ``run.overrides``, the dict
+    ``set_run_override`` writes — and is NOT recomputed by resolving every run.
+    ``_resolution_state`` reports ``overridden`` for exactly the addresses in this
+    dict, so resolving would answer the same question at the cost of deep-copying
+    every inherited payload of every run in the record. There is one divergence, and
+    it falls the honest way: an override persisted at an address ``parse_address``
+    cannot parse is skipped by ``resolve_inherited`` but counted here. The run does
+    hold a recorded override — it is merely unclassifiable — and ``overrides=none``
+    must not file it under "nothing to see".
+    """
+    selected = ordered
+    if overrides is not None:
+        want = overrides == "any"
+        selected = [run for run in selected if bool(run.overrides) is want]
+    if exported is not None:
+        selected = [run for run in selected if (run.record_id is not None) is exported]
+
+    trimmed = (q or "").strip()
+    if trimmed:
+        ordinal = int(trimmed) if _ASCII_DIGITS_ONLY.fullmatch(trimmed) else None
+        needle = trimmed.lower()
+        selected = [run for run in selected if _run_matches_query(run, needle, ordinal)]
+    return selected
+
 
 EXPERIMENT_OVERRIDABLE_ADDRESSES: frozenset[str] = frozenset(
     [
@@ -3250,8 +3397,28 @@ def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
         "The `ETag` header and `experiment_version` carry the RECORD's current "
         "revision, which is what adding a run requires in `If-Match`. Each run "
         "additionally carries its own `version`, which is what editing that run "
-        "requires."
+        "requires.\n\n"
+        "`q`, `overrides` and `exported` narrow the list ON THE SERVER, so finding "
+        "one run never requires downloading all of them. They combine with `AND`, "
+        "and paging applies to what they matched: `matched` is how many runs the "
+        "query selected and `total` remains how many runs EXIST, so a client can "
+        "always say \"3 of 240 runs match\" without a second request. `q` is a "
+        "case-insensitive search over a run's label by substring, and over a whole "
+        "run id or record id — plus its number when the query is digits. Ids match "
+        "whole because they are ULIDs sharing a timestamp prefix, so a substring "
+        "matched everything. It is not a regex, "
+        "it does not rank, and it does not search scientific values: no measured "
+        "quantity is classified here."
     ),
+    # THIS PARAGRAPH IS A TWO-FILE EDIT, and the coupling is deliberate rather than
+    # accidental. `apps/web/src/test/apiFixtures.ts` holds a hand-transcribed copy of
+    # every operation `description`, and `test_contract_description_parity.py` fails
+    # the moment the two disagree — so the search prose was added HERE and THERE in
+    # one change. The alternative considered and rejected was leaving the operation
+    # silent and documenting `q`/`overrides`/`exported` only on the parameters: the
+    # parameters do carry their own full descriptions, but a reader of the Settings
+    # API browser meets the OPERATION first, and an operation whose prose describes
+    # only an unbounded read understates what the endpoint now does.
     response_description=(
         "The record's runs in canonical order, with the record's current revision "
         "and `ETag`."
@@ -3264,6 +3431,13 @@ def list_runs(
     response: Response,
     limit: Annotated[int | None, Query(ge=1, le=RUN_PAGE_MAX, description=_RUN_LIMIT_DESC)] = None,
     offset: Annotated[int, Query(ge=0, description=_RUN_OFFSET_DESC)] = 0,
+    q: Annotated[
+        str | None, Query(max_length=RUN_QUERY_MAX, description=_RUN_QUERY_DESC)
+    ] = None,
+    overrides: Annotated[
+        Literal["any", "none"] | None, Query(description=_RUN_OVERRIDES_DESC)
+    ] = None,
+    exported: Annotated[bool | None, Query(description=_RUN_EXPORTED_DESC)] = None,
 ):
     exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
@@ -3281,11 +3455,18 @@ def list_runs(
 
     ordered = exp.sorted_runs()
     total = len(ordered)
+    # FILTERING HAPPENS BEFORE PAGING, and it has to: a page taken first and then
+    # filtered would return fewer rows than asked for while more matches sat on the
+    # next page, so "no results" would depend on where the client happened to be
+    # scrolled. The window below therefore indexes the MATCHED list.
+    selected = _select_runs(ordered, q=q, overrides=overrides, exported=exported)
+    matched = len(selected)
     # OFFSET IS CLAMPED, NOT REFUSED. An offset past the end is not a client error —
     # it is what "load more" sends after a concurrent delete shortened the list — and
     # the honest answer is an empty page with the true `total`, from which a client
     # can see it has run off the end. Refusing would turn an ordinary race into an
-    # error banner.
+    # error banner. The same rule holds when a query shortened the list under a
+    # client that was already paging it.
     #
     # THIS PAGING IS NOT SNAPSHOT-CONSISTENT, AND THE PREVIOUS PARAGRAPH IS THE
     # FLATTERING HALF OF THAT STORY. It reasons about the benign case — a delete
@@ -3304,19 +3485,32 @@ def list_runs(
     # undocumented until an independent review named this as the most likely way the
     # slice is wrong in production. `apps/web` dedupes by run id when appending for
     # the same reason.
-    window = ordered[offset:] if limit is None else ordered[offset : offset + limit]
+    #
+    # A QUERY MAKES THIS STRICTLY WORSE, and the honest reading is that filtering
+    # widens the window rather than opening a new hole: a run edited concurrently can
+    # ENTER or LEAVE the matched set between two pages, so it can be skipped or
+    # repeated without any run being created or deleted at all. `experiment_version`
+    # still moves on any such write, so it remains the signal a paging client should
+    # watch — it is just doing more work here than it is on an unfiltered walk.
+    window = selected[offset:] if limit is None else selected[offset : offset + limit]
 
     return {
         "runs": [_run_view(exp, run) for run in window],
         "experiment_version": exp.version_token(),
-        # THE THREE NUMBERS A BOUNDED LIST CANNOT BE HONEST WITHOUT. `total` is the
-        # count of runs that EXIST, not the count returned, so a UI showing "50 of 500"
-        # is stating a measured fact rather than inferring completeness from a short
-        # page. `returned` is stated explicitly rather than left to be derived from the
-        # array's length, so a truncation bug shows up as a disagreement instead of
-        # being invisible. `offset` is echoed because a client that sent one and got a
-        # clamped window otherwise cannot tell which rows it holds.
+        # THE FOUR NUMBERS A BOUNDED, FILTERED LIST CANNOT BE HONEST WITHOUT. `total`
+        # is the count of runs that EXIST, not the count returned and NOT the count
+        # matched, so a UI showing "50 of 500" is stating a measured fact rather than
+        # inferring completeness from a short page — and a query that matches nothing
+        # still reports the record's true size instead of claiming it is empty.
+        # `matched` is what the current `q`/filters selected, and equals `total` when
+        # none were sent; keeping the two separate is what lets a client say "3 of 240
+        # runs match" in one request. `returned` is stated explicitly rather than left
+        # to be derived from the array's length, so a truncation bug shows up as a
+        # disagreement instead of being invisible. `offset` is echoed because a client
+        # that sent one and got a clamped window otherwise cannot tell which rows it
+        # holds.
         "total": total,
+        "matched": matched,
         "returned": len(window),
         "offset": offset,
     }
