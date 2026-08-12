@@ -2160,6 +2160,199 @@ def test_the_overridable_addresses_are_derived_and_not_a_hand_written_list():
     }
 
 
+def test_omitting_limit_returns_every_run_and_paging_never_becomes_a_run_limit(
+    client, experiment_id
+):
+    """THE DEFAULT IS UNCHANGED, and that is the contract paging must not break.
+
+    Every existing caller reads the whole list. If `limit` silently defaulted to a
+    page, "this record has N runs" would quietly become "this record has PAGE_MAX
+    runs" on surfaces that never asked to page — the exact class of silent truncation
+    this repository's disclosure rules exist to prevent. So an omitted `limit` returns
+    everything, and `total` always reports how many EXIST rather than how many were
+    returned.
+    """
+    for _ in range(5):
+        _create_run(client, experiment_id)
+
+    body = client.get(f"/api/experiments/{experiment_id}/runs").json()
+    assert len(body["runs"]) == 5
+    assert body["total"] == 5
+    assert body["returned"] == 5
+    assert body["offset"] == 0
+    # `returned` is stated, not derived — a truncation bug must surface as a
+    # disagreement between the two rather than be invisible.
+    assert body["returned"] == len(body["runs"])
+
+
+def _add_runs_through_the_store(client, experiment_id: str, count: int) -> None:
+    """Add ``count`` runs THROUGH THE STORE, because the route is too slow here.
+
+    `_create_run` is the right helper everywhere else — it exercises the real
+    create path, `If-Match` and all. But the test below needs MORE RUNS THAN
+    `RUN_PAGE_MAX`, and creating 201 of them over HTTP was measured at ~19 s: each
+    create re-reads the experiment for its `ETag` and re-saves it, so the cost is
+    quadratic in a way that has nothing to do with what is being asserted. This
+    writes them directly and re-saves once.
+
+    That is sound for THIS test because the property under test is a property of the
+    READ path — what the list route returns when `limit` is omitted. The runs only
+    have to exist; how they came to exist is not the subject. Creation itself is
+    covered by the create tests, and by `_create_run` in every test above.
+    """
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    for _ in range(count):
+        exp.add_run()
+    exp.save_versioned()
+
+
+def test_omitting_limit_returns_MORE_THAN_ONE_PAGE_of_runs(client, experiment_id):
+    """THE TEST ABOVE CANNOT FAIL THE WAY IT CLAIMS TO, AND THIS ONE CAN.
+
+    An independent review proved it: at 5 runs, "no default" and "a default of 200"
+    are indistinguishable, so mutating the route's `limit` parameter from `None` to
+    `RUN_PAGE_MAX` — the exact silent truncation the commit message, the PR body and
+    `RUN_PAGE_MAX`'s own comment all name as THE decision this design turns on — left
+    every paging test green. The whole suite passed but one, and that one was
+    `test_committed_snapshot_indexed_source_gate_dispatches`: a file-hash detector
+    that notices `routes.py` changed at all, not a test of behaviour.
+
+    So the guard has to cross the boundary it is guarding. `RUN_PAGE_MAX + 1` runs is
+    the smallest count at which a defaulted page is visibly short, and asserting the
+    full count comes back is the assertion the five-run test only appeared to make.
+
+    This also extends `test_there_is_no_server_side_maximum_run_count` in the one
+    direction that now matters: that test predates paging and creates 12 runs, and
+    paging is the first thing in this codebase that could quietly become the
+    server-side maximum it forbids.
+    """
+    _add_runs_through_the_store(client, experiment_id, routes.RUN_PAGE_MAX + 1)
+
+    body = client.get(f"/api/experiments/{experiment_id}/runs").json()
+    assert body["total"] == routes.RUN_PAGE_MAX + 1
+    # THE LOAD-BEARING LINE. A route that defaulted `limit` would return exactly
+    # RUN_PAGE_MAX rows here and report a truthful `total` beside them, which is
+    # precisely how the truncation would hide.
+    assert body["returned"] == routes.RUN_PAGE_MAX + 1
+    assert len(body["runs"]) == routes.RUN_PAGE_MAX + 1
+    assert [r["ordinal"] for r in body["runs"]] == list(range(1, routes.RUN_PAGE_MAX + 2))
+
+
+def test_a_bounded_page_reports_the_true_total_and_walks_the_whole_list_in_order(
+    client, experiment_id
+):
+    """A PAGE MUST NOT BE ABLE TO MISREPRESENT THE LIST, in either direction.
+
+    Two failures are asserted against, because a paging implementation can be wrong
+    while looking right: reporting `total` as the page size (so a UI says "7 runs"
+    when there are 7 but shows 3 and calls it complete), and losing or repeating a run
+    across page boundaries. Walking every page and comparing the concatenation against
+    the unpaged read catches both.
+
+    IT DOES NOT CATCH AN ORDERING CHANGE, and an earlier version of this docstring
+    claimed it did. Both sides of the comparison come from the SAME route, so
+    reversing `sorted_runs` moves them together and every assertion here still passes
+    — proven by mutation. Canonical order IS pinned, just elsewhere:
+    `test_there_is_no_server_side_maximum_run_count` and
+    `test_a_supplied_label_is_kept_verbatim_and_does_not_decide_the_ordinal` both fail
+    under that mutation. The coverage was real; the credit was in the wrong place.
+    """
+    for _ in range(7):
+        _create_run(client, experiment_id)
+
+    everything = client.get(f"/api/experiments/{experiment_id}/runs").json()
+    assert everything["total"] == 7
+
+    walked: list[str] = []
+    offset = 0
+    # BOUNDED, BECAUSE AN UNBOUNDED WALK HANGS INSTEAD OF FAILING. With `while True`,
+    # a route that ignored `offset` returned page 0 forever and pytest never came back
+    # — measured; the run was killed at 120 s. A defect that stalls CI to its job
+    # timeout reports nothing; one that trips this bound reports a failing assertion.
+    for _ in range(7 // 3 + 3):
+        page = client.get(
+            f"/api/experiments/{experiment_id}/runs", params={"limit": 3, "offset": offset}
+        ).json()
+        assert page["total"] == 7, "a page must report how many EXIST, not how many it returned"
+        assert page["offset"] == offset
+        assert page["returned"] == len(page["runs"])
+        assert page["returned"] <= 3
+        if not page["runs"]:
+            break
+        walked.extend(r["id"] for r in page["runs"])
+        offset += 3
+    else:  # pragma: no cover - only reachable when the route is broken
+        raise AssertionError(
+            f"the page walk did not terminate within the bound: offset reached {offset} "
+            f"for 7 runs, which means the route is not honouring `offset`"
+        )
+
+    assert walked == [r["id"] for r in everything["runs"]], "paging lost, repeated or reordered a run"
+    assert len(walked) == len(set(walked)) == 7
+
+
+def test_an_offset_past_the_end_is_an_empty_page_not_an_error(client, experiment_id):
+    """CLAMPED, NOT REFUSED — and the distinction is a real race, not a nicety.
+
+    A "load more" issued after a concurrent delete shortened the list arrives with an
+    offset past the end. Refusing it turns an ordinary race into an error banner; the
+    honest answer is an empty page carrying the true `total`, from which the client can
+    see it has run off the end and recover without being told something broke.
+    """
+    for _ in range(2):
+        _create_run(client, experiment_id)
+
+    page = client.get(
+        f"/api/experiments/{experiment_id}/runs", params={"limit": 5, "offset": 99}
+    )
+    assert page.status_code == 200, page.text
+    body = page.json()
+    assert body["runs"] == []
+    assert body["returned"] == 0
+    assert body["total"] == 2, "the true count must survive an off-the-end page"
+    assert body["offset"] == 99
+
+
+def test_the_page_bounds_are_enforced_by_the_route_not_by_the_client(client, experiment_id):
+    """NEGATIVE CONTROLS on the query contract, each refused by the route itself.
+
+    A client cannot ask for an unbounded page, a zero-sized one, or a negative offset.
+    These are asserted as exact `422`s rather than "not 2xx": FastAPI's own validation
+    produces them, and a test that accepted any 4xx would keep passing if the bounds
+    were removed and something else happened to reject the request.
+    """
+    for bad in ({"limit": 0}, {"limit": -1}, {"limit": routes.RUN_PAGE_MAX + 1}, {"offset": -1}):
+        res = client.get(f"/api/experiments/{experiment_id}/runs", params=bad)
+        assert res.status_code == 422, (bad, res.status_code, res.text[:200])
+
+    # ...and the largest permitted page IS permitted, so the ceiling is a real bound
+    # rather than an off-by-one that refuses its own documented maximum.
+    ok = client.get(
+        f"/api/experiments/{experiment_id}/runs", params={"limit": routes.RUN_PAGE_MAX}
+    )
+    assert ok.status_code == 200, ok.text
+
+
+def test_a_paged_run_view_is_byte_identical_to_its_unpaged_self(client, experiment_id):
+    """PAGING CHANGES WHICH RUNS COME BACK AND NOTHING ELSE ABOUT THEM.
+
+    The run view carries inheritance resolution, `overridable`, versions and evidence.
+    If a paged read produced even a slightly different view — a resolution computed
+    against a differently-loaded experiment, say — then a scientist's screen would
+    depend on how they scrolled to it. Comparing the full objects, not selected keys,
+    is what makes that assertion total.
+    """
+    for _ in range(4):
+        _create_run(client, experiment_id)
+
+    full = client.get(f"/api/experiments/{experiment_id}/runs").json()["runs"]
+    paged = client.get(
+        f"/api/experiments/{experiment_id}/runs", params={"limit": 2, "offset": 2}
+    ).json()["runs"]
+    assert paged == full[2:4]
+
+
 def test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set(
     client, experiment_id
 ):

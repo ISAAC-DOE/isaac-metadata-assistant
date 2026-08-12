@@ -2958,6 +2958,55 @@ RUN_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
 #: level — ``system.configuration.*``, ``timestamps.created_utc``, ``meta``,
 #: ``pending``, ``implicit``, ``links``, ``block_evidence`` — is not overridable until
 #: somebody decides, and it is never guessed into a level here.
+
+
+#: Largest page ``GET /experiments/{id}/runs`` will return in one response.
+#:
+#: (This block used to run straight on from the one above with no blank line, which
+#: made one contiguous comment: ``RUN_PAGE_MAX`` was documented by the overridable-
+#: address prose, and ``EXPERIMENT_OVERRIDABLE_ADDRESSES`` was left with no doc
+#: comment at all. In this codebase these blocks ARE the documentation.)
+#:
+#: A CEILING ON ONE RESPONSE, NOT A LIMIT ON HOW MANY RUNS A RECORD MAY HAVE. That
+#: distinction is the whole design: the route's own description promises there is no
+#: limit on runs, and paging must not quietly become one. ``total`` is always the
+#: count that EXIST, and a client may walk the whole list.
+#:
+#: WHY 200, STATED AS WHAT THE MEASUREMENT ACTUALLY SUPPORTS.
+#: ``docs/run-scale-measurements.md`` records the envelope: ~100 runs load comfortably
+#: (~1.1 s), 250 is noticeable (~2.2 s), 500 is bad (~4 s). **200 was not measured** —
+#: no benchmark row exists for it — and it is NOT "inside the comfortable band", which
+#: that table ends at 100. It sits between comfortable and noticeable, deliberately:
+#: this is the worst case a single client request may ask for, not the page a UI
+#: should request. An earlier revision of this comment claimed the comfortable band
+#: and is corrected here, because the choice is defensible without the overstatement.
+#:
+#: OMITTING ``limit`` STILL RETURNS EVERYTHING, deliberately. Every existing caller —
+#: and every existing test — reads the whole list, and silently truncating them to a
+#: page would turn "this record has 300 runs" into "this record has 200 runs" across
+#: surfaces that never opted in. Paging is something a client asks for. Guarded by
+#: ``test_omitting_limit_returns_MORE_THAN_ONE_PAGE_of_runs``, which exists because
+#: the five-run test that came first could not tell a default of 200 from no default.
+RUN_PAGE_MAX: int = 200
+
+#: THE BOUND IS INTERPOLATED, NOT RETYPED. Writing "1–200" as a literal here would be
+#: a second copy of ``RUN_PAGE_MAX``, free to drift from it silently — and the copy
+#: that drifts is the one published in the OpenAPI document, where a reader has no way
+#: to check it against the constant. Changing the constant now changes the sentence.
+_RUN_LIMIT_DESC = (
+    f"Maximum runs to return, 1–{RUN_PAGE_MAX}. OMIT to return every run: this "
+    "parameter bounds one response, and is never a limit on how many runs a record "
+    "may have. `total` always reports how many exist."
+)
+
+_RUN_OFFSET_DESC = (
+    "How many runs to skip, in canonical order. An offset past the end is CLAMPED to "
+    "an empty page rather than refused — that is what a 'load more' sends after a "
+    "concurrent delete shortened the list, and `total` tells the client it ran off "
+    "the end."
+)
+
+
 EXPERIMENT_OVERRIDABLE_ADDRESSES: frozenset[str] = frozenset(
     [
         ws.field_address(path)
@@ -3209,14 +3258,67 @@ def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
     ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
-def list_runs(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
+def list_runs(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=RUN_PAGE_MAX, description=_RUN_LIMIT_DESC)] = None,
+    offset: Annotated[int, Query(ge=0, description=_RUN_OFFSET_DESC)] = 0,
+):
     exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
+    # ONE ETag NOW COVERS MANY DIFFERENT REPRESENTATIONS, and that is a trap for the
+    # next person rather than a bug today. It is the EXPERIMENT's tag, so `limit=1&
+    # offset=0` and `limit=1&offset=1` return the same tag over different runs.
+    # Harmless while nothing reads `If-None-Match` here — and query strings key HTTP
+    # caches separately — but `GET /experiments/{id}` a few hundred lines up already
+    # implements the conditional GET someone will reach for next. Extending that to
+    # this route unchanged would hand a client a 304 for page 1 because it had
+    # fetched page 0, and "unchanged" would be a lie. Whoever does it must fold
+    # `limit`/`offset`/`q` into the tag, or not send one on a bounded read.
     response.headers["ETag"] = exp.etag()
+
+    ordered = exp.sorted_runs()
+    total = len(ordered)
+    # OFFSET IS CLAMPED, NOT REFUSED. An offset past the end is not a client error —
+    # it is what "load more" sends after a concurrent delete shortened the list — and
+    # the honest answer is an empty page with the true `total`, from which a client
+    # can see it has run off the end. Refusing would turn an ordinary race into an
+    # error banner.
+    #
+    # THIS PAGING IS NOT SNAPSHOT-CONSISTENT, AND THE PREVIOUS PARAGRAPH IS THE
+    # FLATTERING HALF OF THAT STORY. It reasons about the benign case — a delete
+    # AFTER the client's current position, which shortens the list and yields an
+    # empty page the client can see. The unflattering case is a delete BEFORE it:
+    # every later run shifts up by one, so the next `offset` starts one row late and
+    # a client walking pages SILENTLY SKIPS A RUN. There is no error and no duplicate
+    # to notice it by. A concurrent create is the mirror image and repeats a row.
+    #
+    # It is not fixed here, and saying so is the point. A cursor keyed on the
+    # canonical order would fix it and is a contract change; the ordinary case is a
+    # single scientist reading their own record, where the window is milliseconds
+    # wide. What a client CAN do today is compare `experiment_version` across pages —
+    # it is returned on every one, and any run add or delete moves it — and re-read
+    # from the start when it changes. That is the intended remedy, and it was
+    # undocumented until an independent review named this as the most likely way the
+    # slice is wrong in production. `apps/web` dedupes by run id when appending for
+    # the same reason.
+    window = ordered[offset:] if limit is None else ordered[offset : offset + limit]
+
     return {
-        "runs": [_run_view(exp, run) for run in exp.sorted_runs()],
+        "runs": [_run_view(exp, run) for run in window],
         "experiment_version": exp.version_token(),
+        # THE THREE NUMBERS A BOUNDED LIST CANNOT BE HONEST WITHOUT. `total` is the
+        # count of runs that EXIST, not the count returned, so a UI showing "50 of 500"
+        # is stating a measured fact rather than inferring completeness from a short
+        # page. `returned` is stated explicitly rather than left to be derived from the
+        # array's length, so a truncation bug shows up as a disagreement instead of
+        # being invisible. `offset` is echoed because a client that sent one and got a
+        # clamped window otherwise cannot tell which rows it holds.
+        "total": total,
+        "returned": len(window),
+        "offset": offset,
     }
 
 

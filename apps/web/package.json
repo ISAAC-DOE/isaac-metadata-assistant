@@ -15,7 +15,8 @@
     "test:e2e:report": "playwright show-report",
     "test:e2e:install": "playwright install --with-deps chromium",
     "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit",
-    "test:e2e:mutation": "playwright test --config=playwright.mutation.config.ts"
+    "test:e2e:mutation": "playwright test --config=playwright.mutation.config.ts",
+    "bench:runs": "playwright test --config=playwright.bench.config.ts --reporter=list"
   },
   "dependencies": {
     "lucide-react": "^0.454.0",
