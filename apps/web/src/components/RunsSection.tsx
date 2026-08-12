@@ -576,6 +576,30 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   const focused = focusRunId !== null && focusRunId !== '';
   const loaded = list.status === 'data' ? list.loaded : null;
 
+  /*
+   * THE CONTROLS SURVIVE THEIR OWN REQUEST, and this ref is the whole reason.
+   *
+   * The controls row was gated on `loaded !== null`, and a criteria change sets the
+   * list to `loading` — so typing in the search box made the search box DISAPPEAR
+   * ~300 ms later and come back when the response landed, taking the caret with it.
+   * A scientist typing a second term mid-search would find the field gone; the
+   * keystrokes would go nowhere.
+   *
+   * It was invisible to every test because no test typed while a request was in
+   * flight, and invisible in local development because the stub answers instantly.
+   * It surfaced only when a test deliberately HELD a response open to exercise the
+   * out-of-order guard — the race the test was written for was fine; the box was not.
+   *
+   * So the controls read the LAST loaded snapshot rather than the current one. They
+   * are a stable frame around a list that is allowed to blank: `runsShown` below
+   * still uses `loaded`, so the list itself shows its loading state honestly. Only
+   * the furniture persists, and only after a first successful read — before that
+   * there is genuinely nothing to search.
+   */
+  const lastLoadedRef = useRef<typeof loaded>(null);
+  if (loaded !== null) lastLoadedRef.current = loaded;
+  const controlsFrame = loaded ?? lastLoadedRef.current;
+
   return (
     <>
       {/*
@@ -638,7 +662,7 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
         filtering nothing is not a feature, and the empty state below says the one
         thing there is to say.
       */}
-      {!focused && loaded !== null && (loaded.total > 0 || filtering) && (
+      {!focused && controlsFrame !== null && (controlsFrame.total > 0 || filtering) && (
         <div className="runs-controls">
           <div className="runs-control">
             <label className="runs-control-label" htmlFor={searchId}>

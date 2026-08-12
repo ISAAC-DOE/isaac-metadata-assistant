@@ -504,6 +504,123 @@ describe('search', () => {
     expect(renderedIds()[0]).toBe('RUN110');
   });
 
+  it('keeps the search box mounted while its own request is in flight', async () => {
+    /*
+     * A REAL DEFECT, FOUND BY A TEST WRITTEN FOR SOMETHING ELSE.
+     *
+     * The controls row was gated on the CURRENT read having landed, and a criteria
+     * change sets the list to `loading` — so ~300 ms after a scientist stopped
+     * typing, the field they had just typed into unmounted, and came back only when
+     * the response arrived. A second search term entered in that window went
+     * nowhere, and the caret was lost with the element.
+     *
+     * Nothing caught it: every other test in this file answers instantly, so the
+     * gap between "request sent" and "response rendered" was never open long enough
+     * to look at. It appeared only when a test held a response deliberately.
+     *
+     * The list is still allowed to blank — that is honest, the runs really are
+     * unknown mid-read. Only the furniture persists.
+     */
+    const all = Array.from({ length: 30 }, (_, i) => mkRun(i + 1));
+    let release: (() => void) | null = null;
+    stubBackend((q) => {
+      const body = serveRuns(all, q);
+      if ((q.q ?? '') === '') return body;
+      return new Promise((resolve) => {
+        release = () => resolve(body);
+      });
+    });
+
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(30));
+
+    const box = screen.getByLabelText('Search runs');
+    await act(async () => {
+      fireEvent.change(box, { target: { value: 'Run 3' } });
+    });
+    await waitFor(() => expect(release).not.toBeNull());
+
+    // MID-FLIGHT: the response is still held open, and the box must still be here.
+    expect(screen.queryByLabelText('Search runs')).not.toBeNull();
+    expect(screen.getByLabelText('Search runs')).toBe(box);
+    expect((box as HTMLInputElement).value).toBe('Run 3');
+
+    await act(async () => {
+      release!();
+      await Promise.resolve();
+    });
+    await flush();
+    expect(screen.queryByLabelText('Search runs')).not.toBeNull();
+  });
+
+  it('discards an in-flight Load More page when the criteria change under it', async () => {
+    /*
+     * THE GENERATION GUARD, WHICH HAD NO TEST AND WAS THEREFORE DELETABLE.
+     *
+     * An independent mutation run removed both `generation !== generationRef.current`
+     * checks and the whole suite stayed green: 91 of 91.
+     *
+     * THE FIRST ATTEMPT AT THIS TEST RACED TWO SEARCHES AND DID NOT KILL THE MUTANT,
+     * which is worth recording because it says exactly what the guard is FOR. The
+     * first-page effect has a second, independent defence: its cleanup sets `alive`
+     * to false when the effect re-runs, so a superseded first-page response is
+     * already discarded without consulting `generation` at all. Racing two searches
+     * therefore proves nothing about this guard.
+     *
+     * LOAD MORE IS WHERE IT IS THE ONLY DEFENCE. It is not an effect, it has no
+     * cleanup and no `alive` flag — a `generation` comparison is all that stands
+     * between a page requested under the old criteria and the list rendered under
+     * the new ones. Without it the stale page APPENDS: runs that do not match the
+     * active search are spliced onto the end of the filtered list, `received` is
+     * advanced past them, and every subsequent offset is wrong. The counts stay
+     * self-consistent throughout, so nothing on screen looks broken.
+     */
+    const all = Array.from({ length: 120 }, (_, i) => mkRun(i + 1));
+    let releaseMore: (() => void) | null = null;
+    const calls = stubBackend((q) => {
+      const body = serveRuns(all, q);
+      // Hold ONLY the unfiltered second page — the one Load More asks for.
+      if ((q.q ?? '') === '' && q.offset > 0) {
+        return new Promise((resolve) => {
+          releaseMore = () => resolve(body);
+        });
+      }
+      return body;
+    });
+
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(50));
+
+    // Load More leaves, and is held open.
+    await act(async () => {
+      fireEvent.click(loadMoreButton()!);
+    });
+    await waitFor(() => expect(releaseMore).not.toBeNull());
+    const beforeSearch = calls.length;
+
+    // The criteria move on while that page is still in flight.
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Search runs'), { target: { value: 'RUN11' } });
+    });
+    await waitFor(() => expect(calls.length).toBe(beforeSearch + 1));
+    await waitFor(() => expect(renderedIds()).toHaveLength(10));
+
+    // NOW the stale page lands.
+    await act(async () => {
+      releaseMore!();
+      await Promise.resolve();
+    });
+    await flush();
+
+    // "RUN11" matches RUN110..RUN119 — exactly ten, and the stale page carried
+    // fifty runs that match nothing the reader asked for.
+    expect(renderedIds()).toHaveLength(10);
+    expect(renderedIds()[0]).toBe('RUN110');
+    expect(countText()).toContain('10');
+  });
+
   it('says what it searches, in a real label rather than a placeholder', async () => {
     const all = Array.from({ length: 10 }, (_, i) => mkRun(i + 1));
     stubBackend((q) => serveRuns(all, q));
@@ -769,6 +886,25 @@ describe('Focus Run', () => {
       expect(header).toHaveAttribute('aria-expanded', 'false');
       const focusButton = within(card).getByRole('button', { name: /^Focus run/ });
       expect(focusButton.tagName).toBe('BUTTON');
+      /*
+       * A SIBLING OF THE HEADER, NOT A CHILD OF IT — asserted because a mutation
+       * run nested it inside and the whole suite stayed green (91 of 91). jsdom
+       * renders a button inside a button happily and React only logs a
+       * `validateDOMNesting` warning, which nothing here was reading.
+       *
+       * The a11y e2e sweep cannot cover this either, and the reason is structural
+       * rather than a thoroughness problem: its record surface has no runs, so a
+       * Focus control never renders there at all. That makes this the only layer
+       * where the invariant can be pinned.
+       *
+       * It matters because the HTML parser does not nest interactive content: a
+       * real browser would close the outer button before the inner one, which puts
+       * the Focus control OUTSIDE the accordion in the accessibility tree while it
+       * still looks nested on screen — and the collapsed-card guarantee this very
+       * test asserts would quietly stop meaning what it says.
+       */
+      expect(header.contains(focusButton)).toBe(false);
+      expect(focusButton.closest('button')).toBe(focusButton);
       // The accessible name names WHICH run, so fifty of these are fifty
       // distinguishable controls rather than fifty called "Focus".
       expect(focusButton.getAttribute('aria-label')).toContain(
