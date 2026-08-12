@@ -99,8 +99,19 @@ APPROVAL_EVIDENCE_DOCUMENT = "docs/evidence/2026-08-05-q19-q20-authorization.md"
 Q19_AGGREGATE_DATASTORE_VERIFICATION_APPROVED = True
 
 #: Q20: may JSON Schema ``format`` enforcement be armed in the official
-#: validator? NO ANSWER WAS RELAYED. The two questions were explicitly not
-#: bundled, so Q19's approval says nothing about this one.
+#: validator? **ANSWERED 2026-08-12, and the answer splits in two — which is why
+#: this flag stays ``False`` even though the question is closed.**
+#:
+#: PERMITTED: ``format`` enforcement in SHADOW MODE — read-only, aggregates only,
+#: non-gating, and OUTSIDE the truth plane. NOT AUTHORIZED: arming it in the
+#: official validator, which is what this flag would represent.
+#:
+#: So "unanswered" and "answered no" produce the same flag value and are not the
+#: same state, and the prose is what carries the difference. The earlier note here
+#: said "NO ANSWER WAS RELAYED"; that is now false and is corrected rather than
+#: deleted, because the same sentence was also being SERVED — see the entry in
+#: :data:`NOT_AUTHORIZED`, which told any reader of the authorization record that
+#: a decided question was still open.
 #:
 #: **DESCRIPTIVE, NOT LOAD-BEARING — and the asymmetry with Q19 above is the
 #: whole reason this note exists.** Nothing reads this flag except
@@ -212,8 +223,10 @@ NOT_AUTHORIZED: tuple[str, ...] = (
     "vocabulary_term_count. Gate G3 is still open.",
     "Caller-parameterized aggregation, cross-tabulation, or any histogram cell "
     "below the disclosure floor (baseline matrix §4.3).",
-    "Arming JSON Schema 'format' enforcement in the official validator. That is "
-    "Q20, it was not bundled with Q19, and no answer has been relayed.",
+    "Arming JSON Schema 'format' enforcement in the official validator. Q20 was "
+    "answered on 2026-08-12 and the answer was NO for this: shadow-mode, "
+    "read-only, aggregate-only, non-gating enforcement OUTSIDE the truth plane "
+    "is permitted; arming it in the official validator is not.",
     "Phase 37 as a feature phase: portal integration, persistence, API keys, "
     "identity/role enforcement, or an external model provider.",
 )

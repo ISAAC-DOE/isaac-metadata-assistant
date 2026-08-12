@@ -1,6 +1,49 @@
 # Migration approval packet — `0002_runs`
 
-> ## STATUS: **APPROVED BY KRISH 2026-08-11. AWAITING OPERATOR APPLICATION. Nothing has been applied to any DEPLOYED database.**
+> ## STATUS: **APPLIED TO THE HOSTED DATABASE BY DEAN, 2026-08-12 00:30 UTC.**
+>
+> Evidence, with every qualification attached:
+> [`evidence/hosted-0002-verification-2026-08-12.md`](evidence/hosted-0002-verification-2026-08-12.md).
+>
+> **This packet is PRESERVED, not retired.** It is the record of what was approved, on what evidence,
+> and with what limits — and §11 is still the live rollback procedure. Nothing below is deleted
+> because the migration has been applied.
+>
+> **The two digests Dean reported for the SQL he applied were recomputed against the committed files
+> and BOTH MATCH this packet's table** (`shasum -a 256`, 2026-08-12). So the bytes applied are the
+> bytes approved. That check is the reason the table at the top of this packet exists, and it is
+> exactly the check that would have failed silently before 2026-08-10, when the forward digest was
+> stale.
+>
+> **What Dean reported and what he did not.** Reported: `0001_experiments` already present;
+> `0002_runs` applied **alone**; `isaac_schema_migrations` now holds both; `isaac_runs` with PK, FK,
+> five CHECK constraints and the expected index **read back from the hosted server**; no `ON DELETE`
+> clause and no `CASCADE`; row count **0** at deployed build `a524708`; a second invocation an
+> idempotent no-op; app health OK / `postgres` / `durable`; no errors; no rollback required.
+> **NOT reported, and named as gaps rather than assumed:** postcheck 1 (`records` count before/after
+> — *"the one that matters"*), postcheck 2 (`isaac_experiments` count before/after), the
+> `isaac_schema_migrations` rows quoted verbatim, and the hosted engine's build string. The migration
+> issues zero DML and names `records` in no statement, so there is no mechanism by which those counts
+> could move — but **"no mechanism exists" is not the same as "it was measured", and this packet must
+> not be cited for the second.**
+>
+> **This is OPERATOR TESTIMONY, not a captured artifact.** No transcript is committed here; no agent
+> connected to the hosted database; no kubeconfig, port-forward or Secret was requested or used. The
+> rule at `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md:48-52` is untouched, and
+> Dean's applying this migration transfers no infrastructure authority to any agent. **`0003` and
+> later still need their own packets and their own approvals** — two applied migrations are not a
+> standing permission for a third.
+>
+> ### The superseded status line, kept visible
+>
+> > **STATUS: APPROVED BY KRISH 2026-08-11. AWAITING OPERATOR APPLICATION. Nothing has been applied
+> > to any DEPLOYED database.**
+>
+> Everything from here to the end of this block was written under that status and is preserved
+> unchanged. The sentences in the present tense about the migration being unapplied — including *"is
+> unapplied on every *deployed* environment"* in the paragraph beginning "The claim that survives" —
+> are **now false**, and are kept rather than edited because the reason they were written still
+> governs any future in-flight migration.
 >
 > **The previous status line read "AWAITING APPROVAL", and it is superseded rather than deleted.**
 > Krish approved this migration for hosted application on 2026-08-11, conditional on the exact
@@ -282,8 +325,12 @@ and diffs `information_schema.columns` across all three.
    (`test_0002_is_inert_for_this_build_no_statement_names_isaac_runs`).
 2. *Unapplied, behaviourally against a real engine* — CI applies **0001 only**, then creates, reads
    and lists an experiment through the real HTTP surface and asserts `/api/health` still reports
-   `durable: true`. **This is the hosted deployment's exact state today**, and the state of every
-   deployment between merging this migration and your applying it.
+   `durable: true`. ~~**This is the hosted deployment's exact state today**, and the state of every
+   deployment between merging this migration and your applying it.~~ **SUPERSEDED 2026-08-12: the
+   hosted database now has BOTH migrations applied** (§12C), so this describes the state of the
+   hosted deployment between merging this migration and 2026-08-12 00:30 UTC, not its state now. The
+   sentence is kept because it is what §12A(2) was cited as witnessing, and because the CI arm it
+   describes is unchanged and still runs.
 3. *Applied, behaviourally against a real engine* — after the full apply, CI runs the whole durable
    repository exercise (create, read-back, list, pod-restart hydration, tutorial refusal, the
    compare-and-swap cases, the wedge recovery) and then asserts **`isaac_runs` is still empty**.
@@ -708,6 +755,49 @@ remains the operator's job and is not pre-answered by this.
   test and no constraint will catch a future writer that sets one inconsistently.
 - **Nothing here is a schema for run *revisions*, assets, or submissions.** Contract §8 D7's other
   five tables are deferred and will each need their own migration and their own packet.
+
+### 12C. HOSTED APPLICATION — 2026-08-12, and what it changes in §12B
+
+**Applied by Dean at 2026-08-12 00:30 UTC.** Full record, including every gap:
+[`evidence/hosted-0002-verification-2026-08-12.md`](evidence/hosted-0002-verification-2026-08-12.md).
+§12A, §12A.2, §12A.3 and §12A.4 are unaltered.
+
+| Item | Status after 2026-08-12 |
+|---|---|
+| **forward / rollback digests** | **RE-MEASURED HERE AND MATCHING.** `shasum -a 256` over both committed files equals both digests Dean reported and both digests in this packet's table. This is the one claim on this subsection that is *not* testimony. |
+| target | namespace `metadata-assistant`, deployment `deploy/metadata-assistant`, database `metadata_assistant`, CNPG primary `isaac-psql-2` |
+| §9's discriminating check | passed — `0002_runs` applied **alone**, not `0001_experiments, 0002_runs` |
+| §10 postcheck 3 (`\d isaac_runs`) and 4 (the index) | **satisfied, read back from the hosted server** — PK, FK, five CHECK constraints and the expected index; no `ON DELETE` clause, no `CASCADE` |
+| §10 postcheck 5 (bookkeeping) | both versions present in `isaac_schema_migrations` |
+| §10 postcheck 6 (`count(*)`) | **0**, at deployed build `a524708` |
+| §10 postcheck 7 (idempotence) | second invocation was a no-op |
+| §10 postcheck 8 (application unaffected) | health OK / `postgres` / `durable`; no errors; no rollback required |
+| **§10 postchecks 1 and 2** | **NOT PERFORMED, or at least not reported.** The `records` and `isaac_experiments` before/after counts were requested by `docs/dean-handoff-2026-08-11.md` §3 and are absent from the report. |
+
+**§12B is NARROWED, not discharged, and the distinction is the whole point of having written it.**
+
+- The bullet *"CI proving this against `postgres:18` is NOT the same as proving it against the hosted
+  database"* is **answered in the direction it was worried about**: the apply, the constraint shape
+  and the idempotence now have hosted observations, not only CI ones. It is answered **by testimony**,
+  not by an artifact in this repository.
+- The bullet *"CI's `records` is a stand-in, not the corpus"* is **NOT answered**. It is in fact the
+  one thing this application could have measured and did not — see the gap row above. The 30
+  production-derived rows remain unread by any agent, and now also **uncounted across this
+  migration**.
+- *"Version parity: the hosted engine's is not measured"* — **still unmeasured.** No build string was
+  reported.
+- *"The locking analysis in §5 is reasoned, not measured"* — **still unmeasured.** No `pg_locks`
+  observation exists, before, during or after.
+- *"`isaac_experiments` is not empty on the hosted database, and its contents are unknown here"* —
+  **still unknown**, and now also un-counted either side of the apply.
+- *"The `ordinal`/`rev`/`generation` columns are unenforced projections"* — unchanged, and it becomes
+  live the moment a writer exists.
+- *"Nothing here is a schema for run revisions, assets, or submissions"* — unchanged. Five tables from
+  contract §8 D7 remain uncreated, and a test still pins their absence.
+
+**§11 is still live.** The rollback procedure is not obsolete because the migration succeeded; it is
+now the *only* way back. Its "what rolling back costs" answer is still **nothing**, because the table
+is empty and no code writes it — and that stops being true the moment the run write path lands.
 
 ## 13. What this packet does not cover
 

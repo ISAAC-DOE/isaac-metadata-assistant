@@ -4,14 +4,40 @@
 ISAAC receives, what it may trust, and what must be decided before any user, group, or attribution
 feature is built. Update it in the same PR as any slice that changes a row.
 
-> ## Verdict: **No identity reaches the application. The trust boundary is unproven and lives outside this repository.**
+> ## Verdict, AMENDED 2026-08-12 — read both halves.
 >
-> Building persistent users, groups, memberships, roles, or per-actor attribution on top of the
-> current state is **not authorized**, and would be unsafe rather than merely premature. The reasons
-> are enumerated in §1 and §2; the exact questions that would unblock it are in §7.
+> **The superseded verdict, kept visible rather than replaced:**
+>
+> > **No identity reaches the application. The trust boundary is unproven and lives outside this
+> > repository.** Building persistent users, groups, memberships, roles, or per-actor attribution on
+> > top of the current state is **not authorized**, and would be unsafe rather than merely premature.
+>
+> **The first sentence is still true of the code**: ISAAC consumes no identity header (§1.1, §1.2),
+> and that has not changed. **The second is now partly false.** On 2026-08-12 Dean answered the
+> questions in §7 that had made the boundary unproven, and **authorized server-stamped actor
+> attribution** — narrowly. The amended verdict is:
+>
+> > **The canonical principal is the Authentik username, server-stamped, and ONLY for a request whose
+> > identity was established through the trusted authentication boundary. The bypass is REAL and Dean
+> > RECONFIRMED it: the Service is a plain ClusterIP with no NetworkPolicy, so any in-cluster pod can
+> > reach the app directly and forge forwarded identity headers. THE PRESENCE OF
+> > `X-authentik-username` ALONE DOES NOT PROVE AUTHENTICATED EDGE TRAVERSAL.**
+>
+> So what is unblocked is the *decision layer* — which claim, stamped where — and what is **not**
+> unblocked is the *trust layer*. §5.2 already named that split and required ISAAC to answer the
+> second on its own evidence; Dean's answer does not answer it, it **names the pattern for answering
+> it**: a trusted-edge mechanism for browser/UI traffic and independent Bearer validation for
+> API/service traffic, which is the existing portal precedent. Until ISAAC implements a boundary that
+> distinguishes the two, **nothing may be stamped.**
+>
+> **All of §7's 2026-08-12 answers are OPERATOR TESTIMONY about infrastructure configuration** — a
+> statement by the infrastructure owner, relayed by the project owner. They are **not** observations
+> made by this repository, and no artifact backing them is committed here. That is a weaker kind of
+> evidence than the §6A probe run, which at least happened; and §6A itself is testimony too (§6A's
+> own banner). Do not let an answer being *authoritative* be mistaken for its being *witnessed*.
 
-Authority, in precedence order: Dean's committed guide; the canonical repository at `d7010f9`;
-observed runtime evidence; the vendored ISAAC v1.05 schema; tests.
+Authority, in precedence order: Dean's committed guide and his relayed answers; the canonical
+repository at `d7010f9`; observed runtime evidence; the vendored ISAAC v1.05 schema; tests.
 
 ---
 
@@ -252,8 +278,33 @@ annotation — **neither of which is in this repository**. The names are therefo
   therefore bypasses Authentik entirely.** The app-level bearer key that would have caught that is
   unset in production (§1.4).
 
+> ### CONFIRMED BY DEAN, 2026-08-12. This was an inference; it is now the infrastructure owner's own statement.
+>
+> **The Service is a plain ClusterIP with no NetworkPolicy. Any in-cluster pod can reach the
+> application directly and can forge forwarded identity headers.** That is **Q4, answered — and
+> answered in the unsafe direction.** It was the question this whole document was built around, and
+> the answer is not the reassuring one.
+>
+> **The consequence, stated as the rule it is:**
+>
+> > **The presence of `X-authentik-username` — or of any other edge-injected header — does NOT prove
+> > that the request traversed the authenticated edge.** A header that arrives is a header that
+> > *someone* set. Any surface that treats an arriving identity header as proof of authentication is
+> > wrong, and this document must be read as saying so.
+>
+> Dean named the pattern that resolves it, and it is the existing portal precedent, not a new
+> invention: **a trusted-edge mechanism for browser/UI traffic, and independent Bearer validation for
+> API/service traffic.** Two paths, two mechanisms. ISAAC has neither today.
+>
+> This is **operator testimony about infrastructure configuration**, not an observation by this
+> repository — no manifest was read, no in-cluster call was attempted, and nothing here should be
+> cited as a measurement. It is nevertheless the strongest available authority on the question, since
+> the manifests are Dean's and are not in this working tree.
+
 > **The safety of forwarded identity depends entirely on ingress configuration this repository cannot
-> see and does not control.** That is the single most important fact in this document.
+> see and does not control.** That is the single most important fact in this document. **Dean's
+> 2026-08-12 answer does not soften it — it sharpens it**, by confirming that the ingress can be
+> bypassed altogether from inside the cluster, which is the case no ingress configuration can fix.
 
 A bounded corollary worth recording without alarm: the same in-cluster bypass applies to
 `GET /api/runtime/database/recon`. Its exposure is limited by design — the response is projected onto
@@ -590,6 +641,41 @@ string. Append was specifically looked for and **did not occur** on this path.
 > claims to exclude. The probe's own limitations said so: `false` means "not found in either compared
 > form", **never "provably stripped"**.
 
+#### RESOLVED 2026-08-12 — by Dean's statement of the configuration, NOT by a new observation
+
+The paragraph immediately above records an ambiguity the probe could not settle. **Dean settled it,
+and the answer is the safe one for these five:**
+
+> **The `/krish` edge injects/overwrites exactly these five headers:** `X-authentik-username`,
+> `X-authentik-groups`, `X-authentik-email`, `X-authentik-name`, `X-authentik-uid`. **Only those are
+> overwritten.**
+
+*Overwrite* is precisely the disjunct §6A.1 could not distinguish from *transform-and-pass-through*.
+So on the edge path the client's copy of any of those five does not influence the value the
+application sees.
+
+**Four qualifications, none of which may be dropped when this paragraph is quoted:**
+
+1. **This is OPERATOR TESTIMONY ABOUT INFRASTRUCTURE CONFIGURATION, not an observation by this
+   repository.** No manifest, provider config, or `auth-response-headers` annotation was read here;
+   no request was made. It is a statement by the person who owns the configuration — the best
+   available authority, and still not a measurement. §6A's own banner applies with equal force: this
+   repository has twice had to retract a claim stated more firmly than its evidence.
+2. **It is a statement about the EDGE PATH ONLY.** §2 records Dean reconfirming, in the same
+   response, that the Service is a plain ClusterIP with no NetworkPolicy — so a caller that reaches
+   the pod directly never meets the edge, and nothing is overwritten for them. **"The edge
+   overwrites it" and "the value ISAAC receives is trustworthy" are different claims**, and only the
+   first is answered.
+3. **Configuration can change.** A point-in-time statement about a manifest ISAAC cannot see has the
+   same decay property §8 already recorded for the probe: Dean can change the provider's header set
+   with no signal to this repository.
+4. **It says nothing about headers outside those five** — see Q1, which remains partially open for
+   exactly that reason.
+
+**What it licenses:** removing the *first* of §6A.1's two non-replacement scenarios from ISAAC's
+design reasoning about the edge path. **What it does not license:** treating any arriving header as
+proof of authentication. That is §2, and it went the other way.
+
 **A point worth stating because the intuition runs the other way: `groups` is the STRONGEST case here,
 not the weakest.** `list` means one value containing `,` or `|`, and segment matching compared every
 segment — so the coalescing attack is *directly* excluded for `groups` in a way it is not for the four
@@ -630,6 +716,17 @@ is independently re-verified**:
 > the caller is an institutional user. `X-Isaac-Edge` is disqualified from the *one job its name
 > implies* — it cannot witness that a request came through the edge, because any client can set it.
 
+> **CONFIRMED BY DEAN, 2026-08-12 — this is now his position, not only ISAAC's inference. Q18 is
+> ANSWERED.** His enumeration of what the edge injects/overwrites contains exactly five headers, and
+> **`X-authentik-entitlements` and `X-Isaac-Edge` are not among them**; he stated directly that both
+> **remain UNTRUSTED**. So the disqualification above is no longer ISAAC unilaterally taking the
+> conservative reading of one probe run — it is the infrastructure owner's own answer, and it agrees.
+>
+> Q18 asked whether the infrastructure *will* strip client-supplied copies of these two. The answer
+> is that it will not, and that ISAAC should treat them as permanently untrusted. **The row is
+> closed in the "permanently untrusted" direction; nothing is owed on it.** (Operator testimony about
+> configuration, per §6A.1's four qualifications.)
+
 **This is a constraint on future implementation, not a live vulnerability.** ISAAC consumes none of the
 seven (`consumed_by_isaac: false` throughout, and the backend still reads only `authorization`,
 `If-None-Match`, `If-Match`, `X-Filename` — §1.2). Nothing can be spoofed into a decision that nothing
@@ -644,12 +741,37 @@ opaque claim was known to reach the pod at all. So the choice is now live:
 - **Username** — the required **compatibility key**, because every existing upstream ownership, ACL and
   audit row is keyed to it (§5.1). That has not changed and is not a preference.
 
-**Neither is confirmed.** UID permanence and username non-reassignability are both institutional
+~~**Neither is confirmed.** UID permanence and username non-reassignability are both institutional
 lifecycle facts that no amount of observation can establish — presence in a header says nothing about
 what happens at rename, departure, deactivation or rehire. The likely end state keeps **both**: UID as
 the canonical internal key, username as the compatibility alias. **Adopt neither as authoritative until
 Q5 and the new Q17 are answered**, and if UID is adopted it must arrive as a migration with a mapping
-and an overlap rule, never as a field added because it looks cleaner (§9.1).
+and an overlap rule, never as a field added because it looks cleaner (§9.1).~~
+
+> ### DECIDED BY DEAN, 2026-08-12. The "likely end state" above is NOT the one chosen.
+>
+> **Usernames are not reassigned. The username is canonical.** That is **Q5, answered** — the
+> institutional lifecycle fact this section correctly said no observation could establish, supplied by
+> the person who can state it.
+>
+> **`Q17` (UID permanence) should NOT be reopened absent contradictory evidence, and no UID↔username
+> mapping infrastructure should be introduced.** So the paragraph above is superseded on both points:
+> the end state is **one** key, not two, and the mapping table / backfill / overlap rule it
+> anticipated is explicitly not wanted.
+>
+> **`X-authentik-uid` is still injected by the edge** (it is one of the five in §6A.1) — Dean did not
+> withdraw the header, he declined to build ISAAC's identity on it. Availability and adoption are
+> different questions and this row answers only the second.
+>
+> **The standing of this answer.** Operator testimony, per §6A.1's four qualifications. But note the
+> asymmetry: unlike the header-overwrite claim, *"usernames are not reassigned"* is an
+> **institutional policy statement**, which is the only kind of authority that could ever have
+> settled it. There is no observation that would have been better evidence.
+>
+> **What this does NOT change.** §9.1's *reason* for preferring the username — compatibility with
+> every existing upstream ownership, ACL and audit row (§5.1) — is unaffected and still the load-bearing
+> argument. And §9's disqualification of **email**, and §9.1's permanent disqualification of **ORCID**,
+> are untouched: Dean named the username, not "any identifier the user recognises".
 
 ### 6A.4 Groups
 
@@ -671,6 +793,28 @@ broad `researcher`-style access group into a shared experiment group** — that 
 experiment with every researcher. Upstream itself never uses groups for sharing; it uses per-resource
 ACL rows.
 
+> ### DEAN'S ANSWER, 2026-08-12 — Q6 and Q7 both closed, and Q7's answer is a SHORT list
+>
+> - **The relevant ISAAC groups at the authenticated edge are `admin` and `researcher`.** That is
+>   **Q7, answered**, and it confirms §5.3's finding from upstream source rather than extending it.
+>   The vocabulary ISAAC should recognise is those two and no more.
+> - **`bl152-users` and `bl152-staff` are NOT ISAAC roles.** Recorded explicitly because they are the
+>   kind of name that looks authoritative in a group list and would be silently adopted by a
+>   later slice. They are not to be mapped to anything.
+> - **`X-authentik-groups` is authoritative ONLY for a request known to have traversed the
+>   authenticated edge.** That is **Q6, answered**, and the qualifier is the whole answer — read it
+>   against §2, where Dean reconfirmed that a request can reach the app *without* traversing the edge.
+>   So the header is authoritative on a condition ISAAC **cannot currently establish**. Until ISAAC
+>   can distinguish an edge-traversed request from a direct one, the practical status of
+>   `X-authentik-groups` is unchanged: not usable for an authorization decision.
+>
+> **The multiplicity disclosure in the block above is unaffected**, and neither is §5.3's warning:
+> `admin`/`researcher` are deployment-access buckets, and keying collaboration to `researcher` would
+> share every experiment with every researcher. Dean naming them as "the relevant ISAAC groups" is an
+> answer about *which names exist*, not a licence to use them as a sharing primitive.
+>
+> Operator testimony, per §6A.1's four qualifications.
+
 ---
 
 ## 7. Decisions only Dean can make
@@ -680,28 +824,49 @@ working tree** and is owned by Dean (`developer-guide-k8s.md:87-89`; `readiness-
 `infrastructure-ownership.md:21-23`). This repository tracks no YAML except three GitHub Actions
 workflows. Dean is therefore the only person who can answer Q1–Q4.
 
+> ## DEAN ANSWERED, 2026-08-12. Read this before the table.
+>
+> A response was received on **2026-08-12** and is reflected row by row below. **Everything in it is
+> OPERATOR TESTIMONY ABOUT INFRASTRUCTURE CONFIGURATION**, relayed by the project owner — not an
+> observation by this repository, and no artifact backing it is committed here. §6A.1's four
+> qualifications apply to every row marked `ANSWERED 2026-08-12`.
+>
+> **The one answer that governs all the others is Q4, and it went the unsafe way**: the Service is a
+> plain ClusterIP with no NetworkPolicy, so the app is reachable in-cluster without traversing
+> Authentik, and forwarded identity headers can be forged. Every "authoritative" in the rows below is
+> therefore conditional on a trusted boundary **ISAAC has not built**. Do not read a closed row as a
+> green light on its own.
+>
+> **Rows Dean's 2026-08-12 response did NOT address, and which remain exactly as open as they were:**
+> **Q11** (columns of `record_history` / `api_requests` / `portal_access_log`), **Q13** (a
+> metadata-only `information_schema.columns` query), **Q14 / G6** (personal identifiers in the 30
+> seeded records), **Q16** (`record_acl` missing from the guide's 8-table list), and — outside this
+> table — gates **G2** (per-record display) and **G3** (the five withdrawn aggregates). Silence is
+> not assent; these were asked and are unanswered.
+
 | # | Question |
 |---|---|
-| **Q1** | **PARTIALLY ANSWERED — deliberately not struck through.** The question asks for the *exact, complete* list of header names the outpost injects. §6A (hosted `d521dd7`) establishes that `username`, `uid`, `email`, `name` and `groups` arrive with edge-supplied values — but the probe tested a **fixed seven-name allowlist**, so what is answered is "which of these seven arrive", never "the complete list". **A header arriving under a name not on that list remains entirely unknown**, and no observation this repository can make will close that gap. Ask Dean only if the complete set matters for a specific design decision. |
+| **Q1** | **ANSWERED 2026-08-12 for the injected set; the residual gap is narrower than it was.** Dean: the `/krish` edge **injects/overwrites exactly these five** — `X-authentik-username`, `X-authentik-groups`, `X-authentik-email`, `X-authentik-name`, `X-authentik-uid` — and **only those are overwritten**. That is the complete-list statement the probe structurally could not produce, since it tested a **fixed seven-name allowlist** and could only answer "which of these seven arrive". *Superseded reading, kept visible:* ~~"A header arriving under a name not on that list remains entirely unknown, and no observation this repository can make will close that gap."~~ The gap is now closed **for what the edge injects**. It is **not** closed for what merely *passes through* — a client-set header under any other name still reaches the app untouched, which is precisely the §6A.2 finding for `X-authentik-entitlements` and `X-Isaac-Edge`. |
 | ~~Q2~~ | ~~Which are listed in the ingress `auth-response-headers` annotation and therefore actually reach the app~~ **ANSWERED empirically** — observation at the pod supersedes the annotation question for these five. The annotation's contents remain unread, but the outcome it controls has been measured. |
 | ~~Q3~~ | ~~Does the ingress strip or overwrite client-supplied copies?~~ **ANSWERED for the tested path — the edge supplied the value and did NOT append** (§6A.1). Every core claim arrived as a single value that was not the planted canary, and `duplicate` was looked for and did not occur. **It does not follow that the client's copy was removed:** a copy joined on a separator outside `{",", "|"}`, or passed through truncated/re-encoded/case-folded/quoted, yields the same signature. **Scope: one request, one path, one moment**, and it says nothing about Q4. |
-| Q4 | Can any workload in the cluster reach the `metadata-assistant` Service directly, bypassing the ingress and therefore Authentik? |
-| Q5 | **Sharpened 2026-08-01.** ISAAC's provisional principal is the **Authentik username**, because all existing portal ownership/ACL/audit rows are keyed to it (§5.1, §9.1). The question is therefore no longer "which claim?" but: **is an Authentik/SLAC username non-reassignable across rename, departure, and rehire?** If it is not, what mapping should ISAAC hold, and does any `sub`-style opaque claim reach the pod at all? |
-| Q6 | Are forwarded group claims authoritative for in-app authorization, or descriptive only? |
-| Q7 | What is the complete set of Authentik groups ISAAC should recognise, and how do they map to app roles? **Context (§5.3):** `admin`/`researcher` are coarse deployment-access groups; upstream uses per-resource ACL rows, not groups, for sharing. |
-| Q8 | On session expiry, what exactly does a browser XHR to `/krish/api/*` receive — a 302, a 401, or an HTML login page — and should the app treat all three identically? |
-| Q9 | Is there a logout URL the app may link to, and should it be surfaced at all? |
-| Q10 | Should this app server-stamp `attribution.uploaded_by` from the forwarded identity per the schema's own description, and from which claim? |
+| **Q4** | ~~Can any workload in the cluster reach the `metadata-assistant` Service directly, bypassing the ingress and therefore Authentik?~~ **ANSWERED 2026-08-12 — YES, AND THIS IS THE MOST CONSEQUENTIAL ANSWER IN THE SET.** Dean **reconfirmed** the bypass: the Service is a **plain ClusterIP with no NetworkPolicy**, so any in-cluster pod can reach the app directly and **can forge forwarded identity headers**. Therefore **the presence of `X-authentik-username` alone does NOT prove authenticated edge traversal.** The row is closed, and closed against us. Dean referenced the existing portal precedent as the resolution pattern: **trusted-edge mechanism for browser/UI traffic, independent Bearer validation for API/service traffic** — two paths, two mechanisms, neither of which ISAAC has today. §2 records this at length. |
+| ~~Q5~~ | ~~**Sharpened 2026-08-01.** … is an Authentik/SLAC username non-reassignable across rename, departure, and rehire? If it is not, what mapping should ISAAC hold, and does any `sub`-style opaque claim reach the pod at all?~~ **ANSWERED 2026-08-12 — usernames are NOT reassigned, and the username is canonical.** This is an institutional policy statement, which is the only kind of authority that could ever have settled it; §9.1 said so and was right to wait. The sub-question about a mapping is answered by **not wanting one** — see Q17. |
+| **Q6** | ~~Are forwarded group claims authoritative for in-app authorization, or descriptive only?~~ **ANSWERED 2026-08-12, conditionally — and the condition is the answer.** `X-authentik-groups` is authoritative **ONLY for a request known to have traversed the authenticated edge.** Read against Q4: ISAAC **cannot currently establish that condition for any request**. So the header is authoritative on a predicate that does not yet exist in this application, and its practical status is unchanged — not usable for an authorization decision until the trust boundary of Q4 is built. |
+| ~~Q7~~ | ~~What is the complete set of Authentik groups ISAAC should recognise, and how do they map to app roles?~~ **ANSWERED 2026-08-12: `admin` and `researcher`** are the relevant ISAAC groups at the authenticated edge — confirming §5.3's independent finding from upstream source. **`bl152-users` and `bl152-staff` are explicitly NOT ISAAC roles** and must not be mapped to anything. §5.3's warning survives the answer: these are deployment-access buckets, and keying collaboration to `researcher` would share every experiment with every researcher. |
+| ~~Q8~~ | ~~On session expiry, what exactly does a browser XHR to `/krish/api/*` receive — a 302, a 401, or an HTML login page — and should the app treat all three identically?~~ **ANSWERED 2026-08-12:** an expired or unauthenticated `/krish/*` request receives a **302 to Authentik**, and a browser `fetch` **follows it** and lands on an **HTML login response**. So the app never sees a 401 on this path; it sees a successful-looking response whose body is HTML. **That is exactly what `FetchStates.tsx` already handles** (§1.3 — it turns a 401/403 *or an intercepted HTML sign-in page* into a "Sign-In Required" state). The existing behaviour is therefore correct by accident of good defensive design rather than by a decision; nothing needs to change, and this row records **why** it does not. |
+| ~~Q9~~ | ~~Is there a logout URL the app may link to, and should it be surfaced at all?~~ **ANSWERED 2026-08-12: `/outpost.goauthentik.io/sign_out` is a valid logout path.** *Whether ISAAC should surface it* is a product decision Dean did not make and was not asked to; the question's second half is therefore **still open, and it is Krish's, not Dean's**. Note the path is edge-relative, not `/krish`-relative — the same origin as the `/outpost.goauthentik.io/start` redirect observed in §1.6. |
+| **Q10** | ~~Should this app server-stamp `attribution.uploaded_by` from the forwarded identity per the schema's own description, and from which claim?~~ **ANSWERED 2026-08-12 — YES, from the canonical Authentik USERNAME, and CONDITIONALLY.** Dean's answer, in full: server-stamp the canonical Authentik username for `attribution.uploaded_by` — **provided the request's identity was established through the trusted authentication boundary.** **Client-supplied username is never authoritative.** Read the proviso as a hard precondition, not a caveat: per Q4 there is **no such boundary in ISAAC today**, so **the authorization is live and the capability is not.** Nothing may be stamped until the boundary exists. What this *does* settle, permanently, is the identifier and the direction: not email (§9), not ORCID (§9.1), not UID (Q17), and never a client value — which the truth core already enforces fail-closed on the record path (§4, item 1). |
 | Q11 | What are the columns of `record_history`, `api_requests`, and `portal_access_log`, and do any store a user identity? |
 | ~~Q12~~ | ~~Does the ISAAC portal have a users/groups/memberships model in Postgres that this repository has not been told about?~~ **ANSWERED for the SERVICE — No** (2026-08-01, direct audit of the public upstream source; §5.1). The portal's source creates **22** tables across its two databases, none of them a users/accounts/identities/groups/memberships/roles/permissions/teams/organizations table; identity is a bare `TEXT` Authentik username written onto rows; and there is no `/me`, no group endpoint and no membership API among ~60 routes. **So there is no upstream identity *service* to inherit — that is the part that load-bears, and it rests on the API surface, which the source does establish.** *Precision added after review:* Q12 as originally worded asked about **Postgres**, and this evidence enumerates what the portal's **source** creates. Whether the mirrored database also carries a table `database.py` does not create is **unverified** — the same class of guide-vs-code divergence as **Q16**, which proves that class is live in this very schema. Retained struck-through rather than deleted so the resolution stays visible. |
 | Q13 | May the app issue a metadata-only `information_schema.columns` query against those three tables — column names and types, no rows? |
 | **Q14 (G6)** | **Do the 30 seeded records contain real personal identifiers in `data->'attribution'`, and does the G2 visibility decision cover personal data as distinct from scientific content?** |
 | ~~Q15~~ | ~~May the deployment temporarily enable a presence-only identity probe?~~ **MOOT — the probe has been REMOVED** (2026-08-02). It ran once against hosted `d521dd7`, recorded §6A, and was deleted in a reviewed cleanup PR: the route now returns 404 and a test pins that. **The objection this row invited is preserved rather than erased**, because the sequence was real: the probe shipped *active by default* before you answered, which pre-empted a question that asked your permission. It is recorded so the pattern is visible, not repeated. Nothing is owed on this row now except, if you wish, an objection to how it was done. |
 | **Q16** | **`record_acl` is absent from the 8-table list in `postgres-test-db-guide.md:20-22`, yet the portal has created it since 2026-06-30 (upstream `dc5da9c`, PR #169). Does the seeded mirror actually omit it, or is the guide's list incomplete?** (§5) |
-| **Q17** | **Is `X-authentik-uid` permanent and non-reassignable across rename, departure, deactivation and rehire?** Raised 2026-08-02: the UID claim is now known to reach the pod (§6A), so it is a live alternative to the username as ISAAC's canonical internal key. Presence is observable; **lifecycle is not** — no request can reveal what happens to a UID when a person leaves and returns. Pairs with **Q5** (the same question for the username); ISAAC likely needs *both* answers, since the probable design keeps UID as the internal key and username as the compatibility alias. |
-| **Q18** | **Will the infrastructure strip client-supplied `X-authentik-entitlements` and `X-Isaac-Edge`, or should ISAAC treat them as permanently untrusted?** On the tested path the edge supplied neither and the client's own values arrived untouched (§6A.2) — so `X-Isaac-Edge` cannot currently witness that a request traversed the edge, which is the one job its name implies. ISAAC's position is already "permanently disqualified from security decisions"; this asks whether that is also *your* intent, or whether the annotation is meant to cover them and does not. |
+| ~~Q17~~ | ~~**Is `X-authentik-uid` permanent and non-reassignable across rename, departure, deactivation and rehire?** … ISAAC likely needs *both* answers, since the probable design keeps UID as the internal key and username as the compatibility alias.~~ **CLOSED 2026-08-12 — and closed by being declined, which is a different thing from being answered.** Dean did **not** state whether the UID is permanent. He stated that **Q17 should NOT be reopened absent contradictory evidence**, that the **username is canonical**, and that **no UID↔username infrastructure should be introduced.** So the "probable design" this row anticipated — two keys, UID internal, username alias — **is not the design.** There is one key. **Precisely which part remains unknown:** UID lifecycle itself is still an unestablished institutional fact; it has simply stopped being a question ISAAC needs answered, because nothing will be keyed to it. If contradictory evidence ever appears, this row is the record of what to reopen and why. The header itself is still injected by the edge (Q1) — availability was never the issue. |
+| ~~Q18~~ | ~~**Will the infrastructure strip client-supplied `X-authentik-entitlements` and `X-Isaac-Edge`, or should ISAAC treat them as permanently untrusted?**~~ **ANSWERED 2026-08-12: treat them as permanently UNTRUSTED.** Dean's enumeration of the injected/overwritten set contains five headers and **neither of these two**; he stated directly that both remain untrusted. So the infrastructure will not strip client copies, and ISAAC's existing unilateral disqualification (§6A.2) is **confirmed as also his intent** rather than merely being the conservative reading of one probe run. `X-Isaac-Edge` therefore remains permanently unable to witness edge traversal — the one job its name implies. |
 | **Q19** | **May the deployed ISAAC backend read each of the 30 production-derived records through the existing read-only path, clone each record only in memory, apply controlled field removals or schema-invalid mutations, run ISAAC's deterministic workflow, discard every copy, and return only aggregate pass/fail conclusions with no values, identifiers, per-record output, or database writes?** Raised 2026-08-02 for the corpus-validation phase. See the authorization audit recorded with that phase for why this is asked rather than assumed. |
-| **Q25** | **RENUMBERED FROM `Q20` ON 2026-08-11, THE SAME DAY IT WAS RAISED — see the note below this table. The question text is unchanged.** **Does your answer to Q10 extend from `attribution.uploaded_by` to ISAAC's own actor columns — specifically the actor on a per-Run field OVERRIDE, on a SUBMISSION, and on each row of a REVISION history?** Raised 2026-08-11 by the scientist-capture programme. **Why this is not already Q10:** Q10 asks about one field of the *upstream official schema*, whose description already invites server-stamping. These three are different in kind — they are **ISAAC-owned application tables** (`isaac_experiments` today, `isaac_runs` and the deferred revision/submission tables of contract §8 D7 later), they are **append-only audit rows rather than a mutable metadata field**, and a wrong or reassigned principal in them **misattributes a scientific decision to a person who did not make it** and cannot be corrected by re-editing a field. So the blast radius differs even if the claim you name is the same. If the answer is "the same claim, stamped the same way", say so and the question closes; ISAAC will not infer that from Q10. **What ISAAC has already built rather than waiting:** the actor seam exists and is deliberately left **unset/unknown** — no client-supplied or user-typed actor is ever accepted as authoritative, and no submitter is fabricated. **The cost of this staying open is bounded and known:** overrides, validation and drafting all work without it; what cannot ship is an *attributed* submission or an *attributed* revision row. |
+| ~~Q25~~ | **ANSWERED 2026-08-12 — YES, THE SAME CLAIM, STAMPED THE SAME WAY, AND UNDER THE SAME PRECONDITION.** Dean's answer to Q10 and Q25 is one answer: server-stamp the **canonical Authentik username** for `attribution.uploaded_by`, **Run overrides, submissions, and revision-history rows** — **provided the request's identity was established through the trusted authentication boundary.** **Client-supplied username is never authoritative.** The row said *"If the answer is 'the same claim, stamped the same way', say so and the question closes"*; he said so, and it closes. **What does NOT close is the ability to act on it.** Per Q4 the trusted boundary does not exist in ISAAC, so the actor seam stays **unset/unknown** exactly as built, and an *attributed* submission or revision row still cannot ship. The change is that the blocker is now a single, named engineering prerequisite instead of an unanswered external question. **Original text, retained below, because it is the record of what was asked.** |
+| ~~Q25 (as asked)~~ | **RENUMBERED FROM `Q20` ON 2026-08-11, THE SAME DAY IT WAS RAISED — see the note below this table. The question text is unchanged.** **Does your answer to Q10 extend from `attribution.uploaded_by` to ISAAC's own actor columns — specifically the actor on a per-Run field OVERRIDE, on a SUBMISSION, and on each row of a REVISION history?** Raised 2026-08-11 by the scientist-capture programme. **Why this is not already Q10:** Q10 asks about one field of the *upstream official schema*, whose description already invites server-stamping. These three are different in kind — they are **ISAAC-owned application tables** (`isaac_experiments` today, `isaac_runs` and the deferred revision/submission tables of contract §8 D7 later), they are **append-only audit rows rather than a mutable metadata field**, and a wrong or reassigned principal in them **misattributes a scientific decision to a person who did not make it** and cannot be corrected by re-editing a field. So the blast radius differs even if the claim you name is the same. If the answer is "the same claim, stamped the same way", say so and the question closes; ISAAC will not infer that from Q10. **What ISAAC has already built rather than waiting:** the actor seam exists and is deliberately left **unset/unknown** — no client-supplied or user-typed actor is ever accepted as authoritative, and no submitter is fabricated. **The cost of this staying open is bounded and known:** overrides, validation and drafting all work without it; what cannot ship is an *attributed* submission or an *attributed* revision row. |
 
 ### The `Q20` collision, and why the actor question is now `Q25` (2026-08-11)
 
@@ -719,6 +884,15 @@ files under `apps/api/` reference `Q20` in total — six besides `authorization.
 double-counted `authorization.py`; the number is quoted here at the precision the command supports. The question has also **already been put to Dean** in
 that packet, alongside `Q19` — which is answered — so `Q20` is an identifier that has left the
 repository and is awaiting an external answer.
+
+**`Q20` HAS SINCE BEEN ANSWERED (2026-08-12), which retroactively proves this section's point.** Dean
+ruled: `format` enforcement is **allowed in shadow mode** — read-only, aggregates only, non-gating,
+outside the truth plane — and **NOT authorized to be armed** in the official validator. That is a
+*two-part* answer whose halves point in opposite directions. Had the collision gone uncorrected, a
+reply of that shape arriving against a `Q20` that also meant "server-stamp ISAAC's actor columns"
+would have been unresolvable, not merely ambiguous. `authorization.Q20_FORMAT_ENFORCEMENT_APPROVED`
+stays `False` and is now **confirmed correct** rather than merely pending; see
+`docs/dean-authorization-packet.md`.
 
 **The concrete harm this avoids.** Had the handoff gone out with two live `Q20`s, a one-word reply
 from Dean — *"Q20: yes"* — would have been ambiguous between arming a validator gate on the truth
@@ -756,7 +930,34 @@ by symbol rather than trusting them.)*
    decides which headers are trusted lives in the repo whose owner we are waiting on. Building the
    reader before he sets the config buys nothing that waiting does not.
 
-**Decision:** do not build a live identity seam. Wire nothing until Q1–Q4 and Q6 are answered.
+**Decision:** do not build a live identity seam. ~~Wire nothing until Q1–Q4 and Q6 are answered.~~
+
+> ### THE TRIGGER CONDITION HAS BEEN MET, AND THE DECISION STILL STANDS — RESTATED 2026-08-12.
+>
+> **Q1, Q3, Q4 and Q6 are all now answered** (§7). By its own terms this section's gate has lifted.
+> **It does not follow that the seam may now be built, and the gate is restated rather than
+> deleted so nobody can read the lapse of a precondition as a permission.**
+>
+> **Reason 2 above — "the trust boundary, not the parsing, is the hard part" — is not weakened by the
+> answers; it is CONFIRMED BY THEM.** Q4's answer is that the Service is a plain ClusterIP with no
+> NetworkPolicy and forwarded headers can be forged in-cluster. Q6's and Q10's answers are both
+> explicitly conditioned on *"a request whose identity was established through the trusted
+> authentication boundary"* — a boundary ISAAC does not have. So the questions that gated this
+> decision have been replaced by a single engineering prerequisite that is strictly harder than
+> knowing the header names ever was.
+>
+> **The restated gate:**
+>
+> > **Wire nothing until ISAAC can distinguish an edge-traversed request from a direct in-cluster one,
+> > and refuses to stamp on the latter.** Dean named the pattern — trusted-edge mechanism for
+> > browser/UI traffic, independent Bearer validation for API/service traffic — and a design that
+> > implements it needs its own review and its own approval. Reading a header is still the easy half.
+>
+> **Reason 1 is entirely untouched:** a `get_principal()`-shaped affordance is exactly what lets a
+> later slice stamp an unverified value, and Dean's *"client-supplied username is never
+> authoritative"* is the same warning in his words. **Reason 3 is partly discharged** — the header
+> names no longer depend on unseen `isaac-k8` config — but the *NetworkPolicy* that would close Q4
+> lives in that same Dean-owned repository, so the dependency has moved rather than gone.
 
 > **⚠ HISTORICAL — READ THIS FIRST (added 2026-08-02). The probe described below is GONE.** It was
 > removed the day after this block was written; the route returns 404 and a test pins that. Everything
@@ -921,15 +1122,40 @@ authored by a human, not an access-control list.
 
 ## 10. Classification summary
 
+> **A FOURTH CATEGORY EXISTS SINCE 2026-08-12, and the three-column table below cannot express it.**
+> Dean's answers are neither *proven here* nor *unknown* — they are **stated by the infrastructure
+> owner and unwitnessed by this repository**. Read them in the new table first; the three-column
+> table that follows is left in place for everything else, with its rows amended where an answer
+> moved one.
+
+### 10.1 STATED BY DEAN, 2026-08-12 — operator testimony, not observed here
+
+| Claim | Direction |
+|---|---|
+| The edge injects/overwrites **exactly five** headers: `X-authentik-username`, `X-authentik-groups`, `X-authentik-email`, `X-authentik-name`, `X-authentik-uid`; only those are overwritten (**Q1**) | resolves §6A.1's ambiguity **for the edge path** |
+| `X-authentik-entitlements` and `X-Isaac-Edge` remain **UNTRUSTED** (**Q18**) | confirms ISAAC's existing disqualification |
+| The Service is a **plain ClusterIP with no NetworkPolicy**; any in-cluster pod can reach the app directly and **forge** forwarded identity headers. **`X-authentik-username`'s presence does NOT prove authenticated edge traversal** (**Q4**) | **against us** — the bypass is real and reconfirmed |
+| Resolution pattern: **trusted-edge mechanism for browser/UI traffic, independent Bearer validation for API/service traffic** (the existing portal precedent) | names the work; ISAAC has neither |
+| **Server-stamp the canonical Authentik username** for `attribution.uploaded_by`, Run overrides, submissions and revision-history rows — **provided identity was established through the trusted boundary**. Client-supplied username is never authoritative (**Q10**, **Q25**) | authorized in principle; **blocked in practice** by the row above |
+| **Usernames are not reassigned; the username is canonical** (**Q5**) | institutional policy — the only authority that could settle it |
+| **Q17 (UID permanence) should not be reopened**; introduce **no** UID↔username infrastructure | one key, not two |
+| ISAAC's groups at the authenticated edge are **`admin`** and **`researcher`**; `X-authentik-groups` is authoritative **only** for an edge-traversed request; **`bl152-users` / `bl152-staff` are NOT ISAAC roles** (**Q6**, **Q7**) | confirms §5.3 |
+| Expired/unauthenticated `/krish/*` → **302 to Authentik**; a browser `fetch` follows it and lands on an **HTML login response** (**Q8**) | matches what `FetchStates.tsx` already handles |
+| **`/outpost.goauthentik.io/sign_out`** is a valid logout path (**Q9**) | whether to surface it is Krish's, unanswered |
+
+**Still UNKNOWN and not addressed by that response:** Q11, Q13, Q14/G6, Q16, and gates G2 and G3.
+
+### 10.2 The original three-column summary
+
 | PROVEN (this repo) | NOT PRESENT IN THIS REPO | UNKNOWN — REQUIRES DEAN |
 |---|---|---|
-| Identity header names confined to **2 files, both documentation** — **none consumed by any code path** (§1.1). **No match total is quoted**; §1.1 records why. ~~"Zero identity headers anywhere (0 matches …, excluding the two docs that name them)"~~ and ~~"4 files — 61 matches, all measurement apparatus or documentation"~~ — both superseded. Note what happened to this cell, since it is a correction record that then repeated the failure it recorded: the first version survived a count refresh (498→501) that fixed the number beside it and left the false claim standing; the second outlived the probe by a day and this cell by two. **That is why the total is now omitted rather than maintained.** | Any k8s / ingress / Authentik manifest | The header names the outpost injects (Q1) |
-| Backend reads exactly 4 headers, none identity | Any users / roles / groups / permissions model | Whether the ingress strips client copies (Q3) |
-| `ApiKeyAuthMiddleware` = one shared secret, fail-open, **unset in prod** | Any logout, session, or expiry logic | Whether the pod is reachable bypassing the ingress (Q4) |
-| No trusted-proxy config, no header-stripping middleware | Any record ownership or actor attribution | The intended subject-identifier claim (Q5) |
-| SPA has no user/session/profile concept — every match is a false positive | ~~`uploaded_by` in any code — schema-only, 2 lines~~ **CORRECTED 2026-08-03: `uploaded_by` IS now in code** — refused in `draft_validator.py` and `export.py`, with `tests/test_attribution_uploaded_by.py`. It was never merely "schema-only": the passthrough was structural. See item 1 of "Two consequences" above. *(This cell was missed when the same commit corrected three other sites — exactly the failure the correction record three rows down warns about.)* | Columns of `record_history` / `api_requests` / `portal_access_log` (Q11) |
-| Schema defines `attribution.uploaded_by` + `contributors[]` | `PII`/`email`/`username` in any DB-governance doc — **zero mentions** | Whether seeded rows carry real personal identifiers (Q14 / G6) |
-| Recon already queries `information_schema`; table inventory computed but **not served** | — | Whether group claims may be authoritative in-app (Q6) |
+| Identity header names confined to **2 files, both documentation** — **none consumed by any code path** (§1.1). **No match total is quoted**; §1.1 records why. ~~"Zero identity headers anywhere (0 matches …, excluding the two docs that name them)"~~ and ~~"4 files — 61 matches, all measurement apparatus or documentation"~~ — both superseded. Note what happened to this cell, since it is a correction record that then repeated the failure it recorded: the first version survived a count refresh (498→501) that fixed the number beside it and left the false claim standing; the second outlived the probe by a day and this cell by two. **That is why the total is now omitted rather than maintained.** | Any k8s / ingress / Authentik manifest | ~~The header names the outpost injects (Q1)~~ **ANSWERED by Dean 2026-08-12 — the five in §10.1** (testimony, not observed here) |
+| Backend reads exactly 4 headers, none identity | Any users / roles / groups / permissions model | ~~Whether the ingress strips client copies (Q3)~~ **ANSWERED — the edge OVERWRITES those five** (Dean, 2026-08-12). Only for the edge path; a direct in-cluster caller never meets it |
+| `ApiKeyAuthMiddleware` = one shared secret, fail-open, **unset in prod** | Any logout, session, or expiry logic. *(Dean has now named the logout PATH — `/outpost.goauthentik.io/sign_out`, Q9 — but no logic exists here and whether to surface it is undecided.)* | ~~Whether the pod is reachable bypassing the ingress (Q4)~~ **ANSWERED — YES. Plain ClusterIP, no NetworkPolicy, headers forgeable in-cluster** (Dean, 2026-08-12). This is the answer everything else is conditioned on |
+| No trusted-proxy config, no header-stripping middleware | Any record ownership or actor attribution — **and Dean has now authorized stamping it (Q10/Q25), conditional on a trusted boundary that does not exist here**, so this cell stays as it is | ~~The intended subject-identifier claim (Q5)~~ **ANSWERED — the canonical Authentik username** (Dean, 2026-08-12) |
+| SPA has no user/session/profile concept — every match is a false positive | ~~`uploaded_by` in any code — schema-only, 2 lines~~ **CORRECTED 2026-08-03: `uploaded_by` IS now in code** — refused in `draft_validator.py` and `export.py`, with `tests/test_attribution_uploaded_by.py`. It was never merely "schema-only": the passthrough was structural. See item 1 of "Two consequences" above. *(This cell was missed when the same commit corrected three other sites — exactly the failure the correction record three rows down warns about.)* | Columns of `record_history` / `api_requests` / `portal_access_log` (**Q11 — STILL UNANSWERED**; not addressed 2026-08-12) |
+| Schema defines `attribution.uploaded_by` + `contributors[]` | `PII`/`email`/`username` in any DB-governance doc — **zero mentions** | Whether seeded rows carry real personal identifiers (**Q14 / G6 — STILL UNANSWERED**; not addressed 2026-08-12) |
+| Recon already queries `information_schema`; table inventory computed but **not served** | — | ~~Whether group claims may be authoritative in-app (Q6)~~ **ANSWERED — authoritative ONLY for an edge-traversed request** (Dean, 2026-08-12), which ISAAC cannot currently identify |
 | Edge is an Authentik proxy outpost — observed at `/outpost.goauthentik.io/start` | — | Whether `/krish` works **now**. **Amended 2026-08-01:** a rollout of `v0.0.38` and a recon run against it *were* observed by Krish (operator testimony — see the baseline matrix §0, Entry 2). **G1 is narrowed, not closed:** what is owed is the captured JSON, not the run. Unauthenticated probes from an agent session still return 302 |
-| **Upstream portal owns no users or research groups** — 22 tables, none identity; bare `TEXT` Authentik username on rows; no `/me`, no group endpoint, no membership API (§5.1, public-source audit) | Any upstream user directory to read or join against | Whether an Authentik username is non-reassignable across rename/departure/rehire (**Q5** — a technical stable-ID candidate is not a lifecycle guarantee) |
-| **Upstream `record_authz.py` is a locked, adversarially-reviewed authorization pattern** — admin ∨ owner ∨ ACL editor, default deny, no delegation (§5.2) | Any ISAAC implementation of it — **none exists, and none is authorized** | Whether the mirrored schema actually contains `record_acl` (**Q16**) |
+| **Upstream portal owns no users or research groups** — 22 tables, none identity; bare `TEXT` Authentik username on rows; no `/me`, no group endpoint, no membership API (§5.1, public-source audit) | Any upstream user directory to read or join against | ~~Whether an Authentik username is non-reassignable across rename/departure/rehire (**Q5**)~~ **ANSWERED — usernames are NOT reassigned** (Dean, 2026-08-12). The distinction this cell drew was the right one: what arrived is an *institutional* statement, not a technical inference |
+| **Upstream `record_authz.py` is a locked, adversarially-reviewed authorization pattern** — admin ∨ owner ∨ ACL editor, default deny, no delegation (§5.2) | Any ISAAC implementation of it — **none exists, and none is authorized** | Whether the mirrored schema actually contains `record_acl` (**Q16 — STILL UNANSWERED**; not addressed 2026-08-12) |

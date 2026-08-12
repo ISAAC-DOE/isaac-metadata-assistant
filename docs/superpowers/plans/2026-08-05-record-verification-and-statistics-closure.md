@@ -14,9 +14,13 @@
 >   fixture updated; the `corpus_size` inconsistency it flags is unrelated and still open.
 > - Any statement that `VERIFICATION_MODES` has exactly one member.
 >
-> **Unchanged and still current:** Q20 (`format` enforcement) is unanswered and the validator stays
-> format-blind; per-record display remains closed by default; CI remains billing-blocked, so nothing
-> from either slice has published an image or merged.
+> ~~**Unchanged and still current:** Q20 (`format` enforcement) is unanswered~~ **— SUPERSEDED
+> 2026-08-12: Q20 IS ANSWERED, and the practical outcome is the same.** `format` enforcement is
+> **allowed in shadow mode** (read-only, aggregates only, non-gating, outside the truth plane) and
+> **NOT authorized to be armed** in the official validator. So **the validator still stays
+> format-blind** and no code changed; what changed is that it is blind *by decision* rather than
+> *by default*. Per-record display remains closed by default (gate G2, unaddressed on 2026-08-12).
+> The CI billing block is separately superseded — see the memory note on it.
 
 # Record Verification + Statistics — closure and evidence package
 

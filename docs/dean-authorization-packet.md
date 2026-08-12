@@ -6,9 +6,36 @@
 > and its machine-readable form — including the twelve constraints attached to the approval — is
 > [`apps/api/isaac_api/authorization.py`](../apps/api/isaac_api/authorization.py).
 >
-> **Q20 is still unanswered.** The two were deliberately not bundled (see the line below), so Q19's
-> approval says nothing about arming `format` enforcement.
-> `authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` is `False` and the validator stays format-blind.
+> ~~**Q20 is still unanswered.**~~ **SUPERSEDED 2026-08-12 — Q20 IS ANSWERED. The old line is kept
+> visible because several documents were written under it.** The two were deliberately not bundled
+> (see the line below), so Q19's approval said nothing about arming `format` enforcement — that part
+> stands and was vindicated.
+>
+> **Dean's answer, 2026-08-12, has two halves and BOTH must travel together:**
+>
+> | | |
+> |---|---|
+> | **ALLOWED** | JSON Schema `format` enforcement **in shadow mode** — read-only, **aggregates only**, **non-gating**, and **outside the truth plane**. |
+> | **NOT AUTHORIZED** | **Arming `format` enforcement in the official validator.** |
+>
+> **So `authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` stays `False`, and it is now CONFIRMED CORRECT
+> rather than merely pending.** The validator stays format-blind; the shadow stays advisory. **This is
+> a documentation slice: no code, test or flag was changed**, and none needs to be — the shipped
+> behaviour already matches the ruling in both directions, which is the outcome the "leave it
+> unarmed" default was designed to produce.
+>
+> **Read the outcome table at the end of this file with that in hand: the answer is `(d) no`.**
+> The four constraints on the allowed half — read-only, aggregates only, non-gating, outside the truth
+> plane — are **conditions, not descriptions.** Any future change that lets the shadow decide
+> validity, gate export, emit per-record output, or execute inside `src/isaac_records/` exceeds this
+> authorization even though `format` enforcement is nominally "allowed in shadow mode".
+>
+> **Q20(e)** — whether a one-off corpus-wide count may be reported — is answered *by implication*
+> ("aggregates only" permits a count) and **not explicitly**; treat a corpus-wide count as within the
+> shadow's allowed output and nothing finer as within it. **Q20(f)** — whether the portal enforces
+> `format` — was **not addressed**, so the local-defect-vs-divergence classification remains open.
+>
+> **Standing: operator testimony**, relayed by the project owner. No transcript is committed here.
 >
 > **What this means for the text below.** The "Consequence while unanswered" bullet for Q19, and the
 > "Ambiguous / no answer → runner stays unbuilt" row in the outcome table, are **no longer the
@@ -220,6 +247,7 @@ authorization.
 
 | Dean's answer to Q20 | Action |
 |---|---|
+| **← ANSWERED 2026-08-12: `(d) no`, plus an explicit permission for the shadow.** | **No action taken, and none required.** `format` enforcement is **NOT** armed; the shadow is explicitly allowed, subject to four conditions (read-only, aggregates only, non-gating, outside the truth plane) that the shipped code already satisfies. `invalid-date-time.json` stays in the QA package as the reproducer, and the characterization tests remain the permanent record. **(e)** is answered only by implication; **(f)** was not addressed. |
 | **(d) yes** | Arm BOTH causes in one change — `format_checker=` **and** the `jsonschema[format]` extra. Then re-measure the QA package: `qa/validator-upload-package/invalid-date-time.json` flips PASS → FAIL, which by design fails `tests/test_validator_qa_package.py` loudly and names the four documents to update. |
 | **(d) no** | Leave it. The characterization tests are the permanent record. `invalid-date-time.json` stays in the QA package as the reproducer. |
 | **(e)** | Governs whether a one-off corpus count may be reported. Absent a yes, report nothing. |

@@ -1,5 +1,16 @@
 # Dean / ISAAC External-Gates Execution Prompt — 2026-08-11
 
+> # SENT, AND ANSWERED IN PART — response received 2026-08-12.
+>
+> **This prompt is preserved verbatim as the record of what was asked.** Do not re-run it and do not
+> edit its questions to match the answers.
+>
+> - **`0002_runs` was applied** (2026-08-12 00:30 UTC) — [`evidence/hosted-0002-verification-2026-08-12.md`](evidence/hosted-0002-verification-2026-08-12.md).
+> - **Q1, Q4, Q5, Q6, Q7, Q8, Q9, Q10, Q17, Q18, Q25 answered** — [`identity-trust-contract.md`](identity-trust-contract.md) §7 and §10.1. **Q4 answered against us:** plain ClusterIP, no NetworkPolicy, headers forgeable in-cluster.
+> - **Q20 answered** — shadow mode allowed; arming the official validator **not** authorized.
+> - **D1–D9 DEFERRED** — *"leave AI integration as future work rather than increasing scope at this point."*
+> - **Not answered:** Q11, Q13, Q14/G6, Q16, G2, G3, and the four operator-report items listed in [`dean-handoff-2026-08-11.md`](dean-handoff-2026-08-11.md).
+
 **How to use this file.** The fenced block below is self-contained and is meant to be copied whole
 into Dean's own Claude session. It assumes no conversational history from Krish's session.
 

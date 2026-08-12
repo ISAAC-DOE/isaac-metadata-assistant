@@ -20,8 +20,12 @@
 >   approval is implemented as *absence*: `verification.VERIFICATION_MODES` is derived from the
 >   approval flag, so clearing the flag deletes the mode rather than disabling it.
 >
-> **Q20 (`format` enforcement) remains unanswered**, and per-record display remains closed by
-> default. Nothing in this note widens either.
+> ~~**Q20 (`format` enforcement) remains unanswered**~~ **— SUPERSEDED 2026-08-12.** Dean's answer:
+> `format` enforcement is **allowed in shadow mode** — read-only, aggregates only, non-gating,
+> outside the truth plane — and **NOT authorized to be armed** in the official validator. The
+> validator stays format-blind either way, so nothing in this note is invalidated. **Per-record
+> display remains closed by default** and was not addressed on 2026-08-12; silence is not assent.
+> Nothing in this note widens either.
 
 # Corpus-Validation Authorization Audit — 30 Production-Derived Records
 
