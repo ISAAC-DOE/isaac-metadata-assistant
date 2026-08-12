@@ -746,11 +746,29 @@ Out of scope unless explicitly approved:
   visible so a future session can see that this is a recorded change of scope and not a drift.
 
   **What the lift covers:** app-owned tables for experiments and their normal application state
-  (`isaac_experiments`, `isaac_schema_migrations`); a swappable repository seam
+  (`isaac_experiments`, `isaac_schema_migrations`, and — **added 2026-08-12** — `isaac_runs`); a swappable repository seam
   (`apps/api/isaac_api/experiment_repository.py`) with a filesystem fallback whenever `PGHOST` is
   unset; a separate write path (`db_write.py`) with parameterized SQL, explicit transactions and
   deterministic rollback; and forward-only, idempotent migrations
   (`apps/api/isaac_api/migrations/`, runner `db_migrate.py`, operator CLI `scripts/db_migrate.py`).
+
+  ***`isaac_runs` was written to before this sentence named it, and that is recorded rather than
+  quietly corrected.*** The 2026-08-07 lift enumerated two tables. `0002_runs` was reviewed,
+  approved and applied on the strength of its own packet, and the shadow-write slice then wrote the
+  table — but **no committed sentence in this file named `isaac_runs` as in-scope for writes**, so
+  that slice's authorization basis was the owner's instruction plus the approval packet, and not
+  this list. The implementing agent found the gap itself and reported it rather than proceeding
+  quietly; the list is corrected here so the basis is committed rather than conversational. The
+  general rule stands: **a slice that cannot cite a committed sentence permitting what it does has
+  not established its authorization basis, and saying so is part of the slice.**
+
+  **What writing `isaac_runs` covers, precisely:** a SHADOW write only. Rows are maintained as a
+  pure function of the experiment document inside the one existing durable write, and **nothing
+  reads them**. The document remains authoritative, `state` keeps its `runs` key, and no read path,
+  route or scientist-visible behaviour changes. Making `isaac_runs` a read source, and removing
+  `runs` from the document, are separate decisions that are **NOT** covered here — the second is
+  not justified by any measurement in this repository, and the brief that motivates it ("contract
+  §8 D7") is cited by several files and committed to none of them.
 
   **What it does NOT cover, and each of these is still out of scope:** modifying the
   production-derived 30-record `records` table (the write path's statement policy refuses any
