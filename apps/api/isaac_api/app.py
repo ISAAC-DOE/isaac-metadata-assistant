@@ -56,7 +56,6 @@ def create_app() -> FastAPI:
     # 'real' whose guardrails are not built), so a misconfigured container cannot
     # silently boot in a permissive state.
     runtime_mode.validate_runtime_mode_or_raise()
-<<<<<<< HEAD
     # Same discipline, second configuration axis: refuse to construct when
     # ISAAC_EDGE_TRUST_VERIFIER names a verifier this build does not have. The
     # resolver itself fails CLOSED (an unrecognised value yields the verifier that
@@ -67,7 +66,6 @@ def create_app() -> FastAPI:
     # No route consumes identity today; this is here so the misconfiguration
     # cannot arrive silently ahead of the slice that does.
     validate_edge_trust_verifier_or_raise()
-=======
     # The SAME fail-closed discipline for the three AI provider seams, and it is
     # here rather than left to the seams' own resolution for the reason the line
     # above exists: resolution itself never raises — an unset, empty or
@@ -77,7 +75,6 @@ def create_app() -> FastAPI:
     # `ISAAC_ASSISTANT_PROVIDER=anthropc` boots happily with no assistant, and the
     # first person to notice is a scientist wondering why nothing answers.
     validate_provider_config_or_raise()
->>>>>>> 86f50f3 (feat(providers): three AI seams that are structurally incapable of claiming a model)
     # Deploy base path (ISAAC_BASE_PATH); "" locally. Resolved once and applied
     # to the router prefix and the SPA mount below.
     base = base_path()

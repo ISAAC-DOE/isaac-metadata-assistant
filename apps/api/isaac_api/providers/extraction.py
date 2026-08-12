@@ -70,7 +70,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, ClassVar, Protocol, Union, runtime_checkable
 
@@ -186,7 +186,30 @@ class FieldCandidate:
     rule: str
     #: Optional extra detail. Screened by :mod:`.guards` and by
     #: :data:`FORBIDDEN_PROVENANCE_KEYS`; replaced with a read-only view.
-    provenance: Mapping[str, Any] = MappingProxyType({})
+    #:
+    #: `default_factory`, NOT a bare `MappingProxyType({})`, AND THE REASON IS A
+    #: PYTHON VERSION DIFFERENCE THAT NO LOCAL RUN CAN SEE.
+    #:
+    #: `dataclasses` rejects a mutable default by testing
+    #: `default.__class__.__hash__ is None`. On CPython 3.11 `mappingproxy` has no
+    #: `__hash__`, so that test fires and the class raises `ValueError: mutable
+    #: default <class 'mappingproxy'> ... use default_factory` AT DEFINITION TIME.
+    #: CPython 3.12 GAVE `mappingproxy` a `__hash__` (it hashes when the underlying
+    #: mapping does), so the identical line is accepted there — measured on this
+    #: machine: `MappingProxyType({}).__class__.__hash__ is not None` -> True on
+    #: 3.12.3.
+    #:
+    #: So this passed every local run and failed CI on import, taking every test
+    #: that reaches `create_app` down with it — the blast radius came from wiring
+    #: the boot validator into `create_app`, which put this module on the import
+    #: path of the whole application. `pyproject.toml` declares
+    #: `requires-python = ">=3.10"`, so 3.11 is squarely supported and the LOCAL
+    #: interpreter is the outlier, not CI.
+    #:
+    #: The empty mapping is still shared and still read-only — `__post_init__`
+    #: replaces whatever arrives with a fresh `MappingProxyType`, so the factory
+    #: only has to survive class construction.
+    provenance: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
         if not self.field_path:
