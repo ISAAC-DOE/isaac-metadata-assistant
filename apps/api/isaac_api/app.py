@@ -24,6 +24,7 @@ from . import runtime_mode
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
 from .experiment_repository import DurableWriteConflict, StorageUnavailable
+from .identity import validate_edge_trust_verifier_or_raise
 from .routes import (
     OPENAPI_TAGS,
     TutorialScopeError,
@@ -54,6 +55,16 @@ def create_app() -> FastAPI:
     # 'real' whose guardrails are not built), so a misconfigured container cannot
     # silently boot in a permissive state.
     runtime_mode.validate_runtime_mode_or_raise()
+    # Same discipline, second configuration axis: refuse to construct when
+    # ISAAC_EDGE_TRUST_VERIFIER names a verifier this build does not have. The
+    # resolver itself fails CLOSED (an unrecognised value yields the verifier that
+    # identifies nobody), so without this the deployment would boot looking
+    # correctly configured while checking nothing — the operator who set the
+    # variable would believe identity was being established when it was not.
+    #
+    # No route consumes identity today; this is here so the misconfiguration
+    # cannot arrive silently ahead of the slice that does.
+    validate_edge_trust_verifier_or_raise()
     # Deploy base path (ISAAC_BASE_PATH); "" locally. Resolved once and applied
     # to the router prefix and the SPA mount below.
     base = base_path()
