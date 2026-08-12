@@ -388,6 +388,67 @@ describe('Load More', () => {
     expect(calls[2].query.offset).toBe(100);
   });
 
+  it('does not become a dead button after a duplicate — it stops when the CURSOR is exhausted', async () => {
+    /*
+     * A CONTROL THAT COULD NEVER DO ANYTHING AGAIN, offered indefinitely.
+     *
+     * The button was gated on `runs.length < matched` while the cursor it pages
+     * from is `received`. The dedupe drops a re-delivered run from the array but
+     * not from what the server handed over, so ONE duplicate makes `runs.length`
+     * trail `received` permanently and the gate can never close. Measured on this
+     * same fixture by clicking further than the dedupe test does: click 3 requests
+     * offset 120, and so do clicks 4 through 8 — the same empty window, forever,
+     * with nothing changing on screen and no message. Reachable in production
+     * whenever a run is created or deleted while a reader is paging.
+     *
+     * The negative control is the OFFSET LIST. A build that merely stopped
+     * rendering the button after some count would show the same card total; what
+     * this asserts is that no fourth request was ever made, and that the reader is
+     * told why the list is one run short instead of being handed a button.
+     */
+    const all = Array.from({ length: 120 }, (_, i) => mkRun(i + 1));
+    const calls = stubBackend((q) => {
+      const page = serveRuns(all, q);
+      if (q.offset === 50) {
+        page.runs = [all[49], ...page.runs.slice(0, page.runs.length - 1)];
+      }
+      return page;
+    });
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(50));
+
+    await act(async () => {
+      fireEvent.click(loadMoreButton()!);
+    });
+    await waitFor(() => expect(renderedIds()).toHaveLength(99));
+
+    await act(async () => {
+      fireEvent.click(loadMoreButton()!);
+    });
+    await waitFor(() => expect(renderedIds()).toHaveLength(119));
+
+    /*
+     * 120 runs have been RECEIVED and 119 are distinct. There is no further page,
+     * so there is no further button — asserted directly rather than through
+     * `waitFor`, because the render that put the 119th card on screen is the same
+     * one that advanced the cursor. Against the old gate this is an immediate,
+     * legible failure instead of a five-second timeout.
+     */
+    expect(loadMoreButton()).toBeNull();
+    expect(calls.map((c) => c.query.offset)).toEqual([0, 50, 100]);
+
+    // The count states what is on screen and what the record holds — both true,
+    // and neither claims the missing run is rendered.
+    expect(countText()).toBe('Showing 119 of 120 runs');
+
+    // And the shortfall is SAID. The warning beside the button was about exactly
+    // this event; withdrawing the button must not withdraw the explanation.
+    expect(
+      screen.getByText(/All pages have been read, but 1 matching run never arrived/),
+    ).toBeInTheDocument();
+  });
+
   it('disappears once everything matching is loaded', async () => {
     const all = Array.from({ length: 60 }, (_, i) => mkRun(i + 1));
     stubBackend((q) => serveRuns(all, q));
@@ -474,36 +535,6 @@ describe('Load More', () => {
 // ---------------------------------------------------------------------------
 
 describe('search', () => {
-  it('debounces, sends `q`, and RESETS the accumulation to a first page', async () => {
-    const all = Array.from({ length: 120 }, (_, i) => mkRun(i + 1));
-    const calls = stubBackend((q) => serveRuns(all, q));
-    renderRecord();
-    await waitForList();
-    await waitFor(() => expect(renderedIds()).toHaveLength(50));
-    await act(async () => {
-      fireEvent.click(loadMoreButton()!);
-    });
-    await waitFor(() => expect(renderedIds()).toHaveLength(100));
-    const before = calls.length;
-
-    const box = screen.getByLabelText('Search runs');
-    // Three keystrokes inside one debounce window must not be three requests.
-    await act(async () => {
-      fireEvent.change(box, { target: { value: 'R' } });
-      fireEvent.change(box, { target: { value: 'RU' } });
-      fireEvent.change(box, { target: { value: 'RUN11' } });
-    });
-    await waitFor(() => expect(calls.length).toBe(before + 1));
-    expect(calls[before].query.q).toBe('RUN11');
-    // RESET, not append: the new read starts at zero.
-    expect(calls[before].query.offset).toBe(0);
-    expect(calls[before].query.limit).toBe(RUNS_PAGE_SIZE);
-
-    // RUN110..RUN119 — ten of a hundred and twenty.
-    await waitFor(() => expect(renderedIds()).toHaveLength(10));
-    expect(renderedIds()[0]).toBe('RUN110');
-  });
-
   it('keeps the search box mounted while its own request is in flight', async () => {
     /*
      * A REAL DEFECT, FOUND BY A TEST WRITTEN FOR SOMETHING ELSE.
@@ -552,6 +583,151 @@ describe('search', () => {
     });
     await flush();
     expect(screen.queryByLabelText('Search runs')).not.toBeNull();
+  });
+
+  it('keeps the count region the SAME live node across a search, so its own result is announced', async () => {
+    /*
+     * THE HALF OF THE UNMOUNTING DEFECT THAT WAS LEFT STANDING, and the more
+     * consequential half. The controls row was fixed; the TOOLBAR was not, and the
+     * toolbar is what holds the `aria-live` count region. A criteria change sets
+     * the list to `loading`, so the region was destroyed and a new one built when
+     * the response arrived — and a live region that arrives already carrying its
+     * text is generally not announced at all. The count change a reader most needs
+     * spoken, the one their own search caused, was the one least likely to be
+     * spoken. The component's own comment claimed the node "survives … searching
+     * and paging"; measured, it did not.
+     *
+     * NODE IDENTITY IS THE ASSERTION, not the presence of a `.runs-count`. A
+     * remount produces an element that passes every text and attribute check and
+     * still announces nothing, which is exactly how this survived a suite that
+     * asserts both.
+     */
+    const all = Array.from({ length: 30 }, (_, i) => mkRun(i + 1));
+    let release: (() => void) | null = null;
+    stubBackend((q) => {
+      const body = serveRuns(all, q);
+      if ((q.q ?? '') === '') return body;
+      return new Promise((resolve) => {
+        release = () => resolve(body);
+      });
+    });
+
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(30));
+
+    const region = document.querySelector('.runs-count')!;
+    expect(region.textContent).toBe('Showing 30 of 30 runs');
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Search runs'), { target: { value: 'Run 3' } });
+    });
+    await waitFor(() => expect(release).not.toBeNull());
+
+    // MID-FLIGHT. The same node, still the only one — `e2e/mutation/runs.spec.ts`
+    // addresses it with a bare `.runs-count` locator, which a second copy would
+    // break on strict mode.
+    expect(document.querySelectorAll('.runs-count')).toHaveLength(1);
+    expect(document.querySelector('.runs-count')).toBe(region);
+    // And it states nothing it cannot know: the list it labels is not on screen.
+    expect(region.textContent).toBe('');
+    /*
+     * THE CONTRACT THIS FIX MUST NOT BUY ITSELF WITH. "`Add Run` on screen means
+     * the runs are loaded" is what ~18 tests here and `openRunsSection` in the
+     * browser suite use to know the section is ready, and there is no experiment
+     * version to send with a create mid-read. The furniture persists; the control
+     * does not.
+     */
+    expect(screen.queryByRole('button', { name: /Add Run/ })).toBeNull();
+
+    await act(async () => {
+      release!();
+      await Promise.resolve();
+    });
+    await flush();
+
+    // The SAME node now carries the new count — which is what makes it an
+    // announcement rather than markup.
+    expect(document.querySelector('.runs-count')).toBe(region);
+    expect(region.textContent).toBe('Showing 2 of 2 matching · 30 runs in this record');
+    expect(screen.queryByRole('button', { name: /Add Run/ })).not.toBeNull();
+  });
+
+  it('sends nothing until the debounce has ELAPSED, then exactly one request', async () => {
+    /*
+     * THIS TEST USED TO PROVE NOTHING ABOUT THE DEBOUNCE. It fired three
+     * `fireEvent.change` calls inside ONE `act()`, so React's own batching
+     * collapsed them into a single render and a single request — with
+     * `RUN_SEARCH_DEBOUNCE_MS` set to 0 it stayed green. What it measured was
+     * batching, not elapsed time.
+     *
+     * So the clock is frozen and moved deliberately: each keystroke RESTARTS the
+     * window (trailing edge), nothing leaves before it closes, and exactly one
+     * request leaves when it does. Verified against the mutant the old version
+     * passed: with the constant set to 0 the very first in-loop assertion fails
+     * (three requests where two were expected).
+     *
+     * The rest of what this test always asserted is unchanged and still here: the
+     * query on the wire, and that a search RESETS an accumulated list to a first
+     * page rather than searching within it.
+     */
+    const all = Array.from({ length: 120 }, (_, i) => mkRun(i + 1));
+    const calls = stubBackend((q) => serveRuns(all, q));
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(50));
+    await act(async () => {
+      fireEvent.click(loadMoreButton()!);
+    });
+    await waitFor(() => expect(renderedIds()).toHaveLength(100));
+    const before = calls.length;
+
+    vi.useFakeTimers();
+    const box = screen.getByLabelText('Search runs');
+
+    // Three keystrokes, each well inside the window of the last.
+    for (const value of ['R', 'RU', 'RUN11']) {
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        fireEvent.change(box, { target: { value } });
+        // A keystroke is not a query: nothing may leave on this tick.
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      // eslint-disable-next-line no-await-in-loop
+      await flush();
+      expect(calls.length).toBe(before);
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+    }
+
+    // 100 ms after the LAST keystroke — the two earlier windows were restarted,
+    // not merely coalesced, so still nothing has been sent.
+    await flush();
+    expect(calls.length).toBe(before);
+
+    // One tick past the debounce, and exactly one request goes out.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUN_SEARCH_DEBOUNCE_MS - 100 + 1);
+    });
+    await flush();
+    expect(calls.length).toBe(before + 1);
+    expect(calls[before].query.q).toBe('RUN11');
+    // RESET, not append: the new read starts at zero.
+    expect(calls[before].query.offset).toBe(0);
+    expect(calls[before].query.limit).toBe(RUNS_PAGE_SIZE);
+
+    // RUN110..RUN119 — ten of a hundred and twenty.
+    expect(renderedIds()).toHaveLength(10);
+    expect(renderedIds()[0]).toBe('RUN110');
+
+    // And the settled query is not re-sent on every later tick.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUN_SEARCH_DEBOUNCE_MS * 4);
+    });
+    await flush();
+    expect(calls.length).toBe(before + 1);
   });
 
   it('discards an in-flight Load More page when the criteria change under it', async () => {
@@ -873,6 +1049,54 @@ describe('Focus Run', () => {
     await waitFor(() => expect(renderedIds()).toHaveLength(20));
   });
 
+  it('never announces "Viewing one run" for a run that is not there — 404 or malformed', async () => {
+    /*
+     * TWO SURFACES, ONE SCREEN, CONTRADICTING EACH OTHER. The count line branched
+     * on whether a run id was in the URL, so a deep link to an id the record does
+     * not hold rendered the alert "No run with the id … is in this record" while
+     * the `aria-live` region simultaneously announced "Viewing one run · 20 runs in
+     * this record". The false half is the half a screen reader speaks, and the test
+     * that covers this alert thoroughly stopped without ever looking at the count.
+     *
+     * BOTH REFUSALS ARE EXERCISED, because they arrive as different statuses and
+     * the copy branches on 404: a run id that does not exist (404) and one the
+     * server will not accept at all (400). Neither is a run being viewed.
+     */
+    const all = Array.from({ length: 20 }, (_, i) => mkRun(i + 1));
+    stubBackend((q) => serveRuns(all, q), {
+      [`GET ${BASE}/runs/RUNGHOST`]: { status: 404, body: { error: 'run_not_found' } },
+    });
+    renderAt(ROUTES.recordRun(ID, 'RUNGHOST'));
+    await waitForList();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('RUNGHOST');
+    // Asserted directly: the render that puts the alert on screen is the render
+    // that settles the count, so a `waitFor` here would turn the old behaviour
+    // into a timeout instead of naming the sentence it wrongly announced.
+    expect(countText()).toBe('No run with that id · 20 runs in this record');
+    expect(countText()).not.toContain('Viewing one run');
+    // The record's own total is still stated — a missing RUN says nothing about
+    // how many runs the record has.
+    expect(countText()).toContain('20 runs in this record');
+  });
+
+  it('says the same thing when the server refuses the id outright, not only when it is absent', async () => {
+    const all = Array.from({ length: 20 }, (_, i) => mkRun(i + 1));
+    stubBackend((q) => serveRuns(all, q), {
+      [`GET ${BASE}/runs/not-a-run-id`]: { status: 400, body: { error: 'malformed_run_id' } },
+    });
+    renderAt(ROUTES.recordRun(ID, 'not-a-run-id'));
+    await waitForList();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('not-a-run-id');
+    // The non-404 branch names what the server said, and the count still refuses
+    // to claim a run is being viewed.
+    expect(alert.textContent).toMatch(/The server said:/);
+    expect(countText()).toBe('No run with that id · 20 runs in this record');
+  });
+
   it('is offered on a collapsed card, so no run is reachable only by expanding it', async () => {
     const all = Array.from({ length: 3 }, (_, i) => mkRun(i + 1));
     stubBackend((q) => serveRuns(all, q));
@@ -951,6 +1175,82 @@ describe('Add Run while filtering', () => {
     expect(
       screen.getByText(/The search and filters were cleared so the new run is not hidden/),
     ).toBeInTheDocument();
+  });
+
+  it('does not hijack a later search with a create whose own reload was superseded', async () => {
+    /*
+     * THE READER WAS TELEPORTED INTO FOCUS RUN ON A RUN THEY WERE NOT LOOKING FOR,
+     * and their query was discarded on the way.
+     *
+     * The first-page effect returned on a generation mismatch BEFORE clearing the
+     * pending create, so a create whose reload was superseded stayed pending and
+     * was consumed by whatever landed next. Measured: Add Run on a 120-run record,
+     * then type `Run 3` while the post-create reload is still in flight. Result —
+     * URL `/record/demo?run=RUN121`, the count reading "Viewing one run · 121 runs
+     * in this record", and the search box gone from the screen.
+     *
+     * The create-to-focus behaviour it must not cost: a new run is LAST, so on a
+     * record this size it is not on the first page and focusing it is the only way
+     * the reader sees the run they just asked for. That is covered by the test
+     * above; what is asserted here is that a SUPERSEDED create cannot do it to a
+     * read that had nothing to do with the create.
+     */
+    const all = Array.from({ length: 120 }, (_, i) => mkRun(i + 1));
+    const created = mkRun(121);
+    let releaseReload: (() => void) | null = null;
+    let unfilteredReads = 0;
+    stubBackend(
+      (q) => {
+        const body = serveRuns(all, q);
+        // Hold the SECOND unfiltered first-page read: the one Add Run triggers.
+        if ((q.q ?? '') === '' && q.offset === 0) {
+          unfilteredReads += 1;
+          if (unfilteredReads === 2) {
+            return new Promise((resolve) => {
+              releaseReload = () => resolve(body);
+            });
+          }
+        }
+        return body;
+      },
+      {
+        [`POST ${BASE}/runs`]: () => {
+          all.push(created);
+          return { status: 201, body: { run: created, experiment_version: '1.1' } };
+        },
+      },
+    );
+
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(50));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Add Run/ }));
+    });
+    await waitFor(() => expect(releaseReload).not.toBeNull());
+
+    // The reader moves on while that reload is still in flight.
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Search runs'), { target: { value: 'Run 3' } });
+    });
+    // `Run 3` matches Run 3 and Run 30..Run 39 — eleven of a hundred and twenty-one.
+    await waitFor(() => expect(renderedIds()).toHaveLength(11));
+
+    // NOW the superseded reload lands.
+    await act(async () => {
+      releaseReload!();
+      await Promise.resolve();
+    });
+    await flush();
+
+    // The reader is still where they put themselves.
+    expect(screen.getByTestId('url').textContent).toBe(`/record/${ID}`);
+    expect((screen.getByLabelText('Search runs') as HTMLInputElement).value).toBe('Run 3');
+    expect(renderedIds()).toHaveLength(11);
+    expect(renderedIds()).not.toContain('RUN121');
+    expect(screen.queryByRole('button', { name: 'Back to all runs' })).toBeNull();
+    expect(countText()).toBe('Showing 11 of 11 matching · 121 runs in this record');
   });
 
   it('preserves the 412 stale-version refusal and its Reload This Section remedy', async () => {

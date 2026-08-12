@@ -206,8 +206,24 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
    * A run this section just created, waiting for the reload it triggered.
    * Held in a ref rather than in state because the only reader is the reload's
    * own `.then`, and re-rendering on it would say nothing.
+   *
+   * IT CARRIES THE GENERATION OF THE READ IT IS WAITING FOR, and that is not
+   * bookkeeping — it is the whole defence against a create HIJACKING a later,
+   * unrelated read. The reload's `.then` used to return on a generation mismatch
+   * BEFORE clearing this ref, so a create whose reload was superseded stayed
+   * pending and was consumed by whatever landed next. Measured: Add Run on a
+   * 120-run record, then type a search while the reload is in flight, and the
+   * reader is thrown into Focus Run on `RUN121` with the query they just typed
+   * silently discarded.
+   *
+   * Clearing the ref before the mismatch check would fix that case and open
+   * another: a read issued BEFORE the create can land after it, and it would
+   * throw away a create that is still legitimately pending on its own reload.
+   * The generation says which read this run belongs to, so only that read — and
+   * no other — can either consume it or drop it. `null` means "not yet claimed":
+   * `addRun` sets the run, and the effect run it triggers stamps the generation.
    */
-  const createdRef = useRef<ApiRunView | null>(null);
+  const createdRef = useRef<{ run: ApiRunView; generation: number | null } | null>(null);
 
   /*
    * A run this section is about to focus and ALREADY HOLDS. The create response
@@ -260,6 +276,15 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   useEffect(() => {
     generationRef.current += 1;
     const generation = generationRef.current;
+    if (createdRef.current !== null && createdRef.current.generation === null) {
+      createdRef.current = { ...createdRef.current, generation };
+    }
+    /** Forget a create that was waiting on THIS read, now that this read is void. */
+    const dropCreated = () => {
+      if (createdRef.current !== null && createdRef.current.generation === generation) {
+        createdRef.current = null;
+      }
+    };
     if (!silentRef.current) setList({ status: 'loading' });
     silentRef.current = false;
     setLoadingMore(false);
@@ -273,7 +298,10 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
         ...criteriaQuery(query, overridesFilter, exportedFilter),
       })
       .then((res) => {
-        if (!alive || generation !== generationRef.current) return;
+        if (!alive || generation !== generationRef.current) {
+          dropCreated();
+          return;
+        }
         setExperimentVersion(res.experiment_version);
         setList({
           status: 'data',
@@ -294,8 +322,9 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
           },
         });
 
-        const created = createdRef.current;
-        if (created === null) return;
+        const pending = createdRef.current;
+        if (pending === null || pending.generation !== generation) return;
+        const created = pending.run;
         createdRef.current = null;
         if (res.runs.some((r) => r.id === created.id)) {
           // It is on the page the reader is looking at: put the caret on it and
@@ -316,8 +345,8 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
         }
       })
       .catch((err: unknown) => {
+        dropCreated();
         if (!alive || generation !== generationRef.current) return;
-        createdRef.current = null;
         setList({ status: 'error', error: asApiError(err) });
       });
     return () => {
@@ -525,7 +554,7 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
           );
           clearCriteria();
         }
-        createdRef.current = res.run;
+        createdRef.current = { run: res.run, generation: null };
         silentRef.current = true;
         setReloadNonce((n) => n + 1);
       })
@@ -577,6 +606,29 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   const loaded = list.status === 'data' ? list.loaded : null;
 
   /*
+   * THE FOCUSED RUN IS RESOLVED ONCE, HERE, because two surfaces describe it and
+   * they were allowed to disagree. `FocusedRun` decided for itself whether the
+   * run existed, while the count line asked only whether a run id was in the URL
+   * — so a deep link to an id that is not in the record rendered the alert "No
+   * run with the id NOPE is in this record" and, at the same moment, announced
+   * "Viewing one run · 120 runs in this record". Two statements about one screen,
+   * one of them false, and the false one is the one a screen reader speaks.
+   */
+  const focusedRun = !focused
+    ? undefined
+    : focus.status === 'fetched'
+      ? focus.run
+      : loaded?.runs.find((r) => r.id === focusRunId);
+
+  const countFocus: CountFocus = !focused
+    ? 'none'
+    : focus.status === 'loading'
+      ? 'loading'
+      : focusedRun === undefined
+        ? 'missing'
+        : 'viewing';
+
+  /*
    * THE CONTROLS SURVIVE THEIR OWN REQUEST, and this ref is the whole reason.
    *
    * The controls row was gated on `loaded !== null`, and a criteria change sets the
@@ -603,40 +655,49 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   return (
     <>
       {/*
-        THE TOOLBAR EXISTS ONLY ONCE THE LIST HAS LANDED, and that is a contract
-        this section has always kept rather than a rendering convenience: `Add Run`
-        appearing means the runs are loaded. Rendering it disabled during the read
-        would put an enabled-looking control on screen before there is an
-        experiment version to send with it, and would break the one thing every
-        caller — including this repo's own specs — uses to know the section is
-        ready.
+        THE TOOLBAR IS THE SECOND PIECE OF FURNITURE THAT MUST OUTLIVE A READ, and
+        for a sharper reason than the controls row below it: it holds the LIVE
+        REGION. It was gated on `loaded !== null`, so a search or a filter change
+        — which sets the list to `loading` — destroyed the `aria-live` node and
+        built a new one when the response landed. A live region that arrives
+        carrying its own content is generally not announced, so the one count
+        change a reader most needs spoken, the one their own search caused, was
+        the one least likely to be spoken. The comment below this claimed the node
+        "survives … searching and paging"; measured, it did not.
+
+        SO THE TOOLBAR FOLLOWS THE SNAPSHOT AND `Add Run` DOES NOT. The contract
+        that `Add Run` appearing means the runs are loaded is relied on by this
+        repo's unit and browser specs, and by every reader who would otherwise be
+        offered a create with no experiment version to send. It stays gated on the
+        LIVE `loaded`; only the region that has to persist persists.
       */}
-      {loaded !== null && (
+      {controlsFrame !== null && (
       <div className="runs-toolbar">
-        {focused ? (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => {
-              // The list the reader had is untouched — focus never changed the
-              // search or the filters, so leaving it returns them to exactly it.
-              setCardFocusId(focusRunId);
-              setFocusRun(null);
-            }}
-          >
-            Back to all runs
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={addRun}
-            disabled={adding || experimentVersion === null}
-          >
-            <Plus size={15} strokeWidth={2.2} aria-hidden="true" />
-            {adding ? 'Adding Run…' : 'Add Run'}
-          </button>
-        )}
+        {loaded !== null &&
+          (focused ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                // The list the reader had is untouched — focus never changed the
+                // search or the filters, so leaving it returns them to exactly it.
+                setCardFocusId(focusRunId);
+                setFocusRun(null);
+              }}
+            >
+              Back to all runs
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={addRun}
+              disabled={adding || experimentVersion === null}
+            >
+              <Plus size={15} strokeWidth={2.2} aria-hidden="true" />
+              {adding ? 'Adding Run…' : 'Add Run'}
+            </button>
+          ))}
         {/*
           THE COUNTS, AND THE ONE ELEMENT THAT ANNOUNCES THEM.
 
@@ -646,13 +707,20 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
           announced, which would make the announcement present in the markup and
           absent in practice.
 
+          IT GOES BLANK MID-READ RATHER THAN HOLDING ITS LAST NUMBERS, which is the
+          one place this differs from the controls row. The controls can honestly
+          show the last snapshot — a search box is a search box — but a count is a
+          claim about a list that is, at that moment, not on screen. Blank also
+          costs nothing in announcements: emptying a live region says nothing, so
+          the reader hears exactly one utterance per search, the answer.
+
           `aria-live` rather than `role="status"` deliberately: this is a label for
           the list below it, not a transient status message, and the record screen
           already carries several `status` regions (one per run card) that an
           unnamed extra one would sit among.
         */}
         <p className="runs-count" aria-live="polite" aria-atomic="true">
-          {countLine(loaded, filtering, focused)}
+          {countLine(loaded, filtering, countFocus)}
         </p>
       </div>
       )}
@@ -758,7 +826,7 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
             experimentId={experimentId}
             focusRunId={focusRunId}
             focus={focus}
-            runs={loaded.runs}
+            run={focusedRun}
             cardFocusId={cardFocusId}
             onCardFocused={() => setCardFocusId(null)}
             expanded={expanded[focusRunId] ?? true}
@@ -799,7 +867,23 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
               </p>
             )}
 
-            {loaded.runs.length < loaded.matched && (
+            {/*
+              THE GATE IS THE CURSOR, NOT THE LIST LENGTH, and the two are not the
+              same number the moment a page re-delivers a run. It read
+              `runs.length < matched` while paging from `received`; the dedupe
+              drops a repeated run from the array but not from what the server has
+              handed over, so after ONE duplicate `runs.length` trails `received`
+              permanently and the condition can never close. Measured on the
+              dedupe fixture: click three requests offset 120, and so does click
+              four, and click eight — the same empty window, forever, with no
+              message and nothing changing on screen. Reachable whenever a run is
+              created or deleted while a reader pages.
+
+              `received >= matched` is the server's own statement that the cursor
+              has reached the end of what matches, which is exactly the question
+              the button answers.
+            */}
+            {loaded.received < loaded.matched ? (
               <div className="runs-more">
                 <button
                   type="button"
@@ -824,6 +908,28 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
                   for a fresh read.
                 </span>
               </div>
+            ) : (
+              loaded.runs.length < loaded.matched && (
+                /*
+                 * THE MISS THE NOTE ABOVE WARNED ABOUT, ONCE IT HAS ACTUALLY
+                 * HAPPENED. Every page has been read and fewer distinct runs
+                 * arrived than match — which is the same shifted-window event the
+                 * dedupe absorbs, seen from the other end: a run delivered twice
+                 * is a run never delivered. The old gate hid this behind a button
+                 * that re-read the same empty window; withdrawing the button
+                 * without saying why would hide it behind silence instead, and
+                 * this is the one moment the reader can act on it.
+                 */
+                <div className="runs-more">
+                  <span className="runs-more-note">
+                    All pages have been read, but {loaded.matched - loaded.runs.length} matching{' '}
+                    {loaded.matched - loaded.runs.length === 1 ? 'run' : 'runs'} never arrived.
+                    Pages are read one after another, not as one snapshot, so a run added or
+                    removed while you were loading can shift out of every window — reload the
+                    record for a fresh read.
+                  </span>
+                </div>
+              )
             )}
           </>
         ))}
@@ -845,6 +951,12 @@ function criteriaQuery(
 }
 
 /**
+ * What focus mode has actually resolved to — not merely whether a run id is in
+ * the URL, which is what the count line used to ask.
+ */
+type CountFocus = 'none' | 'loading' | 'viewing' | 'missing';
+
+/**
  * THE COUNT LINE — the sentence this slice is most able to make dishonest.
  *
  * TWO NUMBERS, NEVER ONE. `matched` is how many runs satisfy the current search
@@ -858,12 +970,25 @@ function criteriaQuery(
  * Focus mode says the same thing from the other side: one run is on screen, and
  * the record's total is still named, so "Viewing one run" can never be mistaken
  * for "this record has one run".
+ *
+ * AND IT SAYS "VIEWING" ONLY WHEN A RUN IS BEING VIEWED. This branched on whether
+ * the URL named a run, so a deep link to an id that does not resolve announced
+ * "Viewing one run" over a panel that read "No run with the id NOPE is in this
+ * record" — the alert and the live region contradicting each other about the same
+ * screen. A run that is still being read is not being viewed either, and saying so
+ * early would be the same defect a moment sooner.
  */
-function countLine(loaded: Loaded | null, filtering: boolean, focused: boolean): string {
+function countLine(loaded: Loaded | null, filtering: boolean, focus: CountFocus): string {
   if (loaded === null) return '';
   const runWord = loaded.total === 1 ? 'run' : 'runs';
-  if (focused) {
+  if (focus === 'viewing') {
     return `Viewing one run · ${loaded.total} ${runWord} in this record`;
+  }
+  if (focus === 'loading') {
+    return `Loading one run · ${loaded.total} ${runWord} in this record`;
+  }
+  if (focus === 'missing') {
+    return `No run with that id · ${loaded.total} ${runWord} in this record`;
   }
   if (loaded.total === 0) return 'No runs in this record yet';
   if (!filtering) {
@@ -923,7 +1048,7 @@ function FocusedRun({
   experimentId,
   focusRunId,
   focus,
-  runs,
+  run,
   cardFocusId,
   onCardFocused,
   expanded,
@@ -934,7 +1059,8 @@ function FocusedRun({
   experimentId: string;
   focusRunId: string;
   focus: FocusState;
-  runs: ApiRunView[];
+  /** Resolved by the browser above, so the count line cannot disagree with it. */
+  run: ApiRunView | undefined;
   cardFocusId: string | null;
   onCardFocused: () => void;
   expanded: boolean;
@@ -942,9 +1068,6 @@ function FocusedRun({
   onRun: (run: ApiRunView) => void;
   onLeave: () => void;
 }) {
-  const fromPage = runs.find((r) => r.id === focusRunId);
-  const run = focus.status === 'fetched' ? focus.run : fromPage;
-
   if (focus.status === 'loading') {
     return <LoadingPanel label="Loading this run…" />;
   }
