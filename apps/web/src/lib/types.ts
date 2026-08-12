@@ -1763,10 +1763,39 @@ export interface ApiRunView {
   inherited: Record<string, ApiRunInherited>;
 }
 
+/**
+ * `GET /experiments/{id}/runs` — a PAGE of runs, and the four numbers that say
+ * what the page is a page OF.
+ *
+ * THE TWO TOTALS ARE DIFFERENT NUMBERS AND MUST NEVER BE SHOWN AS ONE. `total`
+ * is how many runs EXIST in the record and ignores `q` and the filters
+ * entirely; `matched` is how many satisfy the criteria the client sent. They
+ * are equal when nothing is filtering, which is exactly why conflating them is
+ * easy to do and invisible until someone types in the search box — at which
+ * point "320 runs" silently becomes "87 runs" and a scientist reads a filtered
+ * count as the size of their record.
+ *
+ * `returned` is stated rather than left to be derived from `runs.length`, so a
+ * truncation bug surfaces as a disagreement between two numbers instead of
+ * being invisible; `offset` is echoed so a client can tell which window it got.
+ *
+ * OMITTING `limit` STILL RETURNS EVERYTHING — paging is something a caller asks
+ * for, and the server-side contract note in `routes.py` is explicit that
+ * `RUN_PAGE_MAX` bounds one RESPONSE and is not a limit on how many runs a
+ * record may have.
+ */
 export interface ApiRunsResponse {
   runs: ApiRunView[];
   /** The EXPERIMENT's version token — the `If-Match` a run CREATE must carry. */
   experiment_version: string;
+  /** How many runs EXIST in this record. Ignores `q` and every filter. */
+  total: number;
+  /** How many runs match the criteria that were sent. Equals `total` when none were. */
+  matched: number;
+  /** How many runs are in THIS page. */
+  returned: number;
+  /** The offset this page was read from, echoed. */
+  offset: number;
 }
 
 export interface ApiRunCreated {

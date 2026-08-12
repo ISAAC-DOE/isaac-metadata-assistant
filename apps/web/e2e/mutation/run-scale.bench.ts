@@ -39,6 +39,10 @@
 import { test, expect, openRecord } from './own-session-fixtures';
 import { MUT_API_BASE, SEED } from './env';
 import { TUTORIAL_SESSION_HEADER } from '../worked-example';
+// The UI's own first-page size, IMPORTED rather than retyped. A literal 50 here would
+// be a second copy of a product decision, and the benchmark would silently stop
+// measuring the real first page the moment the UI changed its default.
+import { RUNS_PAGE_SIZE } from '../../src/lib/runPaging';
 
 /** Run counts to measure, ascending. Each is reached by topping up from the previous. */
 const COUNTS = (process.env.E2E_BENCH_COUNTS ?? '25,50,100,250,500')
@@ -174,11 +178,29 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
     await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible({
       timeout: 120_000,
     });
-    // "Interactive" means EVERY card is present and Add Run is enabled — not that the
-    // first card painted. A first-paint measurement would be flat by construction and
-    // would report nothing about the tail, which is where a list degrades.
+    /*
+     * WHAT "LOADED" MEANS CHANGED WHEN THE UI STOPPED DOWNLOADING EVERYTHING, and if
+     * this line had not changed with it the benchmark would simply have broken.
+     *
+     * It used to wait for `target` cards, and that was right while the Runs section
+     * read the unpaged list: every run really did arrive and render. The bounded Run
+     * browser requests `RUNS_PAGE_SIZE` and renders that, so above 50 runs the old
+     * gate waits for cards that will never exist and times out at 120 s a row.
+     *
+     * So it now waits for the page the product actually loads. THAT CHANGES WHAT THE
+     * COLUMN MEASURES, and the change is the point rather than a concession: `load ms`
+     * is no longer "how long until all N runs are on screen" but "how long until the
+     * scientist can work", which is the quantity the paging slice set out to flatten.
+     * A row above 50 is therefore NOT comparable with the pre-paging table in
+     * `docs/run-scale-measurements.md` — that table is the "before", kept as the
+     * baseline this is measured against, and the doc says so.
+     *
+     * `expectedCards` is deliberately `min(target, RUNS_PAGE_SIZE)` rather than a bare
+     * constant so the small rows (25) still gate on every card, exactly as before.
+     */
     const cards = page.locator('article.run-card');
-    await expect(cards).toHaveCount(target, { timeout: 120_000 });
+    const expectedCards = Math.min(target, RUNS_PAGE_SIZE);
+    await expect(cards).toHaveCount(expectedCards, { timeout: 120_000 });
     await expect(page.getByRole('button', { name: 'Add Run' })).toBeEnabled({ timeout: 120_000 });
     const loadMs = Date.now() - tLoad;
 
@@ -198,7 +220,12 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
       return ms;
     };
     const expandFirstMs = await expand(0);
-    const expandLastMs = await expand(target - 1);
+    // THE LAST *RENDERED* CARD, not the last run. Above `RUNS_PAGE_SIZE` those differ,
+    // and `expand(target - 1)` would address a card that was never mounted. The
+    // question this column answers is unchanged — does the card at the bottom of the
+    // DOM behave like the one at the top — and that question is about what is
+    // rendered, so the bounded page is the right list to take the tail of.
+    const expandLastMs = await expand(expectedCards - 1);
 
     const longTasks = await page.evaluate(
       () => (window as unknown as { __longTasks?: number }).__longTasks ?? 0

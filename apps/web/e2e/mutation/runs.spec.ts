@@ -97,8 +97,16 @@ async function openRunsSection(page: Page, id: string) {
 async function clickAddRun(page: Page, expectedTotal: number) {
   await addRun(page).click();
   await expect(runCards(page)).toHaveCount(expectedTotal);
+  /*
+   * THE COUNT NOW STATES WHAT IT IS A COUNT OF, and this expectation changed with
+   * it rather than being loosened. The toolbar used to read `{runs.length} runs`,
+   * which stopped being true the moment the list became a bounded page: on a
+   * record with 320 runs it claimed the record had 50. It now reads "Showing N of
+   * M runs", and on these records — every run fits in one page — N and M are the
+   * same number, which is exactly the honest thing to say.
+   */
   await expect(runCount(page)).toHaveText(
-    expectedTotal === 1 ? '1 run' : `${expectedTotal} runs`,
+    `Showing ${expectedTotal} of ${expectedTotal} ${expectedTotal === 1 ? 'run' : 'runs'}`,
   );
 }
 

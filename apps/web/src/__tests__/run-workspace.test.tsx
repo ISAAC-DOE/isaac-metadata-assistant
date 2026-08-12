@@ -28,6 +28,7 @@ import { __entryCount, __resetRunAutosaveStore } from '../lib/runAutosaveStore';
 import {
   bundleRoutes,
   runFixture,
+  runsPage,
   stubFetchRoutes,
   VERSION_FIELDS,
   type RouteEntry,
@@ -78,8 +79,10 @@ const RUN_B = runFixture({
   },
 });
 
+/** The listing shape, with the four counts the real route always sends — see
+ *  `runsPage` in `test/apiFixtures.ts` for why omitting them is not neutral. */
 function runsBody(runs: unknown[]) {
-  return { runs, experiment_version: VERSION_FIELDS.version };
+  return runsPage(runs);
 }
 
 /** Like `renderRecord`, but returns the render result so a test can unmount the SCREEN.
@@ -119,7 +122,11 @@ function cardFor(runId: string): HTMLElement {
 
 /** The accordion header button of one run card. */
 function headerOf(runId: string): HTMLButtonElement {
-  return within(cardFor(runId)).getByRole('button', { name: /Run \d/ }) as HTMLButtonElement;
+  // ANCHORED, and it did not used to be. A card now carries a SECOND button whose
+  // accessible name mentions the run — `Focus run Run 1` — so an unanchored /Run \d/
+  // matches two controls and this helper throws. The accordion header's name BEGINS
+  // with the run label; the Focus control's does not.
+  return within(cardFor(runId)).getByRole('button', { name: /^Run \d/ }) as HTMLButtonElement;
 }
 
 async function expand(runId: string) {

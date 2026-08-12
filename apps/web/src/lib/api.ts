@@ -570,6 +570,31 @@ async function mutationError(res: Response, path: string): Promise<ApiError> {
 
 const enc = encodeURIComponent;
 
+/**
+ * The optional query a run listing may carry. Every field is optional and every
+ * absent field means "the server's default", which for `limit` is THE WHOLE
+ * LIST — see `api.listRuns`.
+ *
+ * `overrides` is the server's own two-valued vocabulary (`any` = this run holds
+ * at least one override, `none` = it holds none) and is deliberately typed as
+ * that union rather than as `string`, so a third state invented on this side is
+ * a compile error instead of a query the server silently ignores.
+ */
+export interface ListRunsQuery {
+  /** 1..200. Omitted means every run. */
+  limit?: number;
+  /** Runs to skip, in canonical order. An offset past the end is CLAMPED to an
+   *  empty page by the server, never refused — that request is exactly what a
+   *  Load More sends after a concurrent delete shortened the list. */
+  offset?: number;
+  /** Case-insensitive literal substring over each run's label, id and record id;
+   *  an all-digits query also matches `ordinal` exactly. NOT a search over
+   *  scientific values, and not fuzzy. */
+  q?: string;
+  overrides?: 'any' | 'none';
+  exported?: boolean;
+}
+
 export const api = {
   health(): Promise<ApiHealth> {
     return getJson<ApiHealth>('/health');
@@ -825,8 +850,41 @@ export const api = {
    * client bug as a precondition failure.
    */
 
-  listRuns(experimentId: string): Promise<ApiRunsResponse> {
-    return getJson<ApiRunsResponse>(`/experiments/${enc(experimentId)}/runs`);
+  /**
+   * One PAGE of a record's runs, optionally searched and filtered SERVER-SIDE.
+   *
+   * EVERY PARAMETER IS OMITTED WHEN UNSET, and that is the contract rather than
+   * tidiness: omitting `limit` returns the whole list, which is what every
+   * caller that has not opted into paging still gets. A caller that wants a
+   * bounded read has to say so.
+   *
+   * `q` IS SENT ONLY WHEN IT IS NON-EMPTY. The server treats a blank or
+   * whitespace-only `q` as absent, so sending `q=` would be harmless — but it
+   * would also put a parameter on the wire that means "no search", and the one
+   * place that is not harmless is a reader (or a test) inspecting the request
+   * to find out whether a search was performed.
+   */
+  listRuns(experimentId: string, query: ListRunsQuery = {}): Promise<ApiRunsResponse> {
+    const params = new URLSearchParams();
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.offset !== undefined) params.set('offset', String(query.offset));
+    if (query.q !== undefined && query.q.trim() !== '') params.set('q', query.q.trim());
+    if (query.overrides !== undefined) params.set('overrides', query.overrides);
+    if (query.exported !== undefined) params.set('exported', String(query.exported));
+    /*
+     * THE PATH LITERAL STAYS WHOLE, AND THE QUERY IS APPENDED TO IT SEPARATELY.
+     * `backend-down-state.test.tsx` derives this module's per-record sub-read
+     * inventory by reading the source and matching every single-line template
+     * literal that starts with the per-record path prefix; interpolating the
+     * query string INTO that literal makes the scanner read runs?… as a new
+     * sub-resource, for which there is no product word, and the
+     * down-state panel then has no product word for the part that failed. This is
+     * the refactor the test's own header says "must revisit this block by hand" —
+     * avoided by keeping the literal in the established shape.
+     */
+    const path = `/experiments/${enc(experimentId)}/runs`;
+    const search = params.toString();
+    return getJson<ApiRunsResponse>(search === '' ? path : `${path}?${search}`);
   },
 
   getRun(experimentId: string, runId: string): Promise<ApiRunResponse> {

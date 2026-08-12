@@ -46,8 +46,8 @@ import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
 import {
   bundleRoutes,
   runFixture,
+  runsPage,
   stubFetchRoutes,
-  VERSION_FIELDS,
   type RouteEntry,
 } from '../test/apiFixtures';
 
@@ -99,8 +99,10 @@ const RUN_WITH_UNCLASSIFIED = runFixture({
   },
 });
 
+/** The listing shape, with the four counts the real route always sends — see
+ *  `runsPage` in `test/apiFixtures.ts` for why omitting them is not neutral. */
 function runsBody(runs: unknown[]) {
-  return { runs, experiment_version: VERSION_FIELDS.version };
+  return runsPage(runs);
 }
 
 function renderRecord(extra: Record<string, RouteEntry>) {
@@ -123,7 +125,9 @@ function cardFor(runId: string): HTMLElement {
 
 async function expand(runId: string) {
   await act(async () => {
-    fireEvent.click(within(cardFor(runId)).getByRole('button', { name: /Run \d/ }));
+    // Anchored: the card also carries a `Focus run Run 1` control, whose accessible
+    // name contains but does not begin with the run label. See run-workspace.test.tsx.
+    fireEvent.click(within(cardFor(runId)).getByRole('button', { name: /^Run \d/ }));
   });
 }
 

@@ -72,6 +72,27 @@ export function isRecordView(value: string | null | undefined): value is RecordV
   return RECORD_VIEW_IDS.includes(value as RecordViewId);
 }
 
+/**
+ * FOCUS RUN — the record screen's "show me this one run and nothing else" mode,
+ * on the SAME `?param=` mechanism as `tab` and `view`. A fifth use of one
+ * convention, not a fifth convention: the value is read with `useSearchParams`
+ * and written by COPYING the existing `URLSearchParams`, so `?view=graph` and
+ * anything else already on the record URL survives being focused and unfocused.
+ *
+ * WHY IT IS IN THE URL AT ALL, rather than in `useState` inside the Runs
+ * section. The Runs list is now BOUNDED — a scientist looking at run 214 of 320
+ * reached it through a search and two Load Mores, and a run held only in
+ * component state cannot be linked to, cannot be bookmarked, and is gone after a
+ * reload. "Here is the run I mean" is exactly the thing a scientist sends to a
+ * colleague, and the same defect (a view reachable by clicking but not by link)
+ * was already shipped once on Governance and fixed there.
+ *
+ * The value is a RUN ID and is never validated here — the section resolves it
+ * against the server and says honestly when no such run exists. An absent or
+ * empty value simply means "not focused", so there is no dead route.
+ */
+export const RECORD_RUN_PARAM = 'run';
+
 export const ROUTES = {
   experiments: '/experiments',
   load: '/load',
@@ -109,6 +130,12 @@ export const ROUTES = {
    *  any other query parameter survives. */
   recordView: (id: string, view: RecordViewId) =>
     `/record/${id}?${RECORD_VIEW_PARAM}=${view}`,
+  /** A deep link to ONE run on a record, e.g. `/record/<id>?run=<runId>`. Same
+   *  division of labour as `settingsTab` and `recordView`: whole-URL links use
+   *  this, while the Runs section itself enters and leaves focus by copying its
+   *  own `URLSearchParams` so any other query parameter survives. */
+  recordRun: (id: string, runId: string) =>
+    `/record/${id}?${RECORD_RUN_PARAM}=${encodeURIComponent(runId)}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,
   export: (id: string) => `/record/${id}/export`,
