@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "d8ca03f561c0226695a0995da8cd35a61b21453cc7b75ae34e73d10b996242bf"
+        "sha256": "4720403a7f79a5ef80f7221db25909c0c1f87d5a579749c7a457e0aea4f39f08"
       },
       {
         "path": "AGENTS.md",
@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "4e81ed4dff523deae9044affb78c2c8e283525f76bfc164680b6b6703ece6da3"
+        "sha256": "6e9ca7c28ef3eddce224167bc587de5a60e887d2b278637888cb5e08d74ae38a"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10264,7 +10264,7 @@
       },
       {
         "path": "apps/api/isaac_api/app.py",
-        "sha256": "af696632040997dba432609f44c776b57cb95a57319e221bf9f2e11e653797e0"
+        "sha256": "39cfc394aa55ec8b63b39a7e8b318fe2acf8e42223ce8ce32837a47eda0e4832"
       },
       {
         "path": "apps/api/isaac_api/auth.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "6e89e343bce793b39c21fa970586be57279abe6e332eb4e146f7419aa0a4d00c"
+    "served_manifest_fingerprint": "e28f7c4dc2f2452ccf095b65449c89c2b0da9a8461bfdc4b6d5446b9f7b87631"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
