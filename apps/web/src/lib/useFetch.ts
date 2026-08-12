@@ -88,7 +88,8 @@ export function useFetch<T>(
   //     raised nothing at all.
   //
   // So the failure is recorded and the caller must surface it. The data stays,
-  // the screen never blanks, and a success clears the flag.
+  // the screen never blanks, and a success clears the flag — with ONE named
+  // exception added later for an edge intercept, argued in the catch below.
   const reloadSilent = useCallback(() => {
     fetcherRef
       .current()
@@ -98,8 +99,35 @@ export function useFetch<T>(
           setRefreshFailed(false);
         }
       })
-      .catch(() => {
-        if (mountedRef.current) setRefreshFailed(true);
+      .catch((err: unknown) => {
+        if (!mountedRef.current) return;
+        /*
+         * ONE FAILURE IS NOT A "STALE DATA" FAILURE, and it is the one the note
+         * cannot describe: an authenticating edge answered instead of ISAAC.
+         *
+         * `refreshFailed` renders "what you see is the last loaded state" with a
+         * Refresh button. For a session that expired behind an open record screen
+         * that is both cause-free and useless — every later refresh is intercepted
+         * too, so the reader presses Refresh against a dead session and the screen
+         * keeps quietly showing data from before they were signed out. The auth
+         * state names the cause and offers the only thing that works, which is a
+         * page reload back through the identity flow.
+         *
+         * Escalating BLANKS the screen, which is precisely what `reloadSilent`
+         * exists to avoid — so this is deliberately the ONLY escalated case, and it
+         * is escalated on the intercept signal alone. Not on 401/403: those are
+         * statuses a single endpoint can answer while the session is perfectly
+         * valid, and treating one member of a bundle's refusal as "you are signed
+         * out" would throw away a whole screen of good data. Not on anything else
+         * either — a 503 or a parse failure keeps its data and its note, which is
+         * the behaviour R1b shipped and this must not undo.
+         */
+        if (err instanceof ApiError && err.htmlIntercept) {
+          setState({ status: 'error', error: err });
+          setRefreshFailed(false);
+          return;
+        }
+        setRefreshFailed(true);
       });
   }, []);
 

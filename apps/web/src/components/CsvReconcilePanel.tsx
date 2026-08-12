@@ -5,6 +5,7 @@ import { LoadingPanel, BackendDown } from './FetchStates';
 import { Upload } from './icons';
 import { api, ApiError } from '../lib/api';
 import { LABELS } from '../lib/labels';
+import { mutationFailureCopy } from '../lib/mutationErrors';
 import { RECONCILE_STATE_CHIP, EVIDENCE_CLASS_CHIP } from '../lib/status';
 import type { ApiCsvPreview, ApiCsvReconcileItem, ApiCsvWarning } from '../lib/types';
 
@@ -73,6 +74,14 @@ function warningText(w: ApiCsvWarning): string {
 }
 
 /**
+ * The last-resort ingress sentence. Named because two branches return it and
+ * because it is the one that must NOT be reached by a session failure: it points
+ * the reader at their own file.
+ */
+const GENERIC_INGRESS_FAILURE =
+  'The CSV could not be processed. Please check the file and try again.';
+
+/**
  * A SAFE, typed message for a non-OK ingress response — never a server path or
  * stack. A trusted, path-free `body.message` is preferred; otherwise a per-status
  * sentence. `unreachable` is handled separately (the BackendDown state).
@@ -84,8 +93,29 @@ function warningText(w: ApiCsvWarning): string {
  * no `case 400` in the switch, so without this branch every one of those would fall
  * to the generic default sentence — it stays (pinned by the FE-1 tests). The guard
  * still rejects any body.message containing a path / Traceback / workspace mount.
+ *
+ * A SESSION THAT ENDED IS ANSWERED FIRST, AND IT IS THE REASON THIS BRANCH WAS
+ * ADDED. The `default:` sentence below reads "check the file and try again", so
+ * an expired session — where the answer came from the identity provider and the
+ * CSV was never read by ISAAC at all — blamed the scientist's file for a response
+ * that had nothing to do with it, and sent them to fix a file that was fine. The
+ * signal is established in `lib/api.ts::interceptedByEdge` and cannot be produced
+ * by any ordinary ingress failure; see `mutationFailureCopy`.
+ *
+ * 403 IS DELIBERATELY LEFT TO ITS OWN CASE HERE, unlike at the other write sites
+ * that pass 403 to `mutationFailureCopy`. On THIS path a 403 has a documented,
+ * non-auth meaning — `routes.py::post_csv_preview` answers 403
+ * `runtime_mode_denied` when the deployment is not synthetic-only, and it says
+ * "Nothing was read" — so claiming a signed-out session would be a guess where a
+ * true sentence already exists. ISAAC's own authentication middleware
+ * (`apps/api/isaac_api/auth.py:54`) answers 401 and only 401, and an edge answers
+ * with the intercept above, so neither of the two real session-expiry signals is
+ * lost by leaving 403 alone.
  */
 function safeErrorMessage(err: ApiError): string {
+  if (err.htmlIntercept || err.status === 401) {
+    return mutationFailureCopy(err, GENERIC_INGRESS_FAILURE);
+  }
   const bodyMsg = (err.body as { message?: unknown } | undefined)?.message;
   if (
     typeof bodyMsg === 'string' &&
@@ -106,7 +136,7 @@ function safeErrorMessage(err: ApiError): string {
     case 403:
       return 'Uploading this file is not permitted here.';
     default:
-      return 'The CSV could not be processed. Please check the file and try again.';
+      return GENERIC_INGRESS_FAILURE;
   }
 }
 

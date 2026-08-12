@@ -66,11 +66,27 @@ export function fixtureWorkflow(s: {
 
 // --- fetch stub ---------------------------------------------------------
 
+/*
+ * THREE FIELDS BELOW EXIST ONLY FOR THE SESSION-EXPIRY SIGNAL, and they are opt-in.
+ *
+ * `interceptedByEdge` in `lib/api.ts` classifies a response by its PROVENANCE —
+ * its content type, and whether the redirect chain ended outside `API_BASE`. A
+ * stub that models neither reports `contentType: undefined` and
+ * `redirected: undefined`, which is exactly the "came from ISAAC" shape, so every
+ * existing fixture keeps its current classification unchanged. Only a route that
+ * explicitly sets one of these can look like an intercept.
+ */
 export interface StubbedRoute {
   status?: number;
   body: unknown;
   /** Optional `ETag` response header (P27.6 conditional GET). */
   etag?: string;
+  /** Optional `Content-Type` response header. Omitted = none reported. */
+  contentType?: string;
+  /** Did `fetch` follow a redirect to produce this response? */
+  redirected?: boolean;
+  /** The FINAL URL, which differs from the requested one after a redirect. */
+  url?: string;
 }
 
 /** The per-call descriptor a route-thunk resolves to (P27.6 conditional GET). */
@@ -78,6 +94,9 @@ export interface RouteResult {
   status?: number;
   body?: unknown;
   etag?: string;
+  contentType?: string;
+  redirected?: boolean;
+  url?: string;
 }
 
 /**
@@ -154,12 +173,20 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
     // a 304 carries no body (ok:false, status 304). checkRecordVersion branches
     // on status before reading json(), so a 304 body is never consumed.
     const headers = {
-      get: (name: string) => (name.toLowerCase() === 'etag' ? (etag ?? null) : null),
+      get: (name: string) => {
+        const lower = name.toLowerCase();
+        if (lower === 'etag') return etag ?? null;
+        if (lower === 'content-type') return resolved.contentType ?? null;
+        return null;
+      },
     };
     return {
       ok: status < 400,
       status,
       headers,
+      // Absent unless a route opts in — see the note on `StubbedRoute`.
+      redirected: resolved.redirected ?? false,
+      url: resolved.url,
       json: async () => body,
     } as unknown as Response;
   };

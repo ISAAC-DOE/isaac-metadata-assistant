@@ -4,6 +4,7 @@ import { VerdictCard } from './VerdictCard';
 import { LoadingPanel, BackendDown } from './FetchStates';
 import { Upload, FileJson, TriangleAlert } from './icons';
 import { api, ApiError } from '../lib/api';
+import { mutationFailureCopy } from '../lib/mutationErrors';
 import type { ApiValidateRecordResult, ValidationResult } from '../lib/types';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 
@@ -141,7 +142,11 @@ export function RecordValidator() {
         setBackendError(err);
         setPhase('backend_down');
       } else {
-        setRejection(err.message || 'The record could not be validated.');
+        // A sign-in page answered in place of the API is not a verdict about the
+        // pasted record, so it must not be shown as one.
+        setRejection(
+          mutationFailureCopy(err, err.message || 'The record could not be validated.'),
+        );
         setPhase('rejected');
       }
     }

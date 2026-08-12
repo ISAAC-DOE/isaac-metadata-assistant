@@ -85,6 +85,7 @@ import {
   type OverrideRefusal,
   type OverrideRow,
 } from '../lib/runOverrides';
+import { mutationFailureCopy } from '../lib/mutationErrors';
 import type { ApiRunView } from '../lib/types';
 
 /** The outcome of the last write, for the panel's one live region. */
@@ -227,12 +228,17 @@ export function RunInheritedPanel({
           ? { kind: 'refused', address, refusal }
           : { kind: 'refused', address, refusal: { message: FALLBACK_REFUSAL, findings: [] } };
       }
-      return { kind: 'error', address, message: err.message };
+      // A session that ended is the one cause worth naming here: the override was
+      // not recorded, and no amount of retrying this panel will change that.
+      return { kind: 'error', address, message: mutationFailureCopy(err, err.message) };
     }
     return {
       kind: 'error',
       address,
-      message: err instanceof Error ? err.message : 'The override could not be sent.',
+      message: mutationFailureCopy(
+        err,
+        err instanceof Error ? err.message : 'The override could not be sent.',
+      ),
     };
   };
 

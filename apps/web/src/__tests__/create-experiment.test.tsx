@@ -535,6 +535,41 @@ describe('My Experiments · Create Experiment', () => {
     expect(screen.getByRole('button', { name: LABELS.createExperimentSubmit })).toBeEnabled();
   });
 
+  /*
+   * A SESSION THAT ENDED IS NAMED, because the remedy differs from every other
+   * create failure: retrying the form cannot work, and only a reload can.
+   *
+   * The response modelled here is the one the infrastructure owner described on
+   * 2026-08-12 — a 302 to Authentik that `fetch` followed, so the body arrives from
+   * outside `API_BASE`. Before this, the form rendered the client's raw transport
+   * sentence and the reader was left to guess.
+   */
+  it('names an ended session instead of showing the raw transport message', async () => {
+    stubFetchRoutes({
+      ...emptyRoutes(EPHEMERAL),
+      'POST /api/experiments': {
+        status: 200,
+        contentType: 'application/xhtml+xml',
+        redirected: true,
+        url: 'https://auth.example.org/if/flow/default/',
+        body: {},
+      },
+    } as never);
+    renderAt();
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
+
+    fireEvent.click(screen.getByRole('button', { name: LABELS.actionCreateExperiment }));
+    fireEvent.change(await screen.findByLabelText(LABELS.createExperimentTitleLabel), {
+      target: { value: 'Interrupted' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: LABELS.createExperimentSubmit }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent ?? '').toMatch(/sign in again/i);
+    // The typed title still survives — the reader signs in and resubmits.
+    expect(screen.getByLabelText(LABELS.createExperimentTitleLabel)).toHaveValue('Interrupted');
+  });
+
   it('Cancel closes the form and returns focus to the control that opened it', async () => {
     await openEmptyState(EPHEMERAL);
     const open = screen.getByRole('button', { name: LABELS.actionCreateExperiment });

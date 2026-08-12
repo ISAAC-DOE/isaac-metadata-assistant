@@ -188,10 +188,19 @@ export class ApiError extends Error {
   /** The response `Content-Type`, when the response reported one. */
   readonly contentType?: string;
   /**
-   * True when a response to an `/api/*` path carried `text/html`. Our API only
-   * ever answers JSON, so HTML on an API path is an edge/proxy intercept — in
-   * this deployment, the identity provider's sign-in page. That is observed
-   * evidence of an authentication redirect, not an inference.
+   * True when the answer to an `/api/*` path demonstrably did not come from
+   * ISAAC. Two SUFFICIENT conditions, both positive observations rather than
+   * inferences from a failed parse — see `interceptedByEdge`:
+   *
+   *   1. the response carried a `text/html` content type, which ISAAC can never
+   *      legitimately serve on an API path;
+   *   2. the request was REDIRECTED and the final URL is outside `API_BASE`,
+   *      i.e. the body was authored by some other origin/path entirely.
+   *
+   * In this deployment either one means the identity provider's sign-in page.
+   * The name is historical (condition 1 was the original and only test) and is
+   * kept because every consumer reads it; it is the "not ISAAC" flag, not a
+   * statement about the media type.
    */
   readonly htmlIntercept: boolean;
   /**
@@ -245,6 +254,9 @@ const HTML_CONTENT_TYPE = /^\s*text\/html\b/i;
 const HTML_INTERCEPT_MESSAGE =
   'The API path returned an HTML page instead of JSON (an edge intercept).';
 
+const REDIRECT_INTERCEPT_MESSAGE =
+  'The API request was redirected away from the ISAAC API and answered elsewhere (an edge intercept).';
+
 /** The response `Content-Type`, tolerating a stub/response without headers. */
 function contentTypeOf(res: Response): string | undefined {
   const raw = res.headers?.get?.('content-type');
@@ -255,12 +267,92 @@ function isHtml(contentType: string | undefined): boolean {
   return contentType !== undefined && HTML_CONTENT_TYPE.test(contentType);
 }
 
+/**
+ * `API_BASE` as an ABSOLUTE URL, resolved once at module load.
+ *
+ * `API_BASE` is `/krish/api` in the hosted build — a path, while `Response.url`
+ * is always absolute — so the two cannot be compared until this resolution has
+ * happened. Resolved against `location.href` rather than `location.origin`
+ * because a relative `VITE_API_BASE` (none ships today, but the env is a string
+ * a deployer sets) must resolve the way the browser resolved it when fetching.
+ *
+ * Trailing slashes are stripped so the comparison below is a clean prefix test;
+ * `API_BASE` is already stripped, this only covers what `new URL` may add.
+ *
+ * FALLS BACK TO THE RAW BASE when there is no `location` (a non-DOM test
+ * environment) or the resolution throws. That fallback can only ever make the
+ * prefix test FAIL to match, i.e. classify a redirect as off-base — which is
+ * reachable only when a redirect actually happened, and is the direction that
+ * says "we cannot vouch for where this came from".
+ */
+function absoluteApiBase(): string {
+  const here = typeof globalThis.location?.href === 'string' ? globalThis.location.href : undefined;
+  try {
+    return new URL(API_BASE, here).href.replace(/\/+$/, '');
+  } catch {
+    return API_BASE;
+  }
+}
+
+const ABSOLUTE_API_BASE = absoluteApiBase();
+
+/**
+ * Did this response demonstrably come from somewhere OTHER than the ISAAC API?
+ *
+ * WHY A POSITIVE SIGNAL AND NOT "THE BODY WOULD NOT PARSE". A failed parse has
+ * many causes — a truncated body, a proxy that mangled a chunk, a genuine
+ * backend bug — and reporting all of them as "your session ended" would replace
+ * one confidently wrong screen with another. Both conditions here are statements
+ * about WHERE the answer came from, which is checkable, rather than about why a
+ * parse failed, which is not.
+ *
+ * CONDITION 1 — a `text/html` content type, UNCHANGED. ISAAC can never
+ * legitimately serve HTML on an `/api/*` path: `apps/api/isaac_api/spa.py:47-48`
+ * raises a JSON 404 for any path beginning `api/` BEFORE the SPA fallback could
+ * return `index.html`. So HTML under `API_BASE` is by construction not ISAAC.
+ * `isHtml` is deliberately NOT widened to `application/xhtml+xml` or to "any
+ * non-JSON type": that would change how every API response is classified, on the
+ * strength of a media type a misconfigured backend could also emit. A sign-in
+ * page served as XHTML — or with no content type at all — is caught by condition
+ * 2 instead, which does not depend on what the edge labelled its own body.
+ *
+ * CONDITION 2 — a redirect that LEFT the API. `fetch` follows redirects by
+ * default, so an expired session's `302` to the identity provider is followed
+ * silently and the body that arrives is the login page. `res.redirected` records
+ * that a hop happened and `res.url` is the FINAL URL, so the pair answers "was
+ * this authored somewhere else?" directly. It is deliberately a CONJUNCTION: a
+ * redirect that stays under `API_BASE` is ISAAC's own (a trailing-slash
+ * normalisation, a future route move) and is NOT an intercept, and an off-base
+ * URL with no redirect cannot happen for a request this client issued.
+ *
+ * A response with `redirected === true` but no readable `url` returns false. We
+ * would be guessing, and the guess would run in the over-claiming direction.
+ *
+ * WHAT THIS STILL MISSES, stated because the gap is real: a sign-in page served
+ * with `Content-Type: application/json`, or one served without a redirect (an
+ * edge that rewrites in place). Neither has been observed here; the 2026-08-12
+ * infrastructure answer is that an expired `/krish/*` request gets a 302 to
+ * Authentik, which is condition 2.
+ */
+function interceptedByEdge(res: Response, contentType: string | undefined): boolean {
+  if (isHtml(contentType)) return true;
+  if (res.redirected !== true) return false;
+  const finalUrl = typeof res.url === 'string' ? res.url : '';
+  if (finalUrl.length === 0) return false;
+  return !finalUrl.startsWith(ABSOLUTE_API_BASE);
+}
+
+/** Which of the two intercept conditions fired, said honestly in the message. */
+function interceptMessage(contentType: string | undefined): string {
+  return isHtml(contentType) ? HTML_INTERCEPT_MESSAGE : REDIRECT_INTERCEPT_MESSAGE;
+}
+
 /** The typed error for a non-OK response, carrying every observable signal. */
 function httpError(res: Response, path: string): ApiError {
   const contentType = contentTypeOf(res);
-  const htmlIntercept = isHtml(contentType);
+  const htmlIntercept = interceptedByEdge(res, contentType);
   return new ApiError(
-    htmlIntercept ? HTML_INTERCEPT_MESSAGE : `Request failed (${res.status}).`,
+    htmlIntercept ? interceptMessage(contentType) : `Request failed (${res.status}).`,
     { status: res.status, path, contentType, htmlIntercept },
   );
 }
@@ -325,15 +417,23 @@ async function httpErrorWithReason(res: Response, path: string): Promise<ApiErro
  * hypothetical: an authenticating edge can answer an `/api/*` request with its
  * sign-in HTML and HTTP **200**. Before this was centralized, that rejection
  * escaped every reader as a raw `SyntaxError` — not an `ApiError` — so screens
- * rendered a generic crash instead of the honest down state. Here the HTML case
- * is detected from the `Content-Type` first (so the caller learns it was an
+ * rendered a generic crash instead of the honest down state. Here the intercept
+ * is detected BEFORE the parse is attempted (so the caller learns it was an
  * intercept, not corrupt JSON), and any other parse failure still becomes a
  * typed `ApiError`.
+ *
+ * THE ORDER IS THE POINT, and it is what keeps the two apart. The intercept test
+ * looks only at the response's provenance — its content type and where the
+ * redirect chain ended — and it runs first. A body that fails to parse having
+ * come from ISAAC's own URL with ISAAC's own content type is NOT an intercept and
+ * must never be reported as one: that is a backend or transport defect, and
+ * telling the reader their session expired would send them to re-authenticate
+ * for a problem re-authenticating cannot fix.
  */
 async function readJson<T>(res: Response, path: string): Promise<T> {
   const contentType = contentTypeOf(res);
-  if (isHtml(contentType)) {
-    throw new ApiError(HTML_INTERCEPT_MESSAGE, {
+  if (interceptedByEdge(res, contentType)) {
+    throw new ApiError(interceptMessage(contentType), {
       status: res.status,
       path,
       contentType,

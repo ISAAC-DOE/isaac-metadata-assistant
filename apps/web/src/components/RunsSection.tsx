@@ -55,6 +55,7 @@ import { api, ApiError } from '../lib/api';
 import { RECORD_RUN_PARAM } from '../lib/routes';
 import type { ApiRunView } from '../lib/types';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
+import { mutationFailureCopy } from '../lib/mutationErrors';
 
 /*
  * RE-EXPORTED, NOT DEFINED HERE. The scale benchmark needs this number too, and
@@ -590,8 +591,13 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
           );
           return;
         }
+        // A session that ended is named as such — the run was not created, and
+        // the remedy is signing in again rather than retrying the form.
         setAddError(
-          err instanceof Error ? err.message : 'The run could not be created.',
+          mutationFailureCopy(
+            err,
+            err instanceof Error ? err.message : 'The run could not be created.',
+          ),
         );
       });
   };

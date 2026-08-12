@@ -369,6 +369,42 @@ describe('CsvReconcilePanel — errors & lifecycle', () => {
     }
   });
 
+  /*
+   * AN EXPIRED SESSION IS NOT A BAD CSV, and this panel was the worst offender in
+   * the app: its generic branch reads "The CSV could not be processed. Please check
+   * the file and try again", so a scientist whose session had ended was told their
+   * file was the problem and sent to re-export a file that was fine.
+   *
+   * The response modelled here is the one the infrastructure owner described on
+   * 2026-08-12 — a 302 to Authentik that `fetch` followed, leaving a login page and
+   * a final URL outside `API_BASE`. ISAAC never authored it, so it says nothing
+   * about the CSV.
+   */
+  it('an intercepted session says so, instead of blaming the scientist’s file', async () => {
+    stubFetchRoutes({
+      [PREVIEW_URL]: {
+        status: 200,
+        contentType: 'application/xhtml+xml',
+        redirected: true,
+        url: 'https://auth.example.org/if/flow/default/',
+        body: {},
+      },
+    });
+    renderPanel();
+    await selectCsv();
+    expect(await screen.findByText(/sign in again/i)).toBeInTheDocument();
+    expect(screen.queryByText(/check the file and try again/i)).toBeNull();
+  });
+
+  it('an ordinary ingress failure keeps the file-oriented sentence', async () => {
+    // The other half of the rule: only a session signal changes the copy.
+    stubFetchRoutes({ [PREVIEW_URL]: { status: 500, body: { error: 'boom' } } });
+    renderPanel();
+    await selectCsv();
+    expect(await screen.findByText(/check the file and try again/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sign in again/i)).toBeNull();
+  });
+
   it('shows a backend-unreachable state without crashing', async () => {
     stubFetchDown();
     renderPanel();
