@@ -122,13 +122,20 @@ APPLICATION_NAME = "isaac_app_write"
 #: 30-row sample and is owned by the record-verification read path; this
 #: application must never read it through here, let alone write it.
 #:
-#: ``isaac_runs`` WAS ADDED FOR MIGRATION ``0002_runs`` AND IS NOT YET WRITTEN BY
-#: ANYTHING. This set is what the statement policy consults, so a table must be
-#: listed here before its own CREATE statement can run — the migration file alone
-#: is not enough. Listing it grants nothing on its own: no module-level statement
-#: names ``isaac_runs``, which is pinned by
-#: ``test_0002_is_inert_for_this_build_no_statement_names_isaac_runs``. Adding a
-#: name here is the deliberate, reviewable act that lets a later slice write it.
+#: ``isaac_runs`` WAS ADDED FOR MIGRATION ``0002_runs`` AND IS NOW WRITTEN.
+#: This set is what the statement policy consults, so a table must be listed here
+#: before its own CREATE statement can run — the migration file alone is not
+#: enough. Listing it granted nothing on its own; it was the deliberate, reviewable
+#: act that let a later slice write the table, and that slice has landed.
+#:
+#: THE PREVIOUS SENTENCE HERE SAID THE TABLE WAS "NOT YET WRITTEN BY ANYTHING" and
+#: cited ``test_0002_is_inert_for_this_build_no_statement_names_isaac_runs`` as the
+#: pin. Both are superseded: ``experiment_repository`` now issues
+#: ``Q_EXPERIMENT_RUN_ROWS``, ``Q_UPSERT_RUN`` and ``Q_DELETE_ABSENT_RUNS`` inside
+#: ``PostgresOrdinaryStore.persist``, and that test has been INVERTED rather than
+#: deleted — it now pins the property that is true instead: the WRITE path names
+#: this table and the READ path still does not. The wording is replaced rather than
+#: softened, because a claim of inertness in a safety module is read as a guarantee.
 OWNED_TABLES: frozenset[str] = frozenset(
     {
         "isaac_schema_migrations",
@@ -198,11 +205,15 @@ class WriteRefused(RuntimeError):
 #: same token" was simply wrong. It is the same privilege-switch shape as
 #: ``SET ROLE`` and is refused by name rather than by hope.
 #:
-#: VERIFIED AGAINST WHAT THE APPLICATION ACTUALLY ISSUES, not assumed: all eight
+#: VERIFIED AGAINST WHAT THE APPLICATION ACTUALLY ISSUES, not assumed: all TWELVE
 #: module-level statements and all five committed migration statements (three from
 #: ``0001_experiments``, two from ``0002_runs``) still pass, pinned by
 #: ``test_every_statement_this_application_actually_issues_passes_the_policy`` and
 #: by ``test_the_committed_migrations_load_and_are_create_only``.
+#: (That count read "eight" while the pinning test already enumerated NINE, and it
+#: is now twelve: ``experiment_repository`` added the three ``isaac_runs``
+#: statements. A hand-maintained tally in a safety comment drifts, which is why the
+#: test enumerates the modules' ``Q_*`` names rather than trusting this number.)
 #: The near-misses are worth naming, because they are why this is a token match
 #: and not a substring one: ``current_database`` (in ``Q_CURRENT_DATABASE``) and
 #: ``isaac_schema_migrations`` are each a SINGLE identifier token, so neither

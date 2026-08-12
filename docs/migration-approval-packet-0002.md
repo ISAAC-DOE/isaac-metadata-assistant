@@ -1,5 +1,29 @@
 # Migration approval packet — `0002_runs`
 
+> ## AMENDMENT 2026-08-12 (b) — the inertness claim is now FALSE, and the file asserting it CANNOT be corrected
+>
+> This packet says in several places (**§ lines 206, 282, 376, 435, 451–452, 717**) that no
+> application code reads or writes `isaac_runs`, and `0002_runs.sql:38-45` says the same, naming
+> `test_0002_is_inert_for_this_build_no_statement_names_isaac_runs` as the pin.
+>
+> **All of that is now false.** A shadow-write slice maintains `isaac_runs` rows as a pure function
+> of the experiment document, inside the one existing durable write. That named test no longer
+> exists; it was **inverted, not deleted**, into
+> `test_0002_is_now_written_by_the_write_path_and_by_nothing_else`, which asserts that exactly three
+> statements name the table, all of them writes, and that **no read of experiment state touches it**.
+> The reads are still inert; only the write half moved.
+>
+> **`0002_runs.sql` IS NOT EDITED, AND WILL NOT BE — including its stale comment.** Its SHA-256 is
+> `c96e308d7fdfd508ab2c2aeffb08abcb18a88aae84db6f1d08b83f9cba8fda3e`, and that digest is the evidence
+> that the bytes Dean applied to the hosted database are the bytes this packet approved. Correcting
+> a comment would change the digest and destroy that correspondence — trading a permanent audit fact
+> for a cosmetic one. So the file keeps a sentence that is no longer true, **deliberately**, and this
+> amendment is where a reader finds that out.
+>
+> A future reader of that file should treat its §"No application code writes or reads" paragraph as
+> **true as of the moment it was applied, and superseded since.** The same applies to
+> `workspace.py`'s `Run` docstring, which still says the storage "moves later".
+>
 > ## STATUS: **APPLIED TO THE HOSTED DATABASE BY DEAN, 2026-08-12 00:30 UTC.**
 >
 > Evidence, with every qualification attached:

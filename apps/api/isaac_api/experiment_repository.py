@@ -802,6 +802,195 @@ Q_ALL_EXPERIMENTS = (
 )
 
 
+# --- the run rows: a SHADOW WRITE, and nothing reads them ----------------------
+#
+# WHAT THESE THREE STATEMENTS ARE, AND — MORE IMPORTANTLY — WHAT THEY ARE NOT.
+# They make the rows of `isaac_runs` for one experiment equal
+# `exp.sorted_runs()`, inside the SAME transaction that upserts the experiment.
+# They are ADDITIVE: `Experiment.to_state()` still serialises `runs`, the state
+# document is still the authoritative copy, and NO READ PATH IN THIS APPLICATION
+# TOUCHES THIS TABLE. Migration `0002_runs` exists so a Run can become the unit of
+# write (contract §8 DECISION D7); this slice makes the rows exist and correct, and
+# moving any reader onto them is a later, separately reviewed slice.
+#
+# SO WHAT IS THE POINT OF WRITING ROWS NOBODY READS? That the table is never wrong.
+# A reader added later inherits a row set that has been maintained from the first
+# write rather than one that has to be backfilled from documents of unknown vintage
+# — and a defect in the projection surfaces now, under test, instead of on the day
+# something starts depending on it.
+#
+# WHY THEY ARE MODULE-LEVEL CONSTANTS WITH `%s` PLACEHOLDERS, like every other
+# statement in this application: `db_write`'s primary guarantee is that no
+# caller-supplied SQL exists anywhere in the write path. A run count is not known
+# here, so a multi-row `VALUES (...), (...)` list — which would be one statement
+# instead of N — would mean BUILDING SQL TEXT AT RUN TIME. That is the one thing
+# this write path does not do, and the diff below is what makes N small anyway.
+
+#: The current row set for one experiment. ONE indexed read — the index
+#: `isaac_runs_experiment_order_idx` leads on `experiment_id` — and it is what makes
+#: the write a DIFF instead of a blanket rewrite.
+#:
+#: IT SELECTS `state`, WHICH IS NOT FREE AND IS DELIBERATE. Comparing only the
+#: promoted `(rev, generation)` columns would be cheaper and would be WRONG in one
+#: reachable direction: `Experiment.save()` is the UNVERSIONED persistence
+#: primitive, so a caller that mutates a run and calls `save()` rather than
+#: `save_versioned()` changes the document without moving `rev`
+#: (`Experiment._bump_changed_runs` is the only writer of `Run.rev`, and it runs
+#: only on the write branch of `save_versioned`). Diffing on the version alone would
+#: silently leave that row stale, and "stale" is precisely what a shadow write must
+#: never be — a row nobody reads is only worth having if it is right.
+#:
+#: The cost is bounded by something already being paid: `Q_UPSERT_EXPERIMENT` sends
+#: `json.dumps(exp.to_state())`, which EMBEDS every run's state, on every save. So
+#: reading the states back is the same order of bytes as the write already in
+#: flight, and it is still ONE statement rather than N. It is not free and is not
+#: claimed to be; it is the honest price of a correct diff, and it stops being
+#: payable the day the experiment document stops carrying `runs`.
+#:
+#: `experiment_id` is NOT selected: the `WHERE` already pins it, so every row this
+#: returns carries it by construction.
+Q_EXPERIMENT_RUN_ROWS = (
+    "SELECT run_id, ordinal, state, rev, generation FROM isaac_runs"
+    " WHERE experiment_id = %s"
+)
+
+#: Insert or refresh ONE run row. Every column this application owns is written
+#: from the projection, so an accepted upsert leaves the row equal to
+#: :func:`_run_row_params` in all of them.
+#:
+#: THE CONFLICT ACTION IS UNCONDITIONAL, and that is not the oversight it looks
+#: like next to :data:`Q_UPSERT_EXPERIMENT`'s careful predicate. The two statements
+#: answer different questions. The experiment upsert arbitrates BETWEEN WRITERS —
+#: it is the shared compare-and-swap that makes `If-Match` mean something across
+#: processes, and it must refuse a writer whose copy is behind. This statement is
+#: only ever reached AFTER that arbitration has already been won, inside the same
+#: transaction, and it writes the winner's own runs. A second predicate here could
+#: only refuse a write the shared one has already authorised, which would leave the
+#: rows disagreeing with the experiment document that was just committed beside
+#: them.
+#:
+#: `created_utc` is never named: it is the server-side stamp of when the ROW was
+#: first written and must survive a refresh. `updated_utc` is stamped `now()` on
+#: every accepted update, which is what makes "did this save touch this run" a
+#: question a real engine can answer — see the CI assertion that the diff really
+#: diffs.
+Q_UPSERT_RUN = (
+    "INSERT INTO isaac_runs"
+    " (run_id, experiment_id, ordinal, state, rev, generation)"
+    " VALUES (%s, %s, %s, %s::jsonb, %s, %s)"
+    " ON CONFLICT (run_id) DO UPDATE"
+    " SET experiment_id = EXCLUDED.experiment_id,"
+    " ordinal = EXCLUDED.ordinal,"
+    " state = EXCLUDED.state,"
+    " rev = EXCLUDED.rev,"
+    " generation = EXCLUDED.generation,"
+    " updated_utc = now()"
+)
+
+#: Remove every row of this experiment that the document no longer names.
+#:
+#: THE PREDICATE IS THE COMPLEMENT OF THE DESIRED SET, NOT A LIST OF VICTIMS, and
+#: that is what makes the row set a PURE FUNCTION of `sorted_runs()` rather than a
+#: function of what the `SELECT` happened to see. It is issued only when that
+#: `SELECT` showed at least one id the document has dropped — issuing it
+#: unconditionally would cost a statement on every save to delete nothing — but
+#: when it is issued it removes everything outside the desired set, so a row that
+#: appeared between the read and the write is removed too.
+#:
+#: `%s::text[]` IS CAST EXPLICITLY BECAUSE OF THE EMPTY CASE. Deleting the LAST run
+#: of an experiment passes an EMPTY id list, and an empty array literal carries no
+#: element type for the server to infer — whichever of psycopg2's two renderings it
+#: produces. The cast makes the type explicit, so "every run was removed" is a
+#: working statement rather than a type error on the one save that needs it most.
+#:
+#: STATED AS AN UNMEASURED PRECAUTION, because the machine this was written on has
+#: no psycopg2 and no PostgreSQL: the cast is cheap and correct under either
+#: rendering, so it is written rather than argued about. CI's `postgres:18` service
+#: is what actually binds it — the `postgres-migration` job now clears an
+#: experiment's runs and asserts the rows are gone.
+#:
+#: NO `ON DELETE CASCADE` IS INVOLVED OR IMPLIED. `0002_runs` deliberately writes no
+#: `ON DELETE` clause at all, so deleting an experiment that still has runs is
+#: refused by the database; this statement deletes RUNS, by their own ids, for an
+#: experiment that continues to exist.
+Q_DELETE_ABSENT_RUNS = (
+    "DELETE FROM isaac_runs WHERE experiment_id = %s AND run_id <> ALL(%s::text[])"
+)
+
+
+def _run_row_params(experiment_id: str, run: "ws.Run") -> tuple:
+    """THE ONE PLACE A ``Run`` BECOMES AN ``isaac_runs`` ROW.
+
+    Returns the parameters for :data:`Q_UPSERT_RUN`, in its order. Pure: it reads a
+    run and returns a tuple, opens nothing, and is deliberately callable — and
+    tested — without a database.
+
+    ``experiment_id`` IS THE OWNING EXPERIMENT'S ID AND NEVER ``run.experiment_id``.
+    They are normally equal and the case where they are not is the whole reason to
+    be explicit: ``workspace._hydrate_runs`` documents that a run's
+    ``experiment_id`` is deliberately NOT repaired from its owner, because
+    repairing it on READ would change the run's authoritative signature and bump
+    every record's ``rev`` on a mere listing. So a legacy run document carries
+    ``experiment_id: ""``, permanently. The COLUMN is a real foreign key and must
+    name the experiment whose transaction is writing this row; the DOCUMENT keeps
+    whatever it has always said. ``0002_runs``' ``isaac_runs_document_identity``
+    CHECK is written to admit exactly that pairing — it treats ``''`` as absent —
+    and a row built any other way would be refused by the database.
+
+    ``state`` IS ``run.to_state()`` VERBATIM, including its ``runs``-side
+    duplication with the experiment document. Nothing is dropped, reordered or
+    "cleaned": the promoted columns are a projection OF the document and never a
+    replacement for it, which is `0002_runs`' own stated rationale.
+
+    ``sort_keys=True`` matches what :meth:`PostgresOrdinaryStore.persist` already
+    does for the experiment payload. It is presentation only — the column is
+    ``jsonb``, which compares by VALUE — and it keeps the parameter deterministic,
+    which is what makes a test able to assert on it.
+
+    THE ``generation`` FALLBACK IS DEFENCE IN DEPTH AND IS NOT REACHABLE TODAY.
+    ``Run.__post_init__`` mints ``_legacy_generation(self.id)`` for any run
+    constructed without one, and nothing in this package assigns ``.generation``
+    afterwards, so ``run.generation`` is non-empty by construction. It is written
+    anyway because the column is ``NOT NULL`` with NO DEFAULT and ``''`` SATISFIES
+    ``NOT NULL``: the migration's own comment says a writer that omits the
+    generation "has a bug and should be told so by the database", and the database
+    would in fact accept the empty string in silence. Reusing the model's own rule
+    is the only fallback that is not an invention.
+    """
+    return (
+        run.id,
+        experiment_id,
+        int(run.ordinal),
+        json.dumps(run.to_state(), sort_keys=True),
+        int(run.rev),
+        run.generation or ws._legacy_generation(run.id),
+    )
+
+
+def _stored_run_rows(rows: Any) -> dict[str, tuple]:
+    """``run_id -> (ordinal, state, rev, generation)`` for the rows already stored.
+
+    ``state`` is normalised to a document with the same tolerance
+    :func:`_row_state` applies: psycopg2 returns ``jsonb`` as a ``dict``, and
+    anything without the adapter registered returns text. A value that is neither
+    is mapped to ``None``, which can never equal a run's ``to_state()`` — so an
+    unreadable stored document makes the row look DIFFERENT and gets rewritten,
+    which is the safe direction for a row that is meant to be a projection.
+    """
+    out: dict[str, tuple] = {}
+    for row in rows or []:
+        state = row[2]
+        if isinstance(state, (str, bytes, bytearray)):
+            try:
+                state = json.loads(state)
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                state = None
+        if not isinstance(state, dict):
+            state = None
+        out[str(row[0])] = (row[1], state, row[3], row[4])
+    return out
+
+
 def _row_state(row: Any) -> dict | None:
     """The state document in a ``(state,)`` row, or ``None`` if it is unusable.
 
@@ -902,9 +1091,37 @@ class PostgresOrdinaryStore:
         rolled-back transaction. Committing an empty transaction and then raising
         keeps "what the database decided" and "how this application reports it"
         separable.
+
+        IT ALSO WRITES THE RUN ROWS, AND THAT IS WHY THIS METHOD IS THE ONLY PLACE
+        THEY CAN BE WRITTEN FROM. `isaac_runs` is a SHADOW of the experiment
+        document: after this returns, the rows of that table for this experiment
+        equal ``exp.sorted_runs()``, while ``to_state()`` still carries ``runs`` and
+        remains the authoritative copy that every read path uses. See
+        :data:`Q_EXPERIMENT_RUN_ROWS` and the three statements beside it.
+
+        THE TUTORIAL RULE IS SATISFIED BY ARCHITECTURE, NOT BY A FOURTH CHECK. The
+        run write lives after :meth:`refuse_if_not_persistable`, in the one method
+        the isolation guards already protect, so it inherits all three of them by
+        construction. A ``PostgresRunStore`` — or any second write path — must never
+        be created, and the reason is specific rather than stylistic:
+        ``isaac_runs`` HAS NO ``session_id`` COLUMN AND CAN NEVER GAIN ONE.
+        ``ALTER`` is a forbidden verb in ``db_write._FORBIDDEN_KEYWORDS`` and
+        ``CREATE TABLE IF NOT EXISTS`` is a silent no-op against a table that
+        already exists, so a worked-example run that ever reached this table would
+        be permanently unidentifiable and permanently uncleanable. The cost of that
+        leak is not "a cleanup script"; it is that no cleanup script could be
+        written.
         """
         self.refuse_if_not_persistable(exp)
         payload = json.dumps(exp.to_state(), sort_keys=True)
+        # THE WHOLE DESIRED ROW SET IS PROJECTED BEFORE THE TRANSACTION OPENS, and
+        # the placement is deliberate: inside the `try` below, ANY exception is
+        # relabelled as a storage outage, so a defect in this application's own
+        # projection would be reported as "the database did not answer" and would
+        # set the process-wide `durable: false` bit over a database that is
+        # perfectly healthy. Out here it raises as itself.
+        desired = [(run, _run_row_params(exp.id, run)) for run in exp.sorted_runs()]
+        desired_ids = [run.id for run, _ in desired]
         try:
             with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
                 cursor.execute(policy.check(Q_UPSERT_EXPERIMENT), (exp.id, payload))
@@ -913,7 +1130,22 @@ class PostgresOrdinaryStore:
                 # silence observable.
                 accepted = cursor.rowcount == 1
                 stored = None
-                if not accepted:
+                if accepted:
+                    # ── THE SINGLE MOST DANGEROUS LINE IN THIS SLICE IS THE ONE
+                    # ── ABOVE: `if accepted`. ────────────────────────────────────
+                    # Before run rows existed, a refused upsert wrote nothing
+                    # because there was only one statement to refuse. With these
+                    # statements added, a writer that LOST the compare-and-swap and
+                    # stamped its runs anyway would overwrite the winner's rows
+                    # while correctly reporting 412 to its own client — the exact
+                    # last-writer-wins defect `Q_UPSERT_EXPERIMENT`'s predicate was
+                    # written to close, reintroduced one level down and invisible,
+                    # because the losing client is told it lost. The run writes are
+                    # strictly inside the accepted branch, and
+                    # `test_a_refused_experiment_upsert_writes_no_run_statement_at_all`
+                    # goes RED if they are moved out of it.
+                    self._write_run_rows(cursor, policy, exp.id, desired, desired_ids)
+                else:
                     cursor.execute(policy.check(Q_ONE_EXPERIMENT), (exp.id,))
                     stored = _row_state(cursor.fetchone())
         except Exception as exc:  # noqa: BLE001 - any driver/server failure, uniformly
@@ -925,6 +1157,63 @@ class PostgresOrdinaryStore:
         _note_storage_success()
         if not accepted:
             raise DurableWriteConflict(stored, experiment_id=exp.id)
+
+    @staticmethod
+    def _write_run_rows(cursor, policy, experiment_id: str, desired, desired_ids) -> None:
+        """Make this experiment's ``isaac_runs`` rows equal ``desired``. DIFFED.
+
+        NOT A SECOND WRITE PATH, and it is written so that it cannot become one: it
+        takes an ALREADY-OPEN cursor and the policy of the transaction that owns it,
+        so there is no way to call it that does not go through
+        :meth:`persist`'s transaction — and therefore through
+        :meth:`refuse_if_not_persistable` and the accepted gate. It is a private
+        method rather than a class because a class is what a future caller
+        instantiates.
+
+        THE DIFF IS REQUIRED, NOT AN OPTIMISATION. Rewriting all N rows on every
+        save would issue N+1 statements under a 15-second per-statement timeout —
+        for a wide record that is worse than the single document write it is
+        supposed to improve on, which would make this change a regression dressed
+        as progress. One indexed ``SELECT`` establishes what is already there;
+        normally exactly one run has moved, so exactly one write follows.
+
+        WHAT COUNTS AS "DIFFERENT" IS EVERY COLUMN THIS APPLICATION OWNS —
+        ``ordinal``, ``state``, ``rev`` and ``generation`` — not just the version
+        pair. ``state`` is in the comparison because a run's document can change
+        without its ``rev`` moving (``Experiment.save()`` is the unversioned
+        primitive; only ``save_versioned`` bumps), and the promoted columns are in
+        it because they are writer-maintained projections that no CHECK constrains
+        — ``0002_runs`` says so itself. ``created_utc`` and ``updated_utc`` are
+        excluded: they are server-side row stamps, not projections of anything.
+
+        THE ORDER IS SELECT -> UPSERT -> DELETE. Run ids are freshly minted ULIDs
+        and the primary key is ``run_id``, so no ordering here can collide; the
+        delete goes last so that a wide save's writes are not preceded by a
+        statement that usually deletes nothing.
+        """
+        cursor.execute(policy.check(Q_EXPERIMENT_RUN_ROWS), (experiment_id,))
+        stored = _stored_run_rows(cursor.fetchall())
+        for run, params in desired:
+            current = stored.get(run.id)
+            # `params` is (run_id, experiment_id, ordinal, state_json, rev,
+            # generation); the stored tuple is (ordinal, state, rev, generation).
+            # `experiment_id` is not compared because the SELECT's WHERE already
+            # pinned it, and `state_json` is compared as a DOCUMENT rather than as
+            # text — the column is jsonb, which normalises key order and whitespace,
+            # so a text comparison would report a difference on every save and turn
+            # the diff back into a blanket rewrite.
+            if current is not None and current == (
+                params[2],
+                run.to_state(),
+                params[4],
+                params[5],
+            ):
+                continue
+            cursor.execute(policy.check(Q_UPSERT_RUN), params)
+        if set(stored) - set(desired_ids):
+            cursor.execute(
+                policy.check(Q_DELETE_ABSENT_RUNS), (experiment_id, list(desired_ids))
+            )
 
     # -- restore ---------------------------------------------------------------
 

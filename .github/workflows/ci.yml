@@ -119,13 +119,27 @@ jobs:
     #   repository's create / read-back / list / tutorial-refusal behaviour works
     #   against a real engine.
     #
-    #   ADDED FOR `0002_runs`: that the app is unaffected by 0002 whether it is
-    #   PENDING (a database migrated to 0001 only — the hosted state as of
-    #   2026-08-09) or APPLIED (`isaac_runs` stays empty while the app runs); that
-    #   every constraint the approval packet claims actually rejects what it claims
-    #   to reject, against a real engine; that the foreign key REFUSES a parent
-    #   delete rather than cascading; and that rolling the two back in the WRONG
-    #   ORDER fails loudly and destroys nothing.
+    #   ADDED FOR `0002_runs`: that every constraint the approval packet claims
+    #   actually rejects what it claims to reject, against a real engine; that the
+    #   foreign key REFUSES a parent delete rather than cascading; and that rolling
+    #   the two back in the WRONG ORDER fails loudly and destroys nothing.
+    #
+    #   CHANGED BY THE RUN SHADOW WRITE, AND THE OLD CLAIM IS RECORDED RATHER THAN
+    #   OVERWRITTEN. This used to read "the app is unaffected by 0002 whether it is
+    #   PENDING or APPLIED (`isaac_runs` stays empty while the app runs)", and the
+    #   parenthesis was checked by asserting `select count(*) from isaac_runs` is
+    #   `0`. That assertion is now INVERTED, not deleted: the write path maintains
+    #   the run rows, so the count must equal the number of runs the application's
+    #   own records hold — MEASURED from the API rather than hardcoded. The READ
+    #   half of the old claim survives untouched and is the half that mattered: a
+    #   deployment migrated to 0001 only still serves every read, because no read
+    #   names the table.
+    #
+    #   AND THE OLD ASSERTION WAS VACUOUS EVEN AS AN INERTNESS CHECK, which is why
+    #   the replacement adds runs first. Every experiment the step created had ZERO
+    #   runs, so `count(*) = 0` would have passed against a build that wrote a row
+    #   per run. The new check creates runs through `POST .../runs`, so a shadow
+    #   write that silently stopped happening fails here.
     #
     #   ADDED AFTER REVIEW: that the identity CHECK ADMITS the legacy run document
     #   THIS APPLICATION ACTUALLY PRODUCES — `Run.to_state()` emits
@@ -687,16 +701,134 @@ jobs:
           # later step reads it — the digests that follow are taken over `records`
           # and over the table SET, never over this application's own rows.
           print("durable compare-and-swap OK against a real PostgreSQL")
+
+          # ── THE RUN SHADOW WRITE (`isaac_runs`, migration 0002) ──────────────
+          # `PostgresOrdinaryStore.persist` maintains one row per run INSIDE THE
+          # SAME transaction as the experiment upsert, and nothing reads those rows:
+          # `Experiment.to_state()` still carries `runs` and is still authoritative.
+          #
+          # WHAT ONLY A REAL ENGINE CAN ANSWER, and it is why this is here rather
+          # than only in `test_experiment_repository.py`:
+          #   * whether the three statements are valid PostgreSQL at all;
+          #   * whether the seven CHECK constraints admit the rows the application
+          #     actually produces (the in-process fake enforces none of them);
+          #   * whether `%s::text[]` binds — that depends on how psycopg2 renders a
+          #     Python list, and the empty list is the case that needs the cast;
+          #   * whether THE DIFF STILL DIFFS once `jsonb` has normalised the
+          #     document on the way in. The fake hands back exactly what it was
+          #     given, so a text-vs-document comparison bug would pass there and
+          #     rewrite every row on every save here.
+          def run_rows(experiment_id):
+              with dbw.write_transaction(os.environ) as (cur, pol):
+                  cur.execute(pol.check(repo.Q_EXPERIMENT_RUN_ROWS), (experiment_id,))
+                  return {row[0]: row for row in cur.fetchall()}
+
+          def run_stamps(experiment_id):
+              # `updated_utc` is stamped `now()` by every ACCEPTED run upsert, so it
+              # is how a real engine answers "did this save touch this run". The SQL
+              # literal lives in this CI step, not in the application: the write
+              # path's own rule — every statement is a module-level constant — is
+              # unaffected, and this statement still goes through the policy.
+              with dbw.write_transaction(os.environ) as (cur, pol):
+                  cur.execute(
+                      pol.check(
+                          "SELECT run_id, updated_utc FROM isaac_runs"
+                          " WHERE experiment_id = %s"
+                      ),
+                      (experiment_id,),
+                  )
+                  return dict(cur.fetchall())
+
+          runs_rid = client.post("/api/experiments", json={"title": "CI runs"}).json()["id"]
+          assert run_rows(runs_rid) == {}, "a record with no runs was given rows"
+
+          def add_run(label):
+              etag = client.get(f"/api/experiments/{runs_rid}").headers["ETag"]
+              added = client.post(
+                  f"/api/experiments/{runs_rid}/runs",
+                  json={"label": label},
+                  headers={"If-Match": etag},
+              )
+              assert added.status_code == 201, added.text
+              return added.json()["run"]["id"]
+
+          run_ids = [add_run(f"CI run {n}") for n in (1, 2, 3)]
+
+          # THE ROW SET IS THE EXPERIMENT'S `sorted_runs()`, column by column.
+          held = ws.load_experiment(runs_rid)
+          rows = run_rows(runs_rid)
+          assert sorted(rows) == sorted(run_ids), rows
+          for run in held.sorted_runs():
+              _run_id, ordinal, state, rev, generation = rows[run.id]
+              assert ordinal == run.ordinal, (run.id, ordinal, run.ordinal)
+              assert rev == run.rev, (run.id, rev, run.rev)
+              assert generation == run.generation, run.id
+              assert state == run.to_state(), (run.id, state, run.to_state())
+
+          # THE DIFF. An experiment-level write that changes no run must leave every
+          # run row untouched. If the stored `jsonb` document compared unequal to
+          # `Run.to_state()`, all three stamps would move and this write would have
+          # cost four statements instead of one.
+          before = run_stamps(runs_rid)
+          assert len(before) == 3, before
+          answered = client.post(
+              f"/api/experiments/{runs_rid}/answers",
+              json=payload,
+              headers={"If-Match": client.get(f"/api/experiments/{runs_rid}").headers["ETag"]},
+          )
+          assert answered.status_code == 200, answered.text
+          assert run_stamps(runs_rid) == before, "an unchanged run row was rewritten"
+
+          # REMOVAL, AND THE EMPTY-ARRAY CASE. No route deletes a run, so this drives
+          # the domain model directly — which is also the only way to reach
+          # `Q_DELETE_ABSENT_RUNS`.
+          held = ws.load_experiment(runs_rid)
+          dropped = held.sorted_runs()[1].id
+          held.runs = [r for r in held.runs if r.id != dropped]
+          assert held.save_versioned() is True
+          assert sorted(run_rows(runs_rid)) == sorted(set(run_ids) - {dropped})
+
+          held = ws.load_experiment(runs_rid)
+          held.runs = []
+          assert held.save_versioned() is True
+          assert run_rows(runs_rid) == {}, "clearing every run left rows behind"
+
+          # ...and back to a non-empty set, so the count assertion after this block
+          # cannot pass by everything being zero.
+          survivors = [add_run("CI survivor A"), add_run("CI survivor B")]
+          assert sorted(run_rows(runs_rid)) == sorted(survivors)
+
+          # WHAT THE APPLICATION BELIEVES IT HOLDS, measured over every experiment in
+          # the ordinary scope rather than hardcoded. The shell assertion after this
+          # block compares the table against it.
+          expected = sum(
+              len(ws.load_experiment(row["id"]).runs)
+              for row in client.get("/api/experiments").json()["experiments"]
+          )
+          with open("/tmp/isaac-runs-expected.txt", "w") as handle:
+              handle.write(str(expected))
+
+          print("run shadow write OK against a real PostgreSQL")
           print("durable repository OK against a real PostgreSQL")
           PY
-          # 0002 IS INERT FOR THIS BUILD, proven behaviourally rather than by
-          # reading the source: the application has just created, listed,
-          # hydrated, refused and raced against a real engine with `isaac_runs`
-          # present, and has written nothing into it.
+          # 0002 IS NO LONGER INERT, AND THIS ASSERTION WAS INVERTED RATHER THAN
+          # DELETED. It required `select count(*) from isaac_runs` to be `0` and
+          # said so as "the application wrote row(s) into isaac_runs". The write
+          # path now maintains those rows deliberately, so the table must instead
+          # agree EXACTLY with what the application believes it holds — a number the
+          # step above measured from the API, never a literal.
+          #
+          # THE SECOND CHECK EXISTS BECAUSE THE OLD ONE WAS VACUOUS. Every
+          # experiment this step created had zero runs, so `count(*) = 0` would have
+          # passed against a build that wrote a row per run. A zero here now fails.
+          expected=$(cat /tmp/isaac-runs-expected.txt)
           runs=$(psql -Atc "select count(*) from isaac_runs")
-          [ "$runs" = "0" ] || {
-            echo "::error::the application wrote $runs row(s) into isaac_runs"; exit 1; }
-          echo "isaac_runs: still empty after the application ran"
+          [ "$runs" = "$expected" ] || {
+            echo "::error::isaac_runs holds $runs row(s); the application holds $expected run(s)"
+            exit 1; }
+          [ "$runs" != "0" ] || {
+            echo "::error::the run count is 0, so this assertion proved nothing"; exit 1; }
+          echo "isaac_runs: $runs row(s), exactly the runs the application holds"
 
       # THE SAME DIGEST, TAKEN AFTER THE APPLICATION HAS ACTUALLY RUN.
       #
@@ -886,7 +1018,14 @@ jobs:
           # what refused it above was the foreign key and nothing else.
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_runs WHERE experiment_id = '$parent'"
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$parent'"
-          left=$(psql -Atc "select count(*) from isaac_runs")
+          # SCOPED TO THIS STEP'S OWN PARENT, and it was not before. It counted every
+          # row in the table, which was equivalent while `isaac_runs` was inert and
+          # is wrong now that the application maintains its own rows there: the
+          # earlier step deliberately leaves runs behind. The claim this line makes
+          # — "this step left rows behind" — was always about THIS step's fixtures,
+          # so narrowing the count restores the intended meaning rather than
+          # weakening it.
+          left=$(psql -Atc "select count(*) from isaac_runs where experiment_id = '$parent'")
           [ "$left" = "0" ] || { echo "::error::this step left rows behind"; exit 1; }
           echo "0002 constraints: every one behaves as the approval packet describes"
 
