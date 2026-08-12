@@ -546,6 +546,62 @@ server-authored **lifecycle title suffix** — `KNOWN_TITLE_SUFFIXES` = `' · Ne
 lifecycle, after the backend's `status()` enum and the frontend's group labels. Any renaming slice
 that touches only `labels.ts` will leave this one inconsistent.
 
+#### DECISION 2026-08-12 — the rename is DEFERRED until the semantics it names exist
+
+The correction above establishes that the four words are not in the product. This records what
+follows from that, because "the labels are wrong" and "adopt these labels now" are different
+conclusions and the section above could be read as the second.
+
+**The rename does not happen yet.** Adopting *Draft / Needs Review / Ready to Submit / Submitted*
+today would replace four labels that are merely *inconsistent with this document* by four labels
+that are **false about the product**:
+
+- **`Submitted` would be a lie.** There is no submission. Measured at `a524708`:
+  `rg -n '"/experiments/\{experiment_id\}/(submit|submissions)"|def submit' apps/api/isaac_api/routes.py`
+  → **no match**. The only `Submit` string in `apps/web/src/lib/labels.ts` is
+  `createExperimentSubmit: 'Create Experiment'` (`:508`); every other frontend hit is a form's
+  `onSubmit` handler. Nothing in the product can put a record into a submitted state, so a group
+  bearing that name could only ever be empty — or, worse, populated by deriving it from Export,
+  which D4 and §32 of the brief both forbid.
+- **`Ready to Submit` would advertise a control that does not exist.** A scientist who reaches
+  that group looks for the button it names and finds Export. That is the same defect class as
+  the Override control offered at a non-overridable address: an affordance whose only possible
+  outcome is disappointment.
+- **The current completion path genuinely ends at Export, not Submit.** `status()`'s terminal
+  value is `ready_to_export`, and the workflow derivation leads there. The present labels are
+  *accurate about the present product*; the proposed ones describe a product that has not been
+  built.
+
+**This is not a decision to drop the requirement.** The final intended lifecycle is unchanged —
+Draft → Needs Review → Ready to Submit → Submitted — and it remains the target. What is deferred
+is only the *naming*, and the deferral has an explicit end condition rather than an open one.
+
+**Adopt the vocabulary in the same slice that implements the submission lifecycle**, not before
+and not after: at that point each word is backed by a real state (`Submitted` by a durable
+submission revision, `Ready to Submit` by an available Submit action with blockers resolved), and
+the rename stops being a cosmetic change to strings and becomes part of the feature that makes
+them true. Doing it in that slice also avoids paying the rename cost twice.
+
+**Cost is a reason to do it once, not a reason to skip it.** The measurement above stands: 15 test
+files contain `Ready to Export` alone, `labels.test.ts:58` pins it verbatim, and
+`KNOWN_TITLE_SUFFIXES` is a third naming that a `labels.ts`-only rename would leave inconsistent.
+Any future slice that adopts the new vocabulary must touch all three namings — the backend
+`status()` enum, the frontend group labels, and the lifecycle title suffixes — or it will simply
+move the inconsistency rather than remove it.
+
+**One thing that must not be undone.** Earlier work removed false "ready to export" wording from
+surfaces where the record was not in fact ready, and that removal is **mechanically pinned** —
+`coverage-figure-disclosure.test.tsx:272` ("pending 0 with the export dry-run FAILING does not
+claim ready to export") and `:354`, and `completion-export.test.tsx:216`/`:238`. Note `:285`'s
+reason for asserting on the lowercased substring: *"not ready to export" contains "ready to
+export"*, so the negative had to be written to survive the phrasing that would otherwise satisfy
+it accidentally.
+
+Deferring the *rename* does not reopen any of that. The existing labels stay pinned to the states
+they actually derive from, and no surface may reintroduce a readiness claim the derivation does
+not support — including, when the rename eventually lands, a `Ready to Submit` group that a
+failing blocker check does not justify.
+
 ### DECISION D4 — `Submit Record` commits *N* records in one transaction
 
 Because of D1, experiment-level submission is not "submit a record". It transactionally persists
