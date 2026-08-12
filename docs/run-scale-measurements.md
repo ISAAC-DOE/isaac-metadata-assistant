@@ -1,12 +1,27 @@
 # High-run-count: the measured envelope, and what it rules out
 
-**Status: measurement complete; it changed the plan.** The roadmap's scale item names
-"virtualization" among its candidate fixes. **These measurements rule virtualization out** —
-rendering is not where the cost is — and point at bounding the *data* instead. Recorded here so the
-choice is traceable to numbers rather than to the word appearing in a roadmap.
+**Status: measurement complete; it changed the plan.** Virtualization/windowing is the reflexive
+answer to "the run list is long". **These measurements rule it out** — rendering is not where the
+cost is — and point at bounding the *data* instead.
+
+*An earlier revision attributed the virtualization proposal to "the roadmap's scale item". No such
+document is in this repository: `git grep -a -i "virtuali"` finds, outside this file, one unrelated
+a11y comment, and nothing matches `*roadmap*`. The proposal came from the working brief this phase
+was authorised from, which is not committed here. Corrected so the framing does not cite a source a
+reader cannot open — the measurements below stand on their own either way.*
 
 **Reproduce:** `npm run bench:runs` (see `apps/web/e2e/mutation/run-scale.bench.ts`). It is a
 `*.bench.ts`, collected by **neither** Playwright config by default, and nothing in CI runs it.
+Two limits on that word *reproduce*, both real:
+
+- the default `COUNTS` stops at **500**. The 1000-run row every headline figure cites — 7.47 MiB,
+  12 326 nodes, 10.3 s, the tested ceiling — needs `E2E_BENCH_COUNTS=25,50,100,250,500,1000`;
+- the benchmark reads the **unpaged** endpoint only. It never sends `limit` or `offset`, so the
+  paging figures quoted in the commit that introduced them (at 1000 runs: unpaged 543 ms / 7474 KiB
+  → `limit=50` 30 ms / 374 KiB → `limit=200` 103 ms / 1495 KiB) have **no committed reproduction
+  path**. They are internally consistent with this table at ≈7.47 KiB/run, and an independent review
+  measured the same 7.47 KiB/run over 201 runs — but they are asserted, not reproducible, and are
+  labelled as such rather than presented as harness output.
 
 ---
 
@@ -39,7 +54,11 @@ first-paint: first-paint is flat by construction and says nothing about the tail
 ## 2. What the numbers say
 
 **The DOM is not the problem, and this is the finding that redirects the work.** A collapsed card
-costs **~12 DOM nodes** (626 nodes at 25 runs → 12 326 at 1000; the slope is 11.9/card). 12 326 nodes
+costs **exactly 12 DOM nodes** (626 nodes at 25 runs → 12 326 at 1000). *An earlier revision said
+"the slope is 11.9/card". That number is not produced by these data under any fit: every consecutive
+pair gives exactly 12.0, and so does the endpoint slope (12 326 − 626)/975. Corrected rather than
+quietly deleted, because a figure that no arithmetic on the published table reproduces is the kind of
+claim this document exists to make checkable.* 12 326 nodes
 is an unremarkable page. `RunCard` mounts its heavy children inside `{expanded && …}`, so a collapsed
 card really is just a header — the existing design already got the expensive half right.
 
@@ -48,16 +67,33 @@ card really is just a header — the existing design already got the expensive h
 down the list". Interaction with one run is not gated on the others.
 
 **The cost is the payload.** API time and bytes are both cleanly linear in run count
-(≈0.56 ms and ≈7.6 KiB per run), and `load ms` tracks them at roughly 2.5×, which is transfer +
-parse + render. At 1000 runs the client receives **7.47 MiB** of JSON.
+(≈0.56 ms and ≈7.6 KiB per run). At 1000 runs the client receives **7.47 MiB** of JSON.
+
+*An earlier revision added "and `load ms` tracks them at roughly 2.5×, which is transfer + parse +
+render". That is withdrawn: the measured load/API ratios in this very table are 41.8, 22.4, 18.7,
+15.8, 14.7 and 18.4, none of them near 2.5. What the table does support is weaker and worth stating
+plainly — `load ms` grows monotonically with payload, and grows FASTER than linearly at the top end
+(500 → 1000 runs doubles the runs and multiplies load by 2.56×). The relationship is superlinear at
+the tail, which is the opposite of what "tracks at 2.5×" implies.*
 
 **Where it comes from is the part worth naming.** `inherited` is computed per run, and for runs that
 override nothing — the normal case — **every run carries a byte-identical copy of the same 15
 record-level payloads**. At 1000 runs the response contains ~15 000 resolutions of which ~15 are
 distinct. The payload is dominated by repetition, not by run content.
 
-**Long tasks appear at 500 and multiply by 1000** (0 → 5 → 14), consistent with parse/render of a
-multi-megabyte response rather than with per-card work.
+**Long tasks appear at 500** — and the *magnitudes* in this table's `long tasks` column are not
+trustworthy, so only that directional statement survives.
+
+*The harness registered its `PerformanceObserver` with `addInitScript` INSIDE the per-count loop.
+`addInitScript` accumulates rather than replaces, so the k-th row navigated with k observers all
+incrementing one counter, and the column reported roughly k × the true count. Reproduced standalone:
+after four registrations a single long task read as 4. The 500-run row is iteration 5, so its "5"
+is about 1. The harness is fixed (the observer is now installed once, outside the loop), but **the
+column in this table was captured before the fix and has NOT been re-measured** — re-running the
+benchmark is the only thing that will correct it. The 0 at 250 and below is still meaningful (k × 0
+is 0), so "the first long tasks appear at 500" holds; "multiply by 1000" does not. Note also that
+the observer counts long tasks from the two expand/collapse interactions as well as from load, so
+even a corrected column is a per-visit total and not purely parse/render.*
 
 ### The envelope, stated as a scientist would feel it
 

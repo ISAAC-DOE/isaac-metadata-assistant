@@ -105,6 +105,39 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
   let have = state.runs.length;
   const rows: Row[] = [];
 
+  /*
+   * THE LONG-TASK OBSERVER IS INSTALLED ONCE, OUTSIDE THE LOOP, AND THAT PLACEMENT IS
+   * THE WHOLE POINT — it used to be inside.
+   *
+   * `addInitScript` REGISTERS a script; it does not replace the previous one. Every
+   * registration runs on every subsequent navigation. So installing it per iteration
+   * meant the k-th row navigated with k observers attached to one document, each
+   * incrementing the same `window.__longTasks`, and the column reported k x the real
+   * count. An independent review caught it and I reproduced it standalone: after four
+   * registrations, a SINGLE long task read as 4.
+   *
+   * That inflated the published table — the 500-run row was iteration 5, so its
+   * reported "5 long tasks" was 1 — and `docs/run-scale-measurements.md` read a trend
+   * off it ("0 -> 5 -> 14"). Registered once, the script still runs on each navigation,
+   * so the counter resets per document and exactly one observer is attached. The
+   * numbers become comparable across rows, which is the only thing that made the
+   * column worth having.
+   *
+   * The observer still counts long tasks caused by the two expand/collapse clicks
+   * below, not only by load. `longTasks` is therefore a per-row total for the whole
+   * visit, and the doc must not attribute it wholly to response parse/render.
+   */
+  await page.addInitScript(() => {
+    (window as unknown as { __longTasks: number }).__longTasks = 0;
+    try {
+      new PerformanceObserver((list) => {
+        (window as unknown as { __longTasks: number }).__longTasks += list.getEntries().length;
+      }).observe({ entryTypes: ['longtask'] });
+    } catch {
+      /* longtask unsupported: the column reads 0 and says so by being 0 everywhere */
+    }
+  });
+
   for (const target of COUNTS) {
     // --- top up to `target` runs, out of band -------------------------------
     while (have < target) {
@@ -134,18 +167,6 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
       }
     }
     apiSamples.sort((a, b) => a - b);
-
-    // --- long-task observer, installed before navigation --------------------
-    await page.addInitScript(() => {
-      (window as unknown as { __longTasks: number }).__longTasks = 0;
-      try {
-        new PerformanceObserver((list) => {
-          (window as unknown as { __longTasks: number }).__longTasks += list.getEntries().length;
-        }).observe({ entryTypes: ['longtask'] });
-      } catch {
-        /* longtask unsupported: the column reads 0 and says so by being 0 everywhere */
-      }
-    });
 
     // --- navigate, and time until the Runs section is actually usable -------
     const tLoad = Date.now();

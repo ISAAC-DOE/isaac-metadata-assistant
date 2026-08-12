@@ -26,7 +26,18 @@
     "`../playwright.mutation.config.ts` was MISSING from this list and is now here.",
     "It was the only Playwright config the typecheck did not see, so a type error in",
     "it — a wrong option name, a stale import from e2e/mutation/env.ts — would have",
-    "surfaced only when the mutation suite was actually run."
+    "surfaced only when the mutation suite was actually run.",
+    "",
+    "`../playwright.bench.config.ts` then repeated that defect and is now here too.",
+    "`**/*.ts` is rooted at e2e/, and nothing imports the bench config, so it was",
+    "invisible to the typecheck — verified with `tsc --listFiles`, which named only",
+    "two configs. It is worse than the mutation case it repeats: the bench suite is",
+    "run BY HAND and rarely, so a break in it would sit undetected far longer."
   ],
-  "include": ["**/*.ts", "../playwright.config.ts", "../playwright.mutation.config.ts"]
+  "include": [
+    "**/*.ts",
+    "../playwright.config.ts",
+    "../playwright.mutation.config.ts",
+    "../playwright.bench.config.ts"
+  ]
 }

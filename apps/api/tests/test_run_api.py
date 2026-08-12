@@ -2185,6 +2185,60 @@ def test_omitting_limit_returns_every_run_and_paging_never_becomes_a_run_limit(
     assert body["returned"] == len(body["runs"])
 
 
+def _add_runs_through_the_store(client, experiment_id: str, count: int) -> None:
+    """Add ``count`` runs THROUGH THE STORE, because the route is too slow here.
+
+    `_create_run` is the right helper everywhere else — it exercises the real
+    create path, `If-Match` and all. But the test below needs MORE RUNS THAN
+    `RUN_PAGE_MAX`, and creating 201 of them over HTTP was measured at ~19 s: each
+    create re-reads the experiment for its `ETag` and re-saves it, so the cost is
+    quadratic in a way that has nothing to do with what is being asserted. This
+    writes them directly and re-saves once.
+
+    That is sound for THIS test because the property under test is a property of the
+    READ path — what the list route returns when `limit` is omitted. The runs only
+    have to exist; how they came to exist is not the subject. Creation itself is
+    covered by the create tests, and by `_create_run` in every test above.
+    """
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    for _ in range(count):
+        exp.add_run()
+    exp.save_versioned()
+
+
+def test_omitting_limit_returns_MORE_THAN_ONE_PAGE_of_runs(client, experiment_id):
+    """THE TEST ABOVE CANNOT FAIL THE WAY IT CLAIMS TO, AND THIS ONE CAN.
+
+    An independent review proved it: at 5 runs, "no default" and "a default of 200"
+    are indistinguishable, so mutating the route's `limit` parameter from `None` to
+    `RUN_PAGE_MAX` — the exact silent truncation the commit message, the PR body and
+    `RUN_PAGE_MAX`'s own comment all name as THE decision this design turns on — left
+    every paging test green. The whole suite passed but one, and that one was
+    `test_committed_snapshot_indexed_source_gate_dispatches`: a file-hash detector
+    that notices `routes.py` changed at all, not a test of behaviour.
+
+    So the guard has to cross the boundary it is guarding. `RUN_PAGE_MAX + 1` runs is
+    the smallest count at which a defaulted page is visibly short, and asserting the
+    full count comes back is the assertion the five-run test only appeared to make.
+
+    This also extends `test_there_is_no_server_side_maximum_run_count` in the one
+    direction that now matters: that test predates paging and creates 12 runs, and
+    paging is the first thing in this codebase that could quietly become the
+    server-side maximum it forbids.
+    """
+    _add_runs_through_the_store(client, experiment_id, routes.RUN_PAGE_MAX + 1)
+
+    body = client.get(f"/api/experiments/{experiment_id}/runs").json()
+    assert body["total"] == routes.RUN_PAGE_MAX + 1
+    # THE LOAD-BEARING LINE. A route that defaulted `limit` would return exactly
+    # RUN_PAGE_MAX rows here and report a truthful `total` beside them, which is
+    # precisely how the truncation would hide.
+    assert body["returned"] == routes.RUN_PAGE_MAX + 1
+    assert len(body["runs"]) == routes.RUN_PAGE_MAX + 1
+    assert [r["ordinal"] for r in body["runs"]] == list(range(1, routes.RUN_PAGE_MAX + 2))
+
+
 def test_a_bounded_page_reports_the_true_total_and_walks_the_whole_list_in_order(
     client, experiment_id
 ):
@@ -2194,8 +2248,15 @@ def test_a_bounded_page_reports_the_true_total_and_walks_the_whole_list_in_order
     while looking right: reporting `total` as the page size (so a UI says "7 runs"
     when there are 7 but shows 3 and calls it complete), and losing or repeating a run
     across page boundaries. Walking every page and comparing the concatenation against
-    the unpaged read catches both, and catches an ordering change with them —
-    `sorted_runs` order is the contract, not an implementation detail.
+    the unpaged read catches both.
+
+    IT DOES NOT CATCH AN ORDERING CHANGE, and an earlier version of this docstring
+    claimed it did. Both sides of the comparison come from the SAME route, so
+    reversing `sorted_runs` moves them together and every assertion here still passes
+    — proven by mutation. Canonical order IS pinned, just elsewhere:
+    `test_there_is_no_server_side_maximum_run_count` and
+    `test_a_supplied_label_is_kept_verbatim_and_does_not_decide_the_ordinal` both fail
+    under that mutation. The coverage was real; the credit was in the wrong place.
     """
     for _ in range(7):
         _create_run(client, experiment_id)
@@ -2205,7 +2266,11 @@ def test_a_bounded_page_reports_the_true_total_and_walks_the_whole_list_in_order
 
     walked: list[str] = []
     offset = 0
-    while True:
+    # BOUNDED, BECAUSE AN UNBOUNDED WALK HANGS INSTEAD OF FAILING. With `while True`,
+    # a route that ignored `offset` returned page 0 forever and pytest never came back
+    # — measured; the run was killed at 120 s. A defect that stalls CI to its job
+    # timeout reports nothing; one that trips this bound reports a failing assertion.
+    for _ in range(7 // 3 + 3):
         page = client.get(
             f"/api/experiments/{experiment_id}/runs", params={"limit": 3, "offset": offset}
         ).json()
@@ -2217,6 +2282,11 @@ def test_a_bounded_page_reports_the_true_total_and_walks_the_whole_list_in_order
             break
         walked.extend(r["id"] for r in page["runs"])
         offset += 3
+    else:  # pragma: no cover - only reachable when the route is broken
+        raise AssertionError(
+            f"the page walk did not terminate within the bound: offset reached {offset} "
+            f"for 7 runs, which means the route is not honouring `offset`"
+        )
 
     assert walked == [r["id"] for r in everything["runs"]], "paging lost, repeated or reordered a run"
     assert len(walked) == len(set(walked)) == 7
