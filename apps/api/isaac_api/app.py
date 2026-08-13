@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from . import runtime_mode
+from .providers import validate_provider_config_or_raise
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
 from .experiment_repository import DurableWriteConflict, StorageUnavailable
@@ -65,6 +66,15 @@ def create_app() -> FastAPI:
     # No route consumes identity today; this is here so the misconfiguration
     # cannot arrive silently ahead of the slice that does.
     validate_edge_trust_verifier_or_raise()
+    # The SAME fail-closed discipline for the three AI provider seams, and it is
+    # here rather than left to the seams' own resolution for the reason the line
+    # above exists: resolution itself never raises — an unset, empty or
+    # unrecognised value falls to `unconfigured`, which is the safe state and must
+    # stay silent. That is right for a value nobody set, and wrong for a value
+    # somebody set and mistyped. Without this call a container deployed with
+    # `ISAAC_ASSISTANT_PROVIDER=anthropc` boots happily with no assistant, and the
+    # first person to notice is a scientist wondering why nothing answers.
+    validate_provider_config_or_raise()
     # Deploy base path (ISAAC_BASE_PATH); "" locally. Resolved once and applied
     # to the router prefix and the SPA mount below.
     base = base_path()
