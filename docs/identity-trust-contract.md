@@ -930,7 +930,7 @@ by symbol rather than trusting them.)*
    decides which headers are trusted lives in the repo whose owner we are waiting on. Building the
    reader before he sets the config buys nothing that waiting does not.
 
-**Decision:** do not build a live identity seam. ~~Wire nothing until Q1–Q4 and Q6 are answered.~~
+**Decision:** ~~do not build a live identity seam.~~ ~~Wire nothing until Q1–Q4 and Q6 are answered.~~ **REVERSED 2026-08-12 by the project owner — see the REVERSAL subsection below. The seam is built and UNARMED; the prohibition on stamping is unchanged.**
 
 > ### THE TRIGGER CONDITION HAS BEEN MET, AND THE DECISION STILL STANDS — RESTATED 2026-08-12.
 >
@@ -958,6 +958,57 @@ by symbol rather than trusting them.)*
 > authoritative"* is the same warning in his words. **Reason 3 is partly discharged** — the header
 > names no longer depend on unseen `isaac-k8` config — but the *NetworkPolicy* that would close Q4
 > lives in that same Dean-owned repository, so the dependency has moved rather than gone.
+
+### REVERSAL 2026-08-12 — the seam IS built, by the project owner's decision, and this records who decided
+
+**Krish instructed that the abstraction be built**, in the same message that relayed Dean's answers:
+*"Implement a real application-side identity/trust abstraction."* That is a project-owner decision
+overriding a project-owner decision, which is legitimate — and it is recorded here rather than
+inferred, because **nothing in Dean's answers authorises it and this document must never read as
+though they did.** Dean answered identity *questions*; he did not lift this gate, and it was not his
+to lift.
+
+Shipped in `feat/identity-trust-seam` (PR #137): `apps/api/isaac_api/identity.py`.
+
+**What the restated gate above demanded, and what was actually built.** The gate says *"wire nothing
+until ISAAC can distinguish an edge-traversed request from a direct in-cluster one, and refuses to
+stamp on the latter."* The seam is that distinction, expressed as types, with the distinguishing part
+deliberately **unarmed**:
+
+- the only shipped verifier is `UnconfiguredEdgeVerifier`, which reads nothing and always answers
+  `Unconfigured`, so **every** request today resolves to `UNTRUSTED` with an explicit refusal reason;
+- **nothing is stamped and no route consumes any of it** — `HumanActorRequired`'s handler is written
+  but deliberately not registered, because no route raises it;
+- `stamp_actor` returns `None` unconditionally for a tutorial-scoped request.
+
+So the gate's *substance* — refuse to stamp on an unverified request — holds by construction, and
+what remains unbuilt is the verifier that could ever answer otherwise. **That verifier still requires
+Dean-owned infrastructure** (a NetworkPolicy, an edge-issued signed assertion, or equivalent), so the
+external dependency identified in reason 3 is unchanged.
+
+**Reason 1 survives this reversal and is now a standing constraint rather than an argument against
+building.** The concern was that a `get_principal()`-shaped affordance invites a later slice to stamp
+an unverified value. The seam is shaped specifically to make that impossible rather than merely
+inadvisable: `resolve_request_identity` takes an `EdgeVerdict`, never a request, never a header map,
+never a bare subject string, so there is no expression that turns an unverified header into a claim.
+Two mechanical guards enforce it — no backend module outside `identity.py` may contain
+`x-authentik-`, and `identity.py` itself must pass a docstring-stripped scan for header access.
+`ServicePrincipal` carries no `subject`, `display_name` or `groups`, so a stamping call site has no
+field to reach for.
+
+**What is still NOT authorised by this reversal**, and a future slice must not read it as cover:
+
+- arming any verifier that returns `Traversed` in production;
+- stamping `attribution.uploaded_by`, a Run-override actor, or any revision row — Q10/Q25 approve
+  that **conditionally**, and the condition is an established trusted boundary that does not exist;
+- registering `HumanActorRequired`'s handler, or having any route depend on `require_human_actor`,
+  until a real verifier exists;
+- treating the presence of `X-authentik-username` as evidence of anything. Q4's answer is that it is
+  forgeable in-cluster, and that has not changed.
+
+*(One thing this section cannot settle from inside the repository: whether Dean would consider an
+unarmed seam consistent with his advice. He was not asked, and §17's follow-up policy says to bundle
+rather than send single questions. Recorded as unasked, not as assumed.)*
 
 > **⚠ HISTORICAL — READ THIS FIRST (added 2026-08-02). The probe described below is GONE.** It was
 > removed the day after this block was written; the route returns 404 and a test pins that. Everything
