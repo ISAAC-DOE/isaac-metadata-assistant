@@ -18,6 +18,7 @@ import { Compass, LayoutList, Plus, ShieldCheck } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
+import { mutationFailureCopy } from '../lib/mutationErrors';
 import { startTutorial, useTutorialState } from '../lib/tutorialController';
 import { useFetch } from '../lib/useFetch';
 import { useHealth } from '../lib/useHealth';
@@ -759,8 +760,16 @@ function CreateExperimentControl({
       // The message is whatever the API layer could establish. It is not
       // reinterpreted into a friendlier cause here: a create that failed for an
       // unknown reason must not be reported as one that failed for a known one.
+      // The ONE named cause is a session that ended, which is not an inference —
+      // see `mutationFailureCopy`, which returns the message below unchanged for
+      // every failure that does not carry that signal.
       setBusy(false);
-      setError(err instanceof Error ? err.message : 'The experiment could not be created.');
+      setError(
+        mutationFailureCopy(
+          err,
+          err instanceof Error ? err.message : 'The experiment could not be created.',
+        ),
+      );
     }
   };
 

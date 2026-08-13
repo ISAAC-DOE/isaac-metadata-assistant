@@ -99,6 +99,7 @@ import {
   runFindingText,
   type RunFieldSpec,
 } from '../lib/runFields';
+import { mutationFailureCopy } from '../lib/mutationErrors';
 import { useRunAutosave, type RunSaveStatus } from '../lib/useRunAutosave';
 import type { ApiRunCheckFinding, ApiRunCheckResponse, ApiRunView } from '../lib/types';
 
@@ -239,7 +240,12 @@ export function RunCard({
       .catch((err: unknown) =>
         setCheck({
           status: 'error',
-          message: err instanceof Error ? err.message : 'The check could not be run.',
+          // An intercepted answer says nothing about this run, so it must not be
+          // reported as a check that ran and went wrong.
+          message: mutationFailureCopy(
+            err,
+            err instanceof Error ? err.message : 'The check could not be run.',
+          ),
         }),
       );
   };

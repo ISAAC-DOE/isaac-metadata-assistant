@@ -112,6 +112,68 @@ describe('R1b · useFetch surfaces a failed silent reload instead of swallowing 
     expect(result.current.status === 'data' && result.current.data).toBe('load-3');
   });
 
+  /*
+   * THE ONE FAILURE THAT IS ESCALATED, and why it is the only one.
+   *
+   * `refreshFailed` renders "what you see is the last loaded state" with a Refresh
+   * button. For a session that ended behind an open record screen that is both
+   * cause-free and useless: every later refresh is intercepted too, so the reader
+   * presses Refresh against a dead session while a stale record sits on screen
+   * looking current. The auth state names the cause and offers the only thing that
+   * works — a page reload back through the identity flow.
+   *
+   * The signal is `htmlIntercept`, which `lib/api.ts::interceptedByEdge` sets only
+   * from a response's PROVENANCE (an HTML content type on an API path, or a
+   * redirect that left `API_BASE`). It cannot be produced by an ordinary failure.
+   */
+  it('escalates an edge intercept out of the silent note into the auth state', async () => {
+    let attempt = 0;
+    const fetcher = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) return 'first';
+      throw new ApiError('sign-in page', { status: 200, htmlIntercept: true });
+    });
+
+    const { result } = renderHook(() => useFetch(fetcher, ['k']));
+    await waitFor(() => expect(result.current.status).toBe('data'));
+
+    await act(async () => {
+      result.current.reloadSilent();
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.status === 'error' && result.current.error.htmlIntercept).toBe(true);
+    // ...and it does NOT also raise the stale-data note, which would claim the
+    // screen is still showing something worth reading.
+    expect(result.current.refreshFailed).toBe(false);
+  });
+
+  it('does NOT escalate a 401, a 503 or a parse failure — those keep their data', async () => {
+    // A single endpoint can answer 401/403 while the session is perfectly valid, and
+    // a 503 or a bad body says nothing about identity at all. Blanking a whole screen
+    // of good data on any of them would undo the property R1b shipped.
+    for (const thrown of [
+      new ApiError('unauthenticated', { status: 401 }),
+      new ApiError('unavailable', { status: 503 }),
+      new ApiError('The API response was not valid JSON (200).', { status: 200 }),
+    ]) {
+      let attempt = 0;
+      const fetcher = vi.fn(async () => {
+        attempt += 1;
+        if (attempt === 1) return 'first';
+        throw thrown;
+      });
+      const { result } = renderHook(() => useFetch(fetcher, ['k']));
+      await waitFor(() => expect(result.current.status).toBe('data'));
+      await act(async () => {
+        result.current.reloadSilent();
+      });
+      expect(result.current.status, `status ${thrown.status}`).toBe('data');
+      expect(result.current.status === 'data' && result.current.data).toBe('first');
+      expect(result.current.refreshFailed).toBe(true);
+    }
+  });
+
   it('an explicit reload clears the flag as it re-enters the loading state', async () => {
     let attempt = 0;
     const fetcher = vi.fn(async () => {
@@ -257,6 +319,45 @@ describe('R1b · the three surfaces that used a silent refresh', () => {
     // The record is still there — the fix must not blank or error the screen.
     expect(getByText('5 Fields Need Your Confirmation')).toBeInTheDocument();
     expect(queryByText(/Loading the record from the ISAAC API/)).toBeNull();
+  });
+
+  /*
+   * The same surface as S3, with the one failure that is NOT a stale-data failure.
+   * A session that ended behind an open record must not leave the reader with a
+   * pre-expiry record and a note offering a Refresh that can never succeed.
+   */
+  it('S3-auth: an intercepted silent refetch reaches the sign-in state, not the stale note', async () => {
+    const live = liveDetailRoute('demo');
+    const routes = bundleRoutes('demo');
+    const draftRoute = routes['GET /api/experiments/demo/draft'] as { body: unknown };
+    const state = { intercepted: false };
+    stubFetchRoutes({
+      ...routes,
+      'GET /api/experiments/demo': live.route,
+      'GET /api/experiments/demo/draft': () =>
+        state.intercepted
+          ? {
+              // What the browser sees after following Authentik's 302: a login
+              // response, authored outside API_BASE.
+              status: 200,
+              contentType: 'application/xhtml+xml',
+              redirected: true,
+              url: 'https://auth.example.org/if/flow/default/',
+              body: {},
+            }
+          : draftRoute,
+    });
+
+    const { getByText, container } = renderAt('/record/demo');
+    await settle();
+    expect(getByText('5 Fields Need Your Confirmation')).toBeInTheDocument();
+
+    state.intercepted = true;
+    live.bump();
+    await settle(30_000);
+
+    expect(getByText('Sign-In Required')).toBeInTheDocument();
+    expect(refreshNote(container), 'the stale-data note must not stand in for this').toBeNull();
   });
 
   it('S5: the evidence trail says so too, rather than showing a pre-refresh state silently', async () => {

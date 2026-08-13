@@ -10332,7 +10332,7 @@
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
-        "sha256": "3b8c9acca2f0a75e49c72f2e2fa58543e36bf8e85f2aaa46f9788ea4a2d46f7a"
+        "sha256": "a8596015bbfa28b546cf842402fa5b4eb6eec69aabab361c7be4ebaad90cdf2b"
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "305f6ca96a793c09fb403e6011aeb8aa0bbb5e861ffcccf7db80f7fdd462d294"
+        "sha256": "26a7f61062ff919f9eebe02bcf7c73a4a678e8ccddb7b9cdee1d9a5b42a2d3a5"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10528,7 +10528,7 @@
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
-        "sha256": "6782f99c7ea7b934b66a232c2610bb164bf1d6f5a8520f2bcd00edb8e4fd6119"
+        "sha256": "897f7f145fa933fd21ef027b1c40f212af8f793977930de8c264188515aabd51"
       },
       {
         "path": "apps/web/src/main.tsx",
@@ -10540,7 +10540,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "63dff03054e41f65e0fc0d012f10e68000981f99a66fdb3692bef0e92ad464ea"
+        "sha256": "287988af798f0e24783130836fb7b6af59f326e50093a3a42cc5526e90776625"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "0e9e73b1320a9852c3c2b7f164b6088ce1cf696e92c54a601de67397521a7dd1"
+        "sha256": "234029008a945cc3174c6f23dee65837e40eed531e1f68f9c7b4eb0071723ebe"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "ae17304719addfba3290560895580ac118b4dc522dc815cdf1632dd87fe0d1e0"
+    "served_manifest_fingerprint": "ab8ae1e6f256d0f678730db8c60bd585b9021a862335a50353650ca17ece75ca"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

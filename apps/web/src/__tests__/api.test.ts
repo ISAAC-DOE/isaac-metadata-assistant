@@ -1,5 +1,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { api, ApiError, API_BASE, RUN_COMMAND, isHostedBuild } from '../lib/api';
+import { mutationFailureCopy } from '../lib/mutationErrors';
+// `downCopy` is the pure branch table `BackendDown` renders from, so the signal
+// and the screen it produces can be asserted in one place: a test that pinned
+// only `htmlIntercept` would not notice a branch table that stopped reading it.
+import { downCopy } from '../components/FetchStates';
 import {
   EXP_ID,
   answersAfterNotebook,
@@ -678,6 +685,239 @@ describe('typed API client — edge intercepts and non-JSON bodies', () => {
 
   it('the local build is the default; hosted is decided by VITE_API_BASE alone', () => {
     expect(isHostedBuild).toBe(false);
+  });
+});
+
+/*
+ * THE SECOND INTERCEPT CONDITION — a request that LEFT the API.
+ *
+ * The infrastructure owner confirmed (2026-08-12) that an expired or
+ * unauthenticated `/krish/*` request gets a 302 to Authentik, and that a browser
+ * `fetch` follows it and lands on the login response. The content-type test alone
+ * catches that only when the login page is labelled `text/html`. Served as
+ * `application/xhtml+xml`, or with no content type at all, it fell through to "The
+ * API response was not valid JSON (200)" — and `FetchStates` then rendered "ISAAC
+ * Returned an Error — the API was reached but answered with HTTP 200", which is
+ * absurd for a 200 and points the reader at the wrong remedy.
+ *
+ * The second condition is `redirected === true && the final URL is outside
+ * API_BASE`. It is a CONJUNCTION on purpose: it states where the answer came from,
+ * which is checkable, rather than guessing why a parse failed, which is not.
+ *
+ * THE FIRST TEST IN THIS BLOCK IS THE ONE THAT MATTERS MOST. It is the negative
+ * control, and it exists to stop a future slice widening this into "any non-JSON
+ * failure means the session ended" — which would tell a scientist to sign in again
+ * to fix a truncated response from a healthy, authenticated backend.
+ */
+describe('typed API client — a redirect that left the API', () => {
+  const OFF_BASE = 'https://auth.example.org/if/flow/default/?next=%2Fapi';
+
+  /** A response stub that can model provenance: content type, redirect, final URL. */
+  function stubResponse(opts: {
+    status?: number;
+    contentType?: string | null;
+    redirected?: boolean;
+    url?: string;
+    text: string;
+  }): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const requested = typeof input === 'string' ? input : String(input);
+        const status = opts.status ?? 200;
+        return {
+          ok: status < 400,
+          status,
+          redirected: opts.redirected ?? false,
+          url: opts.url ?? requested,
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === 'content-type' ? (opts.contentType ?? null) : null,
+          },
+          json: async () => JSON.parse(opts.text) as unknown,
+        } as unknown as Response;
+      }),
+    );
+  }
+
+  it('THE NEGATIVE CONTROL: a parse failure that never left the API is NOT expiry', async () => {
+    // 200, ISAAC's own content type, ISAAC's own URL, no redirect — and a body
+    // that will not parse. That is a backend or transport defect, and signing in
+    // again cannot fix it, so the client must not say the session ended.
+    stubResponse({
+      status: 200,
+      contentType: 'application/json',
+      redirected: false,
+      text: '{"experiments": [',
+    });
+    const error = (await api.listExperiments().catch((e: unknown) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.htmlIntercept).toBe(false);
+    expect(error.message).toMatch(/not valid JSON/i);
+    // ...and the screen this produces is not the sign-in one.
+    expect(downCopy(error, true).kind).not.toBe('auth');
+  });
+
+  it('an XHTML sign-in page reached by a redirect off the API is an intercept', async () => {
+    stubResponse({
+      status: 200,
+      contentType: 'application/xhtml+xml',
+      redirected: true,
+      url: OFF_BASE,
+      text: '<html/>',
+    });
+    const error = (await api.listExperiments().catch((e: unknown) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.htmlIntercept).toBe(true);
+    expect(error.status).toBe(200);
+    expect(error.path).toBe('/experiments');
+    expect(downCopy(error, true).kind).toBe('auth');
+  });
+
+  it('a redirect to a login page with NO content type at all is still an intercept', async () => {
+    // The condition deliberately does not depend on what the edge labelled its
+    // own body — an unlabelled response is the case `isHtml` can never catch.
+    stubResponse({ status: 200, contentType: null, redirected: true, url: OFF_BASE, text: '<html/>' });
+    const error = (await api.health().catch((e: unknown) => e)) as ApiError;
+    expect(error.htmlIntercept).toBe(true);
+    expect(error.contentType).toBeUndefined();
+    expect(error.message).toMatch(/redirected away from the ISAAC API/i);
+  });
+
+  it('a BENIGN redirect that stays under API_BASE is not an intercept', async () => {
+    // ISAAC's own normalisation (a trailing slash, a moved route) redirects
+    // within the API. Nothing about that says the session ended, and treating it
+    // as expiry would sign the reader out on a successful request.
+    stubResponse({
+      status: 200,
+      contentType: 'application/json',
+      redirected: true,
+      url: `${API_BASE}/experiments/`,
+      text: '{"experiments": [], "incomplete": null}',
+    });
+    const list = await api.listExperiments();
+    expect(list.experiments).toEqual([]);
+  });
+
+  it('a benign in-API redirect on a FAILING response keeps its ordinary status copy', async () => {
+    stubResponse({
+      status: 500,
+      contentType: 'application/json',
+      redirected: true,
+      url: `${API_BASE}/experiments/`,
+      text: '{"error": "boom"}',
+    });
+    const error = (await api.listExperiments().catch((e: unknown) => e)) as ApiError;
+    expect(error.htmlIntercept).toBe(false);
+    expect(error.status).toBe(500);
+    expect(downCopy(error, true).kind).toBe('http_error');
+  });
+
+  it('`redirected` alone proves nothing without a readable final URL', async () => {
+    // We would be guessing, and the guess would run in the over-claiming
+    // direction, so the honest answer is "not observed".
+    stubResponse({ status: 200, contentType: 'application/json', redirected: true, url: '', text: 'nope' });
+    const error = (await api.health().catch((e: unknown) => e)) as ApiError;
+    expect(error.htmlIntercept).toBe(false);
+    expect(error.message).toMatch(/not valid JSON/i);
+  });
+
+  it('the intercept is flagged on a non-OK redirected response too', async () => {
+    stubResponse({
+      status: 403,
+      contentType: 'application/xhtml+xml',
+      redirected: true,
+      url: OFF_BASE,
+      text: '<html/>',
+    });
+    const error = (await api.getSchema().catch((e: unknown) => e)) as ApiError;
+    expect(error.htmlIntercept).toBe(true);
+    expect(error.status).toBe(403);
+  });
+
+  it('a mutation reader flags it as well, so write surfaces see the same signal', async () => {
+    stubResponse({
+      status: 200,
+      contentType: 'application/xhtml+xml',
+      redirected: true,
+      url: OFF_BASE,
+      text: '<html/>',
+    });
+    const error = (await api
+      .createExperiment({ title: 'T', description: '' })
+      .catch((e: unknown) => e)) as ApiError;
+    expect(error.htmlIntercept).toBe(true);
+  });
+});
+
+/*
+ * THE SHARED WRITE-FAILURE COPY.
+ *
+ * Five mutation surfaces rendered `err.message` raw, and one of them —
+ * `CsvReconcilePanel` — rendered "check the file and try again", blaming the
+ * scientist's file for an expired session. `mutationFailureCopy` is the single
+ * definition of "this failed because the session ended"; everything else keeps the
+ * caller's own sentence, unchanged.
+ */
+describe('mutationFailureCopy — names one cause and no others', () => {
+  const FALLBACK = 'The thing could not be done.';
+
+  it('names the session for an intercept, a 401 and a 403', () => {
+    for (const err of [
+      new ApiError('x', { status: 200, htmlIntercept: true }),
+      new ApiError('x', { status: 401 }),
+      new ApiError('x', { status: 403 }),
+    ]) {
+      const copy = mutationFailureCopy(err, FALLBACK);
+      expect(copy).not.toBe(FALLBACK);
+      expect(copy).toMatch(/sign in again/i);
+      expect(copy).toMatch(/nothing was changed/i);
+    }
+  });
+
+  /*
+   * A SITE-COVERAGE GUARD, not a behaviour test, and it is honest about that.
+   *
+   * Six surfaces rendered a raw `err.message` (or, on the CSV path, a sentence
+   * blaming the file). Two of them — Create Experiment and CsvReconcilePanel —
+   * have real behavioural tests elsewhere in the suite; driving the other four to
+   * a failed write through their full record screens costs far more than it
+   * proves. What this pins instead is that none of the six can silently STOP
+   * consulting the shared helper, which is the regression that would return the
+   * defect. It cannot tell whether the call site is on the right branch, so it is
+   * a floor and not a ceiling.
+   */
+  it('every write surface that rendered a raw message consults the helper', () => {
+    const sites = [
+      'src/components/RecordValidator.tsx',
+      'src/components/CsvReconcilePanel.tsx',
+      'src/components/RunCard.tsx',
+      'src/components/RunInheritedPanel.tsx',
+      'src/components/RunsSection.tsx',
+      'src/screens/ExperimentsHome.tsx',
+    ];
+    for (const site of sites) {
+      const source = readFileSync(resolve(__dirname, '../..', site), 'utf8');
+      expect(source, `${site} must import the shared helper`).toContain(
+        "from '../lib/mutationErrors'",
+      );
+      expect(source, `${site} must call it`).toMatch(/mutationFailureCopy\(/);
+    }
+  });
+
+  it('returns the caller’s own sentence for every other failure', () => {
+    for (const err of [
+      new ApiError('x', { status: 500 }),
+      new ApiError('x', { status: 412 }),
+      new ApiError('x', { status: 422 }),
+      new ApiError('x', { unreachable: true }),
+      new Error('plain'),
+      'a string',
+      null,
+      undefined,
+    ]) {
+      expect(mutationFailureCopy(err, FALLBACK)).toBe(FALLBACK);
+    }
   });
 });
 
