@@ -53,6 +53,7 @@ from . import evidence_classify
 from . import experiment_repository
 from . import memory
 from . import memory_graph
+from . import notes
 from . import runtime_mode
 from . import runtime_records
 from . import search
@@ -4548,6 +4549,612 @@ def post_run_check(
         "blockers": blockers,
         "checked_run_version": run.version_token(),
     }
+
+
+# --- 7b. unmapped notes -------------------------------------------------------
+#
+# WHAT THESE FOUR OPERATIONS ARE FOR. A scientist captures things that no rule can
+# place: a sentence about why a scan was repeated, a column heading nothing
+# recognises, an aside in a transcript. Every pipeline in this repository used to
+# drop them, silently. These operations are where they land instead, and the
+# governing rule is that NOTHING CAPTURED IS EVER SILENTLY DISCARDED — there is no
+# DELETE here, and there will not be one. Dismissal is a state.
+#
+# WHAT THEY ARE NOT. None of them writes a scientific value, mints evidence, or
+# confirms anything. `isaac_api.notes.Note` cannot even REPRESENT a confirmed value
+# — `status`, `verified`, `is_evidence` and `is_field_value` are read-only
+# constants on a frozen, slotted dataclass, and those constants are serialised on
+# the wire so the guarantee survives the boundary. `src/isaac_records/` and
+# `schema/` are untouched by this feature, and no export path reads a note:
+# `export_draft` reads `Experiment.draft`, and notes are not in it.
+#
+# ONE VALIDATOR, THE RECORD'S. Notes live inside the experiment's state document,
+# so every write here rewrites the experiment and therefore takes the RECORD's
+# `If-Match` — never a run's, and there is deliberately no per-note validator. A
+# second concurrency scheme with no consumer is a trap, and `patch_run`'s own
+# description already records how easily two tokens for two things get confused.
+
+
+#: THE COMPLETE SET OF FIELD PATHS A NOTE MAY BE MAPPED TO OR PROPOSED FOR.
+#:
+#: DERIVED, exactly as :data:`RUN_WRITABLE_FIELD_PATHS` is, and from the same map —
+#: so "a real official field path" has ONE definition in this module rather than a
+#: second copy free to drift. Unlike that set it is NOT filtered by level: a note is
+#: prose about the experiment or about one of its runs, and a scientist saying "this
+#: belongs at `sample.material.formula`" is naming a target, not writing a run-level
+#: value. The level split governs where a VALUE may be written, and this operation
+#: writes none.
+#:
+#: THE GATE IS MEMBERSHIP, NOT SHAPE, and that is the lesson `patch_run` already
+#: paid for: a prefix test admits `sample.material.typo`, which the schema closes.
+#: A path outside this set is refused with a typed 422 and is never stored — storing
+#: one would let a note point at a field that does not exist, which is a guess with
+#: a plausible shape, and plausible shapes are the ones that get believed.
+NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
+    path for path, _coercer in EXTRACTOR_FIELD_MAP.values()
+)
+
+
+#: The largest one note's text may serialise to. A REFUSAL, NEVER A TRUNCATION.
+#:
+#: "Never truncated" is a promise about what is STORED, and it is kept by refusing
+#: an over-large capture outright rather than by silently keeping a prefix — a
+#: truncated note is a note that lies about what was written. 256 KiB is four times
+#: the run-field limit (:data:`_MAX_VALUE_BYTES`, 64 KiB) because a pasted log
+#: excerpt or a block of instrument output is legitimately long prose where a
+#: run-level scalar is not, and half the `POST /validate/record` body limit, so it
+#: sits inside the two bounds this repository already enforces rather than
+#: introducing a new kind of number.
+_MAX_NOTE_BYTES = 256 * 1024
+
+
+#: The path parameter naming a note. One description, so the wording cannot drift.
+NoteId = Annotated[
+    str,
+    Path(
+        description=(
+            "The id of a note on this experiment, as returned by "
+            "`GET /api/experiments/{experiment_id}/notes`."
+        )
+    ),
+]
+
+_R_NOTE_NOT_FOUND: dict = {
+    404: {
+        "description": (
+            "No experiment in the selected workspace has that id, that experiment "
+            "holds no note with that id, or the `X-Isaac-Tutorial-Session` header "
+            "named a worked-example session that does not exist. A DISMISSED note "
+            "is not one of these cases — dismissal is a state, so a dismissed note "
+            "is still returned by this operation."
+        )
+    },
+}
+
+#: The body keys each write accepts. Anything else is REFUSED rather than ignored.
+#:
+#: This is the same defence `FieldCandidate`'s `FORBIDDEN_PROVENANCE_KEYS` provides
+#: from the other direction, and it is why the list is a closed allowlist rather
+#: than a ban list: a client that sends `{"verified": true}` or `{"status":
+#: "verified"}` alongside its note gets a 422 naming the key, instead of a 201 whose
+#: body reports `verified: false` while the caller believes otherwise. A note cannot
+#: be asked to be a value, not merely refused when it tries.
+_NOTE_CAPTURE_KEYS = frozenset(
+    {"text", "source", "run_id", "candidate_field_path", "candidate_rule"}
+)
+_NOTE_REVIEW_KEYS = frozenset(
+    {"action", "confirmed_by_user", "field_path", "text", "reason"}
+)
+
+
+def _note_not_found(experiment_id: str, note_id: str) -> JSONResponse:
+    """A note this experiment does not hold. Distinct from `_not_found`.
+
+    The two 404s are deliberately different bodies, for the reason
+    :func:`_run_not_found` gives: ``experiment_not_found`` means the workspace has
+    no such record, ``note_not_found`` means the record was read successfully and
+    holds no note under that id. Collapsing them sends a client looking in the
+    wrong place.
+    """
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "note_not_found",
+            "experiment_id": experiment_id,
+            "id": note_id,
+        },
+    )
+
+
+def _note_refusal(error: str, message: str, **extra) -> JSONResponse:
+    """One typed 422. Every refusal on these routes is one of these."""
+    return JSONResponse(
+        status_code=422, content={"error": error, "message": message, **extra}
+    )
+
+
+def _unknown_note_keys(body: dict, allowed: frozenset[str]) -> JSONResponse | None:
+    """Refuse a body key this operation does not accept. See :data:`_NOTE_CAPTURE_KEYS`."""
+    refused = sorted(str(key) for key in body if key not in allowed)
+    if not refused:
+        return None
+    return _note_refusal(
+        "unrecognized_field",
+        (
+            "These keys are not part of this request. Nothing was written. A note "
+            "records what was captured and the review acts performed on it; it "
+            "carries no status, no verification and no evidence, so a key naming "
+            "one of those is refused rather than accepted and ignored."
+        ),
+        key=refused[0],
+        keys=refused,
+    )
+
+
+def _note_text_refusal(raw: object, *, what: str) -> JSONResponse | None:
+    """Refuse text that is not text, is blank, or could not be stored intact."""
+    if not isinstance(raw, str) or not raw.strip():
+        return _note_refusal(
+            "invalid_note_text",
+            (
+                f"{what} must be a non-blank string. A note with no content records "
+                "nothing, and a blank one would sit in the review queue as an empty "
+                "row nobody can act on."
+            ),
+        )
+    if not _is_storable_value(raw, max_bytes=_MAX_NOTE_BYTES):
+        return _note_refusal(
+            "unrepresentable_value",
+            (
+                "This text could not be stored intact — either it is larger than one "
+                "note may be, or it contains characters JSON cannot represent (a lone "
+                "surrogate), so a record containing it could not be read back. It is "
+                "REFUSED rather than shortened: a truncated note misrepresents what "
+                "was written. Nothing was written."
+            ),
+        )
+    return None
+
+
+def _note_view(note: "notes.Note") -> dict:
+    """One note, as this API presents it.
+
+    ``to_state()`` is the whole shape, constants included — see its docstring for
+    why ``status`` / ``verified`` / ``is_evidence`` / ``is_field_value`` are
+    serialised rather than left as a class invariant a JSON reader cannot see.
+
+    ``display_text`` is added here and is a CONVENIENCE, never a replacement: the
+    verbatim ``text`` and any ``revised_text`` are both always present, so a client
+    that wants to show the original always can, and a client that renders
+    ``display_text`` is not quietly hiding that an edit happened.
+    """
+    return {**note.to_state(), "display_text": note.display_text}
+
+
+def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
+    """The list body. ``total`` counts what EXISTS, never what was returned."""
+    by_state = {state: 0 for state in sorted(notes.NOTE_STATES)}
+    for note in exp.notes:
+        by_state[note.state] = by_state.get(note.state, 0) + 1
+    return {
+        "notes": [_note_view(note) for note in selected],
+        # THE THREE NUMBERS A FILTERED LIST CANNOT BE HONEST WITHOUT, and the same
+        # rule `GET .../runs` follows: `total` is how many notes this record holds,
+        # NOT how many were returned, so a client filtering to `unreviewed` still
+        # states the record's true size rather than implying the rest are gone.
+        "total": len(exp.notes),
+        "returned": len(selected),
+        "by_state": by_state,
+        # A DISCLOSURE OF WHAT THIS BUILD COULD NOT READ. Entries the note model
+        # refused are kept in the stored document verbatim and are written back out
+        # on every save; they are counted here rather than rendered, because this
+        # server cannot say what they contain without inventing it. Reporting zero
+        # when there are some would be the silent discard this feature exists to end.
+        "unreadable_entries": len(exp.unreadable_notes),
+        # THE SERVER'S OWN ANSWER TO "WHERE MAY I MAP THIS?", for the reason
+        # `_run_view`'s `overridable` flag exists: the alternative is transcribing a
+        # classification into the frontend bundle, where it is free to drift from the
+        # set the route actually enforces. These are one expression, so the control a
+        # client offers and the request the server accepts cannot disagree.
+        "mappable_field_paths": sorted(NOTE_MAPPABLE_FIELD_PATHS),
+        "sources": sorted(notes.NOTE_SOURCES),
+        "experiment_version": exp.version_token(),
+    }
+
+
+_NOTE_LIST_DESC = (
+    "Return only notes in this review state. Omit it to return every note, "
+    "which is the default and includes dismissed ones."
+)
+
+
+@router.get(
+    "/experiments/{experiment_id}/notes",
+    tags=[TAG_EXPERIMENTS],
+    summary="List a Record's Unmapped Notes",
+    description=(
+        "Lists the content captured against this record that has no confident "
+        "schema home — a remark, an unrecognised column heading, an aside in a "
+        "transcript — each with what produced it, the run it belongs to when that "
+        "is known, its verbatim text, and its review state. Read-only.\n\n"
+        "DISMISSED NOTES ARE INCLUDED. Dismissing is a review state reached by an "
+        "explicit act and recorded in the note's history; it is not a deletion, "
+        "and this API has no operation that deletes a note. `state` narrows the "
+        "list on the server and `total` remains how many notes EXIST, so a client "
+        "filtering to one state can always say how much of the record it is "
+        "showing.\n\n"
+        "A note is never a field value. Every note carries `verified: false`, "
+        "`is_evidence: false`, `is_field_value: false` and a `status` of "
+        "`unmapped_note`, which is deliberately not one of the draft field "
+        "statuses — these are constants of the shape, not fields a request can "
+        "set. `candidate_field_path` is present only when something deterministic "
+        "proposed it and stated the rule it applied; when nothing did, the field "
+        "is null rather than a plausible-looking guess.\n\n"
+        "`mappable_field_paths` is the server's own list of the official field "
+        "paths a note may be mapped to, and `unreadable_entries` counts stored "
+        "entries this build could not read. Those entries are preserved in the "
+        "record untouched and are counted rather than rendered, because their "
+        "content cannot be reported without inventing it."
+    ),
+    response_description=(
+        "The record's notes in capture order, the per-state counts, the field "
+        "paths a note may be mapped to, and the record's current `ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def list_notes(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    state: Annotated[
+        Literal["unreviewed", "mapped", "kept", "dismissed"] | None,
+        Query(description=_NOTE_LIST_DESC),
+    ] = None,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
+    ordered = exp.sorted_notes()
+    selected = [n for n in ordered if state is None or n.state == state]
+    return _notes_payload(exp, selected=selected)
+
+
+@router.post(
+    "/experiments/{experiment_id}/notes",
+    tags=[TAG_EXPERIMENTS],
+    status_code=201,
+    summary="Capture an Unmapped Note",
+    description=(
+        "Stores one piece of captured content that has no confident schema home, "
+        "verbatim, and returns it with the record's new revision.\n\n"
+        "Capturing a note rewrites the record, so this requires the RECORD's "
+        "current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and "
+        "stale is `412` with nothing written. `text` is stored exactly as sent: it "
+        "is not trimmed, normalised or shortened, and text too large to store is "
+        "REFUSED with `422` rather than truncated, because a shortened note "
+        "misrepresents what was written.\n\n"
+        "`source` must be one of the values `GET .../notes` reports under "
+        "`sources`, and there is no default — a producer that cannot say what "
+        "produced its own output is not described by inventing a label for it. "
+        "These are this feature's own vocabulary and are deliberately not ISAAC "
+        "evidence source types, because a note is not evidence.\n\n"
+        "`run_id`, `candidate_field_path` and `candidate_rule` are optional and "
+        "nothing supplies them on a caller's behalf. An omitted `run_id` means the "
+        "note belongs to the record rather than to a run, and it is never filled "
+        "in from the only run that happens to exist. A `candidate_field_path` must "
+        "be a real official field path AND must arrive with the "
+        "`candidate_rule` that produced it — an unexplained proposal is a guess, "
+        "and either half without the other is `422`. Absent is absent: an empty "
+        "string is refused, not stored.\n\n"
+        "Any other body key is refused with `422` naming it. A note carries no "
+        "status, no verification and no evidence, so a request that tries to set "
+        "one is rejected rather than accepted and quietly ignored."
+    ),
+    response_description=(
+        "The stored note and the record's new revision, with the record's new "
+        "`ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
+)
+def post_note(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"text\": \"<verbatim content>\", \"source\": \"<one of the "
+            "reported sources>\", \"run_id\": \"<optional>\", "
+            "\"candidate_field_path\": \"<optional>\", \"candidate_rule\": "
+            "\"<required with a candidate path>\"}`. Any other key is refused with "
+            "`422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. Notes have no separate validator of their own."
+        ),
+    ),
+):
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does it,
+    # so a bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        if not isinstance(body, dict):
+            return _note_refusal(
+                "invalid_body", "The request body must be a JSON object."
+            )
+        refused = _unknown_note_keys(body, _NOTE_CAPTURE_KEYS)
+        if refused is not None:
+            return refused
+        # EVERY INPUT IS RESOLVED BEFORE THE PRECONDITION IS EVEN CHECKED, so a
+        # malformed request is a 422 whether or not the caller's `If-Match` happens
+        # to be current — the same ordering `post_run` uses for its label.
+        text_refusal = _note_text_refusal(body.get("text"), what="text")
+        if text_refusal is not None:
+            return text_refusal
+        source = body.get("source")
+        if source not in notes.NOTE_SOURCES:
+            return _note_refusal(
+                "unknown_note_source",
+                (
+                    "`source` must name what produced this content, and must be one "
+                    "of the values this API reports under `sources`. There is no "
+                    "default and nothing is guessed from the text."
+                ),
+                source=source if isinstance(source, str) else None,
+                allowed=sorted(notes.NOTE_SOURCES),
+            )
+        run_id = body.get("run_id")
+        if run_id is not None:
+            # A NOTE MAY NOT NAME A RUN THIS RECORD DOES NOT HAVE. It is a `422` and
+            # not a `404`: the request is to create a note, the record exists, and
+            # the thing that is wrong is one field of the body.
+            if not isinstance(run_id, str) or exp.get_run(run_id) is None:
+                return _note_refusal(
+                    "unknown_run",
+                    (
+                        "This record has no run with that id, so a note cannot be "
+                        "attached to it. Omit `run_id` to capture the note against "
+                        "the record itself — it is never inferred."
+                    ),
+                    run_id=run_id if isinstance(run_id, str) else None,
+                )
+        candidate = body.get("candidate_field_path")
+        if candidate is not None and (
+            not isinstance(candidate, str) or candidate not in NOTE_MAPPABLE_FIELD_PATHS
+        ):
+            return _note_refusal(
+                "unrecognized_field",
+                (
+                    "A candidate field path must be a real official field path. An "
+                    "invented or misspelt path is refused rather than stored: a note "
+                    "pointing at a field that does not exist is a guess with a "
+                    "plausible shape. Nothing was written."
+                ),
+                key=candidate if isinstance(candidate, str) else None,
+            )
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+        try:
+            note = exp.capture_note(
+                text=body["text"],
+                source=source,
+                run_id=run_id,
+                candidate_field_path=candidate,
+                candidate_rule=body.get("candidate_rule"),
+            )
+        except notes.UnsupportedNote as refusal:
+            # THE MODEL'S OWN REFUSALS REACH THE CLIENT AS A TYPED 422, NEVER A 500.
+            # The checks above cover every shape a UI can send; this covers the ones
+            # only the model knows — a candidate rule with no path, a blank optional
+            # sent as `""` — so a malformed payload can never escape as a traceback.
+            return _note_refusal("unsupported_note", str(refusal))
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this note was not captured
+        # `_changed` is structurally always True here: a new note with a fresh id
+        # cannot leave the authoritative signature equal.
+        response.headers["ETag"] = exp.etag()
+        return {"note": _note_view(note), "experiment_version": exp.version_token()}
+
+
+@router.get(
+    "/experiments/{experiment_id}/notes/{note_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read One Unmapped Note",
+    description=(
+        "Returns one note: its verbatim text, any revised wording, what produced "
+        "it, the run it belongs to when that is known, its review state, and the "
+        "full history of the acts performed on it. Read-only.\n\n"
+        "A DISMISSED NOTE IS RETURNED NORMALLY. Dismissal is a state, not a "
+        "deletion, and the history records when it happened and what it was "
+        "dismissed from. The verbatim capture is returned even when the note has "
+        "been edited — an edit stores the corrected wording beside the original "
+        "and never replaces it, and each superseded wording is kept on the history "
+        "entry that replaced it.\n\n"
+        "The `ETag` header carries THE RECORD's current revision, which is what "
+        "capturing or reviewing a note requires in `If-Match`. Notes have no "
+        "separate validator of their own, because a note is stored inside the "
+        "record's own document."
+    ),
+    response_description="The note, with the record's current `ETag`.",
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_NOTE_NOT_FOUND},
+)
+def get_note(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    note_id: NoteId,
+    response: Response,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    note = exp.get_note(note_id)
+    if note is None:
+        return _note_not_found(experiment_id, note_id)
+    response.headers["ETag"] = exp.etag()
+    return {"note": _note_view(note)}
+
+
+@router.post(
+    "/experiments/{experiment_id}/notes/{note_id}/review",
+    tags=[TAG_EXPERIMENTS],
+    summary="Review One Unmapped Note",
+    description=(
+        "Performs one of the four review acts on a note — `map`, `edit`, `keep` or "
+        "`dismiss` — and returns the note as it now stands. Each act is appended "
+        "to the note's history with the state it moved from and the time it "
+        "happened; nothing is ever removed.\n\n"
+        "Requires `confirmed_by_user: true` and the RECORD's current `ETag` in "
+        "`If-Match` — omitted is `428`, malformed is `400`, and stale is `412` "
+        "with nothing written. Re-performing an act that changes nothing is a "
+        "no-op: it writes nothing, adds no history entry and does not advance the "
+        "record's revision.\n\n"
+        "`map` records the official field path a scientist says this note belongs "
+        "to, and requires `field_path` to be one of the paths `GET .../notes` "
+        "reports under `mappable_field_paths`. IT WRITES NO VALUE. Deriving a "
+        "value from prose would mean deciding what the value is, which this "
+        "application makes a person do through the confirmed-edit path that "
+        "already exists; a mapped note says where the content belongs, not what "
+        "the field should hold.\n\n"
+        "`edit` stores a corrected wording BESIDE the verbatim capture and never "
+        "replaces it, and leaves the review state alone — fixing a typo is not a "
+        "triage decision. `keep` records that this content is prose about the "
+        "experiment and belongs to no field, which is a first-class outcome and "
+        "not an unfinished review. `dismiss` sets the note aside and is the "
+        "closest thing to a delete this API offers, which is to say it is not one: "
+        "the note remains listed, readable and unchanged, and an optional `reason` "
+        "is stored when given and left absent when not, because a justification "
+        "nobody wrote is not invented on their behalf.\n\n"
+        "Any other body key, an unknown action, or a `field_path` that is not a "
+        "real official field path is refused with `422` and nothing is written."
+    ),
+    response_description=(
+        "The note as it now stands, including its full history, and the record's "
+        "new `ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_NOTE_NOT_FOUND, **_R_PRECONDITION},
+)
+def post_note_review(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    note_id: NoteId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"action\": \"map|edit|keep|dismiss\", "
+            "\"field_path\": \"<required for map>\", \"text\": \"<required for "
+            "edit>\", \"reason\": \"<optional for dismiss>\"}`. Any other key is "
+            "refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. Notes have no separate validator of their own."
+        ),
+    ),
+):
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        note = exp.get_note(note_id)
+        if note is None:
+            return _note_not_found(experiment_id, note_id)
+        if not isinstance(body, dict):
+            return _note_refusal(
+                "invalid_body", "The request body must be a JSON object."
+            )
+        refused = _unknown_note_keys(body, _NOTE_REVIEW_KEYS)
+        if refused is not None:
+            return refused
+        action = body.get("action")
+        if action not in notes.NOTE_ACTIONS - {notes.ACTION_CAPTURE}:
+            return _note_refusal(
+                "unknown_note_action",
+                (
+                    "`action` must be one of `map`, `edit`, `keep` or `dismiss`. "
+                    "There is no delete: dismissing sets a note aside and leaves it "
+                    "readable, and nothing here removes captured content."
+                ),
+                action=action if isinstance(action, str) else None,
+                allowed=[
+                    notes.ACTION_MAP,
+                    notes.ACTION_EDIT,
+                    notes.ACTION_KEEP,
+                    notes.ACTION_DISMISS,
+                ],
+            )
+        if body.get("confirmed_by_user") is not True:
+            return _confirmation_required("review a note")
+
+        # RESOLVE EVERY INPUT BEFORE ANYTHING IS WRITTEN, so a refused request can
+        # never leave a partial act behind.
+        if action == notes.ACTION_MAP:
+            field_path = body.get("field_path")
+            if not isinstance(field_path, str) or field_path not in NOTE_MAPPABLE_FIELD_PATHS:
+                return _note_refusal(
+                    "unrecognized_field",
+                    (
+                        "A note may only be mapped to a real official field path. An "
+                        "invented or misspelt path is refused rather than stored, "
+                        "because a note pointing at a field that does not exist is a "
+                        "guess with a plausible shape. Nothing was written."
+                    ),
+                    key=field_path if isinstance(field_path, str) else None,
+                )
+        if action == notes.ACTION_EDIT:
+            text_refusal = _note_text_refusal(body.get("text"), what="text")
+            if text_refusal is not None:
+                return text_refusal
+        if action == notes.ACTION_DISMISS and body.get("reason") is not None:
+            reason_refusal = _note_text_refusal(body.get("reason"), what="reason")
+            if reason_refusal is not None:
+                return reason_refusal
+
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        at = _now_iso()
+        try:
+            if action == notes.ACTION_MAP:
+                revised = notes.map_note(note, field_path=body["field_path"], at=at)
+            elif action == notes.ACTION_EDIT:
+                revised = notes.edit_note(note, text=body["text"], at=at)
+            elif action == notes.ACTION_KEEP:
+                revised = notes.keep_note(note, at=at)
+            else:
+                revised = notes.dismiss_note(note, at=at, reason=body.get("reason"))
+        except (notes.UnsupportedNote, notes.ImmutableCapture) as refusal:
+            # A refusal from the model reaches the client as a typed 422, never as a
+            # traceback. `ImmutableCapture` is caught alongside because a review act
+            # added later that tried to rewrite the capture must fail loudly at the
+            # boundary rather than 500 out of the store.
+            return _note_refusal("unsupported_note", str(refusal))
+
+        exp.replace_note(revised)
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this act was not recorded
+        response.headers["ETag"] = exp.etag()
+        return {"note": _note_view(revised), "experiment_version": exp.version_token()}
 
 
 # --- 8. export ----------------------------------------------------------------

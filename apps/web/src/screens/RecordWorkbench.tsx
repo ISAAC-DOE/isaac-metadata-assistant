@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RunsSection } from '../components/RunsSection';
+import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { disposeExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
@@ -504,6 +505,20 @@ function LoadedWorkbench({
            that this experiment has runs at all.
       */}
       <RunsSection experimentId={id} />
+
+      {/*
+        UNMAPPED NOTES SIT BETWEEN THE RUNS AND THE DRAFT BLOCKS, and the position is
+        the argument. What is captured here is content that has NO field — so it
+        cannot live inside a field group below, and putting it after them would bury
+        the one part of the record that nothing else on this screen can represent.
+        Above the blocks and below the runs is where a reader passes it on the way to
+        the fields, which is when a note is worth triaging.
+
+        A section, not a tab, for `RunsSection`'s third reason: hiding it behind a tab
+        would conceal from a reader on the fields view that this record holds captured
+        content nobody has placed yet.
+      */}
+      <UnmappedNotesPanel experimentId={id} />
 
       {groups.map((group) => (
         <FieldGroup

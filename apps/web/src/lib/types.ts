@@ -1882,3 +1882,110 @@ export interface ApiRunCheckResponse {
   /** The run version the check was computed over. It does NOT advance. */
   checked_run_version: string;
 }
+
+/*
+ * --- Unmapped Notes ----------------------------------------------------------
+ *
+ * Content a scientist captured that has no confident schema home. The wire shape
+ * is `isaac_api/notes.py`'s `Note.to_state()` plus `display_text`.
+ *
+ * THE FOUR CONSTANTS ARE PART OF THE TYPE ON PURPOSE. They are typed as their
+ * literal `false` / `'unmapped_note'` rather than as `boolean` / `string`, so a
+ * component that tries to branch on "is this note a confirmed value?" is a
+ * compile error rather than a branch that can never be taken. The server serialises
+ * them for the same reason: a JSON reader cannot see a class invariant.
+ */
+
+/** The four review states. `dismissed` is a STATE — there is no delete. */
+export type ApiNoteState = 'unreviewed' | 'mapped' | 'kept' | 'dismissed';
+
+/** The acts that appear in a note's history. `capture` opens every note. */
+export type ApiNoteAction = 'capture' | 'map' | 'edit' | 'keep' | 'dismiss';
+
+/** One act in a note's life. Append-only; nothing rewrites an entry. */
+export interface ApiNoteTransition {
+  action: ApiNoteAction;
+  at: string;
+  /** The state before this act. `null` only for `capture`. */
+  from_state: ApiNoteState | null;
+  to_state: ApiNoteState;
+  /** For `map`: the path the scientist named. Never inferred. */
+  field_path: string | null;
+  /** For `edit`: the exact wording this act replaced. Nothing is lost. */
+  superseded_text: string | null;
+  /** For `dismiss`: the reason, when one was given. Never composed for them. */
+  reason: string | null;
+}
+
+export interface ApiNote {
+  id: string;
+  experiment_id: string;
+  /** The run this note belongs to WHEN KNOWN. Never inferred from the only run. */
+  run_id: string | null;
+  source: string;
+  /** THE VERBATIM CAPTURE. Never trimmed, normalised or truncated. */
+  text: string;
+  /** A corrected wording stored BESIDE `text`, never replacing it. */
+  revised_text: string | null;
+  captured_utc: string;
+  state: ApiNoteState;
+  /**
+   * The path something DETERMINISTIC proposed, with the rule that produced it.
+   * `null` means nothing proposed a home — never a plausible-looking guess.
+   */
+  candidate_field_path: string | null;
+  candidate_rule: string | null;
+  /** The path a SCIENTIST named. Distinct from the machine's proposal above. */
+  mapped_field_path: string | null;
+  history: ApiNoteTransition[];
+  /** Always this literal. Deliberately not one of the draft field statuses. */
+  status: 'unmapped_note';
+  /** Always `false`. Typed as the literal so no code can branch on it being true. */
+  verified: false;
+  is_evidence: false;
+  is_field_value: false;
+  /** `revised_text` when there is one, else `text`. A convenience, not a substitute. */
+  display_text: string;
+}
+
+/**
+ * `GET /experiments/{id}/notes`.
+ *
+ * `total` is how many notes EXIST and ignores the `state` filter; `returned` is
+ * how many are in this response. They are different numbers for the same reason
+ * `ApiRunsResponse`'s two totals are, and a filtered list that showed `returned`
+ * as the record's size would let a scientist read "no notes" off a record that
+ * holds several.
+ */
+export interface ApiNotesResponse {
+  notes: ApiNote[];
+  total: number;
+  returned: number;
+  by_state: Record<ApiNoteState, number>;
+  /**
+   * Stored entries this build could not read. They are preserved verbatim in the
+   * record and COUNTED rather than rendered, because their content cannot be
+   * reported without inventing it. Showing zero while the record holds some would
+   * be the silent discard this feature exists to end.
+   */
+  unreadable_entries: number;
+  /** The server's own list of paths a note may be mapped to. Never transcribed here. */
+  mappable_field_paths: string[];
+  sources: string[];
+  /** The EXPERIMENT's version token — the `If-Match` every note write must carry. */
+  experiment_version: string;
+}
+
+export interface ApiNoteCaptured {
+  note: ApiNote;
+  experiment_version: string;
+}
+
+export interface ApiNoteResponse {
+  note: ApiNote;
+}
+
+export interface ApiNoteReviewed {
+  note: ApiNote;
+  experiment_version: string;
+}
