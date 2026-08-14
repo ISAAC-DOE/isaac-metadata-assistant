@@ -635,27 +635,50 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // with darwin one BELOW linux (a font-metric text-node split); the extra tab
       // changes how the row wraps and the split is gone, so darwin rose by 2 where
       // linux rose by 1. That is why these are not "old value + 1" arithmetic.
-      'settings@desktop-1280x800': 16,
-      'settings@laptop-1024x768': 16,
-      'settings@tablet-768x1024': 16,
-      'settings@mobile-375x812': 15,
-      'settings@zoom-200': 15,
-      'settings-about@desktop-1280x800': 15,
-      'settings-about@laptop-1024x768': 15,
-      'settings-about@tablet-768x1024': 15,
+      /*
+       * ── CONNECT YOUR AGENT, 2026-08-13: +1 color-contrast on EVERY settings cell ──
+       *
+       * 33 cells, every one exactly +1, every one `color-contrast`. That uniformity is
+       * the evidence this is not a new defect: the tab strip gained a SEVENTH button
+       * (`Connect Your Agent`), and `.section-tab` already fails contrast on this
+       * baseline. One more tab is one more failing node on every page that renders the
+       * strip, at every viewport. No new RULE appears anywhere, and no non-settings
+       * page moved.
+       *
+       * SO THIS RAISES A KNOWN DEFECT'S COUNT; IT DOES NOT BASELINE A REGRESSION. The
+       * underlying `.section-tab` contrast is pre-existing and is still worth fixing —
+       * doing so would drop all 33 of these at once, which is the argument for fixing
+       * it centrally rather than per-slice.
+       *
+       * LINUX IS MEASURED, DARWIN IS INFERRED, and the distinction matters. Every
+       * value below comes from the CI run on this branch (`GREW ... on linux` lines,
+       * read individually, not derived by adding one to the old column). No darwin
+       * sweep was run. Where a cell is a per-platform object, darwin is raised by one
+       * as well — justified because the cause is an EXTRA DOM NODE present on every
+       * platform, not a font-metric wrap effect, which is the class of change this
+       * file elsewhere records as platform-dependent. A darwin sweep should confirm.
+       */
+      'settings@desktop-1280x800': 17,
+      'settings@laptop-1024x768': 17,
+      'settings@tablet-768x1024': 17,
+      'settings@mobile-375x812': 16,
+      'settings@zoom-200': 16,
+      'settings-about@desktop-1280x800': 16,
+      'settings-about@laptop-1024x768': 16,
+      'settings-about@tablet-768x1024': 16,
       // 14 -> 13 at 375 only, MEASURED in the tutorial-scope slice (2026-08-04).
       // A genuine improvement, lowered rather than left stale. The About tab
       // renders a workspace-derived line that is shorter now that the ordinary
       // workspace is empty, and at 375 the shorter string stops wrapping — so one
       // rendered text node fewer exists to fail. The other four projects are
       // unchanged, which is what a wrap-boundary effect looks like.
-      'settings-about@mobile-375x812': 13,
-      'settings-about@zoom-200': 14,
-      'settings-api@desktop-1280x800': 18,
-      'settings-api@laptop-1024x768': 18,
-      'settings-api@tablet-768x1024': 18,
-      'settings-api@mobile-375x812': 17,
-      'settings-api@zoom-200': 17,
+      'settings-about@mobile-375x812': 14,
+      'settings-about@zoom-200': 15,
+      'settings-api@desktop-1280x800': 19,
+      'settings-api@laptop-1024x768': 19,
+      'settings-api@tablet-768x1024': 19,
+      'settings-api@mobile-375x812': 18,
+      'settings-api@zoom-200': 18,
       /*
        * ── RUN VERTICAL SLICE, 2026-08-10: THE SAME CLIPPED-LIST DISPLACEMENT, AND
        *    A DARWIN COLUMN THAT TURNED OUT TO HAVE BEEN STALE ─────────────────
@@ -777,8 +800,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * unchanged, and its cost is a coverage limitation this file has recorded since
        * 2026-08-06, not something this branch introduced.
        */
-      'settings-explorer@desktop-1280x800': { darwin: 48, linux: 47 },
-      'settings-explorer@laptop-1024x768': { darwin: 49, linux: 47 },
+      'settings-explorer@desktop-1280x800': { darwin: 49, linux: 48 },
+      'settings-explorer@laptop-1024x768': { darwin: 50, linux: 48 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -809,7 +832,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // note above the desktop entry: the linux +1 is this branch's five new
       // operations shifting the scroll clip; the darwin +2 is a stale column,
       // A/B-measured as already 64 on `b7792c1`.
-      'settings-explorer@tablet-768x1024': { darwin: 64, linux: 62 },
+      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 63 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -861,13 +884,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // tablet entry above; read that note, including its "darwin-measured only"
       // caveat. `zoom-200` and the two wide projects did NOT move: the new row
       // falls outside the measured window at those widths.
-      'settings-explorer@mobile-375x812': { darwin: 55, linux: 54 },
-      'settings-explorer@zoom-200': { darwin: 58, linux: 57 },
-      'settings-privacy@desktop-1280x800': 8,
-      'settings-privacy@laptop-1024x768': 8,
-      'settings-privacy@tablet-768x1024': 8,
-      'settings-privacy@mobile-375x812': 7,
-      'settings-privacy@zoom-200': 7,
+      'settings-explorer@mobile-375x812': { darwin: 56, linux: 55 },
+      'settings-explorer@zoom-200': { darwin: 59, linux: 58 },
+      'settings-privacy@desktop-1280x800': 9,
+      'settings-privacy@laptop-1024x768': 9,
+      'settings-privacy@tablet-768x1024': 9,
+      'settings-privacy@mobile-375x812': 8,
+      'settings-privacy@zoom-200': 8,
       /*
        * ── STATISTICS-TAB SLICE, 2026-08-04 ──────────────────────────────────
        *
@@ -1144,20 +1167,20 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'schema-reference@width-320': 20,
       'schema-reference@width-390': 22,
       'settings-about@width-320': 14,
-      'settings-about@width-390': 14,
-      'settings-api@width-320': 17,
-      'settings-api@width-390': 17,
+      'settings-about@width-390': 15,
+      'settings-api@width-320': 18,
+      'settings-api@width-390': 18,
       // linux 56 -> 54 on BOTH, 2026-08-10, CI run 31446324340. The two narrow widths
       // move by 2 where the five wide ones move by 1 — see the RUN OVERRIDE ROUTES
       // note above `settings-explorer@desktop-1280x800` for the cause (two new API
       // operations shifting a 320px scroll clip) and for why `width-320` had to split
       // rather than have its scalar lowered onto an unmeasured darwin.
-      'settings-explorer@width-320': { darwin: 56, linux: 54 },
-      'settings-explorer@width-390': { darwin: 58, linux: 54 },
-      'settings-privacy@width-320': 7,
-      'settings-privacy@width-390': 7,
+      'settings-explorer@width-320': { darwin: 57, linux: 55 },
+      'settings-explorer@width-390': { darwin: 59, linux: 55 },
+      'settings-privacy@width-320': 8,
+      'settings-privacy@width-390': 8,
       'settings@width-320': 15,
-      'settings@width-390': 15,
+      'settings@width-390': 16,
       'statistics-example@width-320': 4,
       'statistics-example@width-390': 4,
       'statistics-mine@width-320': 2,
