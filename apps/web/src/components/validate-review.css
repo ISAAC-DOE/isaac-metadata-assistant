@@ -1,0 +1,337 @@
+/*
+ * VALIDATE & REVIEW — the experiment-level action, grouped by run.
+ *
+ * A plain `.card` (base.css). Deliberately NOT the reserved verdict treatment:
+ * the hard-gate PASS/FAIL surface is `VerdictCard` (signals.css) and its filled
+ * green/red belongs to it alone. Every state here is carried by an icon AND a
+ * word, so severity is never encoded in colour.
+ *
+ * NO COLOURED LEFT/RIGHT BORDER anywhere (the no-vertical-rail rule is
+ * system-wide, and `__tests__/no-vertical-rail.test.ts` scans for it). Groups are
+ * separated with `border-top` in the neutral hairline token.
+ *
+ * EVERY LONG STRING WRAPS. Run labels, ULIDs, jsonschema messages and advisory
+ * text are all unbounded and unbroken by spaces, and this section has to survive
+ * 320px. `overflow-wrap: anywhere` on each of them re-flows the content instead
+ * of pushing the page sideways; nothing here sets a fixed width, a min-width or a
+ * nowrap, so no descendant can widen the page.
+ *
+ * The detail block reuses `.run-check-*` from `runs.css` — one vocabulary for "a
+ * finding and what it says", shared with the per-run Check Run card, rather than
+ * a second set of rows that could drift from it.
+ */
+
+.validate-review {
+  margin-top: 14px;
+  padding: 16px 18px;
+}
+
+.vr-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.vr-sub {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  max-width: 72ch;
+}
+
+.vr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.vr-status {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.vr-note {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+
+.vr-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--fail-border);
+  border-radius: var(--radius-inner, 10px);
+  background: var(--fail-bg);
+  color: var(--fail-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.vr-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vr-unit {
+  padding: 12px 0;
+  border-top: 1px solid var(--border-hair);
+}
+.vr-unit:first-of-type {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.vr-unit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.vr-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: var(--radius-token, 6px);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--text-slate);
+}
+/* Text colour only, and only on the FAIL word — the filled verdict treatment
+   stays reserved for VerdictCard. */
+.vr-state-fail {
+  color: var(--fail-text);
+  border-color: var(--border);
+}
+.vr-state-unavailable {
+  color: var(--text-tertiary);
+}
+
+.vr-unit-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vr-unit-ids {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.vr-unit-subject {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+
+.vr-unit-counts {
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.vr-caption {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+
+.vr-group-title {
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+
+.vr-errors {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.vr-errors li {
+  overflow-wrap: anywhere;
+}
+.vr-error-path {
+  color: var(--text-muted);
+}
+
+/* Advisory — the amber, non-gating channel, kept visually apart from the state
+   above it so the two can never be read as one signal. */
+.vr-advisory {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner, 10px);
+  background: var(--advisory-bg);
+}
+.vr-advisory-title {
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--advisory-text);
+  overflow-wrap: anywhere;
+}
+.vr-advisory-list {
+  margin: 5px 0 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--advisory-text);
+}
+.vr-advisory-list li {
+  overflow-wrap: anywhere;
+}
+
+/* The blocker-kind breakdown under the open-questions list. Plain text in the
+   secondary colour: it is a count, not a severity, and must not pick up either
+   the advisory treatment above or the error treatment below it. */
+.vr-kinds {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+
+/* TIER 3 — the evidence-support axis. DELIBERATELY NEITHER PALETTE: not the
+   advisory amber, not the fail red. A neutral bordered block in the subtle
+   surface, because the endpoint that feeds it says it carries no verdict, and a
+   colour borrowed from either tier would say otherwise before a word is read. */
+.vr-attention {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner, 10px);
+  background: var(--surface-subtle);
+}
+.vr-attention-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.vr-attention-note {
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+.vr-attention-counts {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.vr-attention-group {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-hair);
+}
+.vr-attention-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+.vr-attention-list {
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.vr-attention-list li {
+  overflow-wrap: anywhere;
+}
+.vr-attention-field {
+  color: var(--text-muted);
+}
+/* A word, not a colour: the tag reads "descriptor" and would still read it with
+   every colour rule in this file removed. */
+.vr-attention-tag {
+  margin-left: 5px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-token, 6px);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-slate);
+}
+
+.vr-detail {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner, 10px);
+  background: var(--surface-subtle);
+}
+.vr-detail-scope {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+.vr-detail-clean {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.vr-detail-disagree {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  font-weight: 600;
+  color: var(--advisory-text);
+  overflow-wrap: anywhere;
+}
