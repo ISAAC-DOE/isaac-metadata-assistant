@@ -384,8 +384,22 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
     // one. The linux column is transcribed from GitHub Actions run
     // 30668917975; it is the authoritative one.
     counts: {
-      'evidence@desktop-1280x800': 69,
-      'evidence@laptop-1024x768': 69,
+      /*
+       * ── EVIDENCE GRAPH, 2026-08-13: +1 on the evidence page, one more tab button ──
+       *
+       * The Evidence screen gained an `Evidence List | Evidence Graph` tab strip, so
+       * it now renders one more `.section-tab` -- the same pre-existing contrast
+       * failure counted in the settings block above, on one more page. Uniform +1 at
+       * all seven viewports, no new rule, and no page without the strip moved.
+       *
+       * A KNOWN DEFECT'S COUNT, NOT A NEW ONE. Fixing `.section-tab` centrally would
+       * clear this and the 33 settings cells together.
+       *
+       * Linux measured from this branch's CI run, read line by line rather than
+       * derived; darwin inferred by the extra-DOM-node argument used above.
+       */
+      'evidence@desktop-1280x800': 70,
+      'evidence@laptop-1024x768': 70,
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
       // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
       // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
@@ -396,9 +410,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
       // `.record-file`. The element was always painted; only measurement
       // changed. Linux is the authority and may differ.
-      'evidence@tablet-768x1024': 69,
-      'evidence@mobile-375x812': 67,
-      'evidence@zoom-200': 67,
+      'evidence@tablet-768x1024': 70,
+      'evidence@mobile-375x812': 68,
+      'evidence@zoom-200': 68,
       /*
        * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
        * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
@@ -1113,8 +1127,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Every number MEASURED on BOTH platforms on the same commit and merged by
          `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
          run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': 67,
-      'evidence@width-390': 67,
+      'evidence@width-320': 68,
+      'evidence@width-390': 68,
       'experiments-example@width-320': 9,
       'experiments-example@width-390': 9,
       'experiments@width-320': 2,
