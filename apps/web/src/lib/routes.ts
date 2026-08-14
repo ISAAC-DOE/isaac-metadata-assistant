@@ -93,6 +93,49 @@ export function isRecordView(value: string | null | undefined): value is RecordV
  */
 export const RECORD_RUN_PARAM = 'run';
 
+/**
+ * COMPARE RUNS — the record screen's "show me these two runs against each other"
+ * mode, on the SAME `?param=` mechanism as `tab`, `view` and `run`. A sixth use of
+ * one convention, and the value is read with `useSearchParams` and written by
+ * COPYING the existing `URLSearchParams`, so nothing else on the record URL is
+ * dropped by entering or leaving a comparison.
+ *
+ * IT IS A REPEATED PARAMETER — `?compare=RUN003&compare=RUN014` — and that is the
+ * one place this differs from its five siblings, so it is justified rather than
+ * assumed. The alternatives were a comma-joined single value and two numbered
+ * parameters. A comma-joined value has to encode "one chosen, one still to choose"
+ * as a trailing comma, which is a state a reader can produce by hand and which
+ * every consumer then has to special-case; two numbered parameters make
+ * `compare1` and `compare2` two concepts where there is one, and invite a
+ * `compare2` with no `compare1`. `getAll` gives the SET of runs being compared as
+ * one thing, degrades honestly to one and to none, and needs no delimiter that a
+ * run id might one day contain.
+ *
+ * WHY IT IS IN THE URL AT ALL. A comparison is the single most linkable artifact
+ * this screen produces — "these two runs differ here" is exactly the sentence a
+ * scientist sends to a colleague — and selection held in `useState` cannot be
+ * linked, bookmarked or reloaded back into. The same defect (a view reachable by
+ * clicking but not by link) has already been shipped twice in this repository and
+ * fixed twice.
+ *
+ * THE VALUES ARE RUN IDS AND ARE NEVER VALIDATED HERE. The section resolves each
+ * against the server and says honestly when no such run exists, exactly as Focus
+ * Run does. An absent parameter means "not comparing", so there is no dead route.
+ */
+export const RECORD_COMPARE_PARAM = 'compare';
+
+/**
+ * TWO. Not `n`, and the number is a decision rather than a first iteration.
+ *
+ * A two-column table can put an address, both values and the relation between them
+ * on one line at a readable width; a third column makes "these differ" ambiguous
+ * about WHICH pair differs, and the honest rendering of an n-way comparison is a
+ * different component with a different summary. A link naming more than two runs
+ * is therefore not silently truncated — the surface says which ones it is not
+ * comparing.
+ */
+export const RUN_COMPARE_MAX = 2;
+
 export const ROUTES = {
   experiments: '/experiments',
   load: '/load',
@@ -136,6 +179,16 @@ export const ROUTES = {
    *  own `URLSearchParams` so any other query parameter survives. */
   recordRun: (id: string, runId: string) =>
     `/record/${id}?${RECORD_RUN_PARAM}=${encodeURIComponent(runId)}`,
+  /** A deep link to a comparison of two runs, e.g.
+   *  `/record/<id>?compare=<runA>&compare=<runB>`. Same division of labour as
+   *  `recordRun`: whole-URL links use this, while the Runs section adds and
+   *  removes runs by copying its own `URLSearchParams`. It builds whatever it is
+   *  given — including one id, which is a half-made selection and a legitimate
+   *  thing to link to — and never pads the list to two. */
+  recordCompare: (id: string, runIds: readonly string[]) =>
+    `/record/${id}?${runIds
+      .map((runId) => `${RECORD_COMPARE_PARAM}=${encodeURIComponent(runId)}`)
+      .join('&')}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,
   export: (id: string) => `/record/${id}/export`,
