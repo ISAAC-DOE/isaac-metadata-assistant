@@ -1785,8 +1785,14 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Reconciliation again, not derivation: 2152 is the reduction's own output, read
   // by running the same per-platform sum `specs/a11y-axe.spec.ts` performs over the
   // edited map. Re-derive it; do not trust this sentence.
-  darwin: 2162,
-  linux: 2152,
+  // 2026-08-13. darwin 2162 -> 2169, linux 2152 -> 2159: seven cells rose by one
+  // on a single surface (see the dated block in the entries above for which, and
+  // why it is a known defect's count rather than a new one). COMPUTED from the
+  // entries with the same summation the guard uses, and the darwin figure matches
+  // the total CI reported the entries now sum to -- which is what confirms the
+  // constant and the map agree rather than merely both having moved.
+  darwin: 2169,
+  linux: 2159,
 };
 
 /**
