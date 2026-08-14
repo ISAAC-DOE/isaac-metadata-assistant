@@ -1788,8 +1788,14 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Reconciliation again, not derivation: 2152 is the reduction's own output, read
   // by running the same per-platform sum `specs/a11y-axe.spec.ts` performs over the
   // edited map. Re-derive it; do not trust this sentence.
-  darwin: 2162,
-  linux: 2152,
+  // 2026-08-13, Connect Your Agent. darwin 2162 -> 2195, linux 2152 -> 2185: the
+  // seventh Settings tab is one more `.section-tab`, which already fails contrast,
+  // so all 33 settings cells rose by exactly one. The totals are COMPUTED from the
+  // entries by the same summation the guard uses, not derived by adding 33 -- and
+  // the darwin figure matches what CI reported the entries now sum to (2195), which
+  // is the check that this constant and the map agree.
+  darwin: 2195,
+  linux: 2185,
 };
 
 /**

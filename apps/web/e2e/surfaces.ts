@@ -300,6 +300,10 @@ export const TABBED_SURFACES = [
       'About',
       'API Access',
       'Endpoint Explorer',
+      // Connect Your Agent sits between the Explorer and Help: both describe
+      // reaching this build as a program, and this one states a deployment state
+      // rather than offering an action.
+      'Connect Your Agent',
       'Help & Tutorial',
     ],
     panelIdPrefix: 'settings-tabpanel-',
