@@ -52,6 +52,13 @@ import {
  *   · The API-access copy joined `lib/settingsContent.ts`, so the "appears
  *     exactly once" suite now counts those strings too — across five surfaces.
  *
+ * The two counts above are what P36V-1 left, and they are left standing as the
+ * record of that slice rather than edited to match today. Since then R0 added
+ * `Help & Tutorial` and this slice added `Connect Your Agent`, so the page now
+ * has SEVEN tabs and `SURFACES` walks SIX of them — Help is deliberately absent
+ * from `SURFACES`, being the one tab a reader acts on rather than reads. Read
+ * `SETTINGS_TABS` and `SURFACES` for the current numbers; do not read them here.
+ *
  * Guards preserved from P36.4/P36R/P36V: the honest `not set` build-commit
  * branch, the truth-vs-memory + no-guessing copy, the repository doc names
  * rendered as inert `<code>`, the HTTP method conveyed by TEXT, the honest
@@ -164,14 +171,19 @@ afterEach(() => {
 // --- tab structure ------------------------------------------------------------
 
 describe('Settings — tabs', () => {
-  it('renders exactly the six specified tabs, with Overview selected by default', () => {
+  it('renders exactly the seven specified tabs, with Overview selected by default', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
 
-    /* R0 added a SIXTH tab, Help & Tutorial. It is last on purpose: the five
-       before it report what this build is, and the sixth is the one thing on the
-       page a reader ACTS on (replaying the guided walkthrough), so it does not
-       belong in the middle of a readout. */
+    /* R0 added Help & Tutorial. It is last on purpose: every tab before it
+       reports what this build is, and it is the one thing on the page a reader
+       ACTS on (replaying the guided walkthrough), so it does not belong in the
+       middle of a readout.
+
+       Connect Your Agent is the SEVENTH tab and sits BEFORE Help, at position
+       six: it reports a deployment state and offers no action, so it belongs
+       with the readout tabs, and specifically next to the two other tabs about
+       reaching this build as a program. */
     const tabs = screen.getAllByRole('tab');
     expect(tabs.map((t) => t.textContent)).toEqual([
       'Overview',
@@ -179,6 +191,7 @@ describe('Settings — tabs', () => {
       'About',
       'API Access',
       'Endpoint Explorer',
+      'Connect Your Agent',
       'Help & Tutorial',
     ]);
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
@@ -277,7 +290,7 @@ describe('Settings — tabs', () => {
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowRight' });
     expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
 
-    // End is now the SIXTH tab (R0 added Help & Tutorial), not the fifth.
+    // End is the LAST tab — Help & Tutorial, now seventh rather than sixth.
     fireEvent.keyDown(tab('Data & Privacy'), { key: 'End' });
     expect(tab('Help & Tutorial')).toHaveAttribute('aria-selected', 'true');
 
@@ -287,10 +300,10 @@ describe('Settings — tabs', () => {
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowLeft' });
     expect(tab('Help & Tutorial')).toHaveAttribute('aria-selected', 'true');
 
-    // ArrowLeft from the last tab reaches the new fifth tab, so the wrap is
-    // walking all six entries rather than a stale five-entry array.
+    // ArrowLeft from the last tab reaches the one before it, so the wrap is
+    // walking all seven entries rather than a stale shorter array.
     fireEvent.keyDown(tab('Help & Tutorial'), { key: 'ArrowLeft' });
-    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Connect Your Agent')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('keyboard selection moves focus with it, so the arrow keys stay usable', () => {
@@ -1466,6 +1479,20 @@ const SURFACES: { name: string; open: () => void; settle: () => Promise<unknown>
     open: () => openTab('Endpoint Explorer'),
     settle: () => screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
   },
+  /*
+   * Connect Your Agent joined the list rather than being left out of it. The
+   * forbidden-substring guard below is the reason: that tab describes an
+   * authentication model and an authorization boundary, which is exactly the
+   * copy most likely to reach for the name of the identity layer in front of a
+   * deployment or for the word for a bearer credential. A new Settings surface
+   * that is not in SURFACES is a surface nothing checks.
+   */
+  {
+    name: 'Connect Your Agent',
+    open: () => openTab('Connect Your Agent'),
+    settle: () =>
+      screen.findByRole('heading', { name: 'Requires organization configuration', level: 3 }),
+  },
 ];
 
 describe('Settings — no sensitive infrastructure detail is rendered', () => {
@@ -1568,7 +1595,8 @@ describe('Settings — every canonical string appears exactly once across the ta
   it('the full commit SHA is rendered exactly once, on About', async () => {
     const perSurface = await textOfEverySurface();
     const counts = perSurface.map((t) => countOccurrences(t, aboutResponse.build_commit));
-    expect(counts).toEqual([0, 0, 1, 0, 0]);
+    // One entry per SURFACES row, in order; the 1 is About's Technical Details.
+    expect(counts).toEqual([0, 0, 1, 0, 0, 0]);
   });
 
   it('Overview renders no definition, and About renders no data/privacy definition', async () => {
@@ -1607,7 +1635,8 @@ describe('Settings — every canonical string appears exactly once across the ta
   /** Each API-access claim belongs to ONE tab. Counting only the total would
    *  pass if a string moved to the wrong surface, so the surface is pinned too. */
   it('the API-access copy renders on the API tabs and nowhere else', async () => {
-    const [overview, privacy, about_, apiAccess, explorer] = await textOfEverySurface();
+    const [overview, privacy, about_, apiAccess, explorer, connectAgent] =
+      await textOfEverySurface();
     const onApiAccess = [
       API_ACCESS_COPY.statusHeading,
       API_ACCESS_COPY.statusBody,
@@ -1625,6 +1654,7 @@ describe('Settings — every canonical string appears exactly once across the ta
         ['Data & Privacy', privacy],
         ['About', about_],
         ['Endpoint Explorer', explorer],
+        ['Connect Your Agent', connectAgent],
       ] as const) {
         expect(other, `${name} leaked: ${text.slice(0, 48)}`).not.toContain(norm(text));
       }

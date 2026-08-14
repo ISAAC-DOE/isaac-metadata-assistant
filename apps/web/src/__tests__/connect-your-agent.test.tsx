@@ -1,0 +1,578 @@
+/**
+ * Settings → Connect Your Agent.
+ *
+ * The tab's defining requirement is that it must never lie about being
+ * connected, so most of this file is negative: it asserts the absence of the
+ * five things a surface like this reaches for when it has nothing true to show
+ * — a Connected state, an endpoint URL, a last-activity date, a Revoke button,
+ * and a credential field.
+ *
+ * TWO RULES THIS FILE FOLLOWS, BOTH BECAUSE A WEAKER VERSION WOULD PASS ON A
+ * BROKEN PAGE:
+ *
+ *  1. **Every absence is asserted against the rendered DOM, never against the
+ *     source.** A grep over `ConnectYourAgent.tsx` for `<input` would go quiet
+ *     the moment a field arrived through a shared component, which is exactly
+ *     the route by which one would arrive. So the credential check queries the
+ *     mounted tree for every element that accepts typing, and the URL check
+ *     reads text content *and* every attribute.
+ *  2. **The negative controls are flat substring ratchets, not
+ *     negation-aware.** `not.toMatch(/\bconnected\b/i)` fails on "no agent is
+ *     connected" too. That is deliberate: a guard a future author can satisfy
+ *     by inserting the word "not" is not a guard, and the page is written to
+ *     the ratchet rather than the ratchet loosened to the page.
+ *
+ * The one positive branch — an endpoint the deployment supplies — is exercised
+ * through the panel's `endpoint` prop, and the same Connected ratchet is
+ * re-run against it. An address existing is not evidence that anything reached
+ * it, and the page must not start claiming otherwise the day D1 is answered.
+ */
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { render, screen, within, cleanup } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+
+import { SettingsPage } from '../screens/SettingsPage';
+import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
+import {
+  MCP_CAPABILITIES_ALLOWED,
+  MCP_CAPABILITIES_REFUSED,
+  MCP_CONNECT_COPY,
+  MCP_ENDPOINT,
+  MCP_PERMISSIONS,
+  MCP_SETUP_STEPS,
+  mcpDeploymentState,
+} from '../lib/mcpConnectContent';
+import { SETTINGS_TAB_IDS, ROUTES, isSettingsTab } from '../lib/routes';
+import { stubFetchRoutes, aboutResponse, graphStatusAvailable, openApiFixture } from '../test/apiFixtures';
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+const TAB_LABEL = 'Connect Your Agent';
+
+function fullRoutes() {
+  return {
+    'GET /api/about': { body: aboutResponse },
+    'GET /api/openapi': { body: openApiFixture },
+    'GET /api/graph/status': { body: graphStatusAvailable },
+  };
+}
+
+/** The whole Settings page, deep-linked to a tab exactly as a shared link would. */
+function renderSettings(entry = ROUTES.settingsTab('mcp')) {
+  stubFetchRoutes(fullRoutes());
+  return render(
+    <MemoryRouter
+      initialEntries={[entry]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <SettingsPage />
+    </MemoryRouter>,
+  );
+}
+
+/** The panel alone, so the endpoint branch can be driven without a deployment. */
+function renderPanel(endpoint?: string | null) {
+  return render(
+    <ConnectYourAgentPanel endpoint={endpoint} onOpenExplorer={() => {}} />,
+  );
+}
+
+const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+/**
+ * The tab's text with element boundaries PRESERVED as whitespace.
+ *
+ * `container.textContent` concatenates adjacent elements with no separator, so
+ * `<h3>Connected</h3><p>No agent…</p>` yields `ConnectedNo agent…` — and
+ * `/\bconnected\b/i` does NOT match that, because the `d` is followed by a word
+ * character and there is no boundary for `\b` to find.
+ *
+ * This is not a hypothetical. Every ratchet below was first written against
+ * `textContent`, and a mutation that set the status heading to the single word
+ * `Connected` PASSED all 26 tests — the one mutation the whole file exists to
+ * catch. The guard was defeated by adjacency, not by any weakness in the regex.
+ *
+ * Joining the text NODES restores the boundary that the DOM always had and that
+ * the flattened string had lost. Every assertion that reads text on this tab
+ * goes through here for that reason; `textContent` is not used directly.
+ */
+function visibleText(container: HTMLElement): string {
+  const walker = container.ownerDocument.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const parts: string[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    parts.push(node.nodeValue ?? '');
+  }
+  return parts.join('\n');
+}
+
+// --- the tab exists, and is reachable the way every other tab is -------------
+
+describe('Connect Your Agent — the tab', () => {
+  it('is a registered Settings tab id', () => {
+    expect(SETTINGS_TAB_IDS).toContain('mcp');
+    expect(isSettingsTab('mcp')).toBe(true);
+  });
+
+  it('renders as a tab in the page tablist', () => {
+    renderSettings(ROUTES.settingsTab('overview'));
+    expect(screen.getByRole('tab', { name: TAB_LABEL })).toBeInTheDocument();
+  });
+
+  it('opens from a ?tab= deep link, with its real content and not an empty panel', () => {
+    renderSettings();
+    expect(screen.getByRole('tab', { name: TAB_LABEL })).toHaveAttribute('aria-selected', 'true');
+
+    const panel = screen.getByRole('tabpanel', { name: TAB_LABEL });
+    expect(panel).toHaveAttribute('id', 'settings-tabpanel-mcp');
+    expect(panel).toHaveAttribute('aria-labelledby', 'settings-tab-mcp');
+    expect(within(panel).getByText(MCP_CONNECT_COPY.statusLabel)).toBeInTheDocument();
+  });
+
+  it('the deep link helper builds the URL the page actually reads', () => {
+    expect(ROUTES.settingsTab('mcp')).toBe('/settings?tab=mcp');
+  });
+});
+
+// --- the unconfigured state renders AS unconfigured --------------------------
+
+describe('Connect Your Agent — the unconfigured state', () => {
+  it('the module ships no endpoint, so the derived state is requires-configuration', () => {
+    expect(MCP_ENDPOINT).toBeNull();
+    expect(mcpDeploymentState(MCP_ENDPOINT)).toBe('requires-configuration');
+  });
+
+  it('states the configuration requirement as its heading and explains who owns it', () => {
+    const { container } = renderPanel();
+    expect(screen.getByRole('heading', { name: MCP_CONNECT_COPY.statusLabel })).toBeInTheDocument();
+    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.statusDetail));
+    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.statusOwner));
+  });
+
+  it('conveys the state as text inside a live region, not as colour', () => {
+    const { container } = renderPanel();
+    // The state is announced if it ever changes, and reads identically to a
+    // screen reader, a monochrome display and a sighted user.
+    const status = screen.getByRole('status');
+    expect(within(status).getByText(MCP_CONNECT_COPY.statusLabel)).toBeInTheDocument();
+    // Nothing anywhere on the tab leans on a colour word to carry the state.
+    expect(visibleText(container)).not.toMatch(/\b(green|amber|red|yellow)\b/i);
+  });
+
+  it('says there is no endpoint rather than showing a placeholder address', () => {
+    const { container } = renderPanel();
+    expect(screen.getByRole('heading', { name: MCP_CONNECT_COPY.endpointHeading })).toBeInTheDocument();
+    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.endpointNone));
+  });
+});
+
+// --- the negative controls ---------------------------------------------------
+
+/**
+ * XML namespace identifiers, which are URIs that name a vocabulary and are not
+ * addresses anything is fetched from or a reader could copy.
+ *
+ * Exempted BY EXACT VALUE rather than by attribute name. `xmlns`-anything would
+ * have been the easier rule and the weaker one: it exempts a location as long as
+ * it is parked in an attribute starting with those five letters. Pinning the
+ * literal keeps every other value in the sweep, and makes a second namespace
+ * arriving one day a deliberate edit here rather than a silent widening.
+ */
+const XML_NAMESPACES = new Set(['http://www.w3.org/2000/svg']);
+
+/** Every attribute value on the tab, less the XML namespace declarations. */
+function everyAttributeValue(container: HTMLElement): string[] {
+  const values: string[] = [];
+  for (const el of Array.from(container.querySelectorAll('*'))) {
+    for (const attr of Array.from(el.attributes)) {
+      if (XML_NAMESPACES.has(attr.value)) continue;
+      values.push(attr.value);
+    }
+  }
+  return values;
+}
+
+describe('Connect Your Agent — negative controls', () => {
+  it('NOTHING on the tab reads "connected" when the deployment is unconfigured', () => {
+    const { container } = renderPanel();
+    expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
+    // And no element is *named* it either — an accessible name is text a user
+    // reads, and a `Connected` chip whose label lived in `aria-label` would
+    // pass a textContent-only check.
+    for (const value of everyAttributeValue(container)) {
+      expect(value, `attribute claims a connection: ${value}`).not.toMatch(/\bconnected\b/i);
+    }
+  });
+
+  it('the same ratchet holds through the whole Settings page on this tab', () => {
+    const { container } = renderSettings();
+    expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
+  });
+
+  it('fabricates no endpoint URL — no URL appears in text or in any attribute', () => {
+    const { container } = renderPanel();
+    expect(visibleText(container)).not.toMatch(/https?:\/\//i);
+    expect(visibleText(container)).not.toMatch(/\bwss?:\/\//i);
+    for (const value of everyAttributeValue(container)) {
+      expect(value, `attribute carries a URL: ${value}`).not.toMatch(/https?:\/\//i);
+    }
+  });
+
+  it('renders no last-activity value — absent is the honest value, and it says why', () => {
+    const { container } = renderPanel();
+    const text = visibleText(container);
+    expect(norm(text)).toContain(norm(MCP_CONNECT_COPY.activityNone));
+
+    /*
+     * THE DATE ASSERTION IS AN ALLOWLIST, NOT A BAN, and the difference is the
+     * point. The tab legitimately carries ONE date — 2026-08-12, when the two
+     * infrastructure decisions were deferred. That is a fact about a decision,
+     * not a timestamp of anything an agent did. A blanket "no dates" rule would
+     * have forced that fact off the page; an allowlist keeps it while making any
+     * *second* date fail here until somebody writes down what it is.
+     */
+    const dates = text.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
+    expect(dates, 'an unexplained date appeared on the tab').toEqual(['2026-08-12']);
+
+    // No clock time, no relative time, no labelled activity value, no `<time>`.
+    expect(text).not.toMatch(/\b\d{1,2}:\d{2}\b/);
+    expect(text).not.toMatch(/\b\d+\s*(second|minute|hour|day|week|month)s?\s+ago\b/i);
+    expect(text).not.toMatch(/\blast\s+(activity|seen|used|call|request|connection)\b/i);
+    expect(container.querySelector('time')).toBeNull();
+  });
+
+  it('offers no Revoke or Disconnect control, and says why there is none', () => {
+    const { container } = renderPanel();
+    for (const button of screen.queryAllByRole('button')) {
+      expect(
+        button.textContent ?? '',
+        `a control that could revoke nothing: ${button.textContent}`,
+      ).not.toMatch(/\b(revoke|disconnect|sign out|remove access|deauthori[sz]e)\b/i);
+    }
+    // The absence is explained rather than silent.
+    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.revocationNone));
+  });
+
+  /** Every element that accepts typing, by tag, by role, and by editability. */
+  function assertNothingAcceptsTyping(root: HTMLElement) {
+    expect(root.querySelectorAll('input')).toHaveLength(0);
+    expect(root.querySelectorAll('textarea')).toHaveLength(0);
+    expect(root.querySelectorAll('select')).toHaveLength(0);
+    expect(root.querySelectorAll('form')).toHaveLength(0);
+    expect(root.querySelectorAll('[contenteditable]')).toHaveLength(0);
+    for (const role of ['textbox', 'searchbox', 'combobox', 'spinbutton'] as const) {
+      expect(within(root).queryAllByRole(role), `a ${role} on the tab`).toHaveLength(0);
+    }
+    // …and nothing that merely *looks* like a place to paste one.
+    expect(visibleText(root)).not.toMatch(/\b(paste|enter|copy) your\b|\byour (api )?key\b/i);
+  }
+
+  it('has NOTHING that accepts typing anywhere on the tab', () => {
+    // Asserted against the mounted DOM, not by reading the source: a field
+    // arriving through a shared component would be invisible to a grep and
+    // is the likeliest way one would arrive.
+    const { container } = renderPanel();
+    assertNothingAcceptsTyping(container);
+  });
+
+  it('…and none in the tab PANEL either, chrome and shared card included', () => {
+    /*
+     * The check above mounts the panel body alone, which is the component this
+     * slice wrote. This one mounts the real Settings page, deep-linked to the
+     * tab, and scopes to the actual `tabpanel` — so it covers the shared
+     * `SettingsCard` chrome around the body as well. A credential field is
+     * likeliest to arrive through shared furniture, and the narrower check is
+     * exactly the one that would not see it.
+     */
+    renderSettings();
+    assertNothingAcceptsTyping(screen.getByRole('tabpanel', { name: TAB_LABEL }));
+  });
+
+  it('names no credential value and no environment variable that would hold one', () => {
+    const { container } = renderPanel();
+    const text = visibleText(container);
+    expect(text).not.toMatch(/VITE_[A-Z_]+/);
+    expect(text).not.toMatch(/\bsk-[a-z0-9]/i);
+    expect(text).not.toMatch(/\bBearer\s+\S/);
+  });
+});
+
+// --- the claims a scientist is actually here for ------------------------------
+
+describe('Connect Your Agent — what it tells a scientist', () => {
+  it('states that no agent can submit, in its own section and in the boundary list', () => {
+    const { container } = renderPanel();
+    const text = norm(visibleText(container));
+    expect(
+      screen.getByRole('heading', { name: MCP_CONNECT_COPY.neverSubmitHeading }),
+    ).toBeInTheDocument();
+    expect(text).toContain(norm(MCP_CONNECT_COPY.neverSubmitDetail));
+    const noSubmit = MCP_CAPABILITIES_REFUSED.find((c) => c.id === 'no-submit');
+    expect(noSubmit, 'the refusal list must carry the submit row').toBeDefined();
+    expect(text).toContain(norm(noSubmit!.action));
+    expect(text).toContain(norm(noSubmit!.detail));
+  });
+
+  it('renders every allowed capability and every refused one', () => {
+    const { container } = renderPanel();
+    const text = norm(visibleText(container));
+    for (const capability of [...MCP_CAPABILITIES_ALLOWED, ...MCP_CAPABILITIES_REFUSED]) {
+      expect(text, `missing capability: ${capability.action}`).toContain(norm(capability.action));
+      expect(text, `missing detail: ${capability.action}`).toContain(norm(capability.detail));
+    }
+  });
+
+  it('renders both permissions with what each allows and refuses', () => {
+    const { container } = renderPanel();
+    const text = norm(visibleText(container));
+    expect(MCP_PERMISSIONS).toHaveLength(2);
+    for (const permission of MCP_PERMISSIONS) {
+      expect(text).toContain(permission.name);
+      expect(text).toContain(norm(permission.allows));
+      expect(text).toContain(norm(permission.refuses));
+    }
+    expect(text).toContain(norm(MCP_CONNECT_COPY.permissionsDetail));
+  });
+
+  it('renders the setup steps, with the blocking precondition above them', () => {
+    const { container } = renderPanel();
+    const text = norm(visibleText(container));
+    expect(text).toContain(norm(MCP_CONNECT_COPY.setupPrerequisite));
+    for (const step of MCP_SETUP_STEPS) {
+      expect(text, `missing step: ${step.title}`).toContain(norm(step.title));
+    }
+    // The precondition precedes the first step, so a reader cannot start the
+    // procedure before being told it cannot be completed.
+    const prerequisiteAt = text.indexOf(norm(MCP_CONNECT_COPY.setupPrerequisite));
+    const firstStepAt = text.indexOf(norm(MCP_SETUP_STEPS[0].title));
+    expect(prerequisiteAt).toBeGreaterThanOrEqual(0);
+    expect(prerequisiteAt).toBeLessThan(firstStepAt);
+  });
+
+  it('qualifies the capability material as defined rather than running', () => {
+    const { container } = renderPanel();
+    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.provenanceNote));
+  });
+
+  it('states the one-way direction, so nobody reads this as ISAAC gaining an AI', () => {
+    const { container } = renderPanel();
+    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.oneWayDetail));
+  });
+});
+
+// --- accessibility -------------------------------------------------------------
+
+describe('Connect Your Agent — accessibility', () => {
+  it('every heading has real text and the outline never skips a level', () => {
+    const { container } = renderSettings();
+    const headings = Array.from(container.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+    expect(headings.length).toBeGreaterThan(0);
+    for (const heading of headings) {
+      expect((heading.textContent ?? '').trim().length, 'an empty heading').toBeGreaterThan(0);
+    }
+    const levels = headings.map((h) => Number(h.tagName[1]));
+    for (let i = 1; i < levels.length; i += 1) {
+      expect(levels[i] - levels[i - 1], `outline: ${levels.join(',')}`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('the one control on the tab is a real, keyboard-operable button with a name', () => {
+    renderPanel();
+    const explorer = screen.getByRole('button', { name: /Endpoint Explorer/i });
+    expect(explorer).toHaveAttribute('type', 'button');
+    expect(explorer).not.toBeDisabled();
+    // A native button: reachable and activatable by keyboard without a
+    // hand-rolled key handler.
+    expect(explorer.tagName).toBe('BUTTON');
+    expect(explorer).not.toHaveAttribute('tabindex', '-1');
+  });
+
+  it('renders no link off this build and no external URL', () => {
+    const { container } = renderPanel();
+    for (const el of Array.from(container.querySelectorAll('[href], [src]'))) {
+      const url = el.getAttribute('href') ?? el.getAttribute('src') ?? '';
+      expect(/^(https?:)?\/\//.test(url), `external URL rendered: ${url}`).toBe(false);
+    }
+  });
+});
+
+// --- the branch that exists for the day the decisions land ---------------------
+
+describe('Connect Your Agent — when a deployment does publish an address', () => {
+  // Deliberately not a real host: the fixture must not resemble somewhere a
+  // reader could be sent, and the Settings infrastructure-substring guard
+  // forbids naming one anyway.
+  const ADDRESS = 'https://agent.example.invalid/mcp';
+
+  it('shows the address the deployment supplied, and still claims no connection', () => {
+    const { container } = renderPanel(ADDRESS);
+    expect(screen.getByText(ADDRESS)).toBeInTheDocument();
+    expect(norm(visibleText(container))).toContain(
+      norm(MCP_CONNECT_COPY.endpointPublishedNote),
+    );
+    // The ratchet holds in this branch too — an address is not a connection.
+    expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
+    // …and it is inert text, never a link.
+    expect(container.querySelector(`a[href="${ADDRESS}"]`)).toBeNull();
+  });
+
+  it('the state derivation is the only thing that decides which branch renders', () => {
+    expect(mcpDeploymentState(null)).toBe('requires-configuration');
+    expect(mcpDeploymentState(ADDRESS)).toBe('endpoint-published');
+  });
+
+  it('does NOT deny the endpoint it is displaying — the banner follows the branch', () => {
+    /*
+     * The defect this pins: the banner rendered the unconfigured sentences
+     * unconditionally, so this branch showed the address and, immediately above
+     * it, "There is no endpoint address to connect to". A page that contradicts
+     * itself on its one subject is worse than one that says nothing, and no
+     * assertion in this file caught it — the address test only looked for the
+     * address.
+     */
+    const { container } = renderPanel(ADDRESS);
+    const text = norm(visibleText(container));
+
+    expect(text).toContain(norm(MCP_CONNECT_COPY.statusDetailPublished));
+    expect(text).not.toContain(norm(MCP_CONNECT_COPY.statusDetail));
+    // The `Requires organization configuration` heading is a claim about a
+    // deployment with no address; it must not survive into a branch that has one.
+    expect(text).not.toContain(norm(MCP_CONNECT_COPY.statusLabel));
+    // Nor may it keep asserting the two decisions are outstanding — an address
+    // existing is evidence that at least one of them moved.
+    expect(text).not.toContain(norm(MCP_CONNECT_COPY.statusOwner));
+    // And the published status still is not a connection claim.
+    expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
+  });
+
+  it('the unconfigured branch is unaffected — it keeps its own two sentences', () => {
+    const text = norm(visibleText(renderPanel().container));
+    expect(text).toContain(norm(MCP_CONNECT_COPY.statusDetail));
+    expect(text).toContain(norm(MCP_CONNECT_COPY.statusOwner));
+    expect(text).not.toContain(norm(MCP_CONNECT_COPY.statusDetailPublished));
+  });
+});
+
+// --- parity with the backend that defines the boundary -------------------------
+
+/*
+ * The three claims on this tab that are NOT about this build's own UI — the tool
+ * set, the two permissions, and the deferral date — have their source in files
+ * this test reads directly. Without that, the tab is a hand-written description
+ * of somebody else's module, free to drift the moment that module changes, and
+ * the drift would be invisible: a page confidently describing eight tools when
+ * nine exist looks exactly like a correct page.
+ *
+ * WHAT THIS CANNOT DO, stated so nobody reads more into a green run. It checks
+ * that the page NAMES the right things, never that the prose ABOUT them is
+ * accurate. "Add a run" could be reworded to something false about what adding a
+ * run does and every assertion here would still pass. A human reviewer is the
+ * backstop for the wording; this is the backstop for the inventory.
+ */
+
+/** The repository root, located by a file only it has. */
+function locateRepoRoot(): string {
+  const candidates = [join(process.cwd(), '..', '..'), process.cwd()];
+  const found = candidates.find((dir) => existsSync(join(dir, 'schema', 'isaac_record_v1.json')));
+  if (found === undefined) {
+    throw new Error(`cannot locate the repository root from ${process.cwd()}`);
+  }
+  return found;
+}
+
+const REPO_ROOT = locateRepoRoot();
+const POLICY_SOURCE = readFileSync(join(REPO_ROOT, 'apps/api/isaac_api/mcp/policy.py'), 'utf8');
+/**
+ * The audit as PROSE: blockquote markers dropped, emphasis dropped, whitespace
+ * collapsed.
+ *
+ * Without this the assertions below are hostage to line wrapping. The sentence
+ * they check sits inside a `>` blockquote and wraps mid-clause, so the raw file
+ * contains `approved,\n> narrowed` and a plain substring search fails on a
+ * document that says exactly what it should. Normalising means a reflow of the
+ * paragraph does not fail this test, while a change of MEANING still does —
+ * which is the only thing worth pinning.
+ */
+const AUDIT_SOURCE = readFileSync(join(REPO_ROOT, 'docs/mcp-capability-audit.md'), 'utf8')
+  .replace(/^\s*>\s?/gm, '')
+  .replace(/\*+/g, '')
+  .replace(/\s+/g, ' ');
+
+/** Every tool name the backend permits, read off `PERMITTED_TOOL_NAMES`. */
+function permittedToolNames(): string[] {
+  const block = POLICY_SOURCE.match(/PERMITTED_TOOL_NAMES = frozenset\(\s*\{([^}]*)\}/);
+  if (block === null) throw new Error('cannot find PERMITTED_TOOL_NAMES in policy.py');
+  return Array.from(block[1].matchAll(/"([^"]+)"/g), (m) => m[1]).sort();
+}
+
+/** Every scope string the backend can express, read off the `Scope` enum. */
+function scopeValues(): string[] {
+  const block = POLICY_SOURCE.match(/class Scope\(Enum\):([\s\S]*?)\ndef parse_scope/);
+  if (block === null) throw new Error('cannot find the Scope enum in policy.py');
+  return Array.from(block[1].matchAll(/^ {4}[A-Z_]+ = "([^"]+)"$/gm), (m) => m[1]).sort();
+}
+
+describe('Connect Your Agent — parity with the backend it describes', () => {
+  it('the parsers actually found something — a vacuous read would pass every check below', () => {
+    // Set-equality between two empty sets is true, so an over-narrow regex would
+    // turn every assertion in this block green while checking nothing. These two
+    // lines are what stop that.
+    expect(permittedToolNames().length).toBeGreaterThan(0);
+    expect(scopeValues().length).toBeGreaterThan(0);
+  });
+
+  it('the capability list covers every backend tool — exactly, in both directions', () => {
+    const described = MCP_CAPABILITIES_ALLOWED.flatMap((c) => c.tools ?? []).sort();
+    // No duplicates: two rows claiming the same tool would let a real tool go
+    // undescribed while the totals still matched.
+    expect(described, 'a tool is claimed by two capability rows').toEqual([
+      ...new Set(described),
+    ]);
+    // A tool added to policy.py fails here until this tab says what it lets an
+    // agent do; a tool removed there fails until the claim is withdrawn.
+    expect(described).toEqual(permittedToolNames());
+  });
+
+  it('the two permissions are exactly the scopes the backend can express', () => {
+    expect(MCP_PERMISSIONS.map((p) => p.name).sort()).toEqual(scopeValues());
+  });
+
+  it('"no agent can submit" is backed by the backend refusing the token outright', () => {
+    // The page states a structural refusal. This is that structure: `submit` and
+    // `export` are forbidden substrings in any tool name, checked at import in
+    // the application and in CI — so the claim is not this file's word for it.
+    const forbidden = POLICY_SOURCE.match(/FORBIDDEN_TOOL_TOKENS = frozenset\(\s*\{([^}]*)\}/);
+    expect(forbidden, 'cannot find FORBIDDEN_TOOL_TOKENS in policy.py').not.toBeNull();
+    const tokens = Array.from(forbidden![1].matchAll(/"([^"]+)"/g), (m) => m[1]);
+    expect(tokens).toContain('submit');
+    expect(tokens).toContain('export');
+    // And nothing permitted carries one of them.
+    for (const name of permittedToolNames()) {
+      for (const token of tokens) {
+        expect(name, `permitted tool ${name} carries ${token}`).not.toContain(token);
+      }
+    }
+  });
+
+  it('the deferral the page reports is still what the committed audit records', () => {
+    /*
+     * The page says the two decisions were deferred on 2026-08-12 and that
+     * neither has been narrowed. That is the ONE claim on this tab which can go
+     * stale without a line of code changing — the day Dean answers, the page
+     * keeps saying it. So it is pinned to the audit, and when the audit is
+     * updated THIS test fails and sends somebody back to the tab. The failure is
+     * the point; it is not a test to relax when it goes red.
+     */
+    expect(AUDIT_SOURCE).toContain('DEFERRED 2026-08-12 (= D1)');
+    expect(AUDIT_SOURCE).toContain('DEFERRED 2026-08-12 (= D2)');
+    expect(AUDIT_SOURCE).toContain('None of them is approved, narrowed, or conditionally approved');
+    // The status the page shows is the phrase the audit prescribes for it.
+    expect(AUDIT_SOURCE).toContain('Requires organization configuration');
+    expect(MCP_CONNECT_COPY.statusLabel).toBe('Requires organization configuration');
+  });
+});
