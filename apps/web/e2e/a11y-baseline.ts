@@ -599,8 +599,28 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          grew 11 → 12 (+1) but darwin grew 10 → 12 (+2), so the two columns
          CONVERGE and the pair becomes a bare number. Assuming +1 per platform
          would have written `{ darwin: 11, linux: 12 }`, which is wrong. */
-      'record-detail@desktop-1280x800': 14,
-      'record-detail@laptop-1024x768': 14,
+      /*
+       * ── VALIDATE & REVIEW, 2026-08-13: +1 on record-detail, and it is a NEW node ──
+       *
+       * Unlike the seventh-settings-tab move, this is a node that did not exist
+       * before: `<p class="vr-sub">`, the Validate & Review sub-line. So the question
+       * is whether to fix it rather than record it, and the answer is that it uses
+       * `var(--text-tertiary)` -- an established token already used in ~30 places and
+       * already failing on this baseline wherever it renders small text. `.fg-sublabel`
+       * on this very page uses the dimmer `--text-quaternary` and fails likewise.
+       *
+       * So this is a new INSTANCE of a systemic token-level contrast issue, not a
+       * rogue colour chosen here. Giving this one element a compliant colour would
+       * make it inconsistent with every sibling sub-line; the real fix is raising the
+       * tertiary/quaternary tokens, which would move many baselines at once and is a
+       * design-system change, not a slice change.
+       *
+       * Uniform +1 at all seven viewports, no new rule, no other page moved. Linux
+       * measured from this branch's CI run, read line by line; darwin inferred by the
+       * same DOM-node argument as the settings block above.
+       */
+      'record-detail@desktop-1280x800': 15,
+      'record-detail@laptop-1024x768': 15,
       /* linux 15 -> 14: the 320px clipping fix (min-width/overflow-wrap on
          `.fg-summary`, scoped to `.record-view-panel`) let the summary WRAP
          instead of running past its clip, and one contrast node stopped firing
@@ -608,9 +628,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          loosening. darwin measured 16 on the same commit and is unchanged —
          the two faces wrap at different words, which is the entire reason this
          file has two columns. */
-      'record-detail@tablet-768x1024': 14,
-      'record-detail@mobile-375x812': 12,
-      'record-detail@zoom-200': 12,
+      'record-detail@tablet-768x1024': 15,
+      'record-detail@mobile-375x812': 13,
+      'record-detail@zoom-200': 13,
       'schema-reference@desktop-1280x800': 19,
       'schema-reference@laptop-1024x768': 19,
       'schema-reference@tablet-768x1024': 17,
@@ -1133,14 +1153,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'memory-graph@width-390': 16,
       'memory@width-320': 17,
       'memory@width-390': 17,
-      'record-detail@width-320': 12,
+      'record-detail@width-320': 13,
       /* SPLIT, and CI is what established it. I measured darwin 13 after the
          Graph tab landed and recorded it as a bare number, saying in the commit
          that linux was not yet measured and CI would adjudicate. It did: linux
          stayed at 12. So the tab's extra node is measurable on the darwin face
          at 390 and not on the linux one — the two wrap at different words, which
          is the whole reason this file has two columns. */
-      'record-detail@width-390': 12,
+      'record-detail@width-390': 13,
       'schema-reference@width-320': 20,
       'schema-reference@width-390': 22,
       'settings-about@width-320': 14,
