@@ -42,6 +42,15 @@ import {
   ZoomOut,
   Maximize2,
   RotateCcw,
+  // The three Compare Runs glyphs. Each is a plain geometric mark and none of
+  // them is a verdict: `Equal` says two things are the same, not that they are
+  // right; `ArrowLeftRight` says two things differ, not which one to prefer;
+  // `Columns2` is the two-column layout itself. Deliberately NOT a scale, a
+  // trophy, a thumb or an arrow that points up — every one of those would rank one
+  // run above the other, which is the thing that surface must never do.
+  Equal,
+  ArrowLeftRight,
+  Columns2,
   type LucideIcon,
 } from 'lucide-react';
 import type { SourceType } from '../lib/types';
@@ -150,5 +159,8 @@ export {
   ZoomOut,
   Maximize2,
   RotateCcw,
+  Equal,
+  ArrowLeftRight,
+  Columns2,
 };
 export type { LucideIcon };

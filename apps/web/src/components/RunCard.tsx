@@ -126,6 +126,9 @@ export function RunCard({
   focusOnMount,
   onFocused,
   onFocusRun,
+  onCompare,
+  comparing = false,
+  compareFull = false,
 }: {
   experimentId: string;
   run: ApiRunView;
@@ -144,6 +147,22 @@ export function RunCard({
    * 422). Absent means the card renders no such button at all.
    */
   onFocusRun?: () => void;
+  /**
+   * Add this run to — or take it out of — the two-run comparison. Supplied by the
+   * LIST only, for the same reason as `onFocusRun`: the focused view shows one
+   * run, and a comparison needs two. Absent means no such control is rendered.
+   *
+   * THE LIST IS THE PICKER, and this is the control that makes it one. The runs
+   * response is paged for measured reasons (`docs/run-scale-measurements.md`), so
+   * a dropdown of every run would reintroduce exactly the download that slice
+   * removed. The reader reaches the second run with the search, filters and
+   * paging they are already using.
+   */
+  onCompare?: () => void;
+  /** True when this run is one of the two currently being compared. */
+  comparing?: boolean;
+  /** True when two OTHER runs are already selected, so this one cannot be added. */
+  compareFull?: boolean;
 }) {
   const baseId = useId();
   const headerId = `${baseId}-header`;
@@ -415,6 +434,43 @@ export function RunCard({
             onClick={onFocusRun}
           >
             Focus
+          </button>
+        )}
+        {onCompare && (
+          /*
+            A TOGGLE, AND IT SAYS WHICH STATE IT IS IN THREE WAYS: `aria-pressed`,
+            the visible word ("Compare" / "Comparing") and a surface treatment in
+            `runs.css`. Never colour alone, and never a tick that only sighted
+            readers can find among fifty cards.
+
+            THE FULL STATE IS `aria-disabled`, NOT `disabled`, and that is the
+            whole reason a reader can find out why. A `disabled` button is removed
+            from the tab order, so the one explanation a keyboard or screen-reader
+            reader needs — two runs are already selected, remove one first — would
+            be attached to a control they cannot reach. `aria-disabled` keeps it
+            focusable and announced; the click is refused here instead.
+
+            The accessible name CONTAINS the visible word, so WCAG 2.5.3 holds and
+            speech input still reaches it by saying "Compare".
+          */
+          <button
+            type="button"
+            className="run-card-compare"
+            aria-pressed={comparing}
+            aria-disabled={!comparing && compareFull ? true : undefined}
+            aria-label={
+              comparing
+                ? `Comparing run ${run.label}, select again to take it out of the comparison`
+                : compareFull
+                  ? `Compare run ${run.label} — two runs are already selected, take one out first`
+                  : `Compare run ${run.label}`
+            }
+            onClick={() => {
+              if (!comparing && compareFull) return;
+              onCompare();
+            }}
+          >
+            {comparing ? 'Comparing' : 'Compare'}
           </button>
         )}
       </div>
