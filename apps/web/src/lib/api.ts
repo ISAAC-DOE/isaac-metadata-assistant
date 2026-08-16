@@ -44,6 +44,10 @@ import type {
   ApiMemoryFileResponse,
   ApiMemoryFilesResponse,
   ApiMemoryGraphResponse,
+  ApiNoteCaptured,
+  ApiNoteReviewed,
+  ApiNotesResponse,
+  ApiNoteState,
   ApiOpenApiResponse,
   ApiPendingResponse,
   ApiRunCheckResponse,
@@ -695,6 +699,20 @@ export interface ListRunsQuery {
   exported?: boolean;
 }
 
+/**
+ * `GET /experiments/{id}/notes`.
+ *
+ * `state` narrows the list ON THE SERVER. Omitting it returns every note — which
+ * is the default, and which INCLUDES dismissed ones: dismissal is a review state,
+ * not a deletion, so a client that wants them hidden has to ask.
+ *
+ * Typed as the server's own union rather than `string`, so a filter this API does
+ * not offer is a compile error instead of a query the server silently ignores.
+ */
+export interface ListNotesQuery {
+  state?: ApiNoteState;
+}
+
 export const api = {
   health(): Promise<ApiHealth> {
     return getJson<ApiHealth>('/health');
@@ -1117,6 +1135,114 @@ export const api = {
     return postJson<ApiRunCheckResponse>(
       `/experiments/${enc(experimentId)}/runs/${enc(runId)}/check`,
     );
+  },
+
+  /*
+   * --- Unmapped Notes --------------------------------------------------------
+   *
+   * ONE VALIDATOR, THE RECORD'S. Notes are stored inside the experiment's own
+   * document, so every write here carries the EXPERIMENT's version — never a
+   * run's, and there is no per-note token to confuse it with. The guard is on
+   * truthiness for the reason `createRun` states: an empty token must be sent as
+   * ABSENT (server 428) rather than as `If-Match: ""` (400).
+   *
+   * THE PATH LITERAL STAYS WHOLE and the query is appended separately, exactly as
+   * `listRuns` does — `backend-down-state.test.tsx` reads this module's source to
+   * derive its sub-read inventory, and interpolating the query into the literal
+   * makes the scanner see `notes?…` as a sub-resource with no product word.
+   */
+
+  listNotes(
+    experimentId: string,
+    query: ListNotesQuery = {},
+  ): Promise<ApiNotesResponse> {
+    const params = new URLSearchParams();
+    if (query.state !== undefined) params.set('state', query.state);
+    const path = `/experiments/${enc(experimentId)}/notes`;
+    const search = params.toString();
+    return getJson<ApiNotesResponse>(search === '' ? path : `${path}?${search}`);
+  },
+
+  /**
+   * Capture one note, verbatim.
+   *
+   * `text` is sent EXACTLY as the caller supplied it — not trimmed here, because
+   * trimming in the client would make the server's "stored exactly as sent"
+   * promise true of a string the scientist did not write. The panel decides
+   * whether a blank submission is worth sending; this function does not silently
+   * repair one.
+   *
+   * NOTHING OPTIONAL IS INVENTED. `run_id` and the candidate pair are included
+   * only when the caller supplied them, so an omitted run stays omitted rather
+   * than travelling as `null` that a future server might read as a decision.
+   */
+  async captureNote(
+    experimentId: string,
+    opts: {
+      experimentVersion: string;
+      text: string;
+      source: string;
+      runId?: string;
+      candidateFieldPath?: string;
+      candidateRule?: string;
+    },
+  ): Promise<ApiNoteCaptured> {
+    const path = `/experiments/${enc(experimentId)}/notes`;
+    const body: Record<string, unknown> = { text: opts.text, source: opts.source };
+    if (opts.runId) body.run_id = opts.runId;
+    if (opts.candidateFieldPath) body.candidate_field_path = opts.candidateFieldPath;
+    if (opts.candidateRule) body.candidate_rule = opts.candidateRule;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiNoteCaptured>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * Perform one of the four review acts. There is no delete — `dismiss` is a
+   * state, and the note remains listed and readable afterwards.
+   *
+   * `confirmed_by_user: true` is sent unconditionally because this client only
+   * calls it from a control the scientist activated; there is no path here that
+   * reviews a note nobody acted on. `reason` is sent only when non-blank: a
+   * justification nobody wrote is never composed on their behalf, and `""` would
+   * be refused by the server rather than stored as an empty one.
+   */
+  async reviewNote(
+    experimentId: string,
+    noteId: string,
+    opts: {
+      experimentVersion: string;
+      action: 'map' | 'edit' | 'keep' | 'dismiss';
+      fieldPath?: string;
+      text?: string;
+      reason?: string;
+    },
+  ): Promise<ApiNoteReviewed> {
+    const path = `/experiments/${enc(experimentId)}/notes/${enc(noteId)}/review`;
+    const body: Record<string, unknown> = {
+      confirmed_by_user: true,
+      action: opts.action,
+    };
+    if (opts.action === 'map') body.field_path = opts.fieldPath;
+    if (opts.action === 'edit') body.text = opts.text;
+    if (opts.action === 'dismiss' && (opts.reason ?? '').trim() !== '') {
+      body.reason = (opts.reason ?? '').trim();
+    }
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiNoteReviewed>(res, path);
+    throw await mutationError(res, path);
   },
 
   // P31.3 — CSV reconciliation preview (RECONCILIATION-ONLY). Uploads the raw

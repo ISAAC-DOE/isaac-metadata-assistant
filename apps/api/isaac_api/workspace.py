@@ -77,6 +77,9 @@ from isaac_records.extract.draft_builder import build_draft
 from isaac_records.ids import is_record_id, new_record_id
 from isaac_records.models import derivation
 
+from . import notes as notes_module
+from .notes import Note
+
 #: PATH-FREE BY RULE, like every other log line this application emits: a record
 #: id and an exception CLASS NAME, never a message, a filesystem path, a host or a
 #: credential. A log line is an exfiltration surface too (P30.6), and an ``OSError``
@@ -1189,6 +1192,85 @@ def new_run(
     )
 
 
+# --- unmapped notes -----------------------------------------------------------
+#
+# Notes live inside the experiment's state document, exactly as runs do, for the
+# same reason and with the same disclosed cost: contract §8 D7 moves per-record
+# collections to relational rows, that needs a migration and an approval, and this
+# slice has neither. NO DATABASE TABLE AND NO MIGRATION IS ADDED HERE.
+
+
+def _hydrate_notes(raw: object) -> tuple[list[Note], list]:
+    """``(notes, unreadable raw entries)``. Never raises, AND NEVER DISCARDS.
+
+    THIS IS DELIBERATELY NOT WHAT :func:`_hydrate_runs` DOES, and the difference is
+    the whole feature. ``_hydrate_runs`` DROPS an entry it cannot make a run of;
+    dropping is defensible there because the alternative was a measured 500 over the
+    whole workspace, and a run with no id is unaddressable. Applying the same policy
+    to notes would mean this module's own read path silently discarding captured
+    content — which is the exact behaviour Unmapped Notes exists to end. A feature
+    whose reader quietly deletes what its writer promised to keep is worse than no
+    feature.
+
+    So an entry :meth:`Note.from_state` refuses is returned VERBATIM in the second
+    list. :meth:`Experiment.to_state` writes those entries back out unchanged, so
+    the next save preserves them byte-for-byte instead of rewriting the document
+    without them; they are counted and disclosed by the list route rather than
+    rendered as notes, because this module cannot say what they contain without
+    inventing it.
+
+    Two things are still normalised, and neither loses content: a top-level value
+    that is not a list yields no notes at all (there is nothing to iterate), and a
+    DUPLICATE id keeps the first occurrence as a note and files the rest as
+    unreadable — they are preserved, but they cannot both answer to one id.
+    """
+    if not isinstance(raw, list):
+        return [], []
+    hydrated: list[Note] = []
+    unreadable: list = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            unreadable.append(entry)
+            continue
+        try:
+            note = Note.from_state(entry)
+        except (notes_module.UnsupportedNote, TypeError, ValueError, AttributeError):
+            unreadable.append(entry)
+            continue
+        if note.id in seen:
+            unreadable.append(entry)
+            continue
+        seen.add(note.id)
+        hydrated.append(note)
+    return hydrated, unreadable
+
+
+def _sorted_notes(items: list[Note]) -> list[Note]:
+    """Canonical order: oldest capture first, ties broken by id.
+
+    Capture time first because a review queue reads chronologically; ``id`` second
+    so the order is TOTAL and therefore so is the signature below. The state is
+    NOT in the key — dismissing a note must not make it jump position under the
+    reader's cursor.
+    """
+    return sorted(items, key=lambda note: (note.captured_utc, note.id))
+
+
+def _note_state_payload(exp: "Experiment") -> list:
+    """Every note this experiment holds, in canonical order, plus what it could not read.
+
+    ONE function, used by both :meth:`Experiment.to_state` and
+    :func:`_authoritative_signature`, so what is persisted and what is hashed cannot
+    drift apart. The unreadable raw entries are included in BOTH: they are part of
+    the document and they must survive a save, so they must also be part of the
+    state whose change is detected.
+    """
+    return [note.to_state() for note in _sorted_notes(exp.notes)] + list(
+        exp.unreadable_notes
+    )
+
+
 def _authoritative_signature(exp: "Experiment") -> str:
     """Deterministic hash of the AUTHORITATIVE scientific state of an experiment.
 
@@ -1234,6 +1316,30 @@ def _authoritative_signature(exp: "Experiment") -> str:
         "draft": exp.draft,
         "record_id": exp.record_id,
         "runs": [_run_signature_payload(r) for r in exp.sorted_runs()],
+        # NOTES ARE AUTHORITATIVE STATE, and the argument is the one made for runs
+        # one paragraph up rather than a new one. Capturing a note, mapping it,
+        # editing it or DISMISSING it changes what this experiment holds, so each
+        # is a real change to the record: ``rev`` moves, the ``ETag`` moves, and a
+        # second client holding the pre-change validator is correctly refused
+        # instead of silently overwriting the act. Leaving notes out would make
+        # "dismissal is an audited act" false in the one place it has to be true —
+        # a dismissal that does not move the version is a dismissal a concurrent
+        # write can erase without either writer noticing.
+        #
+        # The whole note is hashed, ``history`` included, because the history IS the
+        # audit trail; a transition appended with nothing else changed must still
+        # move the version. That is safe from churn because every mutator in
+        # ``notes.py`` is IDEMPOTENT — re-dismissing, re-keeping, re-mapping to the
+        # same path or re-submitting the same text returns the identical object and
+        # appends nothing, so a no-op re-entry hashes the same and
+        # ``save_versioned`` correctly writes nothing.
+        #
+        # An experiment written before notes existed hashes with ``"notes": []``,
+        # and so does the same experiment re-read from disk (``from_state`` yields
+        # none), so the added key does not cause a spurious rev bump on legacy
+        # state — the same property runs relied on, and pinned by the same kind of
+        # test.
+        "notes": _note_state_payload(exp),
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -2238,6 +2344,20 @@ class Experiment:
     #: §8 D7 moves them to relational rows in migration ``0002``. That is the fix;
     #: a magic number would only hide the need for it.
     runs: list["Run"] = field(default_factory=list)
+    #: The experiment's UNMAPPED NOTES — content a scientist captured that has no
+    #: confident schema home. Carried inside this experiment's state document for
+    #: the same reason runs are, and with the same disclosed cost.
+    #:
+    #: They are NOT part of the draft, and that is a boundary rather than a filing
+    #: decision: ``draft`` is what export reads, and a note must never reach an
+    #: official record. ``export.py`` and ``transform`` are untouched by this
+    #: slice; a note cannot be exported because nothing that exports looks here.
+    notes: list["Note"] = field(default_factory=list)
+    #: RAW ``notes`` entries the note model could not read, kept VERBATIM so a save
+    #: cannot discard them. See :func:`_hydrate_notes` — the alternative is a read
+    #: path that silently deletes captured content, in a feature whose entire
+    #: purpose is that nothing captured is silently deleted.
+    unreadable_notes: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -2294,6 +2414,12 @@ class Experiment:
             "updated_utc": self.updated_utc,
             "generation": self.generation,
             "runs": [r.to_state() for r in self.sorted_runs()],
+            # The unreadable raw entries are written back out INSIDE this array, at
+            # the end, by ``_note_state_payload``. That is what makes "no silent
+            # discard" hold across a save of a document this build could not fully
+            # parse: the entries survive untouched and a later build that
+            # understands them reads them normally.
+            "notes": _note_state_payload(self),
         }
 
     def save(self) -> None:
@@ -2550,6 +2676,82 @@ class Experiment:
             raise ValueError(f"run id {run.id!r} already exists on this experiment")
         self.runs.append(run)
         return run
+
+    # -- unmapped notes --------------------------------------------------------
+
+    def sorted_notes(self) -> list["Note"]:
+        """This experiment's notes in canonical order — INCLUDING dismissed ones.
+
+        There is no filtered variant and deliberately so. A dismissed note is set
+        aside, not deleted, and the only way that stays true in practice is if the
+        store has no way to serve a list with them already removed. Filtering is the
+        caller's, and the list route reports the per-state counts so a client cannot
+        show a subset without knowing it is one.
+        """
+        return _sorted_notes(self.notes)
+
+    def get_note(self, note_id: str) -> "Note | None":
+        for note in self.notes:
+            if note.id == note_id:
+                return note
+        return None
+
+    def capture_note(
+        self,
+        *,
+        text: str,
+        source: str,
+        run_id: str | None = None,
+        candidate_field_path: str | None = None,
+        candidate_rule: str | None = None,
+        captured_utc: str | None = None,
+        id: str | None = None,
+    ) -> "Note":
+        """Append one note to this experiment IN MEMORY. Does not save.
+
+        Saving is the caller's, exactly as it is for :meth:`add_run`, so a route can
+        capture and persist once inside the same ``record_lock`` critical section
+        every other mutation uses.
+
+        The id is a fresh ULID from the same function record and run ids come from.
+        A NOTE ID IS NOT A RECORD ID: it names no exported artifact, and no note
+        reaches an export — ``export_draft`` reads ``draft``, and notes are not in it.
+
+        NOTHING IS DEFAULTED THAT COULD BE INVENTED. ``run_id`` stays ``None`` when
+        the caller does not know which run this belongs to, even when the experiment
+        has exactly one run — "the only run" is an inference about the science, not a
+        stored rule. ``candidate_field_path`` stays ``None`` unless a deterministic
+        producer supplied one together with the rule that produced it; ``notes.Note``
+        refuses either half without the other.
+        """
+        note = notes_module.new_note(
+            id=id or new_record_id(),
+            experiment_id=self.id,
+            text=text,
+            source=source,
+            captured_utc=captured_utc or _now_iso(),
+            run_id=run_id,
+            candidate_field_path=candidate_field_path,
+            candidate_rule=candidate_rule,
+        )
+        if self.get_note(note.id) is not None:  # pragma: no cover - ULID collision
+            raise ValueError(f"note id {note.id!r} already exists on this experiment")
+        self.notes.append(note)
+        return note
+
+    def replace_note(self, note: "Note") -> None:
+        """Swap in a revised note IN MEMORY, by id. Does not save.
+
+        The review actions in ``notes.py`` are pure functions returning a NEW frozen
+        note, so this is how the result gets back into the experiment. It refuses an
+        id this experiment does not hold rather than appending — a "revision" of a
+        note that is not here would silently create one, and the caller has a bug.
+        """
+        for index, existing in enumerate(self.notes):
+            if existing.id == note.id:
+                self.notes[index] = note
+                return
+        raise KeyError(note.id)
 
     def resolve_run(self, run: "Run") -> dict[str, "Resolution"]:
         """Every inherited experiment-level address, resolved for ``run``. Read-only.
@@ -2957,7 +3159,7 @@ class Experiment:
         was read from — it is never read out of ``state``, which deliberately does
         not carry it.
         """
-        return cls(
+        exp = cls(
             session_id=session_id,
             id=state["id"],
             title=state["title"],
@@ -2983,6 +3185,13 @@ class Experiment:
             # workspace.
             runs=_hydrate_runs(state.get("runs")),
         )
+        # SET AFTER CONSTRUCTION rather than passed in, because the two lists come
+        # out of ONE pass over the persisted array and a dataclass call cannot
+        # unpack a pair into two keyword arguments without computing it twice. No
+        # migration is required for notes either, for the reason stated above the
+        # ``runs`` line: an absent key hydrates to an empty pair.
+        exp.notes, exp.unreadable_notes = _hydrate_notes(state.get("notes"))
+        return exp
 
     # -- derived views --
 

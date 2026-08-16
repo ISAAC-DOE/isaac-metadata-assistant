@@ -222,6 +222,7 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   'evidence-classification': 'evidence support',
   export: 'the export',
   ingestion: 'a CSV comparison',
+  notes: 'the unmapped notes',
   pending: 'the missing fields',
   runs: 'the measurement runs',
   'source-preview': 'a reference source file',

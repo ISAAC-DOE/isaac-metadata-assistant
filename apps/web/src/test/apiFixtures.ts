@@ -366,6 +366,105 @@ export const runsEmpty = runsPage([]);
 
 export const runsOne = runsPage([runFixture()]);
 
+/*
+ * --- Unmapped Notes -----------------------------------------------------
+ *
+ * Shaped verbatim from `isaac_api/notes.py`'s `Note.to_state()` plus the
+ * `display_text` the route adds. `notesEmpty` is what `bundleRoutes` serves, for
+ * the same reason `runsEmpty` is: every existing record-screen test keeps a panel
+ * that loads successfully and shows its empty state.
+ *
+ * THE FOUR CONSTANTS ARE IN THE FIXTURE. `status`, `verified`, `is_evidence` and
+ * `is_field_value` are on every real response, and a fixture that omitted them
+ * would let a component read `undefined` where the server always sends `false` —
+ * which is precisely how "a note is not a value" would come to be tested against
+ * nothing.
+ */
+
+/** One captured note, unreviewed, with nothing proposed for it. */
+export function noteFixture(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: '01SYNTHTESTNOTE000000000A1',
+    experiment_id: EXP_ID,
+    run_id: null,
+    source: 'typed_note',
+    text: 'Beam dropped during scan 3; repeated it after realigning.',
+    revised_text: null,
+    captured_utc: '2099-04-02T09:12:00Z',
+    state: 'unreviewed',
+    // NOT a guess and not a blank-looking path: nothing proposed a home for this.
+    candidate_field_path: null,
+    candidate_rule: null,
+    mapped_field_path: null,
+    history: [
+      {
+        action: 'capture',
+        at: '2099-04-02T09:12:00Z',
+        from_state: null,
+        to_state: 'unreviewed',
+        field_path: null,
+        superseded_text: null,
+        reason: null,
+      },
+    ],
+    status: 'unmapped_note',
+    verified: false,
+    is_evidence: false,
+    is_field_value: false,
+    display_text: 'Beam dropped during scan 3; repeated it after realigning.',
+    ...over,
+  };
+}
+
+/**
+ * A notes LISTING, with every number and list the real route always sends.
+ *
+ * `total` counts what EXISTS and is deliberately independent of `notes.length`, so
+ * a fixture can model the filtered case the panel has to stay honest about — a
+ * page of 0 notes on a record that holds 3.
+ */
+export function notesPage(
+  notes: unknown[],
+  over: {
+    total?: number;
+    by_state?: Record<string, number>;
+    unreadable_entries?: number;
+    mappable_field_paths?: string[];
+  } = {},
+) {
+  const total = over.total ?? notes.length;
+  return {
+    notes,
+    total,
+    returned: notes.length,
+    by_state: over.by_state ?? {
+      unreviewed: total,
+      mapped: 0,
+      kept: 0,
+      dismissed: 0,
+    },
+    unreadable_entries: over.unreadable_entries ?? 0,
+    // The server's own list. Two real official paths, so a test can assert the
+    // control offers exactly what the server said and nothing it invented.
+    mappable_field_paths: over.mappable_field_paths ?? [
+      'sample.material.name',
+      'context.environment',
+    ],
+    sources: [
+      'csv_column',
+      'extraction_residue',
+      'file_listing_line',
+      'transcript',
+      'typed_note',
+    ],
+    experiment_version: VERSION_FIELDS.version,
+  };
+}
+
+export const notesEmpty = notesPage([]);
+
+export const notesOne = notesPage([noteFixture()]);
+
 export const draftResponse = {
   groups: [
     {
@@ -1286,6 +1385,12 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     // nothing else, so no existing assertion in any other file has to change.
     // A test about runs supplies its own body for this key.
     [`GET ${base}/runs`]: { body: runsEmpty },
+    // The Unmapped Notes panel reads this on mount, for the same reason and with
+    // the same neutral default as `runs` above: an EMPTY list renders the heading,
+    // the capture box and the honest empty state, and nothing else — so no existing
+    // record-screen assertion has to change. A test about notes supplies its own
+    // body for this key.
+    [`GET ${base}/notes`]: { body: notesEmpty },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
@@ -2606,6 +2711,15 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "POST /api/tutorial/sessions", description: "Creates an isolated worked-example workspace containing the five built-in example records, and returns its id together with the record ids actually materialised in it. Send that id as the `X-Isaac-Tutorial-Session` header on the record and example-workspace operations to work inside the session.\n\nThe examples exist only inside a session: the ordinary workspace contains none of them, and nothing here writes to it. Two sessions are completely independent — the same example record can be answered, edited and exported in one without being visible from the other.\n\nThe returned record ids are read back from the session that was just created, so they state what is there rather than what was intended. Each session expires after the reported number of hours; expired sessions are cleaned up whenever a new one is opened." },
   { op: "DELETE /api/tutorial/sessions/{session_id}", description: "Discards a worked-example session and everything in it, including any answers, edits and exported artifacts produced inside it. Nothing outside the session is touched.\n\nDiscarding a session that no longer exists succeeds: the outcome the caller asked for — that this session is gone — already holds, so repeating the request is safe and a client never has to know whether it is retrying. A malformed id is rejected instead, because it names no session at all." },
   { op: "GET /api/runtime/database/recon", description: "A sanitized, aggregate-only reconnaissance report over this deployment's own application database. It answers one question — do the stored records validate against the vendored official ISAAC schema — and reports the answer as counts.\n\nThe scan is strictly read-only, and no write is possible: the transaction is set AND verified read-only server-side, every statement is checked against a SELECT-only allowlist before it is issued, and values are always bound as parameters. The row count is also compared before and after, but that is a concurrency check rather than a mutation proof — a row-count equality cannot detect an update and cannot distinguish this scan's writes from a concurrent writer's, so it is the verified read-only transaction and the allowlist that carry the guarantee. The statement counters report every statement this service issues through a cursor; they are not a wire-level record, because the driver's own transaction framing never passes through one.\n\nThe response carries aggregates only: record totals, counts by type and domain, validation totals by rule family and by schema path, and the gate results. It never carries a record id, a title, a scientific value, a stored document, a connection detail, or a credential; per-record content stays closed. A serialized-output scan runs over every response shape before it is returned and replaces it with a sanitized failure if it trips. Every shape also carries a fixed `limitations` list saying what the gates cannot establish — in particular that the production-isolation gate is a tripwire rather than proof, and that the confirmed transport encryption does not verify the server certificate.\n\nWhen the deployment has no database configured, the operation reports that and connects to nothing. Repeat calls inside a short window are served from memory, and a scan already in progress is reported as a conflict rather than opening a second connection. The operation takes no parameters and no body." },
+  // ADDED with the Unmapped Notes slice, transcribed from `create_app().openapi()`
+  // by the command in this array's header rather than typed by hand.
+  // `apps/api/tests/test_contract_description_parity.py` compares these strings
+  // byte for byte against the served document in BOTH directions, so a new
+  // operation that is not here fails CI.
+  { op: "GET /api/experiments/{experiment_id}/notes", description: "Lists the content captured against this record that has no confident schema home — a remark, an unrecognised column heading, an aside in a transcript — each with what produced it, the run it belongs to when that is known, its verbatim text, and its review state. Read-only.\n\nDISMISSED NOTES ARE INCLUDED. Dismissing is a review state reached by an explicit act and recorded in the note's history; it is not a deletion, and this API has no operation that deletes a note. `state` narrows the list on the server and `total` remains how many notes EXIST, so a client filtering to one state can always say how much of the record it is showing.\n\nA note is never a field value. Every note carries `verified: false`, `is_evidence: false`, `is_field_value: false` and a `status` of `unmapped_note`, which is deliberately not one of the draft field statuses — these are constants of the shape, not fields a request can set. `candidate_field_path` is present only when something deterministic proposed it and stated the rule it applied; when nothing did, the field is null rather than a plausible-looking guess.\n\n`mappable_field_paths` is the server's own list of the field paths a note may be mapped to. It is a SUBSET of the official schema's field paths — the ones this build knows how to place — so a target absent from it may still be a real schema field, and a refusal against this list says what this application can map a note to rather than what the official schema defines.\n\n`unreadable_entries` counts stored entries this build cannot present as notes. There are two kinds and the count does not separate them: an entry the note model refused, and an entry whose id another note already holds — a duplicate is perfectly readable, but two notes cannot answer to one id. Either way the entry is preserved in the record untouched and is counted rather than rendered: for a refused entry this server cannot say what it contains without inventing it, and for a duplicate it cannot say which entry the id names." },
+  { op: "GET /api/experiments/{experiment_id}/notes/{note_id}", description: "Returns one note: its verbatim text, any revised wording, what produced it, the run it belongs to when that is known, its review state, and the full history of the acts performed on it. Read-only.\n\nA DISMISSED NOTE IS RETURNED NORMALLY. Dismissal is a state, not a deletion, and the history records when it happened and what it was dismissed from. The verbatim capture is returned even when the note has been edited — an edit stores the corrected wording beside the original and never replaces it, and each superseded wording is kept on the history entry that replaced it.\n\nThe `ETag` header carries THE RECORD's current revision, which is what capturing or reviewing a note requires in `If-Match`. Notes have no separate validator of their own, because a note is stored inside the record's own document." },
+  { op: "POST /api/experiments/{experiment_id}/notes", description: "Stores one piece of captured content that has no confident schema home, verbatim, and returns it with the record's new revision.\n\nCapturing a note rewrites the record, so this requires the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written. `text` is stored exactly as sent: it is not trimmed, normalised or shortened, and text too large to store is REFUSED with `422` rather than truncated, because a shortened note misrepresents what was written.\n\n`source` must be one of the values `GET .../notes` reports under `sources`, and there is no default — a producer that cannot say what produced its own output is not described by inventing a label for it. These are this feature's own vocabulary and are deliberately not ISAAC evidence source types, because a note is not evidence.\n\n`run_id`, `candidate_field_path` and `candidate_rule` are optional and nothing supplies them on a caller's behalf. An omitted `run_id` means the note belongs to the record rather than to a run, and it is never filled in from the only run that happens to exist. A `candidate_field_path` must be one of the paths `GET .../notes` reports under `mappable_field_paths` — a subset of the official schema's paths, not the whole of it — AND must arrive with the `candidate_rule` that produced it — an unexplained proposal is a guess, and either half without the other is `422`. Absent is absent: an empty string is refused, not stored.\n\nAny other body key is refused with `422` naming it. A note carries no status, no verification and no evidence, so a request that tries to set one is rejected rather than accepted and quietly ignored." },
+  { op: "POST /api/experiments/{experiment_id}/notes/{note_id}/review", description: "Performs one of the four review acts on a note — `map`, `edit`, `keep` or `dismiss` — and returns the note as it now stands. Each act is appended to the note's history with the state it moved from and the time it happened; nothing is ever removed.\n\nRequires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written. Re-performing an act that changes nothing is a no-op: it writes nothing, adds no history entry and does not advance the record's revision.\n\n`map` records the official field path a scientist says this note belongs to, and requires `field_path` to be one of the paths `GET .../notes` reports under `mappable_field_paths`. IT WRITES NO VALUE. Deriving a value from prose would mean deciding what the value is, which this application makes a person do through the confirmed-edit path that already exists; a mapped note says where the content belongs, not what the field should hold.\n\n`edit` stores a corrected wording BESIDE the verbatim capture and never replaces it, and leaves the review state alone — fixing a typo is not a triage decision. `keep` records that this content is prose about the experiment and belongs to no field, which is a first-class outcome and not an unfinished review. `dismiss` sets the note aside and is the closest thing to a delete this API offers, which is to say it is not one: the note remains listed, readable and unchanged, and an optional `reason` is stored when given and left absent when not, because a justification nobody wrote is not invented on their behalf.\n\nAny other body key, an unknown action, or a `field_path` outside `mappable_field_paths` is refused with `422` and nothing is written. That set is a subset of the official schema's paths, so such a refusal reports what this build can map a note to and never asserts that the official schema has no such field." },
 ];
 
 // --- Statistics dashboard fixtures (the five page-level reads) --------------
