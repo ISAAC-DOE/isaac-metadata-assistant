@@ -363,6 +363,118 @@ describe('Connect Your Agent — what it tells a scientist', () => {
     const { container } = renderPanel();
     expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.oneWayDetail));
   });
+
+  it('points at the HTTP API as a separate mechanism, so neither tab is read alone', () => {
+    /*
+     * Two controls one word and two tabs apart. API Access → Connect an Agent
+     * says a call carries a credential in a header where a deployment enables
+     * authentication; this tab says there is no configured way to authenticate
+     * a caller. Both true of their own path, and a reader who meets only one of
+     * them concludes either that the agent story works or that ISAAC has no
+     * program access at all. The pointer is what stops that, so it is pinned —
+     * and it is pinned in BOTH endpoint branches, because the distinction does
+     * not lapse the day an address is published.
+     */
+    expect(norm(visibleText(renderPanel().container))).toContain(
+      norm(MCP_CONNECT_COPY.restApiPointer),
+    );
+    cleanup();
+    expect(norm(visibleText(renderPanel('https://agent.example.invalid/mcp').container))).toContain(
+      norm(MCP_CONNECT_COPY.restApiPointer),
+    );
+  });
+});
+
+// --- the confirmation is the AGENT's claim, and the page has to say so ---------
+
+/**
+ * C1. The write-draft row used to read "Each write carries your confirmation as
+ * its support" — which a scientist reads as a GATE, as though ISAAC had asked
+ * them and recorded the answer.
+ *
+ * It has not, and cannot. `confirmed_by_user` is a boolean the CALLER sends and
+ * the server passes through unchanged; it is then stored as `user_confirmation`
+ * evidence, which under `CLAUDE.md` §5 is the support for a value that has no
+ * other evidence. So an agent that asked nothing writes a field whose evidence
+ * trail is indistinguishable from one the scientist really confirmed — and the
+ * page that a scientist reads before granting `isaac:draft.write` was the one
+ * place describing that as their own confirmation.
+ *
+ * The direction of the assertion is therefore pinned, in both polarities: the
+ * honest wording has to be PRESENT, and the wording that reads as a gate has to
+ * be ABSENT. Pinning only the first would pass on a row that said both.
+ */
+describe('Connect Your Agent — the draft-write confirmation, whose claim it is', () => {
+  const writeRow = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'write-draft');
+
+  it('the row this is about still exists and still describes the write tool', () => {
+    // A vacuous guard would be one where the row was renamed away and every
+    // assertion below started passing over an `undefined` that never rendered.
+    expect(writeRow, 'the write-draft capability row is gone').toBeDefined();
+    expect(writeRow!.tools).toEqual(['isaac_update_draft']);
+  });
+
+  it('names the AGENT as the party asserting the confirmation', () => {
+    const { container } = renderPanel();
+    const text = norm(visibleText(container));
+    expect(text).toContain(norm(writeRow!.detail));
+    expect(writeRow!.detail).toMatch(/the agent’s assertion that you gave it/i);
+  });
+
+  it('says ISAAC cannot check it, and turns that into advice the reader can act on', () => {
+    // Not merely "ISAAC does not verify" as a fact left hanging: the reader's
+    // only available control is which agent they grant the permission to, so
+    // the sentence has to say that.
+    expect(writeRow!.detail).toMatch(/ISAAC cannot check/i);
+    expect(writeRow!.detail).toMatch(/trust to ask you first/i);
+  });
+
+  it('never describes the confirmation as one the scientist is known to have given', () => {
+    /*
+     * A flat ratchet over the shapes that read as a gate, in the register the
+     * rest of this file uses. It is deliberately not negation-aware: the
+     * failure being guarded against is a future author restoring the shorter,
+     * friendlier phrasing, not one writing a careful double negative.
+     */
+    const { container } = renderPanel();
+    for (const text of [writeRow!.detail, visibleText(container)]) {
+      expect(text).not.toMatch(/carries your confirmation/i);
+      expect(text).not.toMatch(/your confirmation as its support/i);
+      expect(text).not.toMatch(/\bwith your confirmation\b/i);
+      // …and no claim that anything on this path verifies or records that the
+      // scientist was asked.
+      expect(text).not.toMatch(/\bconfirmation is (verified|checked|recorded by ISAAC)\b/i);
+    }
+  });
+
+  it('keeps the half that IS structural — an unknown field path writes nothing', () => {
+    // The refusal of an invented or misspelt path is enforced by the server, so
+    // it stays stated plainly. Weakening it while fixing the confirmation claim
+    // would trade one inaccuracy for another.
+    expect(writeRow!.detail).toMatch(/invented or misspelt field path is refused with nothing written/i);
+  });
+
+  it('is what the backend says about itself, in the backend’s own words', () => {
+    /*
+     * The parity that makes this more than an opinion about wording. Both
+     * sentences are read from `mcp/tools.py` with whitespace collapsed — they
+     * are wrapped across source lines and across adjacent Python string
+     * literals, so a raw substring search would fail on a file that says
+     * exactly what it should, and the test would then be about line wrapping
+     * rather than about meaning.
+     *
+     * If the server ever DID establish the confirmation itself, these fail and
+     * send somebody back to the page. That is the right direction for the
+     * failure to point: the page is downstream of the boundary, never the other
+     * way round.
+     */
+    expect(TOOLS_SOURCE).toContain(
+      "a layer that sets it on the caller's behalf manufactures a confirmation nobody gave",
+    );
+    expect(TOOLS_SOURCE).toContain(
+      "it is the caller's assertion that the scientist confirmed it, not this server's",
+    );
+  });
 });
 
 // --- accessibility -------------------------------------------------------------
@@ -487,6 +599,20 @@ function locateRepoRoot(): string {
 
 const REPO_ROOT = locateRepoRoot();
 const POLICY_SOURCE = readFileSync(join(REPO_ROOT, 'apps/api/isaac_api/mcp/policy.py'), 'utf8');
+/**
+ * `mcp/tools.py` as PROSE: adjacent Python string literals joined, then all
+ * whitespace collapsed.
+ *
+ * Same reasoning as `AUDIT_SOURCE` below, for a different mechanism. The two
+ * sentences the confirmation-direction block asserts on are wrapped BOTH across
+ * source lines (the module docstring) and across adjacent string literals in a
+ * tool description, so a raw substring search fails on a file that says exactly
+ * what it should — and the test would then be pinning line wrapping rather than
+ * meaning. Reflowing the file must not fail this; changing what it says must.
+ */
+const TOOLS_SOURCE = readFileSync(join(REPO_ROOT, 'apps/api/isaac_api/mcp/tools.py'), 'utf8')
+  .replace(/"\s*\n\s*"/g, '')
+  .replace(/\s+/g, ' ');
 /**
  * The audit as PROSE: blockquote markers dropped, emphasis dropped, whitespace
  * collapsed.

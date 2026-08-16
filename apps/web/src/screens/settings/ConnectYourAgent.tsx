@@ -121,6 +121,13 @@ export function ConnectYourAgentPanel({
             </>
           )}
 
+          {/* THE OTHER MECHANISM. Outside the branch on purpose: "no endpoint
+              here" and "the HTTP API is a different thing with a different
+              answer" are both worth a reader in either state, and the two
+              claims are exactly the pair that do not reconcile if a reader
+              meets only one of the two tabs. */}
+          <p className="api-keys-note">{MCP_CONNECT_COPY.restApiPointer}</p>
+
           <h3 className="api-keys-heading">{MCP_CONNECT_COPY.activityHeading}</h3>
           <p className="api-keys-note">{MCP_CONNECT_COPY.activityNone}</p>
         </section>

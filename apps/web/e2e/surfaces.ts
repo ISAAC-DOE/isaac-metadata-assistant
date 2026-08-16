@@ -242,6 +242,42 @@ export const SURFACES: readonly Surface[] = [
     // h2/h3 above it (an intermittent heading-order failure at zoom-200).
     ready: { role: 'heading', name: /\/api\/about/ },
   },
+  {
+    /*
+     * Connect Your Agent — the SEVENTH Settings tab, and until this entry it was
+     * a Settings surface nothing in this suite opened.
+     *
+     * The tab was declared in `TABBED_SURFACES` below when it shipped, which
+     * exercises the tablist structure, the arrow keys and the deep link — and
+     * nothing else. `SURFACES` is what drives `specs/a11y-axe.spec.ts`,
+     * `a11y-narrow.spec.ts`, `layout-widths.spec.ts`, `zoom-200.spec.ts` and
+     * `structure.spec.ts`, so roughly two hundred lines of new markup — a
+     * `<dl>` capability grid, a `role="status"` banner, an `<ol>` of setup
+     * steps and an inert `<code>` command — had been through neither axe nor a
+     * 320px probe. The a11y guard could not notice: `a11y-axe.spec.ts:227`
+     * asserts `allScanPairs().length === SURFACES.length * SCAN_PROJECT_IDS.length`,
+     * and both sides are derived from this array, so a surface that is never
+     * added satisfies it forever. The same reasoning was applied to the tab's
+     * UNIT test when it shipped (`settings-page.test.tsx`: "A new Settings
+     * surface that is not in SURFACES is a surface nothing checks") and was not
+     * carried across to this catalogue.
+     *
+     * ORDINARY scope, and it is the honest one: the panel reads nothing at all
+     * and renders identically inside a worked-example session.
+     *
+     * `ready` waits on the panel's own status heading rather than the page
+     * `h1`, which is painted by the shell before any tab body is. The name is
+     * this build's real state — `MCP_ENDPOINT` is `null`, so
+     * `mcpDeploymentState` resolves to `requires-configuration` — and the day a
+     * deployment publishes an address the panel renders the other banner and
+     * this locator must be revisited rather than loosened.
+     */
+    id: 'settings-connect',
+    name: 'Settings & API — Connect Your Agent',
+    path: '/settings?tab=mcp',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Requires organization configuration' },
+  },
 ] as const;
 
 /**

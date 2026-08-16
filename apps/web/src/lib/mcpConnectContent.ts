@@ -129,6 +129,25 @@ export const MCP_CONNECT_COPY = {
     'None. This screen will not show a placeholder address, because a scientist who copied one would be pointing their Claude at something that does not answer. Ask whoever runs this deployment whether an address exists yet.',
   endpointVerify:
     'You can check the claim rather than take it: the Endpoint Explorer tab lists every operation this build exposes, generated from the app’s own contract, and no agent interface is among them.',
+  /**
+   * THE OTHER MECHANISM, named — because two tabs apart, one word apart, this
+   * page and API Access make auth claims that do not reconcile on their own.
+   *
+   * API Access → Connect an Agent says every call carries a credential in a
+   * header when a deployment enables authentication. This page says there is no
+   * configured way to authenticate a caller. Both are true OF THEIR OWN PATH —
+   * that one is REST over HTTP against the published contract, this one is the
+   * machine-callable tool interface — and neither said which path it meant
+   * relative to the other. A reader who met only this tab could conclude ISAAC
+   * has no program access at all; a reader who met only that one could conclude
+   * the agent story works. One sentence each way, rather than a restructure.
+   *
+   * Rendered in BOTH endpoint branches: the distinction does not stop being
+   * worth drawing on the day an address is published.
+   */
+  restApiPointer:
+    'This page is about the agent interface only. This build does serve an HTTP API, and the API Access tab’s “Connect an Agent” guide covers what a program you write has to get right to call it — a different mechanism, with its own separate answer about authentication.',
+
   /** The endpoint, when a deployment publishes one. Still not a connection. */
   endpointPublishedNote:
     'This is the address the deployment publishes. This screen has not contacted it and reports nothing about whether it is reachable, whether you are authorized to call it, or whether any agent has ever reached it.',
@@ -231,10 +250,32 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     tools: ['isaac_create_run'],
   },
   {
+    /*
+     * THE CONFIRMATION IS THE AGENT'S ASSERTION, AND THIS ROW HAS TO SAY SO.
+     *
+     * It used to read "Each write carries your confirmation as its support",
+     * which a scientist reads as a gate — as though ISAAC had asked them and
+     * recorded the answer. It has not. `confirmed_by_user` is a boolean the
+     * CALLER sends, and the backend is explicit that it is deliberately not
+     * this layer's to set: `apps/api/isaac_api/mcp/tools.py` — "a layer that
+     * sets it on the caller's behalf manufactures a confirmation nobody gave"
+     * and "it is the caller's assertion that the scientist confirmed it, not
+     * this server's". Nothing checks that the scientist was asked, and the
+     * value is stored as `user_confirmation` evidence — which under CLAUDE.md
+     * §5 is the support for a value with no other evidence. So an agent that
+     * asked nothing can write a field whose evidence trail is indistinguishable
+     * from one the scientist really confirmed.
+     *
+     * The register is `neverSubmitEnforcement`'s: name what is structural and
+     * name what is only asserted, rather than letting the second borrow the
+     * first's authority. The refusal of an unknown field path IS structural and
+     * is kept; the confirmation is not, and now says whose claim it is and what
+     * the reader has to do about it (trust the agent, because ISAAC cannot).
+     */
     id: 'write-draft',
     action: 'Write draft values',
     detail:
-      'Correct an answered record-level field, or fill in a run’s own fields. Each write carries your confirmation as its support, and an invented or misspelt field path is refused with nothing written.',
+      'Correct an answered record-level field, or fill in a run’s own fields. An invented or misspelt field path is refused with nothing written. The confirmation each write records, though, is the agent’s assertion that you gave it — ISAAC cannot check whether you were ever asked, so grant this permission only to an agent you trust to ask you first.',
     tools: ['isaac_update_draft'],
   },
   {
@@ -271,9 +312,29 @@ export const MCP_CAPABILITIES_REFUSED: readonly McpCapability[] = [
     detail: 'No agent will be able to remove an experiment, a run, or a piece of evidence.',
   },
   {
+    /*
+     * SCOPED TO THE UPLOAD ROUTE, and this is the FOURTH site to make the claim.
+     *
+     * It used to read "File ingestion is refused for this whole deployment,
+     * agent or not" — deployment-wide, and false in the same way three other
+     * surfaces were false before (CLAUDE.md §11; the correction is pinned by
+     * `__tests__/upload-claim-parity.test.tsx`). `POST /api/uploads` really is
+     * refused unconditionally, but the standalone record validator calls
+     * `file.text()` on a file you pick, and the campaign-sheet CSV
+     * reconciliation panel reads one and POSTs it. A reader who took the old
+     * sentence literally would believe this build never opens a file at all.
+     *
+     * It survived the parity guard only on WORDING: that guard bans "no file is
+     * read/parsed/inspected", and "ingestion" is not one of the banned shapes.
+     * A claim that escapes a ratchet by synonym is not held by it, so this row
+     * is now IN `SITES` there and states the whole shared claim — the refusal,
+     * both readers by name, the in-memory bound and the outcome-only bound —
+     * exactly as the other three do.
+     */
     id: 'no-upload',
     action: 'Upload or ingest a file',
-    detail: 'File ingestion is refused for this whole deployment, agent or not.',
+    detail:
+      'File upload is refused outright for this whole deployment, agent or not, and no agent tool sends a file. That refusal is the upload route: inside the app the record validator and campaign-sheet CSV reconciliation do read a file you paste or pick — in memory, never stored, recording only the outcome and never the content — and an agent has no tool that reaches either of them.',
   },
   {
     id: 'no-governance',
