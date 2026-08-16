@@ -5,14 +5,28 @@ THE TWO INVARIANTS THIS MODULE EXISTS TO ENFORCE
 
 **(1) Nothing captured is ever silently discarded.** A scientist writes things
 down that the extractor cannot place: a sentence about why a scan was re-run, a
-column heading nothing recognises, a remark in a transcript. The old behaviour of
-every pipeline in this repository was to drop them on the floor — quietly, with no
-surface saying so. A :class:`Note` is where they land instead. Dismissal is a
-STATE (:data:`NOTE_DISMISSED`), reached by an explicit act, recorded in an
-append-only :attr:`Note.history`; it is not a delete, and this module offers no
-delete. Editing does not overwrite the capture either: :attr:`Note.text` is the
-verbatim original forever, an edit writes :attr:`Note.revised_text` beside it, and
-the superseded wording is kept on the history entry.
+column heading nothing recognises, a remark in a transcript. Every pipeline in
+this repository drops such content on the floor — quietly, with no surface saying
+so — and **it still does: no pipeline was rewired when this module was added.**
+A :class:`Note` is the destination that now EXISTS and is where such content WILL
+land once a producer is wired to it; today the only producer is a person typing
+into the Unmapped Notes panel, whose captures all carry
+``source="typed_note"``. The intended first automatic producer is the
+``unrecognised_labels`` list that ``providers/extraction.py`` already computes
+and then discards — wiring that seam is a later slice, and until it lands nothing
+in this application creates a ``csv_column``, ``transcript``,
+``file_listing_line`` or ``extraction_residue`` note, sets a ``run_id``, or
+supplies a ``candidate_field_path``. The vocabulary exists ahead of its
+producers deliberately; **reading it as evidence that the producers exist is the
+misreading this paragraph is worded to prevent.**
+
+What invariant (1) governs is therefore what happens to content that DOES reach
+here. Dismissal is a STATE (:data:`NOTE_DISMISSED`), reached by an explicit act,
+recorded in an append-only :attr:`Note.history`; it is not a delete, and this
+module offers no delete. Editing does not overwrite the capture either:
+:attr:`Note.text` is the verbatim original forever, an edit writes
+:attr:`Note.revised_text` beside it, and the superseded wording is kept on the
+history entry.
 
 **(2) A note can never present as a confirmed field value.** The shape is the
 enforcement, in the same way ``providers/extraction.py``'s ``FieldCandidate``

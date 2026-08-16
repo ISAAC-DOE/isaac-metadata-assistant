@@ -3,8 +3,12 @@
  *
  * WHAT THIS PANEL IS FOR. A scientist writes things down that no rule can place: why
  * a scan was repeated, a column heading nothing recognised, an aside in a transcript.
- * Every pipeline in this application used to drop them silently. This is where they
- * land, and where a person decides what each one is.
+ * Every pipeline in this application drops such content silently, and STILL DOES —
+ * nothing was rewired to feed this panel. This is the destination that now exists,
+ * and where a person decides what each note is. Its only producer today is the
+ * capture box below, which always sends `typed_note`; the extractor's discarded
+ * `unrecognised_labels` is the intended first automatic producer and is not wired,
+ * so no note here yet carries a run, a candidate path, or any source but that one.
  *
  * THE FOUR ACTIONS ARE PEERS. Map, Edit, Keep as Note and Dismiss are rendered as one
  * row of equally-weighted buttons, deliberately. "Keep as Note" is a first-class
@@ -79,6 +83,31 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
 
 function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
+}
+
+/**
+ * How `unreadable_entries` is disclosed — ONE string, used by the count line and by
+ * both empty states, so a reader cannot be told two different things by two places
+ * on the same screen.
+ *
+ * IT DOES NOT SAY "CANNOT READ", AND THAT IS THE POINT. The server's single number
+ * covers two different facts (`workspace._hydrate_notes`): an entry the note model
+ * refused, and an entry whose id another note already holds. The second one this
+ * build reads perfectly well — it just cannot let two notes answer to one id. So
+ * the copy says what is actually true of both, which is that they are not SHOWN,
+ * and it names both causes rather than asserting the one that is wrong half the
+ * time. Separating them into two counts is a contract change and was deliberately
+ * not made here.
+ */
+function unreadableClause(count: number): string {
+  if (count <= 0) return '';
+  const noun = count === 1 ? 'entry' : 'entries';
+  const asNote = count === 1 ? 'as a note' : 'as notes';
+  return (
+    ` · ${count} stored ${noun} this version cannot show ${asNote}` +
+    ' — either unreadable, or repeating an id another note already holds' +
+    ' — kept unchanged on the record'
+  );
 }
 
 type ListState =
@@ -202,6 +231,17 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
           ),
         );
         setAnnouncement('');
+        /*
+         * RETHROWN, EXACTLY AS `capture` BELOW RETHROWS, AND FOR THE SAME REASON.
+         *
+         * A caller has to be able to tell "recorded" from "refused", because the
+         * two forms that carry typed input close themselves afterwards. If this
+         * resolved on failure, a 412 would leave the banner saying the note is
+         * unchanged — true — while the form closed and took the scientist's
+         * rewritten paragraphs or dismissal reason with it. The note surviving is
+         * not the promise; what they typed surviving is.
+         */
+        throw err;
       } finally {
         setBusyNoteId(null);
       }
@@ -253,13 +293,7 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
     const total = `${loaded.total} ${loaded.total === 1 ? 'note' : 'notes'} on this record`;
     const filtered =
       filter === 'all' ? total : `Showing ${loaded.returned} of ${total}`;
-    const unreadable =
-      loaded.unreadable_entries > 0
-        ? ` · ${loaded.unreadable_entries} stored ${
-            loaded.unreadable_entries === 1 ? 'entry' : 'entries'
-          } this version cannot read, kept unchanged on the record`
-        : '';
-    return `${filtered}${unreadable}`;
+    return `${filtered}${unreadableClause(loaded.unreadable_entries)}`;
   }, [loaded, filter]);
 
   return (
@@ -324,6 +358,7 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
         (list.loaded.notes.length === 0 ? (
           <EmptyNotes
             total={list.loaded.total}
+            unreadable={list.loaded.unreadable_entries}
             filtering={filter !== 'all'}
             onClear={() => setFilter('all')}
           />
@@ -352,22 +387,31 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
  * different facts, and collapsing them lets a filtered view read as an empty record
  * — which, in a feature whose whole promise is that nothing is silently lost, is the
  * most damaging thing this panel could say.
+ *
+ * BOTH STATES CARRY THE UNREADABLE DISCLOSURE, because `total` counts only the
+ * entries this build could turn into notes. "This record holds 3 notes IN TOTAL"
+ * and "No unmapped notes ON THIS RECORD" are both false while a stored entry sits
+ * outside that count, and an empty state is exactly where a reader stops looking —
+ * so it cannot be the one surface that leaves the number out.
  */
 function EmptyNotes({
   total,
+  unreadable,
   filtering,
   onClear,
 }: {
   total: number;
+  unreadable: number;
   filtering: boolean;
   onClear: () => void;
 }) {
+  const disclosure = unreadableClause(unreadable);
   if (filtering) {
     return (
       <div className="notes-empty">
         <p>
           No notes are in this state. This record holds {total}{' '}
-          {total === 1 ? 'note' : 'notes'} in total.
+          {total === 1 ? 'note' : 'notes'} in total{disclosure}.
         </p>
         <button type="button" className="btn btn-secondary" onClick={onClear}>
           Show All Notes
@@ -378,9 +422,9 @@ function EmptyNotes({
   return (
     <div className="notes-empty">
       <p>
-        No unmapped notes on this record. Notes appear here when something is
-        captured that cannot be placed in a schema field — nothing is created
-        automatically, and nothing is inferred from the record's contents.
+        No unmapped notes on this record{disclosure}. Notes appear here when
+        something is captured that cannot be placed in a schema field — nothing is
+        created automatically, and nothing is inferred from the record's contents.
       </p>
     </div>
   );
@@ -474,11 +518,69 @@ function NoteCard({
   const reasonId = useId();
   const bodyId = useId();
 
+  const mapRef = useRef<HTMLButtonElement>(null);
+  const editRef = useRef<HTMLButtonElement>(null);
+  const dismissRef = useRef<HTMLButtonElement>(null);
+
+  /*
+   * FOCUS RETURNS TO THE CONTROL THAT OPENED THE FORM, AND IT HAS TO BE AN EFFECT.
+   *
+   * Every path out of a form — Cancel, and a review that was recorded — unmounts
+   * the form while focus is on a button INSIDE it, so focus falls to `<body>` and a
+   * keyboard user dismissing the third note on a record is returned to the top of
+   * the document. The same contract `NewExperimentForm` keeps, and for the reason
+   * it records: a `.focus()` call inside the handler silently does nothing, because
+   * the trigger does not exist at that moment — it has to run AFTER the re-render
+   * that puts the button back.
+   *
+   * `returningTo` holds WHICH trigger, and doubles as `NewExperimentForm`'s
+   * `returning` flag: null means "no form was open", so a first render, and a
+   * `keep` (which has no form), never steal focus to a button nobody pressed.
+   */
+  const returningTo = useRef<'map' | 'edit' | 'dismiss' | null>(null);
+  useEffect(() => {
+    if (open !== null) return;
+    const returning = returningTo.current;
+    if (returning === null) return;
+    returningTo.current = null;
+    const trigger =
+      returning === 'map'
+        ? mapRef.current
+        : returning === 'edit'
+          ? editRef.current
+          : dismissRef.current;
+    trigger?.focus();
+  }, [open]);
+
   const close = () => {
+    if (open !== null) returningTo.current = open;
     setOpen(null);
     setFieldPath('');
     setEditText(note.display_text);
     setReason('');
+  };
+
+  /**
+   * Runs one review act, AND CLOSES THE FORM ONLY IF IT WAS RECORDED.
+   *
+   * `onReview` rethrows on failure — see the comment on `review` — so this is where
+   * "the note is unchanged" stops meaning "and so is everything you typed". A 412
+   * from a concurrent capture in another tab must leave the rewritten wording, or
+   * the dismissal reason, on screen and editable; the banner above the list is
+   * already saying what happened. `CaptureNote` swallows its own rethrow the same
+   * way and for the same reason, so the two write paths have one shape.
+   */
+  const runReview = async (
+    action: 'map' | 'edit' | 'keep' | 'dismiss',
+    opts: { fieldPath?: string; text?: string; reason?: string },
+    announce: string,
+  ) => {
+    try {
+      await onReview(note, action, opts, announce);
+      close();
+    } catch {
+      /* Refused. The banner reports it; the form and its typed input stay put. */
+    }
   };
 
   return (
@@ -528,6 +630,7 @@ function NoteCard({
 
       <div className="note-actions">
         <button
+          ref={mapRef}
           type="button"
           className="btn btn-secondary"
           disabled={busy}
@@ -538,6 +641,7 @@ function NoteCard({
           Map to a field
         </button>
         <button
+          ref={editRef}
           type="button"
           className="btn btn-secondary"
           disabled={busy}
@@ -555,8 +659,7 @@ function NoteCard({
           className="btn btn-secondary"
           disabled={busy}
           onClick={() =>
-            onReview(
-              note,
+            runReview(
               'keep',
               {},
               'Kept as a note. It belongs to no field, and it stays on the record.',
@@ -566,6 +669,7 @@ function NoteCard({
           Keep as note
         </button>
         <button
+          ref={dismissRef}
           type="button"
           className="btn btn-secondary"
           disabled={busy}
@@ -596,24 +700,38 @@ function NoteCard({
               </option>
             ))}
           </select>
+          {/*
+            THE LIST IS A SUBSET, AND SAYING SO IS NOT OPTIONAL. The server offers
+            the paths THIS BUILD can map a note to, which is fewer than the official
+            schema defines. A scientist who does not find their target and is not
+            told why concludes the note has no home and dismisses it — the one
+            outcome this panel is built to avoid. So the shortfall is stated where
+            they are looking, and the alternative it names is a real one: keeping
+            the note is a first-class outcome, not a consolation.
+          */}
           <p className="note-form-hint">
             This records where the content belongs. It does not write a value — a
             value still has to be entered and confirmed on the field itself.
+          </p>
+          <p className="note-form-hint">
+            This list is not every field in the ISAAC schema — it is the set this
+            version can map a note to. If the field you want is missing, that does
+            not mean the schema has no such field, and it does not mean this note
+            has nowhere to go: keep it as a note and it stays on the record, in
+            full, for whoever reads it next.
           </p>
           <div className="note-form-actions">
             <button
               type="button"
               className="btn btn-primary"
               disabled={busy || fieldPath === ''}
-              onClick={async () => {
-                await onReview(
-                  note,
+              onClick={() =>
+                runReview(
                   'map',
                   { fieldPath },
                   `Mapped to ${fieldPath}. No value was written.`,
-                );
-                close();
-              }}
+                )
+              }
             >
               Map This Note
             </button>
@@ -645,15 +763,13 @@ function NoteCard({
               type="button"
               className="btn btn-primary"
               disabled={busy || editText.trim() === ''}
-              onClick={async () => {
-                await onReview(
-                  note,
+              onClick={() =>
+                runReview(
                   'edit',
                   { text: editText },
                   'Wording updated. The original capture is unchanged.',
-                );
-                close();
-              }}
+                )
+              }
             >
               Save Wording
             </button>
@@ -686,15 +802,13 @@ function NoteCard({
               type="button"
               className="btn btn-primary"
               disabled={busy}
-              onClick={async () => {
-                await onReview(
-                  note,
+              onClick={() =>
+                runReview(
                   'dismiss',
                   { reason },
                   'Dismissed. The note is set aside and stays on the record.',
-                );
-                close();
-              }}
+                )
+              }
             >
               Dismiss This Note
             </button>

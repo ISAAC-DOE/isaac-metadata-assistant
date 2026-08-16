@@ -332,6 +332,98 @@ def test_a_note_cannot_be_mapped_to_a_field_that_does_not_exist(client, experime
     assert _stored(client, experiment_id).notes[0].mapped_field_path is None
 
 
+# --- what the mapping refusal is allowed to claim -----------------------------
+#
+# `NOTE_MAPPABLE_FIELD_PATHS` is derived from `EXTRACTOR_FIELD_MAP`, so it is the set
+# of paths THIS BUILD can map a note to — 25 of them — and NOT the set the official
+# schema defines. `sample.sample_id`, `measurement.qc`, `measurement.series`,
+# `measurement.processing`, `attribution.uploaded_by`, `descriptors`, `links`, `tags`
+# and `assets` are all real ISAAC paths and all outside it.
+#
+# The refusal used to say "A note may only be mapped to a real official field path …
+# a note pointing at a field that does not exist". For every one of those paths that
+# is FALSE, and it is false in the specific way CLAUDE.md §1 forbids: the official
+# schema is not this application's to speak for, so no surface may report a refusal
+# this application makes as a fact about what the schema contains.
+#
+# WHAT THESE TESTS DO NOT DO: they do not widen the mappable set. Which further paths
+# are safe targets for a note is a product decision and is deliberately not made here.
+
+
+#: Official ISAAC paths that this build cannot map a note to. Read out of the
+#: vendored schema rather than written from memory, so this list cannot quietly
+#: become a list of paths that do not exist — which would make the test vacuous.
+def _real_schema_paths_outside_the_mappable_set() -> list[str]:
+    from pathlib import Path
+
+    schema_file = (
+        Path(__file__).resolve().parents[3] / "schema" / "isaac_record_v1.json"
+    )
+    schema = json.loads(schema_file.read_text())
+    candidates = ["sample.sample_id", "measurement.qc", "attribution.uploaded_by"]
+    confirmed = []
+    for path in candidates:
+        node = schema
+        for segment in path.split("."):
+            node = (node.get("properties") or {}).get(segment)
+            if node is None:
+                break
+        else:
+            confirmed.append(path)
+    assert confirmed == candidates, (
+        "these paths were chosen because the official schema defines them; if it no "
+        f"longer does, the premise of this test changed. found: {confirmed}"
+    )
+    return confirmed
+
+
+def test_real_official_paths_exist_that_this_build_cannot_map_a_note_to():
+    """The premise, pinned separately so a failure says WHICH half broke."""
+    outside = _real_schema_paths_outside_the_mappable_set()
+    assert outside, "the schema must define at least one path for this to be a gate"
+    for path in outside:
+        assert path not in routes.NOTE_MAPPABLE_FIELD_PATHS
+
+
+@pytest.mark.parametrize("path", _real_schema_paths_outside_the_mappable_set())
+def test_the_mapping_refusal_never_claims_the_official_schema_lacks_the_field(
+    client, experiment_id, path
+):
+    note = _captured(client, experiment_id)
+    body = _review(
+        client, experiment_id, note["id"], action="map", field_path=path
+    ).json()
+    assert body["error"] == "unrecognized_field"
+    message = body["message"]
+
+    # It says what is actually enforced: membership of the served list.
+    assert "mappable_field_paths" in message
+    assert "SUBSET of the official schema" in message
+    # And it explicitly refuses the claim that used to be here.
+    assert "does NOT say the official schema has no such field" in message
+    for false_claim in (
+        "a real official field path",
+        "a field that does not exist",
+    ):
+        assert false_claim not in message, (
+            f"the refusal asserts {false_claim!r} about {path!r}, which the official "
+            "schema defines — CLAUDE.md §1 makes the schema not ours to speak for"
+        )
+
+
+def test_the_candidate_path_refusal_makes_the_same_narrow_claim(
+    client, experiment_id
+):
+    """The capture route's gate is the same set, so it may not overclaim either."""
+    path = _real_schema_paths_outside_the_mappable_set()[0]
+    body = _capture(
+        client, experiment_id, candidate_field_path=path, candidate_rule="a rule"
+    ).json()
+    assert body["error"] == "unrecognized_field"
+    assert "does NOT say the official schema has no such field" in body["message"]
+    assert "a field that does not exist" not in body["message"]
+
+
 def test_the_only_run_is_not_inferred_as_a_notes_run(client, experiment_id):
     """An omitted ``run_id`` stays omitted even when exactly one run exists.
 

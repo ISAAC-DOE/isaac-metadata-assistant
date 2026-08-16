@@ -4555,10 +4555,19 @@ def post_run_check(
 #
 # WHAT THESE FOUR OPERATIONS ARE FOR. A scientist captures things that no rule can
 # place: a sentence about why a scan was repeated, a column heading nothing
-# recognises, an aside in a transcript. Every pipeline in this repository used to
-# drop them, silently. These operations are where they land instead, and the
-# governing rule is that NOTHING CAPTURED IS EVER SILENTLY DISCARDED — there is no
-# DELETE here, and there will not be one. Dismissal is a state.
+# recognises, an aside in a transcript. Today every pipeline in this repository
+# still drops such content, silently — NOTHING WAS REWIRED TO FEED THESE
+# OPERATIONS. They are the destination that now exists, and the only producer is a
+# person typing into the panel: `POST .../notes` has exactly one caller in the
+# application, the capture box, which always sends `source: "typed_note"` with no
+# run and no candidate. The intended FIRST automatic producer is
+# `providers/extraction.py`'s `unrecognised_labels`, which is computed and then
+# discarded; wiring it is a later slice, and until it lands no `csv_column`,
+# `transcript`, `file_listing_line` or `extraction_residue` note is ever created,
+# no note carries a `run_id`, and no note carries a `candidate_field_path`. The
+# governing rule for what DOES arrive here is that NOTHING CAPTURED IS EVER
+# SILENTLY DISCARDED — there is no DELETE here, and there will not be one.
+# Dismissal is a state.
 #
 # WHAT THEY ARE NOT. None of them writes a scientific value, mints evidence, or
 # confirms anything. `isaac_api.notes.Note` cannot even REPRESENT a confirmed value
@@ -4577,19 +4586,31 @@ def post_run_check(
 
 #: THE COMPLETE SET OF FIELD PATHS A NOTE MAY BE MAPPED TO OR PROPOSED FOR.
 #:
-#: DERIVED, exactly as :data:`RUN_WRITABLE_FIELD_PATHS` is, and from the same map —
-#: so "a real official field path" has ONE definition in this module rather than a
-#: second copy free to drift. Unlike that set it is NOT filtered by level: a note is
+#: **A SUBSET OF THE OFFICIAL SCHEMA'S PATHS, NOT ALL OF THEM, AND NO SURFACE MAY
+#: SAY OTHERWISE.** It is derived from :data:`EXTRACTOR_FIELD_MAP` — the paths this
+#: build's extractor knows how to place — exactly as :data:`RUN_WRITABLE_FIELD_PATHS`
+#: is, so the enforced set has ONE definition rather than a second copy free to
+#: drift. That derivation is a fact about THIS APPLICATION, and it currently yields
+#: 25 paths. The official schema defines many more that are absent from it:
+#: `sample.sample_id`, `measurement.qc`, `measurement.series`,
+#: `measurement.processing`, `attribution.uploaded_by`, `descriptors`, `links`,
+#: `tags` and `assets` are all real. CLAUDE.md §1 makes the official schema not
+#: ours to speak for, so a refusal from this set must describe what THIS BUILD can
+#: map a note to and must never report the path as one the schema does not define.
+#: Widening the set is a product decision about which paths are safe targets, and
+#: it is deliberately not made here.
+#:
+#: Unlike :data:`RUN_WRITABLE_FIELD_PATHS` it is NOT filtered by level: a note is
 #: prose about the experiment or about one of its runs, and a scientist saying "this
 #: belongs at `sample.material.formula`" is naming a target, not writing a run-level
 #: value. The level split governs where a VALUE may be written, and this operation
 #: writes none.
 #:
 #: THE GATE IS MEMBERSHIP, NOT SHAPE, and that is the lesson `patch_run` already
-#: paid for: a prefix test admits `sample.material.typo`, which the schema closes.
-#: A path outside this set is refused with a typed 422 and is never stored — storing
-#: one would let a note point at a field that does not exist, which is a guess with
-#: a plausible shape, and plausible shapes are the ones that get believed.
+#: paid for: a prefix test admits `sample.material.typo`, which nothing downstream
+#: could place. A path outside this set is refused with a typed 422 and is never
+#: stored — storing one would let a note point at a target this build cannot resolve,
+#: which is a guess with a plausible shape, and plausible shapes get believed.
 NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
     path for path, _coercer in EXTRACTOR_FIELD_MAP.values()
 )
@@ -4745,11 +4766,15 @@ def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
         "total": len(exp.notes),
         "returned": len(selected),
         "by_state": by_state,
-        # A DISCLOSURE OF WHAT THIS BUILD COULD NOT READ. Entries the note model
-        # refused are kept in the stored document verbatim and are written back out
-        # on every save; they are counted here rather than rendered, because this
-        # server cannot say what they contain without inventing it. Reporting zero
-        # when there are some would be the silent discard this feature exists to end.
+        # A DISCLOSURE OF WHAT THIS BUILD CANNOT PRESENT AS A NOTE. Two kinds, and
+        # the single number does not separate them: an entry `Note.from_state`
+        # refused, and an entry whose id another note already holds — the second is
+        # readable, it just cannot share one id (`workspace._hydrate_notes`). Both
+        # are kept in the stored document verbatim and written back out on every
+        # save; both are counted here rather than rendered, because this server can
+        # neither say what a refused entry contains without inventing it nor say
+        # which of two entries an id names. Reporting zero when there are some would
+        # be the silent discard this feature exists to end.
         "unreadable_entries": len(exp.unreadable_notes),
         # THE SERVER'S OWN ANSWER TO "WHERE MAY I MAP THIS?", for the reason
         # `_run_view`'s `overridable` flag exists: the alternative is transcribing a
@@ -4790,11 +4815,20 @@ _NOTE_LIST_DESC = (
         "set. `candidate_field_path` is present only when something deterministic "
         "proposed it and stated the rule it applied; when nothing did, the field "
         "is null rather than a plausible-looking guess.\n\n"
-        "`mappable_field_paths` is the server's own list of the official field "
-        "paths a note may be mapped to, and `unreadable_entries` counts stored "
-        "entries this build could not read. Those entries are preserved in the "
-        "record untouched and are counted rather than rendered, because their "
-        "content cannot be reported without inventing it."
+        "`mappable_field_paths` is the server's own list of the field paths a "
+        "note may be mapped to. It is a SUBSET of the official schema's field "
+        "paths — the ones this build knows how to place — so a target absent "
+        "from it may still be a real schema field, and a refusal against this "
+        "list says what this application can map a note to rather than what the "
+        "official schema defines.\n\n"
+        "`unreadable_entries` counts stored entries this build cannot present as "
+        "notes. There are two kinds and the count does not separate them: an "
+        "entry the note model refused, and an entry whose id another note already "
+        "holds — a duplicate is perfectly readable, but two notes cannot answer "
+        "to one id. Either way the entry is preserved in the record untouched and "
+        "is counted rather than rendered: for a refused entry this server cannot "
+        "say what it contains without inventing it, and for a duplicate it cannot "
+        "say which entry the id names."
     ),
     response_description=(
         "The record's notes in capture order, the per-state counts, the field "
@@ -4843,10 +4877,11 @@ def list_notes(
         "nothing supplies them on a caller's behalf. An omitted `run_id` means the "
         "note belongs to the record rather than to a run, and it is never filled "
         "in from the only run that happens to exist. A `candidate_field_path` must "
-        "be a real official field path AND must arrive with the "
-        "`candidate_rule` that produced it — an unexplained proposal is a guess, "
-        "and either half without the other is `422`. Absent is absent: an empty "
-        "string is refused, not stored.\n\n"
+        "be one of the paths `GET .../notes` reports under `mappable_field_paths` "
+        "— a subset of the official schema's paths, not the whole of it — AND must "
+        "arrive with the `candidate_rule` that produced it — an unexplained "
+        "proposal is a guess, and either half without the other is `422`. Absent "
+        "is absent: an empty string is refused, not stored.\n\n"
         "Any other body key is refused with `422` naming it. A note carries no "
         "status, no verification and no evidence, so a request that tries to set "
         "one is rejected rather than accepted and quietly ignored."
@@ -4935,10 +4970,15 @@ def post_note(
             return _note_refusal(
                 "unrecognized_field",
                 (
-                    "A candidate field path must be a real official field path. An "
-                    "invented or misspelt path is refused rather than stored: a note "
-                    "pointing at a field that does not exist is a guess with a "
-                    "plausible shape. Nothing was written."
+                    "`candidate_field_path` must be one of the paths this build can "
+                    "map a note to — the list `GET .../notes` reports under "
+                    "`mappable_field_paths`. That list is a SUBSET of the official "
+                    "schema's field paths, so this refusal says the path is not one "
+                    "this application can propose a note against; it does NOT say "
+                    "the official schema has no such field. An invented or misspelt "
+                    "path is refused rather than stored: a note pointing at a "
+                    "target this build cannot resolve is a guess with a plausible "
+                    "shape. Nothing was written."
                 ),
                 key=candidate if isinstance(candidate, str) else None,
             )
@@ -5036,8 +5076,11 @@ def get_note(
         "the note remains listed, readable and unchanged, and an optional `reason` "
         "is stored when given and left absent when not, because a justification "
         "nobody wrote is not invented on their behalf.\n\n"
-        "Any other body key, an unknown action, or a `field_path` that is not a "
-        "real official field path is refused with `422` and nothing is written."
+        "Any other body key, an unknown action, or a `field_path` outside "
+        "`mappable_field_paths` is refused with `422` and nothing is written. "
+        "That set is a subset of the official schema's paths, so such a refusal "
+        "reports what this build can map a note to and never asserts that the "
+        "official schema has no such field."
     ),
     response_description=(
         "The note as it now stands, including its full history, and the record's "
@@ -5112,10 +5155,16 @@ def post_note_review(
                 return _note_refusal(
                     "unrecognized_field",
                     (
-                        "A note may only be mapped to a real official field path. An "
+                        "`field_path` must be one of the paths this build can map a "
+                        "note to — the list `GET .../notes` reports under "
+                        "`mappable_field_paths`. That list is a SUBSET of the "
+                        "official schema's field paths, so this refusal says the "
+                        "path is not one this application can map a note to; it "
+                        "does NOT say the official schema has no such field. An "
                         "invented or misspelt path is refused rather than stored, "
-                        "because a note pointing at a field that does not exist is a "
-                        "guess with a plausible shape. Nothing was written."
+                        "because a note pointing at a target this build cannot "
+                        "resolve is a guess with a plausible shape. Nothing was "
+                        "written."
                     ),
                     key=field_path if isinstance(field_path, str) else None,
                 )

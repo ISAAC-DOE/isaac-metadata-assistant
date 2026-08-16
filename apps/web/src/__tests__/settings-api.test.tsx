@@ -1613,8 +1613,32 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 51,716; this
     //     figure drops the 109 `\n\n` separators, and 51,716 - 218 = 51,498.
-    expect(total).toBe(51498);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(109);
+    //
+    // 51,498 -> 52,347, 109 -> 110 post-lead paragraphs, operations UNCHANGED at 51:
+    // A REFUSAL THAT WAS FALSE ABOUT THE OFFICIAL SCHEMA. `mappable_field_paths` is
+    // derived from this build's extractor map -- 25 paths -- and the three notes
+    // operations described it as "a real official field path", so a refusal read as
+    // "the official schema has no such field" for `sample.sample_id`,
+    // `measurement.qc`, `attribution.uploaded_by`, `links`, `tags` and more, all of
+    // which the vendored schema defines. CLAUDE.md §1 makes the schema not ours to
+    // speak for. The three descriptions now say the enforced set is a SUBSET and that
+    // a refusal against it is not a statement about the schema. The same pass split
+    // `unreadable_entries` into its own paragraph -- the ONE new paragraph -- because
+    // that count covers two different facts (an entry the model refused, and an entry
+    // repeating another note's id, which this build reads perfectly well) and the
+    // single sentence had asserted the first of them about both.
+    // +849 characters over three operations, +1 paragraph, no operation added.
+    //
+    // MEASURED the same two independent ways, and NOT by adding +849 to 51,498:
+    //
+    //   . from the SERVED document: the splitPurpose paragraph rule re-implemented
+    //     in Python over `create_app().openapi()`, restricted to the 51 documented
+    //     operations this array names, gives total 52,347 and 110 post-lead
+    //     paragraphs.
+    //   . internal consistency: raw sum of `d.description.length` = 52,567; this
+    //     figure drops the 110 `\n\n` separators, and 52,567 - 220 = 52,347.
+    expect(total).toBe(52347);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(110);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so
     //     `GET /api/experiments/{id}/evidence-classification` now names six classes

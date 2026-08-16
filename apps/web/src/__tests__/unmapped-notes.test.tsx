@@ -486,15 +486,34 @@ describe('the record is the one validator', () => {
 });
 
 describe('what this build could not read is disclosed, not hidden', () => {
-  it('counts unreadable stored entries and says they are kept unchanged', async () => {
+  it('counts unshowable stored entries and says they are kept unchanged', async () => {
     stubFetchRoutes({
       [NOTES]: { body: notesPage([noteFixture()], { unreadable_entries: 2 }) },
     });
     renderPanel();
 
-    const count = await screen.findByText(/stored entries this version cannot read/);
+    const count = await screen.findByText(/stored entries this version cannot show/);
     expect(count.textContent).toContain('2 stored entries');
     expect(count.textContent).toContain('kept unchanged on the record');
+  });
+
+  /*
+   * THE COUNT COVERS TWO DIFFERENT FACTS AND THE COPY MUST NOT PICK ONE.
+   * `workspace._hydrate_notes` files a DUPLICATE-ID entry into the same number as an
+   * entry the model refused, and this build reads a duplicate perfectly well — it
+   * just cannot let two notes answer to one id. "cannot read" was false for half the
+   * count, which is the kind of small confident wrongness this feature exists to end.
+   */
+  it('names both reasons an entry is not shown, and claims neither alone', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()], { unreadable_entries: 2 }) },
+    });
+    renderPanel();
+
+    const count = await screen.findByText(/stored entries this version cannot show/);
+    expect(count.textContent).toContain('either unreadable, or repeating an id');
+    // The old wording asserted unreadability of every one of them.
+    expect(count.textContent).not.toContain('cannot read');
   });
 
   it('says nothing about unreadable entries when there are none', async () => {
@@ -502,7 +521,225 @@ describe('what this build could not read is disclosed, not hidden', () => {
     renderPanel();
 
     await screen.findByText(noteFixture().text);
-    expect(screen.queryByText(/cannot read/)).toBeNull();
+    expect(screen.queryByText(/cannot show/)).toBeNull();
+  });
+
+  /*
+   * `total` COUNTS ONLY WHAT COULD BE HYDRATED, so "no notes on this record" and "N
+   * notes in total" are both false while an unshowable entry exists. The count line
+   * discloses it; the empty state is where a reader STOPS looking, so it cannot be
+   * the one surface that leaves the number out.
+   */
+  it('the unfiltered empty state discloses entries that are stored but not shown', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([], { total: 0, unreadable_entries: 1 }) },
+    });
+    renderPanel();
+
+    const empty = await screen.findByText(/No unmapped notes on this record/);
+    expect(empty.textContent).toContain('1 stored entry this version cannot show');
+    expect(empty.textContent).toContain('kept unchanged on the record');
+  });
+
+  it('the filtered empty state does not call a partial count the record’s total', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([], { total: 0 }) },
+      [`${NOTES}?state=dismissed`]: {
+        body: notesPage([], { total: 3, unreadable_entries: 2 }),
+      },
+    });
+    renderPanel();
+    await screen.findByText(/No unmapped notes on this record/);
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'dismissed' } });
+
+    const empty = await screen.findByText(/No notes are in this state/);
+    expect(empty.textContent).toContain('This record holds 3 notes in total');
+    // "in total" is only true if what sits outside that total is said in the same breath.
+    expect(empty.textContent).toContain('2 stored entries this version cannot show');
+  });
+});
+
+// --- 8. a refused review keeps what was typed ---------------------------------
+
+/*
+ * WHY THESE EXIST, AND WHY THE ONE REFUSAL TEST ABOVE DID NOT COVER IT.
+ *
+ * `a refused write leaves the note alone` uses "Keep as note", which has no form and
+ * no typed input — so a component that closed the form on failure and discarded the
+ * scientist's text passed it. The failure it hides is expensive and quiet: a note
+ * rewritten into three corrected paragraphs, a 412 from a capture in another tab,
+ * a banner truthfully saying the NOTE is unchanged, and the paragraphs gone.
+ *
+ * Each of these fails if `close()` moves back onto the unconditional path.
+ */
+describe('a review that was refused keeps the scientist’s input', () => {
+  const REVIEW = `POST /api/experiments/${EXP}/notes/${noteFixture().id}/review`;
+
+  it('the edit form stays open with the rewritten wording still in it', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [REVIEW]: { status: 412, body: { error: 'stale_write' } },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    const box = screen.getByLabelText('Corrected wording') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'three corrected paragraphs' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Wording' }));
+
+    await screen.findByRole('alert');
+    // Still mounted, still holding what was typed — not reset to `display_text`.
+    const after = screen.getByLabelText('Corrected wording') as HTMLTextAreaElement;
+    expect(after.value).toBe('three corrected paragraphs');
+    expect(screen.getByRole('button', { name: 'Save Wording' })).toBeTruthy();
+    // And re-submittable: the failure re-enabled the control rather than stranding it.
+    expect(
+      (screen.getByRole('button', { name: 'Save Wording' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it('the dismiss form stays open with the typed reason still in it', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [REVIEW]: { status: 412, body: { error: 'stale_write' } },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    const box = screen.getByLabelText('Why (optional)') as HTMLInputElement;
+    fireEvent.change(box, { target: { value: 'duplicated by the run-level remark' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss This Note' }));
+
+    await screen.findByRole('alert');
+    const after = screen.getByLabelText('Why (optional)') as HTMLInputElement;
+    expect(after.value).toBe('duplicated by the run-level remark');
+    expect(screen.getByRole('button', { name: 'Dismiss This Note' })).toBeTruthy();
+  });
+
+  it('the mapping form stays open with the chosen field still selected', async () => {
+    stubFetchRoutes({
+      [NOTES]: {
+        body: notesPage([noteFixture()], { mappable_field_paths: ['context.environment'] }),
+      },
+      [REVIEW]: { status: 412, body: { error: 'stale_write' } },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    fireEvent.change(screen.getByLabelText('Field this note belongs to'), {
+      target: { value: 'context.environment' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Map This Note' }));
+
+    await screen.findByRole('alert');
+    expect(
+      (screen.getByLabelText('Field this note belongs to') as HTMLSelectElement).value,
+    ).toBe('context.environment');
+  });
+
+  it('a review that WAS recorded still closes its form', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [REVIEW]: {
+        body: { note: noteFixture({ state: 'dismissed' }), experiment_version: '1.1' },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss This Note' }));
+
+    await screen.findByRole('status');
+    // The negative control for the three above: keeping the form open on SUCCESS
+    // would satisfy them all and would be its own defect.
+    expect(screen.queryByLabelText('Why (optional)')).toBeNull();
+  });
+});
+
+// --- 9. focus is not dropped when a form closes -------------------------------
+
+/*
+ * A form unmounts while focus is on a button inside it, so focus falls to `<body>`
+ * and a keyboard user reviewing the third note on a record is returned to the top of
+ * the document. The contract is the one `NewExperimentForm` keeps: focus goes back
+ * to the control that opened the form.
+ */
+describe('focus returns to the control that opened the form', () => {
+  it('after Cancel', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
+    renderPanel();
+
+    const trigger = await screen.findByRole('button', { name: 'Dismiss' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('after a review that was recorded', async () => {
+    stubFetchRoutes({
+      [NOTES]: {
+        body: notesPage([noteFixture()], { mappable_field_paths: ['context.environment'] }),
+      },
+      [`POST /api/experiments/${EXP}/notes/${noteFixture().id}/review`]: {
+        body: {
+          note: noteFixture({ state: 'mapped', mapped_field_path: 'context.environment' }),
+          experiment_version: '1.1',
+        },
+      },
+    });
+    renderPanel();
+
+    const trigger = await screen.findByRole('button', { name: 'Map to a field' });
+    fireEvent.click(trigger);
+    fireEvent.change(screen.getByLabelText('Field this note belongs to'), {
+      target: { value: 'context.environment' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Map This Note' }));
+
+    await screen.findByRole('status');
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Map to a field' }),
+    );
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('and is NOT stolen on first render, when nobody opened anything', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
+    renderPanel();
+
+    await screen.findByText(noteFixture().text);
+    // A first paint that focuses a button nobody pressed is its own defect.
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+// --- 10. the mappable list is disclosed as a subset ---------------------------
+
+/*
+ * The server offers the 25 paths THIS BUILD can map a note to, which is fewer than
+ * the official ISAAC schema defines (`sample.sample_id`, `measurement.qc`,
+ * `attribution.uploaded_by`, `links`, `tags` and more are all real and all absent).
+ * A scientist who does not find their target and is not told why concludes the note
+ * has no home and dismisses it.
+ */
+describe('the field list says it is a subset', () => {
+  it('discloses the shortfall at the control, and names keeping the note instead', async () => {
+    stubFetchRoutes({
+      [NOTES]: {
+        body: notesPage([noteFixture()], { mappable_field_paths: ['context.environment'] }),
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    const hint = await screen.findByText(/not every field in the ISAAC schema/);
+    expect(hint.textContent).toContain('the set this version can map a note to');
+    // It must not let a missing path be read as a missing schema field…
+    expect(hint.textContent).toContain('does not mean the schema has no such field');
+    // …and it points at the outcome that loses nothing.
+    expect(hint.textContent).toContain('keep it as a note');
   });
 });
 
