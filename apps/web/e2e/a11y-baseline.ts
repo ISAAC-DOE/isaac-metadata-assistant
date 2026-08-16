@@ -406,22 +406,28 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * until that surface existed the graph panel had never been loaded by axe, by
        * the 320/390 narrow sweep, by the layout probes or by the zoom-200 pass at all.
        *
-       * ~~NOT ONE `evidence-graph@*` KEY APPEARS BELOW~~ — CI HAS NOW ANSWERED FOR
-       * ONE OF THE SEVEN, and the paragraph is struck rather than deleted because
-       * the procedure it states is still the one being followed for the other six.
-       * It was: only the platform you measured on may be edited, and no attempt is
-       * made to guess the other; a bare number asserts BOTH columns, and this
+       * ~~NOT ONE `evidence-graph@*` KEY APPEARS BELOW~~ ~~CI HAS NOW ANSWERED FOR
+       * ONE OF THE SEVEN~~ — ALL SEVEN ARE NOW MEASURED AND RECORDED. Both earlier
+       * paragraphs are struck rather than deleted, because the procedure they state
+       * is exactly the one that was followed and the record of following it is the
+       * point: only the platform actually measured may be edited, no attempt is made
+       * to guess the other, and a bare number asserts BOTH columns because this
        * environment cannot run the Linux face.
        *
-       * Run 31963596365 on `0c9752f` measured `evidence-graph@desktop-1280x800` at
-       * 24 nodes on LINUX. That one key is recorded below. THE OTHER SIX ARE STILL
-       * ABSENT AND STILL EXPECT 0: their figures were printed in the same job but
-       * are not in hand here, and a plausible number written as though it were a
-       * reading is the one thing this file forbids outright. They will read as
-       * `new` on the next run, which prints them, and that is the adjudication —
-       * transcribe those figures and raise `A11Y_BASELINE_TOTAL_NODES` by their sum,
-       * in one commit. Do NOT pre-empt them and do NOT lower anything to make the
-       * run green.
+       * Two CI runs, both on LINUX, both transcribed rather than derived:
+       *   run 31963596365 on `0c9752f` — desktop-1280x800: 24
+       *   run 31966373802 on `dd5e049` — laptop-1024x768: 28, tablet-768x1024: 28,
+       *                                  mobile-375x812: 27, zoom-200: 27,
+       *                                  width-390: 27, width-320: 27
+       * Nothing here was pre-empted and nothing was lowered to make a run green.
+       *
+       * THE SECOND RUN ALSO CONFIRMED THE TWO FIXES, which is why this entry records
+       * contrast ONLY. `aria-allowed-role` had fired on 3 nodes at all seven
+       * viewports (`<li role="note">`, an invalid override of the implicit
+       * `listitem`) and is now absent from the NEW list entirely; the eight
+       * `clipped-x` findings at 375px are likewise gone. Both were FIXED rather than
+       * recorded — which is the distinction this file exists to keep visible, and the
+       * reason the number below is 27–28 and not 30–31.
        *
        * WHAT IS EXPECTED TO FIRE, stated in advance so a large number is not
        * mistaken for a regression this branch caused. `evidence-graph.css` styles
@@ -503,6 +509,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * disagrees, split the key and correct the total; never loosen the assertion.
        */
       'evidence-graph@desktop-1280x800': 24,
+      'evidence-graph@laptop-1024x768': 28,
+      'evidence-graph@tablet-768x1024': 28,
+      'evidence-graph@mobile-375x812': 27,
+      'evidence-graph@zoom-200': 27,
+      'evidence-graph@width-390': 27,
+      'evidence-graph@width-320': 27,
       /*
        * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
        * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
@@ -1940,15 +1952,25 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   //       `--text-tertiary` / `--text-quaternary` shortfall and is expected to
   //       DROP when the design-system slice raises the two tokens.
   //
-  // darwin 2162 + 7 + 7 + 24 = 2200; linux 2159 + 7 + 24 = 2190.
+  // +164  the OTHER SIX `evidence-graph@*` cells, measured on LINUX by run
+  //       31966373802 on `dd5e049` and transcribed: laptop-1024x768 28,
+  //       tablet-768x1024 28, mobile-375x812 27, zoom-200 27, width-390 27,
+  //       width-320 27. All scalars, so each adds to both columns.
   //
-  // THE OTHER SIX `evidence-graph@*` PAIRS ARE ABSENT AND EXPECT 0. They will
-  // read as `new` on the next run and it will print their figures; nothing here
-  // pre-empts them, and this constant will have to move again by their sum. Both
-  // sums are re-checked by the suite from the entry map, per platform, so a stale
-  // constant fails in every project — which is how this one was caught.
-  darwin: 2200,
-  linux: 2190,
+  //       THAT RUN ALSO PROVED THE TWO NON-CONTRAST FINDINGS FIXED rather than
+  //       recorded: `aria-allowed-role` (3 nodes x 7 viewports) and the eight
+  //       `clipped-x` findings at 375px are both absent from its NEW list. Only
+  //       contrast is baselined here, and that is a choice this file should be
+  //       able to show, not merely assert.
+  //
+  // darwin 2162 + 7 + 7 + 24 + 164 = 2364; linux 2159 + 7 + 24 + 164 = 2354.
+  //
+  // ~~THE OTHER SIX ... ARE ABSENT AND EXPECT 0~~ — answered, above. All seven
+  // cells of the new surface are now recorded. Both sums are re-checked by the
+  // suite from the entry map, per platform, so a stale constant fails in every
+  // project — which is how the double-count was caught.
+  darwin: 2364,
+  linux: 2354,
 };
 
 /**
