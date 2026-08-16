@@ -24,6 +24,7 @@ import {
   searchEvidenceGraph,
   shortLabel,
   viewBoxFor,
+  viewRectFor,
   visibleEvidenceEdges,
   visibleEvidenceNodeIds,
   visibleEvidenceTruncated,
@@ -36,6 +37,7 @@ import {
   type EvidenceNodeKind,
   type RunCheckStore,
   type ViewportBox,
+  type ViewportRect,
 } from '../../lib/evidenceGraph';
 import { screenBoundedUnits, type GraphPoint } from '../../lib/graphModel';
 import type {
@@ -125,6 +127,44 @@ const LABEL_PX_MIN = 9;
 const LABEL_PX_MAX = 20;
 const CANVAS_LABEL_MAX_CHARS = 26;
 
+/**
+ * Floor on a canvas label. Below about this, a truncation stops naming anything
+ * and the honest render is no label at all — but the node is still drawn and the
+ * tree beside it still carries the name in full, so nothing is lost either way.
+ */
+const CANVAS_LABEL_MIN_CHARS = 8;
+
+/**
+ * Advance width of one glyph as a multiple of the font size — the estimate the
+ * collision pass has always used. It is deliberately an ESTIMATE: measuring text
+ * would mean `getComputedTextLength()`, i.e. layout, and this module computes its
+ * render from the model alone. Measured against the real face it runs ~1–2 % low
+ * over a 19-character label, which is why the edge rule below carries slack
+ * rather than trusting the number exactly.
+ *
+ * Exported so the bounds test measures a label with the SAME estimator the
+ * placement used. A test carrying its own copy of this number would pass while
+ * checking a different invariant from the one the code guarantees.
+ */
+export const LABEL_WIDTH_RATIO = 0.55;
+
+/**
+ * The most of the canvas ONE label may occupy. At 375 px the canvas is ~295 px
+ * wide and a 26-character label estimates at ~165 px — 56 % of it — so a label on
+ * any node not near the middle hung outside the SVG and was clipped (measured in
+ * CI: `text "processing_notebook"` at 214..336 against a 40..335 container, eight
+ * instances). Capping the STRING at narrow widths is what keeps the clamp below
+ * from having to drag a label far from the mark it names.
+ */
+const LABEL_MAX_WIDTH_FRACTION = 0.45;
+
+/**
+ * Slack between a label's estimated box and the canvas edge, in CSS pixels. It
+ * absorbs the estimator's error above; 8 sits inside `screenBoundedUnits`'
+ * default bounds, so the clamp there is inert and this converts cleanly.
+ */
+const LABEL_EDGE_PAD_PX = 8;
+
 /** Kinds offered as visibility toggles, in a stable reading order. Experiment and
  *  Run are absent on purpose: filtering away the spine is not a filter. */
 const FILTERABLE_KINDS: readonly EvidenceNodeKind[] = [
@@ -152,12 +192,43 @@ interface LabelBox {
 const boxesOverlap = (a: LabelBox, b: LabelBox): boolean =>
   a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
 
+/** One placed canvas label: what to draw, and where relative to its own mark. */
+export interface PlacedLabel {
+  /** Label centre as an offset from the node, in user units. 0 = under the mark. */
+  dx: number;
+  /** The string actually drawn — already cut to what the canvas can hold. */
+  text: string;
+}
+
 /**
- * Which nodes keep a visible canvas label — greedy, in a deterministic priority
- * order, dropping any label that would collide with one already placed. The node
- * is never dropped, and the tree always names it in full.
+ * Which nodes keep a visible canvas label, what that label SAYS, and where it
+ * sits — greedy, in a deterministic priority order, and bounded by the canvas.
+ *
+ * The text is returned rather than recomputed by the renderer on purpose. The
+ * two used to derive it independently, so a change to either the cap or the
+ * ratio would have measured one string and drawn another, and the collision
+ * boxes would have been quietly wrong.
+ *
+ * FOUR reasons a label is dropped or moved, in the order they apply:
+ *
+ *   1. the node's centre is off-canvas — a label for a mark the reader cannot
+ *      see would float free of anything, so there is none;
+ *   2. the string is cut so it can never be wider than
+ *      `LABEL_MAX_WIDTH_FRACTION` of the canvas (this is the narrow-viewport
+ *      half of the clipping fix);
+ *   3. what remains is CLAMPED horizontally into the canvas, with
+ *      `LABEL_EDGE_PAD_PX` of slack — the label shifts along its own baseline
+ *      rather than hanging over the edge and being cut off by the SVG, and it
+ *      never shifts so far that it stops covering the mark it names;
+ *   4. anything that still will not fit — wider than the space between the
+ *      canvas edge and its own node, out of bounds vertically, or colliding
+ *      with a label already placed — is dropped.
+ *
+ * A dropped label costs nothing that is not recoverable: the node is still
+ * drawn, the structure tree beside the canvas names it IN FULL, and the group
+ * carries the full name as an SVG `<title>` for a pointer user.
  */
-function placedLabelIds(
+function placedCanvasLabels(
   visible: readonly string[],
   layout: Map<string, GraphPoint>,
   kindOf: (id: string) => EvidenceNodeKind | undefined,
@@ -165,7 +236,8 @@ function placedLabelIds(
   scale: number,
   selectedId: string | null,
   anchorId: string,
-): Set<string> {
+  rect: ViewportRect,
+): Map<string, PlacedLabel> {
   const order = [
     ...(selectedId && visible.includes(selectedId) ? [selectedId] : []),
     ...(visible.includes(anchorId) ? [anchorId] : []),
@@ -173,27 +245,53 @@ function placedLabelIds(
   ];
   const seen = new Set<string>();
   const boxes: LabelBox[] = [];
-  const placed = new Set<string>();
+  const placed = new Map<string, PlacedLabel>();
   const font = screenBoundedUnits(LABEL_PX, scale, LABEL_PX_MIN, LABEL_PX_MAX);
+  const glyph = font * LABEL_WIDTH_RATIO;
+  const pad = screenBoundedUnits(LABEL_EDGE_PAD_PX, scale);
+  const left = rect.x;
+  const right = rect.x + rect.width;
+  const maxChars = Math.max(
+    CANVAS_LABEL_MIN_CHARS,
+    Math.min(CANVAS_LABEL_MAX_CHARS, Math.floor((rect.width * LABEL_MAX_WIDTH_FRACTION) / glyph)),
+  );
   for (const id of order) {
     if (seen.has(id)) continue;
     seen.add(id);
     const p = layout.get(id);
     const kind = kindOf(id);
     if (!p || !kind) continue;
-    const text = shortLabel(labelOf(id), CANVAS_LABEL_MAX_CHARS);
-    const halfWidth = (text.length * font * 0.55) / 2;
+    // (1) the mark itself is off-canvas.
+    if (p.x < left || p.x > right || p.y < rect.y || p.y > rect.y + rect.height) continue;
+    // (2) the string, cut to what this canvas width can hold.
+    const text = shortLabel(labelOf(id), maxChars);
+    const halfWidth = (text.length * glyph) / 2;
     const radius = screenBoundedUnits(KIND_RADII[kind], scale);
     const baseline = p.y + radius + font * 1.35;
+    /*
+     * (3) clamped into the canvas — but NEVER so far that the label stops
+     * covering its own node's x. A label pushed clear of the mark it names is
+     * an unattributed caption, which is a worse answer than no caption; when
+     * both constraints cannot hold at once the label is dropped at (4). The
+     * span is also empty when the label is wider than the whole canvas.
+     */
+    const lowest = Math.max(left + pad + halfWidth, p.x - halfWidth);
+    const highest = Math.min(right - pad - halfWidth, p.x + halfWidth);
+    if (lowest > highest) continue;
+    const cx = Math.min(highest, Math.max(lowest, p.x));
     const box: LabelBox = {
-      x1: p.x - halfWidth,
-      x2: p.x + halfWidth,
+      x1: cx - halfWidth,
+      x2: cx + halfWidth,
       y1: baseline - font,
       y2: baseline + font * 0.3,
     };
+    // (4) vertically out of bounds — no clamp here: a label dragged UP off its
+    // own baseline would sit beside a different node's, which is worse than
+    // absent. The horizontal shift keeps the label on the line it belongs to.
+    if (box.y1 < rect.y + pad || box.y2 > rect.y + rect.height - pad) continue;
     if (boxes.some((b) => boxesOverlap(b, box))) continue;
     boxes.push(box);
-    placed.add(id);
+    placed.set(id, { dx: cx - p.x, text });
   }
   return placed;
 }
@@ -510,9 +608,15 @@ function LoadedEvidenceGraph({
 
   const selected = state.selectedId ? (graph.byId.get(state.selectedId) ?? null) : null;
   const visibleSet = useMemo(() => new Set(visible), [visible]);
+  /*
+   * The rectangle the canvas actually shows. Labels are placed against THIS and
+   * not against the layout alone, which is what stopped them hanging over the
+   * edge of a narrow canvas and being cut off by the SVG.
+   */
+  const viewRect = useMemo(() => viewRectFor(state.view, box), [state.view, box]);
   const labelled = useMemo(
     () =>
-      placedLabelIds(
+      placedCanvasLabels(
         visible,
         graph.layout,
         (id) => graph.byId.get(id)?.kind,
@@ -520,8 +624,9 @@ function LoadedEvidenceGraph({
         state.view.scale,
         state.selectedId,
         graph.anchorId,
+        viewRect,
       ),
-    [visible, graph, state.view.scale, state.selectedId],
+    [visible, graph, state.view.scale, state.selectedId, viewRect],
   );
 
   // --- drag to pan (pointer only; the tree is the keyboard interface) -------
@@ -649,10 +754,25 @@ function LoadedEvidenceGraph({
       </header>
 
       {graph.notes.length > 0 && (
+        /*
+         * `role="note"` used to sit on each `<li>`, and axe was right to refuse
+         * it: an `<li>` inside a list has an implicit `listitem` role, and
+         * `note` is not one of the roles ARIA lets that element take, so the
+         * override was simply invalid and the three notes were reported at
+         * every viewport.
+         *
+         * The role moves INWARD rather than being deleted, because the two
+         * things it was doing are separable and both worth keeping: the list
+         * still says how many advisories there are, and each advisory is still
+         * announced as a note. A `<span>` accepts any role, so the fix costs no
+         * markup a reader can feel and no CSS — `.evgraph-note` stays on the
+         * `<li>`, and so does `data-note`, which the stylesheet keys the
+         * advisory colours off.
+         */
         <ul className="evgraph-notes">
           {graph.notes.map((note) => (
-            <li key={note.kind} className="evgraph-note" role="note" data-note={note.kind}>
-              {note.text}
+            <li key={note.kind} className="evgraph-note" data-note={note.kind}>
+              <span role="note">{note.text}</span>
             </li>
           ))}
         </ul>
@@ -925,7 +1045,7 @@ function LoadedEvidenceGraph({
                     isSelected={state.selectedId === id}
                     isExpanded={state.expanded.includes(id)}
                     canExpand={(graph.childrenOf.get(id) ?? []).length > 0}
-                    showLabel={labelled.has(id)}
+                    label={labelled.get(id) ?? null}
                     onActivate={() => onNodeActivate(id)}
                   />
                 );
@@ -979,7 +1099,7 @@ function CanvasNode({
   isSelected,
   isExpanded,
   canExpand,
-  showLabel,
+  label,
   onActivate,
 }: {
   node: EvidenceGraphNode;
@@ -990,7 +1110,8 @@ function CanvasNode({
   isSelected: boolean;
   isExpanded: boolean;
   canExpand: boolean;
-  showLabel: boolean;
+  /** What the placement pass decided to draw, or null for no label at all. */
+  label: PlacedLabel | null;
   onActivate: () => void;
 }) {
   const r = screenBoundedUnits(KIND_RADII[node.kind], scale);
@@ -1011,6 +1132,11 @@ function CanvasNode({
         onActivate();
       }}
     >
+      {/* The full name, for a pointer user, on a canvas whose drawn label is cut
+          to the width available. It adds nothing to the accessibility tree —
+          the SVG is `aria-hidden` and the structure tree already carries the
+          name in full — so this is an affordance, not the record of it. */}
+      <title>{node.label}</title>
       {shape === 'circle' && (
         <circle className="evgraph-node-shape" r={r} vectorEffect="non-scaling-stroke" />
       )}
@@ -1040,15 +1166,16 @@ function CanvasNode({
           cy={-r - r * 0.12}
         />
       )}
-      {showLabel && (
+      {label && (
         <text
           className="evgraph-node-label"
+          x={label.dx}
           y={r + font * 1.35}
           fontSize={font}
           strokeWidth={Math.max(1, font * 0.27)}
           textAnchor="middle"
         >
-          {shortLabel(node.label, CANVAS_LABEL_MAX_CHARS)}
+          {label.text}
         </text>
       )}
     </g>

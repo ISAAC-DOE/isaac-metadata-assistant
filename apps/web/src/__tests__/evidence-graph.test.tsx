@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { EvidenceGraphPanel } from '../screens/graph/EvidenceGraphPanel';
+import { EvidenceGraphPanel, LABEL_WIDTH_RATIO } from '../screens/graph/EvidenceGraphPanel';
 import {
   EDGE_PRODUCERS,
   EVIDENCE_EDGE_KINDS,
@@ -16,6 +16,8 @@ import {
   nodeIds,
   readRunCheck,
   rekeyRunCheckStore,
+  viewBoxFor,
+  viewRectFor,
   visibleEvidenceNodeIds,
   writeRunCheck,
   type EvidenceGraph,
@@ -56,6 +58,10 @@ vi.setConfig({ testTimeout: 30000 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // The canvas-bounds test spies on `getBoundingClientRect`; a spy that
+  // outlived its test would silently give every later render a phone-width
+  // canvas.
+  vi.restoreAllMocks();
 });
 
 // --- fixtures (synthetic, unmistakably fake) --------------------------------
@@ -809,6 +815,25 @@ describe('evidence graph · the tree carries the same model as the canvas', () =
     expect(rows.find((r) => r.id === graph.rootId)?.level).toBe(1);
     expect(rows.find((r) => r.id === nodeIds.run(RUN_A))?.level).toBe(2);
   });
+
+  it('the rectangle labels are bounded against IS the rectangle the SVG shows', () => {
+    /*
+     * `viewRectFor` exists because label placement needs the four numbers
+     * `viewBoxFor` formats into a string. Two functions computing the same
+     * rectangle can drift; this is the only thing stopping them, and a drift
+     * here would bound labels against a canvas the browser is not drawing.
+     */
+    for (const view of [
+      { cx: 0, cy: 0, scale: 1 },
+      { cx: -140.5, cy: 62, scale: 0.37 },
+      { cx: 900, cy: -20, scale: 4 },
+    ]) {
+      for (const box of [{ width: 827, height: 420 }, { width: 295, height: 520 }]) {
+        const r = viewRectFor(view, box);
+        expect(viewBoxFor(view, box)).toBe(`${r.x} ${r.y} ${r.width} ${r.height}`);
+      }
+    }
+  });
 });
 
 // ===========================================================================
@@ -1116,6 +1141,155 @@ describe('evidence graph · the rendered panel', () => {
     expect(svg?.getAttribute('aria-hidden')).toBe('true');
     // No second tab stop hiding inside the picture.
     expect(svg?.querySelectorAll('[tabindex="0"]').length).toBe(0);
+  });
+
+  /*
+   * The roles ARIA lets an `<li>` carry — transcribed from the vendored
+   * `axe-core/axe.js`, `htmlElms.li.allowedRoles`, which is the table the
+   * `aria-allowed-role` rule consults. `note` is NOT among them, and the panel
+   * shipped `<li role="note">` on the notes list: three nodes, at every one of
+   * the seven scanned viewports.
+   */
+  const LI_ALLOWED_ROLES = [
+    'menuitem',
+    'menuitemcheckbox',
+    'menuitemradio',
+    'option',
+    'none',
+    'presentation',
+    'radio',
+    'separator',
+    'tab',
+    'treeitem',
+    'doc-biblioentry',
+    'doc-endnote',
+  ];
+
+  it('gives no element a role its own tag may not carry, and still announces the notes', () => {
+    // `runs: []` guarantees at least one note (`no_runs`) is on screen.
+    const { container } = renderPanel({ runs: [] });
+
+    const notes = [...container.querySelectorAll('.evgraph-notes > li')];
+    expect(notes.length).toBeGreaterThan(0);
+    for (const li of notes) {
+      // The invalid override is gone…
+      expect(li.getAttribute('role')).toBeNull();
+      // …and what it was FOR is not: the whole of the note is still a note.
+      expect(li.querySelector('[role="note"]')?.textContent).toBe(li.textContent);
+      // The list still says how many advisories there are.
+      expect(li.parentElement?.tagName).toBe('UL');
+    }
+
+    // Nowhere in the panel — not just in the notes list.
+    for (const li of container.querySelectorAll('li[role]')) {
+      expect(LI_ALLOWED_ROLES).toContain(li.getAttribute('role'));
+    }
+    // `note` is valid on the elements axe records as taking any role.
+    for (const el of container.querySelectorAll('[role="note"]')) {
+      expect(['SPAN', 'P', 'DIV']).toContain(el.tagName);
+    }
+  });
+
+  it('draws no canvas label outside the canvas, at a phone-width viewport', async () => {
+    /*
+     * THE DEFECT THIS PINS. At 375 px the canvas is ~295 px wide and a
+     * 26-character label estimated at ~165 px, so a label on any node away from
+     * the middle hung over the edge and was cut off by the SVG — CI measured
+     * `text "processing_notebook"` at 214..336 against a 40..335 container,
+     * eight instances on `/record/<id>/evidence?view=graph`.
+     *
+     * jsdom performs no layout, so the panel's ONE measurement — the canvas's
+     * own `getBoundingClientRect` — is stubbed at phone width and the rest of
+     * the geometry follows deterministically from the model.
+     *
+     * What is checked here is the ESTIMATED box, with the estimator the
+     * placement itself uses, because that is exactly the guarantee the code
+     * makes. Real glyph geometry is CI's to measure, on the Linux face, in a
+     * browser that has one.
+     */
+    const NARROW = { width: 295, height: 420 };
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
+      const canvas = this.classList?.contains('evgraph-canvas') ?? false;
+      const width = canvas ? NARROW.width : 0;
+      const height = canvas ? NARROW.height : 0;
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: width,
+        bottom: height,
+        width,
+        height,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+
+    const { container } = renderPanel();
+
+    /*
+     * OPEN EVERYTHING, THEN FRAME IT. This is what makes the test bite, and it
+     * was arrived at by measurement rather than by taste: with the runs merely
+     * collapsed the canvas draws five nodes named `Run 1`, `Sample`, `Context`,
+     * all short enough to sit anywhere, and the assertion below passed with the
+     * clamp deliberately removed. The long names are leaves — `raw_scan_listing
+     * .txt`, `Your confirmation · …` — and a leaf is where CI found
+     * `processing_notebook`. Expanding does not refit, so `Fit to View` is what
+     * puts them all on one narrow canvas at once. With the clamp removed, two
+     * of the sixteen labels then land outside the viewBox.
+     */
+    for (let pass = 0; pass < 4; pass += 1) {
+      for (const r of [...container.querySelectorAll('[role="treeitem"][aria-expanded="false"]')]) {
+        fireEvent.keyDown(r, { key: 'Enter' });
+      }
+    }
+    const fit = [...container.querySelectorAll('button')].find((b) =>
+      (b.textContent ?? '').includes('Fit to View'),
+    )!;
+    fireEvent.click(fit);
+    await waitFor(() => {
+      if (container.querySelectorAll('text.evgraph-node-label').length < 12) {
+        throw new Error('the expansion has not painted yet');
+      }
+    });
+
+    const svg = container.querySelector<SVGSVGElement>('svg.evgraph-canvas')!;
+    const [vx, , vw, vh] = svg.getAttribute('viewBox')!.split(' ').map(Number);
+    // The canvas was measured at the narrow width, not left on the default box.
+    expect(vw / vh).toBeCloseTo(NARROW.width / NARROW.height, 6);
+
+    const labels = [...svg.querySelectorAll<SVGTextElement>('text.evgraph-node-label')];
+    // A canvas that drew nothing would satisfy the bound vacuously.
+    expect(labels.length).toBeGreaterThan(0);
+
+    for (const label of labels) {
+      const group = label.closest('g[data-node-id]')!;
+      const at = /translate\((-?[\d.]+) (-?[\d.]+)\)/.exec(group.getAttribute('transform') ?? '')!;
+      const font = Number(label.getAttribute('font-size'));
+      const centre = Number(at[1]) + Number(label.getAttribute('x'));
+      const half = ((label.textContent ?? '').length * font * LABEL_WIDTH_RATIO) / 2;
+      const where = `${group.getAttribute('data-node-id')} — “${label.textContent}”`;
+      expect(centre - half, `${where} starts left of the canvas`).toBeGreaterThanOrEqual(vx);
+      expect(centre + half, `${where} runs past the right edge`).toBeLessThanOrEqual(vx + vw);
+      /*
+       * And the string itself is cut to the canvas. The clamp alone satisfies
+       * the two bounds above — verified by removing the cap and watching them
+       * still pass — so without this line nothing would hold the narrow-width
+       * truncation in place. It is not decoration: a label wider than the space
+       * between its node and the edge is DROPPED rather than detached from its
+       * mark, so an uncut 26-character label at 295 px costs visible labels.
+       */
+      expect(half * 2, `${where} takes more than half the canvas`).toBeLessThanOrEqual(vw / 2);
+    }
+
+    // The full name is still reachable from the picture itself.
+    for (const group of svg.querySelectorAll('g[data-node-id]')) {
+      expect(group.querySelector('title')?.textContent).toBeTruthy();
+    }
+    // …and nothing here is in the accessibility tree; the tree beside it is.
+    expect(svg.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('reaches a non-containment relationship through the details pane', async () => {

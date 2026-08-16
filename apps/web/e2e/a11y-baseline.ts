@@ -406,19 +406,22 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * until that surface existed the graph panel had never been loaded by axe, by
        * the 320/390 narrow sweep, by the layout probes or by the zoom-200 pass at all.
        *
-       * NOT ONE `evidence-graph@*` KEY APPEARS BELOW, and that is this file's own
-       * procedure rather than an omission — it is exactly what `NARROW_WIDTHS` did
-       * when the two narrow widths were added, and the header states the rule twice:
-       * only the platform you measured on may be edited, and no attempt is made to
-       * guess the other. A darwin reading written as a bare number would assert BOTH
-       * columns, and this environment cannot run the Linux face.
+       * ~~NOT ONE `evidence-graph@*` KEY APPEARS BELOW~~ — CI HAS NOW ANSWERED FOR
+       * ONE OF THE SEVEN, and the paragraph is struck rather than deleted because
+       * the procedure it states is still the one being followed for the other six.
+       * It was: only the platform you measured on may be edited, and no attempt is
+       * made to guess the other; a bare number asserts BOTH columns, and this
+       * environment cannot run the Linux face.
        *
-       * SO THE SEVEN PAIRS ALL EXPECT 0 AND WILL READ AS `new`. The first CI run on
-       * this branch is the adjudication: the `browser-a11y` job prints, per pair,
-       * the rule, the surface, the project, the PLATFORM and the exact node count.
-       * Transcribe those figures into keys here and raise
-       * `A11Y_BASELINE_TOTAL_NODES` by their sum, in one commit. Do NOT pre-empt
-       * them and do NOT lower anything to make the run green.
+       * Run 31963596365 on `0c9752f` measured `evidence-graph@desktop-1280x800` at
+       * 24 nodes on LINUX. That one key is recorded below. THE OTHER SIX ARE STILL
+       * ABSENT AND STILL EXPECT 0: their figures were printed in the same job but
+       * are not in hand here, and a plausible number written as though it were a
+       * reading is the one thing this file forbids outright. They will read as
+       * `new` on the next run, which prints them, and that is the adjudication —
+       * transcribe those figures and raise `A11Y_BASELINE_TOTAL_NODES` by their sum,
+       * in one commit. Do NOT pre-empt them and do NOT lower anything to make the
+       * run green.
        *
        * WHAT IS EXPECTED TO FIRE, stated in advance so a large number is not
        * mistaken for a regression this branch caused. `evidence-graph.css` styles
@@ -441,9 +444,17 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * Two things this DOES leave open, named rather than implied: the panel is
        * also newly reachable by `specs/layout-widths.spec.ts`, `layout-responsive`
        * and `zoom-200`, which carry their own baselines in `e2e/layout-baseline.ts`
-       * and `e2e/layout-allowlist.ts` and likewise record nothing for it; and
-       * `A11Y_BASELINE_TOTAL_NODES` does NOT move in this commit, because the entry
-       * map is unchanged and the well-formedness guard sums the map.
+       * and `e2e/layout-allowlist.ts`; and ~~`A11Y_BASELINE_TOTAL_NODES` does NOT
+       * move in this commit~~ — it moves now, because the entry map does. See the
+       * dated block on that constant.
+       *
+       * The layout half of that sentence is also no longer true and is corrected
+       * rather than left: the layout probes DID report this surface — eight
+       * `clipped-x` instances of SVG canvas labels, the quoted one being
+       * `text "processing_notebook"` at `mobile-375x812` — and that is FIXED in
+       * `EvidenceGraphPanel.tsx` (labels are bounded against the canvas rectangle
+       * and cut to its width) rather than recorded in `e2e/layout-baseline.ts`. A
+       * defect on a surface this branch is adding does not get a baseline entry.
        */
       'evidence@desktop-1280x800': 70,
       'evidence@laptop-1024x768': 70,
@@ -460,6 +471,38 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'evidence@tablet-768x1024': 70,
       'evidence@mobile-375x812': 68,
       'evidence@zoom-200': 68,
+      /*
+       * ── `evidence-graph`, MEASURED: 24 nodes at desktop, 2026-08-16 ────────────
+       *
+       * RECORDED, AND NOT ACCEPTED AS CORRECT. This is an instance of the known
+       * systemic token failure this entry has always been about, not a defect
+       * particular to the graph panel:
+       *
+       *   `--text-tertiary`   #78838f — measured 3.86:1 on white
+       *   `--text-quaternary` #9aa4af — measured 2.53:1 on white
+       *
+       * WCAG AA needs 4.50:1, and AA-large 3.00:1, so the first fails AA and the
+       * second fails both. Between them they have 274 usages across 40 files.
+       *
+       * The 24 nodes CI reported are a mix of pre-existing app chrome and new graph
+       * text — `kbd.topbar-search-kbd`, `button#evidence-view-tab-list.section-tab`,
+       * `p.evgraph-counts`, `p.evgraph-freshness` and more — which is the shape of a
+       * token problem rather than a screen problem.
+       *
+       * A DEDICATED DESIGN-SYSTEM SLICE OWNS RAISING THE TWO TOKENS AND IS QUEUED.
+       * It will reduce the count on this surface and on the 18 others at the same
+       * time, so THIS NUMBER IS EXPECTED TO DROP. When it does, transcribe CI's new
+       * figure and lower the total; do not treat the fall as a regression, and do
+       * not fix the palette inside a graph PR, where it would hide.
+       *
+       * 24 is a LINUX reading (run 31963596365, `0c9752f`) written as a scalar,
+       * which asserts darwin too. This file's type system has no way to say
+       * "unknown" for one column — a per-platform pair is rejected when both halves
+       * are equal — so a one-platform measurement can only be written this way, as
+       * the header and several notes below already record. If a darwin run
+       * disagrees, split the key and correct the total; never loosen the assertion.
+       */
+      'evidence-graph@desktop-1280x800': 24,
       /*
        * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
        * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
@@ -1867,8 +1910,45 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // entries with the same summation the guard uses, and the darwin figure matches
   // the total CI reported the entries now sum to -- which is what confirms the
   // constant and the map agree rather than merely both having moved.
-  darwin: 2169,
-  linux: 2159,
+  // ── 2026-08-16. darwin 2169 -> 2200, linux 2159 -> 2190 ────────────────────
+  //
+  // TWO CAUSES, AND THE FIRST IS A MERGE HAZARD GIT CANNOT SEE. Record it,
+  // because it will recur on any branch that touches this constant.
+  //
+  //   +7  `main` (via PR #143, `.vr-sub` on record-detail) and this branch (the
+  //       `Evidence List | Evidence Graph` tab strip) EACH raised darwin from
+  //       2162 to 2169. Different surfaces, different keys, same arithmetic —
+  //       and therefore the same TEXT, `darwin: 2169`, on both sides of the
+  //       merge. Git saw two identical lines and took them without a conflict,
+  //       while silently combining two entry-map changes that each justified
+  //       only one of the two increments. The merged map sums to 2162 + 7 + 7 =
+  //       2176, which is exactly what the guard computed and reported ("the
+  //       entries now sum to 2176"). Two branches adding the same delta to one
+  //       number is invisible to a three-way merge; the per-platform self-check
+  //       is what caught it, and is why it exists. This is the second time this
+  //       file has been hit by it — see the 1704/1705 note above.
+  //
+  //       LINUX FOLLOWS BY THE SAME ARITHMETIC: 2159 + 7 = 2166. Both branches'
+  //       additions were BARE numbers rather than `{ darwin, linux }` pairs, so
+  //       each moved both columns by the same 7. That is derived from the ENTRY
+  //       SHAPES, not measured on Linux, and is flagged as such — CI is the
+  //       authority and will say so if it is wrong.
+  //
+  //  +24  `evidence-graph@desktop-1280x800`, the one cell of the new surface CI
+  //       has measured (run 31963596365 on `0c9752f`, linux). Scalar, so it adds
+  //       24 to both columns. See that key's note: it is an instance of the
+  //       `--text-tertiary` / `--text-quaternary` shortfall and is expected to
+  //       DROP when the design-system slice raises the two tokens.
+  //
+  // darwin 2162 + 7 + 7 + 24 = 2200; linux 2159 + 7 + 24 = 2190.
+  //
+  // THE OTHER SIX `evidence-graph@*` PAIRS ARE ABSENT AND EXPECT 0. They will
+  // read as `new` on the next run and it will print their figures; nothing here
+  // pre-empts them, and this constant will have to move again by their sum. Both
+  // sums are re-checked by the suite from the entry map, per platform, so a stale
+  // constant fails in every project — which is how this one was caught.
+  darwin: 2200,
+  linux: 2190,
 };
 
 /**

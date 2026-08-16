@@ -1868,6 +1868,34 @@ export function searchEvidenceGraph(
   return out;
 }
 
+/**
+ * The user-space rectangle a viewport actually SHOWS, in numbers.
+ *
+ * `viewBoxFor` already computes this and formats it as the SVG `viewBox`
+ * attribute; a renderer that needs to know whether something falls off the
+ * canvas needs the same four numbers un-stringified. The two are pinned to each
+ * other by a test rather than kept in step by hand — `viewBoxFor(v, b)` must be
+ * this rect's four fields, space-joined, for every viewport.
+ *
+ * It is NOT put next to `viewBoxFor` in `experimentGraph.ts` on purpose: the
+ * Project Memory and record-detail canvases render from that module, and the
+ * label bounding this feeds is an evidence-graph fix. A shared edit there would
+ * move surfaces this slice has not measured.
+ */
+export interface ViewportRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The rectangle `viewBoxFor(view, box)` describes. */
+export function viewRectFor(view: GraphViewport, box: ViewportBox): ViewportRect {
+  const width = box.width / view.scale;
+  const height = box.height / view.scale;
+  return { x: view.cx - width / 2, y: view.cy - height / 2, width, height };
+}
+
 /** Viewport that frames `ids` inside `box`. Falls back to identity when empty. */
 export function fitEvidenceViewport(
   ids: readonly string[],
