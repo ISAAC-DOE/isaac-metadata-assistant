@@ -340,10 +340,21 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
       <h2 id={headingId} className="vr-title">
         Validate &amp; Review
       </h2>
+      {/*
+        THE SUB-LINE SAYS "EVERY RUN" ONLY WHERE THERE ARE RUNS. A record with no
+        runs exports one official record and has no run list at all — every one of
+        the five canonical seeds is such a record — so the unconditional wording
+        described a fan-out that does not exist there. Before the check has run,
+        nothing on this screen knows which shape the record is, and the honest
+        third form says so rather than picking one.
+      */}
       <p className="vr-sub">
-        Checks every run against the same deterministic validators the export gate uses, and
-        lists what each one found, so you can decide what to fix. Read-only: nothing here is
-        written, exported, submitted, or repaired for you.
+        {review.status !== 'data'
+          ? 'Checks this record against the same deterministic validators the export gate uses — each run separately if it has runs — and lists what was found, so you can decide what to fix. '
+          : hasRuns
+            ? 'Checks every run against the same deterministic validators the export gate uses, and lists what each one found, so you can decide what to fix. '
+            : 'Checks this record against the same deterministic validators the export gate uses, and lists what they found, so you can decide what to fix. '}
+        Read-only: nothing here is written, exported, submitted, or repaired for you.
       </p>
 
       <div className="vr-actions">
@@ -442,6 +453,14 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
  * units, and presenting an aggregate as one unit's own advice would be a claim
  * the response does not make. A single-unit record's union happens to equal its
  * one entry, but this file must not depend on a coincidence to stay truthful.
+ *
+ * `undefined` THEREFORE MEANS "NOT ATTRIBUTABLE", WHICH IS NOT "NONE". Every
+ * caller must keep those apart. It was got wrong once and it mattered: the counts
+ * line rendered `${count(0, 'advisory note')}` on the undefined branch, so a
+ * record with no runs — which is every canonical seed, each carrying one or two
+ * REAL advisory warnings from `_warnings_payload` — read "0 advisory notes" while
+ * the server had reported some. Refusing to attribute an aggregate is correct;
+ * printing that refusal as a zero is a stronger and false claim.
  */
 function adviceFor(
   warnings: ApiWarningsResponse,
@@ -492,16 +511,39 @@ function summaryLine(
  * read `2 blocking findings · 1 advisory note` before any detail had been
  * fetched, which a reader takes as the whole story about a run whose open
  * questions nobody has looked at.
+ *
+ * EVERY CLAUSE HERE IS EITHER A COUNT OR A COVERAGE STATEMENT, NEVER A ZERO
+ * STANDING IN FOR AN UNKNOWN. Two of the three ways this line can fail to know a
+ * number are the reason:
+ *
+ *   * `adviceCount === null` — {@link adviceFor} could not attribute any advisory
+ *     entry to this unit (a record with no runs has no `warnings.runs` at all; a
+ *     short or re-ordered fan-out list has no entry at this position). The server
+ *     may well have reported advisory warnings for the record; this line simply
+ *     may not say which are this unit's. Printing `0 advisory notes` there told a
+ *     scientist there were none, on every record they can currently open;
+ *   * `state === 'unavailable'` — no verdict was produced at all. `_validate_unit`
+ *     still returns exactly one synthetic sentinel error there ("Validation could
+ *     not be completed."), which is a REFUSAL, not a finding. Counting it made the
+ *     card read "1 blocking finding" immediately above "No verdict could be
+ *     produced for this run — this is not a schema failure". The header's tier
+ *     model already declares `unavailable` a fourth state that is not a tier;
+ *     this honours that in the numbers as well as in the words.
  */
 function unitCounts(
   unit: ReviewUnit,
-  adviceCount: number,
+  state: RunFindingState,
+  adviceCount: number | null,
   detail: Detail | undefined,
   detailAvailable: boolean,
 ): string {
   const parts = [
-    `${count(unit.verdict.errors.length, 'blocking finding')}`,
-    `${count(adviceCount, 'advisory note')}`,
+    state === 'unavailable'
+      ? 'no verdict, so nothing here is counted as a blocking finding'
+      : count(unit.verdict.errors.length, 'blocking finding'),
+    adviceCount === null
+      ? 'advisory notes not attributable to this unit — which is not the same as none'
+      : count(adviceCount, 'advisory note'),
   ];
   if (!detailAvailable) {
     parts.push('this record has no runs, so there is no per-run detail to check');
@@ -519,6 +561,19 @@ function unitCounts(
   return parts.join(' · ');
 }
 
+/**
+ * The VISIBLE words on one run's detail button, in one place.
+ *
+ * It exists so the button's `aria-label` can be composed FROM this string rather
+ * than restating it. WCAG 2.5.3 requires the visible label to appear in the
+ * accessible name; deriving one from the other makes that structural instead of
+ * something a future edit has to remember.
+ */
+function detailButtonLabel(detail: Detail | undefined): string {
+  if (detail?.status === 'checking') return 'Checking…';
+  return detail?.status === 'data' ? 'Check This Run Again' : 'Check This Run In Detail';
+}
+
 function UnitGroup({
   unit,
   advice,
@@ -534,7 +589,12 @@ function UnitGroup({
   const state = runFindingState(unit.verdict);
   const Icon = STATE_ICON[state];
   const errors = unit.verdict.errors;
+  // `undefined` advice is NOT an empty advice list — see {@link adviceFor}. The
+  // rendered list is empty either way (there is nothing attributable to render),
+  // but the COUNT must stay `null` so the counts line states coverage instead of
+  // asserting a zero the response does not support.
   const adviceWarnings = advice?.warnings ?? [];
+  const adviceCount = advice === undefined ? null : advice.warnings.length;
 
   return (
     <li className="vr-unit" data-state={state} data-run-id={unit.runId ?? undefined}>
@@ -572,7 +632,7 @@ function UnitGroup({
       )}
 
       <p className="vr-unit-counts">
-        {unitCounts(unit, adviceWarnings.length, detail, onCheckDetail !== undefined)}
+        {unitCounts(unit, state, adviceCount, detail, onCheckDetail !== undefined)}
       </p>
 
       {state === 'unavailable' && (
@@ -630,18 +690,29 @@ function UnitGroup({
 
       {onCheckDetail !== undefined && (
         <div className="vr-actions">
+          {/*
+            THE ACCESSIBLE NAME NAMES THE RUN AND CONTAINS THE VISIBLE WORDS, and
+            it is BUILT FROM the visible label rather than written twice, so the
+            two cannot drift apart on a later edit. Fifty runs each offering a
+            button called "Check This Run In Detail" is fifty identically named
+            controls in a screen reader's list, which is why the run is appended;
+            WCAG 2.5.3 (label in name) is why the visible string is the prefix and
+            not a paraphrase of it, so speech input still reaches the control by
+            saying what is printed on it.
+
+            IT ALSO HAS TO STAY TRUE IN ALL THREE STATES. A fixed
+            `Check {label} in detail` went stale the moment the button re-labelled
+            itself "Check This Run Again", leaving the announced name describing a
+            press that had already happened.
+          */}
           <button
             type="button"
             className="btn btn-secondary"
             onClick={onCheckDetail}
             disabled={detail?.status === 'checking'}
-            aria-label={`Check ${unit.label} in detail`}
+            aria-label={`${detailButtonLabel(detail)} — ${unit.label}`}
           >
-            {detail?.status === 'checking'
-              ? 'Checking…'
-              : detail?.status === 'data'
-                ? 'Check This Run Again'
-                : 'Check This Run In Detail'}
+            {detailButtonLabel(detail)}
           </button>
         </div>
       )}
@@ -691,8 +762,15 @@ function blockerKindLine(blockers: ApiRunCheckFinding[]): string | null {
  * rendering it again would put two verdicts in one group with nothing saying
  * which is current. What it does instead is compare them and SAY when they
  * differ — which is not a derived verdict but the observation that two answers
- * from one function, taken at two moments, disagree. That can only mean the run
- * moved between the two reads, and the reader is the one who can act on it.
+ * from one function, taken at two moments, disagree.
+ *
+ * IT REPORTS THE DISAGREEMENT AND NAMES NO CAUSE, because it cannot know one.
+ * The copy used to read "so this run changed after the summary was taken", which
+ * is only one of several ways the two reads can differ: an edit to the RECORD
+ * rather than to the run moves the verdict while the sentence blames the run, and
+ * a transient artifact read failure flips a unit to `unavailable` with nothing
+ * having changed at all. Stating the observation is supported; stating the cause
+ * is not, and the reader is the one who can find out which it was.
  */
 function UnitDetail({ unit, data }: { unit: ReviewUnit; data: ApiRunCheckResponse }) {
   const blockers = data.blockers ?? [];
@@ -712,8 +790,10 @@ function UnitDetail({ unit, data }: { unit: ReviewUnit; data: ApiRunCheckRespons
 
       {disagrees && (
         <p className="vr-detail-disagree">
-          This run&rsquo;s own check and the summary above do not agree, so this run changed
-          after the summary was taken. Run Validate &amp; Review again for a current summary.
+          This run&rsquo;s own check and the summary above do not agree. This screen cannot
+          say why: the run or the record may have changed between the two reads, or one of
+          the two checks may not have been able to produce a verdict. Run Validate &amp;
+          Review again for a current summary.
         </p>
       )}
 
@@ -815,11 +895,21 @@ function AttentionBlock({ attention }: { attention: Attention }) {
   return (
     <div className="vr-attention">
       <h3 className="vr-attention-title">Evidence support · no verdict either way</h3>
+      {/*
+        THE SCOPE SENTENCE SAYS WHAT IS ACTUALLY CLASSIFIED, and "the whole record"
+        was not it. `get_evidence_classification` classifies `exp.draft`, which on
+        a record with runs is the EXPERIMENT-LEVEL half only: it carries no
+        measurement, no links and no run content, and it is never exported on its
+        own — each run's own document is. Calling that "the whole record's review"
+        claimed coverage of material this axis never read.
+      */}
       <p className="vr-attention-note">
-        This is the whole record&rsquo;s evidence-support review, not one run&rsquo;s — the
-        server classifies the record&rsquo;s draft and offers no per-run breakdown, so none is
-        shown. It decides nothing about validity: it neither blocks export nor is it one of
-        the advisory notes above. These are yours to judge.
+        This reviews a different document, not one run&rsquo;s: the server classifies the
+        record-level draft, which on a record with runs holds the experiment-level fields
+        only — no measurement, no links, no run content — and is never exported on its own.
+        There is no per-run breakdown, so none is shown. It decides nothing about validity:
+        it neither blocks export nor is it one of the advisory notes above. These are yours
+        to judge.
       </p>
       <p className="vr-attention-counts">
         {total === 0

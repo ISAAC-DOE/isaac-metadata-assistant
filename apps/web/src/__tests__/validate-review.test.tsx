@@ -96,6 +96,61 @@ import type {
  *        no kind is counted, never dropped and never assigned one" ->
  *        `… to contain '1 kind not recorded'`.
  *
+ * ── REVIEW FIXES, 2026-08-16 · NC7–NC11, DENOMINATOR NOW 40 ──────────────────
+ *
+ * An independent review of this feature found five claims the suite above could
+ * not have caught, four of them on screen and one in a comment. The guards added
+ * for them were negative-controlled the same way: the named source line was
+ * broken, this file was run, the failure observed, and the file restored from a
+ * backup taken before the first mutation (`diff` clean after each). THE
+ * DENOMINATOR IS 40, READ OFF THOSE RUNS.
+ *
+ *  NC7 · render the unattributable advisory count as a zero. In `unitCounts`,
+ *        replace the `adviceCount === null` clause with
+ *        `count(adviceCount ?? 0, 'advisory note')`. 1 of 40 failed — "does NOT
+ *        claim zero advisory notes when the server reported some it cannot
+ *        attribute" -> `expected '0 blocking findings · 0 advisory not…' to
+ *        contain 'not attributable to this unit'`.
+ *
+ *        THIS IS THE ONE THAT WAS LIVE ON EVERY RECORD A SCIENTIST CAN OPEN. All
+ *        five canonical seeds have NO runs, so `_warnings_payload` sends no `runs`
+ *        key, so `adviceFor` returns `undefined` — while the same response carries
+ *        one or two real advisory warnings (`NO_LINKS`,
+ *        `NO_MEASUREMENT_SERIES`). "Cannot attribute" was being printed as "zero",
+ *        which is a stronger and false claim. The refusal to attribute is CORRECT
+ *        and is preserved; only its rendering changed.
+ *
+ *  NC8 · count the `unavailable` sentinel as a finding. In `unitCounts`, drop the
+ *        `state === 'unavailable'` clause and always
+ *        `count(unit.verdict.errors.length, 'blocking finding')`. 1 of 40 failed —
+ *        "“no verdict” is not a failure…" -> `expected '1 blocking finding ·
+ *        advisory notes n…' not to contain '1 blocking finding'`.
+ *        `_validate_unit` returns exactly one synthetic `{path: "$", message:
+ *        "Validation could not be completed."}` there, so the card read "1
+ *        blocking finding" directly above "this is not a schema failure".
+ *
+ *  NC9 · freeze the detail button's accessible name at its idle wording:
+ *        `aria-label={`Check This Run In Detail — ${unit.label}`}`. Chosen over
+ *        the blunter break (restoring `Check ${unit.label} in detail`, which fails
+ *        10 of 40 because every `pressDetail` misses) so the control isolates the
+ *        RULE. 1 of 40 failed — "the detail button’s accessible name contains its
+ *        visible label, in all three states" -> `expected 'Check This Run In
+ *        Detail — Run 1' to contain 'Checking…'`.
+ *
+ * NC10 · restore the causal claim: "…do not agree, so this run changed after the
+ *        summary was taken". 2 of 40 failed -> `expected 'This run’s own check and
+ *        the summary …' to contain 'cannot say why'`. It cannot only mean that: a
+ *        transient artifact read failure flips the unit to `unavailable` with
+ *        nothing having changed, and an edit to the RECORD moves the verdict while
+ *        the sentence blames the run.
+ *
+ * NC11 · restore "This is the whole record’s evidence-support review". 1 of 40
+ *        failed — "the evidence-support axis is neither blocking nor advisory, and
+ *        says so" -> `expected 'Evidence support · no verdict either …' not
+ *        to contain 'whole record'`. `get_evidence_classification` classifies
+ *        `exp.draft`, the EXPERIMENT-LEVEL half, which on a record with runs holds
+ *        no measurement, no links and no run content and is never exported.
+ *
  * POLARITY IS ASSERTED BOTH WAYS THROUGHOUT. A test in this repository has
  * already shipped INVERTED and passed (`upload-claim-parity.test.tsx`'s first
  * version), so "an advisory note does not block" is asserted alongside "a real
@@ -197,6 +252,25 @@ function mount(routes: Record<string, unknown>) {
 
 const press = () => fireEvent.click(screen.getByRole('button', { name: 'Validate & Review' }));
 
+/**
+ * The ACCESSIBLE NAME of one run's detail button, in each of its three states.
+ *
+ * It is the visible label followed by the run, in that order, because WCAG 2.5.3
+ * (label in name) requires the printed words to appear in the announced name —
+ * see `detailButtonLabel` and the comment on the button itself. Every query below
+ * goes through here rather than through a class or a DOM position, so a change
+ * that breaks the announced name breaks these tests rather than passing quietly.
+ */
+const detailName = {
+  idle: (label = 'Run 1') => `Check This Run In Detail — ${label}`,
+  again: (label = 'Run 1') => `Check This Run Again — ${label}`,
+  checking: (label = 'Run 1') => `Checking… — ${label}`,
+};
+
+/** Press one run's detail button in its unpressed state. */
+const pressDetail = (label = 'Run 1') =>
+  fireEvent.click(screen.getByRole('button', { name: detailName.idle(label) }));
+
 /** The `<li>` for one run, addressed by the `data-run-id` the component sets. */
 function unitEl(runId: string): HTMLElement {
   const el = document.querySelector(`.vr-unit[data-run-id="${runId}"]`);
@@ -250,7 +324,7 @@ describe('the triggering model is explicit, and bounded when it fires', () => {
     });
     press();
     await screen.findByText(/2 runs checked/);
-    fireEvent.click(screen.getByRole('button', { name: 'Check Run 2 in detail' }));
+    pressDetail('Run 2');
     await waitFor(() => expect(calls).toHaveLength(4));
     expect(calls.filter((c) => c.includes('/check'))).toEqual([
       `POST ${P('/runs/RUN-2/check')}`,
@@ -366,9 +440,12 @@ describe('advisory and blocking stay apart', () => {
     });
     press();
     await screen.findByText(/1 run checked/);
-    fireEvent.click(screen.getByRole('button', { name: 'Check Run 1 in detail' }));
+    pressDetail();
     const heading = await screen.findByText(/Advisory · non-gating · no-guessing notes/);
-    expect(heading.textContent).toContain('1');
+    // The WHOLE heading, not merely "contains a 1" — which almost any string
+    // satisfies, including one that had lost the count entirely and kept a
+    // version number, a path or an id.
+    expect(heading.textContent).toBe('Advisory · non-gating · no-guessing notes · 1');
     // It is not filed under either export-blocking heading.
     expect(screen.queryByText(/Blocks export · no-guessing checks/)).toBeNull();
     // And the verdict is untouched by it.
@@ -392,7 +469,7 @@ describe('advisory and blocking stay apart', () => {
     });
     press();
     await screen.findByText(/1 run checked/);
-    fireEvent.click(screen.getByRole('button', { name: 'Check Run 1 in detail' }));
+    pressDetail();
     expect(await screen.findByText(/Blocks export · no-guessing checks/)).toBeTruthy();
     expect(screen.queryByText(/Advisory · non-gating · no-guessing notes/)).toBeNull();
   });
@@ -423,7 +500,7 @@ describe('“not checked” and “0 findings” are different sentences', () =>
     mount(ROUTES_ONE_RUN);
     press();
     await screen.findByText(/1 run checked/);
-    fireEvent.click(screen.getByRole('button', { name: 'Check Run 1 in detail' }));
+    pressDetail();
     await screen.findByText(/This run has no open questions/);
     const counts = unitEl('RUN-1').querySelector('.vr-unit-counts')!;
     expect(counts.textContent).toContain('0 open questions');
@@ -438,7 +515,7 @@ describe('“not checked” and “0 findings” are different sentences', () =>
     });
     press();
     await screen.findByText(/1 run checked/);
-    fireEvent.click(screen.getByRole('button', { name: 'Check Run 1 in detail' }));
+    pressDetail();
     await screen.findByRole('alert');
     const counts = unitEl('RUN-1').querySelector('.vr-unit-counts')!;
     expect(counts.textContent).toContain('could not be run');
@@ -530,6 +607,47 @@ describe('an ISAAC gate is never reported as an official-schema error', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       '1 run checked: 1 could not be checked.',
     );
+    /*
+     * AND THE COUNTS LINE DOES NOT COUNT THE REFUSAL AS A FINDING. `_validate_unit`
+     * returns exactly one synthetic sentinel error on this branch — the fixed
+     * "Validation could not be completed." above — which is a refusal, not
+     * something wrong with the record. Counting it put "1 blocking finding"
+     * directly above "this is not a schema failure", which is the same sentence
+     * pair contradicting itself. `unavailable` is a fourth state that is not a
+     * tier; the numbers have to honour that too.
+     */
+    const counts = unit.querySelector('.vr-unit-counts')!.textContent ?? '';
+    expect(counts).not.toContain('1 blocking finding');
+    expect(counts).not.toContain('blocking findings');
+    expect(counts).toContain('no verdict, so nothing here is counted as a blocking finding');
+  });
+
+  /*
+   * THE POLARITY TWIN. A unit that DID produce a verdict and DID fail counts its
+   * findings as findings — so the branch above is a real distinction and not a
+   * blanket suppression of the number.
+   */
+  it('a unit that DID produce a verdict still counts its blocking findings', async () => {
+    mount({
+      [`POST ${P('/validate')}`]: {
+        body: validateBody([
+          verdict({
+            ok: false,
+            errors: [
+              { path: 'sample', message: "'material' is a required property" },
+              { path: '$', message: "'title' is a required property" },
+            ],
+          }),
+        ]),
+      },
+      [`GET ${P('/warnings')}`]: { body: warningsBody() },
+      [`GET ${P('/evidence-classification')}`]: { body: NO_CLASSIFICATION },
+    });
+    press();
+    await screen.findByText(/1 run checked/);
+    const counts = unitEl('RUN-1').querySelector('.vr-unit-counts')!.textContent ?? '';
+    expect(counts).toContain('2 blocking findings');
+    expect(counts).not.toContain('no verdict');
   });
 });
 
@@ -610,6 +728,16 @@ describe('the evidence-support axis is a third thing, and says which', () => {
     expect(panel.querySelector('.vr-advisory')).toBeNull();
     // And it does not claim to be per-run.
     expect(panel.textContent).toContain('not one run’s');
+    /*
+     * NOR DOES IT CLAIM TO COVER THE WHOLE RECORD, which is the opposite
+     * over-claim and the one that actually shipped. `get_evidence_classification`
+     * classifies `exp.draft` — the EXPERIMENT-LEVEL half, which on a record with
+     * runs carries no measurement, no links and no run content, and is never
+     * exported on its own. "The whole record's evidence-support review" was
+     * therefore false wherever it mattered most.
+     */
+    expect(panel.textContent).not.toContain('whole record');
+    expect(panel.textContent).toContain('record-level draft');
   });
 
   it('“Blocks export” appears only where the server gates export', async () => {
@@ -655,7 +783,7 @@ describe('blocker kinds come from the server’s own field', () => {
     });
     press();
     await screen.findByText(/1 run checked/);
-    fireEvent.click(screen.getByRole('button', { name: 'Check Run 1 in detail' }));
+    pressDetail();
     return await screen.findByText(/Blocks export · open questions/);
   }
 
@@ -688,9 +816,78 @@ describe('blocker kinds come from the server’s own field', () => {
     });
     press();
     await screen.findByText(/1 run checked/);
-    fireEvent.click(screen.getByRole('button', { name: 'Check Run 1 in detail' }));
+    pressDetail();
     await screen.findByText(/This run has no open questions/);
     expect(document.querySelector('.vr-kinds')).toBeNull();
+  });
+});
+
+// --- 6b. a disagreement is reported as an observation, with no cause named ----
+
+/*
+ * `UnitDetail` compares its own `official` verdict with the summary's and says
+ * when they differ. THAT COMPARISON IS SUPPORTED; A CAUSE FOR IT IS NOT. The copy
+ * used to read "so this run changed after the summary was taken", which is one
+ * explanation among several — an edit to the RECORD moves the verdict while that
+ * sentence blames the run, and a transient artifact read failure flips a unit to
+ * `unavailable` with nothing having changed at all. There was NO test here; the
+ * over-claim shipped unguarded.
+ */
+describe('a check that disagrees with the summary reports the disagreement, not a cause', () => {
+  async function renderDisagreement(official: ApiRunCheckResponse['official']) {
+    mount({
+      // The summary says this run passed.
+      [`POST ${P('/validate')}`]: { body: validateBody([verdict({ ok: true })]) },
+      [`GET ${P('/warnings')}`]: { body: warningsBody() },
+      [`GET ${P('/evidence-classification')}`]: { body: NO_CLASSIFICATION },
+      // Its own check says otherwise.
+      [`POST ${P('/runs/RUN-1/check')}`]: { body: checkBody({ official }) },
+    });
+    press();
+    await screen.findByText(/1 run checked/);
+    pressDetail();
+    return await screen.findByText(/do not agree/);
+  }
+
+  it('states that the two checks do not agree, and names no cause', async () => {
+    const line = await renderDisagreement({
+      ok: false,
+      errors: [{ path: 'sample', message: "'material' is a required property" }],
+      dry_run: true,
+    });
+    const text = line.textContent ?? '';
+    expect(text).toContain('do not agree');
+    expect(text).toContain('cannot say why');
+    // The three over-claims, each asserted absent by its own words.
+    expect(text).not.toContain('this run changed after the summary');
+    expect(text).not.toMatch(/can only mean/);
+    expect(text).not.toMatch(/so this run changed/);
+    // It still tells the reader the one thing they can do about it.
+    expect(text).toContain('again for a current summary');
+  });
+
+  it('says the same thing when the flip is to “no verdict”, where nothing need have changed', async () => {
+    // A transient artifact read failure produces exactly this: the per-run check
+    // comes back `unavailable` against a summary that had a verdict. Nothing about
+    // the run moved, so a sentence claiming it did would be false here.
+    const line = await renderDisagreement({ ok: false, unavailable: true, errors: [], dry_run: false });
+    expect(line.textContent).toContain('cannot say why');
+    expect(line.textContent).not.toContain('this run changed after the summary');
+  });
+
+  it('THE POLARITY TWIN — two checks that agree render no disagreement line at all', async () => {
+    mount({
+      [`POST ${P('/validate')}`]: { body: validateBody([verdict({ ok: true })]) },
+      [`GET ${P('/warnings')}`]: { body: warningsBody() },
+      [`GET ${P('/evidence-classification')}`]: { body: NO_CLASSIFICATION },
+      [`POST ${P('/runs/RUN-1/check')}`]: { body: checkBody() },
+    });
+    press();
+    await screen.findByText(/1 run checked/);
+    pressDetail();
+    await screen.findByText(/This run has no open questions/);
+    expect(document.querySelector('.vr-detail-disagree')).toBeNull();
+    expect(screen.queryByText(/do not agree/)).toBeNull();
   });
 });
 
@@ -781,36 +978,188 @@ describe('headings, live region and severity without colour', () => {
     });
     press();
     await screen.findByText(/2 runs checked/);
-    expect(screen.getByRole('button', { name: 'Check Run 1 in detail' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Check Run 2 in detail' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: detailName.idle('Run 1') })).toBeTruthy();
+    expect(screen.getByRole('button', { name: detailName.idle('Run 2') })).toBeTruthy();
+  });
+
+  /*
+   * WCAG 2.5.3, LABEL IN NAME — asserted in every state the button has, because
+   * the defect this replaces was not a missing name but a STALE one: a fixed
+   * `Check {label} in detail` stayed on the button after it re-labelled itself
+   * "Check This Run Again", so speech input saying the printed words missed, and
+   * a screen reader announced a press that had already happened.
+   *
+   * The assertion is deliberately written as "the accessible name CONTAINS the
+   * visible text" rather than as a literal string comparison, so it keeps testing
+   * the rule and not this particular wording.
+   */
+  it('the detail button’s accessible name contains its visible label, in all three states', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mount({
+      [`POST ${P('/validate')}`]: { body: validateBody([verdict()]) },
+      [`GET ${P('/warnings')}`]: { body: warningsBody() },
+      [`GET ${P('/evidence-classification')}`]: { body: NO_CLASSIFICATION },
+      // A whole-route thunk, held open so the third state — "Checking…" — is
+      // observable at all. It is the state a reader is most likely to be sitting
+      // in when they ask their screen reader what the focused control is.
+      [`POST ${P('/runs/RUN-1/check')}`]: async () => {
+        await held;
+        return { body: checkBody() };
+      },
+    });
+    press();
+    await screen.findByText(/1 run checked/);
+
+    const nameContainsLabel = () => {
+      const button = unitEl('RUN-1').querySelector('button')!;
+      const visible = (button.textContent ?? '').trim();
+      const accessible = button.getAttribute('aria-label') ?? '';
+      expect(visible).not.toBe('');
+      expect(accessible).toContain(visible);
+      // And it still says WHICH run, which is why an `aria-label` is here at all.
+      expect(accessible).toContain('Run 1');
+      return visible;
+    };
+
+    expect(nameContainsLabel()).toBe('Check This Run In Detail');
+    pressDetail();
+    await waitFor(() => expect(nameContainsLabel()).toBe('Checking…'));
+    release();
+    await waitFor(() => expect(nameContainsLabel()).toBe('Check This Run Again'));
   });
 });
 
 // --- 8. a record with no runs is one unit, and is not given an invented run ---
 
 describe('a record with no runs', () => {
-  it('is checked as one unit, with no per-run detail offered', async () => {
-    mount({
-      [`POST ${P('/validate')}`]: {
-        body: {
-          ok: true,
-          errors: [],
-          schema: 'ISAAC v1.05',
-          dry_run: true,
-        } satisfies ApiValidateResult,
+  /** `post_validate`'s non-fan-out branch: one verdict, and no `runs` key at all. */
+  const NO_RUNS_VALIDATE = {
+    ok: true,
+    errors: [],
+    schema: 'ISAAC v1.05',
+    dry_run: true,
+  } satisfies ApiValidateResult;
+
+  /**
+   * `_warnings_payload`'s non-fan-out shape, WITH ADVICE IN IT.
+   *
+   * The two codes are the ones the five canonical seed records actually produce
+   * — `NO_LINKS` and `NO_MEASUREMENT_SERIES` — and the missing `runs` key is the
+   * whole point of the fixture: on this shape there is no per-unit entry, so
+   * `adviceFor` can attribute nothing, while the server plainly did report
+   * advisory warnings. An `warnings: []` fixture cannot show the difference,
+   * which is why the original test could not catch what this one does.
+   */
+  const NO_RUNS_WARNINGS: ApiWarningsResponse = {
+    advisory: true,
+    gating: false,
+    warnings: [
+      { code: 'NO_LINKS', where: 'links', message: 'This record declares no links.' },
+      {
+        code: 'NO_MEASUREMENT_SERIES',
+        where: 'measurement',
+        message: 'This record declares no measurement series.',
       },
-      [`GET ${P('/warnings')}`]: { body: { advisory: true, gating: false, warnings: [] } },
+    ],
+    dry_run: true,
+  };
+
+  async function renderNoRuns(warnings: ApiWarningsResponse) {
+    mount({
+      [`POST ${P('/validate')}`]: { body: NO_RUNS_VALIDATE },
+      [`GET ${P('/warnings')}`]: { body: warnings },
       [`GET ${P('/evidence-classification')}`]: { body: NO_CLASSIFICATION },
     });
     press();
     await screen.findByText(/1 record checked/);
+    return document.querySelector('.vr-unit') as HTMLElement;
+  }
+
+  it('is checked as one unit, with no per-run detail offered', async () => {
+    const unit = await renderNoRuns({ advisory: true, gating: false, warnings: [] });
     expect(screen.getByText('This record')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /in detail/ })).toBeNull();
-    expect(document.querySelector('.vr-unit-counts')!.textContent).toContain(
+    expect(screen.queryByRole('button', { name: /detail/i })).toBeNull();
+    expect(unit.querySelector('.vr-unit-counts')!.textContent).toContain(
       'no per-run detail to check',
     );
-    // No `null` was interpolated into a label or an id line.
-    expect(document.body.textContent).not.toContain('null');
+    /*
+     * NO `null` WAS INTERPOLATED INTO A LABEL OR AN ID LINE — asserted
+     * structurally, because the old form (`document.body.textContent` does not
+     * contain the substring "null") passes on almost any DOM and so could not
+     * fail for the reason it was written. With no run id and no per-unit record
+     * id there is no id line to render AT ALL, and the label is a real phrase.
+     */
+    expect(unit.querySelector('.vr-unit-ids')).toBeNull();
+    expect(unit.querySelector('.vr-unit-label')!.textContent).toBe('This record');
+    expect(unit.textContent).not.toMatch(/\bnull\b/);
+  });
+
+  /*
+   * THE FALSE AFFIRMATIVE ZERO. `_warnings_payload` sends no `runs` key here, and
+   * `reviewUnits` gives the synthesized unit a null `record_id`, so `adviceFor`
+   * returns `undefined` — correctly, because the top-level list is an aggregate
+   * over units and attributing it to one unit is a claim the response does not
+   * make. What was WRONG was rendering that refusal as `0 advisory notes`: on
+   * every record a scientist can currently open (all five seeds have no runs and
+   * one or two real advisory warnings each) the screen asserted zero while the
+   * server had reported some.
+   *
+   * The last two expectations are the NEGATIVE CONTROL: restore
+   * `count(adviceCount ?? 0, 'advisory note')` in `unitCounts` and they fail.
+   */
+  it('does NOT claim zero advisory notes when the server reported some it cannot attribute', async () => {
+    const unit = await renderNoRuns(NO_RUNS_WARNINGS);
+    const counts = unit.querySelector('.vr-unit-counts')!.textContent ?? '';
+    expect(counts).toContain('not attributable to this unit');
+    expect(counts).toContain('not the same as none');
+    expect(counts).not.toContain('0 advisory note');
+    expect(document.body.textContent).not.toContain('0 advisory notes');
+  });
+
+  /*
+   * ...AND IT DOES NOT INVENT A NUMBER EITHER. Refusing to attribute is not the
+   * same as adopting the aggregate: the two top-level warnings above must not
+   * reappear as "2 advisory notes" on the one unit, and neither warning's text
+   * may be rendered under it as though the server had placed it there.
+   */
+  it('does not adopt the record-level aggregate as this unit’s own advice', async () => {
+    const unit = await renderNoRuns(NO_RUNS_WARNINGS);
+    expect(unit.querySelector('.vr-unit-counts')!.textContent).not.toContain('2 advisory notes');
+    expect(unit.querySelector('.vr-advisory')).toBeNull();
+    expect(unit.textContent).not.toContain('NO_LINKS');
+  });
+
+  /*
+   * THE POLARITY TWIN, and the reason the coverage clause is not simply always
+   * printed: where the server DOES attribute advice to a unit, a real count is
+   * rendered and the coverage clause is absent.
+   */
+  it('a unit the server DID attribute advice to gets a number, not the coverage clause', async () => {
+    mount({
+      [`POST ${P('/validate')}`]: { body: validateBody([verdict()]) },
+      [`GET ${P('/warnings')}`]: {
+        body: warningsBody([
+          {
+            run_id: 'RUN-1',
+            run_label: 'Run 1',
+            record_id: 'REC-1',
+            warnings: [
+              { code: 'NO_LINKS', where: 'links', message: 'This record declares no links.' },
+            ],
+            dry_run: true,
+          },
+        ]),
+      },
+      [`GET ${P('/evidence-classification')}`]: { body: NO_CLASSIFICATION },
+    });
+    press();
+    await screen.findByText(/1 run checked/);
+    const counts = unitEl('RUN-1').querySelector('.vr-unit-counts')!.textContent ?? '';
+    expect(counts).toContain('1 advisory note');
+    expect(counts).not.toContain('not attributable');
   });
 });
 
@@ -826,7 +1175,7 @@ describe('read-only', () => {
     });
     press();
     await screen.findByText(/1 run checked/);
-    fireEvent.click(screen.getByRole('button', { name: 'Check Run 1 in detail' }));
+    pressDetail();
     await screen.findByText(/This run has no open questions/);
     expect(calls).toEqual([
       `POST ${P('/validate')}`,

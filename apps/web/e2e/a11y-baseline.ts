@@ -618,6 +618,21 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * Uniform +1 at all seven viewports, no new rule, no other page moved. Linux
        * measured from this branch's CI run, read line by line; darwin inferred by the
        * same DOM-node argument as the settings block above.
+       *
+       * ── THE +1 IS IDLE-STATE ONLY, AND UNDERSTATES THIS FEATURE'S REAL DEBT ──
+       *
+       * The scan never presses the Validate & Review button. It renders the section,
+       * reads the idle state, and moves on — so `.vr-sub` is the ONLY node of this
+       * feature axe has ever seen. Every `--text-tertiary` node the feature paints
+       * AFTER a check is unscanned and uncounted: `.vr-note` (two of them),
+       * `.vr-unit-ids`, `.vr-unit-subject`, `.vr-kinds`, `.vr-attention-note` and
+       * `.vr-state-unavailable`, plus one instance per run of the per-unit ones.
+       *
+       * So `+1` is not this feature's contrast cost; it is the part of it a
+       * button-press-free scan can reach. The number is left as measured — inventing
+       * an unmeasured total would be worse than an honest partial one — but do NOT
+       * read it as "Validate & Review adds one contrast node". Measuring the rest
+       * needs a scan that drives the button, which is its own slice.
        */
       'record-detail@desktop-1280x800': 15,
       'record-detail@laptop-1024x768': 15,
