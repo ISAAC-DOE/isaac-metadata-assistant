@@ -878,6 +878,71 @@ jobs:
             echo "::error::the run count is 0, so this assertion proved nothing"; exit 1; }
           echo "isaac_runs: $runs row(s), exactly the runs the application holds"
 
+      # THE STAGE-1 PARITY ORACLE — the same property as the block above, but as a
+      # SUITE rather than as a script, and driven from pytest so a failure names a
+      # scenario instead of a line number in a heredoc.
+      #
+      # WHY IT IS A SEPARATE STEP AND A SEPARATE FILE. The step above proves the
+      # shadow write works on the happy path, inline, while doing several other
+      # things. `apps/api/tests/test_run_row_parity.py` asserts ONE property —
+      # "the rows of isaac_runs for an experiment ARE exp.sorted_runs()" — across
+      # the shapes that can break it independently: zero through two hundred runs,
+      # an inherited address (which must be ABSENT from the row, because absence
+      # is the inheritance), an override and its displaced payload, a versioned
+      # save, a reorder, a later arrival, a pod restart, a LOST compare-and-swap,
+      # a legacy `experiment_id: ""` document, an unversioned save, and the
+      # byte-identical re-save. It also contains its own NEGATIVE CONTROLS: two
+      # tests mutate a row out of band and assert the oracle goes RED, because a
+      # control suite that can only go green is not evidence.
+      #
+      # THE ONE PYTEST FILE, DELIBERATELY. Running the whole backend suite with
+      # `PGHOST` set would silently move dozens of tests off the filesystem
+      # repository they are written for — the `test` job's own "assert this job has
+      # NO database" step exists to stop exactly that. So this runs one file, by
+      # path, and nothing else.
+      #
+      # `ISAAC_REQUIRE_REAL_ENGINE_PARITY=1` IS THE POINT OF THE STEP. Every test
+      # in that file SKIPS without a reachable, migrated database — which is the
+      # honest behaviour on a developer machine, and would be a silent hole here.
+      # With the variable set, the file's first test FAILS instead of skipping if
+      # the engine is unusable, so "the suite quietly did not run" is a red build.
+      #
+      # NO TEST ORDER IS ASSUMED, and no ordering plugin is installed or needed:
+      # every test creates its own experiments and asserts only about rows it owns.
+      # The two that snapshot the WHOLE table do so to assert that nothing ELSE
+      # moved, which is true whatever ran before them — including the rows the step
+      # above left behind, which is a stronger starting state than an empty table.
+      #
+      # NO HOSTED DATABASE IS INVOLVED. This is the same throwaway service container
+      # every other step in this job uses.
+      - name: Run the Stage-1 run-row parity oracle against the real engine
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-parity
+          ISAAC_REQUIRE_REAL_ENGINE_PARITY: "1"
+        run: |
+          set -euo pipefail
+          # ONE RUN, tee'd — not two. A second invocation would double the rows this
+          # step writes and would make "the first run left the database in a state
+          # the second one needs" a possible failure mode for no benefit.
+          # `pipefail` is set, so a failing pytest still fails the step through tee.
+          pytest apps/api/tests/test_run_row_parity.py -q -rs | tee /tmp/parity.log
+          # A SKIP IS NOT A PASS, AND pytest EXITS 0 ON A FULLY SKIPPED FILE. The
+          # guard test inside the suite turns an unreachable engine into a failure,
+          # but it cannot catch a future edit that skips for some other reason — so
+          # the skip count is read back off the run that already happened.
+          skipped=$(grep -Eo '[0-9]+ skipped' /tmp/parity.log | grep -Eo '^[0-9]+' || true)
+          [ -z "$skipped" ] || {
+            echo "::error::$skipped parity test(s) SKIPPED against a real engine."
+            echo "::error::A skipped oracle is not a passing oracle."
+            exit 1; }
+          # ...and the converse: the file must not have quietly become empty.
+          passed=$(grep -Eo '[0-9]+ passed' /tmp/parity.log | grep -Eo '^[0-9]+' || echo 0)
+          [ "$passed" -ge 20 ] || {
+            echo "::error::only $passed parity test(s) ran; the oracle has lost coverage"
+            exit 1; }
+          echo "parity oracle: $passed scenarios ran against the real engine, none skipped"
+          rm -rf /tmp/isaac-pg-parity
+
       # THE SAME DIGEST, TAKEN AFTER THE APPLICATION HAS ACTUALLY RUN.
       #
       # The step above already proved the MIGRATION does not touch `records`. That
