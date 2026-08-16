@@ -56,6 +56,47 @@ recognised binding name whose scope list contains a string that is not a
 :class:`~.policy.Scope` does not fall back to "grant what we understood" — it
 falls back to granting nothing, because ``isaac:submit`` in a scope list must not
 quietly become a working read-only server that somebody then trusts.
+
+THE BINDING ALSO DECIDES WHETHER A TRANSPORT EXISTS AT ALL
+==========================================================
+Since the Streamable HTTP transport landed (``transport.py``) a binding answers
+two further questions, and both are **declared by the binding rather than
+inferred from its class**, because an ``isinstance`` check is what silently
+admits the next binding somebody adds:
+
+* :attr:`serves_transport` — may a route be mounted for this binding? The
+  application reads this at construction and, when it is false, **registers no
+  route at all**. Not a route that refuses: an absent route. A 403 from a mounted
+  path still advertises that ISAAC speaks MCP and still invites somebody to go
+  looking for the credential that would open it.
+* :attr:`requires_loopback_peer` — must the request's own socket peer be a
+  loopback address? True for :data:`LOCAL_LOOPBACK`, which is the whole content
+  of the name.
+
+Both are read through ``getattr`` with the **safe** value as the default
+(``False`` and ``True`` respectively), so a binding that forgets to declare them
+serves nothing and, if it somehow serves, serves only itself.
+
+``requires_loopback_peer`` CONTROLS MORE THAN ITS NAME SAYS
+===========================================================
+Read this before writing the binding that answers D2. In ``transport.py`` this
+single flag gates **three** distinct refusals, not one:
+
+1. the **socket-peer check** — the one the name describes;
+2. the **proxy-header refusal** — any of :data:`~.transport.PROXY_HEADERS`
+   present means the loopback peer is a relay, not the caller;
+3. the **cross-origin refusal** — an ``Origin`` outside loopback, which is the
+   DNS-rebinding defence the MCP specification requires of a local server.
+
+The consequence is the reason this note exists. An ``edge-issued-bearer`` binding
+legitimately receives traffic *through the Authentik edge*, so its author will
+set ``requires_loopback_peer=False`` — and will thereby switch off the proxy and
+origin defences too, on the one binding in this design that is
+internet-adjacent. **That is not the intent of setting this flag and must not be
+allowed to happen silently.** Until the flag is split into three (a deliberate
+FOLLOW-UP, not this slice), treat it as "all three local-server defences", and
+whoever splits it should give the new binding explicit answers for 2 and 3
+rather than inheriting ``False`` for them.
 """
 
 from __future__ import annotations
@@ -89,9 +130,17 @@ LOCAL_SESSION_ENV = "ISAAC_MCP_LOCAL_TUTORIAL_SESSION"
 #: The default, and the honest one.
 UNCONFIGURED = "unconfigured"
 
-#: In-process development and automated tests. There is no network transport in
-#: this package at all — see ``server.py`` — so this binding cannot be reached
-#: from off the machine no matter how the variable is set.
+#: In-process development and automated tests, and — since ``transport.py`` — a
+#: Streamable HTTP endpoint that accepts **loopback peers only**.
+#:
+#: The older comment here said "there is no network transport in this package at
+#: all … so this binding cannot be reached from off the machine no matter how the
+#: variable is set". That was true and is now false, and it is corrected rather
+#: than deleted because the guarantee it stated still has to hold — it is simply
+#: held by a different mechanism. The mechanism is now
+#: :attr:`LocalLoopbackDeployment.requires_loopback_peer`, enforced per request
+#: against the socket peer address in ``transport.py``, and pinned by
+#: ``test_mcp_transport.py``.
 LOCAL_LOOPBACK = "local-loopback"
 
 #: Names held for the two answers D2 could take. NOT REGISTERED: selecting one
@@ -145,6 +194,24 @@ class Principal:
     def permits(self, scope: Scope) -> bool:
         return scope in self.scopes
 
+    def missing(self, required: frozenset[Scope]) -> frozenset[Scope]:
+        """The required scopes this principal was NOT granted.
+
+        Set difference rather than a loop with an early ``return True``, because
+        the refusal must be able to name *every* scope that was missing. A caller
+        told only the first one re-requests a grant that is still insufficient.
+        """
+        return frozenset(required) - self.scopes
+
+    def permits_all(self, required: frozenset[Scope]) -> bool:
+        """Whether every scope in ``required`` was granted.
+
+        ``all`` over the set, NOT ``required & self.scopes`` — an intersection is
+        non-empty as soon as *one* scope matches, which is exactly how a tool
+        costing two scopes would become reachable by a caller holding one.
+        """
+        return not self.missing(required)
+
 
 class DeploymentRefused(Exception):
     """The deployment boundary refused. Carries a machine-readable reason.
@@ -172,6 +239,19 @@ class DeploymentBinding(Protocol):
     """
 
     name: str
+    #: May the application mount an HTTP transport for this binding? See the
+    #: module docstring: false means NO ROUTE IS REGISTERED, not a route that
+    #: refuses.
+    serves_transport: bool
+    #: Must the request's own socket peer be a loopback address? Read with a
+    #: default of ``True`` wherever it is consulted, so forgetting it narrows
+    #: rather than widens.
+    #:
+    #: **It also gates two guards the name does not mention** — the proxy-header
+    #: refusal and the cross-origin/DNS-rebinding refusal. See the module
+    #: docstring section "``requires_loopback_peer`` controls more than its name
+    #: says" before setting this ``False`` on a new binding.
+    requires_loopback_peer: bool
 
     def authenticate(self, credential: Credential | None) -> Principal:
         """The caller's principal, or raise :class:`DeploymentRefused`."""
@@ -204,6 +284,16 @@ class UnconfiguredDeployment:
     supplied: str | None = None
     #: Why this binding was chosen over a working one.
     reason: str = "unset"
+    #: **The default deployment mounts nothing.** There is no configuration of
+    #: this object that flips it: the field is not read from the environment and
+    #: the class is frozen. Turning the transport on means resolving to a
+    #: different binding, which means implementing one for whichever answer D1
+    #: and D2 receive.
+    serves_transport: bool = False
+    #: Vacuous while :attr:`serves_transport` is false, and set to the safe value
+    #: anyway so that a future edit which mounts this binding by mistake still
+    #: refuses every non-loopback peer.
+    requires_loopback_peer: bool = True
 
     def authenticate(self, credential: Credential | None) -> Principal:
         raise DeploymentRefused(
@@ -263,15 +353,29 @@ class UnconfiguredDeployment:
 
 @dataclass(frozen=True)
 class LocalLoopbackDeployment:
-    """In-process development and automated tests. Authenticates nobody.
+    """Local development and automated tests. Authenticates nobody, serves loopback.
 
-    IT IS NOT A BYPASS OF ANYTHING, and the reason is structural rather than a
-    promise: this package registers no HTTP route and opens no socket, so the only
-    way to deliver a JSON-RPC message to :class:`~.server.McpServer` is to hold a
-    reference to it in the same Python process. ``test_mcp_boundaries.py`` asserts
-    that the FastAPI application exposes no MCP path, so this binding cannot be
-    reached from off the machine even if the environment variable is set in a
-    deployment.
+    **This docstring used to say the guarantee was structural — "this package
+    registers no HTTP route and opens no socket".** That stopped being true when
+    ``transport.py`` landed, and the honest replacement is not a weaker promise
+    but a differently-located one:
+
+    * the route exists **only** when this binding is the resolved one, because
+      :attr:`serves_transport` is what the application consults, and the default
+      binding sets it ``False``;
+    * every request is refused unless its **socket peer** is a loopback address
+      (:attr:`requires_loopback_peer`), checked against ``scope["client"]`` and
+      never against a forwarded header, which any caller can write;
+    * a request carrying a proxy header at all is refused, because the peer being
+      loopback then says nothing about who originated the request.
+
+    The residual limit, stated rather than glossed: this refuses non-loopback
+    *peers*. It cannot stop a reverse proxy running on the same host from
+    relaying a remote caller whose forwarded headers it strips. Loopback binding
+    of the listening socket is the operator's half of that (``--host 127.0.0.1``),
+    and it is documented in ``docs/mcp-local-transport.md`` as the operator's
+    half — an application cannot enforce what address a process it does not own
+    chose to bind.
 
     It **refuses a credential** rather than accepting one. Accepting a token it
     cannot validate would let somebody point a real client at it and believe an
@@ -284,6 +388,10 @@ class LocalLoopbackDeployment:
     scopes: frozenset[Scope] = field(default_factory=lambda: frozenset({Scope.READ}))
     tutorial_session_id: str | None = None
     name: str = LOCAL_LOOPBACK
+    #: The one binding in this build that serves a transport.
+    serves_transport: bool = True
+    #: The name is the contract, and this is where the name is kept.
+    requires_loopback_peer: bool = True
 
     def authenticate(self, credential: Credential | None) -> Principal:
         if credential is not None:

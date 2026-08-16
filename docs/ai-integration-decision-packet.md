@@ -831,11 +831,28 @@ configuration`**, naming the specific missing item.
 - For voice, the equivalent is D6-of-the-spec: **with no provider configured the recorder is not
   offered at all — not offered-and-broken** (`…-capture-data-contract.md:432-433`).
 
-**Measured, and it is a gap worth naming honestly:** the string `Requires organization
+~~**Measured, and it is a gap worth naming honestly:** the string `Requires organization
 configuration` and the label `Connect Your Agent` currently exist **only in documents**.
 `rg --text -n -i -e 'Requires organization configuration' -e 'Connect Your Agent' apps/web/src apps/api src`
 → **exit 1, zero matches.** So the truthful display state is **specified, not implemented.** A
-reader must not mistake this section for a description of a shipped screen.
+reader must not mistake this section for a description of a shipped screen.~~
+
+**SUPERSEDED 2026-08-16 — the display state is now IMPLEMENTED**, and the measurement above is kept
+struck through in place rather than rewritten, because it was true when it was taken and a reader
+should be able to see that this changed rather than find a document that was always right.
+
+Settings gained a seventh tab, **Connect Your Agent** (`?tab=mcp`), whose status banner reads
+`Requires organization configuration` — derived from `MCP_ENDPOINT === null`, not hard-coded as a
+label. Re-run at this commit, the same command now reports **exit 0, 9 files**:
+`lib/mcpConnectContent.ts`, `screens/settings/ConnectYourAgent.tsx`, `screens/SettingsPage.tsx`,
+`lib/routes.ts`, `lib/settingsContent.ts` and four `__tests__/` files.
+
+**What has NOT changed, and must not be read into this.** The tab is a *description* of the agent
+interface and an honest report that no agent can reach this deployment; **D1 and D2 are still
+deferred**, there is still no endpoint, no configured way to authenticate a caller, and nothing to
+revoke. §6.1's rule is not relaxed by being satisfied — it is now enforced by
+`__tests__/connect-your-agent.test.tsx`, which ratchets the bare word `connected` out of the tab's
+text *and* out of every attribute on it, in both endpoint branches.
 
 ### 6.2 External agents cannot submit — an invariant, not a default
 
@@ -890,7 +907,7 @@ of capability B, not a nicety.
 | `POST /api/uploads` refuses unconditionally; no form parsing possible | **IMPLEMENTED** | measured — `routes.py` `# --- 15. uploads (always blocked) ---`, `def uploads():` with no parameters; `pyproject.toml:23` has no `python-multipart` |
 | No browser-side secret; `VITE_API_KEY` seam removed and inverse pinned | **IMPLEMENTED** | measured — `api.ts:104`; `__tests__/api.test.ts:168-169` |
 | MCP server | **NOT IMPLEMENTED** — specified + audited only | measured — `rg … 'mcp'` over `apps/api apps/web/src src scripts pyproject.toml apps/web/package.json` → exit 1 |
-| `Requires organization configuration` display state | **NOT IMPLEMENTED** — specified only | measured — `rg …` over `apps/web/src apps/api src` → exit 1 |
+| `Requires organization configuration` display state | ~~**NOT IMPLEMENTED** — specified only~~ → **IMPLEMENTED 2026-08-16** as Settings → Connect Your Agent (`?tab=mcp`). It reports a state and offers no action; D1/D2 are still deferred and there is still no endpoint | measured — ~~`rg …` → exit 1~~; the same `rg` now → **exit 0, 9 files**. See §6.1's supersession note |
 | Native model-backed assistant | **NOT IMPLEMENTED.** A **production provider** remains out of scope by project rule and is **DEFERRED by Dean** (2026-08-12). **Implementation against a deterministic fake provider is authorized by the project owner** — see the head-of-document block; that authorization covers code, the provider abstraction and tests, and covers no real endpoint, credential or outbound call | measured (no provider, no outbound call site) + `CLAUDE.md:695-698` + owner decision 2026-08-12 |
 | Voice capture / recorder / ASR | **NOT IMPLEMENTED** — DECISION D6 specified only | measured — zero audio APIs in any source file |
 | Audio `source_type` | **NOT IMPLEMENTED**, and a **truth-core change** if pursued | measured — `models.py:29-37` (7, closed); 3 total maps + 2 enumerations |
@@ -923,7 +940,7 @@ is quoted it is **`rg`'s own**, not a pipeline's.
 | **M9** | Three total `Record<SourceType, …>` maps | `rg --text -n 'Record<SourceType' apps/web/src` → `EvidenceRow.tsx:5`, `icons.tsx:76`, `experimentGraph.ts:417` |
 | **M10** | Assistant catalog is exactly eight intents, plus `unsupported`/`ambiguous` | `assistant_query.py:67-74`, `:76-77` |
 | **M11** | No browser secret; inverse pinned with a planted key | `api.ts:104`; `__tests__/api.test.ts:168-169` |
-| **M12** | The truthful display strings exist only in documents | `rg --text -n -i -e 'Requires organization configuration' -e 'Connect Your Agent' apps/web/src apps/api src` → **exit 1** |
+| **M12** | ~~The truthful display strings exist only in documents~~ **SUPERSEDED 2026-08-16** — both strings are now in `apps/web/src`; the measurement stands as a record of `669b60c`, not of HEAD | `rg --text -n -i -e 'Requires organization configuration' -e 'Connect Your Agent' apps/web/src apps/api src` → **exit 1** *at `669b60c`*; **exit 0, 9 files** at HEAD. §6.1 carries the detail |
 | **M13** | The app currently tells users there is no language model | `settingsContent.ts:580`, `:587`, `:546` |
 | **M14** | `CLAUDE.md:775` still lands on "upload writes — NOT authorized" | re-read at this commit |
 | **M15** | `CLAUDE.md:695-698` is the "external model provider / LLM" prohibition | re-read at this commit |

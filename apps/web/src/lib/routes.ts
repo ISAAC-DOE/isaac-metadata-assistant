@@ -21,7 +21,22 @@ export const SETTINGS_TAB_PARAM = 'tab';
  * deep-linkable (`/settings?tab=help`) by exactly the same mechanism, and the
  * walkthrough's own last step links to it rather than describing where to find it.
  */
-export const SETTINGS_TAB_IDS = ['overview', 'privacy', 'about', 'api', 'explorer', 'help'] as const;
+/*
+ * `mcp` is Connect Your Agent — the surface that describes ISAAC's agent
+ * (machine-callable tool) interface to a human. It sits with the other two
+ * "reaching this build as a program" tabs rather than at the end, because it
+ * reports state like the five before it and offers no action; `help` stays last
+ * for the reason given above.
+ */
+export const SETTINGS_TAB_IDS = [
+  'overview',
+  'privacy',
+  'about',
+  'api',
+  'explorer',
+  'mcp',
+  'help',
+] as const;
 
 export type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 
@@ -92,6 +107,34 @@ export function isRecordView(value: string | null | undefined): value is RecordV
  * empty value simply means "not focused", so there is no dead route.
  */
 export const RECORD_RUN_PARAM = 'run';
+
+/**
+ * The Evidence screen's two VIEWS — the evidence LIST (the trail rail, the
+ * classification, the reconciliation and the source preview, exactly as they
+ * were) and the evidence GRAPH.
+ *
+ * The SAME `?view=` mechanism, deliberately reusing `RECORD_VIEW_PARAM`'s name
+ * rather than minting a second one: the two screens are different routes, so
+ * `?view=` cannot collide, and a scientist who has learned what `?view=` means
+ * on the record screen has learned it here too.
+ *
+ * `list` is the fallback for anything unrecognised, so an old bookmark to
+ * `/record/<id>/evidence` lands on precisely the screen it always did — the
+ * addition is not allowed to move anyone's existing entry point.
+ *
+ * The FOCUS RUN param above is read on this screen too: `?view=graph&run=<id>`
+ * opens the graph anchored on one run. An id naming no LOADED run is stated
+ * rather than guessed (see `buildEvidenceGraph` step 7).
+ */
+export const EVIDENCE_VIEW_PARAM = RECORD_VIEW_PARAM;
+
+export const EVIDENCE_VIEW_IDS = ['list', 'graph'] as const;
+
+export type EvidenceViewId = (typeof EVIDENCE_VIEW_IDS)[number];
+
+export function isEvidenceView(value: string | null | undefined): value is EvidenceViewId {
+  return EVIDENCE_VIEW_IDS.includes(value as EvidenceViewId);
+}
 
 /**
  * COMPARE RUNS — the record screen's "show me these two runs against each other"
@@ -191,6 +234,12 @@ export const ROUTES = {
       .join('&')}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,
+  /** A deep link to ONE Evidence view, e.g. `/record/<id>/evidence?view=graph`.
+   *  Same division of labour as `recordView`: whole-URL links use this, while
+   *  the screen itself switches views by copying its own `URLSearchParams` so
+   *  a `?run=` focus survives the switch. */
+  evidenceView: (id: string, view: EvidenceViewId) =>
+    `/record/${id}/evidence?${EVIDENCE_VIEW_PARAM}=${view}`,
   export: (id: string) => `/record/${id}/export`,
 } as const;
 

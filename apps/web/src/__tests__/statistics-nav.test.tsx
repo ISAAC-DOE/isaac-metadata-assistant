@@ -202,14 +202,20 @@ describe('the Settings destination reads "Settings & API"', () => {
     renderAt(ROUTES.settings);
 
     expect(await screen.findByText('About This Build')).toBeInTheDocument();
-    // R0 appended a sixth tab, Help & Tutorial. The five that were here are
-    // unchanged in label and in order, which is what this guard is for.
+    /* R0 appended Help & Tutorial, and Connect Your Agent was later inserted
+       before it. The FIVE tabs this guard was written for are unchanged in
+       label and in order, which is the whole point of it: this test belongs to
+       the `Settings & API` rename slice and exists to catch that rename
+       reaching the tab strip. Tabs added afterwards are listed here so the
+       assertion stays an equality — a weaker `toContain` would stop catching a
+       rename of the five, which is the one thing it is here to catch. */
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
       'Overview',
       'Data & Privacy',
       'About',
       'API Access',
       'Endpoint Explorer',
+      'Connect Your Agent',
       'Help & Tutorial',
     ]);
   });

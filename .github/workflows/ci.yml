@@ -888,6 +888,110 @@ jobs:
             echo "::error::the run count is 0, so this assertion proved nothing"; exit 1; }
           echo "isaac_runs: $runs row(s), exactly the runs the application holds"
 
+      # THE STAGE-1 PARITY ORACLE — the same property as the block above, but as a
+      # SUITE rather than as a script, and driven from pytest so a failure names a
+      # scenario instead of a line number in a heredoc.
+      #
+      # WHY IT IS A SEPARATE STEP AND A SEPARATE FILE. The step above proves the
+      # shadow write works on the happy path, inline, while doing several other
+      # things. `apps/api/tests/test_run_row_parity.py` asserts ONE property —
+      # "the rows of isaac_runs for an experiment ARE exp.sorted_runs()" — across
+      # the shapes that can break it independently: one through two hundred runs
+      # (and separately, an experiment that never had one),
+      # an inherited address (which must be ABSENT from the row, because absence
+      # is the inheritance), an override and its displaced payload, a versioned
+      # save, a reorder, a later arrival, a pod restart, a LOST compare-and-swap,
+      # a legacy `experiment_id: ""` document, an unversioned save, and the
+      # byte-identical re-save. It also contains its own NEGATIVE CONTROLS: two
+      # tests mutate a row out of band and assert the oracle goes RED, because a
+      # control suite that can only go green is not evidence.
+      #
+      # THE ONE PYTEST FILE, DELIBERATELY. Running the whole backend suite with
+      # `PGHOST` set would silently move dozens of tests off the filesystem
+      # repository they are written for — the `test` job's own "assert this job has
+      # NO database" step exists to stop exactly that. So this runs one file, by
+      # path, and nothing else.
+      #
+      # TWO VARIABLES, AND THEY MEAN DIFFERENT THINGS. Both are set below.
+      #
+      #   * `ISAAC_RUN_REAL_ENGINE_PARITY=1` is CONSENT TO CONNECT. Without it the
+      #     suite opens nothing — not even at collection. It exists because that
+      #     file WRITES (~25 experiments, their run rows, an out-of-band UPDATE, a
+      #     DELETE and a jsonb_set tamper, with no teardown) and its only previous
+      #     gates were "is PGHOST set" and "is PGDATABASE `metadata_assistant`" —
+      #     and the second is not a discriminator, because that is the HOSTED
+      #     database's own name, which this service container is deliberately
+      #     configured to match. `pyproject.toml`'s testpaths includes
+      #     `apps/api/tests`, so anyone holding the `kubectl port-forward` that
+      #     `docs/postgres-test-db-guide.md:83-96` documents as a supported
+      #     convenience would have had a plain `pytest` write all of that into the
+      #     owner's production-derived database. It mirrors
+      #     `db_recon.OPT_IN_ENV` ("this entry point never runs by accident"),
+      #     which guards a module that only READS.
+      #   * `ISAAC_REQUIRE_REAL_ENGINE_PARITY=1` IS THE POINT OF THE STEP. Every
+      #     test in that file SKIPS without a reachable, migrated database — which
+      #     is the honest behaviour on a developer machine, and would be a silent
+      #     hole here. With the variable set, the file's first test FAILS instead
+      #     of skipping if the engine is unusable, so "the suite quietly did not
+      #     run" is a red build. Setting it WITHOUT the opt-in is also a red build,
+      #     and the failure names the missing variable.
+      #
+      # The suite additionally requires PGHOST to be a loopback target, which
+      # `127.0.0.1` above satisfies. That is defence in depth against a HOSTNAME
+      # target only — a port-forward is on `localhost` and passes it — so it is the
+      # opt-in, not the loopback check, that closes the accident above.
+      #
+      # NO TEST ORDER IS ASSUMED, and no ordering plugin is installed or needed:
+      # every test creates its own experiments and asserts only about rows it owns.
+      # The two that snapshot the WHOLE table do so to assert that nothing ELSE
+      # moved, which is true whatever ran before them — including the rows the step
+      # above left behind, which is a stronger starting state than an empty table.
+      #
+      # NO HOSTED DATABASE IS INVOLVED. This is the same throwaway service container
+      # every other step in this job uses.
+      - name: Run the Stage-1 run-row parity oracle against the real engine
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-parity
+          ISAAC_RUN_REAL_ENGINE_PARITY: "1"
+          ISAAC_REQUIRE_REAL_ENGINE_PARITY: "1"
+        run: |
+          set -euo pipefail
+          # ONE RUN, tee'd — not two. A second invocation would double the rows this
+          # step writes and would make "the first run left the database in a state
+          # the second one needs" a possible failure mode for no benefit.
+          # `pipefail` is set, so a failing pytest still fails the step through tee.
+          pytest apps/api/tests/test_run_row_parity.py -q -rs | tee /tmp/parity.log
+          # A SKIP IS NOT A PASS, AND pytest EXITS 0 ON A FULLY SKIPPED FILE. The
+          # guard test inside the suite turns an unreachable engine into a failure,
+          # but it cannot catch a future edit that skips for some other reason — so
+          # the skip count is read back off the run that already happened.
+          skipped=$(grep -Eo '[0-9]+ skipped' /tmp/parity.log | grep -Eo '^[0-9]+' || true)
+          [ -z "$skipped" ] || {
+            echo "::error::$skipped parity test(s) SKIPPED against a real engine."
+            echo "::error::A skipped oracle is not a passing oracle."
+            exit 1; }
+          # ...and the converse: the file must not have quietly lost scenarios.
+          #
+          # THE NUMBER IS THE MEASURED COUNT, AND IT IS AN EQUALITY. It was `-ge 20`
+          # against an actual 28, which tolerated deleting EIGHT scenarios — both
+          # negative controls, the lost-CAS test, the tampered-document test and the
+          # byte-identical re-save among them — while still printing "none skipped".
+          # A floor set to today's count is just as strong against deletion, but it
+          # drifts again the moment a scenario is added without bumping it, which is
+          # exactly how 20-versus-28 happened. So: an equality, which must be updated
+          # in the same commit as any added or removed scenario. If you are reading
+          # this because the step failed after you added one, the fix is to change
+          # the number here to the new count and say so in the PR.
+          expected_scenarios=29
+          passed=$(grep -Eo '[0-9]+ passed' /tmp/parity.log | grep -Eo '^[0-9]+' || echo 0)
+          [ "$passed" = "$expected_scenarios" ] || {
+            echo "::error::$passed parity test(s) passed; exactly $expected_scenarios are expected."
+            echo "::error::Fewer means the oracle lost coverage. More means a scenario was added"
+            echo "::error::without updating \`expected_scenarios\` in this step. Neither is silent."
+            exit 1; }
+          echo "parity oracle: $passed scenarios ran against the real engine, none skipped"
+          rm -rf /tmp/isaac-pg-parity
+
       # THE SUBMISSION LIFECYCLE, END TO END, AGAINST THE REAL ENGINE.
       #
       # WHAT ONLY A REAL POSTGRESQL CAN ANSWER, and why the unit suite is not enough
