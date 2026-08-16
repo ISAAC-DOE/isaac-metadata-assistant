@@ -11,6 +11,7 @@ import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RunsSection } from '../components/RunsSection';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
+import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
@@ -507,6 +508,28 @@ function LoadedWorkbench({
       <RunsSection experimentId={id} />
 
       {/*
+        VALIDATE & REVIEW SITS DIRECTLY BELOW THE RUNS, and the placement is the
+        argument for it: its findings are addressed BY RUN, and the runs a reader
+        is being sent back to are the section immediately above.
+
+        IT FETCHES NOTHING ON MOUNT — not one request until the button is pressed
+        (see the component header on why: `docs/run-scale-measurements.md` made a
+        record's runs a payload cost, and N eager per-run checks would be the same
+        mistake in request form). So mounting it here costs this screen nothing on
+        load, which is what makes "below the runs" a free choice rather than a
+        trade against the screen's first paint.
+
+        IT IS NOT `RunFindings` MOVED. That component is the PASSIVE read-out on
+        the export screen, rendering verdicts a bundle already fetched; this is the
+        ACTION, on the screen where the fields and runs are edited, and it reaches
+        two channels the export bundle never carries — the run's open blocking
+        questions and its no-guessing draft report. Both read the same server
+        fields and share `runFindingState` and `FindingList` rather than keeping
+        two opinions about them.
+      */}
+      <ValidateReview experimentId={id} />
+
+      {/*
         UNMAPPED NOTES SIT BETWEEN THE RUNS AND THE DRAFT BLOCKS, and the position is
         the argument. What is captured here is content that has NO field — so it
         cannot live inside a field group below, and putting it after them would bury
@@ -517,6 +540,22 @@ function LoadedWorkbench({
         A section, not a tab, for `RunsSection`'s third reason: hiding it behind a tab
         would conceal from a reader on the fields view that this record holds captured
         content nobody has placed yet.
+
+        ── ON THE ORDER OF THESE TWO, 2026-08-16 ──────────────────────────────────
+        Both sections were written on separate branches and BOTH claimed the slot
+        directly under the runs, each with its own argument. The merge preserves
+        both arguments AS WRITTEN rather than picking a winner: Validate & Review
+        asked for IMMEDIATE adjacency to the runs, which it has, and this panel
+        asked to be ABOVE THE FIELD BLOCKS, which it is. Neither constraint is
+        violated, so neither comment above needed editing to stay true.
+
+        WHAT THAT ORDERING DOES NOT SETTLE, and a later slice should: a note is
+        unplaced INPUT awaiting triage, and review is the step that judges what has
+        been placed — so a reader's natural order is arguably notes first. The
+        counter is that Validate & Review fetches nothing until pressed, so it adds
+        no visual weight between the runs and these notes. Unresolved rather than
+        decided quietly; it becomes a real question once unmapped notes actually
+        feed the review state, which today they do not.
       */}
       <UnmappedNotesPanel experimentId={id} />
 

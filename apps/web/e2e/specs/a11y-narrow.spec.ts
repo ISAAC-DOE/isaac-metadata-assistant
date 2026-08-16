@@ -20,11 +20,13 @@
  * sixth Playwright project multiplies EVERY `@responsive` spec — structure,
  * states, long-strings, layout-responsive, charts, tabs, the axe sweep — not
  * just the scan that wanted the width, and it perturbs the count ratchet in
- * `e2e/a11y-baseline.ts` for all 21 surfaces in one go. This file adds 21 surfaces
+ * `e2e/a11y-baseline.ts` for all 22 surfaces in one go. This file adds 22 surfaces
  * × 2 widths of axe scanning and nothing else, inside one project, by moving the
- * viewport itself with `page.setViewportSize`. (21 = `SURFACES.length`, measured:
- * `npx playwright test e2e/specs/a11y-narrow.spec.ts --list` reports 43 tests —
- * 42 scans plus the browserless shape test at the foot of this file.)
+ * viewport itself with `page.setViewportSize`. (22 = `SURFACES.length`; the count
+ * was 21 until `evidence-graph` was added, and the shape assertion at the foot of
+ * this file reads the array rather than a literal, so the two cannot drift.
+ * `npx playwright test e2e/specs/a11y-narrow.spec.ts --list` reports
+ * `SURFACES.length * 2 + 1` tests — the scans plus that browserless shape test.)
  *
  * The cost of that choice, stated rather than buried: DPR stays at the host
  * project's 1. That is the right call here — `color-contrast`, `button-name`,

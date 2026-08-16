@@ -219,6 +219,60 @@
   color: var(--text-primary);
 }
 
+/*
+ * THE COMPARE TOGGLE, beside Focus and styled from it — one visual family for the
+ * two controls that both act on "which run(s) is this screen about".
+ *
+ * PRESSED IS NOT CARRIED BY COLOUR. The button's own word changes ("Compare" →
+ * "Comparing"), `aria-pressed` changes, and the surface gains a filled background
+ * AND a solid border. A monochrome or forced-colours reader still has the word and
+ * the border; the tint is the least load-bearing of the three.
+ */
+.run-card-compare {
+  flex: none;
+  margin-right: 10px;
+  padding: 4px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+  cursor: pointer;
+}
+
+.run-card-compare:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.run-card-compare:focus-visible {
+  outline: none;
+  border-color: var(--action);
+  box-shadow: var(--ring-active);
+  color: var(--text-primary);
+}
+
+.run-card-compare[aria-pressed='true'] {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+  color: var(--text-primary);
+}
+
+/* Refused rather than removed from the tab order — the button stays reachable so
+   its accessible name can say why it will not act. `not-allowed` matches the
+   announcement rather than replacing it. */
+.run-card-compare[aria-disabled='true'] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.run-card-compare[aria-disabled='true']:hover {
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
 .run-card-header {
   display: flex;
   align-items: center;

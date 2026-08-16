@@ -1,0 +1,959 @@
+/*
+ * The EVIDENCE GRAPH — one experiment, shaped around its runs.
+ *
+ * Visual posture, stated so a later slice does not undo it by accident: this is
+ * the SCIENTIFIC plane and stays neutral and readable. Categories reuse the
+ * motifs the application already established — action-blue for the anchor,
+ * teal for evidence, the derivation purple for a recorded source, the reserved
+ * fail token for a validation finding. Nothing is decorated in the Assistant's
+ * indigo: that family belongs to the command/interaction layer.
+ *
+ * Layout posture. There are THREE panes here, not two: the structure tree, the
+ * canvas, and the detail rail. The tree is not a decorative index — it is the
+ * accessible interface (the canvas is `aria-hidden`), so it is never the pane
+ * that gets dropped at a narrow width. The DEFAULT is fully stacked (tree,
+ * then canvas, then detail); wider containers opt into two and then three
+ * columns via CONTAINER queries, because this panel sits inside a main column
+ * whose width is not the viewport's.
+ *
+ * The no-vertical-rail rule (no-vertical-rail-rule.md) is system-wide: notes
+ * carry a full 1px border and a tint, never a thick coloured left edge.
+ */
+
+.evgraph {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+  container-type: inline-size;
+  container-name: evgraph;
+
+  /* --- the ONE place a node category's colour is declared --------------- */
+  --evgraph-neutral: #6b7684;
+  --evgraph-anchor: #2c6ab0;
+  --evgraph-run: #21568f;
+  --evgraph-sample: #4a7fb0;
+  --evgraph-context: #5b6b7d;
+  --evgraph-measurement: #33404e;
+  --evgraph-asset: #6b7684;
+  --evgraph-descriptor: #7a6bb0;
+  --evgraph-evidence: #2f7d78;
+  --evgraph-source: #8a6d4a;
+  --evgraph-finding: #b23a30;
+}
+
+/* --- head ---------------------------------------------------------------- */
+
+.evgraph-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.evgraph-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
+}
+
+.evgraph-intro {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* The disclosure is a standing statement about what the edges mean, so it is
+   styled as a quiet cover note rather than as an alarm. */
+.evgraph-disclosure {
+  margin: 0;
+  padding: 8px 11px;
+  max-width: 78ch;
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-token);
+  background: var(--cover-bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--cover-text);
+}
+
+.evgraph-counts,
+.evgraph-freshness {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.evgraph-freshness code {
+  font-family: inherit;
+  color: var(--text-slate);
+}
+
+.evgraph-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evgraph-note {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-token);
+  background: var(--cover-bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.evgraph-note[data-note='node_cap'],
+.evgraph-note[data-note='visible_cap'],
+.evgraph-note[data-note='unreadable_evidence'] {
+  border-color: var(--advisory-border);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+}
+
+.evgraph-refusal {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* --- controls ------------------------------------------------------------ */
+
+.evgraph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 18px;
+  min-width: 0;
+}
+
+.evgraph-search {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.evgraph-search-label,
+.evgraph-focus-label,
+.evgraph-kinds-legend {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.evgraph-search-input,
+.evgraph-focus-select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 8px 11px;
+  min-height: 34px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.evgraph-search-input:focus-visible,
+.evgraph-focus-select:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.evgraph-focus {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 0 1 220px;
+  min-width: 0;
+}
+
+.evgraph-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+  padding: 4px;
+}
+
+.evgraph-results-empty {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.evgraph-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-token);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.evgraph-result:hover,
+.evgraph-result:focus-visible {
+  background: var(--selected-row-bg);
+}
+
+.evgraph-result-label {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.evgraph-result-kind,
+.evgraph-result-run {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.evgraph-result-match {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
+}
+
+.evgraph-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-self: flex-end;
+}
+
+.evgraph-btn {
+  padding: 7px 12px;
+  min-height: 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.evgraph-btn:hover:not(:disabled) {
+  background: var(--surface-subtle);
+  border-color: var(--action-selected-border);
+}
+
+.evgraph-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.evgraph-btn:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.evgraph-kinds {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.evgraph-kinds-legend {
+  padding: 0;
+}
+
+.evgraph-kinds-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.evgraph-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.evgraph-kind-chip.on {
+  color: var(--text-strong);
+  border-color: var(--action-selected-border);
+}
+
+.evgraph-kind-chip:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.evgraph-kind-chip:not(.on) .evgraph-kind-swatch {
+  opacity: 0.3;
+}
+
+.evgraph-kind-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+
+.evgraph-kind-swatch,
+.evgraph-row-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--evgraph-neutral);
+}
+
+[data-kind='experiment'].evgraph-kind-swatch,
+[data-kind='experiment'].evgraph-row-swatch { background: var(--evgraph-anchor); }
+[data-kind='run'].evgraph-kind-swatch,
+[data-kind='run'].evgraph-row-swatch { background: var(--evgraph-run); }
+[data-kind='sample'].evgraph-kind-swatch,
+[data-kind='sample'].evgraph-row-swatch { background: var(--evgraph-sample); }
+[data-kind='context'].evgraph-kind-swatch,
+[data-kind='context'].evgraph-row-swatch { background: var(--evgraph-context); }
+[data-kind='measurement'].evgraph-kind-swatch,
+[data-kind='measurement'].evgraph-row-swatch { background: var(--evgraph-measurement); }
+[data-kind='asset'].evgraph-kind-swatch,
+[data-kind='asset'].evgraph-row-swatch { background: var(--evgraph-asset); }
+[data-kind='descriptor'].evgraph-kind-swatch,
+[data-kind='descriptor'].evgraph-row-swatch { background: var(--evgraph-descriptor); }
+[data-kind='evidence_entry'].evgraph-kind-swatch,
+[data-kind='evidence_entry'].evgraph-row-swatch { background: var(--evgraph-evidence); }
+[data-kind='evidence_source'].evgraph-kind-swatch,
+[data-kind='evidence_source'].evgraph-row-swatch { background: var(--evgraph-source); }
+[data-kind='validation_finding'].evgraph-kind-swatch,
+[data-kind='validation_finding'].evgraph-row-swatch { background: var(--evgraph-finding); }
+
+/* --- body: tree + canvas + detail ---------------------------------------- */
+
+/* DEFAULT = fully stacked. Wider containers opt in below. */
+.evgraph-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+/* --- the structure tree (the accessible interface) ----------------------- */
+
+.evgraph-structure {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.evgraph-structure-title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.evgraph-structure-help,
+.evgraph-breadcrumb {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.evgraph-breadcrumb strong {
+  color: var(--text-strong);
+}
+
+.evgraph-breadcrumb-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--action);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.evgraph-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 420px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.evgraph-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-height: 30px;
+  padding-block: 5px;
+  padding-inline-end: 8px;
+  border-radius: var(--radius-token);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.evgraph-row:hover {
+  background: var(--surface-subtle);
+}
+
+.evgraph-row.selected {
+  background: var(--selected-row-bg);
+}
+
+/* Focus must be VISIBLE and must not rely on the background alone — the row is
+   the single tab stop for the whole graph. */
+.evgraph-row:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: -2px;
+  background: var(--selected-row-bg);
+}
+
+.evgraph-row-swatch {
+  align-self: center;
+}
+
+.evgraph-row-label {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.evgraph-row.selected .evgraph-row-label {
+  color: var(--text-heading);
+}
+
+.evgraph-row-kind {
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  white-space: nowrap;
+}
+
+.evgraph-row-count {
+  margin-inline-start: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  white-space: nowrap;
+}
+
+/* --- canvas -------------------------------------------------------------- */
+
+.evgraph-canvas-wrap {
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  background: var(--screen-base);
+  overflow: hidden;
+}
+
+.evgraph-canvas {
+  display: block;
+  width: 100%;
+  height: 420px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.evgraph-canvas:active {
+  cursor: grabbing;
+}
+
+/* --- edges --------------------------------------------------------------- */
+
+.evgraph-edge {
+  stroke: #b9c3cd;
+  stroke-width: 1.1;
+  opacity: 0.75;
+}
+
+.evgraph-edge.active {
+  stroke: var(--action);
+  stroke-width: 2;
+  opacity: 1;
+}
+
+/* A relationship that is NOT containment is dashed — it is not part of the
+   tree, and the tree is the thing the reader is navigating. */
+.evgraph-edge.crosslink {
+  stroke-dasharray: 5 4;
+}
+
+.evgraph-edge[data-edge-kind='validated_by'] { stroke: var(--evgraph-finding); }
+.evgraph-edge[data-edge-kind='conflicts_with'] {
+  stroke: var(--evgraph-finding);
+  stroke-dasharray: 3 3;
+}
+.evgraph-edge[data-edge-kind='supported_by'] { stroke: var(--evgraph-evidence); }
+.evgraph-edge[data-edge-kind='derived_from'] { stroke: var(--evgraph-source); }
+
+/* --- nodes --------------------------------------------------------------- */
+
+.evgraph-node {
+  cursor: pointer;
+}
+
+.evgraph-node-shape {
+  fill: #fff;
+  stroke: var(--evgraph-neutral);
+  stroke-width: 1.6;
+}
+
+.evgraph-node[data-kind='experiment'] .evgraph-node-shape { stroke: var(--evgraph-anchor); fill: #eaf1fa; }
+.evgraph-node[data-kind='run'] .evgraph-node-shape { stroke: var(--evgraph-run); fill: #eaf1fa; }
+.evgraph-node[data-kind='sample'] .evgraph-node-shape { stroke: var(--evgraph-sample); }
+.evgraph-node[data-kind='context'] .evgraph-node-shape { stroke: var(--evgraph-context); }
+.evgraph-node[data-kind='measurement'] .evgraph-node-shape { stroke: var(--evgraph-measurement); }
+.evgraph-node[data-kind='asset'] .evgraph-node-shape { stroke: var(--evgraph-asset); fill: var(--cover-bg); }
+.evgraph-node[data-kind='descriptor'] .evgraph-node-shape { stroke: var(--evgraph-descriptor); }
+.evgraph-node[data-kind='evidence_entry'] .evgraph-node-shape { stroke: var(--evgraph-evidence); fill: var(--verified-bg); }
+.evgraph-node[data-kind='evidence_source'] .evgraph-node-shape { stroke: var(--evgraph-source); fill: var(--confirmed-bg); }
+.evgraph-node[data-kind='validation_finding'] .evgraph-node-shape { stroke: var(--evgraph-finding); fill: var(--fail-bg); }
+
+.evgraph-node.anchor .evgraph-node-shape {
+  stroke-width: 2.6;
+}
+
+.evgraph-node.selected .evgraph-node-shape {
+  stroke: var(--action);
+  stroke-width: 3.2;
+}
+
+.evgraph-node-more {
+  fill: var(--action);
+  stroke: #fff;
+  stroke-width: 1.2;
+}
+
+.evgraph-node-label {
+  font-family: var(--font-ui);
+  /* Size and halo are ATTRIBUTES on the element (screen-bounded, see
+     EvidenceGraphPanel): a CSS px value here is a user unit that grows with the
+     viewBox and swallows the glyphs at deep zoom. */
+  fill: var(--text-strong);
+  paint-order: stroke;
+  stroke: var(--screen-base);
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.evgraph-node.selected .evgraph-node-label {
+  font-weight: 650;
+  fill: var(--text-heading);
+}
+
+/* --- detail -------------------------------------------------------------- */
+
+.evgraph-detail {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 14px;
+}
+
+.evgraph-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.evgraph-detail-empty,
+.evgraph-detail-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.evgraph-detail-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.evgraph-detail-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+
+.evgraph-detail-producer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.evgraph-detail-producer-term {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-quaternary);
+}
+
+.evgraph-detail-producer-value {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+
+.evgraph-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.evgraph-detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 96px) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.evgraph-detail-row dt {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.evgraph-detail-row dd {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.evgraph-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.evgraph-detail-check {
+  min-width: 0;
+}
+
+.evgraph-detail-check-state {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-token);
+  background: var(--cover-bg);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.evgraph-detail-check-state.error {
+  border-color: var(--advisory-border);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+}
+
+.evgraph-detail-subhead {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.evgraph-detail-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+
+.evgraph-conn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.evgraph-conn {
+  padding: 9px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-token);
+  background: var(--surface-subtle);
+  min-width: 0;
+}
+
+.evgraph-conn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+}
+
+.evgraph-conn-rel {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-slate);
+}
+
+.evgraph-conn-tag,
+.evgraph-conn-cross {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--cover-bg);
+  color: var(--cover-text);
+  overflow-wrap: anywhere;
+}
+
+.evgraph-conn-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  text-align: left;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--action);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.evgraph-conn-target:hover {
+  text-decoration: underline;
+}
+
+.evgraph-conn-target:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.evgraph-conn-kind {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-quaternary);
+}
+
+.evgraph-conn-why {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.evgraph-legend {
+  margin-top: 4px;
+  border-top: 1px solid var(--border-hair);
+  padding-top: 8px;
+}
+
+.evgraph-legend summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-slate);
+  cursor: pointer;
+  min-height: 26px;
+}
+
+.evgraph-legend p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.evgraph-legend-kinds {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+}
+
+/* --- responsive ---------------------------------------------------------- */
+
+/*
+ * Two columns first: the tree beside the canvas, detail beneath. The tree is
+ * the accessible interface and therefore never the pane that is dropped.
+ */
+@container evgraph (min-width: 700px) {
+  .evgraph-body {
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  }
+
+  .evgraph-detail {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Three columns only when all three can be legible at once. */
+@container evgraph (min-width: 1040px) {
+  .evgraph-body {
+    grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(270px, 330px);
+  }
+
+  .evgraph-detail {
+    grid-column: auto;
+    max-height: 520px;
+    overflow-y: auto;
+  }
+
+  .evgraph-canvas {
+    height: 520px;
+  }
+
+  .evgraph-tree {
+    max-height: 520px;
+  }
+}
+
+/*
+ * Narrow VIEWPORT concerns — a device question, not a container question, so
+ * these stay media queries.
+ */
+@media (max-width: 900px) {
+  .evgraph-canvas {
+    height: 360px;
+  }
+}
+
+@media (max-width: 620px) {
+  .evgraph-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .evgraph-focus {
+    flex: 1 1 auto;
+  }
+
+  .evgraph-buttons {
+    align-self: stretch;
+  }
+
+  .evgraph-buttons .evgraph-btn {
+    flex: 1 1 auto;
+    min-height: 40px;
+  }
+
+  .evgraph-canvas {
+    height: 300px;
+  }
+
+  /* Touch targets: a row is pressed with a finger here, not a pointer. */
+  .evgraph-row {
+    min-height: 40px;
+  }
+
+  .evgraph-node-shape {
+    stroke-width: 2.2;
+  }
+
+  .evgraph-kind-chip {
+    min-height: 36px;
+  }
+
+  .evgraph-conn-target {
+    min-height: 40px;
+  }
+
+  .evgraph-detail-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+  }
+}
+
+@media (max-width: 380px) {
+  .evgraph-canvas {
+    height: 260px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evgraph-node,
+  .evgraph-edge,
+  .evgraph-row {
+    transition: none;
+  }
+}

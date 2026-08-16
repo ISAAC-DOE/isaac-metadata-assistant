@@ -1,0 +1,491 @@
+/*
+ * COMPARE RUNS.
+ *
+ * THE DIFFERENCE IS NEVER CARRIED BY COLOUR. Every row state carries four
+ * independent signals, and any one of them identifies the state on its own:
+ *
+ *   1. the words — "Different values" / "On one run only" / "Same value,
+ *      different source" / "Same value, different record-keeping" /
+ *      "Not compared here" / "Same";
+ *   2. the glyph beside them — the two-way arrow, the dashed circle (the repo's
+ *      existing "missing" mark), the inheritance corner-arrow, the human pencil,
+ *      the question mark, the equals sign;
+ *   3. the surface — a row that differs is RAISED onto a tinted panel with a
+ *      border; a row that agrees has neither;
+ *   4. the value's weight — 600 where the two runs differ, 400 where they do not.
+ *
+ * A monochrome print, a colour-blind reader and forced-colours mode all still get
+ * 1, 2 and 4, and 3 survives as a border. The tint is the least load-bearing
+ * signal and is deliberately the last one added.
+ *
+ * NO LEFT/RIGHT ACCENT BORDER ANYWHERE. The no-vertical-rail rule is system-wide
+ * and permanent, and `no-vertical-rail.test.ts` scans this file.
+ */
+
+.rc-live {
+  margin: 0;
+  /* A live region with nothing to say must take no space and leave no gap — it is
+     mounted in every state precisely so that it is never CREATED with content,
+     which is the arrangement screen readers do not reliably announce. */
+  height: 0;
+  overflow: hidden;
+}
+
+/* ── one run chosen, one still to go ───────────────────────────────────────── */
+
+.rc-picking {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--action-tint);
+  border: 1px solid var(--action-selected-border);
+  border-radius: var(--radius-inner);
+}
+
+.rc-picking-text {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ── the panel ─────────────────────────────────────────────────────────────── */
+
+.rc-panel {
+  margin: 0 0 16px;
+  padding: 14px 16px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.rc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rc-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.rc-scope {
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.rc-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.rc-unresolved {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  background: var(--needsyou-bg);
+  border: 1px solid var(--needsyou-border);
+  border-radius: var(--radius-inner);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--needsyou-text);
+}
+
+.rc-unresolved p {
+  margin: 0 0 6px;
+}
+
+.rc-unresolved p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── the two selected runs ─────────────────────────────────────────────────── */
+
+.rc-sides {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+}
+
+.rc-side {
+  flex: 1 1 200px;
+  padding: 9px 11px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+
+.rc-side-eyebrow {
+  margin: 0;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+
+.rc-side-label {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  font-weight: 620;
+  color: var(--text-primary);
+}
+
+.rc-side-id {
+  margin: 1px 0 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+
+/* ── the summary ───────────────────────────────────────────────────────────── */
+
+.rc-summary {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-inner);
+}
+
+.rc-summary-line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.rc-summary-line + .rc-summary-line {
+  margin-top: 6px;
+}
+
+.rc-breakdown {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.rc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 9px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* THE THIRD NATIVE CHECKBOX IN THE APP, and it gets the same treatment as the
+   first two for the same reason. Left at `accent-color: auto` it paints itself in
+   the VIEWER'S OS accent — crimson in a default Chromium — and `tokens.css`
+   reserves saturated red for the validation verdict. A control that only reveals
+   the rows two runs AGREE on, rendering itself in the verdict colour, would read
+   as a failure marker on the one part of this table that reports agreement.
+   Scoped to this control rather than a global `input` rule. Guarded by
+   `native-control-accent.test.ts`, which is what caught its absence here. */
+.rc-toggle input {
+  flex: none;
+  accent-color: var(--action);
+}
+
+/* ── the table ─────────────────────────────────────────────────────────────── */
+
+.rc-tablewrap {
+  margin: 14px 0 0;
+  /* Horizontally scrollable, and therefore focusable — a scroll container that
+     cannot take keyboard focus is unreachable by keyboard alone. */
+  overflow-x: auto;
+}
+
+.rc-tablewrap:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.rc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.rc-caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.rc-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.rc-group th {
+  padding: 9px 10px 5px;
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text-strong);
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border-hair);
+}
+
+.rc-group-count {
+  margin-left: 8px;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-slate);
+}
+
+.rc-row > th,
+.rc-row > td {
+  padding: 8px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-hair);
+  text-align: left;
+}
+
+/*
+ * SIGNAL 3 — THE SURFACE. Every category except `same` is raised onto a tinted
+ * panel; `same` is left flat on the card. The tint differs per category and is the
+ * FOURTH signal, never the first: the word and the glyph in the comparison cell
+ * say the same thing without it.
+ */
+.rc-row[data-category='value'] > th,
+.rc-row[data-category='value'] > td {
+  background: var(--advisory-bg);
+}
+
+.rc-row[data-category='absent-on-one'] > th,
+.rc-row[data-category='absent-on-one'] > td {
+  background: var(--missing-bg);
+}
+
+.rc-row[data-category='provenance'] > th,
+.rc-row[data-category='provenance'] > td,
+.rc-row[data-category='evidence'] > th,
+.rc-row[data-category='evidence'] > td {
+  background: var(--confirmed-bg);
+}
+
+.rc-row[data-category='incomparable'] > th,
+.rc-row[data-category='incomparable'] > td {
+  background: var(--cover-bg);
+}
+
+.rc-addr {
+  width: 200px;
+  font-weight: 400;
+}
+
+.rc-addr-path {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.rc-addr-scope {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--text-slate);
+}
+
+.rc-cell {
+  width: 20%;
+}
+
+.rc-value {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* SIGNAL 4 — WEIGHT. Heavier where the two runs are not the same value. */
+.rc-row[data-category='value'] .rc-value,
+.rc-row[data-category='absent-on-one'] .rc-value {
+  font-weight: 600;
+}
+
+.rc-value-none {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-style: italic;
+  /* `--text-slate`, not `--text-tertiary`: these sit on tinted row surfaces, where
+     tertiary was measured below 4.5:1 elsewhere in this repo for the same reason. */
+  color: var(--text-slate);
+}
+
+.rc-origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--cover-text);
+}
+
+.rc-origin[data-origin='overridden'] {
+  color: var(--confirmed-text);
+  font-weight: 600;
+}
+
+.rc-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--text-slate);
+}
+
+.rc-open {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--action);
+  text-decoration: underline;
+}
+
+.rc-open:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.rc-rel {
+  width: 28%;
+}
+
+.rc-rel-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.rc-rel-text {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* ── findings ──────────────────────────────────────────────────────────────── */
+
+.rc-findings {
+  margin: 16px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border-faint);
+}
+
+.rc-findings-title {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.rc-verdicts {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 4px;
+}
+
+.rc-verdict {
+  flex: 1 1 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+
+.rc-verdict-label {
+  font-size: 12.5px;
+  font-weight: 620;
+  color: var(--text-primary);
+}
+
+.rc-verdict-scope {
+  flex: 1 1 100%;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+}
+
+.rc-finding-group {
+  margin: 10px 0 0;
+}
+
+.rc-finding-title {
+  margin: 0 0 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.rc-finding-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* ── narrow viewports ──────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .rc-addr {
+    width: 130px;
+  }
+
+  .rc-table {
+    /* Below this width the four columns cannot all be read at once, so the table
+       scrolls inside its own focusable container rather than compressing an
+       address into three characters per line. */
+    min-width: 620px;
+  }
+}

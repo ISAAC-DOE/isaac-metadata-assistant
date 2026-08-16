@@ -1844,11 +1844,50 @@ export type ApiRunCheckFinding =
       label?: string;
       path?: string;
       id?: string;
+      /**
+       * THE SERVER'S OWN BLOCKER TAXONOMY, on `blockers` entries only.
+       *
+       * `post_run_check` builds `blockers` by spreading
+       * `serialize.pending_to_list(...)["pending"]`, and every element of that list
+       * carries `kind` verbatim from the draft's own `pending[]` entry — the same
+       * `BlockerKind` (`'asset' | 'series' | 'descriptor' | 'edge'`) that
+       * `ApiPendingItem` already declares for the record-level `/pending` route.
+       *
+       * IT IS DECLARED OPTIONAL AND MUST BE READ AS SUCH. The frozen contract text
+       * for this route says only that every element carries a non-empty `message`;
+       * it does not specify the rest of the element, and `_blocker_message`'s last
+       * branch exists precisely for a persisted blocker that records no `kind` at
+       * all. So a reader groups by it when it is there and says nothing when it is
+       * not — it is never defaulted, and no kind is inferred from the message text.
+       * Absent on `errors`/`warnings` entries, which are `{path, message}` pairs.
+       */
+      kind?: string;
     };
 
 export interface ApiRunCheckVerdict {
   ok: boolean;
   errors?: ApiRunCheckFinding[];
+  /**
+   * THE NO-GUESSING VALIDATOR'S OWN ADVISORY CHANNEL — on the `draft` verdict only,
+   * and it has been on the wire the whole time while this type omitted it.
+   *
+   * `post_run_check` builds `draft_verdict` with THREE keys — `ok`, `errors` and
+   * `warnings` — from `DraftReport.errors` and `DraftReport.warnings`
+   * (`routes.py`, and the same shape on its own exception branch). Only the first
+   * two were declared here, so TypeScript actively prevented a client from reading
+   * the third: the same mechanism that hid `dry_run` and `unavailable` below, and
+   * the same one that hid `schema_ok`/`exactness_errors` from the Validator until
+   * a surface shipped a false claim on top of the gap.
+   *
+   * IT CANNOT GATE ANYTHING, and that is the reason it must be shown APART from
+   * `errors` rather than beside them. `DraftReport.ok` is `not self.errors` — it
+   * does not read this list at all — so `export_draft` refuses on `errors` and
+   * never on a warning. Rendering the two under one heading would make a
+   * non-gating note read as a blocker; rendering neither is what shipped.
+   *
+   * Optional because the `official` verdict legitimately carries no such key.
+   */
+  warnings?: ApiRunCheckFinding[];
   /**
    * WHICH DOCUMENT WAS CHECKED — present on the `official` verdict only, and it was
    * MISSING FROM THIS TYPE WHILE THE SCREEN HARD-CODED "(dry run)".

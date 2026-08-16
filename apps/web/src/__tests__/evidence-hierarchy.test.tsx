@@ -223,7 +223,19 @@ describe('S6 · the Evidence LOADED branch actually receives the shared gutter',
    * that simply omitted `mainPad` would silently fall back to the default —
    * which is exactly the unpadded preset. Every branch must state its preset.
    */
-  it('source: all three EvidenceExplorer shells declare a preset explicitly', () => {
+  /*
+   * FOUR shells since the Evidence Graph view was added: loading/error,
+   * no-evidence, the GRAPH view, and the loaded list.
+   *
+   * The count moved; the property did not. What this asserts is that EVERY
+   * shell on this screen names its padding preset explicitly rather than
+   * inheriting one by accident — so a new view is required to make that choice
+   * deliberately, which is exactly what happened here. The graph view takes
+   * `pad` because it mounts one self-contained panel that owns no inset of its
+   * own, unlike the loaded list's split layout (`none`, whose panels each
+   * carry their own).
+   */
+  it('source: all four EvidenceExplorer shells declare a preset explicitly', () => {
     const tsx = import.meta.glob('../screens/EvidenceExplorer.tsx', {
       query: '?raw',
       import: 'default',
@@ -234,9 +246,9 @@ describe('S6 · the Evidence LOADED branch actually receives the shared gutter',
 
     const shells = source.match(/<AppShell/g) ?? [];
     const presets = source.match(/mainPad="(?:pad|centered|none)"/g) ?? [];
-    expect(shells.length, 'loading/error + no-evidence + loaded').toBe(3);
+    expect(shells.length, 'loading/error + no-evidence + graph + loaded').toBe(4);
     expect(presets.length).toBe(shells.length);
-    expect(presets.filter((p) => p.includes('"pad"')).length).toBe(2);
+    expect(presets.filter((p) => p.includes('"pad"')).length).toBe(3);
     expect(presets.filter((p) => p.includes('"none"')).length).toBe(1);
   });
 

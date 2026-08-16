@@ -126,7 +126,14 @@ export function ConnectAnAgent({
       </summary>
       <p className="api-connect-lead">
         What a program calling this API has to get right — short, and only what this build actually
-        supports.
+        supports.{' '}
+        {/* The cross-reference to the OTHER agent surface, appended to the lead
+            rather than given a paragraph of its own: this guide and the Connect
+            Your Agent tab describe different protocols under near-identical
+            names and make auth claims that do not reconcile unless a reader
+            knows which path each is about. Authored in `API_ACCESS_COPY` — see
+            the note on `connectMcpPointer` for the pair. */}
+        {API_ACCESS_COPY.connectMcpPointer}
       </p>
       {/* FINDING B — the precondition, stated INSIDE the guide.
           Slice 13 (see the note at the top of this file) moved the tab's shared
