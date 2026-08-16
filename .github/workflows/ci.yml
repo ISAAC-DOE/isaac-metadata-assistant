@@ -1403,6 +1403,10 @@ jobs:
           parent=01CIREVPARENT00000000000A0
           rev=01CIREVISIONAAAAAAAAAAAAAA
           rev2=01CIREVISIONBBBBBBBBBBBBBB
+          # $parent2/$rev3 exist ONLY so two of the delete cases at the end of this
+          # step can be blamed on one constraint each; see the comment on that block.
+          parent2=01CIREVPARENT00000000000B0
+          rev3=01CIREVISIONCCCCCCCCCCCCCC
           sig=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           sig2=0000000000000000000000000000000000000000000000000000000000000000
 
@@ -1563,14 +1567,62 @@ jobs:
           # THE FOREIGN KEYS REFUSE A PARENT DELETE. No `ON DELETE` clause is written
           # anywhere in either migration, so no single statement can destroy a history
           # tree — the distinction between the shipped design and `ON DELETE CASCADE`.
+          #
+          # EACH DELETE BELOW IS AIMED AT A ROW ONLY ONE FOREIGN KEY CAN REFUSE, and
+          # that shape is the test rather than a tidiness. THREE foreign keys point at
+          # `isaac_experiment_revisions` — `isaac_run_revisions_revision_fk`,
+          # `isaac_revision_changes_revision_fk`, `isaac_submissions_revision_fk` — and
+          # TWO point at `isaac_experiments`. PostgreSQL reports only the FIRST one it
+          # checks, so a delete aimed at a row carrying several kinds of child proves
+          # merely that SOMETHING refused it, and the constraint the case NAMES may
+          # never be exercised at all. THIS STEP HAS ALREADY BEEN BITTEN BY THAT DEFECT
+          # CLASS ONCE: 24/25-character fixture ids let the `*_id_shape` CHECK take the
+          # blame for cases meant to prove other constraints. Deleting `$rev` — which
+          # carries a run revision AND a change row AND a submission — was the same bug
+          # in different clothes, and it is why `$parent2`/`$rev3` were added below.
+          # THE FIX IS NEVER TO ACCEPT EITHER NAME: a case that would pass on two
+          # different constraints cannot tell them apart, which is the defect itself.
+          #
+          # THE FIXTURE THOSE CASES NEED: an experiment whose only child is a revision,
+          # whose only child is a run revision. It is created here, immediately above
+          # its only use, so a future case cannot silently give it a second child.
+          psql -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO isaac_experiments (experiment_id, state)
+            VALUES ('$parent2', '{"id": "$parent2"}');
+          INSERT INTO isaac_experiment_revisions
+            (revision_id, experiment_id, revision_no, experiment_rev, generation,
+             state, content_signature, reason, subject, trust_basis)
+            VALUES ('$rev3', '$parent2', 1, 0, 'ci', '{"id": "$parent2"}', '$sig',
+                    'submission', 'ci.actor', 'test_fixture');
+          INSERT INTO isaac_run_revisions
+            (run_revision_id, revision_id, run_id, ordinal, state, rev, generation)
+            VALUES ('01CIRUNREV000000000000000D', '$rev3', '01CIRUNDDDDDDDDDDDDDDDDDDD', 0,
+                    '{"id": "01CIRUNDDDDDDDDDDDDDDDDDDD"}', 0, 'ci');
+          SQL
+
+          # `isaac_submission_runs` holds the ONLY foreign key into `isaac_submissions`,
+          # so this case is unambiguous by construction rather than by fixture shape.
           refuse "deleting a submission that still has rows" \
             "DELETE FROM isaac_submissions WHERE submission_id = '$sub'" \
             "isaac_submission_runs_submission_fk"
+          # $rev2 carries the keyless submission accepted above and NOTHING else — no
+          # run revision, no change row — so `isaac_submissions_revision_fk` is the only
+          # constraint that can answer this delete.
           refuse "deleting a revision a submission points at" \
-            "DELETE FROM isaac_experiment_revisions WHERE revision_id = '$rev'" \
+            "DELETE FROM isaac_experiment_revisions WHERE revision_id = '$rev2'" \
             "isaac_submissions_revision_fk"
+          # $rev3 is the mirror image: one run revision, no change row, no submission.
+          # Without this case `isaac_run_revisions_revision_fk` would never be proven,
+          # because every delete aimed at `$rev` is answered by whichever of its three
+          # foreign keys PostgreSQL happens to check first.
+          refuse "deleting a revision a run revision points at" \
+            "DELETE FROM isaac_experiment_revisions WHERE revision_id = '$rev3'" \
+            "isaac_run_revisions_revision_fk"
+          # $parent2 owns $rev3 and no submission, so this is answered by the revision
+          # foreign key and cannot be answered by `isaac_submissions_experiment_fk`,
+          # which $parent — the target before this fix — would also have offered.
           refuse "deleting an experiment that still has history" \
-            "DELETE FROM isaac_experiments WHERE experiment_id = '$parent'" \
+            "DELETE FROM isaac_experiments WHERE experiment_id = '$parent2'" \
             "isaac_experiment_revisions_experiment_fk"
 
           # Every index the two packets name exists, with the columns they name.
@@ -1596,9 +1648,14 @@ jobs:
           DELETE FROM isaac_run_revisions WHERE revision_id = '$rev';
           DELETE FROM isaac_experiment_revisions WHERE experiment_id = '$parent';
           DELETE FROM isaac_experiments WHERE experiment_id = '$parent';
+          DELETE FROM isaac_run_revisions WHERE revision_id = '$rev3';
+          DELETE FROM isaac_experiment_revisions WHERE experiment_id = '$parent2';
+          DELETE FROM isaac_experiments WHERE experiment_id = '$parent2';
           SQL
-          left=$(psql -Atc "select count(*) from isaac_experiment_revisions where experiment_id = '$parent'")
+          left=$(psql -Atc "select count(*) from isaac_experiment_revisions where experiment_id in ('$parent', '$parent2')")
           [ "$left" = "0" ] || { echo "::error::this step left rows behind"; exit 1; }
+          left=$(psql -Atc "select count(*) from isaac_experiments where experiment_id in ('$parent', '$parent2')")
+          [ "$left" = "0" ] || { echo "::error::this step left experiment rows behind"; exit 1; }
           echo "0003/0004 constraints: every one behaves as the approval packets describe"
 
       # THE DEPLOYMENT-ORDER GUARD, AGAINST A REAL ENGINE AND IN ONE PROCESS.
