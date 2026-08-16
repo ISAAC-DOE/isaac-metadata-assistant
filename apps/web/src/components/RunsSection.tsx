@@ -49,10 +49,11 @@ import './runs.css';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { RunCard } from './RunCard';
+import { RunCompare } from './RunCompare';
 import { LoadingPanel, BackendDown } from './FetchStates';
 import { Plus } from './icons';
 import { api, ApiError } from '../lib/api';
-import { RECORD_RUN_PARAM } from '../lib/routes';
+import { RECORD_COMPARE_PARAM, RECORD_RUN_PARAM, RUN_COMPARE_MAX } from '../lib/routes';
 import type { ApiRunView } from '../lib/types';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import { mutationFailureCopy } from '../lib/mutationErrors';
@@ -158,6 +159,20 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const focusRunId = searchParams.get(RECORD_RUN_PARAM);
 
+  /*
+   * THE COMPARISON SELECTION IS THE URL, and `getAll` is why the parameter repeats
+   * rather than carrying a delimiter — see `RECORD_COMPARE_PARAM`. It is read here
+   * and never mirrored into state: one source, so a link, a Back press and a click
+   * on a card cannot disagree about which two runs are being compared.
+   *
+   * DE-DUPLICATED, ORDER PRESERVED. `?compare=A&compare=A` is a link a person can
+   * write, and comparing a run with itself is not a comparison. The FIRST
+   * occurrence keeps its place, so "the first run" stays the first run.
+   */
+  const compareIds = [...new Set(searchParams.getAll(RECORD_COMPARE_PARAM))].filter(
+    (id) => id !== '',
+  );
+
   /** What is in the box. `query` is what has been SENT. */
   const [searchText, setSearchText] = useState('');
   const [query, setQuery] = useState('');
@@ -261,6 +276,56 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
       setSearchParams(next, { replace: true });
     },
     [searchParams, setSearchParams],
+  );
+
+  /*
+   * WRITING THE SELECTION BACK, by the same rule as `setFocusRun`: COPY the current
+   * `URLSearchParams` so `?tab=`, `?view=` and `?run=` all survive, and `replace`
+   * so choosing and unchoosing runs does not build a stack of Back presses between
+   * the reader and the screen they arrived from.
+   *
+   * Every existing `compare` is deleted before the new set is appended. Mutating in
+   * place would leave a stale repeat behind, and a repeated parameter is exactly
+   * the shape where that is invisible until someone reads the URL.
+   */
+  const setCompareIds = useCallback(
+    (ids: string[]) => {
+      const next = new URLSearchParams(searchParams);
+      next.delete(RECORD_COMPARE_PARAM);
+      for (const id of ids) next.append(RECORD_COMPARE_PARAM, id);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  /*
+   * ONE CARD'S TOGGLE. Selecting a run already selected takes it OUT — the same
+   * gesture both ways, which is what `aria-pressed` on the control promises.
+   *
+   * A THIRD RUN IS REFUSED, NOT ABSORBED. Silently dropping one of the two already
+   * chosen would answer a click with a change the reader did not ask for, and
+   * silently comparing the first two of three would be the same defect the panel's
+   * "this link names N runs" note exists to prevent. The card renders the refusal
+   * as an `aria-disabled` control that says why; this is the second half of it, so
+   * the rule holds even if a caller forgets to pass `compareFull`.
+   */
+  const compareIdsRef = useRef(compareIds);
+  compareIdsRef.current = compareIds;
+  const toggleCompare = useCallback(
+    (runId: string) => {
+      // Read through the ref rather than joining the ids into a dependency string:
+      // a round trip through a delimiter is a second place for an id containing
+      // that delimiter to break, and this file already reads live values this way
+      // (`runsRef`, `loadedRef`).
+      const current = compareIdsRef.current;
+      if (current.includes(runId)) {
+        setCompareIds(current.filter((id) => id !== runId));
+        return;
+      }
+      if (current.length >= RUN_COMPARE_MAX) return;
+      setCompareIds([...current, runId]);
+    },
+    [setCompareIds],
   );
 
   /*
@@ -658,6 +723,21 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   if (loaded !== null) lastLoadedRef.current = loaded;
   const controlsFrame = loaded ?? lastLoadedRef.current;
 
+  /*
+   * "THE FIRST PAGE HAS SETTLED" — and it LATCHES, which is the point.
+   *
+   * `RunCompare` waits for this before reading a deep-linked run directly, so that
+   * a run the page is about to deliver is not also requested by id. A criteria
+   * change sets the list back to `loading`, so the un-latched form would flip
+   * true → false → true on every search; the panel's resolution effect would tear
+   * down mid-flight and re-issue the same read on the way back. Whether the first
+   * page has EVER arrived is the question being asked, and it only has one answer
+   * per mount. The browser is keyed on the experiment, so switching records
+   * rebuilds this with the rest of the state.
+   */
+  const listSettledRef = useRef(false);
+  if (list.status !== 'loading') listSettledRef.current = true;
+
   return (
     <>
       {/*
@@ -806,6 +886,32 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
         </div>
       )}
 
+      {/*
+        MOUNTED IN EVERY STATE, AND OUTSIDE EVERY GATE ABOVE, because it owns a live
+        region. A region that is unmounted and rebuilt carrying its content is not
+        reliably announced — the defect measured on this section's own toolbar and
+        fixed there. Gating this on `loaded !== null` would rebuild it on every
+        search, which is precisely when the reader most needs to be told what
+        happened to their selection.
+
+        It renders nothing at all when no run is selected, and it is `hidden` while
+        Focus Run owns the screen: a comparison needs two runs, and the focused view
+        shows one.
+
+        `loaded?.runs` and NOT the last snapshot: the panel keeps its own copy of a
+        selected run (see its note on `fetched`), so it needs the LIVE page in order
+        to prefer a run that is still on it — an edit saved through a card is then
+        reflected here rather than being masked by a stale frame.
+      */}
+      <RunCompare
+        experimentId={experimentId}
+        compareIds={compareIds}
+        loadedRuns={loaded?.runs ?? []}
+        listReady={listSettledRef.current}
+        hidden={focused}
+        onSetCompareIds={setCompareIds}
+      />
+
       {addNote !== null && (
         <p className="runs-note" role="status">
           {addNote}
@@ -863,6 +969,9 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
                   focusOnMount={cardFocusId === run.id}
                   onFocused={() => setCardFocusId(null)}
                   onFocusRun={() => setFocusRun(run.id)}
+                  onCompare={() => toggleCompare(run.id)}
+                  comparing={compareIds.includes(run.id)}
+                  compareFull={compareIds.length >= RUN_COMPARE_MAX}
                 />
               ))}
             </div>
