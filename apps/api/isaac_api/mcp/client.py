@@ -29,8 +29,19 @@ IN-PROCESS, BY ASGI, WITH NO NETWORK AND NO CREDENTIAL
 ======================================================
 The transport is ``httpx.ASGITransport`` against the FastAPI application object —
 already a dependency (``pyproject.toml`` ``[api]``), so this package adds none.
-No socket is opened, no DNS is resolved, and the whole suite runs offline. The
-calls go through the real router, the real dependencies (including
+**This client** opens no socket and resolves no DNS, and nothing it does leaves
+the machine.
+
+*Scoped rather than deleted, because an earlier revision said "the whole suite
+runs offline" and that was read as "no test binds a socket".* One test does:
+``test_mcp_transport.py::test_a_real_client_over_a_real_loopback_socket_completes_a_session``
+runs a uvicorn server on ``127.0.0.1`` with an ephemeral port, because a
+kernel-supplied peer address is the only thing that can prove the loopback guard
+reads one. It is still offline in the sense that matters — the bind is loopback
+and no packet leaves the host — but "no socket is opened" is a claim about this
+module, not about the suite.
+
+The calls go through the real router, the real dependencies (including
 ``tutorial_scope``), the real precondition machinery and the real exception
 handlers, which is the point: the MCP layer inherits ISAAC's gates instead of
 re-implementing them.
