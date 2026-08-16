@@ -50,6 +50,39 @@ def _cors_origins() -> list[str]:
     return origins or list(DEFAULT_CORS_ORIGINS)
 
 
+#: Duplicated from ``isaac_api.mcp.deployment.DEPLOYMENT_ENV``, ON PURPOSE, and
+#: pinned equal to it by ``test_mcp_transport.py`` so the copy cannot drift.
+#:
+#: It cannot be imported: reading the constant from the package would execute
+#: ``isaac_api/mcp/__init__.py``, which is the entire thing
+#: :func:`_mcp_is_requested` exists to avoid. See its docstring.
+_MCP_DEPLOYMENT_ENV = "ISAAC_MCP_DEPLOYMENT"
+
+
+def _mcp_is_requested() -> bool:
+    """Did an operator ask for MCP at all? Answered WITHOUT importing the package.
+
+    Deliberately a NECESSARY condition, not a sufficient one. It does not know
+    which binding names serve a transport and must never learn: that registry
+    lives in ``deployment.py``/``transport.py``, and a second copy here would
+    silently refuse to mount the next binding somebody adds. A non-empty value of
+    any kind therefore imports the package and lets
+    :func:`~.mcp.transport.mcp_transport_or_none` make the real decision, which
+    still fails closed for unset, empty, unrecognised, reserved and misconfigured.
+
+    Why the cheap check exists at all: importing ``isaac_api.mcp`` executes
+    ``policy.py``, whose module-scope ``OPERATIONS`` introspects
+    ``routes.list_runs`` and RAISES ``RuntimeError`` on an unreviewed query
+    parameter or an unrenderable annotation. Because ``app = create_app()`` runs at
+    module scope (bottom of this file), an unconditional import turns that
+    review-time guard into a boot failure for the WHOLE application — API, UI and
+    health — on a deployment that was never going to serve MCP. The guard is
+    correct and stays; what changes is that only an operator who asked for MCP can
+    be stopped by it. ``test_mcp_transport.py`` pins both halves.
+    """
+    return bool((os.environ.get(_MCP_DEPLOYMENT_ENV) or "").strip())
+
+
 def create_app() -> FastAPI:
     # Fail-closed at boot, BEFORE reading config or constructing the app: refuse
     # to construct when the runtime mode is misconfigured (invalid value, or
@@ -219,8 +252,13 @@ def create_app() -> FastAPI:
     # is one conditional away from being opened by whoever reads the 403 as a bug.
     #
     # Imported here rather than at module scope so the whole feature is one
-    # contiguous block, and so an application that will never serve it does not
-    # import the package. Registered BEFORE `mount_spa`, whose catch-all would
+    # contiguous block, and — since `_mcp_is_requested()` gates the import —
+    # so an application that will never serve it does not import the package at
+    # all. That is a boot-availability property, not tidiness: `policy.py` raises
+    # at import on an unreviewed `list_runs` query parameter, and with
+    # `app = create_app()` at module scope an unconditional import would turn that
+    # review-time guard into "uvicorn cannot start". Read `_mcp_is_requested`
+    # before changing this. Registered BEFORE `mount_spa`, whose catch-all would
     # otherwise swallow the path.
     #
     # An exact `Route`, not `app.mount`: a Mount matches a PREFIX, which would
@@ -232,21 +270,22 @@ def create_app() -> FastAPI:
     # answer GET and DELETE with its own reasons rather than a bare 405, and
     # `include_in_schema=False` keeps a non-OpenAPI protocol out of the OpenAPI
     # document (a plain Route is invisible to FastAPI's generator anyway).
-    from starlette.routing import Route
+    if _mcp_is_requested():
+        from starlette.routing import Route
 
-    from .mcp.transport import MCP_PATH, mcp_transport_or_none
+        from .mcp.transport import MCP_PATH, mcp_transport_or_none
 
-    mcp_transport = mcp_transport_or_none(app)
-    if mcp_transport is not None:
-        app.router.routes.append(
-            Route(
-                f"{base}{MCP_PATH}",
-                mcp_transport,
-                name="mcp",
-                methods=None,
-                include_in_schema=False,
+        mcp_transport = mcp_transport_or_none(app)
+        if mcp_transport is not None:
+            app.router.routes.append(
+                Route(
+                    f"{base}{MCP_PATH}",
+                    mcp_transport,
+                    name="mcp",
+                    methods=None,
+                    include_in_schema=False,
+                )
             )
-        )
     # -------------------------------------------------------------------------
     mount_spa(app, base)
     return app

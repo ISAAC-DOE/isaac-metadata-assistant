@@ -76,6 +76,27 @@ admits the next binding somebody adds:
 Both are read through ``getattr`` with the **safe** value as the default
 (``False`` and ``True`` respectively), so a binding that forgets to declare them
 serves nothing and, if it somehow serves, serves only itself.
+
+``requires_loopback_peer`` CONTROLS MORE THAN ITS NAME SAYS
+===========================================================
+Read this before writing the binding that answers D2. In ``transport.py`` this
+single flag gates **three** distinct refusals, not one:
+
+1. the **socket-peer check** — the one the name describes;
+2. the **proxy-header refusal** — any of :data:`~.transport.PROXY_HEADERS`
+   present means the loopback peer is a relay, not the caller;
+3. the **cross-origin refusal** — an ``Origin`` outside loopback, which is the
+   DNS-rebinding defence the MCP specification requires of a local server.
+
+The consequence is the reason this note exists. An ``edge-issued-bearer`` binding
+legitimately receives traffic *through the Authentik edge*, so its author will
+set ``requires_loopback_peer=False`` — and will thereby switch off the proxy and
+origin defences too, on the one binding in this design that is
+internet-adjacent. **That is not the intent of setting this flag and must not be
+allowed to happen silently.** Until the flag is split into three (a deliberate
+FOLLOW-UP, not this slice), treat it as "all three local-server defences", and
+whoever splits it should give the new binding explicit answers for 2 and 3
+rather than inheriting ``False`` for them.
 """
 
 from __future__ import annotations
@@ -225,6 +246,11 @@ class DeploymentBinding(Protocol):
     #: Must the request's own socket peer be a loopback address? Read with a
     #: default of ``True`` wherever it is consulted, so forgetting it narrows
     #: rather than widens.
+    #:
+    #: **It also gates two guards the name does not mention** — the proxy-header
+    #: refusal and the cross-origin/DNS-rebinding refusal. See the module
+    #: docstring section "``requires_loopback_peer`` controls more than its name
+    #: says" before setting this ``False`` on a new binding.
     requires_loopback_peer: bool
 
     def authenticate(self, credential: Credential | None) -> Principal:

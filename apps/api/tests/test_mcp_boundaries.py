@@ -411,8 +411,8 @@ def test_no_mcp_transport_is_mounted_on_the_default_application(app):
     The other half of the instruction — that the transport, WHEN mounted, is
     gated — lives in ``apps/api/tests/test_mcp_transport.py``: the loopback peer
     check, the proxy-header and cross-origin refusals, the credential refusal, the
-    per-call scope check, and three negative controls that disable each guard and
-    assert the behaviour changes.
+    per-call scope check, and four negative controls that disable one guard each
+    and assert the behaviour changes.
     """
     paths = {getattr(route, "path", "") for route in app.routes}
     assert not any("mcp" in path.lower() for path in paths)

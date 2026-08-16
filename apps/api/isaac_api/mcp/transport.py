@@ -65,7 +65,9 @@ THE FOUR AXES THIS FAILS CLOSED ON
 1. **Deployment unresolved** → no route is registered at all. Not a 403: an absent
    path. :func:`mcp_transport_or_none` returns ``None`` and ``app.py`` registers
    nothing.
-2. **Peer not loopback** → ``403``, before the body is read. Includes the case
+2. **Peer not loopback** → ``403``, before the method is looked at and before the
+   body is read, so a caller this binding will not serve cannot learn from a
+   ``405`` that ISAAC speaks MCP here. Includes the case
    where ASGI reports no peer at all, and the case where a proxy header is
    present (a loopback peer behind a proxy tells you nothing about the origin).
 3. **Origin present and not loopback** → ``403``. This is the DNS-rebinding
@@ -208,6 +210,12 @@ class McpHttpTransport:
         self._binding = binding
         # Read once, with the SAFE default, so a binding that never declares it
         # gets the narrow behaviour rather than the wide one.
+        #
+        # NAME UNDERSTATES SCOPE: this one flag gates THREE guards in
+        # `_handle_http` — the socket-peer check, the proxy-header refusal and the
+        # cross-origin/DNS-rebinding refusal. The comment at that `if` says why
+        # that matters and why splitting them is a follow-up rather than this
+        # slice.
         self._loopback_only = bool(getattr(binding, "requires_loopback_peer", True))
 
     # -- ASGI -----------------------------------------------------------------
@@ -234,6 +242,43 @@ class McpHttpTransport:
         # from the router and never reaches this object — one path-matching
         # implementation instead of two that can disagree. `app.py` explains the
         # choice; `test_mcp_transport.py` asserts the sub-path 404.
+
+        # FIRST, BEFORE THE METHOD CHECK AND BEFORE THE BODY IS READ. The order is
+        # deliberate and was wrong once: with the method check first, a caller from
+        # off loopback got `405 Allow: POST` naming this as an MCP endpoint — a
+        # refusal that still answers "does ISAAC speak MCP here?" for a scanner
+        # that never sent a POST. A caller this binding will not serve learns
+        # nothing from a verb. The module docstring's axis 2 ("Peer not loopback ->
+        # 403, before the body is read") and `deployment.py` both state this order;
+        # `test_mcp_transport.py` pins a non-loopback GET at 403.
+        #
+        # ONE FLAG, THREE GUARDS — read this before flipping it. `_loopback_only`
+        # is `requires_loopback_peer`, whose name and whose documentation in
+        # `deployment.py` describe ONLY the first of the three refusals inside
+        # `_loopback_refusal`:
+        #   1. the socket-peer check          (the one the flag is named for);
+        #   2. the proxy-header refusal       (`PROXY_HEADERS`, ~line 371 below);
+        #   3. the cross-origin/DNS-rebinding refusal (`Origin`, ~line 380 below).
+        # So setting `requires_loopback_peer=False` — which is exactly what an
+        # implementer of an `edge-issued-bearer` binding would do when D2 is
+        # answered, because traffic then legitimately arrives through the edge —
+        # ALSO silently disables 2 and 3, on the one binding that will be
+        # internet-adjacent. That is the opposite of what that author will intend.
+        # Splitting the flag into three (peer / proxy / origin) is a FOLLOW-UP,
+        # deliberately not done in this slice; until it is, a new binding author
+        # must treat this flag as "all three local-server defences", not as its
+        # name.
+        if self._loopback_only:
+            refusal = self._loopback_refusal(scope, headers)
+            if refusal is not None:
+                code, message = refusal
+                # Logged at INFO with no peer address and no header value: the
+                # operator needs to know the guard fired, and a log line naming a
+                # remote address is a record this application has no reason to keep.
+                _log.info("MCP transport refused a request: %s", code)
+                await self._refuse(send, 403, code, message)
+                return
+
         method = (scope.get("method") or "").upper()
         if method != "POST":
             # Named individually so the refusal explains the design rather than
@@ -251,17 +296,6 @@ class McpHttpTransport:
             await self._refuse(send, 405, "method_not_allowed", reason, allow="POST")
             return
 
-        if self._loopback_only:
-            refusal = self._loopback_refusal(scope, headers)
-            if refusal is not None:
-                code, message = refusal
-                # Logged at INFO with no peer address and no header value: the
-                # operator needs to know the guard fired, and a log line naming a
-                # remote address is a record this application has no reason to keep.
-                _log.info("MCP transport refused a request: %s", code)
-                await self._refuse(send, 403, code, message)
-                return
-
         # A client that states a protocol version states one this server speaks,
         # or is refused. The specification's negotiation happens in `initialize`;
         # this header exists so a MISMATCH after negotiation is caught rather than
@@ -277,7 +311,13 @@ class McpHttpTransport:
             )
             return
 
-        content_type = (headers.get("content-type") or "").split(";", 1)[0].strip()
+        # Lowercased like `Accept` is: RFC 9110 §8.3.1 makes a media type's type
+        # and subtype case-insensitive, so `APPLICATION/JSON` is `application/json`
+        # and a case-sensitive comparison refuses a conforming client with 415.
+        # (Only the type/subtype is folded — parameter VALUES such as a boundary
+        # are case-sensitive, and everything after the first `;` is discarded here
+        # anyway.)
+        content_type = (headers.get("content-type") or "").split(";", 1)[0].strip().lower()
         if content_type != _JSON_CONTENT_TYPE:
             await self._refuse(
                 send,

@@ -15,18 +15,38 @@ somebody would break it turns the file red rather than turning a docstring stale
    CAS parity cases drive the SAME write over the transport and over plain HTTP
    and require the same refusal from both.
 
-Three cases are deliberate NEGATIVE CONTROLS (``..._is_load_bearing``): each
+Four cases are deliberate NEGATIVE CONTROLS (``..._is_load_bearing``): each
 disables one guard and asserts the behaviour changes. They are here because a
 test that only ever sees the guard pass cannot distinguish "the guard refused" from
 "nothing was reachable anyway".
 
-Nothing here opens a socket, reads real data, or touches a database. Every record
-is a committed synthetic example inside an isolated worked-example session.
+ONE TEST BINDS A REAL SOCKET, AND IT IS THE POINT OF IT
+=======================================================
+*This paragraph used to read "Nothing here opens a socket", which was false.*
+``test_a_real_client_over_a_real_loopback_socket_completes_a_session`` starts a
+real ``uvicorn`` server on a real ``127.0.0.1`` TCP socket with an ephemeral port
+and drives it with a real ``httpx`` client. That is deliberate and must stay: it
+is the only case where ``scope["client"]`` is supplied by the KERNEL rather than
+by the test, so it is the only evidence that the loopback guard reads a genuine
+peer address instead of a tuple this file wrote.
+
+The true claim, which is the one that was being protected: **nothing here leaves
+this machine.** The bind is loopback, no DNS is resolved, no real data is read
+and no database is touched. Every record is a committed synthetic example inside
+an isolated worked-example session.
+
+**Practical consequence:** that one test is the only one that can fail in a
+restricted CI sandbox — one that forbids ``bind()``/``listen()`` even on
+loopback, or that has no loopback interface. Every other test in this file drives
+the ASGI application in process. If it fails there, check the sandbox before
+concluding the transport regressed.
 """
 
 from __future__ import annotations
 
 import json
+import sys
+import types
 
 import pytest
 from fastapi.testclient import TestClient
@@ -261,6 +281,109 @@ def test_a_binding_that_forgets_to_declare_itself_serves_nothing(workspace):
     )
 
 
+# --------------------------------------------------------------------------
+# 1b. …and an application that will not serve MCP does not IMPORT the package
+#
+# This is an availability property, not tidiness. `policy.py` builds `OPERATIONS`
+# at module scope and RAISES `RuntimeError` on an unreviewed `list_runs` query
+# parameter or an annotation it cannot render — a review-time guard that is
+# correct and stays. But `app = create_app()` runs at module scope, so an
+# UNCONDITIONAL `from .mcp.transport import ...` inside `create_app` turns that
+# guard into "uvicorn cannot import the application": no API, no UI, no health
+# endpoint, on a deployment that was never going to serve MCP. `policy.py`'s own
+# comment records that the run-list route is growing filters on other branches,
+# so the trigger is a merge order, not a hypothetical.
+# --------------------------------------------------------------------------
+
+def test_the_env_name_app_py_duplicates_is_the_one_deployment_py_defines():
+    """`app.py` cannot import the constant, so it copies it. Pin the copy.
+
+    Importing `isaac_api.mcp.deployment` to read `DEPLOYMENT_ENV` would execute
+    `isaac_api/mcp/__init__.py` — which is the entire thing the pre-check exists
+    to avoid. A duplicated string literal is the price, and this assertion is what
+    stops it drifting into a gate that never opens.
+    """
+    from isaac_api import app as app_module
+
+    assert app_module._MCP_DEPLOYMENT_ENV == DEPLOYMENT_ENV
+
+
+def _unimportable_transport_module(monkeypatch):
+    """Make `from .mcp.transport import ...` raise the way `policy.py` would.
+
+    The real failure is a `RuntimeError` raised while `isaac_api.mcp.policy`
+    executes, which happens the first time anything imports the package. By the
+    time this test runs the package is already in `sys.modules` (this file
+    imported it), so re-importing would be a no-op. Substituting a module object
+    whose attribute access raises reproduces the OBSERVABLE effect at the one
+    place `app.py` touches: the `from ... import` statement raises `RuntimeError`.
+    """
+    exploding = types.ModuleType("isaac_api.mcp.transport")
+    exploding.__spec__ = sys.modules["isaac_api.mcp.transport"].__spec__
+
+    def _raise(name):
+        raise RuntimeError(
+            "the run-list route exposes an unreviewed query parameter 'sort'"
+        )
+
+    exploding.__getattr__ = _raise
+    monkeypatch.setitem(sys.modules, "isaac_api.mcp.transport", exploding)
+
+
+def test_an_unconfigured_app_boots_even_when_the_mcp_package_cannot_import(
+    workspace, monkeypatch
+):
+    """The default deployment builds fine while the MCP package is on fire.
+
+    Before the import was made conditional this raised out of `create_app`, and —
+    because `app = create_app()` is module scope — out of `import isaac_api.app`,
+    which is uvicorn's entry point. An MCP review guard must not be able to take
+    the API, the UI and `/api/health` down with it.
+    """
+    _unimportable_transport_module(monkeypatch)
+
+    app = build_app()  # must not raise
+
+    assert _mcp_route_paths(app) == []
+    client = TestClient(app, client=LOOPBACK_PEER)
+    assert client.get("/api/health").status_code == 200
+
+
+def test_a_configured_app_still_fails_loudly_when_the_mcp_package_cannot_import(
+    workspace, monkeypatch
+):
+    """The other half, and the reason this is a narrowing rather than a bypass.
+
+    The guard is not weakened for anybody who asked for MCP: an operator who set
+    `ISAAC_MCP_DEPLOYMENT` gets the `RuntimeError`, unswallowed, at boot. Silently
+    serving no MCP route because the package failed to import would be strictly
+    worse than failing — it looks like a working deployment with a missing feature.
+    """
+    _unimportable_transport_module(monkeypatch)
+    workspace.setenv(DEPLOYMENT_ENV, LOCAL_LOOPBACK)
+
+    with pytest.raises(RuntimeError, match="unreviewed query parameter"):
+        build_app()
+
+
+def test_an_unrecognised_value_still_reaches_the_package_rather_than_being_judged_here(
+    workspace, monkeypatch
+):
+    """The pre-check is a NECESSARY condition only, and deliberately not a registry.
+
+    `app.py` must not learn which binding names serve a transport — a second copy
+    of that registry would silently refuse to mount the next binding somebody
+    adds. So any non-empty value imports the package and lets
+    `mcp_transport_or_none` decide; the fail-closed answer still comes from there.
+    Asserted by the failure propagating for a value that is NOT a real binding.
+    """
+    _unimportable_transport_module(monkeypatch)
+    workspace.setenv(DEPLOYMENT_ENV, "hosted")
+
+    with pytest.raises(RuntimeError, match="unreviewed query parameter"):
+        build_app()
+
+
 # ==========================================================================
 # 2. A real JSON-RPC session over the mounted transport
 # ==========================================================================
@@ -346,6 +469,13 @@ def test_a_real_client_over_a_real_loopback_socket_completes_a_session(workspace
     ``uvicorn`` is already a declared dependency (``pyproject.toml`` ``[api]``),
     the bind is ``127.0.0.1`` with an ephemeral port, and nothing leaves the
     machine.
+
+    **The only test in this file that binds a socket**, and therefore the only one
+    that can fail in a CI sandbox which forbids ``bind()``/``listen()`` or has no
+    loopback interface. A failure here is a sandbox question first and a transport
+    question second. It is not skipped preemptively: a guard that is only ever
+    exercised against test-supplied peers is a guard nothing has checked, so this
+    case is worth being noisy about when the environment cannot run it.
     """
     import threading
 
@@ -443,6 +573,42 @@ def test_a_non_loopback_peer_is_refused_before_the_body_is_read(workspace, peer)
     assert body["error"]["data"]["code"] == "loopback_only"
     # The refusal does not echo the address it saw back to the caller.
     assert peer not in response.text
+
+
+@pytest.mark.parametrize("method", ["get", "delete", "put", "patch", "options"])
+def test_a_non_loopback_caller_is_refused_before_the_method_is_considered(
+    workspace, method
+):
+    """403, not 405 — the peer check runs first, as both docstrings say it does.
+
+    With the method check first, a caller from off loopback got
+    ``405 Allow: POST``, which answers "does ISAAC speak MCP at this path?" for a
+    scanner that never sent a POST and contradicts ``transport.py``'s stated axis
+    2 and ``deployment.py``. Nothing about the verb may reach a peer this binding
+    will not serve.
+    """
+    app, _ = configured(workspace)
+    remote = TestClient(app, client=("203.0.113.9", 5000))
+
+    response = getattr(remote, method)(MCP_PATH)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["data"]["code"] == "loopback_only"
+    # Specifically NOT the method refusal: no `Allow`, and no MCP vocabulary.
+    assert "allow" not in {k.lower() for k in response.headers}
+    assert "Mcp-Session-Id" not in response.text
+
+
+def test_a_loopback_caller_still_gets_the_method_refusal(workspace):
+    """The reorder narrows what a REMOTE caller learns and changes nothing local.
+
+    Paired with the test above on purpose: moving a guard earlier is only safe if
+    the behaviour it now precedes is intact for everybody it was written for.
+    """
+    _, client = configured(workspace)
+    response = client.get(MCP_PATH)
+    assert response.status_code == 405
+    assert response.headers["allow"] == "POST"
 
 
 def test_a_request_with_no_reported_peer_is_refused(workspace):
@@ -602,6 +768,34 @@ def test_a_non_json_content_type_is_refused(workspace, content_type):
         headers={"content-type": content_type} if content_type else {},
     )
     assert response.status_code == 415
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "application/json",
+        "APPLICATION/JSON",
+        "Application/Json",
+        "application/json; charset=UTF-8",
+        "  application/json  ",
+    ],
+)
+def test_the_media_type_is_matched_case_insensitively(workspace, content_type):
+    """RFC 9110 §8.3.1 makes type/subtype case-insensitive, so 415 here is a bug.
+
+    It failed closed rather than open, which is why it is a usability defect and
+    not a security one — but a conforming client refused with 415 has no way to
+    tell that from "this server does not take JSON". ``Accept`` was already
+    lowercased; only ``Content-Type`` was not.
+    """
+    _, client = configured(workspace)
+    response = client.post(
+        MCP_PATH,
+        content=b'{"jsonrpc":"2.0","id":1,"method":"ping"}',
+        headers={"content-type": content_type},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == {}
 
 
 def test_a_client_that_cannot_accept_json_is_refused(workspace):
@@ -1034,11 +1228,19 @@ def test_the_mount_gate_is_load_bearing(workspace, monkeypatch):
     keep passing after somebody deleted the feature.
 
     The break is applied at the ONE place the gate is read: the binding the
-    transport module resolves. Everything else — the environment, ``create_app``,
-    the route registration — is left exactly as the default deployment has it.
+    transport module resolves. Everything else — ``create_app``, the route
+    registration — is left as it is.
+
+    ``ISAAC_MCP_DEPLOYMENT`` is SET here, to a value that is not a binding. There
+    are two gates in series since the import was made conditional, and this test
+    is about the inner one: a set-but-unrecognised value clears ``app.py``'s cheap
+    env pre-check (so the package is imported and the real decision is made) and
+    still resolves to :class:`UnconfiguredDeployment`. The OUTER gate has its own
+    control immediately below.
     """
     import isaac_api.mcp.transport as transport_module
 
+    workspace.setenv(DEPLOYMENT_ENV, "hosted")
     assert _mcp_route_paths(build_app()) == []
     monkeypatch.setattr(
         transport_module,
@@ -1048,8 +1250,43 @@ def test_the_mount_gate_is_load_bearing(workspace, monkeypatch):
     assert _mcp_route_paths(build_app()) == [MCP_PATH]
 
 
+def test_the_env_precheck_is_the_outer_gate_and_is_load_bearing(workspace, monkeypatch):
+    """With the binding forced to serve, the env pre-check alone still mounts nothing.
+
+    Same forced binding in both halves, so the only variable is the environment.
+    Unset, ``app.py`` never imports the package, so the forced binding is never
+    consulted and no route appears — which is the property that keeps a raising
+    ``policy.py`` out of the boot path. Set, the package is imported, the forced
+    binding is consulted, and the route appears.
+    """
+    import isaac_api.mcp.transport as transport_module
+
+    monkeypatch.setattr(
+        transport_module,
+        "resolve_binding",
+        lambda env=None: _forced(UnconfiguredDeployment()),
+    )
+    assert _mcp_route_paths(build_app()) == []
+
+    workspace.setenv(DEPLOYMENT_ENV, "hosted")
+    assert _mcp_route_paths(build_app()) == [MCP_PATH]
+
+
 def test_the_loopback_guard_is_load_bearing(workspace, monkeypatch):
-    """Disable it and a remote peer is served — so the 403 is this check, not luck."""
+    """Disable it and a remote peer is served — so the 403 is this check, not luck.
+
+    **This control is also a warning, and must not be read as an endorsement.**
+    The flip it performs — ``requires_loopback_peer=False`` — switches off THREE
+    guards, not one: the peer check, the proxy-header refusal and the
+    cross-origin/DNS-rebinding refusal all sit behind that single flag in
+    ``transport.py``. Serving a remote peer 200 is the correct assertion *here*,
+    because this is a control on an unmountable binding in a test process. It
+    would be the wrong thing to reproduce in a real binding: an
+    ``edge-issued-bearer`` author who copies this flip to admit edge traffic
+    silently disables the other two on the one binding that is internet-adjacent.
+    See the comments at ``transport.py``'s ``if self._loopback_only`` and in
+    ``deployment.py``; splitting the flag is a follow-up.
+    """
     import isaac_api.mcp.transport as transport_module
 
     app, _ = configured(workspace)

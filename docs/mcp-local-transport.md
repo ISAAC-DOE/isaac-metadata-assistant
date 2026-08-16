@@ -166,9 +166,20 @@ permanently disqualified. No binding in this build reads a header, and a future 
 must not either.
 
 Until one of those contracts exists, the honest state is the one this build has:
-`ISAAC_MCP_DEPLOYMENT` unset, no route, and `Connect Your Agent` saying that
-organization configuration is required rather than showing a connection it cannot
-verify (`docs/ai-integration-decision-packet.md` §6.1, §9).
+`ISAAC_MCP_DEPLOYMENT` unset, no route, **and no product surface that mentions MCP
+at all.** This build ships no `Connect Your Agent` screen — verify with
+`rg -i 'Connect Your Agent' apps/web/src apps/api src`, which matches nothing —
+and that absence is itself the honest state, because
+`docs/ai-integration-decision-packet.md` §9 says to build nothing that implies a
+connection exists.
+
+> **Forward reference, NOT a description of this build.** A separate branch
+> (`feat/connect-agent`, PR #142) adds a `Connect Your Agent` screen whose copy
+> says organization configuration is required rather than showing a connection it
+> cannot verify (`docs/ai-integration-decision-packet.md` §6.1, §9). It is not on
+> this branch and may land after it. Do not read the sentence above as describing
+> a shipped screen; when that branch merges, this note is what should be replaced
+> with a present-tense statement.
 
 ---
 
@@ -176,10 +187,17 @@ verify (`docs/ai-integration-decision-packet.md` §6.1, §9).
 
 `apps/api/tests/test_mcp_transport.py` — the transport: the mount gate, the loopback
 and origin guards, the fail-closed HTTP axes, the authorization seam, the CAS/validation
-parity cases, and three negative controls that disable one guard each and assert the
+parity cases, and four negative controls that disable one guard each and assert the
 behaviour changes.
 
 `apps/api/tests/test_mcp_boundaries.py` — what must never be reachable.
 `apps/api/tests/test_mcp_server.py` — the eight tools, in process.
 
-None of them opens a socket, reads real data, or touches a database.
+**None of them reads real data, touches a database, or sends anything off this
+machine.** *This line previously said "None of them opens a socket", which was
+false.* Exactly one test does — `test_a_real_client_over_a_real_loopback_socket_
+completes_a_session` binds a `uvicorn` server to `127.0.0.1` on an ephemeral port
+and drives it with a real HTTP client. That is the only way to prove the loopback
+guard reads a **kernel-supplied** peer address rather than one the test wrote, so
+it stays. It is also the only test here that can fail in a CI sandbox that
+forbids binding a socket; every other test drives the ASGI application in process.

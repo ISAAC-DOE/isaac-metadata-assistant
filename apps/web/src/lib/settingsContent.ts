@@ -770,6 +770,22 @@ export const API_ACCESS_COPY = {
    */
   requirementsBoundary:
     "Those five are the application's to build, and building all five would still not be enough on its own. One requirement is not ours: a program has to be able to reach the API in the first place, and a deployment that answers only browser sessions does not let it — that part belongs to whoever operates the deployment.",
+  /**
+   * THE OTHER MECHANISM, named — the mirror of `MCP_CONNECT_COPY.restApiPointer`.
+   *
+   * "Connect an Agent" and the "Connect Your Agent" tab are one word and two
+   * tabs apart, describe different protocols, and made unreconciled claims
+   * about authentication to the same reader: this guide says every call carries
+   * a credential in a header when a deployment enables authentication, and that
+   * tab says there is no configured way to authenticate a caller. Each is true
+   * of its own path, and neither said so relative to the other.
+   *
+   * Authored here rather than inline so the duplication guard counts it like
+   * every other canonical string on this tab, and so the two directions can be
+   * read side by side in one module diff.
+   */
+  connectMcpPointer:
+    'This guide is about calling the HTTP API from a program you write. Pointing your own Claude at ISAAC’s machine-callable tool interface is a different mechanism with a different answer about authentication, and the Connect Your Agent tab describes it — including the fact that no agent can reach this deployment yet.',
 } as const;
 
 /**
