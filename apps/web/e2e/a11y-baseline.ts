@@ -750,8 +750,76 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * read it as "Validate & Review adds one contrast node". Measuring the rest
        * needs a scan that drives the button, which is its own slice.
        */
-      'record-detail@desktop-1280x800': 15,
-      'record-detail@laptop-1024x768': 15,
+      /*
+       * ── UNMAPPED NOTES (PR #146), 2026-08-16: +1 on all seven `record-detail`
+       *    cells, and +1/+2/+3 on all seven `settings-explorer` cells ───────────
+       *
+       * CI run 31973740169 on head `0c72100` failed `browser accessibility and
+       * responsive baseline` with GROWTHS on exactly these two surfaces, rule
+       * `color-contrast`, LINUX column. No NEW rule appeared, no `clipped-x`
+       * finding, and no other rule fired anywhere. The numbers below are
+       * TRANSCRIBED from that job; nothing here was measured locally, and this
+       * file's standing rule applies — a11y figures come from linux CI and are
+       * never read off a laptop.
+       *
+       * THE SAME SYSTEMIC SHORTFALL THIS ENTRY HAS ALWAYS BEEN ABOUT, not a new
+       * defect and not a colour either surface chose:
+       *
+       *   `--text-tertiary`   #78838f — measured 3.86:1 on white
+       *   `--text-quaternary` #9aa4af — measured 2.53:1 on white
+       *
+       * WCAG AA needs 4.50:1 and AA-large 3.00:1, so the first fails AA and the
+       * second fails both. Both are already in this entry's `foregrounds` list.
+       * THESE COUNTS ARE RECORDED, NOT ACCEPTED AS CORRECT. The queued
+       * design-system slice that raises the two tokens will lower them here and
+       * on every other surface at once, so THESE FIGURES ARE EXPECTED TO FALL;
+       * when they do, transcribe CI's new numbers and lower the total. Do not
+       * read the fall as a regression, and do not repair the palette inside a
+       * notes PR, where a broad change would hide.
+       *
+       * ── WHY `record-detail` MOVED: the notes panel's EMPTY STATE ───────────
+       *
+       * The Unmapped Notes panel mounts inside this existing surface, and the
+       * SEEDED RECORDS HOLD NO NOTES. So the +1 at every viewport is the section
+       * heading / empty state and nothing else.
+       *
+       * WHAT THIS NUMBER THEREFORE DOES NOT MEASURE, named rather than implied:
+       * the note card, the four action buttons, the three inline forms and the
+       * select are ALL UNSCANNED, because the scan renders the section and moves
+       * on without ever putting a note in front of it. That is a known coverage
+       * gap and a deferred follow-up — it needs a scan that seeds a note and
+       * drives the controls — and it must NOT be mistaken for a clean surface.
+       * `+1` is the part of this feature's contrast cost a note-free scan can
+       * reach, exactly as the `.vr-sub` note above says of Validate & Review.
+       *
+       * ── WHY `settings-explorer` MOVED: a SECOND-ORDER effect ───────────────
+       *
+       * This branch adds notes API operations, and the Endpoint Explorer renders
+       * every operation the build exposes — so more operations means more small
+       * text on that screen. Nothing about the notes UI is rendered there. This
+       * is worth knowing beyond this PR: ANY FUTURE SLICE THAT ADDS ROUTES WILL
+       * MOVE THIS SURFACE TOO, and its cells move by different amounts (+1 at the
+       * five wide projects, +2/+3 at the narrow ones) because `.api-browser-list`
+       * is a clipped scroll container — see the long RUN OVERRIDE ROUTES note
+       * above `settings-explorer@desktop-1280x800` for that mechanism.
+       *
+       * ── HOW THE SEVEN `record-detail` CELLS ARE WRITTEN ────────────────────
+       *
+       * All seven were SCALARS, and a scalar asserts BOTH columns. Only linux was
+       * measured, so every one of them SPLITS into `{ darwin: <carried forward,
+       * unmeasured>, linux: <CI> }` rather than having its scalar raised onto a
+       * macOS reading nobody took. The precedent is `settings-explorer@width-320`
+       * and the two `@width-320` splits of 2026-08-16. `A11Y_BASELINE_TOTAL_NODES.darwin`
+       * therefore does not move at all in this transcription.
+       *
+       * THE DARWIN COLUMN HERE IS KNOWN-UNVERIFIED, not known-correct. A DOM node
+       * added by an empty state has moved both faces every time it has been
+       * measured, so darwin has very probably moved too. It is left alone anyway:
+       * a stale number that says where it came from can be corrected by the next
+       * darwin run; a fresh number nobody measured cannot be caught at all.
+       */
+      'record-detail@desktop-1280x800': { darwin: 15, linux: 16 },
+      'record-detail@laptop-1024x768': { darwin: 15, linux: 16 },
       /* linux 15 -> 14: the 320px clipping fix (min-width/overflow-wrap on
          `.fg-summary`, scoped to `.record-view-panel`) let the summary WRAP
          instead of running past its clip, and one contrast node stopped firing
@@ -759,9 +827,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          loosening. darwin measured 16 on the same commit and is unchanged —
          the two faces wrap at different words, which is the entire reason this
          file has two columns. */
-      'record-detail@tablet-768x1024': 15,
-      'record-detail@mobile-375x812': 13,
-      'record-detail@zoom-200': 13,
+      'record-detail@tablet-768x1024': { darwin: 15, linux: 16 },
+      'record-detail@mobile-375x812': { darwin: 13, linux: 14 },
+      'record-detail@zoom-200': { darwin: 13, linux: 14 },
       'schema-reference@desktop-1280x800': 19,
       'schema-reference@laptop-1024x768': 19,
       'schema-reference@tablet-768x1024': 17,
@@ -1052,8 +1120,20 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * unchanged, and its cost is a coverage limitation this file has recorded since
        * 2026-08-06, not something this branch introduced.
        */
-      'settings-explorer@desktop-1280x800': { darwin: 49, linux: 48 },
-      'settings-explorer@laptop-1024x768': { darwin: 50, linux: 48 },
+      // UNMAPPED NOTES (PR #146), 2026-08-16, CI run 31973740169 on `0c72100`:
+      // linux 48 -> 49 here and on laptop. A SECOND-ORDER effect of adding notes
+      // API operations — the Endpoint Explorer renders every operation the build
+      // exposes — and one more instance of the #78838f / #9aa4af shortfall, not a
+      // new defect. Read the block above `record-detail@desktop-1280x800` for the
+      // full reasoning, including why these figures are expected to FALL.
+      //
+      // The desktop pair COLLAPSES to a scalar 49: darwin was already 49, linux has
+      // converged on it, and the well-formedness guard rejects a pair whose halves
+      // are equal ("write a bare number instead"). The scalar is therefore two
+      // measurements agreeing, not one measurement asserted twice. Laptop stays a
+      // pair — darwin 50 is carried forward untouched and unmeasured at this commit.
+      'settings-explorer@desktop-1280x800': 49,
+      'settings-explorer@laptop-1024x768': { darwin: 50, linux: 49 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -1084,7 +1164,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // note above the desktop entry: the linux +1 is this branch's five new
       // operations shifting the scroll clip; the darwin +2 is a stale column,
       // A/B-measured as already 64 on `b7792c1`.
-      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 63 },
+      // UNMAPPED NOTES (PR #146), 2026-08-16: linux 63 -> 64, same cause as the
+      // desktop/laptop cells above. darwin 65 carried forward unmeasured.
+      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 64 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1136,8 +1218,19 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // tablet entry above; read that note, including its "darwin-measured only"
       // caveat. `zoom-200` and the two wide projects did NOT move: the new row
       // falls outside the measured window at those widths.
-      'settings-explorer@mobile-375x812': { darwin: 56, linux: 55 },
-      'settings-explorer@zoom-200': { darwin: 59, linux: 58 },
+      // UNMAPPED NOTES (PR #146), 2026-08-16: linux 55 -> 57 (+2) at mobile and
+      // 58 -> 59 (+1) at zoom-200. Same cause as the cells above; mobile moves by
+      // two because the narrower box holds fewer rows across the scroll clip.
+      //
+      // Mobile stays a PAIR, and note the columns have now CROSSED — linux 57 is
+      // above darwin 56, where it used to sit below. That is what carrying an
+      // unmeasured darwin column forward looks like; it is not a correction of
+      // darwin, which no run has touched at this commit.
+      //
+      // zoom-200 COLLAPSES to a scalar 59: darwin was already 59 and linux has
+      // converged on it, and the guard rejects a pair with equal halves.
+      'settings-explorer@mobile-375x812': { darwin: 56, linux: 57 },
+      'settings-explorer@zoom-200': 59,
       'settings-privacy@desktop-1280x800': 9,
       'settings-privacy@laptop-1024x768': 9,
       'settings-privacy@tablet-768x1024': 9,
@@ -1408,14 +1501,20 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'memory-graph@width-390': 16,
       'memory@width-320': 17,
       'memory@width-390': 17,
-      'record-detail@width-320': 13,
+      /* UNMAPPED NOTES (PR #146), 2026-08-16: linux 13 -> 14 at BOTH narrow
+         widths, the notes panel's empty state — same +1 as the five project
+         cells. Both were SCALARS and both SPLIT rather than being raised onto an
+         unmeasured darwin; the precedent is `settings-explorer@width-320` just
+         below. Full reasoning, including what this figure does NOT measure, is in
+         the block above `record-detail@desktop-1280x800`. */
+      'record-detail@width-320': { darwin: 13, linux: 14 },
       /* SPLIT, and CI is what established it. I measured darwin 13 after the
          Graph tab landed and recorded it as a bare number, saying in the commit
          that linux was not yet measured and CI would adjudicate. It did: linux
          stayed at 12. So the tab's extra node is measurable on the darwin face
          at 390 and not on the linux one — the two wrap at different words, which
          is the whole reason this file has two columns. */
-      'record-detail@width-390': 13,
+      'record-detail@width-390': { darwin: 13, linux: 14 },
       'schema-reference@width-320': 20,
       'schema-reference@width-390': 22,
       /* SPLIT 2026-08-16, and it is a fall rather than a rise. CI run 31968866824
@@ -1439,8 +1538,16 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // note above `settings-explorer@desktop-1280x800` for the cause (two new API
       // operations shifting a 320px scroll clip) and for why `width-320` had to split
       // rather than have its scalar lowered onto an unmeasured darwin.
-      'settings-explorer@width-320': { darwin: 57, linux: 55 },
-      'settings-explorer@width-390': { darwin: 59, linux: 55 },
+      // UNMAPPED NOTES (PR #146), 2026-08-16, CI run 31973740169: linux 55 -> 57
+      // at 320 and 55 -> 58 at 390 — the notes API operations again, moving the
+      // 320px scroll clip harder than the wide projects. See the block above
+      // `record-detail@desktop-1280x800`.
+      //
+      // width-320 COLLAPSES to a scalar 57: darwin was already 57 and linux has
+      // converged on it, so the pair no longer marks a measured difference and
+      // the guard would reject it. width-390 stays a pair, darwin 59 unmeasured.
+      'settings-explorer@width-320': 57,
+      'settings-explorer@width-390': { darwin: 59, linux: 58 },
       'settings-privacy@width-320': 8,
       'settings-privacy@width-390': 8,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -2156,8 +2263,40 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // darwin 2397 + 154 = 2551; linux 2387 + 154 - 2 = 2539. COMPUTED from the map
   // by the same per-platform reduction the guard runs, then checked against this
   // arithmetic — not obtained from it.
+  // ── 2026-08-16, UNMAPPED NOTES (PR #146). linux 2539 -> 2557. darwin DOES NOT MOVE ──
+  //
+  // +18, entirely from the fourteen cells CI run 31973740169 (head `0c72100`)
+  // reported as GROWN on linux, rule `color-contrast`:
+  //
+  //   +7  the seven `record-detail@*` cells, +1 each — the Unmapped Notes panel's
+  //       EMPTY STATE, because the seeded records hold no notes. That is the whole
+  //       of what was measured: the note card, the four action buttons, the three
+  //       inline forms and the select are unscanned, and the coverage gap is a
+  //       deferred follow-up, not a clean surface.
+  //  +11  the seven `settings-explorer@*` cells (+1 desktop, +1 laptop, +1 tablet,
+  //       +2 mobile, +1 zoom-200, +2 width-320, +3 width-390) — a SECOND-ORDER
+  //       effect of this branch adding notes API operations to the contract the
+  //       Endpoint Explorer renders. Any future slice that adds routes moves this
+  //       surface too.
+  //
+  // Both are instances of the `--text-tertiary` #78838f (3.86:1) and
+  // `--text-quaternary` #9aa4af (2.53:1) shortfall against AA's 4.50:1 and
+  // AA-large's 3.00:1 — RECORDED, NOT ACCEPTED AS CORRECT, and expected to FALL
+  // when the queued design-system slice raises the two tokens.
+  //
+  // darwin stays 2551 BECAUSE NOT ONE DARWIN NUMBER CHANGED. Nine of the fourteen
+  // cells were scalars, and a scalar asserts both columns, so each SPLIT into
+  // `{ darwin: <carried forward>, linux: <CI> }`. The three whose carried-forward
+  // darwin value EQUALS the new linux one — `settings-explorer` at desktop (49),
+  // zoom-200 (59) and width-320 (57) — collapse the other way, back to scalars,
+  // because the guard rejects a pair with equal halves. Neither move invents a
+  // darwin figure.
+  //
+  // 2557 is COMPUTED from the merged entry map by the same per-platform reduction
+  // the guard performs, then checked against this arithmetic — not obtained from
+  // it. Re-derive it; do not trust this sentence.
   darwin: 2551,
-  linux: 2539,
+  linux: 2557,
 };
 
 /**

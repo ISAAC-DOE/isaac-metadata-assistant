@@ -1,0 +1,303 @@
+/*
+ * Unmapped Notes.
+ *
+ * Built entirely on the existing Scientific Clarity tokens — no new hue, no new
+ * radius, no new shadow. The card geometry is `.run-card`'s, so a note and a run
+ * read as two kinds of thing on one screen rather than two screens.
+ *
+ * THE FOUR ACTIONS ARE DELIBERATELY THE SAME WEIGHT. Dismiss is not painted as a
+ * destructive control, because it is not destructive: it sets a note aside and the
+ * note stays on the record. Reaching for `--danger-*` here would say, in the one
+ * language a reader cannot help absorbing, the opposite of what the feature does.
+ *
+ * Reserved verdict colour (--pass-* / --fail-*) appears NOWHERE in this file. A
+ * review state is not a validator verdict about the science, and `mapped` is not a
+ * pass.
+ *
+ * State is carried on `data-state`, not on extra classes, matching `.run-card`.
+ */
+
+.notes-section {
+  margin-bottom: 20px;
+}
+
+.notes-head {
+  margin-bottom: 10px;
+}
+
+.notes-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.notes-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+.notes-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* --- toolbar --------------------------------------------------------------- */
+
+.notes-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.notes-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notes-control-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.notes-filter,
+.note-field-select,
+.note-reason-input {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.notes-filter:focus-visible,
+.note-field-select:focus-visible,
+.note-reason-input:focus-visible,
+.notes-capture-input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+/*
+ * The live count. It is mounted in every state and blanks rather than holding
+ * stale numbers, so it needs a reserved line box — otherwise the toolbar reflows
+ * every time a reload starts.
+ */
+.notes-count {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* --- capture --------------------------------------------------------------- */
+
+.notes-capture {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.notes-capture-input {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  width: 100%;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  padding: 7px 9px;
+  resize: vertical;
+}
+
+.notes-capture-hint,
+.note-form-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  max-width: 68ch;
+}
+
+/* --- the list -------------------------------------------------------------- */
+
+.notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-card {
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/*
+ * A dismissed note is set back, never hidden and never struck through. Strike-through
+ * reads as deletion, which is the one thing this state is not; a quieter surface says
+ * "handled" without saying "gone".
+ */
+.note-card[data-state='dismissed'] {
+  background: var(--surface-subtle);
+}
+
+.note-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 6px;
+}
+
+/*
+ * The state chip is NOT colour-coded by outcome. All four states are the same
+ * neutral treatment, because ranking them by colour would make `kept` read as a
+ * lesser result than `mapped`, and it is not one.
+ */
+.note-state {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-strong);
+  background: var(--border-faint);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.note-source,
+.note-captured,
+.note-run {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.note-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  /* The capture is verbatim, so its own line breaks and spacing are preserved. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-original {
+  margin: 6px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-strong);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-original-label {
+  font-weight: 650;
+  color: var(--text-slate);
+}
+
+.note-mapped,
+.note-candidate {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/*
+ * A machine's proposal is quieter than a person's decision, and its rule travels
+ * with it in the same line — the suggestion is never shown on its own.
+ */
+.note-candidate {
+  color: var(--text-tertiary);
+}
+
+.note-candidate-rule {
+  color: var(--text-quaternary);
+}
+
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* --- the per-action forms -------------------------------------------------- */
+
+.note-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+}
+
+.note-field-select,
+.note-reason-input {
+  max-width: 100%;
+}
+
+.note-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* --- empty / error --------------------------------------------------------- */
+
+.notes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px;
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.notes-empty p {
+  margin: 0;
+  max-width: 68ch;
+}
+
+.notes-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-primary);
+}

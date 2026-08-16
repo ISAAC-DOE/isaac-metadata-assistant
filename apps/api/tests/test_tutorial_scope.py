@@ -960,6 +960,12 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
         # which is the property this test exists to defend. See
         # ``test_run_domain_model.py::test_a_run_carries_no_session_id``.
         "runs",
+        # ``notes`` was added with Unmapped Notes, and belongs here for the same
+        # reason ``runs`` does: a note is content captured against THIS record, so
+        # it is part of the record's own document. It carries no scope key either —
+        # a ``Note`` has an ``experiment_id`` and no ``session_id``, and the scope
+        # stays a property of the directory the state was read from.
+        "notes",
     }
     assert "session_id" not in state and "scope" not in state and "root" not in state
     assert len(state["runs"]) == 1, "the per-run assertion below must not be vacuous"

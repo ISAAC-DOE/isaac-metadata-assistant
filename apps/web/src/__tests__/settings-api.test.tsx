@@ -1072,13 +1072,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * figure the test itself disproved on the next screenful. It was found only when a
    * later merge conflicted on the same two lines.
    *
-   * Both numbers were 92 when that was written and are now 48 operations / 105
-   * post-lead paragraphs, re-measured from `create_app().openapi()` on each change.
+   * Both numbers are re-measured from `create_app().openapi()` on every change (the
+   * figure quoted here used to be a bare "92", which had itself gone stale).
    * If you change the assertion, change the test NAME in the same edit — that is the
    * whole lesson of the paragraph above, and it is easier to forget than the number.
+   *
+   * 2026-08-16: Unmapped Notes took this to 51 operations / 109 paragraphs / 51,498
+   * characters, and the submission slice took it to 48 / 105 / 49,238 — each counting
+   * from the same base on its own branch. THE MERGE IS NONE OF THOSE NUMBERS, and it
+   * is not their arithmetic either: it MEASURES 52 / 119 / 55,611. Adding the deltas
+   * would have given 110 paragraphs, which is wrong by nine, because each branch also
+   * re-transcribed shared operations whose paragraph counts moved. Two branches
+   * incrementing one counter is invisible to a three-way merge when they agree and
+   * merely noisy when they disagree; either way the only safe answer is to re-measure
+   * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 48 operations, 105 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(48);
+  it('describes the contract it claims to: 52 operations, 119 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(52);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1594,6 +1604,52 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     total 45,974 and 96 post-lead paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 46,166; this drops
     //     the 96 `\n\n` separators, and 46,166 - 192 = 45,974.
+    //
+    // 45,974 -> 51,498, 47 -> 51 operations, 96 -> 109 post-lead paragraphs: the
+    // Unmapped Notes slice publishes FOUR new operations --
+    // `GET|POST /api/experiments/{id}/notes`, `GET .../notes/{note_id}` and
+    // `POST .../notes/{note_id}/review`. They are long because the thing they have
+    // to state is a set of refusals: that dismissal is a state and no operation
+    // deletes a note, that `candidate_field_path` is null rather than a
+    // plausible-looking guess when nothing proposed one, and that the four
+    // not-a-value constants are constants of the shape rather than fields a request
+    // can set. +5,524 characters over four operations, +13 paragraphs (3 + 2 + 4 + 4).
+    //
+    // MEASURED the same two independent ways, and NOT by adding +5,524 to 45,974:
+    //
+    //   . from the SERVED document: the splitPurpose paragraph rule re-implemented
+    //     in Python over `create_app().openapi()`, restricted to the 51 documented
+    //     operations this array names, gives total 51,498 and 109 post-lead
+    //     paragraphs.
+    //   . internal consistency: raw sum of `d.description.length` = 51,716; this
+    //     figure drops the 109 `\n\n` separators, and 51,716 - 218 = 51,498.
+    //
+    // 51,498 -> 52,347, 109 -> 110 post-lead paragraphs, operations UNCHANGED at 51:
+    // A REFUSAL THAT WAS FALSE ABOUT THE OFFICIAL SCHEMA. `mappable_field_paths` is
+    // derived from this build's extractor map -- 25 paths -- and the three notes
+    // operations described it as "a real official field path", so a refusal read as
+    // "the official schema has no such field" for `sample.sample_id`,
+    // `measurement.qc`, `attribution.uploaded_by`, `links`, `tags` and more, all of
+    // which the vendored schema defines. CLAUDE.md §1 makes the schema not ours to
+    // speak for. The three descriptions now say the enforced set is a SUBSET and that
+    // a refusal against it is not a statement about the schema. The same pass split
+    // `unreadable_entries` into its own paragraph -- the ONE new paragraph -- because
+    // that count covers two different facts (an entry the model refused, and an entry
+    // repeating another note's id, which this build reads perfectly well) and the
+    // single sentence had asserted the first of them about both.
+    // +849 characters over three operations, +1 paragraph, no operation added.
+    //
+    // MEASURED the same two independent ways, and NOT by adding +849 to 51,498:
+    //
+    //   . from the SERVED document: the splitPurpose paragraph rule re-implemented
+    //     in Python over `create_app().openapi()`, restricted to the 51 documented
+    //     operations this array names, gives total 52,347 and 110 post-lead
+    //     paragraphs.
+    //   . internal consistency: raw sum of `d.description.length` = 52,567; this
+    //     figure drops the 110 `\n\n` separators, and 52,567 - 220 = 52,347.
+    expect(total).toBe(55611);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(119);
+
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the
     // scientist's submission. Two entries moved, not one: the new operation and
@@ -1628,8 +1684,6 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // claim its gate was "exactly the export gate and nothing more", which
     // overstates it by one condition — `POST .../export` has no `pending_count()`
     // check at all — so a qualifying paragraph was added.
-    expect(total).toBe(49238);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(105);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so
     //     `GET /api/experiments/{id}/evidence-classification` now names six classes

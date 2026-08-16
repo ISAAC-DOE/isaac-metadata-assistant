@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RunsSection } from '../components/RunsSection';
+import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
@@ -527,6 +528,36 @@ function LoadedWorkbench({
         two opinions about them.
       */}
       <ValidateReview experimentId={id} />
+
+      {/*
+        UNMAPPED NOTES SIT BETWEEN THE RUNS AND THE DRAFT BLOCKS, and the position is
+        the argument. What is captured here is content that has NO field — so it
+        cannot live inside a field group below, and putting it after them would bury
+        the one part of the record that nothing else on this screen can represent.
+        Above the blocks and below the runs is where a reader passes it on the way to
+        the fields, which is when a note is worth triaging.
+
+        A section, not a tab, for `RunsSection`'s third reason: hiding it behind a tab
+        would conceal from a reader on the fields view that this record holds captured
+        content nobody has placed yet.
+
+        ── ON THE ORDER OF THESE TWO, 2026-08-16 ──────────────────────────────────
+        Both sections were written on separate branches and BOTH claimed the slot
+        directly under the runs, each with its own argument. The merge preserves
+        both arguments AS WRITTEN rather than picking a winner: Validate & Review
+        asked for IMMEDIATE adjacency to the runs, which it has, and this panel
+        asked to be ABOVE THE FIELD BLOCKS, which it is. Neither constraint is
+        violated, so neither comment above needed editing to stay true.
+
+        WHAT THAT ORDERING DOES NOT SETTLE, and a later slice should: a note is
+        unplaced INPUT awaiting triage, and review is the step that judges what has
+        been placed — so a reader's natural order is arguably notes first. The
+        counter is that Validate & Review fetches nothing until pressed, so it adds
+        no visual weight between the runs and these notes. Unresolved rather than
+        decided quietly; it becomes a real question once unmapped notes actually
+        feed the review state, which today they do not.
+      */}
+      <UnmappedNotesPanel experimentId={id} />
 
       {groups.map((group) => (
         <FieldGroup
