@@ -384,8 +384,86 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
     // one. The linux column is transcribed from GitHub Actions run
     // 30668917975; it is the authoritative one.
     counts: {
-      'evidence@desktop-1280x800': 69,
-      'evidence@laptop-1024x768': 69,
+      /*
+       * ── EVIDENCE GRAPH, 2026-08-13: +1 on the evidence page, one more tab button ──
+       *
+       * The Evidence screen gained an `Evidence List | Evidence Graph` tab strip, so
+       * it now renders one more `.section-tab` -- the same pre-existing contrast
+       * failure counted in the settings block above, on one more page. Uniform +1 at
+       * all seven viewports, no new rule, and no page without the strip moved.
+       *
+       * A KNOWN DEFECT'S COUNT, NOT A NEW ONE. Fixing `.section-tab` centrally would
+       * clear this and the 33 settings cells together.
+       *
+       * Linux measured from this branch's CI run, read line by line rather than
+       * derived; darwin inferred by the extra-DOM-node argument used above.
+       */
+      /*
+       * ── `evidence-graph`, 2026-08-16: A NEW SURFACE WITH NO COUNTS, ON PURPOSE ──
+       *
+       * `e2e/surfaces.ts` now carries `evidence-graph`, the `?view=graph` deep link
+       * on the Evidence route. The `evidence` entry above lands on the LIST view, so
+       * until that surface existed the graph panel had never been loaded by axe, by
+       * the 320/390 narrow sweep, by the layout probes or by the zoom-200 pass at all.
+       *
+       * ~~NOT ONE `evidence-graph@*` KEY APPEARS BELOW~~ ~~CI HAS NOW ANSWERED FOR
+       * ONE OF THE SEVEN~~ — ALL SEVEN ARE NOW MEASURED AND RECORDED. Both earlier
+       * paragraphs are struck rather than deleted, because the procedure they state
+       * is exactly the one that was followed and the record of following it is the
+       * point: only the platform actually measured may be edited, no attempt is made
+       * to guess the other, and a bare number asserts BOTH columns because this
+       * environment cannot run the Linux face.
+       *
+       * Two CI runs, both on LINUX, both transcribed rather than derived:
+       *   run 31963596365 on `0c9752f` — desktop-1280x800: 24
+       *   run 31966373802 on `dd5e049` — laptop-1024x768: 28, tablet-768x1024: 28,
+       *                                  mobile-375x812: 27, zoom-200: 27,
+       *                                  width-390: 27, width-320: 27
+       * Nothing here was pre-empted and nothing was lowered to make a run green.
+       *
+       * THE SECOND RUN ALSO CONFIRMED THE TWO FIXES, which is why this entry records
+       * contrast ONLY. `aria-allowed-role` had fired on 3 nodes at all seven
+       * viewports (`<li role="note">`, an invalid override of the implicit
+       * `listitem`) and is now absent from the NEW list entirely; the eight
+       * `clipped-x` findings at 375px are likewise gone. Both were FIXED rather than
+       * recorded — which is the distinction this file exists to keep visible, and the
+       * reason the number below is 27–28 and not 30–31.
+       *
+       * WHAT IS EXPECTED TO FIRE, stated in advance so a large number is not
+       * mistaken for a regression this branch caused. `evidence-graph.css` styles
+       * EIGHT rules with `--text-quaternary` at 10.5–11px — `.evgraph-result-match`
+       * (:253), `.evgraph-kind-count` (:344), `.evgraph-row-kind` (:488),
+       * `.evgraph-row-count` (:496), `.evgraph-detail-producer-term` (:662),
+       * `.evgraph-detail-count` (:739), `.evgraph-conn-kind` (:815) and
+       * `.evgraph-legend-kinds` (:850). (Eight, counted here by `grep -n` over the
+       * file; the review that prompted this entry said "at least seven" and listed
+       * seven, missing `.evgraph-conn-kind`.) That token is #9aa4af, measured at
+       * 2.53:1 on white — below AA's 4.5:1 and below even AA-large's 3.0:1 — and it
+       * is ALREADY in this entry's `foregrounds` list with 263 recorded instances
+       * elsewhere in the app. Every node those rules produce is one more instance of
+       * a documented token shortfall, not a new defect, and the panel renders many
+       * of them per row. The systemic remedy is darkening the token, which moves
+       * counts on all 18 pre-existing surfaces and belongs to the slice that owns
+       * the design system — not here, where it would hide a palette change inside a
+       * graph PR.
+       *
+       * Two things this DOES leave open, named rather than implied: the panel is
+       * also newly reachable by `specs/layout-widths.spec.ts`, `layout-responsive`
+       * and `zoom-200`, which carry their own baselines in `e2e/layout-baseline.ts`
+       * and `e2e/layout-allowlist.ts`; and ~~`A11Y_BASELINE_TOTAL_NODES` does NOT
+       * move in this commit~~ — it moves now, because the entry map does. See the
+       * dated block on that constant.
+       *
+       * The layout half of that sentence is also no longer true and is corrected
+       * rather than left: the layout probes DID report this surface — eight
+       * `clipped-x` instances of SVG canvas labels, the quoted one being
+       * `text "processing_notebook"` at `mobile-375x812` — and that is FIXED in
+       * `EvidenceGraphPanel.tsx` (labels are bounded against the canvas rectangle
+       * and cut to its width) rather than recorded in `e2e/layout-baseline.ts`. A
+       * defect on a surface this branch is adding does not get a baseline entry.
+       */
+      'evidence@desktop-1280x800': 70,
+      'evidence@laptop-1024x768': 70,
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
       // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
       // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
@@ -396,9 +474,47 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
       // `.record-file`. The element was always painted; only measurement
       // changed. Linux is the authority and may differ.
-      'evidence@tablet-768x1024': 69,
-      'evidence@mobile-375x812': 67,
-      'evidence@zoom-200': 67,
+      'evidence@tablet-768x1024': 70,
+      'evidence@mobile-375x812': 68,
+      'evidence@zoom-200': 68,
+      /*
+       * ── `evidence-graph`, MEASURED: 24 nodes at desktop, 2026-08-16 ────────────
+       *
+       * RECORDED, AND NOT ACCEPTED AS CORRECT. This is an instance of the known
+       * systemic token failure this entry has always been about, not a defect
+       * particular to the graph panel:
+       *
+       *   `--text-tertiary`   #78838f — measured 3.86:1 on white
+       *   `--text-quaternary` #9aa4af — measured 2.53:1 on white
+       *
+       * WCAG AA needs 4.50:1, and AA-large 3.00:1, so the first fails AA and the
+       * second fails both. Between them they have 274 usages across 40 files.
+       *
+       * The 24 nodes CI reported are a mix of pre-existing app chrome and new graph
+       * text — `kbd.topbar-search-kbd`, `button#evidence-view-tab-list.section-tab`,
+       * `p.evgraph-counts`, `p.evgraph-freshness` and more — which is the shape of a
+       * token problem rather than a screen problem.
+       *
+       * A DEDICATED DESIGN-SYSTEM SLICE OWNS RAISING THE TWO TOKENS AND IS QUEUED.
+       * It will reduce the count on this surface and on the 18 others at the same
+       * time, so THIS NUMBER IS EXPECTED TO DROP. When it does, transcribe CI's new
+       * figure and lower the total; do not treat the fall as a regression, and do
+       * not fix the palette inside a graph PR, where it would hide.
+       *
+       * 24 is a LINUX reading (run 31963596365, `0c9752f`) written as a scalar,
+       * which asserts darwin too. This file's type system has no way to say
+       * "unknown" for one column — a per-platform pair is rejected when both halves
+       * are equal — so a one-platform measurement can only be written this way, as
+       * the header and several notes below already record. If a darwin run
+       * disagrees, split the key and correct the total; never loosen the assertion.
+       */
+      'evidence-graph@desktop-1280x800': 24,
+      'evidence-graph@laptop-1024x768': 28,
+      'evidence-graph@tablet-768x1024': 28,
+      'evidence-graph@mobile-375x812': 27,
+      'evidence-graph@zoom-200': 27,
+      'evidence-graph@width-390': 27,
+      'evidence-graph@width-320': 27,
       /*
        * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
        * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
@@ -1148,8 +1264,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Every number MEASURED on BOTH platforms on the same commit and merged by
          `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
          run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': 67,
-      'evidence@width-390': 67,
+      'evidence@width-320': 68,
+      'evidence@width-390': 68,
       'experiments-example@width-320': 9,
       'experiments-example@width-390': 9,
       'experiments@width-320': 2,
@@ -1806,8 +1922,55 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // entries with the same summation the guard uses, and the darwin figure matches
   // the total CI reported the entries now sum to -- which is what confirms the
   // constant and the map agree rather than merely both having moved.
-  darwin: 2169,
-  linux: 2159,
+  // ── 2026-08-16. darwin 2169 -> 2200, linux 2159 -> 2190 ────────────────────
+  //
+  // TWO CAUSES, AND THE FIRST IS A MERGE HAZARD GIT CANNOT SEE. Record it,
+  // because it will recur on any branch that touches this constant.
+  //
+  //   +7  `main` (via PR #143, `.vr-sub` on record-detail) and this branch (the
+  //       `Evidence List | Evidence Graph` tab strip) EACH raised darwin from
+  //       2162 to 2169. Different surfaces, different keys, same arithmetic —
+  //       and therefore the same TEXT, `darwin: 2169`, on both sides of the
+  //       merge. Git saw two identical lines and took them without a conflict,
+  //       while silently combining two entry-map changes that each justified
+  //       only one of the two increments. The merged map sums to 2162 + 7 + 7 =
+  //       2176, which is exactly what the guard computed and reported ("the
+  //       entries now sum to 2176"). Two branches adding the same delta to one
+  //       number is invisible to a three-way merge; the per-platform self-check
+  //       is what caught it, and is why it exists. This is the second time this
+  //       file has been hit by it — see the 1704/1705 note above.
+  //
+  //       LINUX FOLLOWS BY THE SAME ARITHMETIC: 2159 + 7 = 2166. Both branches'
+  //       additions were BARE numbers rather than `{ darwin, linux }` pairs, so
+  //       each moved both columns by the same 7. That is derived from the ENTRY
+  //       SHAPES, not measured on Linux, and is flagged as such — CI is the
+  //       authority and will say so if it is wrong.
+  //
+  //  +24  `evidence-graph@desktop-1280x800`, the one cell of the new surface CI
+  //       has measured (run 31963596365 on `0c9752f`, linux). Scalar, so it adds
+  //       24 to both columns. See that key's note: it is an instance of the
+  //       `--text-tertiary` / `--text-quaternary` shortfall and is expected to
+  //       DROP when the design-system slice raises the two tokens.
+  //
+  // +164  the OTHER SIX `evidence-graph@*` cells, measured on LINUX by run
+  //       31966373802 on `dd5e049` and transcribed: laptop-1024x768 28,
+  //       tablet-768x1024 28, mobile-375x812 27, zoom-200 27, width-390 27,
+  //       width-320 27. All scalars, so each adds to both columns.
+  //
+  //       THAT RUN ALSO PROVED THE TWO NON-CONTRAST FINDINGS FIXED rather than
+  //       recorded: `aria-allowed-role` (3 nodes x 7 viewports) and the eight
+  //       `clipped-x` findings at 375px are both absent from its NEW list. Only
+  //       contrast is baselined here, and that is a choice this file should be
+  //       able to show, not merely assert.
+  //
+  // darwin 2162 + 7 + 7 + 24 + 164 = 2364; linux 2159 + 7 + 24 + 164 = 2354.
+  //
+  // ~~THE OTHER SIX ... ARE ABSENT AND EXPECT 0~~ — answered, above. All seven
+  // cells of the new surface are now recorded. Both sums are re-checked by the
+  // suite from the entry map, per platform, so a stale constant fails in every
+  // project — which is how the double-count was caught.
+  darwin: 2364,
+  linux: 2354,
 };
 
 /**
