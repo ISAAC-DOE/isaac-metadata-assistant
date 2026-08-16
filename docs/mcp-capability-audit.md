@@ -107,6 +107,28 @@ verify.
 **Never build:** a `submit_record` tool, a tool that deletes an experiment, a tool that applies a
 migration, or anything that changes governance.
 
+### Status update — the transport is now built, and D1/D2 are untouched by that
+
+A **Streamable HTTP transport** ships in `apps/api/isaac_api/mcp/transport.py`, so the eight tools
+are genuinely runnable by a real MCP client — **when, and only when,
+`ISAAC_MCP_DEPLOYMENT=local-loopback` is set**. Operator guide, the full
+configuration-state table, and the exact contract Dean would have to supply for either D2 shape:
+[`docs/mcp-local-transport.md`](mcp-local-transport.md).
+
+Read the boundary precisely, because "the transport exists" is easy to over-read:
+
+* **The default deployment registers no MCP route at all** — an absent path, not a path that
+  answers 403. A route that refuses still advertises the capability.
+* The one binding that serves a transport refuses every request whose **socket peer** is not a
+  loopback address, refuses one carrying a proxy header, refuses an off-loopback browser `Origin`,
+  and refuses a credential it cannot verify. No header is ever read as evidence of identity.
+* **Nothing about D1 or D2 is answered, narrowed, or implied.** No internet-reachable path, no
+  credential, no outbound call, no billing, and no hosted connection exists or is authorized. The
+  two reserved binding names remain unimplemented, and selecting one still resolves to the
+  unconfigured binding.
+* No product screen mentions MCP (verified: `apps/web/src` contains no reference), so nothing
+  implies a connection exists — `ai-integration-decision-packet.md` §6.1 and §9 are intact.
+
 ---
 
 ## 6. Exact external actions

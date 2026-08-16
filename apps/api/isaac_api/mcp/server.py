@@ -7,17 +7,21 @@ small enough protocol to meet honestly: ``initialize``, ``tools/list``,
 ``tools/call``, ``ping``, and the JSON-RPC framing around them. That is what is
 here, targeting protocol revision :data:`MCP_PROTOCOL_VERSION`.
 
-**No transport ships with it, and that is a decision rather than an omission.**
-There is no HTTP route, no stdio loop, no socket. :meth:`McpServer.handle` takes a
-decoded JSON-RPC message and returns one; wiring it to Streamable HTTP is the work
-that begins when D1 and D2 are answered (``deployment.py``). Two consequences a
-future session should not have to rediscover:
+**A transport now ships, in ``transport.py``, and this module still has none.**
+:meth:`McpServer.handle` takes a decoded JSON-RPC message and returns one; the
+Streamable HTTP framing, the loopback guard and the HTTP status mapping all live
+next door, so this file stays a pure message handler that a test can drive
+directly. Two consequences a future session should not have to rediscover:
 
 * the whole surface is exercisable locally and in CI with no network and no
   credential, which is why the test suite is deterministic; and
-* ``ISAAC_MCP_DEPLOYMENT=local-loopback`` cannot expose anything remotely, because
-  there is nothing listening. ``test_mcp_boundaries.py`` asserts the FastAPI app
-  registers no MCP path.
+* ``ISAAC_MCP_DEPLOYMENT=local-loopback`` is the ONLY value that causes a route to
+  exist. The paragraph here used to say a loopback binding "cannot expose anything
+  remotely, because there is nothing listening"; that reason has expired, and the
+  guarantee is now carried by ``transport.py``'s per-request peer check rather
+  than by the absence of a listener. Unset — the default — still mounts nothing at
+  all, and ``test_mcp_transport.py`` asserts it against the route table and the
+  OpenAPI document.
 
 The features this surface does not implement — resources, prompts, sampling,
 elicitation, completion, logging, progress, cancellation — are not advertised in
@@ -248,7 +252,11 @@ class McpServer:
             "tools": [
                 tool.descriptor()
                 for name, tool in sorted(TOOLS.items())
-                if principal.permits(tool.scope)
+                # `permits_all`, not `permits`: the listing must show exactly the
+                # tools a call would succeed for. A tool listed and then refused
+                # teaches an agent that the server is unreliable, and a tool
+                # hidden that would have worked wastes the grant.
+                if principal.permits_all(tool.required_scopes)
             ]
         }
 
@@ -270,8 +278,9 @@ class McpServer:
             raise InvalidArguments(f"{name!r} is not a tool this server exposes.")
 
         principal = self._binding.authenticate(credential)
-        if not principal.permits(tool.scope):
-            raise _ScopeDenied(tool.name, tool.scope, principal)
+        missing = principal.missing(tool.required_scopes)
+        if missing:
+            raise _ScopeDenied(tool, missing, principal)
 
         arguments = params.get("arguments", {})
         accepted = validate_arguments(tool.input_schema, arguments)
@@ -303,15 +312,28 @@ class McpServer:
 
 
 class _ScopeDenied(Exception):
-    def __init__(self, tool_name: str, required: Scope, principal: Principal) -> None:
+    """Refused for scope. Names every missing scope, not the first one found.
+
+    ``requiredScope`` stays the tool's DEFINING scope — the one that separates it
+    from a read tool — because that is the field clients and tests already read.
+    ``requiredScopes`` and ``missingScopes`` carry the complete picture beside it,
+    so a caller can request a grant that will actually be sufficient rather than
+    discovering the second missing scope on the retry.
+    """
+
+    def __init__(self, tool, missing: frozenset[Scope], principal: Principal) -> None:
+        missing_values = sorted(s.value for s in missing)
         self.message = (
-            f"{tool_name!r} requires the {required.value!r} scope, which this "
-            "connection was not granted."
+            f"{tool.name!r} requires the scope(s) "
+            f"{sorted(s.value for s in tool.required_scopes)}, and this connection "
+            f"was not granted {missing_values}."
         )
         super().__init__(self.message)
         self.data = {
-            "tool": tool_name,
-            "requiredScope": required.value,
+            "tool": tool.name,
+            "requiredScope": tool.scope.value,
+            "requiredScopes": sorted(s.value for s in tool.required_scopes),
+            "missingScopes": missing_values,
             "grantedScopes": sorted(s.value for s in principal.scopes),
             "binding": principal.binding,
         }
