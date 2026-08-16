@@ -11,6 +11,7 @@ import {
   LayoutList,
   ChevronRight,
   Lock,
+  Network,
   Shield,
   Settings,
 } from '../components/icons';
@@ -29,8 +30,10 @@ import {
 } from '../lib/settingsContent';
 import { diagnosticsAppFrom, diagnosticsMemoryFrom } from '../lib/diagnostics';
 import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../lib/types';
+import { MCP_CONNECT_COPY } from '../lib/mcpConnectContent';
 import { ApiExplorerPanel, ApiQuickStartPanel } from './settings/ApiDocs';
 import { ApiKeysPanel } from './settings/ApiKeys';
+import { ConnectYourAgentPanel } from './settings/ConnectYourAgent';
 import { HelpAndTutorialPanel } from './settings/HelpAndTutorial';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 
@@ -53,6 +56,14 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
  *                     honest key-unavailable status, the access model, Quick
  *                     Start, and the Connect an Agent guide.
  *   · Endpoint Explorer — the master-detail browser over `GET /api/openapi`.
+ *   · Connect Your Agent — ISAAC's agent (machine-callable tool) interface,
+ *                     described to a human: what an agent will be able to do,
+ *                     what it will never be able to do, and the honest state of
+ *                     this deployment, which is that no agent can reach it.
+ *                     It states a state and offers no action, and it renders no
+ *                     endpoint, no activity date and no Revoke control, because
+ *                     none of the three exists. See
+ *                     `lib/mcpConnectContent.ts` for the reasoning per claim.
  *
  * P36V-1 slice 12 made those last two SEPARATE top-level tabs and deleted the
  * `keys | docs` sub-tab layer. The Endpoint Explorer used to sit three levels
@@ -93,7 +104,14 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: 'about', label: 'About' },
   { id: 'api', label: 'API Access' },
   { id: 'explorer', label: 'Endpoint Explorer' },
-  /* R0 — the sixth tab. It is the ONE permanent home of the guided walkthrough's
+  /* Connect Your Agent — the machine-interface surface, next to the other two
+     tabs about reaching this build as a program. It states a deployment state
+     and offers no action, so it belongs with the readout tabs rather than
+     after the one thing on the page a reader acts on. */
+  { id: 'mcp', label: 'Connect Your Agent' },
+  /* R0 — the LAST tab (it was the sixth; Connect Your Agent above made it the
+     seventh, and the reason it is last is unchanged by that). It is the ONE
+     permanent home of the guided walkthrough's
      replay control: the first-run offer on My Experiments disappears for good
      once the walkthrough is finished, so without a fixed home a reader who
      completed it could never get it back. */
@@ -200,6 +218,18 @@ export function SettingsPage() {
           tabIndex={0}
         >
           <EndpointExplorerTab state={openapi} />
+        </div>
+      )}
+
+      {activeTab === 'mcp' && (
+        <div
+          className="settings-panel"
+          id={panelId('mcp')}
+          role="tabpanel"
+          aria-labelledby={tabId('mcp')}
+          tabIndex={0}
+        >
+          <ConnectYourAgentTab onOpenExplorer={() => setActiveTab('explorer')} />
         </div>
       )}
 
@@ -688,6 +718,31 @@ function EndpointExplorerTab({ state }: { state: OpenApiState }) {
       {state.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
       {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
       {state.status === 'data' && <ApiExplorerPanel schema={state.data} />}
+    </SettingsCard>
+  );
+}
+
+// --- Connect Your Agent --------------------------------------------------------
+
+/**
+ * ISAAC's agent (machine-callable tool) interface, described to a human.
+ *
+ * Needs no fetch, and that is a property of what it reports rather than a
+ * convenience: there is no agent interface in this build to ask about, so there
+ * is no endpoint to probe, no session to list and no activity to read. A
+ * loading state here would imply a source, and a failure state would imply
+ * something had failed. Neither is true, so the panel renders immediately from
+ * authored copy whose provenance it states on the page.
+ */
+function ConnectYourAgentTab({ onOpenExplorer }: { onOpenExplorer: () => void }) {
+  return (
+    <SettingsCard
+      icon={<Network size={18} strokeWidth={2} aria-hidden="true" className="settings-card-icon" />}
+      headingId="settings-mcp-heading"
+      title="Connect Your Agent"
+      sub={MCP_CONNECT_COPY.cardSub}
+    >
+      <ConnectYourAgentPanel onOpenExplorer={onOpenExplorer} />
     </SettingsCard>
   );
 }
