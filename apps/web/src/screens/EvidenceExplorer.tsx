@@ -1,6 +1,7 @@
 import './screens.css';
-import { useMemo, useState } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
@@ -14,13 +15,21 @@ import { StatusBar } from '../components/StatusBar';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
+import { EvidenceGraphPanel } from './graph/EvidenceGraphPanel';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
-import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
-import { ROUTES } from '../lib/routes';
+import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
+import { RUNS_PAGE_SIZE } from '../lib/runPaging';
+import {
+  EVIDENCE_VIEW_PARAM,
+  RECORD_RUN_PARAM,
+  ROUTES,
+  isEvidenceView,
+  type EvidenceViewId,
+} from '../lib/routes';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
   citedLinesForEntry,
@@ -110,6 +119,37 @@ function LoadedEvidence({
   const { detail, evidence, artifacts, graph, sourcePreviews, classification } = data;
   const navigate = useNavigate();
 
+  /*
+   * The screen's two VIEWS — the evidence LIST (everything below, unchanged)
+   * and the evidence GRAPH.
+   *
+   * On the same `?view=` mechanism the record screen already uses, so the graph
+   * is deep-linkable and a `?run=` focus survives switching between them. `list`
+   * is the fallback for anything unrecognised, which is what keeps every
+   * existing bookmark to this URL landing on exactly the screen it always did.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedView = searchParams.get(EVIDENCE_VIEW_PARAM);
+  const activeView: EvidenceViewId = isEvidenceView(requestedView) ? requestedView : 'list';
+  const focusRunId = searchParams.get(RECORD_RUN_PARAM);
+
+  // Both writers COPY the existing params rather than replacing them, so
+  // switching view keeps the focused run and focusing a run keeps the view.
+  const selectView = (view: EvidenceViewId) => {
+    const next = new URLSearchParams(searchParams);
+    if (view === 'list') next.delete(EVIDENCE_VIEW_PARAM);
+    else next.set(EVIDENCE_VIEW_PARAM, view);
+    setSearchParams(next, { replace: true });
+  };
+  const selectFocusRun = (runId: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (runId === null) next.delete(RECORD_RUN_PARAM);
+    else next.set(RECORD_RUN_PARAM, runId);
+    setSearchParams(next, { replace: true });
+  };
+
+  const viewTabs = <EvidenceViewTabs active={activeView} onSelect={selectView} />;
+
   // P28.5 — the evidence-support view is bound to `record_rev`. Compare it to the
   // rev encoded in the loaded detail's version token (`generation.rev`, so the
   // last segment is the rev — the exact value the backend reports as record_rev).
@@ -122,6 +162,50 @@ function LoadedEvidence({
   const entries = useMemo(() => evidenceEntriesToTrail(evidence), [evidence]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selected = entries.find((e) => e.key === selectedKey) ?? entries[0];
+
+  /*
+   * The graph branch sits ABOVE the no-evidence early return below, deliberately.
+   * An experiment can carry runs while recording no EXPERIMENT-LEVEL evidence at
+   * all, and that record's graph is exactly the one worth looking at. Putting the
+   * branch after the early return would have made the graph unreachable for it.
+   *
+   * It sits BELOW every hook in this component, equally deliberately: switching
+   * view re-renders the same component, so a return placed above `useMemo` /
+   * `useState` would change the hook count between renders.
+   */
+  if (activeView === 'graph') {
+    return (
+      <AppShell
+        variant="record"
+        topBar={
+          <TopBar
+            variant="record"
+            title={detail.title}
+            recordId={id}
+            surface={LABELS.screenEvidence}
+          />
+        }
+        mainPad="pad"
+      >
+        <h1 className="sr-only">{LABELS.screenEvidence}</h1>
+        {viewTabs}
+        <div
+          id={evidenceViewPanelId('graph')}
+          role="tabpanel"
+          aria-labelledby={evidenceViewTabId('graph')}
+        >
+          <EvidenceGraphView
+            id={id}
+            detail={detail}
+            evidence={evidence}
+            classification={classification}
+            focusRunId={focusRunId}
+            onFocusRun={selectFocusRun}
+          />
+        </div>
+      </AppShell>
+    );
+  }
 
   // TWO DIFFERENT FACTS, AND THIS SCREEN USED TO HOLD ONLY ONE OF THEM.
   // `exported` was `artifacts.sidecar !== null` — a DERIVED proxy that never reads
@@ -168,6 +252,7 @@ function LoadedEvidence({
         mainPad="pad"
       >
         <h1 className="sr-only">{LABELS.screenEvidence}</h1>
+        {viewTabs}
         <p className="preview-empty" role="note">
           No evidence has been recorded for this experiment yet.
         </p>
@@ -257,6 +342,14 @@ function LoadedEvidence({
       mainPad="none"
     >
       <h1 className="sr-only">{LABELS.screenEvidence}</h1>
+      {/* `.main-inset-control`, NOT `.main-inset` — same measure, different
+          contract. The notices wrapper below is specified to hold only the two
+          transient notices and to carry no vertical margin, so that an EMPTY
+          wrapper adds no space; `evidence-hierarchy` pins both that composition
+          and the fact that exactly one `.main-inset` is a direct child of main.
+          A permanently-present control mounted inside it would retire the
+          no-double-gutter property those assertions exist to protect. */}
+      <div className="main-inset-control">{viewTabs}</div>
       {/* One shared horizontal inset for BOTH transient notices, so the degraded
           live-sync note lines up with the banner and the panels below instead of
           running edge-to-edge. Each child renders null when it has nothing to
@@ -293,5 +386,154 @@ function LoadedEvidence({
         sidecarJson={sidecarJson}
       />
     </AppShell>
+  );
+}
+
+// --- the Evidence screen's two VIEWS ---------------------------------------
+//
+// The evidence LIST and the evidence GRAPH are two views of the SAME recorded
+// evidence, so they are local page tabs on this screen rather than a separate
+// route or nav entry — the same `.section-tabs` pattern (roving tabindex,
+// arrow/Home/End) that Project Memory, Governance, Settings and the record
+// screen already use.
+//
+// The graph is an ADDITION. Selecting "Evidence List" renders precisely what
+// this screen rendered before it existed.
+
+const EVIDENCE_VIEWS: { id: EvidenceViewId; label: string }[] = [
+  { id: 'list', label: 'Evidence List' },
+  { id: 'graph', label: 'Evidence Graph' },
+];
+
+const evidenceViewTabId = (id: EvidenceViewId) => `evidence-view-tab-${id}`;
+const evidenceViewPanelId = (id: EvidenceViewId) => `evidence-view-panel-${id}`;
+
+function EvidenceViewTabs({
+  active,
+  onSelect,
+}: {
+  active: EvidenceViewId;
+  onSelect: (view: EvidenceViewId) => void;
+}) {
+  function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      nextIndex = (index + 1) % EVIDENCE_VIEWS.length;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      nextIndex = (index - 1 + EVIDENCE_VIEWS.length) % EVIDENCE_VIEWS.length;
+    } else if (e.key === 'Home') {
+      nextIndex = 0;
+    } else if (e.key === 'End') {
+      nextIndex = EVIDENCE_VIEWS.length - 1;
+    }
+    if (nextIndex === null) return;
+    e.preventDefault();
+    const next = EVIDENCE_VIEWS[nextIndex];
+    onSelect(next.id);
+    (document.getElementById(evidenceViewTabId(next.id)) as HTMLButtonElement | null)?.focus();
+  }
+
+  return (
+    <div className="section-tabs" role="tablist" aria-label="Evidence views">
+      {EVIDENCE_VIEWS.map((view, i) => {
+        const selected = active === view.id;
+        return (
+          <button
+            key={view.id}
+            id={evidenceViewTabId(view.id)}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            /*
+             * `aria-controls` is deliberately ABSENT.
+             *
+             * It is optional in the ARIA tabs pattern, and the LIST view is not
+             * one element: its trail rail is a sidebar region and its
+             * classification, reconciliation and preview are in main. Pointing
+             * `aria-controls` at either half would tell a screen-reader user
+             * that the tab governs less than it does, which is worse than
+             * saying nothing. `role="tab"` + `aria-selected` still convey the
+             * set, the position and the current choice.
+             */
+            tabIndex={selected ? 0 : -1}
+            className={`section-tab${selected ? ' active' : ''}`}
+            onClick={() => onSelect(view.id)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+          >
+            {view.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The evidence graph's own data load.
+ *
+ * `detail`, `evidence` and `classification` are handed down from the bundle the
+ * screen already holds, so the graph and the list are looking at the SAME read
+ * of the record — a graph that refetched them could disagree with the list
+ * beside it about what is recorded.
+ *
+ * The RUNS are the one thing this view needs that the bundle does not carry,
+ * and they are read as a BOUNDED PAGE. `docs/run-scale-measurements.md` measured
+ * the cost of the run list as the payload (~7.5 KiB per run; 1000 runs is
+ * 7.47 MiB and a 10.3 s load), which is why the Runs section is paged — a graph
+ * that asked for every run to draw a picture would undo that measurement's whole
+ * point. It draws what is loaded and SAYS so (`runs_bounded`).
+ *
+ * Run CHECKS are not fetched here at all: the panel asks for one run's findings
+ * when a reader opens that run.
+ *
+ * The scope pair enforces tutorial isolation at the model boundary: the scope
+ * the data was READ in is captured at mount and compared with the scope the
+ * surface is addressing now.
+ */
+function EvidenceGraphView({
+  id,
+  detail,
+  evidence,
+  classification,
+  focusRunId,
+  onFocusRun,
+}: {
+  id: string;
+  detail: EvidenceBundle['detail'];
+  evidence: EvidenceBundle['evidence'];
+  classification: EvidenceBundle['classification'];
+  focusRunId: string | null;
+  onFocusRun: (runId: string | null) => void;
+}) {
+  const runs = useFetch(() => api.listRuns(id, { limit: RUNS_PAGE_SIZE }), [id]);
+  const currentScope = useWorkspaceScope();
+  const readInScope = useRef(currentScope);
+
+  if (runs.status === 'loading') {
+    return <LoadingPanel label="Loading this experiment's runs from the ISAAC API…" />;
+  }
+  if (runs.status !== 'data') {
+    return <BackendDown error={runs.error} onRetry={runs.reload} />;
+  }
+
+  return (
+    <EvidenceGraphPanel
+      experimentId={id}
+      detail={detail}
+      evidence={evidence}
+      classification={classification}
+      runs={runs.data.runs}
+      runsMeta={{
+        total: runs.data.total,
+        matched: runs.data.matched,
+        returned: runs.data.returned,
+        offset: runs.data.offset,
+      }}
+      readInScope={readInScope.current}
+      currentScope={currentScope}
+      focusRunId={focusRunId}
+      onFocusRun={onFocusRun}
+      onRequestRunCheck={(runId) => api.checkRun(id, runId)}
+    />
   );
 }
