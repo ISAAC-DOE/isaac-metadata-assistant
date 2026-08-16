@@ -785,6 +785,23 @@ def test_records_is_not_and_never_becomes_an_owned_table():
         "isaac_schema_migrations",
         "isaac_experiments",
         "isaac_runs",
+        # The five submission-lifecycle tables, added in the SAME change that
+        # created them (`0003_revisions`, `0004_submissions`). That ordering is not
+        # a convention: the policy is consulted before a connection is opened, so a
+        # `CREATE TABLE` naming an unlisted table is refused at load time and the
+        # migration cannot run at all.
+        #
+        # Listing them grants nothing by itself. What may be written to them is
+        # decided by the statements that exist, and
+        # `test_submission_store.py::test_no_submission_statement_updates_or_deletes_history`
+        # asserts that not one of them is ever the subject of an UPDATE or a DELETE
+        # — which IS the append-only guarantee, because neither a trigger nor
+        # REVOKE is available to enforce one in the database.
+        "isaac_experiment_revisions",
+        "isaac_run_revisions",
+        "isaac_revision_changes",
+        "isaac_submissions",
+        "isaac_submission_runs",
     }
     # ...and it is additionally on the absolute denylist, which does not reason
     # about SQL grammar at all. Both guards are asserted, because the grammar one
@@ -2112,6 +2129,45 @@ def test_a_failed_durable_write_does_not_leave_a_file_behind(app, tmp_path, monk
 # =============================================================================
 
 
+#: THE COMMITTED MIGRATION SET, IN APPLICATION ORDER, AND WHAT EACH CONTRIBUTES.
+#:
+#: Named once because six tests below assert against it, and six hand-maintained
+#: copies of a list is how a new migration ends up half-pinned. The ORDER is part of
+#: the assertion, not presentation: `load_migrations` sorts by filename and the
+#: runner applies in that order, and every migration after the first declares a
+#: foreign key into a table an earlier one creates.
+_COMMITTED_MIGRATIONS = [
+    "0001_experiments",
+    "0002_runs",
+    "0003_revisions",
+    "0004_submissions",
+]
+
+#: How many statements each contributes. A LITERAL rather than a measurement,
+#: deliberately: the point of the assertion is that a statement cannot be added to a
+#: committed migration file without a visible edit here, and a count read off the
+#: files themselves would assert nothing at all.
+_COMMITTED_STATEMENT_COUNTS = [3, 2, 6, 4]
+
+#: Every table the committed migrations create, in creation order.
+#:
+#: `isaac_schema_migrations` IS DELIBERATELY ABSENT, and its absence is the only
+#: non-obvious thing here. The runner issues `Q_ENSURE_BOOKKEEPING` once per
+#: TRANSACTION — that is what makes losing the bookkeeping table survivable — so its
+#: DDL is issued once per migration rather than once in total, and asserting "issued
+#: exactly once" over it would fail for a reason that has nothing to do with the
+#: property under test. It is asserted separately, below.
+_MIGRATION_TABLES = (
+    "isaac_experiments",
+    "isaac_runs",
+    "isaac_experiment_revisions",
+    "isaac_run_revisions",
+    "isaac_revision_changes",
+    "isaac_submissions",
+    "isaac_submission_runs",
+)
+
+
 def test_the_committed_migrations_load_and_are_create_only():
     """EVERY committed migration, not just the first.
 
@@ -2121,8 +2177,8 @@ def test_the_committed_migrations_load_and_are_create_only():
     stylistic preference, it is a failure.
     """
     migrations = dbm.load_migrations()
-    assert [m.version for m in migrations] == ["0001_experiments", "0002_runs"]
-    assert [len(m.statements) for m in migrations] == [3, 2]
+    assert [m.version for m in migrations] == _COMMITTED_MIGRATIONS
+    assert [len(m.statements) for m in migrations] == _COMMITTED_STATEMENT_COUNTS
     # Every statement is CREATE ... IF NOT EXISTS — the second half of the
     # idempotence claim, and the half that survives the bookkeeping table being lost.
     for migration in migrations:
@@ -2169,18 +2225,15 @@ def _ddl_for(conn, table: str) -> list[str]:
 
 def test_migrate_applies_once_and_a_second_run_is_a_no_op():
     conn = FakeConnection()
-    assert dbm.migrate(_env(), connect=_connector(conn)) == [
-        "0001_experiments",
-        "0002_runs",
-    ]
-    assert conn.applied == {"0001_experiments", "0002_runs"}
-    assert len(_ddl_for(conn, "isaac_experiments")) == 1
-    assert len(_ddl_for(conn, "isaac_runs")) == 1
+    assert dbm.migrate(_env(), connect=_connector(conn)) == _COMMITTED_MIGRATIONS
+    assert conn.applied == set(_COMMITTED_MIGRATIONS)
+    for table in _MIGRATION_TABLES:
+        assert len(_ddl_for(conn, table)) == 1, table
 
-    again = FakeConnection(applied={"0001_experiments", "0002_runs"})
+    again = FakeConnection(applied=set(_COMMITTED_MIGRATIONS))
     assert dbm.migrate(_env(), connect=_connector(again)) == []
-    assert not _ddl_for(again, "isaac_experiments"), "a second run re-issued 0001's DDL"
-    assert not _ddl_for(again, "isaac_runs"), "a second run re-issued 0002's DDL"
+    for table in _MIGRATION_TABLES:
+        assert not _ddl_for(again, table), f"a second run re-issued the DDL for {table}"
 
 
 def test_a_partially_applied_database_applies_only_what_is_missing():
@@ -2192,17 +2245,19 @@ def test_a_partially_applied_database_applies_only_what_is_missing():
     this is the exact transition the `0002` approval packet asks for.
     """
     conn = FakeConnection(applied={"0001_experiments"})
-    assert dbm.migrate(_env(), connect=_connector(conn)) == ["0002_runs"]
+    assert dbm.migrate(_env(), connect=_connector(conn)) == _COMMITTED_MIGRATIONS[1:]
     assert not _ddl_for(conn, "isaac_experiments"), "an applied migration was re-issued"
     assert len(_ddl_for(conn, "isaac_runs")) == 1
+    # ...and the two later migrations applied in the same pass, each exactly once.
+    for table in _MIGRATION_TABLES:
+        if table == "isaac_experiments":
+            continue
+        assert len(_ddl_for(conn, table)) == 1, table
 
 
 def test_pending_versions_reports_the_plan_without_applying_it():
     conn = FakeConnection()
-    assert dbm.pending_versions(_env(), connect=_connector(conn)) == [
-        "0001_experiments",
-        "0002_runs",
-    ]
+    assert dbm.pending_versions(_env(), connect=_connector(conn)) == _COMMITTED_MIGRATIONS
     assert conn.applied == set(), "a plan-only call recorded a version as applied"
 
 
@@ -2217,10 +2272,12 @@ def test_the_bookkeeping_row_is_written_in_the_same_transaction_as_the_ddl():
     """
     conn = FakeConnection()
     dbm.migrate(_env(), connect=_connector(conn))
-    assert conn.commits == 2, "one transaction per migration was not honoured"
+    assert conn.commits == len(_COMMITTED_MIGRATIONS), (
+        "one transaction per migration was not honoured"
+    )
     issued = [sql for sql, _ in conn.statements]
     assert dbm.Q_RECORD_VERSION in issued
-    for table in ("isaac_experiments", "isaac_runs"):
+    for table in _MIGRATION_TABLES:
         ddl_index = issued.index(_ddl_for(conn, table)[0])
         # The bookkeeping row for this migration is written AFTER its DDL, in the
         # same transaction.
@@ -2229,6 +2286,27 @@ def test_the_bookkeeping_row_is_written_in_the_same_transaction_as_the_ddl():
             for index, sql in enumerate(issued)
             if sql == dbm.Q_RECORD_VERSION
         ), table
+
+
+def test_the_bookkeeping_ddl_is_issued_once_per_transaction_not_once_in_total():
+    """The exclusion `_MIGRATION_TABLES` makes, asserted rather than assumed.
+
+    `Q_ENSURE_BOOKKEEPING` runs at the top of EVERY migration's transaction, which
+    is precisely what makes losing the bookkeeping table survivable: the next
+    `--apply` recreates it and the `CREATE ... IF NOT EXISTS` statements in the
+    migration files carry the rest. So its DDL count is the number of migrations,
+    not one — and a runner that "optimised" it to once would quietly remove that
+    recovery property while every other assertion in this file stayed green.
+    """
+    conn = FakeConnection()
+    dbm.migrate(_env(), connect=_connector(conn))
+    # ONE PER MIGRATION FROM THE RUNNER, PLUS ONE FROM `0001_experiments.sql` ITSELF,
+    # whose first statement creates the bookkeeping table. The `+ 1` is written out
+    # rather than absorbed into a `>=` because it is the second half of the same
+    # recovery property: the runner ensures the table before reading it, and the
+    # committed file ensures it again so a database that lost the table is repaired
+    # by an ordinary `--apply` rather than by hand.
+    assert len(_ddl_for(conn, "isaac_schema_migrations")) == len(_COMMITTED_MIGRATIONS) + 1
 
 
 def test_the_statement_separator_survives_a_semicolon_inside_a_literal():
@@ -2276,11 +2354,16 @@ def test_the_committed_migrations_regex_literal_is_not_read_as_a_dollar_quote():
     here. Dollar QUOTING needs a pair.
     """
     migrations = dbm.load_migrations()
-    assert [m.version for m in migrations] == ["0001_experiments", "0002_runs"]
-    assert [len(m.statements) for m in migrations] == [3, 2]
-    # 0002 carries the same `$` inside `CHECK (run_id ~ '^[0-9A-Z]{26}$')`, so the
-    # guard has to stay narrow for it too.
-    assert "$" in "\n".join(migrations[1].statements)
+    assert [m.version for m in migrations] == _COMMITTED_MIGRATIONS
+    assert [len(m.statements) for m in migrations] == _COMMITTED_STATEMENT_COUNTS
+    # EVERY committed migration after the first carries the same `$` inside an id
+    # CHECK, and `0003_revisions` additionally carries `'^[0-9a-f]{64}$'` for the
+    # content signature — so the guard has to stay narrow for all of them, not only
+    # for the one this test was written against. Asserted over the whole set rather
+    # than over index 1, because a new migration is exactly when this would be
+    # forgotten.
+    for migration in migrations[1:]:
+        assert "$" in "\n".join(migration.statements), migration.version
 
 
 # =============================================================================

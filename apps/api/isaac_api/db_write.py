@@ -136,11 +136,43 @@ APPLICATION_NAME = "isaac_app_write"
 #: deleted — it now pins the property that is true instead: the WRITE path names
 #: this table and the READ path still does not. The wording is replaced rather than
 #: softened, because a claim of inertness in a safety module is read as a guarantee.
+#: THE FIVE SUBMISSION-LIFECYCLE TABLES (``0003_revisions``, ``0004_submissions``)
+#: ARE LISTED HERE IN THE SAME CHANGE THAT CREATES THEM, AND THAT IS NOT OPTIONAL.
+#: This set is what :class:`WriteStatementPolicy` consults, and it is consulted
+#: BEFORE a connection is opened — so a ``CREATE TABLE isaac_submissions`` in a
+#: committed migration file is refused by this application at load time unless the
+#: name is here first. Splitting the two across changes does not produce a
+#: half-working feature; it produces a migration that cannot run at all.
+#:
+#: LISTING A TABLE GRANTS NOTHING BY ITSELF. It permits a statement naming it to
+#: pass this policy. What may actually be written is decided by the statements that
+#: exist, all of which are module-level ``Q_*`` constants, and by the tests that
+#: enumerate them. In particular ``test_submission_store.py`` asserts that no
+#: ``Q_*`` constant anywhere in this application issues an ``UPDATE`` or a
+#: ``DELETE`` naming any of these five — which is the whole of the append-only
+#: guarantee, because neither a trigger (it needs a dollar-quoted body, which
+#: ``db_migrate.split_statements`` refuses) nor ``REVOKE`` (a forbidden verb, below)
+#: is available to enforce it in the database.
+#:
+#: THEIR AUTHORIZATION BASIS, CITED HERE BECAUSE THE LAST TIME IT WAS NOT, IT WENT
+#: UNNOTICED. ``CLAUDE.md`` §15's 2026-08-07 write lift covers Create Experiment
+#: persistence "plus the minimum supporting persistence architecture that feature
+#: requires", and its enumerated table list named only ``isaac_experiments``,
+#: ``isaac_schema_migrations`` and ``isaac_runs`` when these five were added — a gap
+#: an independent review found rather than the implementing slice, exactly as
+#: happened for ``isaac_runs``. The list is now corrected and both approval packets
+#: carry an "Authorization basis" section. Listing a table here is a **recorded
+#: scope extension**, and adding a sixth needs the same treatment.
 OWNED_TABLES: frozenset[str] = frozenset(
     {
         "isaac_schema_migrations",
         "isaac_experiments",
         "isaac_runs",
+        "isaac_experiment_revisions",
+        "isaac_run_revisions",
+        "isaac_revision_changes",
+        "isaac_submissions",
+        "isaac_submission_runs",
     }
 )
 

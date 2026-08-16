@@ -1072,11 +1072,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * figure the test itself disproved on the next screenful. It was found only when a
    * later merge conflicted on the same two lines.
    *
-   * Both numbers are now 92, re-measured from `create_app().openapi()` after that merge.
-   * If you change the assertion, change this line in the same edit.
+   * Both numbers were 92 when that was written and are now 48 operations / 105
+   * post-lead paragraphs, re-measured from `create_app().openapi()` on each change.
+   * If you change the assertion, change the test NAME in the same edit — that is the
+   * whole lesson of the paragraph above, and it is easier to forget than the number.
    */
-  it('describes the contract it claims to: 47 operations, 96 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
+  it('describes the contract it claims to: 48 operations, 105 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(48);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1592,8 +1594,42 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     total 45,974 and 96 post-lead paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 46,166; this drops
     //     the 96 `\n\n` separators, and 46,166 - 192 = 45,974.
-    expect(total).toBe(45974);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(96);
+    // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
+    // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the
+    // scientist's submission. Two entries moved, not one: the new operation and
+    // `GET /api/health`, whose captured copy was re-transcribed in the same pass
+    // because that docstring gained a paragraph about the new `submission` block.
+    // Neither was hand-edited — both came out of `create_app().openapi()`, which is
+    // why `test_contract_description_parity.py` is green in both directions.
+    //
+    // THE FIRST LINE OF THIS NOTE USED TO READ "45,974 -> 48,364 … 96 -> 103" WHILE
+    // THE BULLETS BELOW IT SAID 48,833 AND 104 (review item M7). It was a stale
+    // first measurement left standing above a later one, and the assertions used
+    // the bullets — so the headline figure was the only wrong number on the screen,
+    // which is the hardest kind to notice. Both are now the same measurement, and
+    // the per-entry deltas that used to appear here have been DROPPED rather than
+    // recomputed: they were the arithmetic that made the discrepancy invisible.
+    //
+    // MEASURED the same two independent ways every corrected total above was, and
+    // NOT by adding a delta to the previous figure:
+    //
+    //   · from the SERVED document: the splitPurpose paragraph rule transcribed
+    //     into Python over `create_app().openapi()`, restricted to the 48 operations
+    //     this array names, gives total 49,238 and 105 post-lead paragraphs.
+    //   · internal consistency: raw sum of `d.description.length` = 49,448; this
+    //     figure drops the 105 `\n\n` separators, and 49,448 - 210 = 49,238.
+    //
+    // The submit description moved twice after the first measurement, and the
+    // numbers were RE-MEASURED each time rather than adjusted by a delta. First:
+    // reviewing the real-engine proof surfaced that an already-exported record is
+    // never republished, so a submission over an edited draft names records holding
+    // something else — the operation now says so and reports
+    // `published_artifact_state`. Second (review item M5): the operation used to
+    // claim its gate was "exactly the export gate and nothing more", which
+    // overstates it by one condition — `POST .../export` has no `pending_count()`
+    // check at all — so a qualifying paragraph was added.
+    expect(total).toBe(49238);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(105);
     // (e) THE SIXTH EVIDENCE CLASS. the evidence-support
     //     histogram gained a SIXTH class, `unreadable`, so
     //     `GET /api/experiments/{id}/evidence-classification` now names six classes

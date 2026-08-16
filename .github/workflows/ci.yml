@@ -382,11 +382,16 @@ jobs:
           # THE ORDER IS PART OF THE ASSERTION. `0002_runs` declares a foreign key
           # into `isaac_experiments`, so applying it first is a failure, not a
           # style preference.
-          [ "$out" = "pending: 0001_experiments, 0002_runs" ] || {
+          # THE ORDER IS THE ASSERTION, and it now covers four migrations rather
+          # than two. `0003_revisions` declares a foreign key into
+          # `isaac_experiments`, and `0004_submissions` declares one into
+          # `isaac_experiment_revisions`, so each depends on something an earlier
+          # one creates.
+          [ "$out" = "pending: 0001_experiments, 0002_runs, 0003_revisions, 0004_submissions" ] || {
             echo "::error::unexpected plan: $out"; exit 1; }
           # A plan must apply NOTHING. The bookkeeping table may exist (the plan
           # creates it to read it); no application table may.
-          for t in isaac_experiments isaac_runs; do
+          for t in isaac_experiments isaac_runs isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs; do
             count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
             [ "$count" = "0" ] || { echo "::error::--plan created $t"; exit 1; }
           done
@@ -416,10 +421,10 @@ jobs:
           )
           applied = db_migrate.migrate(os.environ, directory=staged)
           assert applied == ["0001_experiments"], applied
-          # Against the REAL committed set, 0002 is now the only pending version.
+          # Against the REAL committed set, everything after 0001 is pending.
           pending = db_migrate.pending_versions(os.environ)
-          assert pending == ["0002_runs"], pending
-          print("database migrated to 0001 only; 0002 pending")
+          assert pending == ["0002_runs", "0003_revisions", "0004_submissions"], pending
+          print("database migrated to 0001 only; 0002, 0003 and 0004 pending")
           PY
           count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
           [ "$count" = "0" ] || { echo "::error::isaac_runs exists but 0002 was not applied"; exit 1; }
@@ -511,7 +516,7 @@ jobs:
           # 0001 is already recorded, so ONLY 0002 applies. That the bookkeeping
           # skips an applied version is the property being read here; the
           # both-at-once path is proven by the bookkeeping-deletion case below.
-          [ "$out" = "applied: 0002_runs" ] || {
+          [ "$out" = "applied: 0002_runs, 0003_revisions, 0004_submissions" ] || {
             echo "::error::unexpected apply result: $out"; exit 1; }
 
       # THE IDEMPOTENCE CLAIM, PROVEN RATHER THAN ASSERTED IN A COMMENT.
@@ -545,10 +550,15 @@ jobs:
           echo "--- after  ---"; cat /tmp/tables-after.txt
           added=$(comm -13 /tmp/tables-before.txt /tmp/tables-after.txt | tr '\n' ' ' | sed 's/ *$//')
           removed=$(comm -23 /tmp/tables-before.txt /tmp/tables-after.txt | tr '\n' ' ' | sed 's/ *$//')
-          # EXACTLY three, and named. Contract §8 D7 lists six candidate tables;
-          # `0002_runs` deliberately creates one of them, so this list is also the
-          # guard against a later migration quietly bringing the other five along.
-          [ "$added" = "isaac_experiments isaac_runs isaac_schema_migrations" ] || {
+          # EXACTLY eight, and named. This list is the guard against a migration
+          # quietly bringing a table along that no approval packet describes — which
+          # is why it is a literal in alphabetical order (the `information_schema`
+          # query above sorts) and never a count.
+          #
+          # THREE -> EIGHT: `0003_revisions` adds `isaac_experiment_revisions`,
+          # `isaac_run_revisions` and `isaac_revision_changes`; `0004_submissions`
+          # adds `isaac_submissions` and `isaac_submission_runs`.
+          [ "$added" = "isaac_experiment_revisions isaac_experiments isaac_revision_changes isaac_run_revisions isaac_runs isaac_schema_migrations isaac_submission_runs isaac_submissions" ] || {
             echo "::error::the migration created tables it should not have: '$added'"; exit 1; }
           [ -z "$removed" ] || { echo "::error::the migration REMOVED tables: '$removed'"; exit 1; }
           psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
@@ -559,7 +569,7 @@ jobs:
           # `isaac_schema_migrations` is as application-owned as the other two — it is
           # in `db_write.OWNED_TABLES` — so the tally was simply wrong, in the one line
           # a reviewer skims to conclude the guard passed.
-          echo "records: byte-identical; added exactly the three application-owned tables"
+          echo "records: byte-identical; added exactly the eight application-owned tables"
 
       # The repository, end to end, against the real engine — the half the
       # in-process fake cannot cover.
@@ -878,6 +888,175 @@ jobs:
             echo "::error::the run count is 0, so this assertion proved nothing"; exit 1; }
           echo "isaac_runs: $runs row(s), exactly the runs the application holds"
 
+      # THE SUBMISSION LIFECYCLE, END TO END, AGAINST THE REAL ENGINE.
+      #
+      # WHAT ONLY A REAL POSTGRESQL CAN ANSWER, and why the unit suite is not enough
+      # on its own. `apps/api/tests/test_submission*.py` drives an in-process
+      # connection double: it proves the application's LOGIC — which branch runs,
+      # what is written, what is rolled back — and it CANNOT prove that the committed
+      # SQL is valid PostgreSQL at all, that the CHECK constraints admit the rows the
+      # application actually produces, that the two UNIQUE constraints idempotency
+      # rests on really refuse a duplicate, or that `jsonb` round-trips a revision
+      # snapshot. This step answers exactly those.
+      #
+      # IT IS THE FIRST TIME THIS REPOSITORY EXECUTES `0003`/`0004` DDL ANYWHERE. The
+      # machine the feature was written on has no PostgreSQL and no psycopg2, so until
+      # this job runs, "the migration is valid SQL" is an unverified claim — and the
+      # two approval packets say so in their own words.
+      #
+      # THE FIXTURE VERIFIER IS WHAT MAKES A SUCCESSFUL SUBMISSION REACHABLE.
+      # `ISAAC_EDGE_TRUST_VERIFIER=test_fixture` plus `ISAAC_FIXTURE_ACTOR_SUBJECT`
+      # selects `identity.FixtureEdgeVerifier`, which reads its subject from THE
+      # PROCESS ENVIRONMENT and never from a request — a header-reading verifier would
+      # rebuild the forgeable-header hazard Q4 is answered against. Everything it
+      # attributes is stamped `trust_basis = 'test_fixture'` in the row, permanently,
+      # and that is asserted below because the label is the entire mitigation for such
+      # a verifier existing at all.
+      - name: Exercise the submission lifecycle against the real engine
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-submission
+          ISAAC_EDGE_TRUST_VERIFIER: test_fixture
+          ISAAC_FIXTURE_ACTOR_SUBJECT: ci.actor
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, sys
+          sys.path.insert(0, "apps/api")
+          from fastapi.testclient import TestClient
+          import isaac_api.db_write as dbw
+          import isaac_api.submission_store as sstore
+          import isaac_api.workspace as ws
+          from isaac_api.app import create_app
+
+          client = TestClient(create_app(), raise_server_exceptions=False)
+
+          # The `submission` block on /api/health reports what CONFIGURATION permits.
+          # It opens no connection, so it never promises the write will land — the
+          # field is `configuration_permits` and not `available` for that reason.
+          block = client.get("/api/health").json()["submission"]
+          assert block["configuration_permits"] is True, block
+          assert block["actor_trust_basis"] == "test_fixture", block
+          assert block["basis"] == "configuration_only", block
+
+          # An export-ready ORDINARY-scope record with two runs, created through the
+          # durable store (PGHOST is set for this whole job).
+          rid = "01CISUBMISSIONFIXTURE00001"
+          exp = ws.create_experiment(
+              "CI submission", {"kind": "synthetic"}, ws._full_draft(), id=rid
+          )
+          exp.save_versioned()
+          exp = ws.load_experiment(rid)
+          run_draft = json.loads(json.dumps(exp.draft))
+          for label in ("CI run A", "CI run B"):
+              exp.add_run(label=label, draft=json.loads(json.dumps(run_draft)))
+          exp.save_versioned()
+
+          def etag():
+              return client.get(f"/api/experiments/{rid}").headers["ETag"]
+
+          submitted = client.post(
+              f"/api/experiments/{rid}/submit",
+              headers={"If-Match": etag(), "Idempotency-Key": "ci-key-1"},
+          )
+          assert submitted.status_code == 200, submitted.text
+          body = submitted.json()
+          assert body["subject"] == "ci.actor", body
+          assert body["trust_basis"] == "test_fixture", body
+          assert body["unit_count"] == 2, body
+          assert body["published_record_count"] == 2, body
+          assert body["replayed"] is False, body
+          # THE SERVER ASSIGNED THE TIME. This is a real `timestamptz` coming back
+          # through psycopg2 and being formatted, which the in-process double cannot
+          # prove — it hands back the fixed string it was given.
+          assert body["submitted_utc"], body
+          # The first revision has no predecessor, so it records no changes AND SAYS
+          # SO, rather than letting `0` read as "nothing changed".
+          assert body["change_count"] == 0, body
+          assert body["changes_comparable"] is False, body
+
+          def rows(sql, params=()):
+              with dbw.write_transaction(os.environ) as (cur, pol):
+                  cur.execute(pol.check(sql), params)
+                  return cur.fetchall()
+
+          found = rows(sstore.Q_SUBMISSION_BY_SIGNATURE, (rid, body["content_signature"]))
+          assert len(found) == 1, found
+
+          # An exact retry under the same key replays the ORIGINAL row.
+          replay = client.post(
+              f"/api/experiments/{rid}/submit",
+              headers={"If-Match": etag(), "Idempotency-Key": "ci-key-1"},
+          )
+          assert replay.status_code == 200, replay.text
+          assert replay.json()["replayed"] is True, replay.text
+          assert replay.json()["submission_id"] == body["submission_id"], replay.text
+          assert replay.json()["published_record_count"] == 0, replay.text
+
+          # ...and without the key it is a 409 echoing what is on record. THE UNIQUE
+          # CONSTRAINT IS WHAT MAKES THAT TRUE ACROSS PROCESSES, and only a real
+          # engine enforces one.
+          duplicate = client.post(f"/api/experiments/{rid}/submit", headers={"If-Match": etag()})
+          assert duplicate.status_code == 409, duplicate.text
+          assert duplicate.json()["error"] == "already_submitted", duplicate.text
+
+          # A SECOND SUBMISSION AFTER A REAL EDIT: new signature, revision 2, and the
+          # change rows the diff produced. This is the path that exercises
+          # `jsonb` round-tripping — revision 2's diff is computed by rehydrating
+          # revision 1's stored `state` document out of the database.
+          held = ws.load_experiment(rid)
+          address = next(
+              path
+              for path, env in held.draft["fields"].items()
+              if isinstance(env, dict) and env.get("value") is not None
+          )
+          held.draft["fields"][address]["value"] = "a different value entirely"
+          held.save_versioned()
+          again = client.post(f"/api/experiments/{rid}/submit", headers={"If-Match": etag()})
+          assert again.status_code == 200, again.text
+          second = again.json()
+          assert second["revision_no"] == 2, second
+          assert second["changes_comparable"] is True, second
+          assert second["change_count"] >= 1, second
+          # It published NOTHING: both records were already materialised by the first
+          # submission and a materialised unit is never revalidated or rewritten.
+          assert second["published_record_count"] == 0, second
+          # ...and BECAUSE it published nothing, the records on disk no longer match
+          # what was submitted. That is disclosed rather than refused — there is no
+          # operation that republishes an immutable record — and the first submission
+          # reported the other value, which is what stops this passing vacuously.
+          assert body["published_artifact_state"]["state"] == "current", body
+          assert second["published_artifact_state"]["state"] == "stale", second
+
+          print("submission lifecycle OK against a real PostgreSQL")
+          with open("/tmp/isaac-submission-experiment.txt", "w") as handle:
+              handle.write(rid)
+          PY
+          # THE ROW SETS, READ WITH psql SO THE ASSERTION DOES NOT GO BACK THROUGH THE
+          # APPLICATION THAT WROTE THEM.
+          rid=$(cat /tmp/isaac-submission-experiment.txt)
+          [ "$(psql -Atc "select count(*) from isaac_submissions where experiment_id = '$rid'")" = "2" ] || {
+            echo "::error::expected two submission rows"; exit 1; }
+          [ "$(psql -Atc "select count(*) from isaac_submission_runs")" = "4" ] || {
+            echo "::error::expected one submission-run row per unit per submission"; exit 1; }
+          [ "$(psql -Atc "select count(*) from isaac_experiment_revisions where experiment_id = '$rid'")" = "2" ] || {
+            echo "::error::expected two revision rows"; exit 1; }
+          [ "$(psql -Atc "select count(*) from isaac_run_revisions")" = "4" ] || {
+            echo "::error::expected one run-revision row per run per revision"; exit 1; }
+          [ "$(psql -Atc "select count(*) from isaac_revision_changes")" != "0" ] || {
+            echo "::error::the second revision recorded no change rows"; exit 1; }
+          # The attribution pair, as stored.
+          [ "$(psql -Atc "select distinct subject || '/' || trust_basis from isaac_submissions where experiment_id = '$rid'")" = "ci.actor/test_fixture" ] || {
+            echo "::error::the submission was not attributed as a fixture"; exit 1; }
+          # ONE RUN, ONE RECORD — the CHECK, observed as data rather than as text.
+          [ "$(psql -Atc "select count(*) from isaac_submission_runs where record_id <> unit_id")" = "0" ] || {
+            echo "::error::a submission-run row names a record that is not its unit"; exit 1; }
+          # The revision numbers are 1 and 2, which is what the UNIQUE constraint on
+          # (experiment_id, revision_no) exists to keep true.
+          [ "$(psql -Atc "select string_agg(revision_no::text, ',' order by revision_no) from isaac_experiment_revisions where experiment_id = '$rid'")" = "1,2" ] || {
+            echo "::error::revision numbers are not 1,2"; exit 1; }
+          rm -rf /tmp/isaac-pg-submission
+          echo "submission rows: exactly as the approval packets describe"
+
       # THE SAME DIGEST, TAKEN AFTER THE APPLICATION HAS ACTUALLY RUN.
       #
       # The step above already proved the MIGRATION does not touch `records`. That
@@ -1077,6 +1256,247 @@ jobs:
           [ "$left" = "0" ] || { echo "::error::this step left rows behind"; exit 1; }
           echo "0002 constraints: every one behaves as the approval packet describes"
 
+      # EVERY CONSTRAINT `0003_revisions` AND `0004_submissions` DECLARE, EXERCISED.
+      #
+      # `docs/migration-approval-packet-0003.md` and `-0004.md` claim an attribution
+      # CHECK pairing `trust_basis` with `subject`, a per-experiment revision-number
+      # uniqueness, a one-submission-per-revision uniqueness, the two uniqueness
+      # constraints idempotency rests on, a one-run-one-record CHECK, and the
+      # DELIBERATE ABSENCE of a foreign key from `isaac_run_revisions.run_id` to
+      # `isaac_runs`. Nothing in the Python suite can check any of that: it has no
+      # PostgreSQL, so it can only assert the constraint TEXT is present. This step
+      # asserts the constraints BEHAVE.
+      #
+      # It runs after the application-behaviour digests deliberately, so its rows
+      # cannot perturb them, and it removes its own rows at the end.
+      - name: Prove every 0003 and 0004 constraint rejects what it claims to reject
+        run: |
+          set -euo pipefail
+
+          # THE THIRD ARGUMENT IS WHAT MAKES THIS A TEST RATHER THAN A FORMALITY,
+          # for the reason the 0002 step gives: "the statement failed" is satisfied
+          # by a typo, a missing column, or a syntax error. Each case names the
+          # object PostgreSQL must blame.
+          #
+          # EVERY FIXTURE ID BELOW IS EXACTLY 26 CHARACTERS, AND THAT IS LOAD-BEARING
+          # RATHER THAN TIDY. Every id column in 0001/0003/0004 carries
+          # `CHECK (~ '^[0-9A-Z]{26}$')`, so a 25-character fixture id makes the
+          # ACCEPTED inserts fail outright (aborting this step under ON_ERROR_STOP)
+          # and makes each `refuse` case ambiguous — PostgreSQL may blame the id-shape
+          # CHECK instead of the constraint under test, and the grep would then fail
+          # for a reason that has nothing to do with the property being proved.
+          # `python3 -c "import re; ..."` over this file is the cheap way to re-check.
+          refuse() {
+            if psql -v ON_ERROR_STOP=1 -c "$2" > /tmp/refuse2.log 2>&1; then
+              echo "::error::ACCEPTED a statement that must be refused: $1"; exit 1
+            fi
+            if ! grep -q -- "$3" /tmp/refuse2.log; then
+              echo "::error::$1 was refused, but not by '$3':"; cat /tmp/refuse2.log; exit 1
+            fi
+            echo "refused as designed by $3: $1"
+          }
+
+          parent=01CIREVPARENT00000000000A0
+          rev=01CIREVISIONAAAAAAAAAAAAAA
+          rev2=01CIREVISIONBBBBBBBBBBBBBB
+          sig=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          sig2=0000000000000000000000000000000000000000000000000000000000000000
+
+          psql -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO isaac_experiments (experiment_id, state)
+            VALUES ('$parent', '{"id": "$parent"}');
+          INSERT INTO isaac_experiment_revisions
+            (revision_id, experiment_id, revision_no, experiment_rev, generation,
+             state, content_signature, reason, subject, trust_basis)
+            VALUES ('$rev', '$parent', 1, 0, 'ci', '{"id": "$parent"}', '$sig',
+                    'submission', 'ci.actor', 'test_fixture');
+          SQL
+          echo "a well-formed revision row inserts"
+
+          # --- the attribution CHECK, BOTH directions --------------------------
+          # A name nothing vouched for, and a basis naming nobody. Both are the shape
+          # the identity seam exists to refuse, and the CHECK is an EQUALITY between
+          # the two conditions precisely so that neither half can be written.
+          refuse "an unattributed revision that names somebody" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIBADATTRIB0000000000AA0', '$parent', 9, 0, 'ci', '{}', '$sig', 'submission', 'ci.actor', 'unattributed')" \
+            "isaac_experiment_revisions_attribution"
+          refuse "an attributed revision that names nobody" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIBADATTRIB0000000000AB0', '$parent', 9, 0, 'ci', '{}', '$sig', 'submission', NULL, 'test_fixture')" \
+            "isaac_experiment_revisions_attribution"
+          # M1 — THE VALUE THAT SLIPS BETWEEN THE TWO HALVES OF THE PAIRING. `''` is
+          # not NULL, so the attribution CHECK reads this row as ATTRIBUTED while it
+          # names nobody. The third argument is what makes this meaningful: it must
+          # be blamed on `subject_non_empty`, NOT on `attribution`, or the new CHECK
+          # is not the thing doing the work.
+          refuse "an attributed revision whose subject is the empty string" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIEMPTYSUBJ000000000AA00', '$parent', 9, 0, 'ci', '{}', '$sig', 'submission', '', 'test_fixture')" \
+            "isaac_experiment_revisions_subject_non_empty"
+          refuse "an unrecognised trust basis" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIBADBASIS00000000000AA0', '$parent', 9, 0, 'ci', '{}', '$sig', 'submission', 'x', 'edge_header')" \
+            "isaac_experiment_revisions_trust_basis_known"
+          refuse "a second revision at the same number" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIDUPNUMBER00000000000A0', '$parent', 1, 0, 'ci', '{}', '$sig2', 'submission', NULL, 'unattributed')" \
+            "isaac_experiment_revisions_no_unique"
+          refuse "a signature that is not a 64-hex sha256" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIBADSIG0000000000000AA0', '$parent', 9, 0, 'ci', '{}', 'NOTAHASH', 'submission', NULL, 'unattributed')" \
+            "isaac_experiment_revisions_signature_shape"
+          refuse "an unknown revision reason" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIBADREASON000000000AAA0', '$parent', 9, 0, 'ci', '{}', '$sig2', 'because', NULL, 'unattributed')" \
+            "isaac_experiment_revisions_reason_known"
+          refuse "a revision of an experiment that does not exist" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIORPHANREV00000000000A0', '01CINOSUCHEXP0000000000000', 1, 0, 'ci', '{}', '$sig2', 'submission', NULL, 'unattributed')" \
+            "isaac_experiment_revisions_experiment_fk"
+
+          # --- isaac_run_revisions ---------------------------------------------
+          psql -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO isaac_run_revisions
+            (run_revision_id, revision_id, run_id, ordinal, state, rev, generation)
+            VALUES ('01CIRUNREV000000000000000A', '$rev', '01CIRUNAAAAAAAAAAAAAAAAAAA', 0,
+                    '{"id": "01CIRUNAAAAAAAAAAAAAAAAAAA"}', 0, 'ci');
+          SQL
+          echo "a well-formed run-revision row inserts"
+          refuse "the same run twice in one revision" \
+            "INSERT INTO isaac_run_revisions (run_revision_id, revision_id, run_id, state, generation) VALUES ('01CIRUNREV000000000000000B', '$rev', '01CIRUNAAAAAAAAAAAAAAAAAAA', '{\"id\": \"01CIRUNAAAAAAAAAAAAAAAAAAA\"}', 'ci')" \
+            "isaac_run_revisions_revision_run_unique"
+          refuse "a run-revision document naming a different run" \
+            "INSERT INTO isaac_run_revisions (run_revision_id, revision_id, run_id, state, generation) VALUES ('01CIRUNREV000000000000000C', '$rev', '01CIRUNBBBBBBBBBBBBBBBBBBB', '{\"id\": \"01CIRUNCCCCCCCCCCCCCCCCCCC\"}', 'ci')" \
+            "isaac_run_revisions_document_identity"
+
+          # THE DELIBERATE ABSENCE, ASSERTED POSITIVELY. `isaac_runs` holds no row for
+          # that run id and the insert above SUCCEEDED — history survives a run that
+          # does not exist, which is the whole reason there is no foreign key. The
+          # count check is what stops this passing for the wrong reason.
+          [ "$(psql -Atc "select count(*) from isaac_runs where run_id = '01CIRUNAAAAAAAAAAAAAAAAAAA'")" = "0" ] || {
+            echo "::error::the fixture run exists, so the missing-FK assertion proves nothing"; exit 1; }
+          echo "admitted as designed: a run revision naming a run that is not in isaac_runs"
+
+          # --- isaac_revision_changes --------------------------------------------
+          psql -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO isaac_revision_changes (change_id, revision_id, unit_id, address, change_kind)
+            VALUES ('01CICHANGE0000000000000AA0', '$rev', '$parent', 'sample.mass_mg', 'modified');
+          SQL
+          refuse "an unknown change kind" \
+            "INSERT INTO isaac_revision_changes (change_id, revision_id, unit_id, address, change_kind) VALUES ('01CICHANGE0000000000000AB0', '$rev', '$parent', 'sample.mass_mg', 'reworded')" \
+            "isaac_revision_changes_kind_known"
+          refuse "an empty address" \
+            "INSERT INTO isaac_revision_changes (change_id, revision_id, unit_id, address, change_kind) VALUES ('01CICHANGE0000000000000AC0', '$rev', '$parent', '', 'added')" \
+            "isaac_revision_changes_address_non_empty"
+          refuse "the same address changing twice in one revision" \
+            "INSERT INTO isaac_revision_changes (change_id, revision_id, unit_id, address, change_kind) VALUES ('01CICHANGE0000000000000AD0', '$rev', '$parent', 'sample.mass_mg', 'added')" \
+            "isaac_revision_changes_unique"
+
+          # --- isaac_submissions ---------------------------------------------------
+          sub=01CISUBMISSION0000000000A0
+          psql -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO isaac_submissions
+            (submission_id, experiment_id, revision_id, content_signature,
+             idempotency_key, unit_count, subject, trust_basis)
+            VALUES ('$sub', '$parent', '$rev', '$sig', 'ci-key', 1, 'ci.actor', 'test_fixture');
+          SQL
+          echo "a well-formed submission row inserts"
+          # The second revision exists so the refusals below differ from the accepted
+          # row in exactly ONE column each — otherwise a refusal could be blamed on
+          # the wrong constraint.
+          psql -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO isaac_experiment_revisions
+            (revision_id, experiment_id, revision_no, experiment_rev, generation,
+             state, content_signature, reason, subject, trust_basis)
+            VALUES ('$rev2', '$parent', 2, 0, 'ci', '{}', '$sig2', 'submission', NULL, 'unattributed');
+          SQL
+          refuse "a second submission over the same revision" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000B0', '$parent', '$rev', '$sig2', 1, 'x', 'test_fixture')" \
+            "isaac_submissions_revision_unique"
+          refuse "a second submission of the same content" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000C0', '$parent', '$rev2', '$sig', 1, 'x', 'test_fixture')" \
+            "isaac_submissions_signature_unique"
+          refuse "a reused idempotency key" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, idempotency_key, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000G0', '$parent', '$rev2', '$sig2', 'ci-key', 1, 'x', 'test_fixture')" \
+            "isaac_submissions_idempotency_unique"
+          refuse "an empty idempotency key" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, idempotency_key, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000D0', '$parent', '$rev2', '$sig2', '', 1, 'x', 'test_fixture')" \
+            "isaac_submissions_idempotency_key_non_empty"
+          refuse "a submission that published nothing" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000E0', '$parent', '$rev2', '$sig2', 0, 'x', 'test_fixture')" \
+            "isaac_submissions_unit_count_positive"
+          refuse "an unattributed submission that names somebody" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000F0', '$parent', '$rev2', '$sig2', 1, 'x', 'unattributed')" \
+            "isaac_submissions_attribution"
+          # M1, the submission half. Blamed on `subject_non_empty` and NOT on
+          # `attribution`: `''` is not NULL, so the pairing reads this row as
+          # attributed while it names nobody.
+          refuse "an attributed submission whose subject is the empty string" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000H0', '$parent', '$rev2', '$sig2', 1, '', 'test_fixture')" \
+            "isaac_submissions_subject_non_empty"
+
+          # THE ABSENCE, ASSERTED POSITIVELY: PostgreSQL's default is NULLS DISTINCT,
+          # so any number of rows may carry no idempotency key. Idempotency is opt-in,
+          # and a constraint that refused a second keyless submission would break
+          # every client that never sends the header.
+          psql -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO isaac_submissions
+            (submission_id, experiment_id, revision_id, content_signature, unit_count,
+             subject, trust_basis)
+            VALUES ('01CISUBMISSION000000000100', '$parent', '$rev2', '$sig2', 1,
+                    NULL, 'unattributed');
+          SQL
+          echo "admitted as designed: a second keyless submission, and an unattributed one"
+
+          # --- isaac_submission_runs -------------------------------------------------
+          psql -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id)
+            VALUES ('01CISUBRUN000000000000AAA0', '$sub', '$parent', NULL, '$parent');
+          SQL
+          refuse "a record that is not its unit" \
+            "INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id) VALUES ('01CISUBRUN000000000000AAB0', '$sub', '$parent', NULL, '01CIOTHERRECORD000000000A0')" \
+            "isaac_submission_runs_one_record_per_unit"
+          refuse "a run id that is not its unit" \
+            "INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id) VALUES ('01CISUBRUN000000000000AAC0', '$sub', '$parent', '01CIOTHERRUN00000000000AA0', '$parent')" \
+            "isaac_submission_runs_run_matches_unit"
+          refuse "the same unit twice in one submission" \
+            "INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id) VALUES ('01CISUBRUN000000000000AAD0', '$sub', '$parent', NULL, '$parent')" \
+            "isaac_submission_runs_unit_unique"
+
+          # THE FOREIGN KEYS REFUSE A PARENT DELETE. No `ON DELETE` clause is written
+          # anywhere in either migration, so no single statement can destroy a history
+          # tree — the distinction between the shipped design and `ON DELETE CASCADE`.
+          refuse "deleting a submission that still has rows" \
+            "DELETE FROM isaac_submissions WHERE submission_id = '$sub'" \
+            "isaac_submission_runs_submission_fk"
+          refuse "deleting a revision a submission points at" \
+            "DELETE FROM isaac_experiment_revisions WHERE revision_id = '$rev'" \
+            "isaac_submissions_revision_fk"
+          refuse "deleting an experiment that still has history" \
+            "DELETE FROM isaac_experiments WHERE experiment_id = '$parent'" \
+            "isaac_experiment_revisions_experiment_fk"
+
+          # Every index the two packets name exists, with the columns they name.
+          for spec in "isaac_experiment_revisions_experiment_time_idx:(experiment_id, created_utc, revision_id)" \
+                      "isaac_run_revisions_run_idx:(run_id, revision_id)" \
+                      "isaac_revision_changes_address_idx:(unit_id, address, revision_id)" \
+                      "isaac_submissions_experiment_time_idx:(experiment_id, submitted_utc, submission_id)" \
+                      "isaac_submission_runs_record_idx:(record_id, submission_id)"; do
+            name="${spec%%:*}"; cols="${spec#*:}"
+            idx=$(psql -Atc "select indexdef from pg_indexes where indexname='$name'")
+            case "$idx" in
+              *"$cols") echo "index OK: $name $cols" ;;
+              *) echo "::error::$name is missing or has the wrong columns: '$idx'"; exit 1 ;;
+            esac
+          done
+
+          # ...and once the children are gone the parent deletes succeed, so what
+          # refused them above was the foreign keys and nothing else.
+          psql -v ON_ERROR_STOP=1 <<SQL
+          DELETE FROM isaac_submission_runs WHERE submission_id = '$sub';
+          DELETE FROM isaac_submissions WHERE experiment_id = '$parent';
+          DELETE FROM isaac_revision_changes WHERE revision_id = '$rev';
+          DELETE FROM isaac_run_revisions WHERE revision_id = '$rev';
+          DELETE FROM isaac_experiment_revisions WHERE experiment_id = '$parent';
+          DELETE FROM isaac_experiments WHERE experiment_id = '$parent';
+          SQL
+          left=$(psql -Atc "select count(*) from isaac_experiment_revisions where experiment_id = '$parent'")
+          [ "$left" = "0" ] || { echo "::error::this step left rows behind"; exit 1; }
+          echo "0003/0004 constraints: every one behaves as the approval packets describe"
+
       # THE DEPLOYMENT-ORDER GUARD, AGAINST A REAL ENGINE AND IN ONE PROCESS.
       #
       # WHY IT IS HERE AND NOT ONLY IN `test_experiment_repository.py`. The unit
@@ -1104,6 +1524,12 @@ jobs:
           ISAAC_UI_WORKSPACE: /tmp/isaac-pg-transition
         run: |
           set -euo pipefail
+          # ONLY 0002 IS ROLLED BACK HERE, and 0003/0004 deliberately stay applied.
+          # `isaac_run_revisions.run_id` is NOT a foreign key into `isaac_runs` — the
+          # whole point of that omission is that history survives the live table — so
+          # dropping `isaac_runs` underneath them succeeds. This step is about the
+          # deployment-order guard, not about rollback order; that is proven at the
+          # end of the job.
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0002_runs.rollback.sql
           gone=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
           [ "$gone" = "0" ] || { echo "::error::the rollback left isaac_runs behind"; exit 1; }
@@ -1197,11 +1623,24 @@ jobs:
             exit 1
           fi
           cat /tmp/wrong-order.log
-          for t in isaac_experiments isaac_runs isaac_schema_migrations; do
+          for t in isaac_experiments isaac_runs isaac_schema_migrations isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs; do
             c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
             [ "$c" = "1" ] || { echo "::error::$t was destroyed by the failed rollback attempt"; exit 1; }
           done
-          echo "wrong-order rollback: refused, and nothing was dropped"
+          # THE SECOND WRONG ORDER, one level in. `isaac_submissions` references
+          # `isaac_experiment_revisions`, so 0003's rollback must refuse while 0004
+          # is applied — a dependency that did not exist when this step was written
+          # and that an operator reaching for a rollback should not have to discover.
+          if psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0003_revisions.rollback.sql > /tmp/wrong-order-0003.log 2>&1; then
+            echo "::error::0003's rollback succeeded while isaac_submissions still referenced it"
+            exit 1
+          fi
+          cat /tmp/wrong-order-0003.log
+          for t in isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions; do
+            c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
+            [ "$c" = "1" ] || { echo "::error::$t was destroyed by the failed 0003 rollback attempt"; exit 1; }
+          done
+          echo "wrong-order rollback: refused at both levels, and nothing was dropped"
 
       # THE ROLLBACKS, PROVEN, IN THE DOCUMENTED ORDER. They are operator actions
       # run with psql — the application cannot run either file, because each
@@ -1210,6 +1649,27 @@ jobs:
       - name: Prove the documented rollbacks return the database to its prior state
         run: |
           set -euo pipefail
+          # THE DOCUMENTED ORDER IS 0004, 0003, 0002, 0001 — children before parents
+          # across files as well as within them.
+          psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0004_submissions.rollback.sql
+          for t in isaac_submissions isaac_submission_runs; do
+            c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
+            [ "$c" = "0" ] || { echo "::error::0004's rollback left $t behind"; exit 1; }
+          done
+          rows=$(psql -Atc "select count(*) from isaac_schema_migrations where version = '0004_submissions'")
+          [ "$rows" = "0" ] || { echo "::error::0004's rollback left its bookkeeping row"; exit 1; }
+
+          psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0003_revisions.rollback.sql
+          for t in isaac_experiment_revisions isaac_run_revisions isaac_revision_changes; do
+            c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
+            [ "$c" = "0" ] || { echo "::error::0003's rollback left $t behind"; exit 1; }
+          done
+          rows=$(psql -Atc "select count(*) from isaac_schema_migrations where version = '0003_revisions'")
+          [ "$rows" = "0" ] || { echo "::error::0003's rollback left its bookkeeping row"; exit 1; }
+          plan=$(python scripts/db_migrate.py --plan)
+          [ "$plan" = "pending: 0003_revisions, 0004_submissions" ] || {
+            echo "::error::after the 0004+0003 rollback the plan is wrong: $plan"; exit 1; }
+
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0002_runs.rollback.sql
           gone=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
           [ "$gone" = "0" ] || { echo "::error::0002's rollback left isaac_runs behind"; exit 1; }
@@ -1220,7 +1680,7 @@ jobs:
           [ "$rows" = "0" ] || { echo "::error::0002's rollback left its bookkeeping row"; exit 1; }
           plan=$(python scripts/db_migrate.py --plan)
           echo "$plan"
-          [ "$plan" = "pending: 0002_runs" ] || {
+          [ "$plan" = "pending: 0002_runs, 0003_revisions, 0004_submissions" ] || {
             echo "::error::after the 0002 rollback the plan is wrong: $plan"; exit 1; }
 
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0001_experiments.rollback.sql

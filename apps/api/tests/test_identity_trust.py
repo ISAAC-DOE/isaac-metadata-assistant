@@ -294,7 +294,15 @@ def test_require_human_actor_refuses_with_the_typed_body_and_writes_nothing(tmp_
 
 
 def test_the_refusal_renders_as_its_typed_json_body():
-    """The handler exists and produces the same body. It is NOT registered — see the class."""
+    """The handler produces the typed body, called directly rather than through a route.
+
+    THIS DOCSTRING USED TO END "It is NOT registered — see the class", AND THAT IS NO
+    LONGER TRUE: ``create_app`` registers it, because ``POST .../submit`` consumes
+    ``require_human_actor``. That end-to-end path is asserted in
+    ``test_submission.py::test_the_default_build_refuses_every_submission_with_a_typed_409``,
+    which is what would catch a missing registration; this one is the unit check on
+    the body itself.
+    """
     dependency = require_human_actor("export_record")
     with pytest.raises(HumanActorRequired) as excinfo:
         dependency(_request())

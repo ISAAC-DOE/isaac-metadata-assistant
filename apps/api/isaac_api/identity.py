@@ -1,11 +1,35 @@
 """The application-side identity/trust abstraction. TYPES AND A REFUSAL — no reader.
 
+WHAT CHANGED WHEN THE SUBMISSION ROUTE LANDED — READ THIS FIRST
+===============================================================
+**Three sentences that used to open this docstring are now FALSE, and they are
+recorded here rather than quietly deleted**, because each was a claim a reader may
+have relied on:
+
+* *"in this build the answer is always no"* — no longer unconditional. A deployment
+  that sets ``ISAAC_EDGE_TRUST_VERIFIER=test_fixture`` **and**
+  ``ISAAC_FIXTURE_ACTOR_SUBJECT`` attributes to that configured subject. Every other
+  deployment, including every default one and the hosted pod, still answers no.
+* *"Nothing here is wired to a route"* — ``POST /api/experiments/{id}/submit`` now
+  depends on :func:`require_human_actor`, and ``create_app`` registers
+  :func:`human_actor_required_handler` in the same change (without it the refusal
+  would surface as a 500, which this module's own note below predicted).
+* *"The one verifier this build ships"* — there are two. See
+  :class:`FixtureEdgeVerifier` for why the second exists and what stops it being a
+  hole.
+
+**What did NOT change, and is the reason the rest of this docstring still stands:**
+nothing here reads a header, in either verifier; the only way to a subject is still
+through something that vouches for it; and no verifier in this build mints
+:data:`TRUST_BASIS_VERIFIED_EDGE_ASSERTION`, so nothing here can claim a request
+traversed the authenticated edge. A fixture-attributed row is labelled
+``test_fixture`` in the database permanently.
+
 WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT
 =============================================
 This module answers one question — *"is there a person this request may be
-attributed to, and on whose word?"* — and in this build the answer is always
-**no**. Nothing here reads a header. Nothing here is wired to a route. Nothing
-here stamps anything.
+attributed to, and on whose word?"* — and answers it only from what CHECKED, never
+from what arrived. Nothing here reads a header.
 
 It exists because the alternative is worse. ``docs/identity-trust-contract.md``
 §8 reason 1 names the hazard precisely: *"a no-op abstraction invites a
@@ -30,8 +54,17 @@ gap. Read the two together, not either alone.
 What is worth noticing is that §8's restated gate is the specification this file
 implements rather than violates: the whole design is a machine for distinguishing
 "the boundary vouched for this request" from "a header arrived", and for refusing
-the second. The part §8 forbids — a live reader, a wired route, a stamp — is
-absent.
+the second.
+
+**The sentence that followed here said "The part §8 forbids — a live reader, a
+wired route, a stamp — is absent." Two thirds of that is now false and the third is
+narrowed.** A route IS wired (the submission path), and :func:`stamp_actor` HAS a
+caller. What remains absent, and is the half §8 actually cares about, is a
+verifier that treats an arriving header as evidence: neither shipped verifier reads
+a request, so no forged header can produce an actor, which is the property §8's
+restated gate names. The other two are the owner's instruction being carried out,
+and pretending otherwise in this docstring would be the same defect the module
+exists to prevent, one layer up.
 
 THE FACT THAT GOVERNS EVERY LINE HERE
 =====================================
@@ -66,12 +99,15 @@ accepts a header, a header mapping, or a value claiming to be a subject:
     naming the verifier that produced it and the basis on which it is trusted.
   * The only :class:`EdgeAssertion` producer contemplated is an
     :class:`EdgeTrustVerifier`, and **the verifier is the sole header reader in
-    the design**. The one verifier this build ships,
-    :class:`UnconfiguredEdgeVerifier`, reads nothing at all.
+    the design**. Neither verifier this build ships reads anything from a request:
+    :class:`UnconfiguredEdgeVerifier` reads nothing at all, and
+    :class:`FixtureEdgeVerifier` reads the PROCESS ENVIRONMENT.
 
 A claim is therefore only readable *through the thing that vouches for it*. The
 short way to say it: you cannot get a subject out of this module without first
-producing something that says who checked, and today nothing checks.
+producing something that says who checked — and the only thing that checks in this
+build checks a deployment's own configuration, which is why what it produces is
+labelled a fixture rather than an edge assertion.
 
 Two mechanical guards back the argument up, because an argument in a docstring is
 not a guarantee. ``apps/api/tests/test_identity_trust.py`` asserts (a) that the
@@ -115,6 +151,11 @@ from starlette.responses import JSONResponse
 __all__ = [
     "EDGE_INJECTED_HEADERS",
     "EDGE_TRUST_VERIFIER_ENV",
+    "FIXTURE_ACTOR_GROUPS_ENV",
+    "FIXTURE_ACTOR_SUBJECT_ENV",
+    "FIXTURE_VERIFIER",
+    "FixtureEdgeVerifier",
+    "actor_attribution_status",
     "HUMAN_ACTOR_REQUIRED_ERROR",
     "ISAAC_ADMIN_GROUP",
     "ISAAC_DEPLOYMENT_GROUPS",
@@ -582,6 +623,17 @@ class EdgeTrustVerifier(Protocol):
     def verify(self, request: object) -> EdgeVerdict:
         """Examine the request and return a verdict. May read headers."""
 
+    def can_attribute(self) -> bool:
+        """Could ANY request be attributed under this verifier, as configured now?
+
+        A question about the DEPLOYMENT, asked with no request in hand, so that
+        ``GET /api/health`` can publish whether submission is possible here without
+        opening a connection or inventing a request. It is deliberately allowed to
+        be a weaker statement than ``verify`` would make about any particular
+        request: ``True`` means "an attributed outcome is reachable", never "this
+        caller is attributed".
+        """
+
 
 @dataclass(frozen=True)
 class UnconfiguredEdgeVerifier:
@@ -602,6 +654,98 @@ class UnconfiguredEdgeVerifier:
     def verify(self, request: object) -> EdgeVerdict:  # noqa: ARG002 - see docstring
         return Unconfigured(verifier_id=self.verifier_id)
 
+    def can_attribute(self) -> bool:
+        """Whether ANY request could be attributed under this verifier. Never.
+
+        Asked by :func:`actor_attribution_status` so ``GET /api/health`` can state,
+        from configuration alone, that no submission in this deployment can name an
+        author. It is a method on the verifier rather than an ``isinstance`` check at
+        the call site because a second verifier now exists, and a health surface that
+        enumerated verifier classes would need editing every time one is added — which
+        is exactly the maintenance shape that goes stale silently.
+        """
+        return False
+
+
+#: The env var naming the subject :class:`FixtureEdgeVerifier` attributes to.
+FIXTURE_ACTOR_SUBJECT_ENV = "ISAAC_FIXTURE_ACTOR_SUBJECT"
+
+#: Optional, comma-separated. Groups the fixture actor carries, verbatim.
+FIXTURE_ACTOR_GROUPS_ENV = "ISAAC_FIXTURE_ACTOR_GROUPS"
+
+
+@dataclass(frozen=True)
+class FixtureEdgeVerifier:
+    """A verifier for TEST AND DEVELOPMENT that attributes to a CONFIGURED subject.
+
+    IT EXISTS BECAUSE A ROUTE NOW CONSUMES :func:`require_human_actor`. Without a
+    second verifier the submission path would refuse every request in every
+    environment including the test suite, so the happy path — the one that writes an
+    attributed row — would be unreachable and therefore untested. An untested write
+    path to a durable, append-only, attributable table is a worse outcome than the
+    existence of this class.
+
+    THE ONE PROPERTY THAT MATTERS: IT READS ITS SUBJECT FROM THE PROCESS
+    ENVIRONMENT, NEVER FROM THE REQUEST.
+    ``request`` is typed ``object`` and is never touched, exactly as
+    :class:`UnconfiguredEdgeVerifier` never touches it, and a test passes an object
+    that raises on every attribute access. Reading a header here — even "only in
+    dev" — would rebuild the precise hazard Q4 is answered against: the Service is a
+    plain ClusterIP with no NetworkPolicy, so any in-cluster pod can forge a
+    forwarded identity header, and a verifier that believed one would turn a
+    deployment-level fact into an application-level vulnerability. An environment
+    variable is set by whoever deploys the process; a header is set by whoever calls
+    it. That asymmetry is the whole of the safety argument.
+
+    IT MINTS :data:`TRUST_BASIS_TEST_FIXTURE`, NEVER
+    :data:`TRUST_BASIS_VERIFIED_EDGE_ASSERTION`, and the basis is written into every
+    row it causes. So a submission attributed by this verifier is **permanently
+    labelled in the database as having been attributed by a fixture** — the label
+    cannot be lost, cannot be inferred away, and does not depend on anyone
+    remembering how the deployment was configured on the day. If this verifier is
+    ever enabled somewhere it should not be, the resulting rows say so about
+    themselves. That is the mitigation for the obvious objection to this class
+    existing at all, and it is deliberately a data property rather than a policy.
+
+    NO SUBJECT CONFIGURED -> :class:`NotTraversed`, NOT :class:`Traversed` WITH AN
+    EMPTY NAME AND NOT :class:`Unconfigured`. ``Unconfigured`` means "this build
+    never looked", which would be false — a verifier was selected and it ran. So the
+    honest verdict is that a verifier examined the request and did not establish the
+    boundary, which resolves to ``UNVERIFIED_EDGE_TRAVERSAL``.
+
+    NO DISPLAY NAME, NO EMAIL, NO UID. :class:`EdgeAssertion` has no field for the
+    last two and this passes no ``display_name``: a fixture has no honest display
+    name to offer, and inventing one would put a fabricated human-readable string
+    next to a real username in a durable row.
+    """
+
+    verifier_id: str = "test_fixture"
+
+    def verify(self, request: object) -> EdgeVerdict:  # noqa: ARG002 - see docstring
+        subject = (os.environ.get(FIXTURE_ACTOR_SUBJECT_ENV) or "").strip()
+        if not subject:
+            return NotTraversed(
+                verifier_id=self.verifier_id,
+                # No value, no address, nothing from the request: `NotTraversed`'s
+                # own docstring forbids echoing input, and there is no input here to
+                # echo even if it did not.
+                detail="no fixture subject is configured for this process",
+            )
+        raw_groups = (os.environ.get(FIXTURE_ACTOR_GROUPS_ENV) or "").strip()
+        groups = frozenset(part.strip() for part in raw_groups.split(",") if part.strip())
+        return Traversed(
+            assertion=EdgeAssertion(
+                subject=subject,
+                groups=groups,
+                verifier_id=self.verifier_id,
+                trust_basis=TRUST_BASIS_TEST_FIXTURE,
+            )
+        )
+
+    def can_attribute(self) -> bool:
+        """Whether a subject is configured, so an attributed row is possible."""
+        return bool((os.environ.get(FIXTURE_ACTOR_SUBJECT_ENV) or "").strip())
+
 
 # --------------------------------------------------------------------------
 # Verifier selection. Fail-closed. Mirrors runtime_mode.py exactly.
@@ -609,14 +753,23 @@ class UnconfiguredEdgeVerifier:
 
 EDGE_TRUST_VERIFIER_ENV = "ISAAC_EDGE_TRUST_VERIFIER"
 
-#: The one recognised value. Named rather than implied so a misconfiguration can
-#: be *detected*, which is the only reason the env var exists at all today.
+#: The default. Named rather than implied so a misconfiguration can be *detected*,
+#: which is why the env var exists at all.
 UNCONFIGURED_VERIFIER = "unconfigured"
 
-#: Value -> factory. One entry. A future verifier is added here, and adding it is
-#: the moment the whole trust question reopens.
+#: The test/development verifier. Selecting it is a deliberate, auditable act, and
+#: everything it attributes is labelled :data:`TRUST_BASIS_TEST_FIXTURE` in the
+#: database forever.
+FIXTURE_VERIFIER = "test_fixture"
+
+#: Value -> factory. A future REAL verifier is added here, and adding it is the
+#: moment the whole trust question reopens — neither entry below is one:
+#: ``unconfigured`` identifies nobody, and ``test_fixture`` identifies whoever the
+#: process was configured to name, which is a statement about the deployment and
+#: never about the caller.
 _VERIFIERS: dict[str, Callable[[], EdgeTrustVerifier]] = {
     UNCONFIGURED_VERIFIER: UnconfiguredEdgeVerifier,
+    FIXTURE_VERIFIER: FixtureEdgeVerifier,
 }
 
 
@@ -717,6 +870,37 @@ def resolve_request_identity(verdict: EdgeVerdict) -> RequestIdentity:
             raise TypeError(f"unhandled EdgeVerdict member: {type(verdict).__name__}")
 
 
+def actor_attribution_status() -> dict:
+    """Can this DEPLOYMENT attribute anything, and on what basis? NO REQUEST NEEDED.
+
+    Returns ``{"verifier_id", "can_attribute", "trust_basis"}``, derived from the
+    configured verifier alone. It opens nothing, reads no request, and — this is the
+    part that matters — **never returns a subject**. A capability surface answers
+    "could someone be named here", not "who".
+
+    ``trust_basis`` is the basis a successful attribution WOULD carry, or ``None``
+    when none is reachable. It is published on ``GET /api/health`` deliberately: a
+    deployment running :class:`FixtureEdgeVerifier` attributes on a basis that is
+    **not proof anyone authenticated**, and an operator must be able to see that from
+    the health banner rather than from the deployment manifest.
+
+    THE BASIS IS DERIVED FROM THE VERIFIER'S IDENTITY, NOT ASSUMED. A future real
+    verifier added to :data:`_VERIFIERS` that forgot to appear here would report
+    ``None`` — understating what the deployment can do, which is the safe direction
+    — rather than being silently reported as a fixture.
+    """
+    verifier = edge_trust_verifier()
+    can = bool(getattr(verifier, "can_attribute", lambda: False)())
+    basis: str | None = None
+    if can and getattr(verifier, "verifier_id", None) == FIXTURE_VERIFIER:
+        basis = TRUST_BASIS_TEST_FIXTURE
+    return {
+        "verifier_id": getattr(verifier, "verifier_id", UNCONFIGURED_VERIFIER),
+        "can_attribute": can,
+        "trust_basis": basis,
+    }
+
+
 def resolve_identity_for_request(request: Request) -> RequestIdentity:
     """The settled identity for one request. The **only** function here given one.
 
@@ -781,12 +965,19 @@ class HumanActorRequired(Exception):
     constraint ``TutorialScopeError`` solves, and this is deliberately the same
     solution so the two refusals have one shape between them.
 
-    **The handler below is NOT registered on the app**, because no route consumes
-    :func:`require_human_actor` yet and a handler for an exception nothing raises
-    is dead code that reads as wiring. The route slice that first consumes the
-    dependency must register it in ``create_app`` in the same change; until then,
-    raising this from a live route would surface as a 500. That is stated here
-    rather than left to be discovered.
+    **THIS DOCSTRING USED TO SAY "the handler below is NOT registered on the app",
+    AND THAT IS SUPERSEDED.** It was true while nothing consumed
+    :func:`require_human_actor`, and it carried the instruction that made the change
+    safe: *"the route slice that first consumes the dependency must register it in
+    ``create_app`` in the same change; until then, raising this from a live route
+    would surface as a 500."*
+
+    **That slice has landed.** ``POST /api/experiments/{experiment_id}/submit``
+    consumes the dependency (``routes.post_submit``) and ``create_app`` registers
+    :func:`human_actor_required_handler` (``app.py``). The instruction is kept
+    visible rather than deleted because it is the reason the registration exists,
+    and because it still binds the next consumer: a refusal class with no registered
+    handler is a 500 wearing a typed body.
     """
 
     def __init__(self, *, operation: str, identity: RequestIdentity) -> None:
@@ -807,7 +998,13 @@ class HumanActorRequired(Exception):
 
 
 async def human_actor_required_handler(request, exc: HumanActorRequired) -> JSONResponse:
-    """Render a :class:`HumanActorRequired` as its typed JSON body. Not registered."""
+    """Render a :class:`HumanActorRequired` as its typed JSON body.
+
+    REGISTERED in ``app.create_app``, since ``POST .../submit`` became the first
+    route to consume :func:`require_human_actor`. This line used to end "Not
+    registered."; the correction is recorded here rather than silently dropped
+    because the two states differ by a 500.
+    """
     return JSONResponse(status_code=exc.status_code, content=exc.payload)
 
 
@@ -815,8 +1012,22 @@ def require_human_actor(operation: str) -> Callable[[Request], RequestIdentity]:
     """A dependency that admits only a request with an attributable human actor.
 
     Modelled on ``routes._tutorial_scope_required``: a named operation, a typed
-    ``{"error": ...}`` body, and a refusal that changes nothing. In this build it
-    refuses **every** request, including one carrying all five edge headers.
+    ``{"error": ...}`` body, and a refusal that changes nothing.
+
+    **THIS USED TO SAY "in this build it refuses EVERY request, including one
+    carrying all five edge headers", AND ONLY THE SECOND HALF SURVIVES.** The header
+    half is unchanged and is the important one: **no shipped verifier reads a request
+    at all**, so a forged ``X-authentik-*`` header is worth exactly nothing here, and
+    Q4's answer — the Service is a plain ClusterIP with no NetworkPolicy — is why
+    that matters. What is no longer true is "every request": a deployment that sets
+    ``ISAAC_EDGE_TRUST_VERIFIER=test_fixture`` and ``ISAAC_FIXTURE_ACTOR_SUBJECT``
+    selects :class:`FixtureEdgeVerifier`, which mints an actor **from the process
+    environment**, and this dependency then admits the request. That configuration is
+    set by no shipped deploy artifact (a test in ``test_deploy_config.py`` pins that)
+    and everything it attributes is labelled ``trust_basis="test_fixture"``
+    permanently — but the default-refusal claim is a claim about **configuration**,
+    not about the build, and stating it the stronger way is the kind of comfortable
+    falsehood this project has been corrected for before.
 
     WHY 409, ARGUED AGAINST THE TWO OBVIOUS ALTERNATIVES
     ----------------------------------------------------
@@ -862,7 +1073,14 @@ def require_human_actor(operation: str) -> Callable[[Request], RequestIdentity]:
 
 
 def stamp_actor(identity: RequestIdentity, scope: str | None) -> str | None:
-    """The subject to attribute an effect to, or ``None``. **``None`` today, always.**
+    """The subject to attribute an effect to, or ``None``.
+
+    **THIS DOCSTRING USED TO SAY "``None`` today, always" AND TO END "Nothing calls
+    this function."** Both are superseded and are recorded rather than deleted. The
+    submission route calls it, and it returns a subject whenever a deployment
+    configured :class:`FixtureEdgeVerifier` with a subject and the request is not in
+    a worked-example session. Every default deployment still gets ``None``, by the
+    second rule below.
 
     Returns ``None`` — meaning *do not stamp anything* — in three cases, and the
     caller must treat all three the same way: write no actor, rather than write a
@@ -894,8 +1112,13 @@ def stamp_actor(identity: RequestIdentity, scope: str | None) -> str | None:
     function is not a way around that refusal — stamping it would require a
     change *in the truth core*, reviewed on its own terms.
 
-    Nothing calls this function. It is defined now so that the tutorial rule is
-    written down in code, with a test, before the first caller exists.
+    THE FIRST CALLER IS ``POST /api/experiments/{id}/submit``, and it passes the
+    route's own resolved scope, so rule 1 is enforced on the one path that writes an
+    attributed durable row. That route ALSO refuses a worked-example session
+    outright, one branch earlier, so rule 1 is currently unreachable from it — which
+    is exactly why it stays here rather than being replaced by that route's check: a
+    second caller would inherit the rule, and a second caller that forgot the
+    session refusal would still stamp nothing.
     """
     if scope is not None:
         return None

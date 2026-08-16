@@ -25,7 +25,11 @@ from .providers import validate_provider_config_or_raise
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
 from .experiment_repository import DurableWriteConflict, StorageUnavailable
-from .identity import validate_edge_trust_verifier_or_raise
+from .identity import (
+    HumanActorRequired,
+    human_actor_required_handler,
+    validate_edge_trust_verifier_or_raise,
+)
 from .routes import (
     OPENAPI_TAGS,
     TutorialScopeError,
@@ -204,6 +208,22 @@ def create_app() -> FastAPI:
     # concurrency refusal is the one failure of the three that is not a server
     # error at all.
     app.add_exception_handler(DurableWriteConflict, durable_write_conflict_handler)
+    # An attributability refusal — the operation records who performed it and this
+    # deployment could not establish who is calling. Raised from
+    # `identity.require_human_actor`, which is a FastAPI dependency and so cannot
+    # return a response, only raise.
+    #
+    # REGISTERED HERE BECAUSE A ROUTE NOW CONSUMES THAT DEPENDENCY, AND THE
+    # REGISTRATION IS NOT OPTIONAL. `HumanActorRequired`'s own docstring has said,
+    # since it was written, that the handler is deliberately NOT registered while
+    # nothing raises it, and that "the route slice that first consumes the dependency
+    # must register it in create_app in the same change; until then, raising this
+    # from a live route would surface as a 500". `POST /api/experiments/{id}/submit`
+    # is that slice. Without this line every submission in the default build — which
+    # is every deployment, because no verifier is configured anywhere — would return
+    # a bare 500 with a traceback in the server log instead of the typed 409 that
+    # tells the caller nothing was written and why.
+    app.add_exception_handler(HumanActorRequired, human_actor_required_handler)
     # ISAAC_BASE_PATH prefixes every route (the router keeps its own /api
     # prefix, so routes land at {base}/api/*). Unset, prefix="" is byte-identical
     # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR

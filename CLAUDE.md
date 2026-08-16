@@ -746,7 +746,10 @@ Out of scope unless explicitly approved:
   visible so a future session can see that this is a recorded change of scope and not a drift.
 
   **What the lift covers:** app-owned tables for experiments and their normal application state
-  (`isaac_experiments`, `isaac_schema_migrations`, and — **added 2026-08-12** — `isaac_runs`); a swappable repository seam
+  (`isaac_experiments`, `isaac_schema_migrations`, — **added 2026-08-12** — `isaac_runs`, and —
+  **added 2026-08-16** — the five submission-lifecycle tables `isaac_experiment_revisions`,
+  `isaac_run_revisions`, `isaac_revision_changes`, `isaac_submissions` and `isaac_submission_runs`);
+  a swappable repository seam
   (`apps/api/isaac_api/experiment_repository.py`) with a filesystem fallback whenever `PGHOST` is
   unset; a separate write path (`db_write.py`) with parameterized SQL, explicit transactions and
   deterministic rollback; and forward-only, idempotent migrations
@@ -761,6 +764,25 @@ Out of scope unless explicitly approved:
   quietly; the list is corrected here so the basis is committed rather than conversational. The
   general rule stands: **a slice that cannot cite a committed sentence permitting what it does has
   not established its authorization basis, and saying so is part of the slice.**
+
+  ***The five submission-lifecycle tables were added to `db_write.OWNED_TABLES` before this list
+  named them — the same failure as `isaac_runs`, a second time, and recorded rather than quietly
+  corrected.*** The submit slice (`0003_revisions`, `0004_submissions`) added
+  `isaac_experiment_revisions`, `isaac_run_revisions`, `isaac_revision_changes`, `isaac_submissions`
+  and `isaac_submission_runs` to `OWNED_TABLES` — which it had to, because the statement policy
+  refuses a `CREATE TABLE` naming an unlisted table, so the migration could not run at all otherwise.
+  **No committed sentence in this file named those five**, so that slice's authorization basis was
+  the project owner's instruction plus this lift's *"minimum supporting persistence architecture that
+  feature requires"* clause, and **not** the enumeration above. Unlike the `isaac_runs` slice, the
+  implementing slice did **not** find and report the gap; an independent review did. The list is
+  corrected here so the basis is committed rather than conversational, and both approval packets now
+  carry an explicit **"Authorization basis"** section saying the same thing. **This is a recorded
+  scope extension, not a pre-existing permission written down late.**
+
+  **What listing those five covers, precisely:** creating them, by an owner-applied migration, and
+  writing them through `submission_store.py`'s append-only `INSERT`s. It covers **no** read surface
+  over the history, **no** change to `records`, and — per the hard stop below — **no hosted
+  application of `0003` or `0004`**, both of which remain NOT APPROVED and NOT APPLIED anywhere.
 
   **What writing `isaac_runs` covers, precisely:** a SHADOW write only. Rows are maintained as a
   pure function of the experiment document inside the one existing durable write, and **nothing

@@ -1903,6 +1903,13 @@ def test_health_keeps_its_original_keys_byte_identical(client, monkeypatch):
         # where THIS application stores its own experiments), and nesting one
         # inside the other would be the conflation this file exists to prevent.
         "experiment_storage",
+        # A THIRD SIBLING, added for the same reason and with the same rule: whether
+        # this deployment can record a SUBMISSION is a different question again from
+        # either of the two above. A deployment can store experiments durably and
+        # still be unable to submit, because submitting additionally needs an
+        # attributable person and the 0003/0004 tables. It is a sibling of
+        # `database`, never a member of it, and it opens no connection either.
+        "submission",
     }
 
 

@@ -101,6 +101,25 @@ def test_health(client, monkeypatch):
             # `unavailable` ("configured, and experiments are not going into it").
             "state": "ephemeral",
         },
+        # A deployment with no database and no configured verifier can record no
+        # submission, and says so with both reasons rather than one. The field is
+        # `configuration_permits` and not `available` deliberately: whether the
+        # 0003/0004 tables exist cannot be known without opening a connection, and
+        # `/api/health` opens none — so this block reports what the deployment is set
+        # up to permit and never promises that the write would land.
+        "submission": {
+            "configuration_permits": False,
+            "blockers": ["no_durable_storage", "no_attributable_actor"],
+            "basis": "configuration_only",
+            "requires_attributable_actor": True,
+            # `null` means no actor can be established here at all. A deployment
+            # running the fixture verifier would report `test_fixture`, which is what
+            # makes "this deployment attributes on a basis that is not proof anyone
+            # authenticated" visible from the health banner rather than only from the
+            # manifest.
+            "actor_trust_basis": None,
+            "verifier_id": "unconfigured",
+        },
     }
     assert body["version"]
 
