@@ -87,6 +87,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { StatusChip } from './StatusChip';
 import { RunInheritedPanel } from './RunInheritedPanel';
 import { RunSection } from './RunSection';
+import { FindingList } from './RunFindingList';
 import { inheritedTally, type InheritedTally } from '../lib/runOverrides';
 import { Check, ChevronDown, ChevronRight, CircleAlert, RotateCcw, TriangleAlert } from './icons';
 import { api } from '../lib/api';
@@ -96,12 +97,11 @@ import {
   parseRunField,
   runConditionsSummary,
   runFilledCount,
-  runFindingText,
   type RunFieldSpec,
 } from '../lib/runFields';
 import { mutationFailureCopy } from '../lib/mutationErrors';
 import { useRunAutosave, type RunSaveStatus } from '../lib/useRunAutosave';
-import type { ApiRunCheckFinding, ApiRunCheckResponse, ApiRunView } from '../lib/types';
+import type { ApiRunCheckResponse, ApiRunView } from '../lib/types';
 
 /** The glyph for each save state. Paired with words; never used alone. */
 const SAVE_ICON: Record<Exclude<RunSaveStatus, 'idle'>, typeof Check> = {
@@ -1018,26 +1018,12 @@ function CheckResult({ check }: { check: CheckState }) {
   );
 }
 
-function FindingList({ title, findings }: { title: string; findings: ApiRunCheckFinding[] }) {
-  if (findings.length === 0) return null;
-  return (
-    <div className="run-check-group">
-      <p className="run-check-group-title">
-        {title} · {findings.length}
-      </p>
-      <ul className="run-check-list">
-        {findings.map((finding, i) => {
-          const text = runFindingText(finding);
-          return (
-            <li key={i} className={text === null ? 'run-check-item run-check-item-opaque' : 'run-check-item'}>
-              {/* A finding this build cannot describe is still COUNTED and still
-                  shown. Dropping it would quietly shrink the number of things
-                  standing between this run and a valid record. */}
-              {text ?? 'The server reported a finding this build cannot describe.'}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
+/*
+ * `FindingList` LIVED HERE AND HAS MOVED, rather than been duplicated. Its home
+ * is `components/RunFindingList.tsx`, because the experiment-level
+ * `ValidateReview` renders the same `POST …/runs/{id}/check` findings and a
+ * second renderer beside this one would be free to drift from it — including on
+ * the opaque-finding behaviour, which exists because it was got wrong once. The
+ * markup, the class names and that behaviour are unchanged; only the file is
+ * different.
+ */

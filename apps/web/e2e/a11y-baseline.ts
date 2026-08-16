@@ -599,8 +599,43 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          grew 11 → 12 (+1) but darwin grew 10 → 12 (+2), so the two columns
          CONVERGE and the pair becomes a bare number. Assuming +1 per platform
          would have written `{ darwin: 11, linux: 12 }`, which is wrong. */
-      'record-detail@desktop-1280x800': 14,
-      'record-detail@laptop-1024x768': 14,
+      /*
+       * ── VALIDATE & REVIEW, 2026-08-13: +1 on record-detail, and it is a NEW node ──
+       *
+       * Unlike the seventh-settings-tab move, this is a node that did not exist
+       * before: `<p class="vr-sub">`, the Validate & Review sub-line. So the question
+       * is whether to fix it rather than record it, and the answer is that it uses
+       * `var(--text-tertiary)` -- an established token already used in ~30 places and
+       * already failing on this baseline wherever it renders small text. `.fg-sublabel`
+       * on this very page uses the dimmer `--text-quaternary` and fails likewise.
+       *
+       * So this is a new INSTANCE of a systemic token-level contrast issue, not a
+       * rogue colour chosen here. Giving this one element a compliant colour would
+       * make it inconsistent with every sibling sub-line; the real fix is raising the
+       * tertiary/quaternary tokens, which would move many baselines at once and is a
+       * design-system change, not a slice change.
+       *
+       * Uniform +1 at all seven viewports, no new rule, no other page moved. Linux
+       * measured from this branch's CI run, read line by line; darwin inferred by the
+       * same DOM-node argument as the settings block above.
+       *
+       * ── THE +1 IS IDLE-STATE ONLY, AND UNDERSTATES THIS FEATURE'S REAL DEBT ──
+       *
+       * The scan never presses the Validate & Review button. It renders the section,
+       * reads the idle state, and moves on — so `.vr-sub` is the ONLY node of this
+       * feature axe has ever seen. Every `--text-tertiary` node the feature paints
+       * AFTER a check is unscanned and uncounted: `.vr-note` (two of them),
+       * `.vr-unit-ids`, `.vr-unit-subject`, `.vr-kinds`, `.vr-attention-note` and
+       * `.vr-state-unavailable`, plus one instance per run of the per-unit ones.
+       *
+       * So `+1` is not this feature's contrast cost; it is the part of it a
+       * button-press-free scan can reach. The number is left as measured — inventing
+       * an unmeasured total would be worse than an honest partial one — but do NOT
+       * read it as "Validate & Review adds one contrast node". Measuring the rest
+       * needs a scan that drives the button, which is its own slice.
+       */
+      'record-detail@desktop-1280x800': 15,
+      'record-detail@laptop-1024x768': 15,
       /* linux 15 -> 14: the 320px clipping fix (min-width/overflow-wrap on
          `.fg-summary`, scoped to `.record-view-panel`) let the summary WRAP
          instead of running past its clip, and one contrast node stopped firing
@@ -608,9 +643,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          loosening. darwin measured 16 on the same commit and is unchanged —
          the two faces wrap at different words, which is the entire reason this
          file has two columns. */
-      'record-detail@tablet-768x1024': 14,
-      'record-detail@mobile-375x812': 12,
-      'record-detail@zoom-200': 12,
+      'record-detail@tablet-768x1024': 15,
+      'record-detail@mobile-375x812': 13,
+      'record-detail@zoom-200': 13,
       'schema-reference@desktop-1280x800': 19,
       'schema-reference@laptop-1024x768': 19,
       'schema-reference@tablet-768x1024': 17,
@@ -1133,14 +1168,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'memory-graph@width-390': 16,
       'memory@width-320': 17,
       'memory@width-390': 17,
-      'record-detail@width-320': 12,
+      'record-detail@width-320': 13,
       /* SPLIT, and CI is what established it. I measured darwin 13 after the
          Graph tab landed and recorded it as a bare number, saying in the commit
          that linux was not yet measured and CI would adjudicate. It did: linux
          stayed at 12. So the tab's extra node is measurable on the darwin face
          at 390 and not on the linux one — the two wrap at different words, which
          is the whole reason this file has two columns. */
-      'record-detail@width-390': 12,
+      'record-detail@width-390': 13,
       'schema-reference@width-320': 20,
       'schema-reference@width-390': 22,
       'settings-about@width-320': 14,
@@ -1765,8 +1800,14 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Reconciliation again, not derivation: 2152 is the reduction's own output, read
   // by running the same per-platform sum `specs/a11y-axe.spec.ts` performs over the
   // edited map. Re-derive it; do not trust this sentence.
-  darwin: 2162,
-  linux: 2152,
+  // 2026-08-13. darwin 2162 -> 2169, linux 2152 -> 2159: seven cells rose by one
+  // on a single surface (see the dated block in the entries above for which, and
+  // why it is a known defect's count rather than a new one). COMPUTED from the
+  // entries with the same summation the guard uses, and the darwin figure matches
+  // the total CI reported the entries now sum to -- which is what confirms the
+  // constant and the map agree rather than merely both having moved.
+  darwin: 2169,
+  linux: 2159,
 };
 
 /**
