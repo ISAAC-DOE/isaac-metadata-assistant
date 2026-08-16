@@ -430,9 +430,32 @@ function LoadedEvidenceGraph({
           const opened =
             !prev.expanded.includes(action.nodeId) && next.expanded.includes(action.nodeId);
           if (opened) {
-            const n = (graph.childrenOf.get(action.nodeId) ?? []).length;
+            /*
+             * THE NUMBER ANNOUNCED IS THE NUMBER OF ROWS THAT APPEARED, measured
+             * by differencing the tree before and after the action — not
+             * `childrenOf(nodeId).length`, which is what this said until it was
+             * caught being wrong.
+             *
+             * The two differ whenever a kind filter is on or the visible cap has
+             * bitten. Hide "Evidence Entry", open a Measurement whose three
+             * children are all evidence entries, and the containment count is 3
+             * while the number of rows that appear is 0. For a screen-reader
+             * user this live region is the ONLY report of what their keystroke
+             * did, so announcing 3 there is not an imprecision — it is the app
+             * describing an effect it did not have.
+             *
+             * `evidenceTreeRows` is the right thing to difference rather than
+             * `visibleEvidenceNodeIds`: the tree is what a reader of this
+             * announcement is navigating, and the canvas is `aria-hidden`.
+             */
+            const revealed = Math.max(
+              0,
+              evidenceTreeRows(next, graph).length - evidenceTreeRows(prev, graph).length,
+            );
             setAnnouncement(
-              `${label(action.nodeId)} expanded. ${n} ${n === 1 ? 'item' : 'items'} revealed.`,
+              revealed === 0
+                ? `${label(action.nodeId)} expanded. Nothing is shown beneath it — either it has no children, or they are hidden by the kind filters, or the ${MAX_VISIBLE_EVIDENCE_NODES}-node display limit is reached.`
+                : `${label(action.nodeId)} expanded. ${revealed} ${revealed === 1 ? 'item' : 'items'} revealed.`,
             );
           } else if (prev.expanded.includes(action.nodeId)) {
             setAnnouncement(`${label(action.nodeId)} collapsed.`);
@@ -458,6 +481,29 @@ function LoadedEvidenceGraph({
 
   const visible = useMemo(() => visibleEvidenceNodeIds(state, graph), [state, graph]);
   const rows = useMemo(() => evidenceTreeRows(state, graph), [state, graph]);
+
+  /**
+   * For each rendered row, HOW MANY ROWS ARE ACTUALLY SHOWN BENEATH IT right now.
+   *
+   * Read straight off `rows`, which is the tree the reader is looking at: a row's
+   * descendants are the contiguous run after it whose `level` is greater. That
+   * survives the kind filters, which drop a node while still walking its children
+   * (so a filtered-out parent leaves a gap in the levels rather than renumbering
+   * anything), and it survives the visible cap, because `rows` is already sliced.
+   *
+   * It is deliberately NOT `childrenOf(id).length`. That number is a fact about
+   * the model; this one is a fact about the screen, and the badge sits on the
+   * screen. See the expansion announcement above for the same correction.
+   */
+  const shownBeneath = useMemo(() => {
+    const out = new Map<string, number>();
+    for (let i = 0; i < rows.length; i += 1) {
+      let n = 0;
+      for (let j = i + 1; j < rows.length && rows[j].level > rows[i].level; j += 1) n += 1;
+      out.set(rows[i].id, n);
+    }
+    return out;
+  }, [rows]);
   const edges = useMemo(() => visibleEvidenceEdges(visible, graph), [visible, graph]);
   const truncated = useMemo(() => visibleEvidenceTruncated(state, graph), [state, graph]);
   const results = useMemo(() => searchEvidenceGraph(state.search, graph), [state.search, graph]);
@@ -791,8 +837,28 @@ function LoadedEvidenceGraph({
                   <span className="evgraph-row-swatch" data-kind={node.kind} aria-hidden="true" />
                   <span className="evgraph-row-label">{node.label}</span>
                   <span className="evgraph-row-kind">{NODE_KIND_LABELS[node.kind]}</span>
+                  {/*
+                    OPEN: the rows actually shown beneath this one, which under a
+                    kind filter can be 0 and is then worth rendering rather than
+                    hiding — "you opened it and nothing came" is the honest
+                    report. CLOSED: the children the record holds, which is a
+                    claim about the data and not a promise about what will
+                    appear. The two numbers are different claims, so each carries
+                    its own qualifier; a bare "3" said neither.
+
+                    The qualifier is visually-hidden TEXT rather than an
+                    `aria-label`: a `<span>` has no role, author naming is
+                    prohibited on a generic element, and the treeitem's name is
+                    computed from its contents anyway — so real text reaches the
+                    accessible name by the route the tree already relies on.
+                  */}
                   {children.length > 0 && (
-                    <span className="evgraph-row-count">{children.length}</span>
+                    <span className="evgraph-row-count">
+                      {isOpen ? (shownBeneath.get(row.id) ?? 0) : children.length}
+                      <span className="sr-only">
+                        {isOpen ? ' shown beneath' : ' recorded beneath'}
+                      </span>
+                    </span>
                   )}
                 </li>
               );

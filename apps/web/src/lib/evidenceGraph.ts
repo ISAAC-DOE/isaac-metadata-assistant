@@ -32,9 +32,17 @@
  * EVERY node and EVERY edge derives from stored schema, provenance, evidence or
  * validation state, and says which. `NODE_PRODUCERS` and `EDGE_PRODUCERS` are the
  * closed, named lists, and every emitted node/edge carries its producer string
- * verbatim — a test asserts that no emitted producer is outside the list, which is
- * what stops a future slice from inventing a relationship that merely looks
- * plausible.
+ * verbatim. That is enforced at RUNTIME, in both directions and symmetrically:
+ * {@link Builder.addNode} refuses a node whose producer is not
+ * `NODE_PRODUCERS[kind]`, and {@link Builder.addEdge} refuses an edge whose
+ * producer is not one of `EDGE_PRODUCERS[kind]`. A test then asserts membership
+ * over every emitted node and edge.
+ *
+ * Both halves are needed and neither is decoration. Until the node guard existed,
+ * only the edges were checked and the node test asserted merely that the producer
+ * string was non-empty — which `producer: 'inferred from the sample name'` would
+ * have satisfied. Refusing at construction is what stops a future slice from
+ * inventing a relationship, or a provenance, that merely looks plausible.
  *
  * NOTHING here infers scientific causality, and the surface says so out loud (see
  * {@link EVIDENCE_GRAPH_DISCLOSURE}). Specifically NOT emitted, because no
@@ -56,6 +64,18 @@
  * more, "these conflict" does not say WHICH PAIR disagrees, and drawing all pairs
  * would be an invention. That case is disclosed in words instead. See
  * {@link buildEvidenceGraph} step 6.
+ *
+ * "EXACTLY TWO" MEANS TWO AS THE SERVER RECORDED THEM, not two as this module
+ * managed to draw, and the difference is the whole guard rather than a nicety.
+ * `attachEvidence` drops any item {@link readEvidenceItem} cannot narrow and any
+ * item the node cap refuses; the backend filters neither way — `serialize`'s
+ * readable-evidence projection keeps any object, and `evidence_classify` counts an
+ * entry with no `source_type` when it decides `conflicting_evidence`. So three
+ * stored entries of which one is unreadable here leave TWO drawn nodes, and a pair
+ * chosen from them would be a pair chosen by ARRAY POSITION out of three — exactly
+ * the invention the `> 2` rule exists to refuse, arrived at by a different road.
+ * Step 6 therefore reads the count off the SERVER's `ApiEvidenceEntry` and refuses
+ * the edge whenever anything at all was dropped.
  *
  * ── Freshness ───────────────────────────────────────────────────────────────
  *
@@ -345,6 +365,19 @@ export interface EvidenceGraphNote {
   text: string;
 }
 
+/**
+ * The `conflict_pair_unknown` disclosure, as a constant because BOTH refusals in
+ * {@link buildEvidenceGraph} step 6 emit it and `Builder.note` keeps only the
+ * FIRST text per kind — two near-identical sentences would mean the surviving one
+ * is decided by iteration order over the classification.
+ *
+ * It therefore has to be true of both reasons: more than two recorded entries, and
+ * a recorded set this build could not draw in full. The per-address detail line
+ * says which one applies where; this says the rule.
+ */
+export const CONFLICT_PAIR_UNKNOWN_NOTE =
+  'At least one address is classified as conflicting, and cannot be reduced to a single pair here — either the server records more than two entries there, or not every entry it records could be read and drawn. The stored state says that the entries disagree, not which pair does, so no conflict line is drawn there; it is stated in the details instead.';
+
 export interface EvidenceGraph {
   /** Where a reader starts: the focused run when one is named, else the experiment. */
   anchorId: string;
@@ -356,7 +389,23 @@ export interface EvidenceGraph {
   adjacency: Map<string, EvidenceGraphAdjacent[]>;
   /** Containment children, in stable order. The backbone of the accessible tree. */
   childrenOf: Map<string, string[]>;
-  /** Deterministic coordinates for EVERY node — expanding never reshuffles. */
+  /**
+   * Coordinates for EVERY node BUILT — including the ones no expansion has
+   * revealed yet, so opening a node never has to invent a position for it.
+   *
+   * DETERMINISTIC IN THE INPUT, NOT STABLE ACROSS INPUTS, and the distinction is
+   * worth stating because an earlier revision of this line claimed "expanding
+   * never reshuffles" and that is FALSE. `computeLayout` seeds each node from its
+   * INDEX in the id list, so the whole layout is a function of the node SET: the
+   * same set always yields byte-identical coordinates, and a set that gains a
+   * member re-seeds every member. Expanding a node does not change the set —
+   * visibility is a view concern and the builder draws everything either way — but
+   * OPENING A RUN FETCHES ITS CHECK, and a check that arrives adds
+   * `validation_finding` nodes, which does. So the picture can settle differently
+   * once a run's findings load. That is a rebuild, not a reshuffle of a stale
+   * layout, and it is the price of holding no cache; nothing here is random and
+   * nothing depends on a clock.
+   */
   layout: Map<string, GraphPoint>;
   counts: Record<EvidenceNodeKind, number>;
   /** Run node ids in server order. */
@@ -691,7 +740,21 @@ class Builder {
   readonly notes: EvidenceGraphNote[] = [];
   truncated = false;
 
+  /**
+   * A node is kept ONLY when its producer is THE declared producer for its kind.
+   *
+   * Symmetric with {@link addEdge}, and added because the asymmetry was real: for
+   * a long while only edges were checked, so a node could carry any string at all
+   * and the test that was supposed to catch it asserted only that the string was
+   * non-empty. `producer` is the answer a reader gets when they ask "where did
+   * this come from?", and a wrong answer there is worse than no node.
+   *
+   * Unlike edges, a kind has exactly ONE node producer, so this is an equality
+   * rather than a membership test — `NODE_PRODUCERS` is a `Record`, not a
+   * `Record` of arrays, and that shape is the reason.
+   */
   addNode(node: EvidenceGraphNode): string | null {
+    if (node.producer !== NODE_PRODUCERS[node.kind]) return null;
     const existing = this.nodes.get(node.id);
     if (existing) {
       for (const line of node.detail) {
@@ -954,6 +1017,18 @@ export function buildEvidenceGraph(
   /** address → the evidence-entry node ids built for it, experiment-level. */
   const experimentEntriesByAddress = new Map<string, string[]>();
   const experimentGroupByAddress = new Map<string, string>();
+  /**
+   * address → WHAT THE SERVER RECORDED THERE, before this module narrowed
+   * anything: how many items its `evidence` array carries, and whether it flagged
+   * the entry `unavailable`.
+   *
+   * Kept separate from `experimentEntriesByAddress` on purpose. That map holds the
+   * nodes actually BUILT, which is a smaller set whenever an item could not be
+   * narrowed or the node cap bit. Step 6 needs both, and needs them not to be
+   * confusable: the count it may quote is this one, and the SIZE MATCH between the
+   * two is the condition for drawing a pair at all.
+   */
+  const experimentRecordedByAddress = new Map<string, { count: number; unavailable: boolean }>();
 
   for (const entry of [...evidence].sort((x, y) => byIdAsc(x.path, y.path))) {
     const groupId = ensureGroup(
@@ -962,6 +1037,12 @@ export function buildEvidenceGraph(
       entry.path,
       'This experiment records evidence at addresses in this part of the record.',
     );
+    // Recorded BEFORE the `unavailable` early-return and before any narrowing, so
+    // it describes the server's entry rather than this build's success with it.
+    experimentRecordedByAddress.set(entry.path, {
+      count: (entry.evidence ?? []).length,
+      unavailable: entry.unavailable === true,
+    });
     if (!groupId) continue;
     experimentGroupByAddress.set(entry.path, groupId);
     if (entry.unavailable) {
@@ -1164,9 +1245,16 @@ export function buildEvidenceGraph(
       'This experiment has no runs. Nothing is drawn under it, and no run is invented to fill the shape.',
     );
   } else if (runsMeta.returned < runsMeta.matched) {
+    /*
+     * "load more to extend it" USED TO END THIS SENTENCE, AND THERE IS NOTHING TO
+     * PRESS. This view fetches one fixed page and offers no page control of its
+     * own; the Runs section's Load More pages the Runs section, not this graph.
+     * An instruction a reader cannot act on is worse than the bound it apologises
+     * for, so the sentence now states the bound and stops.
+     */
     b.note(
       'runs_bounded',
-      `${runsMeta.returned} of ${runsMeta.matched} matching run(s) are loaded (${runsMeta.total} exist in this record). The graph draws what is loaded and never fetches every run to draw it — load more to extend it.`,
+      `${runsMeta.returned} of ${runsMeta.matched} matching run(s) are loaded (${runsMeta.total} exist in this record). The graph draws this one page and never fetches every run to draw it. It has no page control of its own, and the runs beyond this page are not drawn here — open the record's Runs section to browse them.`,
     );
   }
   b.note(
@@ -1176,33 +1264,68 @@ export function buildEvidenceGraph(
 
   // ── 6. conflicts, from the server's OWN classification ────────────────────
   //
-  // The ONLY source for a `conflicts_with` edge. And even here it is drawn only
-  // when the classified address carries exactly two entries, because with three
-  // or more the stored state says THAT they conflict and not WHICH PAIR does.
+  // The ONLY source for a `conflicts_with` edge, and TWO conditions must both
+  // hold before one is drawn:
+  //
+  //   (a) the SERVER recorded exactly two entries at the classified address —
+  //       because with three or more, the stored state says THAT they conflict
+  //       and not WHICH PAIR does;
+  //   (b) this build drew BOTH of them, i.e. nothing was dropped on the way.
+  //
+  // (b) is not redundant, and leaving it out was a real defect rather than a
+  // theoretical one. `attachEvidence` drops an item `readEvidenceItem` cannot
+  // narrow and an item the node cap refuses; the classifier that produced
+  // `conflicting_evidence` did neither. Three stored entries with one unreadable
+  // here therefore leave a surviving set of two, and joining those two would
+  // pick a pair by ARRAY POSITION out of three and then state, in `why`, that
+  // "exactly two entries are recorded there" — a count from the wrong set, in
+  // the sentence a reader would use to check the claim.
+  //
+  // So the count is read off the server's own `ApiEvidenceEntry` (never off
+  // `entries`, which is post-narrowing), and any mismatch takes the same honest
+  // route the `> 2` case already took: say it in the details, note it, draw
+  // nothing.
   for (const result of classification.field_results ?? []) {
     if (result.classification !== 'conflicting_evidence') continue;
     const entries = experimentEntriesByAddress.get(result.field) ?? [];
     const groupId = experimentGroupByAddress.get(result.field);
-    if (entries.length === 2) {
+    const recorded = experimentRecordedByAddress.get(result.field);
+    // The classification names an address the trail does not hold at all. There
+    // is nothing to join and no count to state, so nothing is said beyond this.
+    if (!recorded) continue;
+    const node = groupId ? b.nodes.get(groupId) : undefined;
+
+    const drewEveryRecordedEntry = !recorded.unavailable && entries.length === recorded.count;
+
+    if (recorded.count === 2 && drewEveryRecordedEntry) {
       b.addEdge({
         source: entries[0],
         target: entries[1],
         kind: 'conflicts_with',
         producer: EDGE_PRODUCERS.conflicts_with[0],
-        why: `The evidence-support classification for ${result.field} is \`conflicting_evidence\` — ${result.explanation} Exactly two entries are recorded there, so the disagreement is between these two. No winner is picked.`,
+        why: `The evidence-support classification for ${result.field} is \`conflicting_evidence\` — ${result.explanation} The server records exactly two entries there and both are drawn, so the disagreement is between these two. No winner is picked.`,
         label: 'conflicting_evidence',
         containment: false,
       });
-    } else if (entries.length > 2) {
-      const node = groupId ? b.nodes.get(groupId) : undefined;
+    } else if (recorded.count > 2) {
       node?.detail.push({
         term: `Conflicting evidence · ${result.field}`,
-        value: `${entries.length} entries are recorded and the classification is \`conflicting_evidence\`. Which pair disagrees is not recorded, so no pair is drawn.`,
+        value: `The server records ${recorded.count} entries here and classifies them \`conflicting_evidence\`. Which pair disagrees is not recorded, so no pair is drawn.`,
       });
-      b.note(
-        'conflict_pair_unknown',
-        'At least one address is classified as conflicting over more than two entries. The stored state says that the entries disagree, not which pair does, so no conflict line is drawn there — it is stated in the details instead.',
-      );
+      b.note('conflict_pair_unknown', CONFLICT_PAIR_UNKNOWN_NOTE);
+    } else if (!drewEveryRecordedEntry) {
+      // recorded.count is 0, 1 or 2, and the surviving set does not match it.
+      // The commonest shape is two recorded entries of which one could not be
+      // read — where a naive pairwise join would have had exactly one endpoint.
+      node?.detail.push({
+        term: `Conflicting evidence · ${result.field}`,
+        value: `The server records ${recorded.count} entr${recorded.count === 1 ? 'y' : 'ies'} here and classifies them \`conflicting_evidence\`, but ${
+          recorded.unavailable
+            ? 'it reported the stored evidence as unreadable'
+            : `only ${entries.length} of them could be read here`
+        }. A conflict line drawn from an incomplete set would name a pair the record does not, so none is drawn.`,
+      });
+      b.note('conflict_pair_unknown', CONFLICT_PAIR_UNKNOWN_NOTE);
     }
   }
 

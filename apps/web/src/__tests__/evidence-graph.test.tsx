@@ -7,6 +7,7 @@ import {
   EDGE_PRODUCERS,
   EVIDENCE_EDGE_KINDS,
   EVIDENCE_GRAPH_DISCLOSURE,
+  NODE_PRODUCERS,
   buildEvidenceGraph,
   emptyRunCheckStore,
   evidenceGraphFreshnessKey,
@@ -76,6 +77,20 @@ const detailFixture = (over: Partial<ApiExperimentDetail> = {}): ApiExperimentDe
  *
  * `context.environment` deliberately carries EXACTLY TWO entries: it is the only
  * shape from which a `conflicts_with` edge may be drawn.
+ *
+ * BOTH of those two are `user_confirmation` entries carrying DISTINCT `answer`s,
+ * and that shape is not decoration — it is the only shape the server can classify
+ * this way. `evidence_classify._asserted_values` collects each entry's `answer`
+ * and rule 1 fires on two DISTINCT ones; `quote` is never read. An earlier
+ * version of this fixture gave two entries differing `quote`s, no `answer` at
+ * all, and then hand-labelled the classification `conflicting_evidence` — a
+ * response the backend cannot emit, so every conflict assertion below was being
+ * checked against an impossible input. `answer` appears on `user_confirmation`
+ * entries and on nothing else in this repository's real drafts, so two
+ * confirmations that disagree (the same question asked twice, answered
+ * differently) is the honest realisation of it.
+ *
+ * The negative controls are only as strong as the positive fixture is real.
  */
 const evidenceFixture: ApiEvidenceEntry[] = [
   {
@@ -97,16 +112,16 @@ const evidenceFixture: ApiEvidenceEntry[] = [
     status: 'needs_confirmation',
     evidence: [
       {
-        source_type: 'spreadsheet',
-        source_file: 'mock_campaign.csv',
-        locator: "Sheet 'Campaign Info', field=environment",
-        quote: 'in_situ',
+        source_type: 'user_confirmation',
+        question: 'Was this measurement in situ or ex situ?',
+        answer: 'in_situ',
+        timestamp: '2099-04-02T12:00:00Z',
       },
       {
-        source_type: 'file_listing',
-        source_file: 'raw_scan_listing.txt',
-        locator: 'line 4',
-        quote: 'ex_situ',
+        source_type: 'user_confirmation',
+        question: 'Confirm the environment for the second scan set.',
+        answer: 'ex_situ',
+        timestamp: '2099-04-02T13:30:00Z',
       },
     ],
   },
@@ -339,7 +354,12 @@ describe('evidence graph · derivation from stored state', () => {
     expect(graph.edges.length).toBeGreaterThan(0);
 
     for (const edge of graph.edges) {
-      expect(EVIDENCE_EDGE_KINDS, `unknown edge kind ${edge.kind}`).toContain(edge.kind);
+      // NOTE: `edge.kind` is typed by `EvidenceEdgeKind`, so asserting that it is
+      // in `EVIDENCE_EDGE_KINDS` is a tautology the compiler already enforces —
+      // it used to be here and has been removed rather than left to read as a
+      // check. The PRODUCER is the part TypeScript cannot police: it is a plain
+      // string, so only this assertion (and `Builder.addEdge`'s own refusal)
+      // stops a future slice writing a plausible-sounding provenance.
       expect(
         EDGE_PRODUCERS[edge.kind],
         `${edge.kind} carried an undeclared producer: ${edge.producer}`,
@@ -349,11 +369,52 @@ describe('evidence graph · derivation from stored state', () => {
     }
   });
 
-  it('EVERY emitted node carries a declared producer, and both endpoints of every edge exist', () => {
+  it('EVERY emitted node carries THE declared producer for its kind', () => {
+    /*
+     * This used to assert `node.producer.trim().length > 0`, which
+     * `producer: 'inferred from the sample name'` would have satisfied — the
+     * module header meanwhile claimed a test checked membership in
+     * `NODE_PRODUCERS`. It now does, and `Builder.addNode` refuses at
+     * construction, so the claim and the code agree.
+     *
+     * A node kind has exactly ONE producer (unlike an edge kind, two of which
+     * carry several), so this is an equality rather than a membership test.
+     */
     const graph = buildOk({ checks: { [RUN_A]: checkFixture() } });
+    expect(graph.nodes.length).toBeGreaterThan(0);
+
+    const declared = new Set(Object.values(NODE_PRODUCERS));
     for (const node of graph.nodes) {
-      expect(node.producer.trim().length).toBeGreaterThan(0);
+      expect(declared, `${node.kind} carried an undeclared producer: ${node.producer}`).toContain(
+        node.producer,
+      );
+      expect(
+        node.producer,
+        `${node.id} carried ${node.kind === 'run' ? 'another kind’s' : 'the wrong kind’s'} producer`,
+      ).toBe(NODE_PRODUCERS[node.kind]);
     }
+
+    // Every kind the fixture actually exercises, so the assertion above is not
+    // passing merely because few kinds were built.
+    const kinds = new Set(graph.nodes.map((n) => n.kind));
+    for (const kind of [
+      'experiment',
+      'run',
+      'sample',
+      'context',
+      'measurement',
+      'asset',
+      'descriptor',
+      'evidence_entry',
+      'evidence_source',
+      'validation_finding',
+    ]) {
+      expect(kinds, `no ${kind} node was produced`).toContain(kind);
+    }
+  });
+
+  it('both endpoints of every edge exist as nodes', () => {
+    const graph = buildOk({ checks: { [RUN_A]: checkFixture() } });
     for (const edge of graph.edges) {
       expect(graph.byId.has(edge.source)).toBe(true);
       expect(graph.byId.has(edge.target)).toBe(true);
@@ -379,8 +440,12 @@ describe('evidence graph · derivation from stored state', () => {
     ]) {
       expect(kinds, `no ${kind} edge was produced`).toContain(kind);
     }
-    // And nothing outside the closed vocabulary.
-    for (const kind of kinds) expect(EVIDENCE_EDGE_KINDS).toContain(kind);
+    // (`for (const kind of kinds) expect(EVIDENCE_EDGE_KINDS).toContain(kind)`
+    // used to close this test. It compared a value against the union that
+    // already types it, so it could not fail; removed rather than left to look
+    // like coverage. The list above is the real assertion — it names all ten and
+    // fails if a producer stops firing.)
+    expect(kinds.size).toBe(EVIDENCE_EDGE_KINDS.length);
   });
 
   it('a run reading the experiment’s value derives from the EXPERIMENT node, not a copy', () => {
@@ -471,6 +536,107 @@ describe('evidence graph · no invented edge', () => {
 
     expect(graph.edges.filter((e) => e.kind === 'conflicts_with')).toEqual([]);
     expect(graph.notes.map((n) => n.kind)).toContain('conflict_pair_unknown');
+  });
+
+  /*
+   * ── The drop guard, which is the SAME refusal reached by a different road ───
+   *
+   * The `> 2` rule above protects against inventing WHICH PAIR disagrees. It is
+   * defeated if the count it tests is the count of entries this module managed to
+   * DRAW rather than the count the server RECORDED, because the two differ:
+   * `attachEvidence` drops an item `readEvidenceItem` cannot narrow and an item
+   * the node cap refuses, and the backend does neither — `serialize`'s
+   * readable-evidence projection keeps any dict, and `evidence_classify`
+   * classifies over the unfiltered list.
+   *
+   * These three cases are negative controls in the strict sense: each one leaves
+   * a surviving set that a naive `entries.length` test would happily draw from.
+   */
+  it('refuses `conflicts_with` when THREE are recorded and only two could be read', () => {
+    // The exact defect: three stored entries, one unreadable, so the client's
+    // surviving set is TWO. Joining those two would pick a pair by array
+    // position out of three AND state a count from the wrong set. The server's
+    // number is 3, so this takes the `> 2` route.
+    const threeWithOneUnreadable: ApiEvidenceEntry[] = [
+      {
+        ...evidenceFixture[1],
+        evidence: [
+          ...evidenceFixture[1].evidence,
+          // No `source_type`: `readEvidenceItem` returns null and the item is
+          // counted as unreadable rather than drawn.
+          { source_file: 'third_note.txt' } as never,
+        ],
+      },
+    ];
+    const graph = buildOk({ evidence: threeWithOneUnreadable });
+
+    // Two evidence-entry nodes exist at the experiment level…
+    expect(graph.nodes.filter((n) => n.kind === 'evidence_entry' && n.runId === null).length).toBe(
+      2,
+    );
+    // …and NO pair is drawn between them.
+    expect(graph.edges.filter((e) => e.kind === 'conflicts_with')).toEqual([]);
+    expect(graph.notes.map((n) => n.kind)).toContain('conflict_pair_unknown');
+    expect(graph.notes.map((n) => n.kind)).toContain('unreadable_evidence');
+
+    // And no surface anywhere states the client's count as if it were the
+    // record's. The only number said about this address is the server's 3.
+    const said = graph.nodes
+      .flatMap((n) => n.detail)
+      .filter((l) => l.term.startsWith('Conflicting evidence'))
+      .map((l) => l.value);
+    expect(said.length).toBe(1);
+    expect(said[0]).toContain('3 entries');
+    expect(said[0]).not.toContain('2 entries');
+  });
+
+  it('refuses `conflicts_with` when TWO are recorded and only one could be read', () => {
+    // The server's count IS two, so the `> 2` rule alone would not fire here —
+    // only the size-match condition refuses this one. Under the old code the
+    // surviving set was 1 and nothing at all was said; now the shortfall is
+    // stated rather than silently producing an unexplained gap.
+    const twoWithOneUnreadable: ApiEvidenceEntry[] = [
+      {
+        ...evidenceFixture[1],
+        evidence: [evidenceFixture[1].evidence[0], {} as never],
+      },
+    ];
+    const graph = buildOk({ evidence: twoWithOneUnreadable });
+
+    expect(graph.edges.filter((e) => e.kind === 'conflicts_with')).toEqual([]);
+    expect(graph.notes.map((n) => n.kind)).toContain('conflict_pair_unknown');
+    const said = graph.nodes
+      .flatMap((n) => n.detail)
+      .find((l) => l.term.startsWith('Conflicting evidence'));
+    expect(said?.value).toContain('2 entries');
+    expect(said?.value).toContain('only 1 of them could be read');
+  });
+
+  it('refuses `conflicts_with` when the server itself flagged the entry unreadable', () => {
+    // `unavailable` means the SERVER could not read part or all of the stored
+    // evidence. Whatever survived on the wire is by definition not the whole
+    // recorded set, so no pair may be taken from it.
+    const graph = buildOk({
+      evidence: [
+        {
+          ...evidenceFixture[1],
+          unavailable: true,
+          unavailable_reason: 'the stored evidence could not be decoded',
+        },
+      ],
+    });
+
+    expect(graph.edges.filter((e) => e.kind === 'conflicts_with')).toEqual([]);
+    expect(graph.notes.map((n) => n.kind)).toContain('conflict_pair_unknown');
+  });
+
+  it('states the SERVER’s count, not its own, in the `why` of the pair it does draw', () => {
+    const graph = buildOk();
+    const conflict = graph.edges.find((e) => e.kind === 'conflicts_with');
+    expect(conflict).toBeTruthy();
+    // Two recorded, two drawn — and the sentence says both halves, so a reader
+    // can check the claim against the record rather than against the picture.
+    expect(conflict!.why).toContain('records exactly two entries there and both are drawn');
   });
 
   it('refuses `conflicts_with` when the classified address carries NO stored entries', () => {
@@ -842,6 +1008,105 @@ describe('evidence graph · the rendered panel', () => {
     fireEvent.keyDown(row(container, nodeIds.run(RUN_A))!, { key: 'Enter' });
     await waitFor(() => expect(getByTestId('evgraph-live').textContent).toContain('expanded'));
     expect(getByTestId('evgraph-live').getAttribute('aria-live')).toBe('polite');
+  });
+
+  /*
+   * ── The announced NUMBER, which is the only report a screen-reader user gets ─
+   *
+   * The test above asserts `toContain('expanded')` and would pass against any
+   * number at all, which is how "N items revealed" came to announce
+   * `childrenOf(id).length` — the CONTAINMENT count — while what actually appears
+   * is `evidenceTreeRows`, filtered by the hidden kinds and sliced at the visible
+   * cap. Hide a kind and the live region reported an effect the keystroke did not
+   * have. These two pin the number to the rows.
+   */
+  it('announces the number of rows that ACTUALLY appeared, not the child count', async () => {
+    /*
+     * A CLEAN check on purpose. Opening a run also fetches its findings, and a
+     * finding arrives ASYNCHRONOUSLY as an extra node — so a check with blockers
+     * would leave the row count one higher than the announcement by the time
+     * `waitFor` settles, and the test would be measuring the fetch rather than
+     * the keystroke. The announcement is honest about the action it describes;
+     * the later arrival is a different event.
+     */
+    const { container, getByTestId } = renderPanel({
+      onRequestRunCheck: vi.fn(async () =>
+        checkFixture({ ok: true, blockers: [], official: { ok: true, errors: [], dry_run: true } }),
+      ),
+    });
+    const before = container.querySelectorAll('[role="treeitem"]').length;
+
+    fireEvent.keyDown(row(container, nodeIds.run(RUN_A))!, { key: 'Enter' });
+    await waitFor(() => expect(getByTestId('evgraph-live').textContent).toContain('expanded'));
+
+    const after = container.querySelectorAll('[role="treeitem"]').length;
+    const appeared = after - before;
+    expect(appeared).toBeGreaterThan(0);
+    expect(getByTestId('evgraph-live').textContent).toContain(`${appeared} items revealed`);
+  });
+
+  it('announces NO number when a kind filter means nothing was revealed', async () => {
+    const { container, getByTestId } = renderPanel({
+      // Clean, for the same reason as the test above: an arriving finding would
+      // add a row that has nothing to do with the keystroke being measured.
+      onRequestRunCheck: vi.fn(async () =>
+        checkFixture({ ok: true, blockers: [], official: { ok: true, errors: [], dry_run: true } }),
+      ),
+    });
+
+    /*
+     * Run B carries exactly ONE grouped child, a Sample, and nothing else — so
+     * hiding "Sample" makes opening it reveal nothing at all. (Run A would not
+     * do: it carries five kinds, so hiding one still reveals four.)
+     *
+     * The chip is pressed BEFORE the expansion, which is the order a reader
+     * would use, and is also the order that makes the old code wrong: the
+     * containment count is 1 either way.
+     */
+    // By class + `data-kind` rather than by accessible name: "Sample" also names
+    // tree rows and details-pane controls, and `getByRole` finds several.
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>('.evgraph-kind-chip[data-kind="sample"]')!,
+    );
+    const before = container.querySelectorAll('[role="treeitem"]').length;
+
+    fireEvent.keyDown(row(container, nodeIds.run(RUN_B))!, { key: 'Enter' });
+    await waitFor(() => expect(getByTestId('evgraph-live').textContent).toContain('expanded'));
+
+    // Nothing appeared…
+    expect(container.querySelectorAll('[role="treeitem"]').length).toBe(before);
+    // …and the announcement says so instead of claiming one item.
+    const said = getByTestId('evgraph-live').textContent ?? '';
+    expect(said).toContain('Nothing is shown beneath it');
+    expect(said).not.toMatch(/\d+ items? revealed/);
+  });
+
+  it('labels a row’s badge with what the number MEANS, open or closed', async () => {
+    const { container } = renderPanel();
+    const badgeOf = (nodeId: string) =>
+      row(container, nodeId)?.querySelector('.evgraph-row-count')?.textContent ?? '';
+
+    // Closed: the children the record holds — a claim about the data.
+    expect(badgeOf(nodeIds.run(RUN_A))).toContain('recorded beneath');
+
+    fireEvent.keyDown(row(container, nodeIds.run(RUN_A))!, { key: 'Enter' });
+    await waitFor(() =>
+      expect(row(container, nodeIds.run(RUN_A))?.getAttribute('aria-expanded')).toBe('true'),
+    );
+
+    // Open: the rows on screen beneath it — a claim about the screen. And the
+    // number matches the rows the tree actually renders below this one.
+    const badge = badgeOf(nodeIds.run(RUN_A));
+    expect(badge).toContain('shown beneath');
+    const rowsNow = [...container.querySelectorAll<HTMLLIElement>('[role="treeitem"]')];
+    const at = rowsNow.findIndex((r) => r.getAttribute('data-node-id') === nodeIds.run(RUN_A));
+    const level = Number(rowsNow[at].getAttribute('aria-level'));
+    let deeper = 0;
+    for (let i = at + 1; i < rowsNow.length; i += 1) {
+      if (Number(rowsNow[i].getAttribute('aria-level')) <= level) break;
+      deeper += 1;
+    }
+    expect(badge).toContain(String(deeper));
   });
 
   it('keeps the canvas out of the accessibility tree, so nothing is announced twice', () => {

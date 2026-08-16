@@ -398,6 +398,53 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * Linux measured from this branch's CI run, read line by line rather than
        * derived; darwin inferred by the extra-DOM-node argument used above.
        */
+      /*
+       * ── `evidence-graph`, 2026-08-16: A NEW SURFACE WITH NO COUNTS, ON PURPOSE ──
+       *
+       * `e2e/surfaces.ts` now carries `evidence-graph`, the `?view=graph` deep link
+       * on the Evidence route. The `evidence` entry above lands on the LIST view, so
+       * until that surface existed the graph panel had never been loaded by axe, by
+       * the 320/390 narrow sweep, by the layout probes or by the zoom-200 pass at all.
+       *
+       * NOT ONE `evidence-graph@*` KEY APPEARS BELOW, and that is this file's own
+       * procedure rather than an omission — it is exactly what `NARROW_WIDTHS` did
+       * when the two narrow widths were added, and the header states the rule twice:
+       * only the platform you measured on may be edited, and no attempt is made to
+       * guess the other. A darwin reading written as a bare number would assert BOTH
+       * columns, and this environment cannot run the Linux face.
+       *
+       * SO THE SEVEN PAIRS ALL EXPECT 0 AND WILL READ AS `new`. The first CI run on
+       * this branch is the adjudication: the `browser-a11y` job prints, per pair,
+       * the rule, the surface, the project, the PLATFORM and the exact node count.
+       * Transcribe those figures into keys here and raise
+       * `A11Y_BASELINE_TOTAL_NODES` by their sum, in one commit. Do NOT pre-empt
+       * them and do NOT lower anything to make the run green.
+       *
+       * WHAT IS EXPECTED TO FIRE, stated in advance so a large number is not
+       * mistaken for a regression this branch caused. `evidence-graph.css` styles
+       * EIGHT rules with `--text-quaternary` at 10.5–11px — `.evgraph-result-match`
+       * (:253), `.evgraph-kind-count` (:344), `.evgraph-row-kind` (:488),
+       * `.evgraph-row-count` (:496), `.evgraph-detail-producer-term` (:662),
+       * `.evgraph-detail-count` (:739), `.evgraph-conn-kind` (:815) and
+       * `.evgraph-legend-kinds` (:850). (Eight, counted here by `grep -n` over the
+       * file; the review that prompted this entry said "at least seven" and listed
+       * seven, missing `.evgraph-conn-kind`.) That token is #9aa4af, measured at
+       * 2.53:1 on white — below AA's 4.5:1 and below even AA-large's 3.0:1 — and it
+       * is ALREADY in this entry's `foregrounds` list with 263 recorded instances
+       * elsewhere in the app. Every node those rules produce is one more instance of
+       * a documented token shortfall, not a new defect, and the panel renders many
+       * of them per row. The systemic remedy is darkening the token, which moves
+       * counts on all 18 pre-existing surfaces and belongs to the slice that owns
+       * the design system — not here, where it would hide a palette change inside a
+       * graph PR.
+       *
+       * Two things this DOES leave open, named rather than implied: the panel is
+       * also newly reachable by `specs/layout-widths.spec.ts`, `layout-responsive`
+       * and `zoom-200`, which carry their own baselines in `e2e/layout-baseline.ts`
+       * and `e2e/layout-allowlist.ts` and likewise record nothing for it; and
+       * `A11Y_BASELINE_TOTAL_NODES` does NOT move in this commit, because the entry
+       * map is unchanged and the well-formedness guard sums the map.
+       */
       'evidence@desktop-1280x800': 70,
       'evidence@laptop-1024x768': 70,
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
