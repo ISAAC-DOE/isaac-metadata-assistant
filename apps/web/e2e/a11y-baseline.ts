@@ -851,12 +851,25 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * face. Numbers invented to look plausible would be worse than none, because a
        * baseline that was never measured still reads exactly like one that was.
        *
-       * SO THE SEVEN PAIRS ALL EXPECT 0 AND WILL READ AS `new`. The first CI run on
-       * this branch is the adjudication: the `browser-a11y` job prints, per pair, the
-       * rule, the surface, the project, the PLATFORM and the exact node count.
-       * Transcribe those figures into keys here and raise `A11Y_BASELINE_TOTAL_NODES`
-       * by their sum, in one commit. Do NOT pre-empt them and do NOT lower anything to
-       * make the run green.
+       * ~~SO THE SEVEN PAIRS ALL EXPECT 0 AND WILL READ AS `new`.~~ — ADJUDICATED.
+       * CI run 31968866824 printed all seven on LINUX and they are transcribed below:
+       * desktop 22, laptop 22, tablet 23, mobile-375 22, zoom-200 22, width-390 21,
+       * width-320 22. Nothing was pre-empted and nothing was lowered to go green.
+       *
+       * ONE RULE ONLY — `color-contrast`. No landmark, role, name or focus finding
+       * appeared on this surface, which is worth stating because the panel is a
+       * `<dl>` grid, a `role="status"` banner, an `<ol>` and a `<code>` block, and
+       * none of that authored markup produced a violation. What did is the same
+       * shortfall recorded everywhere else in this entry: `--text-tertiary` at
+       * 3.86:1 and `--text-quaternary` at 2.53:1 against AA's 4.50 — the panel
+       * carries thirteen `.api-keys-note` paragraphs at 11.5px. RECORDED, NOT
+       * ACCEPTED: the design-system slice that raises those two tokens is queued,
+       * and this count is expected to FALL when it lands.
+       *
+       * THE SAME RUN ALSO REPORTED TWO FALLS, and they are the interesting part —
+       * see the split notes on `settings@width-320` and `settings-about@width-320`.
+       * They are the two cells the review of this branch named as the two of
+       * thirty-five that did not move.
        *
        * WHAT IS EXPECTED TO FIRE, stated in advance so a large number is not mistaken
        * for a regression this surface introduced:
@@ -888,6 +901,15 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * move in this commit, because the entry map is unchanged and the well-formedness
        * guard sums the map.
        */
+      /* The seven `settings-connect` cells, transcribed from CI run 31968866824
+         (linux). See the dated block above for what fired and what did not. */
+      'settings-connect@desktop-1280x800': 22,
+      'settings-connect@laptop-1024x768': 22,
+      'settings-connect@tablet-768x1024': 23,
+      'settings-connect@mobile-375x812': 22,
+      'settings-connect@zoom-200': 22,
+      'settings-connect@width-390': 21,
+      'settings-connect@width-320': 22,
       'settings@desktop-1280x800': 17,
       'settings@laptop-1024x768': 17,
       'settings@tablet-768x1024': 17,
@@ -1396,7 +1418,19 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'record-detail@width-390': 13,
       'schema-reference@width-320': 20,
       'schema-reference@width-390': 22,
-      'settings-about@width-320': 14,
+      /* SPLIT 2026-08-16, and it is a fall rather than a rise. CI run 31968866824
+         measured linux 14 -> 13 here and 15 -> 14 on `settings@width-320`. Those
+         are the exact two cells the review of this branch singled out as the two
+         of thirty-five that did NOT move when the seventh tab landed — so the
+         prediction was right about the tab and wrong about this branch, because
+         the branch went on to add a cross-reference sentence to the API Access
+         lead paragraph and that rewraps the 320px face. A fall still has to be
+         recorded: a stale high number silently re-admits the defect.
+         Split rather than lowered as a scalar, for the same reason
+         `settings-explorer@width-320` below is split — CI measures linux only,
+         darwin is carried forward UNMEASURED, and a bare number would assert a
+         macOS reading nobody took. */
+      'settings-about@width-320': { darwin: 14, linux: 13 },
       'settings-about@width-390': 15,
       'settings-api@width-320': 18,
       'settings-api@width-390': 18,
@@ -1409,7 +1443,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-explorer@width-390': { darwin: 59, linux: 55 },
       'settings-privacy@width-320': 8,
       'settings-privacy@width-390': 8,
-      'settings@width-320': 15,
+      /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
+         `settings-about@width-320` above; darwin carried forward unmeasured. */
+      'settings@width-320': { darwin: 15, linux: 14 },
       'settings@width-390': 16,
       'statistics-example@width-320': 4,
       'statistics-example@width-390': 4,
@@ -2101,8 +2137,27 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // is the sum of BOTH sets of additions, and it is COMPUTED from the merged map
   // by the same per-platform reduction the guard performs — not obtained by
   // adding one branch's delta to the other branch's total.
-  darwin: 2397,
-  linux: 2387,
+  // ── 2026-08-16, CI run 31968866824 adjudicated `settings-connect` ──────────
+  //
+  // +154  the seven `settings-connect` cells, transcribed from linux: 22, 22, 23,
+  //       22, 22, 21, 22. Scalars, so both columns move.
+  //
+  //   -2  linux ONLY, and they are FALLS: `settings@width-320` 15 -> 14 and
+  //       `settings-about@width-320` 14 -> 13. Both split into pairs rather than
+  //       lowered as scalars, because CI measures linux and darwin is carried
+  //       forward unmeasured — the precedent is `settings-explorer@width-320`.
+  //       Worth noticing rather than absorbing: these are exactly the two cells
+  //       this branch's review named as the two of thirty-five that did NOT rise
+  //       when the seventh tab landed. They moved later, downward, because the
+  //       branch then added a cross-reference sentence that rewraps the 320px
+  //       face. A prediction can be right about one change and wrong about the
+  //       next one to touch the same cell.
+  //
+  // darwin 2397 + 154 = 2551; linux 2387 + 154 - 2 = 2539. COMPUTED from the map
+  // by the same per-platform reduction the guard runs, then checked against this
+  // arithmetic — not obtained from it.
+  darwin: 2551,
+  linux: 2539,
 };
 
 /**
