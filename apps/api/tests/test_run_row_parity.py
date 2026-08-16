@@ -33,12 +33,47 @@ this suite is written for is CI's ``postgres:18`` SERVICE CONTAINER, in
 ``.github/workflows/ci.yml``'s ``postgres-migration`` job. Locally every test here
 SKIPS, and a skip is reported as a skip — never as a pass.
 
+THIS SUITE WRITES, SO IT NEVER ACTIVATES BY ACCIDENT
+====================================================
+**Two variables, and they mean different things. Both are required in CI.**
+
+* :data:`OPT_IN_ENV` (``ISAAC_RUN_REAL_ENGINE_PARITY=1``) is CONSENT TO CONNECT.
+  Without it this file opens NOTHING — not at collection, not at run — whatever
+  the libpq environment says.
+* :data:`REQUIRE_ENV` (``ISAAC_REQUIRE_REAL_ENGINE_PARITY=1``) is a DEMAND THAT
+  THE ENGINE BE THERE, and it is the anti-silent-skip guard described below.
+
+They were one variable, and that was a defect. The gates this file used to have
+were "is ``PGHOST`` set" and "is ``PGDATABASE`` exactly ``metadata_assistant``" —
+and the second is not a discriminator at all, because ``metadata_assistant`` is
+the HOSTED database's own name (CI's service container is deliberately named to
+match it). ``pyproject.toml``'s ``testpaths`` includes ``apps/api/tests``, so the
+documented developer command ``.venv/bin/pytest`` (``CLAUDE.md`` §14) collects
+this file, and the probe ran at COLLECTION time. Anyone holding the
+``kubectl port-forward`` that ``docs/postgres-test-db-guide.md:83-96`` documents
+as a supported convenience would therefore have had a plain ``pytest`` write
+~25 experiments, their run rows, an out-of-band ``UPDATE``, a ``DELETE`` and a
+``jsonb_set`` tamper into the owner's production-derived database, with no
+teardown. The precedent for the fix is one package away:
+``db_recon.OPT_IN_ENV``, whose comment is "this entry point never runs by
+accident" — and ``db_recon`` only READS.
+
+A LOOPBACK CHECK IS ALSO APPLIED, AND ITS LIMIT IS STATED RATHER THAN IMPLIED.
+:func:`_is_loopback_target` refuses a ``PGHOST`` that is not a loopback literal, a
+unix socket path, or ``localhost``. That is defence in depth against a hostname
+target — it is **NOT** a defence against the port-forward case, because a
+port-forward IS on ``localhost`` and passes it. The opt-in is what closes that
+case; the loopback check only narrows what an opt-in can then reach. Do not
+describe it as making the suite safe.
+
 **A SKIP IS ONLY HONEST IF SOMETHING SOMEWHERE REFUSES TO ACCEPT IT.** A suite that
 silently skips in the one environment that can run it is worse than no suite,
 because the green tick means "not run" while reading as "verified". So
 :data:`REQUIRE_ENV` exists: CI sets ``ISAAC_REQUIRE_REAL_ENGINE_PARITY=1``, and
 :func:`test_the_real_engine_is_present_when_the_environment_demands_it` then FAILS
-instead of skipping if the engine is not reachable.
+instead of skipping if the engine is not reachable — including when it is
+unreachable because the opt-in was not given, which is a configuration error in a
+job that demanded an engine.
 
 AND THE ORACLE ITSELF IS CONTROLLED
 ===================================
@@ -55,11 +90,11 @@ machine is nothing at all.
 
 from __future__ import annotations
 
-import copy
+import ipaddress
 import json
 import os
 import shutil
-from typing import Any
+from typing import Any, Mapping
 
 import pytest
 
@@ -71,31 +106,89 @@ import isaac_api.workspace as ws
 # 0. is there an engine, and is one REQUIRED?
 # =============================================================================
 
+#: CONSENT TO CONNECT. Mirrors ``db_recon.OPT_IN_ENV`` deliberately, including the
+#: "never runs by accident" intent — and this file, unlike ``db_recon``, WRITES.
+#: Absent, :func:`_probe_engine` opens nothing and every scenario below skips.
+OPT_IN_ENV = "ISAAC_RUN_REAL_ENGINE_PARITY"
+OPT_IN_VALUE = "1"
+
 #: Set by CI's ``postgres-migration`` job. When it is set, an unreachable engine is
-#: a FAILURE rather than a skip — see the module docstring.
+#: a FAILURE rather than a skip — see the module docstring. It is NOT consent: CI
+#: sets :data:`OPT_IN_ENV` too, and setting this one alone is a hard failure rather
+#: than a licence to connect.
 REQUIRE_ENV = "ISAAC_REQUIRE_REAL_ENGINE_PARITY"
 
+#: Hostnames accepted as loopback WITHOUT a DNS lookup. Resolution is deliberately
+#: not performed: a probe that resolved names would make test collection depend on
+#: a resolver, and could block. ``localhost`` is accepted because CI and every
+#: throwaway local engine use it — which is exactly why this check cannot stand in
+#: for the opt-in (a ``kubectl port-forward`` is also ``localhost``).
+_LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
 
-def _probe_engine() -> tuple[bool, str]:
+
+def _is_loopback_target(host: str) -> bool:
+    """Is ``PGHOST`` a local target, decided from the STRING alone?
+
+    True for a unix-socket directory (a path), for ``localhost``, and for any IP
+    literal the standard library calls loopback (``127.0.0.0/8``, ``::1``). False
+    for every hostname — which is the one shape the hosted database would take.
+    """
+    host = (host or "").strip()
+    if not host:
+        return False
+    if host.startswith("/"):  # a unix domain socket directory: local by construction
+        return True
+    if host.lower() in _LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def _probe_engine(env: Mapping[str, str] | None = None) -> tuple[bool, str]:
     """``(available, reason)``: can this process reach a migrated app database?
 
-    Deliberately probes for the WHOLE precondition rather than just ``PGHOST``:
-    the driver must be importable, the ``PGDATABASE`` gate must pass, the server
-    must answer, and ``isaac_runs`` must exist. Anything less and the suite would
-    fail for a reason that has nothing to do with parity.
+    **THE FIRST GATE IS CONSENT, AND IT IS CHECKED BEFORE ANYTHING ELSE IS READ.**
+    Without :data:`OPT_IN_ENV` this function returns ``False`` having opened
+    nothing — because it runs at IMPORT time under a bare ``pytest``, and the
+    scenarios it enables WRITE. See the module docstring for the specific accident
+    this closes.
+
+    After consent it probes for the WHOLE precondition rather than just ``PGHOST``:
+    the target must be loopback, the driver must be importable, the ``PGDATABASE``
+    gate must pass, the server must answer, and ``isaac_runs`` must exist. Anything
+    less and the suite would fail for a reason that has nothing to do with parity.
+
+    Note what the ``PGDATABASE`` gate is and is not: it pins the name to
+    ``metadata_assistant``, which is the HOSTED database's own name, so it rejects a
+    misconfigured target and discriminates nothing about WHICH server is being
+    reached. It is a sanity check, never a safety boundary.
 
     It opens ONE short-lived transaction through the application's own write path,
     so it inherits the timeouts, the database gate and the statement policy. It
     writes nothing.
     """
-    if not dbw.database_configured(os.environ):
+    env = os.environ if env is None else env
+    if (env.get(OPT_IN_ENV) or "").strip() != OPT_IN_VALUE:
+        return False, (
+            f"{OPT_IN_ENV} is not {OPT_IN_VALUE!r}: this suite WRITES, so it never "
+            "connects by accident. Set it only against a throwaway engine."
+        )
+    if not dbw.database_configured(env):
         return False, "no PGHOST: this suite needs a real PostgreSQL (CI's postgres:18)"
+    host = (env.get("PGHOST") or "").strip()
+    if not _is_loopback_target(host):
+        return False, (
+            f"PGHOST={host!r} is not a loopback target; this suite runs only against "
+            "a local throwaway engine"
+        )
     try:
-        dbw.pgdatabase_gate(os.environ)
+        dbw.pgdatabase_gate(env)
     except dbw.WriteRefused as exc:
         return False, f"the PGDATABASE gate refused this environment: {exc}"
     try:
-        with dbw.write_transaction(os.environ) as (cursor, policy):
+        with dbw.write_transaction(env) as (cursor, policy):
             cursor.execute(policy.check(repo.Q_RUN_TABLE_PRESENT), (repo.RUN_TABLE,))
             row = cursor.fetchone()
     except Exception as exc:  # noqa: BLE001 - a probe reports, it does not raise
@@ -120,6 +213,11 @@ def test_the_real_engine_is_present_when_the_environment_demands_it():
     Locally this skips, and says why. In CI, where ``ISAAC_REQUIRE_REAL_ENGINE_PARITY``
     is set, it FAILS if the engine is not reachable — so the whole suite quietly
     skipping in the only place it can run is a red build, not a green one.
+
+    A job that sets :data:`REQUIRE_ENV` but forgets :data:`OPT_IN_ENV` fails here
+    too, and that is deliberate: the probe's refusal reason names the missing
+    variable, so the failure reads as the configuration error it is rather than as
+    an unreachable database.
     """
     if os.environ.get(REQUIRE_ENV) != "1":
         pytest.skip(
@@ -129,6 +227,95 @@ def test_the_real_engine_is_present_when_the_environment_demands_it():
     assert _AVAILABLE, (
         f"{REQUIRE_ENV}=1 demands a real engine and this one is unusable: {_REASON}"
     )
+
+
+def _refuse_to_connect(*_args, **_kwargs):
+    raise AssertionError(
+        "the probe opened a connection when it must not have: this is the accident "
+        "the opt-in exists to prevent"
+    )
+
+
+def test_the_suite_does_NOT_activate_without_the_explicit_opt_in(monkeypatch):
+    """THE GATE, ASSERTED AT THE ONE INPUT THAT USED TO BE DANGEROUS.
+
+    A fully configured libpq environment pointing at a database whose name passes
+    the ``PGDATABASE`` gate — which is to say, the exact environment the
+    port-forward at ``docs/postgres-test-db-guide.md:83-96`` produces — and NO
+    opt-in. The probe must report unavailable AND must not have opened anything.
+
+    ``write_transaction`` and ``connect_psycopg2`` are both replaced with a raiser,
+    so "it did not connect" is measured rather than inferred from the return value:
+    a future probe that connected first and gated afterwards would still return
+    ``False`` here, and would still have written a connection to the owner's
+    database.
+    """
+    monkeypatch.setattr(dbw, "write_transaction", _refuse_to_connect)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _refuse_to_connect)
+
+    port_forwarded = {
+        "PGHOST": "localhost",
+        "PGPORT": "5432",
+        "PGUSER": "metadata_assistant",
+        "PGPASSWORD": "irrelevant-to-this-test",
+        "PGDATABASE": "metadata_assistant",
+    }
+    available, reason = _probe_engine(port_forwarded)
+    assert available is False
+    assert OPT_IN_ENV in reason, reason
+
+    # The same environment, with an opt-in that is present but not exactly "1",
+    # is still refused — a truthy-looking value is not consent.
+    for near_miss in ("0", "true", "yes", "", " "):
+        available, reason = _probe_engine(dict(port_forwarded, **{OPT_IN_ENV: near_miss}))
+        assert available is False, near_miss
+        assert OPT_IN_ENV in reason, reason
+
+    # And REQUIRE without RUN is not consent either: demanding an engine does not
+    # authorise reaching for one.
+    available, reason = _probe_engine(dict(port_forwarded, **{REQUIRE_ENV: "1"}))
+    assert available is False
+    assert OPT_IN_ENV in reason, reason
+
+
+def test_the_opt_in_alone_does_not_admit_a_non_loopback_target(monkeypatch):
+    """DEFENCE IN DEPTH, AND ITS LIMIT, BOTH ASSERTED.
+
+    With consent given, a ``PGHOST`` that is a HOSTNAME is still refused without a
+    connection being opened. That is the belt.
+
+    The second half is the honest one, and it is asserted so nobody can read the
+    first half as more than it is: ``localhost`` — a port-forward — PASSES the
+    loopback check and reaches the connection attempt. The loopback check narrows
+    what an opt-in can reach; it does not make an accidental run safe. Only the
+    opt-in does that.
+    """
+    monkeypatch.setattr(dbw, "write_transaction", _refuse_to_connect)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _refuse_to_connect)
+    consented = {
+        OPT_IN_ENV: OPT_IN_VALUE,
+        "PGUSER": "metadata_assistant",
+        "PGPASSWORD": "irrelevant-to-this-test",
+        "PGDATABASE": "metadata_assistant",
+    }
+
+    for remote in ("isaac-psql-rw.isaac-psql.svc.cluster.local", "10.0.0.5", "db.example"):
+        available, reason = _probe_engine(dict(consented, PGHOST=remote))
+        assert available is False, remote
+        assert "loopback" in reason, reason
+
+    # No PGHOST at all is refused before the loopback question is even asked.
+    available, reason = _probe_engine(dict(consented))
+    assert available is False
+    assert "PGHOST" in reason
+
+    # THE LIMIT. A loopback target gets past every string gate and is refused only
+    # by the connection attempt itself — here, by the raiser standing in for it.
+    for local in ("127.0.0.1", "127.0.0.53", "::1", "[::1]", "localhost", "/var/run/pg"):
+        assert _is_loopback_target(local) is True, local
+        available, reason = _probe_engine(dict(consented, PGHOST=local))
+        assert available is False, local
+        assert "could not reach the database (AssertionError)" == reason, reason
 
 
 # =============================================================================
@@ -409,16 +596,27 @@ def test_parity_one_run_produces_exactly_one_row_equal_to_its_to_state(workspace
 
 
 @real_engine
-@pytest.mark.parametrize("n", [0, 1, 2, 50, 200])
-def test_parity_holds_at_every_run_count_from_zero_to_two_hundred(workspace, n):
-    """THE COUNT IS NOT A DETAIL. Three distinct things break at different sizes.
+@pytest.mark.parametrize("n", [1, 2, 50, 200])
+def test_parity_holds_at_every_run_count_from_one_to_two_hundred(workspace, n):
+    """THE COUNT IS NOT A DETAIL. Different things break at different sizes.
 
-    ``0`` is the empty-array case ``Q_DELETE_ABSENT_RUNS``' ``%s::text[]`` cast
-    exists for — an empty array literal carries no element type for the server to
-    infer, so this is the one save where the cast is load-bearing. ``1`` and ``2``
-    are the ordinary shapes. ``50`` and ``200`` are where a diff that silently
-    degraded into a blanket rewrite would still be CORRECT and would be issuing
-    N+1 statements under a 15-second per-statement timeout.
+    ``1`` and ``2`` are the ordinary shapes. ``50`` and ``200`` are where a diff
+    that silently degraded into a blanket rewrite would still be CORRECT and would
+    be issuing N+1 statements under a 15-second per-statement timeout.
+
+    ``0`` WAS A PARAMETER HERE AND IS REMOVED, because it was vacuous and its
+    justification was false. ``_with_runs`` never saves at ``count == 0``, so the
+    body reduced to ``0 == 0`` twice and an oracle comparing ``[] == []`` — it
+    passed with the shadow write deleted entirely. And the claim it carried — that
+    ``0`` is "the one save where ``Q_DELETE_ABSENT_RUNS``' ``%s::text[]`` cast is
+    load-bearing" — is not true of this parameter at all: the delete is issued only
+    when ``set(stored) - set(desired_ids)`` is non-empty, and an experiment that
+    never had a run has nothing stored, so no delete is ever issued. The empty
+    array is genuinely bound by the drop-every-run tail below and by
+    :func:`test_the_delete_of_the_last_run_binds_the_empty_text_array`; the
+    run-less save itself is covered by
+    :func:`test_parity_an_experiment_with_no_runs_leaves_isaac_runs_holding_no_row_for_it`
+    and :func:`test_a_byte_identical_re_save_of_a_run_less_experiment_still_holds`.
 
     A row-count equality is asserted BESIDE the oracle deliberately: the oracle
     compares two sorted lists, and two lists can only be equal if they are the same
@@ -431,12 +629,13 @@ def test_parity_holds_at_every_run_count_from_zero_to_two_hundred(workspace, n):
     assert_parity(exp)
 
     # And the set really is a function of the document, not of insertion history:
-    # drop every run and the table follows.
-    if n:
-        exp.runs = []
-        assert exp.save_versioned() is True
-        assert _observed(exp.id) == []
-        assert_parity(exp)
+    # drop every run and the table follows. Unconditional now that ``n >= 1``,
+    # which is also what makes the empty ``%s::text[]`` binding reachable from
+    # every parameter rather than from none.
+    exp.runs = []
+    assert exp.save_versioned() is True
+    assert _observed(exp.id) == []
+    assert_parity(exp)
 
 
 @real_engine
@@ -960,8 +1159,11 @@ def test_the_diff_compares_the_DOCUMENT_and_repairs_a_tampered_row(workspace):
     # The promoted columns are untouched, which is the whole point of the case.
     assert drifted[target.id][1:2] == before[target.id][1:2]
     assert drifted[target.id][3:6] == before[target.id][3:6]
-    with pytest.raises(AssertionError):
+    # The oracle's own message, for the reason the deletion control states: a bare
+    # `AssertionError` would be satisfied by any assertion inside `assert_parity`.
+    with pytest.raises(AssertionError) as drift_failure:
         assert_parity(exp)
+    assert "isaac_runs disagrees with the experiment document" in str(drift_failure.value)
 
     exp.save()  # byte-identical: admitted by clause 3, and the diff repairs the row
 
@@ -1015,6 +1217,12 @@ def test_the_parity_oracle_FAILS_when_a_row_is_deleted_out_of_band(workspace):
     The ordinal control proves the oracle notices a row that is WRONG. This proves
     it notices a row that is GONE — a different failure, and the one a projection
     that only ever upserts would produce.
+
+    THE ORACLE'S OWN MESSAGE IS ASSERTED, matching its sibling above. A bare
+    ``pytest.raises(AssertionError)`` stood here, and it would have been satisfied
+    by ANY assertion inside ``assert_parity`` — including a future second one that
+    fired for an unrelated reason, letting this control pass while the property it
+    exists to check went unmeasured.
     """
     exp = _with_runs("parity: the deletion control", 2)
     assert_parity(exp)
@@ -1023,8 +1231,9 @@ def test_the_parity_oracle_FAILS_when_a_row_is_deleted_out_of_band(workspace):
     assert removed == 2, removed
     assert _observed(exp.id) == []
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError) as failure:
         assert_parity(exp)
+    assert "isaac_runs disagrees with the experiment document" in str(failure.value)
 
     exp.save()
     assert_parity(exp)
@@ -1161,20 +1370,31 @@ def test_the_delete_of_the_last_run_binds_the_empty_text_array(workspace):
 
 
 def test_this_suite_reads_isaac_runs_only_as_a_test_and_never_on_the_apps_behalf():
-    """A SCOPE ASSERTION, and it runs even with no engine — it opens nothing.
+    """A NAME-AND-VALUE DRIFT GUARD OVER TWO MODULES. It opens nothing.
 
     ``CLAUDE.md`` §15: the run write is a SHADOW, the document is authoritative, and
     making ``isaac_runs`` a READ SOURCE is a separate, unauthorized decision. This
     file reads the table constantly, and that could be mistaken for exactly the
-    change that is not authorized. It is not: every statement here is defined in
-    THIS MODULE, none of them is reachable from ``isaac_api``, and the application's
-    own enumeration of which statements name the table
-    (``test_0002_is_now_written_by_the_write_path_and_by_nothing_else``) is
-    unaffected because none of these is a module-level constant of an application
-    module.
+    change that is not authorized.
 
-    Asserted rather than only written down, so a future slice that moves one of
-    these statements into the application trips here.
+    **WHAT THIS TEST CHECKS, precisely.** It builds the set of ``Q_``-prefixed
+    module-level values of ``db_write`` and ``experiment_repository`` and asserts
+    that none of the five TEST statements below is among them, and that each still
+    passes the application's own ``WriteStatementPolicy``. So a future slice that
+    MOVES one of these statements into either of those two modules trips here.
+
+    **WHAT IT DOES NOT CHECK, and this is stated because the claim was once made
+    more broadly than the code supports.** It is NOT a reachability proof. It would
+    not notice a run-row read added to ``routes.py``, ``db_provider.py`` or any
+    other module; it would not notice a constant that is not prefixed ``Q_``; and it
+    would not notice inline SQL built at a call site. The property that no read path
+    names ``isaac_runs`` does hold today, but the evidence for it is
+    ``test_0002_is_now_written_by_the_write_path_and_by_nothing_else``'s enumeration
+    plus review — not this assertion.
+
+    The one thing this test contributes to that wider property is negative: it
+    confirms the five statements here are not part of the application's constant
+    set, so the enumeration elsewhere is not silently made false by this file.
     """
     application_statements = set()
     for module in (dbw, repo):
@@ -1236,10 +1456,22 @@ def test_the_oracle_projects_the_same_tuple_the_application_writes():
     assert _expected(exp) == [
         (run_id, ordinal, json.loads(state_json), rev, generation)
     ]
-    # Guard against the oracle silently comparing an aliased document.
+    # The document the WRITE PATH serialises is the document the ORACLE projects.
     assert json.loads(state_json) == run.to_state()
-    assert json.loads(state_json) is not run.to_state()
-    assert copy.deepcopy(run.to_state()) == run.to_state()
+    # ...and it is serialised DETERMINISTICALLY, with sorted keys.
+    #
+    # Two assertions used to stand here and NEITHER COULD FAIL: `json.loads(...) is
+    # not run.to_state()` is true of any two separately-built objects, and
+    # `copy.deepcopy(x) == x` is true of any value-equal structure. They were
+    # labelled a guard against an aliased document and guarded nothing. This one
+    # can go red, on a real and documented property: `_run_row_params`' own
+    # docstring says `sort_keys=True` is "presentation only — the column is jsonb,
+    # which compares by VALUE — and it keeps the parameter deterministic, which is
+    # what makes a test able to assert on it". Several tests DO assert on the
+    # parameter, so a writer that dropped the sort would not be a correctness
+    # regression against the engine but would make those assertions
+    # order-dependent. It is pinned where the claim is made.
+    assert state_json == json.dumps(run.to_state(), sort_keys=True)
 
 
 # =============================================================================

@@ -1,12 +1,15 @@
 /*
- * R1b · ONE upload claim, three sites — and the ban on the absolute form.
+ * R1b · ONE upload claim, four sites — and the ban on the absolute form.
  *
- * WHY THIS FILE EXISTS. Three surfaces describe the same boundary to a reader:
+ * WHY THIS FILE EXISTS. Four surfaces describe the same boundary to a reader:
  *
  *   - `screens/GovernancePage.tsx`   → Governance & Safety → Policy
  *   - `screens/LoadMaterials.tsx`    → the approval-gated on-ramp's warning line
  *   - `lib/settingsContent.ts`       → Settings → Data & Privacy →
  *                                      `no-real-experiment-data`
+ *   - `lib/mcpConnectContent.ts`     → Settings → Connect Your Agent, the
+ *                                      `no-upload` row of the refused-capability
+ *                                      list
  *
  * Nothing pinned them to each other, and they drifted. `settingsContent.ts` was
  * corrected to say that file UPLOAD is refused with nothing parsed, *while* the
@@ -17,13 +20,22 @@
  * validator one tab away (`GovernancePage.tsx`'s `validator` tab renders
  * `components/RecordValidator.tsx`, which calls `file.text()`).
  *
+ * THE FOURTH ARRIVED LATE, AND IT ARRIVED FALSE. It shipped reading "File
+ * ingestion is refused for this whole deployment, agent or not" — the same
+ * deployment-wide claim the other three had already been corrected for — and it
+ * passed this guard untouched, because it was not in `SITES` and because §3
+ * bans the shapes that shipped ("no file is read/parsed/inspected") rather than
+ * the claim, and "ingestion" is not one of them. A claim that escapes a ratchet
+ * by synonym is not held by it. Adding the site is the fix; the wording change
+ * alone would have left the next one free to drift the same way.
+ *
  * WHAT IT ASSERTS, and why in this order:
  *
  *  §1 the file-reading controls REALLY EXIST in this build. The ban in §3 is
  *     only justified while they do. If a later slice genuinely removes both
  *     readers, §1 fails first and tells the next reader to revisit §3 rather
  *     than leaving a stale prohibition standing on nothing.
- *  §2 all three sites make the SAME claim — the refusal, the two readers by
+ *  §2 all four sites make the SAME claim — the refusal, the two readers by
  *     name, in-memory-not-stored, outcome-not-content. Parity is the property
  *     that was missing; a site that states half of it is a site that will drift
  *     again.
@@ -49,7 +61,9 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { GovernancePage } from '../screens/GovernancePage';
 import { LoadMaterials } from '../screens/LoadMaterials';
+import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
 import { settingsConcepts } from '../lib/settingsContent';
+import { MCP_CAPABILITIES_REFUSED } from '../lib/mcpConnectContent';
 
 afterEach(cleanup);
 
@@ -95,7 +109,7 @@ function noRealDataDetail(): string {
 }
 
 /**
- * The three sites, as the text a reader actually meets.
+ * The four sites, as the text a reader actually meets.
  *
  * The first two are RENDERED, not source-scanned. A source scan of
  * `GovernancePage.tsx` matches `/validator/i` on its `import { RecordValidator }`
@@ -130,10 +144,33 @@ function loadMaterialsWarnText(): string {
   return warn.textContent ?? '';
 }
 
+/**
+ * The Connect Your Agent tab's refused-capability row, as the reader meets it.
+ *
+ * Read off the content module the way `noRealDataDetail` is — the claim is
+ * authored there and the row is the unit that makes it, so scanning the whole
+ * panel would let a neighbouring paragraph supply half the claim and count as
+ * parity. A site has to state the whole thing WHERE IT STATES THE REFUSAL, or a
+ * reader of the capability table gets the half-truth on its own.
+ *
+ * It still RENDERS the panel and asserts the row is on the surface, because the
+ * failure mode a constant-read misses is copy that exists in the module and is
+ * not shown. `getByText` throws when it is not found, so the render is a real
+ * assertion rather than a decoration.
+ */
+function mcpNoUploadRow(): string {
+  const row = MCP_CAPABILITIES_REFUSED.find((c) => c.id === 'no-upload');
+  if (!row) throw new Error('no such refused capability: no-upload');
+  render(<ConnectYourAgentPanel onOpenExplorer={() => {}} />);
+  screen.getByText(row.detail);
+  return `${row.action} ${row.detail}`;
+}
+
 const SITES: [string, () => string][] = [
   ['Governance → Policy', policyTabText],
   ['the Load Materials on-ramp warning', loadMaterialsWarnText],
   ['Settings → Data & Privacy → no-real-experiment-data', noRealDataDetail],
+  ['Settings → Connect Your Agent → the no-upload capability row', mcpNoUploadRow],
 ];
 
 // --- §1 the readers this ban is justified by ---------------------------------
@@ -173,7 +210,7 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
  * over-discloses in the other direction (it sounds like the file is kept).
  *
  * The patterns are deliberately tolerant of wording — the sites read differently
- * because their contexts differ, and forcing three identical paragraphs would be
+ * because their contexts differ, and forcing four identical paragraphs would be
  * worse copy for no extra truth. What is pinned is the CLAIM, not the sentence.
  */
 const SHARED_CLAIM: [string, RegExp][] = [
@@ -190,7 +227,7 @@ const SHARED_CLAIM: [string, RegExp][] = [
   ],
 ];
 
-describe('R1b §2 · all three sites state the same claim', () => {
+describe('R1b §2 · all four sites state the same claim', () => {
   for (const [site, text] of SITES) {
     describe(site, () => {
       it.each(SHARED_CLAIM)('states %s', (_what, pattern) => {
@@ -307,7 +344,7 @@ describe('R1b §4b · the polarity pattern is proven on the string that defeated
     ).not.toHaveLength(0);
   });
 
-  // One test PER SITE, not one loop over all three. `policyTabText` renders, and
+  // One test PER SITE, not one loop over all of them. `policyTabText` renders, and
   // `cleanup` runs between tests rather than between calls — looping renders the
   // second site on top of the first, and the by-role query then matches two
   // tabpanels. That is a harness artefact, not a copy defect, and it is easy to

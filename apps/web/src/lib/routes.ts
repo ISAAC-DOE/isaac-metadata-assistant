@@ -21,7 +21,22 @@ export const SETTINGS_TAB_PARAM = 'tab';
  * deep-linkable (`/settings?tab=help`) by exactly the same mechanism, and the
  * walkthrough's own last step links to it rather than describing where to find it.
  */
-export const SETTINGS_TAB_IDS = ['overview', 'privacy', 'about', 'api', 'explorer', 'help'] as const;
+/*
+ * `mcp` is Connect Your Agent — the surface that describes ISAAC's agent
+ * (machine-callable tool) interface to a human. It sits with the other two
+ * "reaching this build as a program" tabs rather than at the end, because it
+ * reports state like the five before it and offers no action; `help` stays last
+ * for the reason given above.
+ */
+export const SETTINGS_TAB_IDS = [
+  'overview',
+  'privacy',
+  'about',
+  'api',
+  'explorer',
+  'mcp',
+  'help',
+] as const;
 
 export type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 

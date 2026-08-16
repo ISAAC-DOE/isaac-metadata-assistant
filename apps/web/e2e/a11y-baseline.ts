@@ -786,27 +786,151 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // with darwin one BELOW linux (a font-metric text-node split); the extra tab
       // changes how the row wraps and the split is gone, so darwin rose by 2 where
       // linux rose by 1. That is why these are not "old value + 1" arithmetic.
-      'settings@desktop-1280x800': 16,
-      'settings@laptop-1024x768': 16,
-      'settings@tablet-768x1024': 16,
-      'settings@mobile-375x812': 15,
-      'settings@zoom-200': 15,
-      'settings-about@desktop-1280x800': 15,
-      'settings-about@laptop-1024x768': 15,
-      'settings-about@tablet-768x1024': 15,
+      /*
+       * ── CONNECT YOUR AGENT, 2026-08-13: +1 color-contrast on 33 of 35 settings cells ──
+       *
+       * 33 cells, every one exactly +1, every one `color-contrast`. That near-uniformity
+       * is the evidence this is not a new defect: the tab strip gained a SEVENTH button
+       * (`Connect Your Agent`), and `.section-tab` already fails contrast on this
+       * baseline. One more tab is one more failing node on every page that renders the
+       * strip, at every viewport. No new RULE appears anywhere, and no non-settings
+       * page moved.
+       *
+       * THE TWO CELLS THAT DID NOT MOVE ARE NAMED, not absorbed into "every". There are
+       * 35 settings cells in this entry — five surfaces (`settings`, `settings-about`,
+       * `settings-api`, `settings-explorer`, `settings-privacy`) across the five
+       * Playwright projects plus the two narrow widths — and exactly two are unchanged
+       * by this branch:
+       *
+       *   · `settings-about@width-320`, still 14
+       *   · `settings@width-320`,       still 15
+       *
+       * Both are the 320px face, and 320 is where this file elsewhere records a
+       * scroll-CLIP effect: content that runs past its clip at that width is not
+       * painted, so a node that fails at 390 can be absent at 320. That is the likely
+       * cause and it is stated as likely — no per-node diff was taken, only the totals.
+       * It matters because the UNIFORMITY is the argument: if the +1 were a new defect
+       * in new markup it would not track the tab strip, and two exceptions at the one
+       * width that clips are consistent with the strip explanation rather than against
+       * it. An "every one" that is really 33/35 invites the next reader to trust the
+       * shape of the claim instead of checking it.
+       *
+       * The arithmetic still reconciles either way: 33 raised cells, and the totals
+       * below move darwin 2162 -> 2195 and linux 2152 -> 2185, +33 on each.
+       *
+       * SO THIS RAISES A KNOWN DEFECT'S COUNT; IT DOES NOT BASELINE A REGRESSION. The
+       * underlying `.section-tab` contrast is pre-existing and is still worth fixing —
+       * doing so would drop every settings cell in this entry at once (all 35, not just
+       * the 33 that moved), which is the argument for fixing it centrally rather than
+       * per-slice.
+       *
+       * LINUX IS MEASURED, DARWIN IS INFERRED, and the distinction matters. Every
+       * value below comes from the CI run on this branch (`GREW ... on linux` lines,
+       * read individually, not derived by adding one to the old column). No darwin
+       * sweep was run. Where a cell is a per-platform object, darwin is raised by one
+       * as well — justified because the cause is an EXTRA DOM NODE present on every
+       * platform, not a font-metric wrap effect, which is the class of change this
+       * file elsewhere records as platform-dependent. A darwin sweep should confirm.
+       */
+      /*
+       * ── `settings-connect`, 2026-08-16: A NEW SURFACE WITH NO COUNTS, ON PURPOSE ──
+       *
+       * `e2e/surfaces.ts` now carries `settings-connect`, the `?tab=mcp` deep link onto
+       * the Settings route. Declaring the tab in `TABBED_SURFACES` — which is all the
+       * branch did at first — exercises the tablist and the deep link and NOTHING else,
+       * so until that surface existed the Connect Your Agent panel had never been
+       * loaded by axe, by the 320/390 narrow sweep, by the layout probes or by the
+       * zoom-200 pass at all.
+       *
+       * NOT ONE `settings-connect@*` KEY APPEARS BELOW, and that is this file's own
+       * procedure rather than an omission — the same thing `NARROW_WIDTHS` did when the
+       * two narrow widths were added, and what `evidence-graph` did on its branch. The
+       * header states the rule twice: only the platform you measured on may be edited,
+       * and no attempt is made to guess the other. A darwin reading written as a bare
+       * number would assert BOTH columns, and this environment cannot run the Linux
+       * face. Numbers invented to look plausible would be worse than none, because a
+       * baseline that was never measured still reads exactly like one that was.
+       *
+       * ~~SO THE SEVEN PAIRS ALL EXPECT 0 AND WILL READ AS `new`.~~ — ADJUDICATED.
+       * CI run 31968866824 printed all seven on LINUX and they are transcribed below:
+       * desktop 22, laptop 22, tablet 23, mobile-375 22, zoom-200 22, width-390 21,
+       * width-320 22. Nothing was pre-empted and nothing was lowered to go green.
+       *
+       * ONE RULE ONLY — `color-contrast`. No landmark, role, name or focus finding
+       * appeared on this surface, which is worth stating because the panel is a
+       * `<dl>` grid, a `role="status"` banner, an `<ol>` and a `<code>` block, and
+       * none of that authored markup produced a violation. What did is the same
+       * shortfall recorded everywhere else in this entry: `--text-tertiary` at
+       * 3.86:1 and `--text-quaternary` at 2.53:1 against AA's 4.50 — the panel
+       * carries thirteen `.api-keys-note` paragraphs at 11.5px. RECORDED, NOT
+       * ACCEPTED: the design-system slice that raises those two tokens is queued,
+       * and this count is expected to FALL when it lands.
+       *
+       * THE SAME RUN ALSO REPORTED TWO FALLS, and they are the interesting part —
+       * see the split notes on `settings@width-320` and `settings-about@width-320`.
+       * They are the two cells the review of this branch named as the two of
+       * thirty-five that did not move.
+       *
+       * WHAT IS EXPECTED TO FIRE, stated in advance so a large number is not mistaken
+       * for a regression this surface introduced:
+       *
+       *   · `color-contrast`, and NOT a small count. The panel is built almost entirely
+       *     from `.api-keys-note` (`screens.css:2635`), which is 11.5px
+       *     `var(--text-tertiary)` — #78838f, 3.85:1, already this entry's most-recorded
+       *     shortfall. `ConnectYourAgent.tsx` carries 14 of them (`grep -c` at this
+       *     commit; 13 render in the unconfigured state, the 14th only when an address
+       *     is published), plus the shared seven-button `.section-tab` strip every
+       *     other settings cell already counts. The `.api-keys-row > dd` capability
+       *     cells use `--text-secondary`, which this file records at #46515f / 8.07:1
+       *     and which therefore should contribute nothing — said as an expectation,
+       *     not a measurement, and CI is what settles it.
+       *     Every one of those nodes is one more instance of a documented token
+       *     shortfall in reused chrome; this slice added no colour and no CSS.
+       *   · `landmark-unique`: expected 0. That finding is the two unnamed
+       *     `role="search"` landmarks, and this panel has no search — it has no input of
+       *     any kind, which its unit test asserts against the mounted DOM.
+       *   · `scrollable-region-focusable`: expected 0. That finding is `.preview-lines`
+       *     and a `<pre>`; the one command on this tab is an inline `<code>`, not a
+       *     `<pre>` block.
+       *
+       * Two things this DOES leave open, named rather than implied: the panel is also
+       * newly reachable by `specs/layout-widths.spec.ts`, `layout-responsive` and
+       * `zoom-200`, which carry their own baselines in `e2e/layout-baseline.ts` and
+       * `e2e/layout-allowlist.ts` and likewise record nothing for it (no settings
+       * surface has an entry in either today); and `A11Y_BASELINE_TOTAL_NODES` does NOT
+       * move in this commit, because the entry map is unchanged and the well-formedness
+       * guard sums the map.
+       */
+      /* The seven `settings-connect` cells, transcribed from CI run 31968866824
+         (linux). See the dated block above for what fired and what did not. */
+      'settings-connect@desktop-1280x800': 22,
+      'settings-connect@laptop-1024x768': 22,
+      'settings-connect@tablet-768x1024': 23,
+      'settings-connect@mobile-375x812': 22,
+      'settings-connect@zoom-200': 22,
+      'settings-connect@width-390': 21,
+      'settings-connect@width-320': 22,
+      'settings@desktop-1280x800': 17,
+      'settings@laptop-1024x768': 17,
+      'settings@tablet-768x1024': 17,
+      'settings@mobile-375x812': 16,
+      'settings@zoom-200': 16,
+      'settings-about@desktop-1280x800': 16,
+      'settings-about@laptop-1024x768': 16,
+      'settings-about@tablet-768x1024': 16,
       // 14 -> 13 at 375 only, MEASURED in the tutorial-scope slice (2026-08-04).
       // A genuine improvement, lowered rather than left stale. The About tab
       // renders a workspace-derived line that is shorter now that the ordinary
       // workspace is empty, and at 375 the shorter string stops wrapping — so one
       // rendered text node fewer exists to fail. The other four projects are
       // unchanged, which is what a wrap-boundary effect looks like.
-      'settings-about@mobile-375x812': 13,
-      'settings-about@zoom-200': 14,
-      'settings-api@desktop-1280x800': 18,
-      'settings-api@laptop-1024x768': 18,
-      'settings-api@tablet-768x1024': 18,
-      'settings-api@mobile-375x812': 17,
-      'settings-api@zoom-200': 17,
+      'settings-about@mobile-375x812': 14,
+      'settings-about@zoom-200': 15,
+      'settings-api@desktop-1280x800': 19,
+      'settings-api@laptop-1024x768': 19,
+      'settings-api@tablet-768x1024': 19,
+      'settings-api@mobile-375x812': 18,
+      'settings-api@zoom-200': 18,
       /*
        * ── RUN VERTICAL SLICE, 2026-08-10: THE SAME CLIPPED-LIST DISPLACEMENT, AND
        *    A DARWIN COLUMN THAT TURNED OUT TO HAVE BEEN STALE ─────────────────
@@ -928,8 +1052,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * unchanged, and its cost is a coverage limitation this file has recorded since
        * 2026-08-06, not something this branch introduced.
        */
-      'settings-explorer@desktop-1280x800': { darwin: 48, linux: 47 },
-      'settings-explorer@laptop-1024x768': { darwin: 49, linux: 47 },
+      'settings-explorer@desktop-1280x800': { darwin: 49, linux: 48 },
+      'settings-explorer@laptop-1024x768': { darwin: 50, linux: 48 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -960,7 +1084,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // note above the desktop entry: the linux +1 is this branch's five new
       // operations shifting the scroll clip; the darwin +2 is a stale column,
       // A/B-measured as already 64 on `b7792c1`.
-      'settings-explorer@tablet-768x1024': { darwin: 64, linux: 62 },
+      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 63 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1012,13 +1136,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // tablet entry above; read that note, including its "darwin-measured only"
       // caveat. `zoom-200` and the two wide projects did NOT move: the new row
       // falls outside the measured window at those widths.
-      'settings-explorer@mobile-375x812': { darwin: 55, linux: 54 },
-      'settings-explorer@zoom-200': { darwin: 58, linux: 57 },
-      'settings-privacy@desktop-1280x800': 8,
-      'settings-privacy@laptop-1024x768': 8,
-      'settings-privacy@tablet-768x1024': 8,
-      'settings-privacy@mobile-375x812': 7,
-      'settings-privacy@zoom-200': 7,
+      'settings-explorer@mobile-375x812': { darwin: 56, linux: 55 },
+      'settings-explorer@zoom-200': { darwin: 59, linux: 58 },
+      'settings-privacy@desktop-1280x800': 9,
+      'settings-privacy@laptop-1024x768': 9,
+      'settings-privacy@tablet-768x1024': 9,
+      'settings-privacy@mobile-375x812': 8,
+      'settings-privacy@zoom-200': 8,
       /*
        * ── STATISTICS-TAB SLICE, 2026-08-04 ──────────────────────────────────
        *
@@ -1294,21 +1418,35 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'record-detail@width-390': 13,
       'schema-reference@width-320': 20,
       'schema-reference@width-390': 22,
-      'settings-about@width-320': 14,
-      'settings-about@width-390': 14,
-      'settings-api@width-320': 17,
-      'settings-api@width-390': 17,
+      /* SPLIT 2026-08-16, and it is a fall rather than a rise. CI run 31968866824
+         measured linux 14 -> 13 here and 15 -> 14 on `settings@width-320`. Those
+         are the exact two cells the review of this branch singled out as the two
+         of thirty-five that did NOT move when the seventh tab landed — so the
+         prediction was right about the tab and wrong about this branch, because
+         the branch went on to add a cross-reference sentence to the API Access
+         lead paragraph and that rewraps the 320px face. A fall still has to be
+         recorded: a stale high number silently re-admits the defect.
+         Split rather than lowered as a scalar, for the same reason
+         `settings-explorer@width-320` below is split — CI measures linux only,
+         darwin is carried forward UNMEASURED, and a bare number would assert a
+         macOS reading nobody took. */
+      'settings-about@width-320': { darwin: 14, linux: 13 },
+      'settings-about@width-390': 15,
+      'settings-api@width-320': 18,
+      'settings-api@width-390': 18,
       // linux 56 -> 54 on BOTH, 2026-08-10, CI run 31446324340. The two narrow widths
       // move by 2 where the five wide ones move by 1 — see the RUN OVERRIDE ROUTES
       // note above `settings-explorer@desktop-1280x800` for the cause (two new API
       // operations shifting a 320px scroll clip) and for why `width-320` had to split
       // rather than have its scalar lowered onto an unmeasured darwin.
-      'settings-explorer@width-320': { darwin: 56, linux: 54 },
-      'settings-explorer@width-390': { darwin: 58, linux: 54 },
-      'settings-privacy@width-320': 7,
-      'settings-privacy@width-390': 7,
-      'settings@width-320': 15,
-      'settings@width-390': 15,
+      'settings-explorer@width-320': { darwin: 57, linux: 55 },
+      'settings-explorer@width-390': { darwin: 59, linux: 55 },
+      'settings-privacy@width-320': 8,
+      'settings-privacy@width-390': 8,
+      /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
+         `settings-about@width-320` above; darwin carried forward unmeasured. */
+      'settings@width-320': { darwin: 15, linux: 14 },
+      'settings@width-390': 16,
       'statistics-example@width-320': 4,
       'statistics-example@width-390': 4,
       'statistics-mine@width-320': 2,
@@ -1916,6 +2054,22 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Reconciliation again, not derivation: 2152 is the reduction's own output, read
   // by running the same per-platform sum `specs/a11y-axe.spec.ts` performs over the
   // edited map. Re-derive it; do not trust this sentence.
+  // 2026-08-13, Connect Your Agent. darwin 2162 -> 2195, linux 2152 -> 2185: the
+  // seventh Settings tab is one more `.section-tab`, which already fails contrast,
+  // so 33 of the 35 settings cells rose by exactly one. The two that did not are
+  // `settings-about@width-320` (14) and `settings@width-320` (15), both the 320px
+  // face, and the note above `settings@desktop-1280x800` says what is and is not
+  // established about why. The totals are COMPUTED from the entries by the same
+  // summation the guard uses, not derived by adding 33 -- and the darwin figure
+  // matches what CI reported the entries now sum to (2195), which is the check
+  // that this constant and the map agree.
+  //
+  // 2026-08-16: `settings-connect` joined `SURFACES` and this constant does NOT
+  // move, because it records nothing. See the block above `settings@desktop-1280x800`.
+  // (Those two numbers were this branch's own total before it met `main`. They are
+  // kept because the 33-of-35 reasoning above is still the record of what this
+  // branch measured; the LIVE total is at the bottom of this block.)
+  //
   // 2026-08-13. darwin 2162 -> 2169, linux 2152 -> 2159: seven cells rose by one
   // on a single surface (see the dated block in the entries above for which, and
   // why it is a known defect's count rather than a new one). COMPUTED from the
@@ -1969,8 +2123,41 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // cells of the new surface are now recorded. Both sums are re-checked by the
   // suite from the entry map, per platform, so a stale constant fails in every
   // project — which is how the double-count was caught.
-  darwin: 2364,
-  linux: 2354,
+  // ── 2026-08-16, THE MERGE OF THIS BRANCH INTO THE ABOVE ────────────────────
+  //
+  // THE HAZARD RECORDED ABOVE RECURRED, AND THIS TIME GIT SHOWED IT. `main` had
+  // reached 2364/2354 by the evidence-graph work; this branch had reached
+  // 2195/2185 by its 33 settings cells. Because the two literals DIFFER, the
+  // three-way merge raised a real conflict instead of silently taking one — the
+  // opposite of the +7/+7 case above, where the two sides agreed on the text and
+  // git took it without a word. That is the whole lesson: this constant is safe
+  // from a merge exactly when the two branches disagree about it.
+  //
+  // So neither side's number is right here. Both entry maps merged, so the total
+  // is the sum of BOTH sets of additions, and it is COMPUTED from the merged map
+  // by the same per-platform reduction the guard performs — not obtained by
+  // adding one branch's delta to the other branch's total.
+  // ── 2026-08-16, CI run 31968866824 adjudicated `settings-connect` ──────────
+  //
+  // +154  the seven `settings-connect` cells, transcribed from linux: 22, 22, 23,
+  //       22, 22, 21, 22. Scalars, so both columns move.
+  //
+  //   -2  linux ONLY, and they are FALLS: `settings@width-320` 15 -> 14 and
+  //       `settings-about@width-320` 14 -> 13. Both split into pairs rather than
+  //       lowered as scalars, because CI measures linux and darwin is carried
+  //       forward unmeasured — the precedent is `settings-explorer@width-320`.
+  //       Worth noticing rather than absorbing: these are exactly the two cells
+  //       this branch's review named as the two of thirty-five that did NOT rise
+  //       when the seventh tab landed. They moved later, downward, because the
+  //       branch then added a cross-reference sentence that rewraps the 320px
+  //       face. A prediction can be right about one change and wrong about the
+  //       next one to touch the same cell.
+  //
+  // darwin 2397 + 154 = 2551; linux 2387 + 154 - 2 = 2539. COMPUTED from the map
+  // by the same per-platform reduction the guard runs, then checked against this
+  // arithmetic — not obtained from it.
+  darwin: 2551,
+  linux: 2539,
 };
 
 /**

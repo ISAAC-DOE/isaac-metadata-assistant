@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "c7b2ea222ffe212e27bf9c0ffaddf204665db64b662f789b021fc688243aebd0"
+        "sha256": "a9b56d682f56036dfe29fb04eddee6057492db8973f6d221ed0e799b365d4b78"
       },
       {
         "path": "AGENTS.md",
@@ -10516,7 +10516,7 @@
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "b9929ae503f3e967ea0b62c767fb0545cb924179e393ed0912fc293e655a2a2e"
+        "sha256": "1057b2a41b257ca97415951cf757532e46d44db15f7c1fda92727540768f5d7a"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "a9b2a911a629ca6c44e9353e401ecb153d4838b94de1344c6e49bb07e3eb27a3"
+        "sha256": "9be710e081f4a37b03ab67bff4fb1ff3476bf75582be16797b32336ee7cb3ca4"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "e0b6c8429dca675de1dad70a46e50e934612d47281862cdbb5a3f5c3c6991b4d"
+    "served_manifest_fingerprint": "5173d323956e5bc9f6b4a72d686c7b4bff53ea0f52787eb9bd58fe15bf57305f"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
