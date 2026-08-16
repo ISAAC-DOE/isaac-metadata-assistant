@@ -111,6 +111,29 @@ export const SURFACES: readonly Surface[] = [
     ready: { role: 'heading', name: 'Evidence & File Preview' },
   },
   {
+    /*
+     * The Evidence GRAPH, which is a `?view=` deep link on the Evidence route and
+     * NOT the same DOM as the entry above it.
+     *
+     * `evidence` lands on the LIST view — that is what the route defaults to — so
+     * until this entry existed, axe, the 320/390 narrow sweep, the five-project
+     * layout probes and the 200% zoom pass had never loaded the graph panel at
+     * all. Its canvas, its `role="tree"`, its kind-filter chips, its details pane
+     * and its notes were unmeasured markup on a measured route, which is the
+     * failure mode `statistics-example` was added to fix and is worth naming as
+     * the same one.
+     *
+     * `ready` waits on the panel's own heading rather than the page `h1`: the
+     * screen heading renders while the graph is still fetching this experiment's
+     * runs, and scanning in between would audit a `role="status"` loading panel.
+     */
+    id: 'evidence-graph',
+    name: 'Evidence & File Preview — Graph',
+    path: `${recordSub(SEED.partial, 'evidence')}?view=graph`,
+    scope: 'example',
+    ready: { role: 'heading', name: 'Evidence Graph' },
+  },
+  {
     id: 'export-readiness',
     name: 'Export Readiness (in review)',
     path: recordSub(SEED.review, 'export'),

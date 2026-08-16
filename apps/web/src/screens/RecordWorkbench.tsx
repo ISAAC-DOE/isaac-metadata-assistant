@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RunsSection } from '../components/RunsSection';
+import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
@@ -504,6 +505,28 @@ function LoadedWorkbench({
            that this experiment has runs at all.
       */}
       <RunsSection experimentId={id} />
+
+      {/*
+        VALIDATE & REVIEW SITS DIRECTLY BELOW THE RUNS, and the placement is the
+        argument for it: its findings are addressed BY RUN, and the runs a reader
+        is being sent back to are the section immediately above.
+
+        IT FETCHES NOTHING ON MOUNT — not one request until the button is pressed
+        (see the component header on why: `docs/run-scale-measurements.md` made a
+        record's runs a payload cost, and N eager per-run checks would be the same
+        mistake in request form). So mounting it here costs this screen nothing on
+        load, which is what makes "below the runs" a free choice rather than a
+        trade against the screen's first paint.
+
+        IT IS NOT `RunFindings` MOVED. That component is the PASSIVE read-out on
+        the export screen, rendering verdicts a bundle already fetched; this is the
+        ACTION, on the screen where the fields and runs are edited, and it reaches
+        two channels the export bundle never carries — the run's open blocking
+        questions and its no-guessing draft report. Both read the same server
+        fields and share `runFindingState` and `FindingList` rather than keeping
+        two opinions about them.
+      */}
+      <ValidateReview experimentId={id} />
 
       {groups.map((group) => (
         <FieldGroup
