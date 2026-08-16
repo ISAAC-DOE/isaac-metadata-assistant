@@ -394,14 +394,29 @@ def test_a_refusal_never_echoes_the_credential_over_the_wire(app):
     assert "s3cret-value" not in str(envelope)
 
 
-def test_no_mcp_transport_is_mounted_on_the_application(app):
-    """There is no listener, which is why the loopback binding cannot be remote.
+def test_no_mcp_transport_is_mounted_on_the_default_application(app):
+    """The default deployment registers no MCP route. THIS TEST HAS BEEN REPLACED.
 
-    If a future slice adds a Streamable HTTP transport this test must be replaced
-    by one that asserts the transport is authenticated — not deleted.
+    Its previous form asserted that the application had no MCP path at all, and
+    carried the instruction: *"If a future slice adds a Streamable HTTP transport
+    this test must be replaced by one that asserts the transport is authenticated
+    — not deleted."* That slice has landed (``isaac_api.mcp.transport``), and this
+    is the replacement, narrowed to the claim that is still true and still worth
+    holding: with ``ISAAC_MCP_DEPLOYMENT`` unset — which the ``app`` fixture
+    guarantees — nothing is mounted.
+
+    Absence, not refusal, is the assertion. A path that exists and answers 403
+    still advertises that ISAAC speaks MCP.
+
+    The other half of the instruction — that the transport, WHEN mounted, is
+    gated — lives in ``apps/api/tests/test_mcp_transport.py``: the loopback peer
+    check, the proxy-header and cross-origin refusals, the credential refusal, the
+    per-call scope check, and three negative controls that disable each guard and
+    assert the behaviour changes.
     """
     paths = {getattr(route, "path", "") for route in app.routes}
     assert not any("mcp" in path.lower() for path in paths)
+    assert not any("mcp" in path.lower() for path in app.openapi()["paths"])
 
 
 # ==========================================================================

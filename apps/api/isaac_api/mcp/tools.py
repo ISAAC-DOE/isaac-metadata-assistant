@@ -119,6 +119,29 @@ class Tool:
     read_only: bool
     idempotent: bool
 
+    @property
+    def required_scopes(self) -> frozenset[Scope]:
+        """EVERY scope a call to this tool costs, which is not always just one.
+
+        A read tool costs :attr:`~.policy.Scope.READ`. A write tool costs
+        ``READ`` **and** :attr:`~.policy.Scope.DRAFT_WRITE`, because a write tool
+        also reads: ``isaac_create_run`` and ``isaac_update_draft`` both return
+        the record state they produced, and a caller that may see that state is a
+        caller holding the read scope.
+
+        THIS IS NOT NESTING, AND THE DIRECTION IS WHAT MAKES THE DIFFERENCE.
+        Nesting would mean ``DRAFT_WRITE`` *implies* ``READ`` — one grant
+        silently becoming two. This is the opposite: the write tools require more
+        than they used to, so a principal holding ``DRAFT_WRITE`` alone can now
+        call nothing at all rather than being able to write blind.
+        ``test_the_write_scope_does_not_imply_the_read_scope`` still passes, and
+        would still fail if implication were ever introduced.
+
+        Derived rather than declared, so a tool cannot be added with a
+        hand-written scope set that disagrees with the scope its operations cost.
+        """
+        return frozenset({Scope.READ, self.scope})
+
     def annotations(self) -> dict:
         return {
             "title": self.title,
@@ -140,7 +163,16 @@ class Tool:
             # client can see, before calling, that a tool it was not granted exists
             # and why it will be refused.
             "_isaac": {
+                # The tool's DEFINING scope — the one that distinguishes it from a
+                # read tool. Kept as a scalar because clients and tests already
+                # read it, and because "what does this tool cost beyond a read" is
+                # the question a reader is actually asking.
                 "requiredScope": self.scope.value,
+                # The complete set the server checks. Both are published because
+                # publishing only the scalar would understate the grant a write
+                # tool now needs, and a client that renders the scalar as the
+                # whole requirement would show a caller a tool it cannot call.
+                "requiredScopes": sorted(s.value for s in self.required_scopes),
                 "operations": list(self.operation_ids),
             },
         }

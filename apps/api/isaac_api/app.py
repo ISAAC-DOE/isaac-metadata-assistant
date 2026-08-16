@@ -209,6 +209,45 @@ def create_app() -> FastAPI:
     # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR
     # points at a built frontend; registered last so API routes win.
     app.include_router(router, prefix=base)
+    # --- MCP Streamable HTTP transport, mounted ONLY when configured ----------
+    # `mcp_transport_or_none` returns None unless ISAAC_MCP_DEPLOYMENT resolves to
+    # a binding that declares `serves_transport` — which nothing does by default,
+    # because every unset/empty/unrecognised/reserved/misconfigured value fails
+    # closed to the unconfigured binding. So the DEFAULT DEPLOYMENT REGISTERS NO
+    # MCP ROUTE AT ALL. That is the point, and it is not the same as a route that
+    # answers 403: a path that refuses still advertises that ISAAC speaks MCP and
+    # is one conditional away from being opened by whoever reads the 403 as a bug.
+    #
+    # Imported here rather than at module scope so the whole feature is one
+    # contiguous block, and so an application that will never serve it does not
+    # import the package. Registered BEFORE `mount_spa`, whose catch-all would
+    # otherwise swallow the path.
+    #
+    # An exact `Route`, not `app.mount`: a Mount matches a PREFIX, which would
+    # make `{base}/api/mcp/anything` the transport's problem to 404 and would
+    # 307-redirect the canonical trailing-slash-free URL that `claude mcp add
+    # --transport http` is given. A Starlette `Route` whose endpoint is an object
+    # rather than a function is treated as a raw ASGI app, which is exactly what
+    # the transport is. `methods=None` matches every verb so the transport can
+    # answer GET and DELETE with its own reasons rather than a bare 405, and
+    # `include_in_schema=False` keeps a non-OpenAPI protocol out of the OpenAPI
+    # document (a plain Route is invisible to FastAPI's generator anyway).
+    from starlette.routing import Route
+
+    from .mcp.transport import MCP_PATH, mcp_transport_or_none
+
+    mcp_transport = mcp_transport_or_none(app)
+    if mcp_transport is not None:
+        app.router.routes.append(
+            Route(
+                f"{base}{MCP_PATH}",
+                mcp_transport,
+                name="mcp",
+                methods=None,
+                include_in_schema=False,
+            )
+        )
+    # -------------------------------------------------------------------------
     mount_spa(app, base)
     return app
 
