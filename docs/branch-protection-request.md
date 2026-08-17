@@ -79,6 +79,41 @@ both are defensible choices and the owner may want either one.
   buys protection against a merge-result regression that the required checks largely cover, at a
   cost this repository can measure.
 
+  **Addendum, 2026-08-17 — the decision is unchanged, one of its inputs is not.** The concrete
+  merge-result regression this rule would have caught had a name: two branches independently
+  raising `A11Y_BASELINE_TOTAL_NODES` to the same literal for different reasons, which git merges
+  without a conflict while both sets of baseline entries survive. It was real, it recurred, and
+  until now its only detector lived in the ~30-minute `browser-a11y` job — so it was found on
+  `main`, after the merge, half an hour late.
+
+  That detector now also runs in the fast `frontend` job, on every pull request and every push to
+  `main` (`apps/web/e2e/invariants/baseline-aggregate.invariant.test.ts`, logic in
+  `apps/web/e2e/baseline-aggregate.ts`). The stale-base window is not closed — a PR merged without
+  seeing the current base still fails on `main` rather than before it — but the cost of landing in
+  that window fell from **~26 minutes to ~4**, and the failure message now names the merge as the
+  likely cause and prints the exact number to write.
+
+  **~4 minutes, not "seconds", and the difference is the point.** An earlier revision of this
+  addendum said "to seconds". The *check* is 6 ms locally and 26 ms in CI — but the **signal** costs
+  whatever the job costs, and the `frontend` job is `npm ci` + the full vitest suite + `vite build`.
+  Measured over the last runs on `main` (`gh api .../actions/runs/<id>/jobs`): `frontend tests and
+  build` 3m06s and 3m48s; `browser accessibility and responsive baseline` 26m13s and 26m42s. So the
+  honest figure is a ~7× improvement, not ~300×. Quoting the test's own runtime as the feedback
+  latency is exactly the kind of unmeasured count `CLAUDE.md` §12 forbids, and it was caught by
+  independent review rather than by me.
+
+  **And a second correction, because the sentence above could be read as more than it is.** `main`
+  currently has **no required status checks at all** — measured, not assumed:
+  `gh api repos/ISAAC-DOE/isaac-metadata-assistant/branches/main --jq '.protected'` → `false`;
+  `.../rulesets` → `[]`; `.../branches/main/protection` → `404`. So the fast check **reports; it does
+  not block**. A pull request can be merged with it red, or still running. That is this document's
+  whole subject and is stated in its header, but it needs saying here too, next to the claim that the
+  hazard is now caught quickly.
+
+  So the rule buys less than it did when this section was written, at the same price. Declining it
+  remains the right call, and this is recorded so a future reader does not mistake the unchanged
+  verdict for an unexamined one.
+
 ## A separate, application-owned defect that protection does NOT fix
 
 **`.github/workflows/build-push.yaml` published a deployable image without consulting CI at all.**

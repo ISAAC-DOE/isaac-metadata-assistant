@@ -1683,6 +1683,72 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
  *
  * The rule that got it there still stands for next time: if CI ever disagrees
  * with a number in this file, correct THE NUMBER, never loosen the assertion.
+ *
+ * ── HOW THIS NUMBER GOES STALE WITHOUT A GIT CONFLICT ───────────────────────
+ *
+ * Every per-cell count below is a MEASUREMENT: the axe scan reproduces it or
+ * the build fails. This constant is ARITHMETIC over those measurements, and it
+ * is the only thing in this file that can be wrong while every run agrees with
+ * every other number.
+ *
+ * The way it goes wrong is a merge, not a typo. Two branches open against the
+ * same `main`. Each adds a disjoint set of keys above; each raises this literal
+ * to cover its own addition. When the two deltas happen to be EQUAL, both
+ * branches write the SAME resulting number — and git merges two identical
+ * changes to one line without a conflict, while the key additions merge
+ * cleanly because they touch different keys. The merged file then holds BOTH
+ * sets of new entries and only ONE of the two increments. Nothing in the text
+ * of that merge says so.
+ *
+ * Two further facts kept it hidden longer than it should have been: GitHub does
+ * not re-run a pull request's checks when its BASE advances, so neither branch
+ * ever executed the combined state before merging; and the only guard was in
+ * the ~30-minute `browser-a11y` job, so the first signal arrived on `main`,
+ * half an hour later.
+ *
+ * WHAT NOW CATCHES IT, and where: `e2e/invariants/baseline-aggregate.invariant.test.ts`,
+ * a `vitest` file that needs no browser. It runs in the fast `frontend` CI job
+ * on every pull request and every push to `main`, and it carries negative
+ * controls that reproduce exactly the two-branch merge above.
+ * `specs/a11y-axe.spec.ts` still makes the same check — through the same shared
+ * module, so the two cannot drift.
+ *
+ * HOW MUCH FASTER, measured rather than felt: the CHECK is ~6 ms locally and
+ * ~26 ms in CI, but the SIGNAL costs whatever its job costs. `frontend tests and
+ * build` measured 3m06s and 3m48s on recent `main` runs; `browser accessibility
+ * and responsive baseline` measured 26m13s and 26m42s. So this is ~26 minutes
+ * down to ~4 — about 7x, not the "seconds" an earlier revision of this note
+ * claimed. Worth having; not worth overstating.
+ *
+ * AND IT REPORTS RATHER THAN BLOCKS. `main` has no required status checks at
+ * all — `gh api repos/.../branches/main --jq '.protected'` returns `false`,
+ * `.../rulesets` returns `[]`, `.../branches/main/protection` returns `404`. A
+ * pull request can be merged with this check red or still running. Do not read
+ * the paragraph above as an enforcement gate; it is a fast alarm. See
+ * `docs/branch-protection-request.md`, "Status: NOT CONFIGURED".
+ *
+ * WHAT IS DELIBERATELY NOT DONE: this constant is not derived away, the way
+ * `LAYOUT_BASELINE_TOTAL_INSTANCES` derives itself. Deriving it would make the
+ * defect structurally impossible and was seriously considered; it is rejected
+ * because this literal is the only artefact in the repository that makes a DEBT
+ * INCREASE visible in a diff. A slice that adds entries for a new surface adds
+ * newly tolerated debt, and a derived total would absorb that silently. The
+ * per-cell ratchets catch growth on a MEASURED cell; only this number catches
+ * growth by ADDITION.
+ *
+ * The residual risk is named rather than implied: a fast check still only runs
+ * when CI runs, so a pull request merged without having seen the current base
+ * fails this invariant on `main` rather than on the pull request.
+ *
+ * The setting that would close THAT half is "Require branches to be up to date
+ * before merging", and `docs/branch-protection-request.md:74-81` **deliberately
+ * declines to ask for it** — not an oversight, a measured trade: the generated
+ * memory snapshot already forces every open PR to regenerate after every merge,
+ * and adding the rule would additionally force a full ~30-minute CI re-run on
+ * every open PR after every merge. Do not read this note as a pending request
+ * for that setting; it is not one. The fast check above is the cheaper half of
+ * the same protection, and it is what makes declining the expensive half more
+ * defensible than it was, not less.
  */
 export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number>> = {
   // 2026-08-01, responsive remediation slice. darwin 1628 -> 1629: the net of

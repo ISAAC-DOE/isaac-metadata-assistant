@@ -49,9 +49,11 @@ import {
   renderedFontFamily,
 } from '../helpers/layout';
 import {
+  LAYOUT_SWEEP_WIDTHS,
   applicableLayoutFindings,
   isKnownLayoutFinding,
   layoutKey,
+  layoutWidthId,
   platformInstances,
 } from '../layout-baseline';
 import { hiddenTextMatchersFor, overflowMatchersFor } from '../layout-allowlist';
@@ -67,8 +69,14 @@ import { SURFACES } from '../surfaces';
  */
 const HOST_PROJECT = 'desktop-1280x800';
 
-/** Breakpoint and content-pressure widths. 320 is required; see the header. */
-const WIDTHS = [1280, 1024, 768, 640, 390, 375, 320] as const;
+/**
+ * Breakpoint and content-pressure widths. 320 is required; see the header.
+ *
+ * Declared in `../layout-baseline` rather than here, so the fast invariant
+ * suite can validate this file's baseline keys without starting a browser.
+ * This alias keeps the sweep below reading exactly as it did.
+ */
+const WIDTHS = LAYOUT_SWEEP_WIDTHS;
 
 /**
  * The "project" component of a `layout-baseline.ts` key for this file.
@@ -83,8 +91,12 @@ const WIDTHS = [1280, 1024, 768, 640, 390, 375, 320] as const;
  *
  * `layoutKey()` already builds `surfaceId@projectId` from any two strings, so
  * nothing in `layout-baseline.ts` needed changing to support this.
+ *
+ * The definition now lives in `../layout-baseline` beside the widths it is
+ * applied to, so a checker that never starts a browser can tell a legal
+ * `width-<n>` key from a typo. This alias keeps the sweep's own prose intact.
  */
-const widthKey = (width: number): string => `width-${width}`;
+const widthKey = layoutWidthId;
 
 test.describe('layout width sweep', () => {
   test.beforeEach(({}, testInfo) => {
