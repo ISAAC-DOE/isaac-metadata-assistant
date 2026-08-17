@@ -345,7 +345,10 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # MEASURED, NOT CARRIED. See the note above about two branches each counting
     # from 47: this number comes from running `create_app().openapi()` on this
     # branch, and a merge must re-measure rather than add.
-    assert checked == 53, f"expected 53 documented operations, found {checked}"
+    # MEASURED AFTER THE MERGE, not carried across it and not derived by adding
+    # deltas. Provenance publishes one operation and the asset slice four, both
+    # from the same base of 52; either branch's own figure is wrong for the merge.
+    assert checked == 57, f"expected 57 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -577,6 +580,15 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # 400/412/428 set. There is deliberately no per-note validator, and deliberately
     # NO DELETE — dismissal is a review act on the review operation, so it appears
     # here as a `200` on a POST and not as a `204` anywhere.
+    # The ASSET REFERENCE API. The library lives in the experiment's draft and the
+    # associations live in each run's draft — both inside the one experiment document
+    # — so all three writes carry the RECORD's `If-Match` and the whole 400/412/428
+    # set with it, exactly as `POST .../runs` does. There is no DELETE: removal is a
+    # sub-path POST, matching `.../notes/{id}/review` and `.../overrides/clear`.
+    ("/api/experiments/{experiment_id}/assets", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/assets", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/assets/{asset_id}", "patch"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/assets/{asset_id}/remove", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],
