@@ -1448,6 +1448,39 @@ jobs:
           refuse "a signature that is not a 64-hex sha256" \
             "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIBADSIG0000000000000AA0', '$parent', 9, 0, 'ci', '{}', 'NOTAHASH', 'submission', NULL, 'unattributed')" \
             "isaac_experiment_revisions_signature_shape"
+          # ── ANCHOR STRICTNESS. The one class of CHECK failure this repository has
+          # ── already shipped once, proved rather than assumed.
+          #
+          # `src/isaac_records/exactness.py` exists because Python's `$` ALSO matches
+          # immediately before a trailing newline, so `re.match(r'^[0-9a-f]{64}$', s)`
+          # accepts a 64-hex string with a `\n` glued to the end. Five patterns in the
+          # vendored schema had that hole, and a whole gate was built to close it.
+          #
+          # Every id and signature column in 0001/0002/0003/0004 is guarded by a
+          # `~ '^...$'` CHECK of exactly that shape. PostgreSQL's POSIX `~` is NOT
+          # newline-sensitive by default, so `^`/`$` should match only at the true
+          # start and end of the string and these should be refused — but "should,
+          # by my reading of the manual" is precisely the standard that produced
+          # `exactness.py`. If PostgreSQL behaved like Python here, a
+          # `content_signature` carrying a trailing newline would be stored, would
+          # never equal the signature computed on the next submit, and idempotency
+          # would silently stop working — a submission would duplicate rather than
+          # replay. That is a data-correctness failure, not a cosmetic one.
+          #
+          # `E'...\n'` is PostgreSQL escape-string syntax: the value really does end
+          # in a newline byte. The third argument matters as much as ever — each case
+          # must be blamed on the SHAPE constraint, not on some other rule.
+          refuse "a signature that is 64 hex followed by a newline" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CINLSIG00000000000000AA0', '$parent', 9, 0, 'ci', '{}', E'$sig\\n', 'submission', NULL, 'unattributed')" \
+            "isaac_experiment_revisions_signature_shape"
+          refuse "an id that is 26 valid characters followed by a newline" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES (E'01CINLID0000000000000000A0\\n', '$parent', 9, 0, 'ci', '{}', '$sig2', 'submission', NULL, 'unattributed')" \
+            "isaac_experiment_revisions_id_shape"
+          # And a LEADING newline, because `^` is the other half of the same question
+          # and a pattern anchored at only one end fails differently.
+          refuse "a signature preceded by a newline" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CINLSIG00000000000000AB0', '$parent', 9, 0, 'ci', '{}', E'\\n$sig', 'submission', NULL, 'unattributed')" \
+            "isaac_experiment_revisions_signature_shape"
           refuse "an unknown revision reason" \
             "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, subject, trust_basis) VALUES ('01CIBADREASON000000000AAA0', '$parent', 9, 0, 'ci', '{}', '$sig2', 'because', NULL, 'unattributed')" \
             "isaac_experiment_revisions_reason_known"
@@ -1535,6 +1568,17 @@ jobs:
           refuse "an attributed submission whose subject is the empty string" \
             "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000H0', '$parent', '$rev2', '$sig2', 1, '', 'test_fixture')" \
             "isaac_submissions_subject_non_empty"
+          # ANCHOR STRICTNESS, the submission half — and this is the column where the
+          # consequence is worst. `content_signature` IS the natural idempotency key:
+          # a trailing newline stored here would never equal the signature recomputed
+          # on the next submit, `isaac_submissions_signature_unique` would not fire,
+          # and a retry would PUBLISH A SECOND SUBMISSION instead of replaying the
+          # first. Duplicate scientific publication is the exact outcome the submit
+          # contract exists to prevent, so this is proved directly here rather than
+          # inferred from the revisions case above.
+          refuse "a submission signature that is 64 hex followed by a newline" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION00000000NL10', '$parent', '$rev2', E'$sig2\\n', 1, 'x', 'test_fixture')" \
+            "isaac_submissions_signature_shape"
 
           # THE ABSENCE, ASSERTED POSITIVELY: PostgreSQL's default is NULLS DISTINCT,
           # so any number of rows may carry no idempotency key. Idempotency is opt-in,
