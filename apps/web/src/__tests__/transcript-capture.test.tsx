@@ -732,3 +732,111 @@ describe('accessibility', () => {
     expect(status?.textContent).toMatch(/1 segment\(s\) stored with this record/);
   });
 });
+
+// --- 6. the panel toggle, and the recorder lifecycle -------------------------
+//
+// THIS BLOCK EXISTS BECAUSE ITS ABSENCE SHIPPED TWO DEFECTS.
+//
+// Independent review found both, and neither was reachable by the suite as it
+// stood: nothing here ever closed the panel, and jsdom has no `MediaRecorder`,
+// so `audioRecordingAvailable()` returned false, `voice` was pinned to
+// `'unsupported'`, and every line of the recorder lifecycle — start, stop,
+// discard, drop — was dead to the tests. The "no part of this panel claims a
+// provider exists" scan was likewise only ever scanning the unsupported branch.
+
+/** The smallest `MediaRecorder` that reproduces the real ordering hazard. */
+class FakeMediaRecorder {
+  static instances: FakeMediaRecorder[] = [];
+  state: 'inactive' | 'recording' = 'inactive';
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  constructor(_stream: unknown) {
+    FakeMediaRecorder.instances.push(this);
+  }
+  start() {
+    this.state = 'recording';
+  }
+  /**
+   * THE POINT OF THIS FAKE. A real `MediaRecorder` emits its final
+   * `dataavailable` ASYNCHRONOUSLY, on a later task — which is exactly how a
+   * "discarded" recording used to end up back in the buffer after the live
+   * region had already announced it gone. A synchronous fake would not
+   * reproduce the defect and the test would pass against the broken code.
+   */
+  stop() {
+    this.state = 'inactive';
+    const emit = this.ondataavailable;
+    setTimeout(() => emit?.({ data: new Blob(['audio-bytes']) }), 0);
+  }
+}
+
+describe('the panel toggle and the recorder lifecycle', () => {
+  const tracks = { stop: vi.fn() };
+
+  beforeEach(() => {
+    FakeMediaRecorder.instances = [];
+    tracks.stop.mockClear();
+    (globalThis as never as Record<string, unknown>).MediaRecorder = FakeMediaRecorder;
+    (globalThis as never as Record<string, unknown>).Blob =
+      (globalThis as never as Record<string, unknown>).Blob ?? class {};
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [tracks] })) },
+    });
+  });
+
+  afterEach(() => {
+    delete (globalThis as never as Record<string, unknown>).MediaRecorder;
+  });
+
+  it('CLOSING THE PANEL DOES NOT DISCARD TYPED TEXT', async () => {
+    // The fourth path the three "text survives" controls missed. The reset
+    // effect used to key on `open` and ran its setters BEFORE the `if (!open)`
+    // guard, so collapsing the panel — to scroll, or by accident — wiped every
+    // word. Finalize had not been pressed, so nothing had reached the server and
+    // there was nothing to recover from.
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    const box = await screen.findByLabelText('Transcript');
+    fireEvent.change(box, { target: { value: 'Several careful paragraphs.' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Close capture/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Start a capture/i }));
+
+    const reopened = await screen.findByLabelText('Transcript');
+    expect((reopened as HTMLTextAreaElement).value).toBe('Several careful paragraphs.');
+  });
+
+  it('DISCARDING MID-RECORDING REALLY DISCARDS, even though stop() emits later', async () => {
+    // `MediaRecorder.stop()` fires `dataavailable` on a later task. The handler
+    // closes over a stable ref, so clearing the buffer and THEN stopping put the
+    // complete recording straight back — after the live region had announced
+    // "Audio discarded." Nulling the recorder ref does not unbind a handler.
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: /Start recording/i }));
+    await waitFor(() => expect(FakeMediaRecorder.instances).toHaveLength(1));
+
+    const recorder = FakeMediaRecorder.instances[0];
+    fireEvent.click(screen.getByRole('button', { name: /Discard/i }));
+
+    // The handler must be detached BEFORE the async emission lands.
+    expect(recorder.ondataavailable).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(recorder.ondataavailable).toBeNull();
+    // And the microphone was actually released.
+    expect(tracks.stop).toHaveBeenCalled();
+  });
+
+  it('CLOSING THE PANEL RELEASES THE MICROPHONE', async () => {
+    // Closing does not unmount, and Stop/Discard live inside the body that stops
+    // rendering — so a hot microphone had no ISAAC-visible control at all.
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: /Start recording/i }));
+    await waitFor(() => expect(FakeMediaRecorder.instances).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /Close capture/i }));
+    await waitFor(() => expect(tracks.stop).toHaveBeenCalled());
+    expect(FakeMediaRecorder.instances[0].state).toBe('inactive');
+  });
+});

@@ -30,8 +30,13 @@
  * spinner that outlives a refusal.
  *
  * AUDIO NEVER LEAVES THE TAB, AND THE UI SAYS SO RATHER THAN IMPLYING IT.
- * `MediaRecorder` chunks are held in a ref, counted for the reader, and dropped
- * on discard, on record change, and on unmount. Nothing serialises them, nothing
+ * `MediaRecorder` chunks are held in a ref, counted only to build the opaque
+ * handle below — the count is NOT rendered, and an earlier version of this line
+ * said "counted for the reader", which was not true of anything on screen — and
+ * dropped on discard, on close, on record change, and on unmount. The drop
+ * detaches `ondataavailable` BEFORE calling `stop()`, because `stop()` emits its
+ * last chunk asynchronously and would otherwise refill a buffer the live region
+ * had just announced as empty. Nothing serialises them, nothing
  * puts them in a request body, and there is no upload endpoint in this
  * application for them to reach. The one request that mentions audio sends an
  * opaque handle — a string this component minted — and never the audio.
@@ -154,17 +159,35 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
   /* ---- audio lifecycle. Everything here DROPS audio; nothing sends it. ---- */
 
   const dropAudio = useCallback(() => {
-    chunksRef.current = [];
-    setHeldChunks(0);
     const recorder = recorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      try {
-        recorder.stop();
-      } catch {
-        /* already stopping; the tracks below are what actually release the mic */
+    if (recorder) {
+      // DETACH THE HANDLER BEFORE STOPPING, and this ordering is the whole fix.
+      //
+      // `MediaRecorder.stop()` emits its final `dataavailable` ASYNCHRONOUSLY, on
+      // a later task. The handler closes over the stable `chunksRef`, so the
+      // previous version — which cleared the array, then called `stop()`, then
+      // nulled `recorderRef` — announced "Audio discarded." to the live region
+      // and then had the complete recording pushed straight back into the buffer
+      // a tick later. Nulling the ref does not unbind a DOM event handler.
+      //
+      // The blob never left the tab either way (no request has ever carried it;
+      // `requestTranscript` sends only an opaque `held-in-tab:<n>` handle), so
+      // this was a retention and honesty defect rather than an exfiltration one
+      // — the UI stated the audio was gone while it sat in memory for the rest
+      // of the session with no control that could clear it.
+      recorder.ondataavailable = null;
+      if (recorder.state !== 'inactive') {
+        try {
+          recorder.stop();
+        } catch {
+          /* already stopping; the tracks below are what actually release the mic */
+        }
       }
     }
     recorderRef.current = null;
+    // Cleared AFTER the handler is detached, so nothing can repopulate it.
+    chunksRef.current = [];
+    setHeldChunks(0);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   }, []);
@@ -172,6 +195,28 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
   // Unmount and record change both drop audio. Leaving a record must not leave a
   // live microphone or a buffer behind, and the panel says the audio is gone.
   useEffect(() => () => dropAudio(), [dropAudio]);
+
+  /*
+   * CLOSING THE PANEL RELEASES THE MICROPHONE.
+   *
+   * The unmount cleanup above is not enough: "Close capture" does not unmount
+   * this component, it only stops rendering the body — and the Stop button, the
+   * Discard button and the recording live region all live inside that body. So
+   * closing mid-recording left `getUserMedia` tracks and a running
+   * `MediaRecorder` alive with NO ISAAC-visible indicator and no way to stop
+   * until the panel was reopened. The browser's own tab indicator would be the
+   * only sign a scientist had that the microphone was still on.
+   *
+   * `dropAudio` is stable (`useCallback(…, [])`), so this effect fires exactly on
+   * the open→closed transition and never spuriously.
+   *
+   * Deliberately NOT paired with anything that clears `text`: releasing the
+   * microphone and discarding typed words are different acts, and only the first
+   * belongs here. See the reset effect below.
+   */
+  useEffect(() => {
+    if (!open) dropAudio();
+  }, [open, dropAudio]);
 
   useEffect(() => {
     if (!audioRecordingAvailable()) setVoice('unsupported');
@@ -185,12 +230,35 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     setExperimentVersion(listed.experiment_version);
   }, [experimentId]);
 
+  /*
+   * RESETTING IS KEYED ON THE RECORD, NEVER ON THE PANEL BEING OPENED.
+   *
+   * These four setters used to sit at the top of the fetch effect below, whose
+   * deps include `open` — and they ran BEFORE its `if (!open) return` guard. So
+   * "Close capture" wiped the box. A scientist who typed several paragraphs and
+   * then collapsed the panel to scroll, or hit the toggle by accident, lost every
+   * word: finalize had not been pressed, so nothing had reached the server, and
+   * there was nothing to recover from.
+   *
+   * That is the "scientist-entered text is never silently discarded" claim being
+   * false, and it is the fourth path the three negative controls missed — they
+   * cover empty candidates, a 412 on accept and a 412 on finalize, all real, and
+   * none involving the toggle. It also contradicted this component's own
+   * reasoning further down, that clearing the box "would make a reader who wants
+   * to correct a sentence retype the lot".
+   *
+   * Changing RECORDS is a different matter and genuinely must reset: the runs,
+   * the candidates and the text all belong to the record that was open.
+   */
   useEffect(() => {
-    let live = true;
     setReading(null);
     setDecisions({});
     setSelectedRun('');
     setText('');
+  }, [experimentId]);
+
+  useEffect(() => {
+    let live = true;
     if (!open) return undefined;
     loadRuns().catch((cause: unknown) => {
       if (live) setError(mutationFailureCopy(cause, FALLBACK.runs));
@@ -478,11 +546,14 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
           </button>
         </div>
       ) : (
+        // No `aria-controls`: the element carrying `guidanceId` is UNMOUNTED in
+        // this branch, and pointing at an id that is not in the document is a
+        // dangling reference an assistive technology cannot follow. `aria-expanded`
+        // alone is correct and sufficient here.
         <button
           type="button"
           className="capture-guidance-reopen"
           aria-expanded={false}
-          aria-controls={guidanceId}
           onClick={() => setGuidanceOpen(true)}
         >
           {CAPTURE_COPY.guidanceReopen}
