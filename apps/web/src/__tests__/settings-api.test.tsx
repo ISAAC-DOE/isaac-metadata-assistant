@@ -1087,8 +1087,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 56 operations, 130 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(56);
+  it('describes the contract it claims to: 59 operations, MEASURED after the merge', () => {
+    // MEASURED after the merge. Revision history publishes three operations and
+    // the asset slice four, both from a base of 52 — neither branch's own figure
+    // is the merged one, and adding the deltas gives a third wrong number.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(59);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1647,20 +1650,26 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 52,567; this
     //     figure drops the 110 `\n\n` separators, and 52,567 - 220 = 52,347.
-    // 55,611 -> 60,399, 52 -> 56 operations, 119 -> 130 post-lead paragraphs: the
-    // backend now publishes the four ASSET REFERENCE operations (list, record, edit,
-    // remove). All four entries came out of `create_app().openapi()` — none was
-    // hand-written — which is why `test_contract_description_parity.py` is green in
-    // both directions.
+    // 55,611 -> 60,728, 52 -> 55 operations, 119 -> 131 post-lead paragraphs: the
+    // backend now publishes the three READ-ONLY submission-history operations
+    // (`GET .../revisions`, `GET .../revisions/{revision_no}` and its `/diff`).
+    // Nothing was hand-edited: all three entries came out of
+    // `create_app().openapi()`, which is why `test_contract_description_parity.py`
+    // is green in both directions.
     //
-    // RE-MEASURED OVER THE WHOLE ARRAY, not added to the previous figure, because that
-    // is the lesson the 2026-08-16 note above records. Measured two independent ways:
+    // MEASURED the same two independent ways, and NOT by adding a delta to 55,611 —
+    // see the paragraph at the top of this block about two branches incrementing
+    // one counter:
     //
-    //   . the splitPurpose paragraph rule over the array gives 60,399 / 130.
-    //   . internal consistency: raw sum of `d.description.length` = 60,659; this figure
-    //     drops the 130 `\n\n` separators, and 60,659 - 260 = 60,399.
-    expect(total).toBe(60399);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(130);
+    //   . from the SERVED document: the splitPurpose paragraph rule re-implemented
+    //     in Python over `create_app().openapi()`, restricted to the 55 documented
+    //     operations this array names, gives total 60,728 and 131 post-lead
+    //     paragraphs.
+    //   . internal consistency: raw sum of `d.description.length` = 60,990; this
+    //     figure drops the 131 `\n\n` separators, and 60,990 - 262 = 60,728.
+    // MEASURED after the merge, both figures, from this test's own failure output.
+    expect(total).toBe(65516);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(142);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

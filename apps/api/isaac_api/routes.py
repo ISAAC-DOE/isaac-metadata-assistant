@@ -57,6 +57,7 @@ from . import identity as identity_module
 from . import memory
 from . import memory_graph
 from . import notes
+from . import revision_history
 from . import runtime_mode
 from . import runtime_records
 from . import search
@@ -68,7 +69,7 @@ from . import verification
 from . import version_contract as vc
 from . import workspace as ws
 from .identity import require_human_actor
-from .workflow import derive_workflow
+from .workflow import derive_lifecycle, derive_workflow
 from .workspace import REPO_ROOT, Experiment, atomic_write_text
 
 router = APIRouter(prefix="/api")
@@ -7414,6 +7415,768 @@ def _submission_replay(
     )
     response.headers["ETag"] = exp.etag()
     return payload
+
+
+# --- 8a2. THE REVISION HISTORY READ SURFACE (read-only, writes nothing) -------
+#
+# WHAT THESE THREE OPERATIONS ARE, AND THE ONE THING THEY MUST NEVER DO.
+#
+# `POST .../submit` captures an immutable snapshot of a record and records a
+# declaration over it. Until this section existed there was NO WAY TO READ ANY OF
+# THAT BACK: the rows were written and were reachable only by a psql session. These
+# three GETs are that read surface, and they add no write of any kind — no route
+# here mints a revision, and the only writer of `isaac_experiment_revisions` is
+# still `submission_store.record_submission`, inside its one transaction.
+#
+# THE ONE THING THEY MUST NEVER DO IS ANSWER "NO HISTORY" WHEN THE TRUTH IS
+# "CANNOT KNOW". Migrations `0003_revisions` and `0004_submissions` are applied by
+# an OPERATOR, separately from the image rollout, so a running build routinely meets
+# a database its own migrations have not reached — and on this deployment they have
+# not been applied at all. An empty `revisions: []` in that state is a lie with a
+# plausible shape: it says "this record was never submitted" about a database this
+# server never successfully asked. So every operation here reports `availability` as
+# a FIRST-CLASS field, `revisions` exists ONLY when the history was actually read,
+# and the three ways it can be unreadable are named separately because they have
+# three different remedies (configure a database / apply a migration / restore one
+# that stopped answering).
+#
+# THE STORED DOCUMENT NEVER LEAVES THE PROCESS. `isaac_experiment_revisions.state`
+# is a whole experiment snapshot and `revision_history.Q_REVISION_BY_NO` fetches it,
+# because the diff is computed from it. No response body below carries it: the
+# payload builders name their fields one by one, and a test asserts the detail body
+# has no `state` key.
+
+
+#: The three ways the history can be unreadable, as prose. Each names its own
+#: remedy, because merging them would send an operator to the wrong place — the
+#: same reasoning `_SUBMISSION_NO_TABLES_LEAD` and its two siblings are split on.
+_HISTORY_NO_STORAGE_LEAD = (
+    "Submission history is a durable record, and this deployment is not configured "
+    "with an application database to keep one in. Nothing about this record's "
+    "submission history can be read here — which is not the same as this record "
+    "never having been submitted."
+)
+_HISTORY_NO_TABLES_LEAD = (
+    "This deployment's database does not yet have the submission-history tables, so "
+    "the history could not be read. The migration that creates them has to be "
+    "applied by an operator. This is not a statement that this record has never "
+    "been submitted — it is a statement that this server could not find out."
+)
+#: Deliberately says "the read did not complete" rather than naming a CAUSE.
+#:
+#: It used to say the database "did not accept the connection". That was true of
+#: the two connection-layer exceptions this once caught, and false of everything
+#: the catch now covers: a statement-policy refusal, a cancelled query, a
+#: `lock_timeout`, a dropped connection mid-transaction, a column missing from a
+#: drifted migration. Naming the wrong cause is worse than naming none — it sends
+#: an operator to the network when the answer is in the code.
+#:
+#: What it must keep saying, and does: this is an operator condition, not a fact
+#: about the record, and emphatically not "never submitted".
+_HISTORY_DB_UNREACHABLE_LEAD = (
+    "This deployment could not complete the read of its application database, so the "
+    "submission history could not be read. This is an operator or infrastructure "
+    "condition, not something about this record, and it is not a statement that "
+    "this record has never been submitted."
+)
+#: The FOURTH case, and the one that is NOT an unknown. A worked-example session is
+#: refused by `post_submit` outright, `identity.stamp_actor` returns `None` for any
+#: scoped request, and `PostgresOrdinaryStore.refuse_if_not_persistable` raises on a
+#: session record — three independent enforcements. So "this record has no submission
+#: history" is a fact here rather than an inability, and it is reported as its own
+#: state so that it can never be confused with the three above.
+_HISTORY_WORKED_EXAMPLE_LEAD = (
+    "Records in a worked-example session are temporary and are discarded with the "
+    "session, so they are never submitted and have no submission history. Nothing "
+    "was read, and nothing could have been there to read."
+)
+
+#: THE ``503`` THE THREE HISTORY OPERATIONS CAN ANSWER, DECLARED BECAUSE THEY CAN.
+#:
+#: It covers BOTH 503s these handlers can produce, and it has to, because OpenAPI
+#: admits one description per status code and both are reachable on one operation:
+#: the record read can raise the durable-storage outage ``_R_STORAGE_UNAVAILABLE``
+#: describes, and the history read can find no database, no tables, or a database
+#: that did not answer. Declaring only one of them would leave a client meeting the
+#: other with a status the contract does not admit exists — the same defect
+#: ``_R_STORAGE_UNAVAILABLE``'s own note records being corrected for.
+_R_REVISION_HISTORY_UNAVAILABLE: dict = {
+    503: {
+        "description": (
+            "The submission history could not be read, and the body says which of "
+            "the reasons applies in `availability.reason`: `no_durable_storage` "
+            "(this deployment has no application database), `tables_absent` (it has "
+            "one and the migration creating the history tables has not been "
+            "applied), or `database_unavailable` (it did not answer). **The rows "
+            "key is absent rather than empty**, because \"this record was never "
+            "submitted\" and \"this server could not find out\" are different "
+            "statements and only one of them was observed. The same status is also "
+            "returned when this deployment stores experiments in its own database "
+            "and the server could not find out whether that database holds this "
+            "record. Nothing is changed either way, and no host, path or credential "
+            "is named."
+        )
+    },
+}
+
+#: The ``404`` the two per-revision operations can answer, which is TWO facts.
+_R_REVISION_NOT_FOUND: dict = {
+    404: {
+        "description": (
+            "Either no experiment in the selected workspace has that id — or the "
+            "record exists, its history was read successfully, and it holds no "
+            "revision under that number. The body's `error` distinguishes them "
+            "(`experiment_not_found` / `revision_not_found`), because they send a "
+            "reader to different places."
+        )
+    },
+}
+
+#: `availability.state`, as three stable machine-readable values.
+_HISTORY_AVAILABLE = "available"
+_HISTORY_UNAVAILABLE = "unavailable"
+_HISTORY_NOT_APPLICABLE = "not_applicable"
+
+
+def _history_availability(state: str, reason: str | None, message: str) -> dict:
+    """The one shape every history operation reports its availability in.
+
+    ``reason`` is ``None`` only for ``available``. Every other state names its cause
+    with a stable code so a client branches on the code and renders the message.
+    """
+    return {"state": state, "reason": reason, "message": message}
+
+
+def _submission_deployment_block() -> dict:
+    """Why this deployment could not accept a submission — SEPARATELY from the science.
+
+    **THIS IS THE FIELD THAT KEEPS `ready_to_submit` HONEST.** A record whose every
+    question is answered and whose every unit passes the export gate IS ready to
+    submit, and stays ``ready_to_submit`` on a deployment that can record nothing at
+    all. Whether a submission would be ACCEPTED is a different question about a
+    different subject — this server's configuration — and it is answered here, under
+    its own name, so that an operator problem can never read as an unfinished record.
+
+    It reuses ``submission_store.capability()`` verbatim rather than re-deriving the
+    conditions: that function is what ``GET /api/health`` already publishes, and two
+    surfaces of one deployment disagreeing about whether it can submit is precisely
+    the defect its own docstring records being corrected for. It opens nothing.
+
+    Worth stating because it is this build's normal state: ``no_attributable_actor``
+    is present on every deployment shipped today. ``identity.require_human_actor``
+    reaches an actor only through a configured verifier, no shipped deploy artifact
+    configures one, and therefore ``POST .../submit`` refuses every request with
+    ``409 human_actor_required``. That is a deployment fact. It is NOT a fact about
+    any record, and nothing here lets it become one.
+    """
+    capability = submission_store.capability()
+    blockers = list(capability["blockers"])
+    if not blockers:
+        message = (
+            "This deployment is configured to accept a submission. Whether one "
+            "would succeed also depends on the database holding the "
+            "submission-history tables, which cannot be known without writing."
+        )
+    else:
+        message = (
+            "This deployment cannot currently accept a submission of any record. "
+            "This says nothing about whether this record is ready — it is a fact "
+            "about how this server is configured, and it is resolved by an "
+            "operator, not by editing the record."
+        )
+    return {
+        "blocked": bool(blockers),
+        "blockers": blockers,
+        "basis": capability["basis"],
+        "requires_attributable_actor": capability["requires_attributable_actor"],
+        "actor_trust_basis": capability["actor_trust_basis"],
+        "message": message,
+    }
+
+
+def _lifecycle_payload(
+    exp,
+    units: Sequence[Any],
+    *,
+    submitted_known: bool,
+    submitted_for_current_content: bool | None,
+    unknown_reason: str | None,
+) -> dict:
+    """The derived lifecycle, plus the deployment disclosure beside it.
+
+    ``blocker_report`` IS CALLED, NOT REIMPLEMENTED. It is the one definition of what
+    blocks a submission — ``pending_count() == 0`` over all units, and every unit's
+    ``export_draft`` dry run passing — and it never raises. Deriving the lifecycle
+    from anything else would create a second answer to "is this ready", which is the
+    exact class of defect ``_workflow_for``'s own comment records being fixed.
+
+    The derivation itself is ``workflow.derive_lifecycle``, which is pure and takes
+    NO deployment input and NO ``exported`` input. Everything environmental is
+    attached here, under its own key.
+    """
+    blockers = submissions.blocker_report(exp, units)
+    lifecycle = derive_lifecycle(
+        pending_count=int(blockers["pending_count"]),
+        failing_unit_count=len(blockers["failing_units"]),
+        submitted_known=submitted_known,
+        submitted_for_current_content=submitted_for_current_content,
+        submission_unknown_reason=unknown_reason,
+    )
+    lifecycle["submission_blocked_by_deployment"] = _submission_deployment_block()
+    # The per-unit detail behind `failing_unit_count`, so a refusal names WHICH unit
+    # refused rather than only that one did. Same list `POST .../submit` refuses with.
+    lifecycle["scientific_readiness"]["failing_units"] = blockers["failing_units"]
+    return lifecycle
+
+
+def _revision_summary(revision: Mapping[str, Any]) -> dict:
+    """One revision as a listing row. Never carries the stored document."""
+    submission = revision.get("submission")
+    return {
+        "revision_no": revision["revision_no"],
+        "revision_id": revision["revision_id"],
+        "reason": revision["reason"],
+        "created_utc": revision["created_utc"],
+        "experiment_rev": revision["experiment_rev"],
+        "content_signature": revision["content_signature"],
+        "actor": _revision_actor(revision),
+        "change_counts": revision.get("change_counts") or {},
+        "submission": _submission_summary(submission),
+    }
+
+
+def _revision_actor(row: Mapping[str, Any]) -> dict:
+    """WHO IS ON RECORD FOR THIS ROW — including, honestly, nobody.
+
+    ``subject`` is returned verbatim and is ``None`` whenever ``trust_basis`` is
+    ``unattributed``; the database enforces that pairing in both directions
+    (``CHECK ((trust_basis = 'unattributed') = (subject IS NULL))``). No placeholder,
+    no "system", no "unknown user", no deployment name — a name here would be a
+    person credited with a declaration they did not make, which is the single worst
+    thing this surface could invent.
+
+    ``basis`` is passed through so a reader can see WHAT the attribution is worth.
+    ``test_fixture`` is a real, shipped basis (``identity.FixtureEdgeVerifier`` mints
+    a subject from the process environment) and it is **not proof anyone
+    authenticated** — ``submission_store.capability`` already surfaces it on
+    ``/api/health`` for that reason, and this does the same rather than flattening
+    every attributed row into "attributed".
+    """
+    trust_basis = row.get("trust_basis")
+    return {
+        "subject": row.get("subject"),
+        "trust_basis": trust_basis,
+        "attributed": trust_basis != submissions.TRUST_BASIS_UNATTRIBUTED,
+    }
+
+
+def _submission_summary(submission: Mapping[str, Any] | None) -> dict | None:
+    if submission is None:
+        return None
+    return {
+        "submission_id": submission["submission_id"],
+        "submitted_utc": submission["submitted_utc"],
+        "unit_count": submission["unit_count"],
+        "idempotency_key_used": submission["idempotency_key"] is not None,
+        "actor": _revision_actor(submission),
+        "conflict_summary": submission.get("conflict_summary") or {},
+    }
+
+
+def _history_unavailable(
+    reason: str, message: str, body: dict, *, etag: str | None = None
+) -> JSONResponse:
+    """The typed ``503`` for "this deployment cannot read the submission history".
+
+    503 FOR THE SAME REASON ``_submission_unavailable`` IS ONE: the request is well
+    formed, the application is working, and a dependency this deployment is
+    configured to use is not ready. Every reason it can carry is resolved by an
+    operator action that is already specified.
+
+    **THE BODY IS THE SAME ENVELOPE THE 200 CARRIES**, minus ``revisions`` and the
+    counts. That is deliberate: a client reads one shape and branches on
+    ``availability.state``, and cannot accidentally treat a refusal as a listing —
+    the rows simply are not there to be misread as empty.
+
+    ``etag`` IS TAKEN AND SET HERE BECAUSE FASTAPI WILL NOT DO IT. The list route
+    sets ``response.headers["ETag"]`` on the injected ``Response``, but that only
+    reaches a body FastAPI serialises itself; every refusal path returns a
+    ``JSONResponse`` directly, and FastAPI does not merge the injected headers into
+    one. So the ETag was silently dropped on exactly the paths this deployment
+    always takes — ``tables_absent`` is its current state, so it was never emitted
+    at all. The record's version is knowable on these paths (the experiment loaded
+    fine; it is the HISTORY that could not be read), so withholding it was an
+    accident rather than a policy.
+    """
+    response = JSONResponse(
+        status_code=503,
+        content={
+            **body,
+            "error": "revision_history_unavailable",
+            "availability": _history_availability(_HISTORY_UNAVAILABLE, reason, message),
+        },
+    )
+    if etag is not None:
+        response.headers["ETag"] = etag
+    return response
+
+
+def _open_reader():
+    """The revision reader for this deployment, or ``(None, reason, message)``.
+
+    Returns ``(reader, None, None)`` when one exists. The gate is
+    ``revision_history.reader``, which calls the SAME ``repo._postgres_available``
+    the submission write path calls — so a deployment that cannot record a
+    submission is exactly a deployment that cannot read one back.
+    """
+    selected = revision_history.reader()
+    if selected is None:
+        return None, submission_store.BLOCKER_NO_DURABLE_STORAGE, _HISTORY_NO_STORAGE_LEAD
+    return selected, None, None
+
+
+#: EVERY failure of a history read, not only the two the CONNECTION layer raises.
+#:
+#: This was ``(WriteRefused, MissingDependency)``. Those two are raised at exactly
+#: four sites — the ``PGDATABASE`` gate, missing libpq environment,
+#: ``psycopg2.connect`` failing, and a ``current_database()`` mismatch. **Nothing
+#: wraps an exception raised by ``cursor.execute``.** ``db_write.write_transaction``
+#: catches ``BaseException``, rolls back and re-raises unchanged, and ``create_app``
+#: registers no catch-all handler.
+#:
+#: So the driver's own errors escaped as an undeclared **500** — exactly what the
+#: note below says must never happen — on every reachable path that is not a
+#: connection failure: the server dropping the connection mid-transaction, a
+#: pooler rejecting ``SET LOCAL``, an administrator cancelling the query, a
+#: ``lock_timeout`` firing, or a drifted ``0003`` in which ``to_regclass`` resolves
+#: the relation but a column is missing (``_tables_present`` is relation-level and
+#: cannot see that). The three tests that appeared to cover this raised
+#: ``WriteRefused`` from a stub, so the gap was invisible.
+#:
+#: Worse than the status code: the raw psycopg2 exception reached the ASGI stack
+#: and the log. ``connect_psycopg2`` strips those on the connect path precisely
+#: because "psycopg2 messages echo the host, the user and the connection string";
+#: the execute path had no equivalent guard. Only the exception CLASS is ever
+#: reported here, never its message.
+#:
+#: ``Exception``, not ``BaseException``: a cancellation or ``KeyboardInterrupt``
+#: must still propagate.
+_HISTORY_READ_FAILURES = (Exception,)
+#: ``MissingDependency`` IS CAUGHT HERE AND IS NOT CAUGHT BY ``post_submit``, AND
+#: THE DIVERGENCE IS DELIBERATE RATHER THAN AN OVERSIGHT. It is raised when
+#: ``PGHOST`` is set and psycopg2 is not importable — a deployment defect, not a
+#: request defect — and on the write path it surfaces as a 500. **A read operation
+#: in this application must never 500** (``_read_artifact_json``'s docstring states
+#: the rule and gives the reason: the caller gets nothing usable, and in a bundled
+#: `Promise.all` neither do its siblings). So these three GETs report the honest
+#: "this deployment could not reach its database" instead. Making the write path
+#: agree is a separate change with its own review; it is not silently made here.
+
+
+#: What `availability.message` says when the history WAS read, on the operation
+#: that returns a LIST. Present on the success path too, so a client never has to
+#: treat a missing message as "everything is fine".
+HISTORY_READ_NOTE = (
+    "The submission history was read from this deployment's database. An empty list "
+    "here means this record has no submitted revisions."
+)
+
+#: The same fact for the two operations that return ONE revision and a diff.
+#:
+#: `HISTORY_READ_NOTE` was served on all three, and its second sentence — "an
+#: empty list here means this record has no submitted revisions" — is about a list
+#: neither of those responses contains. Not user-visible today, because the UI
+#: renders `availability.message` only on the non-available branches; a false
+#: sentence in the contract's own response body all the same.
+HISTORY_READ_NOTE_SINGLE = (
+    "This revision was read from this deployment's database."
+)
+
+
+@router.get(
+    "/experiments/{experiment_id}/revisions",
+    tags=[TAG_EXPORT],
+    summary="List a Record's Submitted Revisions",
+    description=(
+        "Lists the immutable snapshots captured when this record was submitted, "
+        "newest first, and reports the record's derived submission lifecycle. "
+        "Read-only: nothing here writes a revision, and the only writer of one is "
+        "`POST /api/experiments/{experiment_id}/submit`.\n\n"
+        "**`availability` is the field to read first, and an empty list is never a "
+        "refusal.** The submission-history tables are created by a migration an "
+        "operator applies separately from the image, so a running server can meet a "
+        "database that does not have them. When that happens this operation answers "
+        "`503` with `availability.state: \"unavailable\"` and **no `revisions` key "
+        "at all** — never an empty list, because \"this record was never submitted\" "
+        "and \"this server could not find out\" are different statements and only "
+        "one of them was observed. `availability.reason` is `no_durable_storage`, "
+        "`tables_absent` or `database_unavailable`; the three have three different "
+        "remedies. A worked-example record answers `200` with "
+        "`availability.state: \"not_applicable\"`, which is a fact rather than an "
+        "inability: such records are never submitted.\n\n"
+        "`lifecycle.state` is DERIVED on every read and is never stored: `draft`, "
+        "`needs_review`, `ready_to_submit` or `submitted`. `submitted` means a "
+        "submission is on record for exactly the content this record holds NOW — it "
+        "is never derived from whether the record was exported, which is a "
+        "mechanical transform any caller can perform and is not a declaration by "
+        "anyone. `lifecycle.submission.known` is `false` whenever the history could "
+        "not be read, and the state then falls back to the scientific derivation "
+        "rather than to `not submitted`.\n\n"
+        "`lifecycle.submission_blocked_by_deployment` is reported SEPARATELY and "
+        "never lowers `lifecycle.state`. A record whose science is finished reads "
+        "`ready_to_submit` even where this deployment can accept no submission at "
+        "all — which is every deployment shipped today, because no edge-trust "
+        "verifier is configured and submission requires an attributable person.\n\n"
+        "The listing is bounded; `total` is how many revisions EXIST, whatever the "
+        "bounded list returned. No stored record snapshot is ever included."
+    ),
+    response_description=(
+        "The record's submitted revisions newest first, how many exist, the derived "
+        "lifecycle, and the availability of the history itself."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_REVISION_HISTORY_UNAVAILABLE,
+    },
+)
+def list_revisions(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
+
+    units = exp.export_units()
+    signature = submissions.content_signature(exp.id, units)
+    base = {
+        "experiment_id": exp.id,
+        "record_rev": exp.rev,
+        "current_content_signature": signature,
+        "signature_scope": submissions.SIGNATURE_SCOPE,
+        "limit": revision_history.DEFAULT_REVISION_LIMIT,
+    }
+
+    def envelope(*, known: bool, submitted: bool | None, reason: str | None) -> dict:
+        return {
+            **base,
+            "lifecycle": _lifecycle_payload(
+                exp,
+                units,
+                submitted_known=known,
+                submitted_for_current_content=submitted,
+                unknown_reason=reason,
+            ),
+        }
+
+    if scope is not None:
+        # A FACT, NOT AN UNKNOWN — see `_HISTORY_WORKED_EXAMPLE_LEAD`. `submitted` is
+        # reported as KNOWN and False because three independent enforcements make a
+        # submission over a session record unreachable, and no database was consulted
+        # to establish that.
+        body = envelope(known=True, submitted=False, reason=None)
+        body["availability"] = _history_availability(
+            _HISTORY_NOT_APPLICABLE, "worked_example_session", _HISTORY_WORKED_EXAMPLE_LEAD
+        )
+        return body
+
+    reader, reason, message = _open_reader()
+    if reader is None:
+        return _history_unavailable(
+            reason, message, envelope(known=False, submitted=None, reason=reason),
+            etag=exp.etag(),
+        )
+    try:
+        read = reader.history(exp.id, signature)
+    except _HISTORY_READ_FAILURES:
+        return _history_unavailable(
+            "database_unavailable",
+            _HISTORY_DB_UNREACHABLE_LEAD,
+            envelope(known=False, submitted=None, reason="database_unavailable"),
+            etag=exp.etag(),
+        )
+    if not read["tables_present"]:
+        return _history_unavailable(
+            "tables_absent",
+            _HISTORY_NO_TABLES_LEAD,
+            envelope(known=False, submitted=None, reason="tables_absent"),
+            etag=exp.etag(),
+        )
+
+    body = envelope(
+        known=True, submitted=read["current_submission"] is not None, reason=None
+    )
+    body["availability"] = _history_availability(_HISTORY_AVAILABLE, None, HISTORY_READ_NOTE)
+    body["revisions"] = [_revision_summary(r) for r in read["revisions"]]
+    body["total"] = read["total"]
+    body["returned"] = len(body["revisions"])
+    body["current_submission"] = _submission_summary(read["current_submission"])
+    return body
+
+
+@router.get(
+    "/experiments/{experiment_id}/revisions/{revision_no}",
+    tags=[TAG_EXPORT],
+    summary="Read One Submitted Revision",
+    description=(
+        "Returns one submitted revision of this record: when it was captured, who "
+        "is on record for it, the run snapshots it holds, the field addresses that "
+        "changed since the revision before it, and the submission that captured "
+        "it. Read-only.\n\n"
+        "**The stored record snapshot is deliberately NOT returned.** The revision "
+        "holds a complete copy of the record as it was, and this operation reports "
+        "what that revision IS rather than shipping the document; the field values "
+        "themselves are available, scoped to what actually differs, from "
+        "`GET .../revisions/{revision_no}/diff`.\n\n"
+        "`actor.subject` is `null` and `actor.attributed` is `false` whenever the "
+        "revision was recorded without an attributable person. No placeholder name "
+        "is ever substituted. `actor.trust_basis` says what the attribution is "
+        "worth: `test_fixture` is a real shipped basis and is **not** proof anyone "
+        "authenticated.\n\n"
+        "`changes` are the field addresses this revision differed from its "
+        "PREDECESSOR at, exactly as they were recorded at submission time. They "
+        "cover draft field values only — evidence entries, run overrides, answer "
+        "logs and assets are not compared — so an empty list means no field value "
+        "differed, never that nothing changed. A revision with no predecessor "
+        "records no changes at all, which is not the same as having changed "
+        "nothing.\n\n"
+        "`503` with `availability.state: \"unavailable\"` when the history cannot be "
+        "read; `404` when the record exists and holds no such revision number. Those "
+        "are different answers and are never merged."
+    ),
+    response_description=(
+        "The revision, its run snapshots, its recorded field-address changes, and "
+        "the submission that captured it."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_REVISION_NOT_FOUND,
+        **_R_REVISION_HISTORY_UNAVAILABLE,
+    },
+)
+def get_revision(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    revision_no: Annotated[
+        int,
+        Path(ge=1, description="The revision number, as `GET .../revisions` reports it."),
+    ],
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    base = {"experiment_id": exp.id, "revision_no": revision_no}
+
+    if scope is not None:
+        return {
+            **base,
+            "availability": _history_availability(
+                _HISTORY_NOT_APPLICABLE,
+                "worked_example_session",
+                _HISTORY_WORKED_EXAMPLE_LEAD,
+            ),
+        }
+
+    reader, reason, message = _open_reader()
+    if reader is None:
+        return _history_unavailable(reason, message, base, etag=exp.etag())
+    try:
+        read = reader.revision(exp.id, revision_no)
+    except _HISTORY_READ_FAILURES:
+        return _history_unavailable(
+            "database_unavailable", _HISTORY_DB_UNREACHABLE_LEAD, base, etag=exp.etag()
+        )
+    if not read["tables_present"]:
+        return _history_unavailable(
+            "tables_absent", _HISTORY_NO_TABLES_LEAD, base, etag=exp.etag()
+        )
+    if read["revision"] is None:
+        return _revision_not_found(exp.id, revision_no)
+
+    revision = read["revision"]
+    return {
+        **base,
+        "availability": _history_availability(_HISTORY_AVAILABLE, None, HISTORY_READ_NOTE_SINGLE),
+        # Built field by field. `revision["state"]` — the stored record snapshot — is
+        # never named here, and `test_revision_history` asserts the body has no
+        # `state` key on any path.
+        "revision": {
+            **_revision_summary(revision),
+            "run_revisions": revision["run_revisions"],
+            "changes": revision["changes"],
+            "changes_scope": _REVISION_CHANGES_SCOPE,
+            "submission_runs": revision["submission_runs"],
+        },
+    }
+
+
+#: What the recorded change rows cover, echoed into the response so a reader never
+#: has to infer a comparison's scope from its name. It is the scope
+#: `submissions.field_values` documents and `0003_revisions.sql` writes down.
+_REVISION_CHANGES_SCOPE = "draft_field_values_only"
+
+
+def _revision_not_found(experiment_id: str, revision_no: int) -> JSONResponse:
+    """``404`` for a revision number this record does not have.
+
+    SEPARATE FROM ``experiment_not_found`` and separate from the ``503``. The record
+    was read successfully and the history was read successfully; there is simply no
+    revision under that number. Collapsing it into either of the others would tell a
+    client to go looking in the wrong place — the same reasoning ``_run_not_found``
+    already applies to a run id on a record that exists.
+    """
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "revision_not_found",
+            "experiment_id": experiment_id,
+            "revision_no": revision_no,
+            "message": (
+                "This record's submission history was read and holds no revision "
+                f"{revision_no}."
+            ),
+        },
+    )
+
+
+@router.get(
+    "/experiments/{experiment_id}/revisions/{revision_no}/diff",
+    tags=[TAG_EXPORT],
+    summary="Compare the Current Record Against a Submitted Revision",
+    description=(
+        "Compares the record AS IT IS NOW against the immutable snapshot captured "
+        "by one submitted revision, and reports every draft field address whose "
+        "value differs, with the value on each side. Read-only.\n\n"
+        "**The comparison is narrow, and it says so in `changes_scope`.** Only "
+        "draft field values are compared — the same scope the stored change rows "
+        "use. Evidence entries, run overrides, answer logs, assets and implicit "
+        "claims are NOT compared, and neither is anything nested inside a value "
+        "beyond that value's canonical form. An empty `changes` list therefore "
+        "means no field value differed; it does not mean nothing changed.\n\n"
+        "`content_signature_matches` is the stronger, authoritative statement and "
+        "covers more than `changes` does: it is `true` only when this record's "
+        "current content signature equals the one the revision recorded. **An empty "
+        "`changes` list beside `content_signature_matches: false` is a real and "
+        "meaningful state** — it means something outside draft field values differs, "
+        "and this operation is telling you it did not look there.\n\n"
+        "`units` reports which export units (runs, or the record itself when it has "
+        "none) were added and removed, separately from the field changes. A removed "
+        "run also contributes one `removed` field row per value it held, so the two "
+        "describe the same event at two altitudes.\n\n"
+        "`comparable` is `false` when the stored snapshot could not be read back "
+        "into a comparable record. `changes` is then absent rather than empty, "
+        "because an empty list would assert a comparison this server did not make."
+    ),
+    response_description=(
+        "The field-level differences between the current record and the named "
+        "revision, the unit membership changes, and whether the content signatures "
+        "match."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_REVISION_NOT_FOUND,
+        **_R_REVISION_HISTORY_UNAVAILABLE,
+    },
+)
+def get_revision_diff(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    revision_no: Annotated[
+        int,
+        Path(ge=1, description="The revision number, as `GET .../revisions` reports it."),
+    ],
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    units = exp.export_units()
+    signature = submissions.content_signature(exp.id, units)
+    base = {
+        "experiment_id": exp.id,
+        "revision_no": revision_no,
+        "record_rev": exp.rev,
+        "current_content_signature": signature,
+        "changes_scope": _REVISION_CHANGES_SCOPE,
+    }
+
+    if scope is not None:
+        return {
+            **base,
+            "availability": _history_availability(
+                _HISTORY_NOT_APPLICABLE,
+                "worked_example_session",
+                _HISTORY_WORKED_EXAMPLE_LEAD,
+            ),
+        }
+
+    reader, reason, message = _open_reader()
+    if reader is None:
+        return _history_unavailable(reason, message, base, etag=exp.etag())
+    try:
+        read = reader.revision(exp.id, revision_no)
+    except _HISTORY_READ_FAILURES:
+        return _history_unavailable(
+            "database_unavailable", _HISTORY_DB_UNREACHABLE_LEAD, base, etag=exp.etag()
+        )
+    if not read["tables_present"]:
+        return _history_unavailable(
+            "tables_absent", _HISTORY_NO_TABLES_LEAD, base, etag=exp.etag()
+        )
+    if read["revision"] is None:
+        return _revision_not_found(exp.id, revision_no)
+
+    revision = read["revision"]
+    # THE ONE DEFINITION OF "REHYDRATE A STORED SNAPSHOT INTO COMPARABLE DRAFTS", and
+    # it is REUSED rather than copied even though it is module-private. It is what
+    # the submit path itself compares against, its `None`-on-unreadable tolerance is
+    # load-bearing (a historical row that cannot be read must degrade the comparison,
+    # never fail the request), and a second copy here could diverge from the baseline
+    # the stored change rows were computed against — which would put two different
+    # answers to one question on two screens.
+    previous_units = submission_store._previous_unit_drafts(revision.get("state"))
+    current_units = submissions.units_by_id(units)
+    comparable = previous_units is not None
+
+    body = {
+        **base,
+        "availability": _history_availability(_HISTORY_AVAILABLE, None, HISTORY_READ_NOTE_SINGLE),
+        "comparable": comparable,
+        "content_signature_matches": (
+            revision["content_signature"] == signature
+        ),
+        "revision": {
+            **_revision_summary(revision),
+            "run_labels": {
+                r["run_id"]: r["label"]
+                for r in revision["run_revisions"]
+                if r["label"] is not None
+            },
+        },
+    }
+    if not comparable:
+        body["comparable_note"] = (
+            "The snapshot stored for this revision could not be read back into a "
+            "comparable record, so no field comparison was made. The revision "
+            "itself, and the change addresses recorded when it was submitted, are "
+            "unaffected."
+        )
+        body["units"] = submissions.unit_membership_changes(None, current_units)
+        return body
+
+    changes = submissions.address_value_changes(previous_units, current_units)
+    body["changes"] = changes
+    body["change_counts"] = {
+        kind: sum(1 for c in changes if c["change_kind"] == kind)
+        for kind in submissions.CHANGE_KINDS
+    }
+    body["units"] = submissions.unit_membership_changes(previous_units, current_units)
+    body["current_run_labels"] = {
+        unit.run_id: unit.run_label for unit in units if unit.run_id is not None
+    }
+    return body
 
 
 # --- 8b. CSV ingestion preview (P31.1 — read-only, no mutation) ---------------
