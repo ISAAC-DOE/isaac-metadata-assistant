@@ -633,3 +633,107 @@ it('renders the backend-down state for a response that is not a history envelope
   expect(screen.queryByText(TABLES_ABSENT_MESSAGE)).toBeNull();
   expect(screen.queryByText(/has no submitted revisions/i)).toBeNull();
 });
+
+/* ── 8. every changed row says which unit it belongs to ─────────────────────
+ *
+ * REGRESSION FROM INDEPENDENT REVIEW. No test anywhere exercised a REMOVED unit
+ * — `units.removed` was `[]` in every route test and every component fixture —
+ * and that is exactly the case the diff table could not describe.
+ */
+
+describe('unit attribution in the diff table', () => {
+  const REMOVED = '01UNITBBBBBBBBBBBBBBBBBBBB';
+
+  it('attributes a row whose run was REMOVED since the revision', async () => {
+    // `current_run_labels` is built from CURRENT units only, so a removed run is
+    // absent from it by construction. Reading it alone left these rows with no
+    // annotation at all — indistinguishable from a record-level field, and in a
+    // record where one run was deleted and another edited, two rows with the
+    // same address and no way to tell them apart.
+    stubFetchRoutes({
+      [LIST]: { body: history({ revisions: [revision()], total: 1, returned: 1 }) },
+      [DETAIL]: { body: detail() },
+      [DIFF]: {
+        body: diff({
+          content_signature_matches: false,
+          changes: [
+            {
+              unit_id: UNIT,
+              address: 'sample.composition',
+              change_kind: 'modified',
+              previous_value: 'CuO',
+              current_value: 'Cu2O',
+            },
+            {
+              unit_id: REMOVED,
+              address: 'sample.composition',
+              change_kind: 'removed',
+              previous_value: 'CuO',
+              current_value: null,
+            },
+          ],
+          change_counts: { added: 0, removed: 1, modified: 1 },
+          units: { comparable: true, added: [], removed: [REMOVED], unchanged: [UNIT] },
+          current_run_labels: { [UNIT]: 'Run C' },
+          revision: { ...revision(), run_labels: { [REMOVED]: 'Run B' } },
+        } as Partial<ApiRevisionDiff>),
+      },
+    });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
+
+    // BOTH rows are attributed, and to DIFFERENT units. Before the fix the
+    // second carried no annotation at all.
+    expect(await screen.findByText(/· Run C/)).toBeTruthy();
+    expect(await screen.findByText(/· Run B/)).toBeTruthy();
+  });
+
+  it('never prints a bare identifier when neither side recorded a label', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: history({ revisions: [revision()], total: 1, returned: 1 }) },
+      [DETAIL]: { body: detail() },
+      [DIFF]: {
+        body: diff({
+          content_signature_matches: false,
+          units: { comparable: true, added: [], removed: [REMOVED], unchanged: [] },
+          current_run_labels: {},
+          revision: { ...revision(), run_labels: {} },
+        } as Partial<ApiRevisionDiff>),
+      },
+    });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
+
+    // The id is shown AS an id, the treatment `RevisionSnapshot` already uses —
+    // never a naked ULID a reader would mistake for a name.
+    expect(
+      await screen.findByText(new RegExp(`a run with no recorded label · ${REMOVED}`)),
+    ).toBeTruthy();
+  });
+
+  it('calls the record the record, when the unit IS the record', async () => {
+    // `export_units` returns the RECORD ITSELF as the single unit of a record
+    // with no runs. A record that had zero runs at revision time and has one now
+    // produced `removed: [<experiment id>]`, rendered as "In this revision and
+    // not recorded now: 01J…" — asserting a deletion where the record had simply
+    // gained its first run.
+    stubFetchRoutes({
+      [LIST]: { body: history({ revisions: [revision()], total: 1, returned: 1 }) },
+      [DETAIL]: { body: detail() },
+      [DIFF]: {
+        body: diff({
+          content_signature_matches: false,
+          units: { comparable: true, added: [UNIT], removed: [EXP], unchanged: [] },
+          current_run_labels: { [UNIT]: 'Run A' },
+          revision: { ...revision(), run_labels: {} },
+        } as Partial<ApiRevisionDiff>),
+      },
+    });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
+
+    expect(
+      await screen.findByText(/In this revision and not recorded now: this record/),
+    ).toBeTruthy();
+  });
+});

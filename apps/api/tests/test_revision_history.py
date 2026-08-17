@@ -1043,3 +1043,120 @@ def test_the_history_read_issues_only_the_statements_it_declares(armed, wired, d
     assert db.commits >= 1 and db.rollbacks == 0
     # And nothing was written.
     assert len(db.revisions) == 1 and len(db.submissions) == 1
+
+
+# =============================================================================
+# REGRESSION FROM INDEPENDENT REVIEW — the "a read must never 500" invariant was
+# only true of the two exceptions the CONNECTION layer raises.
+# =============================================================================
+
+
+class _DriverError(Exception):
+    """Stands in for psycopg2's `OperationalError` / `QueryCanceled` / `UndefinedColumn`.
+
+    A distinct class, not `WriteRefused`: the point of the test below is that the
+    catch used to be keyed on `db_write`'s own two exception types, and NOTHING
+    wraps an error raised by `cursor.execute`. `write_transaction` catches
+    `BaseException`, rolls back, and re-raises unchanged.
+    """
+
+
+@pytest.mark.parametrize("path", ["", "/1", "/1/diff"])
+def test_a_DRIVER_error_mid_query_is_a_refusal_and_not_a_500(armed, monkeypatch, path):
+    """The gap the three existing failure tests could not see.
+
+    They raise `WriteRefused`/`MissingDependency` from a stub — the two types
+    raised at exactly four CONNECTION sites. Every other reachable failure came
+    from `cursor.execute` and escaped as an undeclared 500: the server dropping
+    the connection mid-transaction, a pooler rejecting `SET LOCAL`, an
+    administrator cancelling the query, a `lock_timeout` firing, or a drifted
+    `0003` where `to_regclass` resolves the relation but a column is missing —
+    which `_tables_present` is relation-level and cannot detect.
+
+    500 is not in this operation's declared contract, the frontend's envelope
+    reader rejects it, and the raw driver message — which echoes the host, the
+    user and the connection string — reached the log.
+
+    MUTATION: narrow `_HISTORY_READ_FAILURES` back to
+    `(WriteRefused, MissingDependency)` and every parameterization goes RED.
+    """
+
+    class ExplodingMidQuery:
+        def history(self, *a, **k):
+            raise _DriverError("server closed the connection unexpectedly\nhost=db.invalid")
+
+        def revision(self, *a, **k):
+            raise _DriverError("server closed the connection unexpectedly\nhost=db.invalid")
+
+        def diff(self, *a, **k):
+            raise _DriverError("server closed the connection unexpectedly\nhost=db.invalid")
+
+    monkeypatch.setattr(rhist, "reader", lambda env=None: ExplodingMidQuery())
+    _make()
+    response = _client().get(f"/api/experiments/{EXPERIMENT_ID}/revisions{path}")
+
+    assert response.status_code == 503, response.text
+    body = response.json()
+    assert body["availability"]["reason"] == "database_unavailable"
+    # Never an empty list: "could not read" is not "there are none".
+    assert "revisions" not in body, body
+    # And the driver's message — which carries the host — must not be echoed.
+    assert "db.invalid" not in response.text
+    assert "Traceback" not in response.text
+
+
+def test_the_unreachable_lead_names_no_cause_it_cannot_know(armed, monkeypatch):
+    """The copy must not blame the network for a failure that was not the network.
+
+    It used to say the database "did not accept the connection", which was true
+    of the two connection exceptions and false of everything the widened catch
+    now covers. Naming the wrong cause is worse than naming none: it sends an
+    operator to the network when the answer is in the code.
+    """
+
+    class ExplodingMidQuery:
+        def history(self, *a, **k):
+            raise _DriverError("canceling statement due to statement timeout")
+
+    monkeypatch.setattr(rhist, "reader", lambda env=None: ExplodingMidQuery())
+    _make()
+    message = _revisions(_client()).json()["availability"]["message"]
+
+    assert "did not accept the connection" not in message
+    # What it must still say, in substance.
+    assert "not a statement that this record has never been submitted" in message
+
+
+def test_a_refusal_still_carries_the_records_ETag(armed, no_tables):
+    """The version is knowable on a refusal path, so withholding it was an accident.
+
+    `list_revisions` sets `response.headers["ETag"]` on the injected `Response`,
+    but that only reaches a body FastAPI serialises itself. Every refusal path
+    returns a `JSONResponse` directly, and FastAPI does not merge the injected
+    headers into one — so the ETag was dropped on exactly the paths this
+    deployment always takes. `tables_absent` is its current state, so it was
+    never emitted at all.
+
+    The experiment loaded fine; it is the HISTORY that could not be read.
+
+    MUTATION: drop the `etag=` keyword at the call sites and this goes RED.
+    """
+    _make()
+    response = _revisions(_client())
+    assert response.status_code == 503, response.text
+    assert response.headers.get("ETag"), "a refusal must still say which version it refused for"
+
+
+def test_the_single_revision_routes_do_not_describe_a_list_they_do_not_return():
+    """`HISTORY_READ_NOTE`'s second sentence is about a list.
+
+    It was served on all three operations, including the two that return ONE
+    revision and a diff — "an empty list here means this record has no submitted
+    revisions", in a body with no list in it. Not user-visible today, because the
+    UI reads `availability.message` only on the non-available branches; a false
+    sentence in the contract's own response body all the same.
+    """
+    from isaac_api.routes import HISTORY_READ_NOTE, HISTORY_READ_NOTE_SINGLE
+
+    assert "empty list" in HISTORY_READ_NOTE
+    assert "empty list" not in HISTORY_READ_NOTE_SINGLE

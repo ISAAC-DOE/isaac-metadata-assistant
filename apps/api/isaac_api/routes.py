@@ -6810,8 +6810,19 @@ _HISTORY_NO_TABLES_LEAD = (
     "applied by an operator. This is not a statement that this record has never "
     "been submitted — it is a statement that this server could not find out."
 )
+#: Deliberately says "the read did not complete" rather than naming a CAUSE.
+#:
+#: It used to say the database "did not accept the connection". That was true of
+#: the two connection-layer exceptions this once caught, and false of everything
+#: the catch now covers: a statement-policy refusal, a cancelled query, a
+#: `lock_timeout`, a dropped connection mid-transaction, a column missing from a
+#: drifted migration. Naming the wrong cause is worse than naming none — it sends
+#: an operator to the network when the answer is in the code.
+#:
+#: What it must keep saying, and does: this is an operator condition, not a fact
+#: about the record, and emphatically not "never submitted".
 _HISTORY_DB_UNREACHABLE_LEAD = (
-    "This deployment's application database did not accept the connection, so the "
+    "This deployment could not complete the read of its application database, so the "
     "submission history could not be read. This is an operator or infrastructure "
     "condition, not something about this record, and it is not a statement that "
     "this record has never been submitted."
@@ -7020,7 +7031,9 @@ def _submission_summary(submission: Mapping[str, Any] | None) -> dict | None:
     }
 
 
-def _history_unavailable(reason: str, message: str, body: dict) -> JSONResponse:
+def _history_unavailable(
+    reason: str, message: str, body: dict, *, etag: str | None = None
+) -> JSONResponse:
     """The typed ``503`` for "this deployment cannot read the submission history".
 
     503 FOR THE SAME REASON ``_submission_unavailable`` IS ONE: the request is well
@@ -7032,8 +7045,18 @@ def _history_unavailable(reason: str, message: str, body: dict) -> JSONResponse:
     counts. That is deliberate: a client reads one shape and branches on
     ``availability.state``, and cannot accidentally treat a refusal as a listing —
     the rows simply are not there to be misread as empty.
+
+    ``etag`` IS TAKEN AND SET HERE BECAUSE FASTAPI WILL NOT DO IT. The list route
+    sets ``response.headers["ETag"]`` on the injected ``Response``, but that only
+    reaches a body FastAPI serialises itself; every refusal path returns a
+    ``JSONResponse`` directly, and FastAPI does not merge the injected headers into
+    one. So the ETag was silently dropped on exactly the paths this deployment
+    always takes — ``tables_absent`` is its current state, so it was never emitted
+    at all. The record's version is knowable on these paths (the experiment loaded
+    fine; it is the HISTORY that could not be read), so withholding it was an
+    accident rather than a policy.
     """
-    return JSONResponse(
+    response = JSONResponse(
         status_code=503,
         content={
             **body,
@@ -7041,6 +7064,9 @@ def _history_unavailable(reason: str, message: str, body: dict) -> JSONResponse:
             "availability": _history_availability(_HISTORY_UNAVAILABLE, reason, message),
         },
     )
+    if etag is not None:
+        response.headers["ETag"] = etag
+    return response
 
 
 def _open_reader():
@@ -7057,7 +7083,33 @@ def _open_reader():
     return selected, None, None
 
 
-_HISTORY_READ_FAILURES = (db_write.WriteRefused, db_write.MissingDependency)
+#: EVERY failure of a history read, not only the two the CONNECTION layer raises.
+#:
+#: This was ``(WriteRefused, MissingDependency)``. Those two are raised at exactly
+#: four sites — the ``PGDATABASE`` gate, missing libpq environment,
+#: ``psycopg2.connect`` failing, and a ``current_database()`` mismatch. **Nothing
+#: wraps an exception raised by ``cursor.execute``.** ``db_write.write_transaction``
+#: catches ``BaseException``, rolls back and re-raises unchanged, and ``create_app``
+#: registers no catch-all handler.
+#:
+#: So the driver's own errors escaped as an undeclared **500** — exactly what the
+#: note below says must never happen — on every reachable path that is not a
+#: connection failure: the server dropping the connection mid-transaction, a
+#: pooler rejecting ``SET LOCAL``, an administrator cancelling the query, a
+#: ``lock_timeout`` firing, or a drifted ``0003`` in which ``to_regclass`` resolves
+#: the relation but a column is missing (``_tables_present`` is relation-level and
+#: cannot see that). The three tests that appeared to cover this raised
+#: ``WriteRefused`` from a stub, so the gap was invisible.
+#:
+#: Worse than the status code: the raw psycopg2 exception reached the ASGI stack
+#: and the log. ``connect_psycopg2`` strips those on the connect path precisely
+#: because "psycopg2 messages echo the host, the user and the connection string";
+#: the execute path had no equivalent guard. Only the exception CLASS is ever
+#: reported here, never its message.
+#:
+#: ``Exception``, not ``BaseException``: a cancellation or ``KeyboardInterrupt``
+#: must still propagate.
+_HISTORY_READ_FAILURES = (Exception,)
 #: ``MissingDependency`` IS CAUGHT HERE AND IS NOT CAUGHT BY ``post_submit``, AND
 #: THE DIVERGENCE IS DELIBERATE RATHER THAN AN OVERSIGHT. It is raised when
 #: ``PGHOST`` is set and psycopg2 is not importable — a deployment defect, not a
@@ -7069,11 +7121,23 @@ _HISTORY_READ_FAILURES = (db_write.WriteRefused, db_write.MissingDependency)
 #: agree is a separate change with its own review; it is not silently made here.
 
 
-#: What `availability.message` says when the history WAS read. Present on the success
-#: path too, so a client never has to treat a missing message as "everything is fine".
+#: What `availability.message` says when the history WAS read, on the operation
+#: that returns a LIST. Present on the success path too, so a client never has to
+#: treat a missing message as "everything is fine".
 HISTORY_READ_NOTE = (
     "The submission history was read from this deployment's database. An empty list "
     "here means this record has no submitted revisions."
+)
+
+#: The same fact for the two operations that return ONE revision and a diff.
+#:
+#: `HISTORY_READ_NOTE` was served on all three, and its second sentence — "an
+#: empty list here means this record has no submitted revisions" — is about a list
+#: neither of those responses contains. Not user-visible today, because the UI
+#: renders `availability.message` only on the non-available branches; a false
+#: sentence in the contract's own response body all the same.
+HISTORY_READ_NOTE_SINGLE = (
+    "This revision was read from this deployment's database."
 )
 
 
@@ -7170,7 +7234,8 @@ def list_revisions(
     reader, reason, message = _open_reader()
     if reader is None:
         return _history_unavailable(
-            reason, message, envelope(known=False, submitted=None, reason=reason)
+            reason, message, envelope(known=False, submitted=None, reason=reason),
+            etag=exp.etag(),
         )
     try:
         read = reader.history(exp.id, signature)
@@ -7179,12 +7244,14 @@ def list_revisions(
             "database_unavailable",
             _HISTORY_DB_UNREACHABLE_LEAD,
             envelope(known=False, submitted=None, reason="database_unavailable"),
+            etag=exp.etag(),
         )
     if not read["tables_present"]:
         return _history_unavailable(
             "tables_absent",
             _HISTORY_NO_TABLES_LEAD,
             envelope(known=False, submitted=None, reason="tables_absent"),
+            etag=exp.etag(),
         )
 
     body = envelope(
@@ -7263,20 +7330,24 @@ def get_revision(
 
     reader, reason, message = _open_reader()
     if reader is None:
-        return _history_unavailable(reason, message, base)
+        return _history_unavailable(reason, message, base, etag=exp.etag())
     try:
         read = reader.revision(exp.id, revision_no)
     except _HISTORY_READ_FAILURES:
-        return _history_unavailable("database_unavailable", _HISTORY_DB_UNREACHABLE_LEAD, base)
+        return _history_unavailable(
+            "database_unavailable", _HISTORY_DB_UNREACHABLE_LEAD, base, etag=exp.etag()
+        )
     if not read["tables_present"]:
-        return _history_unavailable("tables_absent", _HISTORY_NO_TABLES_LEAD, base)
+        return _history_unavailable(
+            "tables_absent", _HISTORY_NO_TABLES_LEAD, base, etag=exp.etag()
+        )
     if read["revision"] is None:
         return _revision_not_found(exp.id, revision_no)
 
     revision = read["revision"]
     return {
         **base,
-        "availability": _history_availability(_HISTORY_AVAILABLE, None, HISTORY_READ_NOTE),
+        "availability": _history_availability(_HISTORY_AVAILABLE, None, HISTORY_READ_NOTE_SINGLE),
         # Built field by field. `revision["state"]` — the stored record snapshot — is
         # never named here, and `test_revision_history` asserts the body has no
         # `state` key on any path.
@@ -7391,13 +7462,17 @@ def get_revision_diff(
 
     reader, reason, message = _open_reader()
     if reader is None:
-        return _history_unavailable(reason, message, base)
+        return _history_unavailable(reason, message, base, etag=exp.etag())
     try:
         read = reader.revision(exp.id, revision_no)
     except _HISTORY_READ_FAILURES:
-        return _history_unavailable("database_unavailable", _HISTORY_DB_UNREACHABLE_LEAD, base)
+        return _history_unavailable(
+            "database_unavailable", _HISTORY_DB_UNREACHABLE_LEAD, base, etag=exp.etag()
+        )
     if not read["tables_present"]:
-        return _history_unavailable("tables_absent", _HISTORY_NO_TABLES_LEAD, base)
+        return _history_unavailable(
+            "tables_absent", _HISTORY_NO_TABLES_LEAD, base, etag=exp.etag()
+        )
     if read["revision"] is None:
         return _revision_not_found(exp.id, revision_no)
 
@@ -7415,7 +7490,7 @@ def get_revision_diff(
 
     body = {
         **base,
-        "availability": _history_availability(_HISTORY_AVAILABLE, None, HISTORY_READ_NOTE),
+        "availability": _history_availability(_HISTORY_AVAILABLE, None, HISTORY_READ_NOTE_SINGLE),
         "comparable": comparable,
         "content_signature_matches": (
             revision["content_signature"] == signature

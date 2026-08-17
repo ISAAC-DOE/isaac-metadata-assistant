@@ -181,11 +181,24 @@ function LifecycleCard({ lifecycle }: { lifecycle: ApiLifecycle }) {
           <li key={reason.code}>{reason.message}</li>
         ))}
       </ul>
-      {!lifecycle.submission.known && (
-        <p className="revhist-unknown" role="note">
-          {LIFECYCLE_UNKNOWN_NOTE}
-        </p>
-      )}
+      {/*
+       * SAID ONCE, NOT TWICE. `lifecycle.reasons` already carries
+       * `submission_state_unknown` whenever the history could not be read, so
+       * rendering `LIFECYCLE_UNKNOWN_NOTE` unconditionally beneath it stacked two
+       * wordings of one fact — and since `tables_absent` is this deployment's
+       * CURRENT state, every reader saw the pair. `RevisionList` states the rule
+       * this violates a few components down: do not stack two reads of one
+       * finding as two separate findings.
+       *
+       * The note is kept for the case it is actually needed: submission state
+       * unknown for a reason the reasons list does NOT already name.
+       */}
+      {!lifecycle.submission.known &&
+        !lifecycle.reasons.some((reason) => reason.code === 'submission_state_unknown') && (
+          <p className="revhist-unknown" role="note">
+            {LIFECYCLE_UNKNOWN_NOTE}
+          </p>
+        )}
       {lifecycle.scientific_readiness.failing_units.length > 0 && (
         <ul className="revhist-failing">
           {lifecycle.scientific_readiness.failing_units.map((unit) => (
@@ -489,12 +502,7 @@ function RevisionDiff({ diff }: { diff: ApiRevisionDiff }) {
                     <tr key={`${change.unit_id}:${change.address}`}>
                       <th scope="row" className="mono">
                         {change.address}
-                        {diff.current_run_labels?.[change.unit_id] ? (
-                          <span className="revhist-unit">
-                            {' '}
-                            · {diff.current_run_labels[change.unit_id]}
-                          </span>
-                        ) : null}
+                        <UnitTag diff={diff} unitId={change.unit_id} />
                       </th>
                       <td>{sideSentence(previous)}</td>
                       <td>{sideSentence(current)}</td>
@@ -513,24 +521,67 @@ function RevisionDiff({ diff }: { diff: ApiRevisionDiff }) {
 }
 
 /**
- * Runs added and removed since the revision — the same event the field rows above
- * describe one value at a time, said once at the altitude a reader arrives with.
+ * How one unit is named, wherever a unit is named.
+ *
+ * THREE SOURCES, IN ORDER, AND NEVER A BARE ULID. The diff table used to read
+ * `current_run_labels` alone — which is built from CURRENT units only, so a run
+ * REMOVED since the revision is absent from it by construction. Its rows got no
+ * annotation at all, indistinguishable from a record-level field: in a record
+ * where run B was deleted and run C edited, two rows both reading
+ * `sample.composition` appeared, one marked `· Run C` and one marked nothing,
+ * and a scientist could not tell which measurement each value belonged to.
+ *
+ * `diff.revision.run_labels` was already fetched and sat unused for exactly this.
+ * When neither side has a label, the id is shown as an id — the treatment
+ * `RevisionSnapshot` already uses, and this file's own rule.
+ *
+ * A UNIT IS NOT ALWAYS A RUN. `export_units` returns the RECORD ITSELF as the
+ * single unit of a record with no runs, so `unitLabel` says "this record" for
+ * that case rather than describing it in run words.
+ */
+function unitLabel(diff: ApiRevisionDiff, unitId: string): string | null {
+  const current = diff.current_run_labels?.[unitId];
+  if (current) return current;
+  const historical = diff.revision?.run_labels?.[unitId];
+  if (historical) return historical;
+  if (unitId === diff.experiment_id) return 'this record';
+  return null;
+}
+
+function UnitTag({ diff, unitId }: { diff: ApiRevisionDiff; unitId: string }) {
+  const label = unitLabel(diff, unitId);
+  return (
+    <span className="revhist-unit">
+      {' '}
+      · {label ?? `a run with no recorded label · ${unitId}`}
+    </span>
+  );
+}
+
+/**
+ * Units added and removed since the revision — the same event the field rows
+ * above describe one value at a time, said once at the altitude a reader arrives
+ * with.
+ *
+ * "Units", not "runs", and the distinction is not pedantry: an `ExportUnit` is
+ * the RECORD ITSELF for a record with no runs. A record that had zero runs at
+ * revision time and has one now produced `removed: [<experiment ULID>]`, which
+ * this rendered as "In this revision and not recorded now: 01J…" — asserting
+ * that something had been deleted when the record had simply gained its first
+ * run.
  */
 function UnitChanges({ diff }: { diff: ApiRevisionDiff }) {
   const units = diff.units;
   if (!units || !units.comparable) return null;
   if (units.added.length === 0 && units.removed.length === 0) return null;
+  const name = (id: string) => unitLabel(diff, id) ?? `a run with no recorded label · ${id}`;
   return (
     <ul className="revhist-units">
       {units.added.map((id) => (
-        <li key={`added:${id}`}>
-          Recorded now and not in this revision: {diff.current_run_labels?.[id] ?? id}
-        </li>
+        <li key={`added:${id}`}>Recorded now and not in this revision: {name(id)}</li>
       ))}
       {units.removed.map((id) => (
-        <li key={`removed:${id}`}>
-          In this revision and not recorded now: {diff.revision?.run_labels?.[id] ?? id}
-        </li>
+        <li key={`removed:${id}`}>In this revision and not recorded now: {name(id)}</li>
       ))}
     </ul>
   );
