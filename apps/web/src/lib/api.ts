@@ -50,6 +50,9 @@ import type {
   ApiNoteState,
   ApiOpenApiResponse,
   ApiPendingResponse,
+  ApiRevisionDetail,
+  ApiRevisionDiff,
+  ApiRevisionHistory,
   ApiRunCheckResponse,
   ApiRunCreated,
   ApiRunOverrideCleared,
@@ -623,6 +626,49 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
  * statuses that carry a conflict payload (412 / 400), and the methods that use it
  * surface failures inline rather than through `BackendDown`.
  */
+/**
+ * A REVISION-HISTORY envelope, which arrives on `200` AND on `503`.
+ *
+ * WHY THIS EXISTS INSTEAD OF `getJson`. The three history operations answer `503`
+ * when the deployment cannot READ its own submission history — no application
+ * database, migrations not applied, or a database that did not answer. That status
+ * is the right one (a dependency this deployment is configured to use is not
+ * ready, and every cause is fixed by an operator), and the body is the SAME
+ * envelope the `200` carries, minus the rows. `getJson` would turn it into a bare
+ * `ApiError`, and the screen would then have to render "something went wrong" over
+ * a state the server described precisely.
+ *
+ * IT IS NOT A BLANKET "TREAT 503 AS SUCCESS". The body has to actually be one of
+ * these envelopes — `availability.state` must be present and must be one of the
+ * three the contract defines — and anything else falls through to the normal typed
+ * error. Otherwise an unrelated `503` (the storage handler's
+ * `experiment_storage_unavailable`, or a proxy's own page) would be handed to a
+ * caller as a history answer with no availability in it.
+ *
+ * An HTML intercept is still an intercept: `readJson` tests provenance BEFORE it
+ * parses, so a sign-in page served on this path throws rather than being mistaken
+ * for an envelope.
+ */
+const HISTORY_STATES = ['available', 'unavailable', 'not_applicable'];
+
+function isHistoryEnvelope(body: unknown): boolean {
+  const availability = (body as { availability?: { state?: unknown } } | null)?.availability;
+  return (
+    typeof availability?.state === 'string' && HISTORY_STATES.includes(availability.state)
+  );
+}
+
+async function getHistoryEnvelope<T>(path: string): Promise<T> {
+  const res = await request(path);
+  if (res.ok) return readJson<T>(res, path);
+  if (res.status !== 503) throw await httpErrorWithReason(res, path);
+  // `readJson` throws a typed ApiError for an intercept or an unparseable body,
+  // which is exactly what a non-envelope 503 should produce.
+  const body = await readJson<T>(res, path);
+  if (!isHistoryEnvelope(body)) throw httpError(res, path);
+  return body;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await request(path);
   if (!res.ok) throw await httpErrorWithReason(res, path);
@@ -1363,6 +1409,35 @@ export const api = {
   // the backend reads only the two files export wrote inside the workspace.
   getArtifacts(id: string): Promise<ApiArtifactsResponse> {
     return getJson<ApiArtifactsResponse>(`/experiments/${enc(id)}/artifacts`);
+  },
+
+  /*
+   * SUBMISSION REVISION HISTORY — three read-only operations, one envelope.
+   *
+   * All three resolve on `503` as well as `200`, because a `503` here is a
+   * DESCRIBED state ("this deployment cannot read its own submission history, and
+   * here is which of the three reasons applies") rather than a failure the screen
+   * has nothing to say about. See `getHistoryEnvelope`.
+   *
+   * THE CALLER MUST BRANCH ON `availability.state` BEFORE READING `revisions` OR
+   * `changes`. Those keys are ABSENT — not empty — whenever the history was not
+   * read, which is what makes it impossible to render "no revisions" over a
+   * database nobody successfully asked.
+   */
+  getRevisionHistory(id: string): Promise<ApiRevisionHistory> {
+    return getHistoryEnvelope<ApiRevisionHistory>(`/experiments/${enc(id)}/revisions`);
+  },
+
+  getRevision(id: string, revisionNo: number): Promise<ApiRevisionDetail> {
+    return getHistoryEnvelope<ApiRevisionDetail>(
+      `/experiments/${enc(id)}/revisions/${enc(String(revisionNo))}`,
+    );
+  },
+
+  getRevisionDiff(id: string, revisionNo: number): Promise<ApiRevisionDiff> {
+    return getHistoryEnvelope<ApiRevisionDiff>(
+      `/experiments/${enc(id)}/revisions/${enc(String(revisionNo))}/diff`,
+    );
   },
 
   // P34.2 — the READ-ONLY grounded assistant resolver. A non-mutating POST (a

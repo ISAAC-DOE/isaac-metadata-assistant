@@ -1,0 +1,262 @@
+/*
+ * Submission History.
+ *
+ * Built entirely on the existing Scientific Clarity tokens — no new hue, no new
+ * radius, no new shadow. The card geometry is `.notes-section`'s, so the history
+ * and the notes panel read as two kinds of thing on one screen rather than two
+ * screens.
+ *
+ * RESERVED VERDICT COLOUR (--pass-* / --fail-*) APPEARS NOWHERE IN THIS FILE, and
+ * that is the load-bearing decision here rather than a style preference. A
+ * lifecycle state is not a validator verdict about the science: `ready_to_submit`
+ * is not a PASS and `needs_review` is not a FAIL, and painting them in the colours
+ * this product reserves for official schema validation would say, in the one
+ * language a reader cannot help absorbing, something the API never says.
+ *
+ * EVERY STATE CARRIES ITS WORD. `.revhist-chip` renders `lifecycle.label`, the
+ * change kinds render their sentence, and the availability block renders the
+ * server's message — colour is never the carrier of any distinction here, which is
+ * the repo's system-wide rule and matters most on a surface a reader skims.
+ *
+ * State is carried on `data-state`, not on extra classes, matching `.run-card`.
+ */
+
+.revhist-section {
+  margin-top: 24px;
+  margin-bottom: 20px;
+}
+
+.revhist-head {
+  margin-bottom: 10px;
+}
+
+.revhist-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.revhist-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+/* --- cards ---------------------------------------------------------------- */
+
+.revhist-card,
+.revhist-deployment,
+.revhist-availability {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.revhist-deployment,
+.revhist-availability {
+  background: var(--surface-subtle);
+  border-color: var(--border-faint);
+}
+
+.revhist-card-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.revhist-lifecycle {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.revhist-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-strong);
+  background: var(--surface-subtle);
+}
+
+/*
+ * THERE IS DELIBERATELY NO PER-STATE RULE HERE, and the absence is the decision.
+ * The chip renders `lifecycle.label`, so the state is already carried by the word;
+ * a per-state tint would add a second, weaker channel saying the same thing, and
+ * the obvious palette for it (`--pass-*` / `--fail-*`) is reserved for official
+ * schema validation, which a lifecycle state is not. `data-state` is still on the
+ * element so a future, deliberate treatment has somewhere to attach.
+ */
+
+.revhist-lifecycle-note {
+  color: var(--text-muted);
+}
+
+.revhist-reasons,
+.revhist-failing,
+.revhist-blockers,
+.revhist-runs,
+.revhist-changes,
+.revhist-units {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.revhist-unknown,
+.revhist-deployment-text,
+.revhist-availability-text,
+.revhist-block-note,
+.revhist-scope,
+.revhist-empty,
+.revhist-count {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+.revhist-count {
+  margin-top: 12px;
+  color: var(--text-secondary);
+}
+
+/* --- the list ------------------------------------------------------------- */
+
+.revhist-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.revhist-list > li {
+  margin-top: 8px;
+}
+
+.revhist-row {
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.revhist-row-button {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.revhist-row-button:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.revhist-row-no {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.revhist-row-when {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.revhist-row-actor {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.revhist-row-basis {
+  color: var(--text-tertiary);
+}
+
+/* --- one revision, expanded ----------------------------------------------- */
+
+.revhist-detail {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+}
+
+.revhist-block + .revhist-block {
+  margin-top: 14px;
+}
+
+.revhist-block-title {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-strong);
+}
+
+.revhist-change-kind {
+  font-weight: 650;
+  color: var(--text-strong);
+}
+
+.revhist-unit {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+/* --- the diff table ------------------------------------------------------- */
+/*
+ * Wide content scrolls INSIDE its own container rather than pushing the page
+ * sideways — the repo's responsive rule. A field address plus two values is the
+ * widest thing this panel renders.
+ */
+
+.revhist-table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.revhist-table th,
+.revhist-table td {
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-faint);
+  color: var(--text-secondary);
+}
+
+.revhist-table thead th {
+  font-weight: 650;
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+
+.revhist-table tbody th {
+  font-weight: 500;
+  color: var(--text-primary);
+}

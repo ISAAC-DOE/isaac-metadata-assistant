@@ -2028,3 +2028,202 @@ export interface ApiNoteReviewed {
   note: ApiNote;
   experiment_version: string;
 }
+
+/* ── submission revision history (read-only) ────────────────────────────────
+ *
+ * WHY `availability` EXISTS AND WHY IT IS ON EVERY ONE OF THESE SHAPES. The
+ * submission-history tables are created by a migration an OPERATOR applies,
+ * separately from the image rollout, and on this deployment they have not been
+ * applied. So a running build meeting a database without them is the normal case.
+ * "This record was never submitted" and "this server could not find out" are
+ * different statements, and the API refuses to give the first when the second is
+ * true — the rows key is ABSENT rather than empty on every unavailable answer,
+ * which is why `revisions` and `changes` below are OPTIONAL. A consumer that
+ * reads them without checking `availability.state` is reading a key that is not
+ * there, not an empty list.
+ */
+
+export type RevisionHistoryState = 'available' | 'unavailable' | 'not_applicable';
+
+/**
+ * Why the history is not `available`. Three of the four are inabilities with
+ * three different operator remedies; `worked_example_session` is not an
+ * inability at all — a worked-example record is never submitted, so it HAS no
+ * history, and that answer arrives as `200`.
+ */
+export type RevisionHistoryReason =
+  | 'no_durable_storage'
+  | 'tables_absent'
+  | 'database_unavailable'
+  | 'worked_example_session';
+
+export interface ApiHistoryAvailability {
+  state: RevisionHistoryState;
+  reason: RevisionHistoryReason | null;
+  /** The server's own sentence. Rendered verbatim; never paraphrased here. */
+  message: string;
+}
+
+/**
+ * WHO IS ON RECORD — including, honestly, nobody.
+ *
+ * `subject` is `null` whenever `trust_basis` is `unattributed`; the database
+ * enforces that pairing in both directions. No surface may substitute a
+ * placeholder name, and `trust_basis` is carried so a reader can see what the
+ * attribution is WORTH: `test_fixture` is a real shipped basis and is not proof
+ * anyone authenticated.
+ */
+export interface ApiRevisionActor {
+  subject: string | null;
+  trust_basis: string | null;
+  attributed: boolean;
+}
+
+export interface ApiRevisionSubmission {
+  submission_id: string;
+  submitted_utc: string | null;
+  unit_count: number | null;
+  idempotency_key_used: boolean;
+  actor: ApiRevisionActor;
+  conflict_summary: Record<string, unknown>;
+}
+
+export interface ApiRevisionSummary {
+  revision_no: number;
+  revision_id: string;
+  reason: string;
+  created_utc: string | null;
+  experiment_rev: number;
+  content_signature: string;
+  actor: ApiRevisionActor;
+  /** `added` / `removed` / `modified` counts. Absent kinds are simply not keys. */
+  change_counts: Record<string, number>;
+  submission: ApiRevisionSubmission | null;
+}
+
+/** One run snapshot inside a revision. `label` is `null` when none was stored. */
+export interface ApiRunRevision {
+  run_revision_id: string;
+  run_id: string;
+  ordinal: number | null;
+  rev: number | null;
+  generation: string;
+  created_utc: string | null;
+  label: string | null;
+}
+
+export type RevisionChangeKind = 'added' | 'removed' | 'modified';
+
+export interface ApiRecordedChange {
+  unit_id: string;
+  address: string;
+  change_kind: RevisionChangeKind;
+}
+
+export interface ApiRevisionDetail {
+  experiment_id: string;
+  revision_no: number;
+  availability: ApiHistoryAvailability;
+  revision?: ApiRevisionSummary & {
+    run_revisions: ApiRunRevision[];
+    /** What this revision differed from ITS PREDECESSOR at, as recorded then. */
+    changes: ApiRecordedChange[];
+    changes_scope: string;
+    submission_runs: { unit_id: string; run_id: string | null; record_id: string }[];
+  };
+  error?: string;
+}
+
+export interface ApiRevisionValueChange extends ApiRecordedChange {
+  /** The value the REVISION recorded. `null` when it recorded none. */
+  previous_value: unknown;
+  /** The value the record holds NOW. `null` when it holds none. */
+  current_value: unknown;
+}
+
+export interface ApiRevisionDiff {
+  experiment_id: string;
+  revision_no: number;
+  record_rev: number;
+  current_content_signature: string;
+  changes_scope: string;
+  availability: ApiHistoryAvailability;
+  /** `false` when the stored snapshot could not be read back. `changes` is then absent. */
+  comparable?: boolean;
+  comparable_note?: string;
+  /**
+   * The STRONGER statement, covering more than `changes` does. An empty `changes`
+   * beside `content_signature_matches: false` is a real state: something outside
+   * draft field values differs, and the comparison did not look there.
+   */
+  content_signature_matches?: boolean;
+  revision?: ApiRevisionSummary & { run_labels: Record<string, string> };
+  changes?: ApiRevisionValueChange[];
+  change_counts?: Record<string, number>;
+  units?: { comparable: boolean; added: string[]; removed: string[]; unchanged: string[] };
+  current_run_labels?: Record<string, string | null>;
+  error?: string;
+}
+
+export type LifecycleState = 'draft' | 'needs_review' | 'ready_to_submit' | 'submitted';
+
+/**
+ * The DERIVED submission lifecycle. Never stored, recomputed on every read.
+ *
+ * `submitted` means a submission is on record for exactly the content the record
+ * holds NOW. It is never derived from whether the record was exported — export is
+ * a mechanical transform any caller can perform, and treating it as a submission
+ * would attribute a declaration nobody made.
+ *
+ * `submission_blocked_by_deployment` is reported SEPARATELY and never lowers
+ * `state`. A record whose science is finished reads `ready_to_submit` even on a
+ * deployment that can accept no submission at all — which is every deployment
+ * shipped today, because no edge-trust verifier is configured.
+ */
+export interface ApiLifecycle {
+  state: LifecycleState;
+  label: string;
+  reasons: { code: string; message: string }[];
+  scientific_readiness: {
+    blocked: boolean;
+    pending_count: number;
+    failing_unit_count: number;
+    failing_units: {
+      unit_id: string;
+      run_id: string | null;
+      run_label: string | null;
+      errors: unknown[];
+    }[];
+  };
+  submission: {
+    known: boolean;
+    /** `null` — never `false` — when the history could not be read. */
+    submitted_for_current_content: boolean | null;
+    unknown_reason: string | null;
+  };
+  submission_blocked_by_deployment: {
+    blocked: boolean;
+    blockers: string[];
+    basis: string;
+    requires_attributable_actor: boolean;
+    actor_trust_basis: string | null;
+    message: string;
+  };
+}
+
+export interface ApiRevisionHistory {
+  experiment_id: string;
+  record_rev: number;
+  current_content_signature: string;
+  signature_scope: string;
+  limit: number;
+  availability: ApiHistoryAvailability;
+  lifecycle: ApiLifecycle;
+  /** ABSENT unless `availability.state === 'available'`. Never an empty stand-in. */
+  revisions?: ApiRevisionSummary[];
+  /** How many revisions EXIST, whatever the bounded list returned. */
+  total?: number;
+  returned?: number;
+  current_submission?: ApiRevisionSubmission | null;
+  error?: string;
+}
