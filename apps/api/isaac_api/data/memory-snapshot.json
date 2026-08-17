@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "47c8346be6fc8209e57c7cee78061795daa61b44105d611cabf477d5ca7c2b8b"
+        "sha256": "463b132600467807ddbb540b37872dd6fdb5065d71a93ed7ed32df315b1fca28"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10436,7 +10436,7 @@
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "fb76106ce8edaadbd42f7ef41efe6b2bc9015bbb702e2a991f567bc6e1fc1287"
+        "sha256": "73178a8c723f73e75daf26a083ae315c8331735eb029f169ccc131c342eedd84"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "6d459e38e81f5aa5d831ab527b0809b440505c4bfab4820307a551db24b0d0d9"
+        "sha256": "fbf011c8e627510eb9923f2980ea80a65bc29426fb85841440d8254f93e6ad5b"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "372abed3ca2b683c46eab4483432e45515b0078fe93a5f9539e1e895c0f5e449"
+        "sha256": "25347123efc55e59b74e3243fde7cd6ceb62049bb9ba830722b37088e1422a04"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "2f7cc477a0479f8bf9ebe290da60ffe7e4550c535b2661b9f3d5185a0771f0db"
+        "sha256": "249074435416b2f077ba270dcc29a42f987199642f2b855a691e9be1139e3c48"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "51e4053109824e9eaefd0f80d326d1f8cdb5bdcdf205038e0c35b88fe99c1899"
+        "sha256": "6630f100c32722164cde15e78c919c03bb41ad488a77869e1eb422059e3f9511"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "6958e45de5b51b46d42c1b3675d6ae9e729904b357ed92f63dffbb57531f0734"
+    "served_manifest_fingerprint": "a1ca8193fdb8f7ea760529d828b21a05e250d82ec867d0bd505f7657b9bad92c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
