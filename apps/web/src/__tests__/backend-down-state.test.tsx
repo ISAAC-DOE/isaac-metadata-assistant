@@ -671,10 +671,28 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // An unexpected interior shape in one of these literals would silently shrink
     // both guards below — see the limits paragraph above for what this misses.
     expect(unclassifiedLiterals).toEqual([]);
-    expect(experimentPathLiterals.length).toBe(29);
+    // ALL THREE NUMBERS BELOW ARE MEASURED AFTER THE MERGE, read out of this
+    // test's own failure output. None was computed by adding the asset slice's
+    // delta to this slice's — that arithmetic is exactly how a merged counter
+    // ends up wrong, and the sibling transcript merge caught a counter that both
+    // branches had set to the SAME literal, which git then merged with no
+    // conflict at all while the true value was one higher than either.
+    expect(experimentPathLiterals.length).toBe(33);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(24);
-    expect(SUB_READ_SEGMENTS).toHaveLength(17);
+    expect(SUB_READ_SUFFIXES).toHaveLength(27);
+    // 18, AND THIS LINE WAS NOT IN THE MERGE CONFLICT.
+    //
+    // Both branches raised it 16 -> 17 for different additions, so git saw two
+    // identical one-line changes and merged them without a murmur — the entries
+    // changed twice, the total recorded once. This is the SECOND independent
+    // branch in this series to hit it on this exact counter; the transcript
+    // merge hit it first.
+    //
+    // It was caught only because this count is DERIVED from `api.ts` and the
+    // assertion re-measures it. A hand-maintained number with no derivation
+    // behind it would have merged clean and stayed wrong, which is the argument
+    // for deriving a counter wherever a derivation exists.
+    expect(SUB_READ_SEGMENTS).toHaveLength(18);
     // Spot-check the two shapes that are easiest to derive wrongly.
     expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');
     expect(SUB_READ_SUFFIXES).toContain('source-preview?source=SEG-1');

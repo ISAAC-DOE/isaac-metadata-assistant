@@ -465,6 +465,81 @@ export const notesEmpty = notesPage([]);
 
 export const notesOne = notesPage([noteFixture()]);
 
+/*
+ * --- Asset reference fixtures -------------------------------------------------
+ *
+ * The digests below are unmistakably synthetic — a repeated two-character pair,
+ * not the hash of anything — so no reader can mistake a fixture for a real
+ * artifact's digest, and no test can accidentally assert that ISAAC computed one.
+ */
+
+/** A structurally valid, obviously fake sha256: 64 lowercase hex characters. */
+export const FAKE_SHA_A = 'a1'.repeat(32);
+export const FAKE_SHA_B = 'b2'.repeat(32);
+
+export function assetFixture(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    asset_id: 'reduced_spectrum',
+    content_role: 'reduction_product',
+    uri: 'synthetic://example/reduced/CuO2_merged.xdi',
+    sha256: FAKE_SHA_A,
+    media_type: 'application/x-xdi',
+    evidence: [
+      {
+        source_type: 'user_confirmation',
+        question:
+          'Record these asset reference details, as entered? (No file was read, fetched or hashed by this application.)',
+        answer: FAKE_SHA_A,
+        timestamp: '2099-04-02T09:12:00Z',
+      },
+    ],
+    evidence_count: 1,
+    // A STATEMENT ABOUT THE STRING. The fixture name says so, because a fixture
+    // called `verified` would seed the very claim the feature must not make.
+    sha256_wellformed: true,
+    used_by_runs: [],
+    export_reach: 'record',
+    ...over,
+  };
+}
+
+/** The twelve official roles, in the schema's own order. Served, never invented. */
+export const ASSET_CONTENT_ROLES = [
+  'raw_data',
+  'raw_data_pointer',
+  'reduction_product',
+  'input_structure',
+  'workflow_recipe',
+  'processing_script',
+  'calibration_reference',
+  'auxiliary_reference',
+  'documentation',
+  'metadata_snapshot',
+  'supplementary_image',
+  'other',
+];
+
+export function assetsPage(
+  assets: unknown[],
+  over: {
+    unreadable_entries?: number;
+    content_roles?: string[];
+    runs?: { id: string; label: string; ordinal: number }[];
+    total?: number;
+  } = {},
+) {
+  return {
+    assets,
+    total: over.total ?? assets.length,
+    unreadable_entries: over.unreadable_entries ?? 0,
+    content_roles: over.content_roles ?? ASSET_CONTENT_ROLES,
+    runs: over.runs ?? [],
+    experiment_version: VERSION_FIELDS.version,
+  };
+}
+
+export const assetsEmpty = assetsPage([]);
+
 export const draftResponse = {
   groups: [
     {
@@ -1392,6 +1467,7 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     // record-screen assertion has to change. A test about notes supplies its own
     // body for this key.
     [`GET ${base}/notes`]: { body: notesEmpty },
+    [`GET ${base}/assets`]: { body: assetsEmpty },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
@@ -2810,6 +2886,14 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/experiments/{experiment_id}/revisions", description: "Lists the immutable snapshots captured when this record was submitted, newest first, and reports the record's derived submission lifecycle. Read-only: nothing here writes a revision, and the only writer of one is `POST /api/experiments/{experiment_id}/submit`.\n\n**`availability` is the field to read first, and an empty list is never a refusal.** The submission-history tables are created by a migration an operator applies separately from the image, so a running server can meet a database that does not have them. When that happens this operation answers `503` with `availability.state: \"unavailable\"` and **no `revisions` key at all** — never an empty list, because \"this record was never submitted\" and \"this server could not find out\" are different statements and only one of them was observed. `availability.reason` is `no_durable_storage`, `tables_absent` or `database_unavailable`; the three have three different remedies. A worked-example record answers `200` with `availability.state: \"not_applicable\"`, which is a fact rather than an inability: such records are never submitted.\n\n`lifecycle.state` is DERIVED on every read and is never stored: `draft`, `needs_review`, `ready_to_submit` or `submitted`. `submitted` means a submission is on record for exactly the content this record holds NOW — it is never derived from whether the record was exported, which is a mechanical transform any caller can perform and is not a declaration by anyone. `lifecycle.submission.known` is `false` whenever the history could not be read, and the state then falls back to the scientific derivation rather than to `not submitted`.\n\n`lifecycle.submission_blocked_by_deployment` is reported SEPARATELY and never lowers `lifecycle.state`. A record whose science is finished reads `ready_to_submit` even where this deployment can accept no submission at all — which is every deployment shipped today, because no edge-trust verifier is configured and submission requires an attributable person.\n\nThe listing is bounded; `total` is how many revisions EXIST, whatever the bounded list returned. No stored record snapshot is ever included." },
   { op: "GET /api/experiments/{experiment_id}/revisions/{revision_no}", description: "Returns one submitted revision of this record: when it was captured, who is on record for it, the run snapshots it holds, the field addresses that changed since the revision before it, and the submission that captured it. Read-only.\n\n**The stored record snapshot is deliberately NOT returned.** The revision holds a complete copy of the record as it was, and this operation reports what that revision IS rather than shipping the document; the field values themselves are available, scoped to what actually differs, from `GET .../revisions/{revision_no}/diff`.\n\n`actor.subject` is `null` and `actor.attributed` is `false` whenever the revision was recorded without an attributable person. No placeholder name is ever substituted. `actor.trust_basis` says what the attribution is worth: `test_fixture` is a real shipped basis and is **not** proof anyone authenticated.\n\n`changes` are the field addresses this revision differed from its PREDECESSOR at, exactly as they were recorded at submission time. They cover draft field values only — evidence entries, run overrides, answer logs and assets are not compared — so an empty list means no field value differed, never that nothing changed. A revision with no predecessor records no changes at all, which is not the same as having changed nothing.\n\n`503` with `availability.state: \"unavailable\"` when the history cannot be read; `404` when the record exists and holds no such revision number. Those are different answers and are never merged." },
   { op: "GET /api/experiments/{experiment_id}/revisions/{revision_no}/diff", description: "Compares the record AS IT IS NOW against the immutable snapshot captured by one submitted revision, and reports every draft field address whose value differs, with the value on each side. Read-only.\n\n**The comparison is narrow, and it says so in `changes_scope`.** Only draft field values are compared — the same scope the stored change rows use. Evidence entries, run overrides, answer logs, assets and implicit claims are NOT compared, and neither is anything nested inside a value beyond that value's canonical form. An empty `changes` list therefore means no field value differed; it does not mean nothing changed.\n\n`content_signature_matches` is the stronger, authoritative statement and covers more than `changes` does: it is `true` only when this record's current content signature equals the one the revision recorded. **An empty `changes` list beside `content_signature_matches: false` is a real and meaningful state** — it means something outside draft field values differs, and this operation is telling you it did not look there.\n\n`units` reports which export units (runs, or the record itself when it has none) were added and removed, separately from the field changes. A removed run also contributes one `removed` field row per value it held, so the two describe the same event at two altitudes.\n\n`comparable` is `false` when the stored snapshot could not be read back into a comparable record. `changes` is then absent rather than empty, because an empty list would assert a comparison this server did not make." },
+  // The four ASSET REFERENCE operations, transcribed from `create_app().openapi()`.
+  // `apps/api/tests/test_contract_description_parity.py` compares these strings byte
+  // for byte against the served document in BOTH directions, so a new operation that
+  // is not listed here fails the backend suite.
+  { op: "GET /api/experiments/{experiment_id}/assets", description: "Lists the asset references on this record — metadata about files, never the files themselves. Each entry carries the official ISAAC asset fields, the evidence recorded for it, the runs it is associated with, and where it actually reaches an exported record. Read-only.\n\nNO FILE IS READ, FETCHED OR HASHED BY THIS APPLICATION. `sha256_wellformed` says whether the stored digest is 64 lowercase hexadecimal characters — a statement about the string, not about the file at the `uri`, which this server has never opened. Nothing here should be presented as a verified or checked hash.\n\n`export_reach` is `record` when this experiment has no runs (it exports one record from its own draft, carrying this asset), `runs` when the asset is associated with at least one run, and `none` when the experiment HAS runs and this asset is associated with none of them — in which case no exported record will carry it, because assets are run-level content.\n\n`content_roles` is the official schema's own enumeration, read from the vendored schema rather than restated, so a client renders exactly the values the exported record is validated against. `unreadable_entries` counts stored entries this build cannot present — one that is not an object, or one carrying no `asset_id` — which are left in the record untouched rather than dropped." },
+  { op: "POST /api/experiments/{experiment_id}/assets", description: "Records one asset reference on this record and returns it. Metadata only: no file is uploaded, opened, fetched or hashed, and this operation accepts no file content of any kind.\n\nTHE DIGEST IS YOURS, NOT THIS SERVER'S. `sha256` must be exactly 64 lowercase hexadecimal characters, with nothing before or after it — not even a trailing newline. It is never computed, completed, trimmed or corrected: this application does not read the file at the `uri`, so the only digest it can hold is the one you supply, and a malformed one is refused with `422` rather than repaired.\n\n`asset_id`, `content_role`, `uri` and `sha256` are required — the official ISAAC schema requires them and none is invented here. `asset_id` must be unique on this record, because the evidence sidecar is keyed by it. `content_role` must be one of the twelve values the official schema enumerates; it is not inferred from the URI, the file extension or the media type. Any key the official schema does not declare on an asset is refused with `422` naming it, because that object is closed and storing one would make the record unexportable.\n\n`run_ids` associates this asset with those runs, and `[]` or an omitted key associates it with none — nothing is chosen on your behalf, including on a record that has exactly one run. Recording an asset rewrites the record, so this requires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written." },
+  { op: "PATCH /api/experiments/{experiment_id}/assets/{asset_id}", description: "Edits the draft metadata of one asset reference, its run associations, or both, and returns the refreshed entry. Metadata only: no file is uploaded, opened, fetched or hashed.\n\nOnly the keys you send are changed; a key you omit keeps its current value. Sending `null` clears an optional key by removing it — a stored `null` would fail official validation. The four required keys cannot be cleared; remove the whole reference instead. `asset_id` cannot be changed: it is the address of this entry, the key of every run's copy of it and the key of its evidence sidecar entry, so sending a different one is refused with `422`.\n\nA new `sha256` is subject to the same rule as on creation — exactly 64 lowercase hexadecimal characters, never computed or repaired here. `run_ids` SETS the associations exactly: `[]` associates the asset with no run, and omitting the key leaves them unchanged.\n\nEvery change appends a user confirmation to this asset's evidence; nothing already recorded is replaced or removed. A request that changes nothing is a no-op that does not advance the record's revision. A request that names no asset field and no `run_ids` is refused with `422` rather than silently doing nothing. Requires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match`." },
+  { op: "POST /api/experiments/{experiment_id}/assets/{asset_id}/remove", description: "Removes one asset reference from this record's draft and from every run that was associated with it, and reports what was removed.\n\nThis deletes a DRAFT reference — the metadata entry this application holds. It does not touch the file at the `uri`, which this application has never read, and it does not alter any record already exported: an exported record and its evidence sidecar are written artifacts and are not rewritten by this operation.\n\nThe evidence recorded on the reference is removed with it, because it is part of the entry. Requires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing removed." },
 ];
 
 // --- Statistics dashboard fixtures (the five page-level reads) --------------

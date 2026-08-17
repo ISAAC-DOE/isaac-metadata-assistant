@@ -2227,3 +2227,95 @@ export interface ApiRevisionHistory {
   current_submission?: ApiRevisionSubmission | null;
   error?: string;
 }
+
+/*
+ * --- Asset references ---------------------------------------------------------
+ *
+ * Metadata ABOUT files. No bytes travel over any of these shapes, and this
+ * application never reads, fetches or hashes the file at a `uri`.
+ */
+
+/** One of the twelve `content_role` values the official ISAAC schema enumerates. */
+export type ApiAssetContentRole = string;
+
+export interface ApiAssetRunUse {
+  run_id: string;
+  label: string;
+  ordinal: number;
+}
+
+/**
+ * Where an asset actually reaches an exported record.
+ *
+ * `none` is the value that has to exist and the one a UI must never hide: an
+ * experiment that HAS runs exports one record per run, composed from that run's own
+ * blocks, and `assets` is run-level — so a library entry associated with no run is
+ * invisible to export. A scientist who recorded a file, saw it listed, and is not
+ * told this would never find out.
+ */
+export type ApiAssetExportReach = 'record' | 'runs' | 'none';
+
+export interface ApiAsset {
+  asset_id: string;
+  content_role: ApiAssetContentRole;
+  uri: string;
+  /** The digest THE SCIENTIST SUPPLIED. Never computed, completed or repaired. */
+  sha256: string;
+  media_type?: string;
+  notes?: string;
+  citation?: Record<string, unknown>;
+  caption_verbatim?: string;
+  caption_highlights?: Record<string, unknown>;
+  paper_conclusions_about_figure?: string[];
+  figure_label?: string;
+  page?: number | string;
+  /*
+   * The RAW draft evidence entries, exactly as stored — `FieldEvidence`, not
+   * `ApiEvidenceEntry`. The latter is the evidence-TRAIL wrapper (a path, a status
+   * and a list); an asset carries the list itself, and typing it as the wrapper
+   * made every field the UI reads — `question`, `source_file`, `timestamp` —
+   * invisible to the compiler.
+   */
+  evidence: FieldEvidence[];
+  evidence_count: number;
+  /**
+   * Whether the stored digest is 64 lowercase hexadecimal characters.
+   *
+   * A STATEMENT ABOUT THE STRING, NOT ABOUT THE FILE. Named for what it measures,
+   * so no reader of this type can mistake it for a verification result — nothing in
+   * ISAAC has opened the file at the `uri`.
+   */
+  sha256_wellformed: boolean;
+  used_by_runs: ApiAssetRunUse[];
+  export_reach: ApiAssetExportReach;
+}
+
+/** `GET /experiments/{id}/assets`. */
+export interface ApiAssetsResponse {
+  assets: ApiAsset[];
+  total: number;
+  /**
+   * Stored entries this build cannot present — not an object, or carrying no
+   * `asset_id`. Preserved in the record and COUNTED rather than rendered, for the
+   * reason `ApiNotesResponse.unreadable_entries` is.
+   */
+  unreadable_entries: number;
+  /** The official schema's own enumeration, served rather than transcribed here. */
+  content_roles: ApiAssetContentRole[];
+  /** This record's runs, so the association control can be drawn in one read. */
+  runs: { id: string; label: string; ordinal: number }[];
+  /** The EXPERIMENT's version token — the `If-Match` every asset write must carry. */
+  experiment_version: string;
+}
+
+export interface ApiAssetWritten {
+  asset: ApiAsset;
+  experiment_version: string;
+}
+
+export interface ApiAssetRemoved {
+  removed_asset_id: string;
+  /** The runs it was detached from, NAMED rather than counted. */
+  detached_from_runs: string[];
+  experiment_version: string;
+}

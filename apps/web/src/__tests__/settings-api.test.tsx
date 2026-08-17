@@ -1087,8 +1087,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 55 operations, 131 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(55);
+  it('describes the contract it claims to: 59 operations, MEASURED after the merge', () => {
+    // MEASURED after the merge. Revision history publishes three operations and
+    // the asset slice four, both from a base of 52 — neither branch's own figure
+    // is the merged one, and adding the deltas gives a third wrong number.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(59);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1664,8 +1667,9 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 60,990; this
     //     figure drops the 131 `\n\n` separators, and 60,990 - 262 = 60,728.
-    expect(total).toBe(60728);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(131);
+    // MEASURED after the merge, both figures, from this test's own failure output.
+    expect(total).toBe(65516);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(142);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the
