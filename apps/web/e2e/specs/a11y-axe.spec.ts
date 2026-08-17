@@ -37,6 +37,7 @@ import {
   platformCount,
   type BaselinePlatform,
 } from '../a11y-baseline';
+import { auditAggregate, sumA11yNodes } from '../baseline-aggregate';
 import { auditScan, scan } from '../helpers/axe';
 import { openUnreachableDisclosures } from '../helpers/disclosures';
 import { expect, test } from '../fixtures';
@@ -208,13 +209,36 @@ test('@responsive a11y baseline file is well-formed and cannot silently exempt a
 
   // The two numbers that say how much automated-a11y debt this app carries.
   // They can only move by editing this file, which is the point.
+  //
+  // THE COMPARISON ITSELF NOW LIVES IN `../baseline-aggregate`, and is made
+  // here through that module rather than inline. Two reasons, and the second is
+  // the one that matters:
+  //
+  //   * one implementation, so the browser suite and the fast `vitest`
+  //     invariant suite cannot drift into disagreeing about what "consistent"
+  //     means;
+  //   * the fast suite runs this same check in the `frontend` CI job in
+  //     milliseconds. A hand-maintained total that goes stale in a merge used
+  //     to be discovered only here, ~30 minutes in and after the merge button
+  //     had already been pressed. See that module's header for the exact
+  //     two-branch mechanism.
+  //
+  // `total` above is accumulated by THIS file's own walk over the entries;
+  // `sumA11yNodes` walks them independently. Asserting they agree is not
+  // ceremony — it is what would catch one of the two walks learning to skip a
+  // per-platform pair.
+  const computed = sumA11yNodes(A11Y_BASELINE);
   for (const platform of BASELINE_PLATFORMS) {
     expect(
       total[platform],
-      `A11Y_BASELINE_TOTAL_NODES.${platform} is stale: the entries now sum to ${total[platform]}. ` +
-        `Update the constant in e2e/a11y-baseline.ts so the recorded debt stays visible in one place.`
-    ).toBe(A11Y_BASELINE_TOTAL_NODES[platform]);
+      `this spec's own sum and baseline-aggregate.ts's disagree on ${platform} — one of the two ` +
+        `walks over A11Y_BASELINE is wrong, which is worse than a stale total`
+    ).toBe(computed[platform]);
   }
+  expect(
+    auditAggregate('A11Y_BASELINE_TOTAL_NODES', A11Y_BASELINE_TOTAL_NODES, computed).map((m) => m.message),
+    'the declared total must equal the sum of the entries it totals'
+  ).toEqual([]);
 
   // Sanity: the grid the counts are keyed against is the grid the suite scans.
   //

@@ -79,6 +79,22 @@ both are defensible choices and the owner may want either one.
   buys protection against a merge-result regression that the required checks largely cover, at a
   cost this repository can measure.
 
+  **Addendum, 2026-08-17 — the decision is unchanged, one of its inputs is not.** The concrete
+  merge-result regression this rule would have caught had a name: two branches independently
+  raising `A11Y_BASELINE_TOTAL_NODES` to the same literal for different reasons, which git merges
+  without a conflict while both sets of baseline entries survive. It was real, it recurred, and
+  until now its only detector lived in the ~30-minute `browser-a11y` job — so it was found on
+  `main`, after the merge, half an hour late.
+
+  That detector now also runs in the fast `frontend` job, in milliseconds, on every pull request
+  and every push to `main` (`apps/web/e2e/invariants/baseline-aggregate.invariant.test.ts`, logic in
+  `apps/web/e2e/baseline-aggregate.ts`). The stale-base window is not closed — a PR merged without
+  seeing the current base still fails on `main` rather than before it — but the cost of landing in
+  that window fell from ~30 minutes to seconds, and the failure message now names the merge as the
+  likely cause and prints the exact number to write. So the rule buys less than it did when this
+  section was written, at the same price. Declining it remains the right call, and this is recorded
+  so a future reader does not mistake the unchanged verdict for an unexamined one.
+
 ## A separate, application-owned defect that protection does NOT fix
 
 **`.github/workflows/build-push.yaml` published a deployable image without consulting CI at all.**

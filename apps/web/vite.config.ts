@@ -17,6 +17,21 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    include: [
+      'src/**/*.{test,spec}.{ts,tsx}',
+      // The e2e BASELINE INVARIANTS — arithmetic and string shape over the two
+      // committed baseline data files, with no browser, no backend and no
+      // Playwright import anywhere in their dependency chain
+      // (`a11y-baseline` -> `surfaces` -> `env`, all of which only read
+      // `process.env`). They were previously enforced only inside the ~30-minute
+      // `browser-a11y` job, which is why a stale hand-maintained total could be
+      // merged and only discovered afterwards. Running them here puts the answer
+      // in the fast `frontend` job instead. See `e2e/baseline-aggregate.ts`.
+      //
+      // `.invariant.test.ts`, never `.spec.ts`: both Playwright configs discover
+      // with `testMatch: /.*\.spec\.ts$/`, so this pattern cannot collide with
+      // the browser suites.
+      'e2e/**/*.invariant.test.ts',
+    ],
   },
 });

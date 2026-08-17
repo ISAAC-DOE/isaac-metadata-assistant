@@ -10596,7 +10596,7 @@
       },
       {
         "path": "apps/web/vite.config.ts",
-        "sha256": "c679cdd834ca2e2e13d0d14b2770424e9196520317d7be656ec5bd9af9874439"
+        "sha256": "2f917b767344d099e5a1fb2107a944e6bacfc9f7a08dde8f31ca3574369c35a3"
       },
       {
         "path": "docs/architecture.md",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "5a49905c48fff43cd049a3a8f7390c8509102d0c5a18f04d20d8342cc2e4b172"
+    "served_manifest_fingerprint": "afe1ff16ce0392ca2da7bcd67455ec9d7594ddf594f0016663972b7dbe20b8c0"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
