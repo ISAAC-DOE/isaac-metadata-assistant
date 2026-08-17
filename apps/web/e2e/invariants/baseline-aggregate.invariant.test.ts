@@ -38,7 +38,9 @@ import {
 } from '../layout-baseline';
 import {
   a11yBaselineKeys,
+  auditA11yWellFormedness,
   auditAggregate,
+  auditEntryShapes,
   auditBaselineAggregates,
   layoutBaselineKeys,
   splitBaselineKey,
@@ -81,8 +83,39 @@ describe('declared baseline totals equal the entries they total', () => {
    * would catch the derivation being changed to skip per-platform objects —
    * exactly the bug `platformInstances` exists to prevent.
    */
-  it('the two totals are not accidentally equal, so neither test can pass by coincidence', () => {
-    expect(A11Y_BASELINE_TOTAL_NODES.darwin).not.toBe(LAYOUT_BASELINE_TOTAL_INSTANCES.darwin);
+  /*
+   * This slot used to hold `expect(A11Y_TOTAL.darwin).not.toBe(LAYOUT_TOTAL.darwin)`,
+   * titled "so neither test can pass by coincidence". Independent review was
+   * right that it guarded nothing: each test above compares a declared total to
+   * ITS OWN computed sum, so neither's passing depends on the two totals
+   * differing — and the assertion would have gone red for free the day a11y debt
+   * happened to land on the layout figure.
+   *
+   * Replaced with the property that title was reaching for: the two summers
+   * really are different functions over different data, so one cannot be
+   * standing in for the other.
+   */
+  it('the two summers are genuinely different functions, not one aliased twice', () => {
+    expect(sumA11yNodes(A11Y_BASELINE)).not.toEqual(sumLayoutInstances(LAYOUT_BASELINE));
+    // And each is non-trivial: a summer that always returned zero would satisfy
+    // every "declared equals computed" test if the declared totals were zero too.
+    expect(sumA11yNodes(A11Y_BASELINE).darwin).toBeGreaterThan(0);
+    expect(sumLayoutInstances(LAYOUT_BASELINE).darwin).toBeGreaterThan(0);
+  });
+
+  // M4: the combined entry point is the one a future consistency script would
+  // call, so at least one control must prove IT reports a real drift rather than
+  // only the per-baseline helper underneath it.
+  it('the COMBINED audit reports a stale a11y total (not only auditAggregate)', () => {
+    const stale = {
+      darwin: A11Y_BASELINE_TOTAL_NODES.darwin + 1,
+      linux: A11Y_BASELINE_TOTAL_NODES.linux,
+    };
+    const mismatches = auditBaselineAggregates(stale, LAYOUT_BASELINE_TOTAL_INSTANCES);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].platform).toBe('darwin');
+    expect(mismatches[0].drift).toBe(-1);
+    expect(mismatches[0].message).toContain('A11Y_BASELINE_TOTAL_NODES');
   });
 });
 
@@ -174,6 +207,28 @@ describe('the aggregate checker detects the failures it claims to', () => {
     expect(mismatches[0].drift).toBe(1);
   });
 
+  it('diagnoses a MISSING PLATFORM as a shape defect, not as a stale total', () => {
+    // A per-platform count with one half missing makes the sum `NaN`. The
+    // arithmetic branch would print "Set the total to NaN" — advice that leaves
+    // the suite red forever, because `NaN !== NaN`. It must diagnose instead.
+    const broken = [
+      entry('color-contrast', {
+        // Deliberately malformed: `linux` is absent. Cast because the type
+        // system correctly forbids writing this, which is exactly why a test
+        // has to prove what happens when someone does it anyway.
+        'alpha@desktop-1280x800': { darwin: 3 } as unknown as PlatformCount,
+      }),
+    ];
+    const mismatches = auditAggregate('A11Y_BASELINE_TOTAL_NODES', { darwin: 3, linux: 3 }, sumA11yNodes(broken));
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].platform).toBe('linux');
+    expect(Number.isFinite(mismatches[0].computed)).toBe(false);
+    expect(mismatches[0].message).toContain('SHAPE defect');
+    expect(mismatches[0].message).toContain('missing the "linux" key');
+    // The misleading advice must NOT appear.
+    expect(mismatches[0].message).not.toContain('Set the total to NaN');
+  });
+
   it('counts per-platform pairs on the right side of the pair, not by array position', () => {
     const totals = sumA11yNodes([
       entry('color-contrast', {
@@ -210,6 +265,96 @@ describe('the aggregate checker detects the failures it claims to', () => {
  * half an hour. The browser test keeps its own copies — it must, because it is
  * the thing that runs the scan — and these run first and fail sooner.
  */
+/*
+ * ── THE REST OF THE WELL-FORMEDNESS TEST, WHICH ALSO NEEDED NO BROWSER ──────
+ *
+ * The first version of this file moved ONE check out of the ~30-minute
+ * `browser-a11y` job. Independent review pointed out that its own justification
+ * — "there is no reason a data error should cost half an hour" — applied just as
+ * well to everything else in `specs/a11y-axe.spec.ts`'s well-formedness test,
+ * which stayed behind: duplicate rule names, the `note.length` floor, empty
+ * `counts`, `targetPattern` regex validity, hex `foregrounds`, per-platform
+ * completeness, and the RATCHET INVERSION — arguably the most valuable check in
+ * the file, and one that touches no page at all.
+ *
+ * `auditA11yWellFormedness` is now the single implementation of all of it, and
+ * the browser spec calls the same function. Two runners, one implementation.
+ */
+describe('the a11y baseline file is well-formed', () => {
+  it('reports no problem for the committed baseline', () => {
+    expect(auditA11yWellFormedness().join('\n')).toBe('');
+  });
+
+  /*
+   * NEGATIVE CONTROLS for the shape half. `auditEntryShapes` takes its inputs
+   * rather than reading the module constants precisely so these can exist — a
+   * checker only ever run against valid data has not been shown to detect
+   * anything, which is the same lesson `sumA11yNodes` was parameterized for.
+   *
+   * The ratchet-inversion half of the audit is NOT covered here and cannot be:
+   * `baselineVerdict` reads the module-level `A11Y_BASELINE` itself, so feeding
+   * a different entry list would compare one baseline's counts against
+   * another's verdicts. That limit is stated at `auditEntryShapes` rather than
+   * hidden.
+   */
+  const SURFACE = new Set(['record-detail']);
+  const PROJECT = new Set(['desktop-1280x800']);
+  const good = {
+    rule: 'color-contrast',
+    impact: 'serious' as const,
+    note: 'A synthetic entry long enough to clear the sixty-character explanation floor this audit imposes.',
+    targetPattern: '^synthetic$',
+    counts: { 'record-detail@desktop-1280x800': 3 },
+  };
+
+  const only = (over: Partial<typeof good>) =>
+    auditEntryShapes([{ ...good, ...over } as BaselineEntry], SURFACE, PROJECT);
+
+  it('accepts a well-formed synthetic entry, so the rejections below mean something', () => {
+    expect(only({})).toEqual([]);
+  });
+
+  it.each([
+    ['an invalid rule id', { rule: 'Color Contrast' }, 'not a valid axe rule id'],
+    ['a too-short note', { note: 'too short' }, 'must carry a real explanation'],
+    ['no recorded pair', { counts: {} }, 'records no (surface, project) pair'],
+    ['neither targetPattern nor foregrounds', { targetPattern: undefined }, 'must pin WHICH nodes fail'],
+    ['an invalid targetPattern regex', { targetPattern: '([' }, 'invalid targetPattern regex'],
+    ['a non-hex foreground', { targetPattern: undefined, foregrounds: ['#GGGGGG'] }, 'not lower-case hex'],
+    ['an unknown surface', { counts: { 'no-such-surface@desktop-1280x800': 1 } }, 'unknown surface'],
+    ['an unknown project', { counts: { 'record-detail@no-such-project': 1 } }, 'unknown project'],
+    ['a malformed key', { counts: { 'nokeyseparator': 1 } }, 'is not surfaceId@projectId'],
+    ['a zero count', { counts: { 'record-detail@desktop-1280x800': 0 } }, 'must be a positive integer'],
+    [
+      'a per-platform pair missing a platform',
+      { counts: { 'record-detail@desktop-1280x800': { darwin: 3 } as unknown as PlatformCount } },
+      'has no "linux" number',
+    ],
+    [
+      'a per-platform pair whose halves are equal',
+      { counts: { 'record-detail@desktop-1280x800': { darwin: 3, linux: 3 } } },
+      'both numbers are the same',
+    ],
+  ])('rejects %s', (_label, override, expected) => {
+    const found = only(override as Partial<typeof good>);
+    expect(found.join('\n')).toContain(expected);
+  });
+
+  it('rejects a duplicate rule entry across two entries', () => {
+    const found = auditEntryShapes([good as BaselineEntry, good as BaselineEntry], SURFACE, PROJECT);
+    expect(found.join('\n')).toContain('duplicate baseline entry');
+  });
+
+  it('checks a non-trivial number of things, so an empty result means something', () => {
+    // A guard against the audit silently becoming a no-op — e.g. if
+    // `A11Y_BASELINE` were emptied, or an early `return` crept in. The floor is
+    // deliberately far below the real figure rather than pinned to it, so
+    // ordinary baseline edits do not churn this number.
+    expect(A11Y_BASELINE.length).toBeGreaterThan(0);
+    expect(a11yBaselineKeys().length).toBeGreaterThan(50);
+  });
+});
+
 describe('every baseline key names a real surface and a real scan project', () => {
   const surfaceIds = new Set(SURFACES.map((s) => s.id));
   // The two grids, kept apart on purpose — see `a11yBaselineKeys` for why a

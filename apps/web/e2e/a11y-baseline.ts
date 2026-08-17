@@ -1707,11 +1707,25 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
  * half an hour later.
  *
  * WHAT NOW CATCHES IT, and where: `e2e/invariants/baseline-aggregate.invariant.test.ts`,
- * a `vitest` file with no browser in its dependency chain. It runs in the fast
- * `frontend` CI job in milliseconds, on every pull request and every push to
- * `main`, and it carries negative controls that reproduce exactly the
- * two-branch merge above. `specs/a11y-axe.spec.ts` still makes the same check —
- * through the same shared module, so the two cannot drift.
+ * a `vitest` file that needs no browser. It runs in the fast `frontend` CI job
+ * on every pull request and every push to `main`, and it carries negative
+ * controls that reproduce exactly the two-branch merge above.
+ * `specs/a11y-axe.spec.ts` still makes the same check — through the same shared
+ * module, so the two cannot drift.
+ *
+ * HOW MUCH FASTER, measured rather than felt: the CHECK is ~6 ms locally and
+ * ~26 ms in CI, but the SIGNAL costs whatever its job costs. `frontend tests and
+ * build` measured 3m06s and 3m48s on recent `main` runs; `browser accessibility
+ * and responsive baseline` measured 26m13s and 26m42s. So this is ~26 minutes
+ * down to ~4 — about 7x, not the "seconds" an earlier revision of this note
+ * claimed. Worth having; not worth overstating.
+ *
+ * AND IT REPORTS RATHER THAN BLOCKS. `main` has no required status checks at
+ * all — `gh api repos/.../branches/main --jq '.protected'` returns `false`,
+ * `.../rulesets` returns `[]`, `.../branches/main/protection` returns `404`. A
+ * pull request can be merged with this check red or still running. Do not read
+ * the paragraph above as an enforcement gate; it is a fast alarm. See
+ * `docs/branch-protection-request.md`, "Status: NOT CONFIGURED".
  *
  * WHAT IS DELIBERATELY NOT DONE: this constant is not derived away, the way
  * `LAYOUT_BASELINE_TOTAL_INSTANCES` derives itself. Deriving it would make the
