@@ -304,6 +304,34 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
 export const layoutKey = (surfaceId: string, projectId: string): string => `${surfaceId}@${projectId}`;
 
 /**
+ * THE WIDTH SWEEP'S GRID, moved here from `specs/layout-widths.spec.ts`.
+ *
+ * Two grids write keys into `LAYOUT_BASELINE`, and they are not the same grid:
+ * `specs/layout-responsive.spec.ts` keys by Playwright PROJECT
+ * (`surfaceId@desktop-1280x800`), while `specs/layout-widths.spec.ts` moves the
+ * viewport itself inside one project and keys by WIDTH
+ * (`surfaceId@width-1024`). The namespacing is deliberate and is documented at
+ * the sweep — both measure 1280, 1024, 768 and 640, and a shared key would let
+ * a defect recorded for one measurement silently excuse the other.
+ *
+ * It lives HERE rather than in the spec because the spec cannot be imported by
+ * anything that is not a Playwright run, and the fast invariant suite
+ * (`invariants/baseline-aggregate.invariant.test.ts`) needs to know which
+ * project halves are legal in order to reject a typo'd key in milliseconds
+ * instead of after a ~30-minute browser job. A grid that only one runner can
+ * see is a grid nothing cheap can check against.
+ *
+ * The spec imports these two declarations; it does not keep a second copy.
+ */
+export const LAYOUT_SWEEP_WIDTHS = [1280, 1024, 768, 640, 390, 375, 320] as const;
+
+/** `320` → `'width-320'`. The "project" component of a width-sweep key. */
+export const layoutWidthId = (width: number): string => `width-${width}`;
+
+/** Every width-sweep pseudo-project id, in sweep order. */
+export const LAYOUT_SWEEP_WIDTH_IDS: readonly string[] = LAYOUT_SWEEP_WIDTHS.map(layoutWidthId);
+
+/**
  * True only for an EXACT recorded offender on an EXACT recorded
  * (surface, project) pair, ON THIS PLATFORM. No substrings, no wildcards, and
  * no cross-platform borrowing: a clip recorded only for Linux does not excuse
