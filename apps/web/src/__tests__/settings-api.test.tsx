@@ -1087,8 +1087,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 52 operations, 119 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(52);
+  it('describes the contract it claims to: 55 operations, 131 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(55);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1647,8 +1647,22 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 52,567; this
     //     figure drops the 110 `\n\n` separators, and 52,567 - 220 = 52,347.
-    expect(total).toBe(55611);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(119);
+    // 55,611 -> 60,222, 52 -> 55 operations, 119 -> 131 post-lead paragraphs:
+    // transcript capture publishes three operations —
+    // `POST /api/experiments/{experiment_id}/transcript`,
+    // `POST /api/transcription` and `GET /api/providers/capabilities`. No existing
+    // entry was re-transcribed, so this delta is entirely the three new ones.
+    //
+    // MEASURED the same two independent ways every corrected total above was, and
+    // NOT by adding a delta to 55,611:
+    //
+    //   . from the SERVED document: the splitPurpose paragraph rule re-implemented
+    //     in Python over `create_app().openapi()` gives total 60,222 and 131
+    //     post-lead paragraphs.
+    //   . internal consistency: raw sum of `d.description.length` = 60,484; this
+    //     figure drops the 131 `\n\n` separators, and 60,484 - 262 = 60,222.
+    expect(total).toBe(60222);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(131);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

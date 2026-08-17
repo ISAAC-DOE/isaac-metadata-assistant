@@ -226,6 +226,7 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   pending: 'the missing fields',
   runs: 'the measurement runs',
   'source-preview': 'a reference source file',
+  transcript: 'the transcript capture',
   validate: 'validation',
   warnings: 'advisory warnings',
 };

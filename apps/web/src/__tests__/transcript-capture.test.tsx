@@ -1,0 +1,734 @@
+/*
+ * The Transcript Capture panel.
+ *
+ * WHAT WOULD FAIL BEFORE THE BEHAVIOUR THESE TESTS DEFEND. Each is a way the panel
+ * could be built that renders perfectly and still breaks the feature's promise:
+ *
+ *   1. A panel that reads while the reader types — a debounce, an `onChange`
+ *      handler, an autosave. Authoritative metadata would then move from text
+ *      nobody finished.
+ *      (`typing alone sends nothing`, `finalizing is the only thing that reads`)
+ *   2. An Accept control that writes through a path of its own, or one that omits
+ *      the run's `If-Match`, silently overwriting a concurrent edit.
+ *      (`accepting writes through the existing run edit, with the run's version`,
+ *       `the panel never issues a write to any path but the run edit`)
+ *   3. A panel that clears the transcript box, or hides the stored notes, after a
+ *      reading that proposed nothing — leaving a scientist to believe their words
+ *      went nowhere.
+ *      (`text survives a reading that proposed nothing`,
+ *       `text survives a failed accept`)
+ *   4. A voice surface that says "Connected", "Ready", or "Configured", or that
+ *      shows a spinner where a refusal belongs.
+ *      (`no part of this panel claims a provider exists`,
+ *       `the refusal is rendered from the server's own words`)
+ *   5. A run chosen on the reader's behalf when the record has exactly one.
+ *      (`the run is never pre-selected`)
+ *
+ * Every fixture is synthetic and no test here reaches a backend.
+ */
+import { describe, it, expect, afterEach, beforeEach, vi, type Mock } from 'vitest';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import axe from 'axe-core';
+
+import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
+import { CAPTURE_GUIDANCE_SENTENCE } from '../lib/transcriptCaptureContent';
+import {
+  CAPTURE_GUIDANCE_KEY,
+  isCaptureGuidanceSeen,
+} from '../lib/transcriptCapturePreference';
+import { runFixture, stubFetchRoutes } from '../test/apiFixtures';
+
+const EXP = 'demo';
+const RUNS = `GET /api/experiments/${EXP}/runs`;
+const CAPS = 'GET /api/providers/capabilities';
+const TRANSCRIPT = `POST /api/experiments/${EXP}/transcript`;
+const TRANSCRIBE = 'POST /api/transcription';
+
+const RUN = runFixture({ id: 'run-1', label: 'Run 1', version: 'r1.0', fields: {} });
+
+const runsPage = {
+  runs: [RUN],
+  experiment_version: 'g1.4',
+  total: 1,
+  matched: 1,
+  returned: 1,
+  offset: 0,
+};
+
+/** The seam report a deployment with no provider actually serves. */
+const capabilities = {
+  any_provider_configured: false,
+  decision_reference: 'docs/ai-integration-decision-packet.md',
+  note: 'A note the server composes.',
+  manual_transcript_available: true,
+  seams: [
+    {
+      seam: 'transcription',
+      implementation: 'unconfigured',
+      configured: false,
+      is_test_double: false,
+      reason:
+        'No transcription provider is configured. Speech is not transcribed and no audio leaves the browser.',
+      selected_by: 'ISAAC_TRANSCRIPTION_PROVIDER',
+    },
+  ],
+};
+
+function candidate(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    field_path: 'context.temperature_K',
+    proposed_value: 300,
+    quote: 'Temperature was 300 K.',
+    start_char: 0,
+    end_char: 22,
+    origin: 'transcript',
+    produced_by: 'transcript-reader',
+    rule: 'the words temperature and a number followed by K appear in one clause',
+    provenance: { reader_rule: 'temperature_kelvin' },
+    status: 'needs_confirmation',
+    verified: false,
+    is_evidence: false,
+    requires_user_confirmation: true,
+    ...over,
+  };
+}
+
+function noteOf(text: string, id: string) {
+  return {
+    id,
+    experiment_id: EXP,
+    run_id: 'run-1',
+    source: 'transcript',
+    text,
+    revised_text: null,
+    captured_utc: '2099-04-02T09:12:00Z',
+    state: 'unreviewed',
+    candidate_field_path: null,
+    candidate_rule: null,
+    mapped_field_path: null,
+    history: [],
+    status: 'unmapped_note',
+    verified: false,
+    is_evidence: false,
+    is_field_value: false,
+    display_text: text,
+  };
+}
+
+function reading(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    capture: {
+      finalized: true,
+      run_id: 'run-1',
+      segments: 1,
+      retention: {
+        state: 'retained_with_experiment',
+        notes_captured: 1,
+        deletable: false,
+        description: 'The finalized transcript is stored with this record as notes.',
+        not_implemented: [
+          { state: 'retain_during_draft', reason: 'Nothing here removes a note.' },
+        ],
+        raw_audio: { stored: false, reason: 'No audio reaches this server.' },
+      },
+    },
+    applied: false,
+    candidates: [candidate()],
+    clarifications: [],
+    abstentions: [],
+    review_required: [],
+    notes: [noteOf('Temperature was 300 K.', 'n1')],
+    ambiguity_policy: [],
+    accept_contract: {
+      method: 'PATCH',
+      path: '/api/experiments/{experiment_id}/runs/{run_id}',
+      requires: ['confirmed_by_user: true', 'If-Match set to that run’s own current ETag'],
+      message: 'This operation writes no field.',
+    },
+    experiment_version: 'g1.5',
+    ...over,
+  };
+}
+
+const BASE_ROUTES: Record<string, unknown> = {
+  [RUNS]: { body: runsPage },
+  [CAPS]: { body: capabilities },
+};
+
+beforeEach(() => {
+  try {
+    localStorage.setItem(
+      CAPTURE_GUIDANCE_KEY,
+      JSON.stringify({
+        guidanceId: 'isaac-transcript-capture-guidance',
+        version: 1,
+        seen: true,
+        seenAt: '2099-01-01T00:00:00Z',
+      }),
+    );
+  } catch {
+    /* the read path fails safe; a test that needs the guidance clears the key */
+  }
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+/** Render the panel and OPEN it — it is a closed disclosure until a reader acts. */
+async function renderPanel() {
+  const rendered = render(
+    <MemoryRouter
+      initialEntries={['/']}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <TranscriptCapturePanel experimentId={EXP} />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+  return rendered;
+}
+
+/** Every request this panel issued, as `"METHOD /path"`. */
+function requests(): string[] {
+  const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+  return calls.map(([url, init]) => `${init?.method ?? 'GET'} ${String(url).replace(/^https?:\/\/[^/]+/, '')}`);
+}
+
+/** Every write, with its parsed body and `If-Match`. */
+function writes(): { key: string; body: Record<string, unknown>; ifMatch?: string }[] {
+  const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+  return calls
+    .filter(([, init]) => init?.method === 'POST' || init?.method === 'PATCH')
+    .map(([url, init]) => ({
+      key: `${init?.method} ${String(url).replace(/^https?:\/\/[^/]+/, '')}`,
+      body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      ifMatch: (init?.headers as Record<string, string> | undefined)?.['If-Match'],
+    }));
+}
+
+async function typeAndFinalize(text = 'Temperature was 300 K.') {
+  const box = await screen.findByLabelText('Transcript');
+  fireEvent.change(box, { target: { value: text } });
+  fireEvent.change(await screen.findByLabelText(/Run these notes describe/), {
+    target: { value: 'run-1' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
+}
+
+// --- 1. nothing is read from unfinished text ---------------------------------
+
+describe('unfinished text', () => {
+  it('a closed panel fetches nothing at all', async () => {
+    // The record screen already issues a bundle of reads on mount. A section that
+    // quietly added two more, for readers who never dictate anything, would change
+    // the request pattern of every screen it appears on.
+    stubFetchRoutes(BASE_ROUTES as never);
+    render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={EXP} />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: 'Start a capture' });
+    expect(requests()).toEqual([]);
+    expect(screen.queryByLabelText('Transcript')).toBeNull();
+  });
+
+  it('typing alone sends nothing', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    const box = await screen.findByLabelText('Transcript');
+    fireEvent.change(box, { target: { value: 'Temperature was' } });
+    fireEvent.change(box, { target: { value: 'Temperature was 300' } });
+    fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
+    await waitFor(() => expect(requests()).toContain(RUNS));
+    expect(writes()).toEqual([]);
+    expect(requests().filter((key) => key === TRANSCRIPT)).toEqual([]);
+  });
+
+  it('finalizing is the only thing that reads, and it says so in the body', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+    const finalize = writes().filter((entry) => entry.key === TRANSCRIPT);
+    expect(finalize).toHaveLength(1);
+    expect(finalize[0].body.finalized).toBe(true);
+    expect(finalize[0].body.text).toBe('Temperature was 300 K.');
+    expect(finalize[0].ifMatch).toBe('"g1.4"');
+  });
+
+  it('the finalize control is unavailable while the box is empty', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    expect(await screen.findByRole('button', { name: 'Finalize and read' })).toBeDisabled();
+  });
+});
+
+// --- 2. a candidate is never a value, and accepting uses the existing path ----
+
+describe('accepting a proposal', () => {
+  it('accepting writes through the existing run edit, with the run’s own version', async () => {
+    const patched = { run: { ...RUN, version: 'r1.1', fields: { 'context.temperature_K': { value: 300 } } } };
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { body: reading() },
+      [`PATCH /api/experiments/${EXP}/runs/run-1`]: { body: patched },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+
+    // TWO matches on purpose: the card states it, and the live region announces
+    // it. Asserting one of them would break the moment the other was removed.
+    expect(await screen.findAllByText(/Accepted and written to the run/)).toHaveLength(2);
+    const patch = writes().filter((entry) => entry.key.startsWith('PATCH'));
+    expect(patch).toHaveLength(1);
+    expect(patch[0].key).toBe(`PATCH /api/experiments/${EXP}/runs/run-1`);
+    expect(patch[0].body.confirmed_by_user).toBe(true);
+    expect(patch[0].body.fields).toEqual({ 'context.temperature_K': 300 });
+    // THE RUN'S TOKEN, NOT THE RECORD'S. Sending `g1.4` here is a 412, and a
+    // client that sent neither would be a blind overwrite.
+    expect(patch[0].ifMatch).toBe('"r1.0"');
+  });
+
+  it('the panel never issues a write to any path but the run edit', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { body: reading() },
+      [`PATCH /api/experiments/${EXP}/runs/run-1`]: { body: { run: { ...RUN, version: 'r1.1' } } },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+    await screen.findAllByText(/Accepted and written to the run/);
+
+    const paths = new Set(writes().map((entry) => entry.key));
+    expect(paths).toEqual(
+      new Set([TRANSCRIPT, `PATCH /api/experiments/${EXP}/runs/run-1`]),
+    );
+  });
+
+  it('undo restores what the run held before, through the same path', async () => {
+    // The run starts EMPTY at this path, so "what it held before" is nothing, and
+    // an honest undo clears the field rather than writing a plausible old value.
+    let version = 'r1.0';
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { body: reading() },
+      [`PATCH /api/experiments/${EXP}/runs/run-1`]: () => {
+        version = version === 'r1.0' ? 'r1.1' : 'r1.2';
+        return { body: { run: { ...RUN, version } } };
+      },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    await screen.findByRole('button', { name: 'Accept' });
+
+    const patches = writes().filter((entry) => entry.key.startsWith('PATCH'));
+    expect(patches).toHaveLength(2);
+    expect(patches[1].body.fields).toEqual({ 'context.temperature_K': null });
+    // The version the FIRST write returned, adopted rather than re-read.
+    expect(patches[1].ifMatch).toBe('"r1.1"');
+  });
+
+  it('rejecting writes nothing at all', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }));
+    await screen.findAllByText(/Rejected\./);
+    expect(writes().filter((entry) => entry.key.startsWith('PATCH'))).toEqual([]);
+  });
+
+  it('a proposal is labelled as a proposal, with the words it came from', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+    expect(screen.getByText(/A proposal, not a value/)).toBeInTheDocument();
+    expect(screen.getByText(/“Temperature was 300 K\.”/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/the words temperature and a number followed by K/),
+    ).toBeInTheDocument();
+  });
+});
+
+// --- 3. text is never lost ----------------------------------------------------
+
+describe('nothing a scientist wrote is discarded', () => {
+  it('text survives a reading that proposed nothing', async () => {
+    const empty = reading({
+      candidates: [],
+      notes: [noteOf('The cryostat rattled.', 'n2')],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: empty } } as never);
+    await renderPanel();
+    await typeAndFinalize('The cryostat rattled.');
+    await screen.findByText(/Nothing was proposed from this transcript/);
+    // The words are shown as stored, AND the box still holds them. Both matches
+    // are wanted: the stored-notes list and the textarea's own value.
+    expect(screen.getAllByText('The cryostat rattled.').length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByLabelText('Transcript')).toHaveValue('The cryostat rattled.');
+  });
+
+  it('text survives a failed accept', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { body: reading() },
+      [`PATCH /api/experiments/${EXP}/runs/run-1`]: {
+        status: 412,
+        body: { error: 'stale_write', current_version: 'r9.9' },
+      },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent(/was NOT written to the run/);
+    // The stored note and the transcript are both still on screen.
+    expect(screen.getAllByText('Temperature was 300 K.').length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByLabelText('Transcript')).toHaveValue('Temperature was 300 K.');
+    // And the proposal is still offered, not silently marked accepted.
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeInTheDocument();
+  });
+
+  it('a failed finalize says the transcript was not stored and keeps the text', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { status: 412, body: { error: 'stale_write' } },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent(/was NOT stored/);
+    expect(await screen.findByLabelText('Transcript')).toHaveValue('Temperature was 300 K.');
+  });
+
+  it('the panel says every segment is stored, including the ones that proposed', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(/including the ones that produced a proposal/);
+  });
+});
+
+// --- 4. ambiguity is shown as a question, never resolved ----------------------
+
+describe('ambiguity', () => {
+  it('the run is never pre-selected, even with exactly one run', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    const select = await screen.findByLabelText(/Run these notes describe/);
+    expect(select).toHaveValue('');
+    expect(screen.getByText(/never chosen for you, even when the record has exactly one run/)).toBeInTheDocument();
+  });
+
+  it('a clarification is rendered as a question with its alternatives', async () => {
+    const asked = reading({
+      candidates: [],
+      clarifications: [
+        {
+          outcome: 'clarification',
+          kind: 'ambiguous_run_reference',
+          question: 'The run named here matches more than one run of this record. Which one is it?',
+          quote: 'run Cooling',
+          options: [
+            { run_id: 'run-1', label: 'Cooling sweep', ordinal: 1 },
+            { run_id: 'run-2', label: 'Cooling repeat', ordinal: 2 },
+          ],
+          segment_index: 0,
+        },
+      ],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: asked } } as never);
+    await renderPanel();
+    await typeAndFinalize('Notes for run Cooling.');
+    await screen.findByText(/matches more than one run/);
+    expect(screen.getByText('Cooling sweep')).toBeInTheDocument();
+    expect(screen.getByText('Cooling repeat')).toBeInTheDocument();
+    // NOTHING was proposed, so there is no Accept control to press by mistake.
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+  });
+
+  it('an abstention states the subject and the reason, and proposes nothing', async () => {
+    const abstained = reading({
+      candidates: [],
+      abstentions: [
+        {
+          outcome: 'abstention',
+          kind: 'temperature_not_in_kelvin',
+          reason: 'The temperature field records kelvin and this statement gives another unit.',
+          quote: 'Temperature was 25 C',
+          segment_index: 0,
+        },
+      ],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: abstained } } as never);
+    await renderPanel();
+    await typeAndFinalize('Temperature was 25 C.');
+    await screen.findByText(/records kelvin and this statement gives another unit/);
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+  });
+
+  it('two values for one field are BOTH offered, with the conflict stated', async () => {
+    const conflicted = reading({
+      candidates: [candidate(), candidate({ proposed_value: 320, quote: 'Later the temperature was 320 K.', start_char: 23 })],
+      review_required: [
+        {
+          outcome: 'needs_review',
+          kind: 'conflicting_values_for_one_field',
+          field_path: 'context.temperature_K',
+          reason: 'Accept at most one.',
+          candidate_indexes: [0, 1],
+        },
+      ],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: conflicted } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    const conflicts = await screen.findAllByText(/proposes another value for the same field/);
+    expect(conflicts).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Accept' })).toHaveLength(2);
+  });
+});
+
+// --- 5. the voice surface claims nothing --------------------------------------
+
+describe('voice capture', () => {
+  it('no part of this panel claims a provider exists', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+    const text = (container.textContent ?? '').toLowerCase();
+    for (const banned of [
+      'connected',
+      'ready to transcribe',
+      'provider configured',
+      'temporarily',
+      'try again',
+      'coming soon',
+      'not yet available',
+    ]) {
+      expect(text).not.toContain(banned);
+    }
+  });
+
+  it('the seam status is rendered from the server, not from this bundle', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    // Byte-for-byte the `reason` the capability report served.
+    await screen.findByText(/No transcription provider is configured\. Speech is not transcribed/);
+  });
+
+  it('the refusal is rendered from the server’s own words, with what is missing', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIBE]: {
+        status: 501,
+        body: {
+          refused: true,
+          seam: 'transcription',
+          reason: 'no_provider_configured',
+          missing: ['an approved transcription provider (decision D9)'],
+          message: 'This build cannot transcribe speech: no provider is configured.',
+          decision_reference: 'docs/ai-integration-decision-packet.md',
+        },
+      },
+    } as never);
+    // The panel reports the browser has no recorder in jsdom, which is TRUE here
+    // and is itself the honest surface — so this test drives the API directly to
+    // pin the refusal rendering the recorder path leads to.
+    const { api, providerRefusalOf } = await import('../lib/api');
+    const failure = await api.requestTranscription({ audioRef: 'held-in-tab:1' }).catch((e: unknown) => e);
+    const stated = providerRefusalOf(failure);
+    expect(stated?.missing).toEqual(['an approved transcription provider (decision D9)']);
+    expect(stated?.message).toContain('no provider is configured');
+  });
+
+  it('a browser with no recorder says so plainly and keeps the typed path', async () => {
+    // jsdom has no `MediaRecorder`, which is the case this branch exists for.
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    await screen.findByText(/This browser does not offer audio recording/);
+    expect(await screen.findByLabelText('Transcript')).toBeInTheDocument();
+  });
+
+  it('no request this panel makes carries audio', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+    for (const entry of writes()) {
+      expect(Object.keys(entry.body)).not.toContain('audio');
+      expect(Object.keys(entry.body)).not.toContain('audio_data');
+    }
+    expect(requests().some((key) => key.includes('/uploads'))).toBe(false);
+  });
+});
+
+// --- 6. first-use guidance ----------------------------------------------------
+
+describe('first-use guidance', () => {
+  it('is shown on first use with the exact guidance sentence and a worked example', async () => {
+    localStorage.removeItem(CAPTURE_GUIDANCE_KEY);
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    expect(await screen.findByText(CAPTURE_GUIDANCE_SENTENCE)).toBeInTheDocument();
+    expect(screen.getByText(/Notes for run 2\. Temperature was 300 K\./)).toBeInTheDocument();
+    expect(screen.getByText(/proposed for the temperature field, in kelvin/)).toBeInTheDocument();
+  });
+
+  it('is skippable, persists the dismissal, and stays reachable afterwards', async () => {
+    localStorage.removeItem(CAPTURE_GUIDANCE_KEY);
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Got it' }));
+
+    expect(screen.queryByText(CAPTURE_GUIDANCE_SENTENCE)).toBeNull();
+    expect(isCaptureGuidanceSeen()).toBe(true);
+    // Unobtrusive, but not gone: one control brings it back.
+    fireEvent.click(screen.getByRole('button', { name: 'Show capture guidance' }));
+    expect(screen.getByText(CAPTURE_GUIDANCE_SENTENCE)).toBeInTheDocument();
+  });
+
+  it('is not shown again once this browser has seen it', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    await screen.findByLabelText('Transcript');
+    expect(screen.queryByText(CAPTURE_GUIDANCE_SENTENCE)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show capture guidance' })).toBeInTheDocument();
+  });
+
+  it('says the dismissal is remembered by the browser and not by the server', async () => {
+    localStorage.removeItem(CAPTURE_GUIDANCE_KEY);
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    await screen.findByText(/This browser remembers that you have seen this/);
+  });
+
+  it('stores no transcript text and no record identifier', async () => {
+    localStorage.removeItem(CAPTURE_GUIDANCE_KEY);
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Got it' }));
+    const stored = localStorage.getItem(CAPTURE_GUIDANCE_KEY) ?? '';
+    expect(Object.keys(JSON.parse(stored)).sort()).toEqual([
+      'guidanceId',
+      'seen',
+      'seenAt',
+      'version',
+    ]);
+    expect(stored).not.toContain(EXP);
+    expect(stored).not.toContain('run-1');
+  });
+});
+
+// --- 7. retention: only what is enforced --------------------------------------
+
+describe('retention', () => {
+  it('reports the enforced state and names the ones this build does not offer', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(/The finalized transcript is stored with this record as notes/);
+    expect(screen.getByText(/retain_during_draft/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing here removes a note/)).toBeInTheDocument();
+  });
+
+  it('offers no raw-audio retention control, and says why', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(/No audio reaches this server/);
+    expect(screen.queryByLabelText(/audio retention/i)).toBeNull();
+  });
+});
+
+// --- 8. accessibility ---------------------------------------------------------
+
+describe('accessibility', () => {
+  async function violations(container: HTMLElement) {
+    const results = await axe.run(container, {
+      runOnly: {
+        type: 'rule',
+        values: [
+          'button-name',
+          'label',
+          'aria-allowed-attr',
+          'aria-allowed-role',
+          'aria-required-attr',
+          'aria-valid-attr-value',
+          'select-name',
+        ],
+      },
+      resultTypes: ['violations'],
+    });
+    return results.violations;
+  }
+
+  it('every control is named and every field is labelled', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('a failure is announced as an alert, not only coloured', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { status: 412, body: { error: 'stale_write' } },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/NOT stored/);
+  });
+
+  it('the recording state is carried by a live region, not by colour', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await screen.findByLabelText('Transcript');
+    const live = container.querySelectorAll('[aria-live="polite"]');
+    expect(live.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('an outcome is never distinguished by colour alone', async () => {
+    const mixed = reading({
+      candidates: [],
+      abstentions: [
+        {
+          outcome: 'abstention',
+          kind: 'implicit_only_subject',
+          reason: 'No field exists for this in the official record schema.',
+          quote: 'Cu K-edge',
+          segment_index: 0,
+        },
+      ],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: mixed } } as never);
+    await renderPanel();
+    await typeAndFinalize('We measured the Cu K-edge.');
+    // A WORD, not a hue. Removing the tag would turn this red.
+    const item = (await screen.findByText(/No field exists for this/)).closest('li');
+    expect(within(item as HTMLElement).getByText('Not proposed')).toBeInTheDocument();
+  });
+
+  it('finalizing announces what happened to the text', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toMatch(/1 segment\(s\) stored with this record/);
+  });
+});

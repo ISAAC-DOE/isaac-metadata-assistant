@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RunsSection } from '../components/RunsSection';
+import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment } from '../lib/runAutosaveStore';
@@ -557,6 +558,24 @@ function LoadedWorkbench({
         decided quietly; it becomes a real question once unmapped notes actually
         feed the review state, which today they do not.
       */}
+      {/*
+        TRANSCRIPT CAPTURE SITS DIRECTLY ABOVE THE NOTES IT PRODUCES, and adjacency
+        is the whole of the argument. Finalizing a transcript stores EVERY segment
+        of it as an unmapped note, so the panel that creates them and the queue they
+        land in are neighbours: a reader who finalizes sees, without scrolling past
+        anything else, that their words were kept.
+
+        A section, not a tab, for the reason the two panels around it are sections —
+        and here the reason is sharper than usual. Hiding this behind a tab would
+        conceal from a reader on the fields view that this record can hold captured
+        content at all, and the one thing this feature must never do is let a
+        scientist believe what they dictated went nowhere.
+
+        ABOVE the notes panel, not below it, because capture precedes triage. The
+        reverse order shows a reader the queue before the thing that fills it.
+      */}
+      <TranscriptCapturePanel experimentId={id} />
+
       <UnmappedNotesPanel experimentId={id} />
 
       {groups.map((group) => (

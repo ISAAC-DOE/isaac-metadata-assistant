@@ -667,10 +667,16 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // An unexpected interior shape in one of these literals would silently shrink
     // both guards below — see the limits paragraph above for what this misses.
     expect(unclassifiedLiterals).toEqual([]);
-    expect(experimentPathLiterals.length).toBe(26);
+    // 26 -> 27, 21 -> 22, 16 -> 17: `captureTranscript` adds ONE per-record
+    // literal (`.../transcript`), which is one new suffix and one new segment. It
+    // is a write rather than a read, exactly as `captureNote` is, and it is
+    // inventoried here for the same reason: the panel that issues it renders the
+    // same failure copy, so an unlabelled segment would leak the wire name into
+    // a sentence a scientist reads.
+    expect(experimentPathLiterals.length).toBe(27);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(21);
-    expect(SUB_READ_SEGMENTS).toHaveLength(16);
+    expect(SUB_READ_SUFFIXES).toHaveLength(22);
+    expect(SUB_READ_SEGMENTS).toHaveLength(17);
     // Spot-check the two shapes that are easiest to derive wrongly.
     expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');
     expect(SUB_READ_SUFFIXES).toContain('source-preview?source=SEG-1');
