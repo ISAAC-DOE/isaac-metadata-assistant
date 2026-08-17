@@ -335,7 +335,7 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # is 47 + 4 + 1. This is the same shape as the a11y total that two branches each
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
-    assert checked == 52, f"expected 52 documented operations, found {checked}"
+    assert checked == 56, f"expected 56 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -563,6 +563,15 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # 400/412/428 set. There is deliberately no per-note validator, and deliberately
     # NO DELETE — dismissal is a review act on the review operation, so it appears
     # here as a `200` on a POST and not as a `204` anywhere.
+    # The ASSET REFERENCE API. The library lives in the experiment's draft and the
+    # associations live in each run's draft — both inside the one experiment document
+    # — so all three writes carry the RECORD's `If-Match` and the whole 400/412/428
+    # set with it, exactly as `POST .../runs` does. There is no DELETE: removal is a
+    # sub-path POST, matching `.../notes/{id}/review` and `.../overrides/clear`.
+    ("/api/experiments/{experiment_id}/assets", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/assets", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/assets/{asset_id}", "patch"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/assets/{asset_id}/remove", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],

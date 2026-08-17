@@ -1087,8 +1087,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 52 operations, 119 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(52);
+  it('describes the contract it claims to: 56 operations, 130 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(56);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1647,8 +1647,20 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 52,567; this
     //     figure drops the 110 `\n\n` separators, and 52,567 - 220 = 52,347.
-    expect(total).toBe(55611);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(119);
+    // 55,611 -> 60,399, 52 -> 56 operations, 119 -> 130 post-lead paragraphs: the
+    // backend now publishes the four ASSET REFERENCE operations (list, record, edit,
+    // remove). All four entries came out of `create_app().openapi()` — none was
+    // hand-written — which is why `test_contract_description_parity.py` is green in
+    // both directions.
+    //
+    // RE-MEASURED OVER THE WHOLE ARRAY, not added to the previous figure, because that
+    // is the lesson the 2026-08-16 note above records. Measured two independent ways:
+    //
+    //   . the splitPurpose paragraph rule over the array gives 60,399 / 130.
+    //   . internal consistency: raw sum of `d.description.length` = 60,659; this figure
+    //     drops the 130 `\n\n` separators, and 60,659 - 260 = 60,399.
+    expect(total).toBe(60399);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(130);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the
