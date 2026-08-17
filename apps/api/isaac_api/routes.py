@@ -56,6 +56,7 @@ from . import identity as identity_module
 from . import memory
 from . import memory_graph
 from . import notes
+from . import provenance
 from . import runtime_mode
 from . import runtime_records
 from . import search
@@ -163,8 +164,8 @@ OPENAPI_TAGS: list[dict] = [
         "name": TAG_EVIDENCE,
         "description": (
             "The per-field evidence trail, its evidence-support classification, "
-            "and previews of the reference source files the evidence cites. "
-            "Read-only."
+            "where each value came from and what establishes it, and previews of "
+            "the reference source files the evidence cites. Read-only."
         ),
     },
     {
@@ -7754,6 +7755,100 @@ def get_evidence_classification(
         counts[fr["classification"]] += 1
     response.headers["ETag"] = exp.etag()
     return {"record_rev": exp.rev, "field_results": field_results, "counts": counts}
+
+
+# --- 12c. unified provenance (two dimensions, read-only) ----------------------
+
+
+@router.get(
+    "/experiments/{experiment_id}/provenance",
+    tags=[TAG_EVIDENCE],
+    summary="Describe Where a Record's Values Came From",
+    description=(
+        "Two SEPARATE answers for each address on this record: `origins` — where "
+        "the value came from — and `review_state` — what, if anything, "
+        "establishes it. They are independent dimensions and are never combined "
+        "into one word: where a value came from says nothing about whether it is "
+        "backed, so a value read out of a file, produced by a derivation rule, or "
+        "inherited can perfectly well still be awaiting review.\n\n"
+        "`origins` is a SET, because one address can legitimately carry several "
+        "citations of different kinds. `primary_origin` picks one of them by a "
+        "fixed documented order, never by whichever citation happens to be stored "
+        "first, and that order announces a mixed-origin value under the origin a "
+        "reader most needs to know about rather than its most reassuring one. "
+        "When nothing stored says where a value came from, the origin is "
+        "`unknown` — a statement about the record, never a plausible default.\n\n"
+        "`review_state` is `conflict` when the record's own evidence asserts "
+        "incompatible values, `unmapped` for captured content that has no schema "
+        "home and no review yet, `supported` only when the stored status is "
+        "`verified` AND at least one readable citation backs it, and "
+        "`needs_review` for everything else — including anything this server "
+        "cannot positively place. It is not a validity, completion or export "
+        "verdict, and it decides nothing about whether this record can be "
+        "exported.\n\n"
+        "Pass `run` to describe one run instead of the record: each address then "
+        "says whether the run holds the value itself or resolves to the "
+        "record-level value it inherits. Nothing here is stored — every answer is "
+        "derived on read from content the record already carries. Read-only."
+    ),
+    response_description=(
+        "One entry per described address, plus what was deliberately not "
+        "described: how many notes exist against how many are listed, and the "
+        "record-level blocks that carry no value envelope to describe."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
+)
+def get_provenance(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    run: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Describe this run of the record rather than the record itself. "
+                "Omit it for the record. An id this record has no run for is "
+                "refused rather than answered from the record."
+            )
+        ),
+    ] = None,
+):
+    """The two provenance dimensions for one record, or for one of its runs.
+
+    Read-only and lock-free. Both dimensions are DERIVED on every call from
+    content that is already stored — no new field is written, and nothing about
+    the truth path, official validation, or export is consulted or changed.
+
+    A run is addressed by a QUERY parameter rather than its own path segment
+    because the answer is the same document either way: the record's own draft is
+    the default subject, and `run` narrows the subject to one of its runs. An
+    unknown run id is a `404` naming the run (the record itself was found), never
+    a silent fallback to the record-level answer.
+    """
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+
+    if run is None:
+        body = provenance.describe_experiment(exp.draft, exp.sorted_notes())
+    else:
+        run_obj = exp.get_run(run)
+        if run_obj is None:
+            return _run_not_found(experiment_id, run)
+        # Notes are narrowed to the ones captured against THIS run. A note with no
+        # run is a note about the record as a whole; attaching it to whichever run
+        # is being viewed would be exactly the invention `notes` refuses when it
+        # keeps `run_id` absent rather than guessing one.
+        run_notes = [n for n in exp.sorted_notes() if n.run_id == run]
+        body = provenance.describe_run(run_obj.draft, exp.resolve_run(run_obj), run_notes)
+
+    response.headers["ETag"] = exp.etag()
+    return {
+        "experiment_id": exp.id,
+        "run_id": run,
+        "record_rev": exp.rev,
+        **body,
+    }
 
 
 # --- 13. source preview -------------------------------------------------------

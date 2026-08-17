@@ -1087,8 +1087,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 52 operations, 119 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(52);
+  it('describes the contract it claims to: 53 operations, 122 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(53);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1647,8 +1647,17 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 52,567; this
     //     figure drops the 110 `\n\n` separators, and 52,567 - 220 = 52,347.
-    expect(total).toBe(55611);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(119);
+    // 55,611 -> 57,254 and 52 -> 53 operations, 119 -> 122 post-lead paragraphs:
+    // the backend now publishes `GET /api/experiments/{experiment_id}/provenance`,
+    // the two-dimension provenance view. ONE entry moved: the new operation and its
+    // three post-lead paragraphs. No existing description changed, and the parity
+    // test named above proves that rather than leaving it asserted here.
+    //
+    // MEASURED on this branch by running these two reducers over the array, not by
+    // adding a delta to 55,611 — see the note at the top of this block about two
+    // branches each incrementing one counter.
+    expect(total).toBe(57254);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(122);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

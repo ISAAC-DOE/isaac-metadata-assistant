@@ -51,6 +51,15 @@ import {
   Equal,
   ArrowLeftRight,
   Columns2,
+  // The four provenance glyphs this file did not already have. Each is a plain
+  // line mark and none of them is a verdict: `CornerRightUp` points at the record
+  // an inherited value lives on, `Cpu` is a processor outline (deliberately NOT a
+  // sparkle or a wand — this file's own rule), `Quote` is a citation mark, and
+  // `Inbox` is content that is waiting to be placed.
+  CornerRightUp,
+  Cpu,
+  Quote,
+  Inbox,
   type LucideIcon,
 } from 'lucide-react';
 import type { SourceType } from '../lib/types';
@@ -84,6 +93,23 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   reconMatch: Check,
   reconConflict: TriangleAlert,
   reconAbsent: CircleDashed,
+  // ORIGIN axis. Eight distinct glyphs, because these chips are deliberately all
+  // the same neutral colour (see `CHIP_META`) — the glyph and the label are the
+  // ONLY things telling one origin from another, so no two may share one.
+  // NOTHING here is a check mark: an origin is never an approval.
+  origManual: UserCheck,
+  origFile: FileText,
+  origVoice: AudioWaveform,
+  origInherited: CornerRightUp,
+  origAssistant: Cpu,
+  origDerived: CornerDownRight,
+  origEvidence: Quote,
+  origUnknown: CircleDashed,
+  // REVIEW axis.
+  revSupported: Check,
+  revNeedsReview: CircleAlert,
+  revConflict: TriangleAlert,
+  revUnmapped: Inbox,
 };
 
 // Evidence source-type glyphs (icons-and-symbols.md).
