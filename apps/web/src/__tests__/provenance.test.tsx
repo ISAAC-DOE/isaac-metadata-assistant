@@ -30,8 +30,10 @@ import { render } from '@testing-library/react';
 
 import { EvidenceRow } from '../components/EvidenceRow';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
+import { CHIP_ICON } from '../components/icons';
 import { OriginChip, ProvenanceChipPair, ReviewStateChip } from '../components/ProvenanceChips';
 import { CHIP_META, ORIGIN_CHIP, REVIEW_STATE_CHIP } from '../lib/status';
+import type { LucideIcon } from 'lucide-react';
 import {
   NOTE_SOURCE_ORIGIN,
   ORIGIN_LABEL,
@@ -307,6 +309,45 @@ describe('origin never implies support', () => {
   it('gives each origin its own glyph, since colour is not available to tell them apart', () => {
     const kinds = PROVENANCE_ORIGINS.map((o) => ORIGIN_CHIP[o]);
     expect(new Set(kinds).size).toBe(PROVENANCE_ORIGINS.length);
+  });
+
+  it('NO ORIGIN GLYPH DRAWS A VERDICT MARK — the last channel that could encode approval', () => {
+    /*
+     * The glyph set was pinned for DISTINCTNESS above, and for nothing else, so
+     * nothing stopped an origin borrowing the review axis's meaning.
+     *
+     * Independent review found `origManual` set to lucide's `UserCheck` — a
+     * torso, a head, and `polyline points="16 11 18 13 22 9"`, i.e. a check mark
+     * — drawn at the same size and stroke as `revSupported: Check`, directly
+     * beneath a comment reading "NOTHING here is a check mark: an origin is
+     * never an approval." A field a person typed and nobody confirmed therefore
+     * showed a check beside "Needs review", and the check is the
+     * higher-contrast, faster-read mark of the two.
+     *
+     * The Python signature forbids origin reaching the review decision and the
+     * palette is neutral for all eight origins; the glyph was the one remaining
+     * channel, and it was leaking.
+     *
+     * Compared by RENDERED GEOMETRY rather than by identifier, so a rename — or
+     * a different icon that happens to draw a tick — is caught the same way.
+     */
+    const geometryOf = (Icon: LucideIcon) => render(<Icon />).container.innerHTML;
+
+    const verdictShapes = new Set(
+      [CHIP_ICON.verified, CHIP_ICON.confirmed, CHIP_ICON.pass].map(geometryOf),
+    );
+    // Guard the guard: if the verdict glyphs were empty or all identical to a
+    // blank render, the comparison below would prove nothing.
+    expect(verdictShapes.size).toBeGreaterThan(0);
+    for (const shape of verdictShapes) expect(shape.length).toBeGreaterThan(20);
+
+    for (const origin of PROVENANCE_ORIGINS) {
+      const shape = geometryOf(CHIP_ICON[ORIGIN_CHIP[origin]]);
+      expect(
+        verdictShapes.has(shape),
+        `the "${origin}" origin glyph draws a verdict mark; an origin is never an approval`,
+      ).toBe(false);
+    }
   });
 
   it('never labels an origin with the truth core\'s word "verified"', () => {

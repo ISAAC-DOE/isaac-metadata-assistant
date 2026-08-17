@@ -5,6 +5,7 @@
  */
 import {
   Check,
+  User,
   UserCheck,
   CornerDownRight,
   CircleDashed,
@@ -97,7 +98,21 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   // the same neutral colour (see `CHIP_META`) — the glyph and the label are the
   // ONLY things telling one origin from another, so no two may share one.
   // NOTHING here is a check mark: an origin is never an approval.
-  origManual: UserCheck,
+  //
+  // `origManual` WAS `UserCheck`, directly beneath that sentence. Lucide's
+  // `UserCheck` is a torso, a head, and `polyline points="16 11 18 13 22 9"` — a
+  // check mark, drawn at the same 13px / 2.2 stroke as `revSupported: Check` on
+  // the review axis. So a field a person typed and nobody confirmed rendered as
+  // `[check] Entered by a person` beside `[warn] Needs review`, and the check is
+  // the higher-contrast, faster-read mark of the two.
+  //
+  // That is this model's central invariant defeated in the one channel still
+  // open to it. The Python signature forbids an origin reaching the review-state
+  // decision; the palette makes all eight origin chips neutral; the glyph was
+  // the only remaining way to encode approval on the origin axis, and it was
+  // using the approval glyph. The test named below makes this mechanical rather
+  // than a matter of remembering.
+  origManual: User,
   origFile: FileText,
   origVoice: AudioWaveform,
   origInherited: CornerRightUp,

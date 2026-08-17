@@ -46,8 +46,13 @@ MODULE_PATH = Path(provenance.__file__)
 ENTRY_KEYS = set(provenance.ENTRY_KEYS)
 
 
-def test_the_entry_shape_is_the_seven_documented_keys():
-    """Pins the constant itself, so reading it above is not circular."""
+def test_the_entry_shape_is_the_eight_documented_keys():
+    """Pins the constant itself, so reading it above is not circular.
+
+    `unavailable` was added after independent review found that a PARTIALLY
+    unreadable payload reported `supported`. The wire shape had no slot to carry
+    the disclosure, so no client could have reached a different verdict either.
+    """
     assert ENTRY_KEYS == {
         "address",
         "origins",
@@ -56,6 +61,7 @@ def test_the_entry_shape_is_the_seven_documented_keys():
         "evidence_count",
         "inherited",
         "note_refs",
+        "unavailable",
     }
 
 
@@ -248,9 +254,24 @@ def test_unreadable_stored_evidence_contributes_no_invented_origin():
 
 
 def test_review_state_takes_no_origin_parameter():
-    """The enforcement is structural: there is no parameter to pass one through."""
+    """The enforcement is structural: there is no parameter to pass one through.
+
+    `unavailable` joined the signature when a partially unreadable payload was
+    found reporting `supported`. It is a fact about whether the STORED PAYLOAD
+    could be read, not about where the value came from, so the invariant this
+    test guards is untouched — and the second assertion, which is the one that
+    actually forbids origin, is deliberately kept rather than folded into the
+    first. The exact-set assertion catches an argument being added; the substring
+    assertion catches the specific argument that would break the model.
+    """
     params = set(inspect.signature(provenance.review_state).parameters)
-    assert params == {"status", "evidence_count", "classification", "note_state"}
+    assert params == {
+        "status",
+        "evidence_count",
+        "classification",
+        "note_state",
+        "unavailable",
+    }
     assert not {p for p in params if "origin" in p}
 
 
@@ -827,3 +848,164 @@ def test_the_derivations_do_not_mutate_their_input():
     before = copy.deepcopy(draft)
     provenance.describe_experiment(draft)
     assert draft == before
+
+
+# =============================================================================
+# REGRESSIONS FROM INDEPENDENT REVIEW — two CRITICALs, each with the exact shape
+# that made it invisible to the suite that shipped it.
+# =============================================================================
+
+
+def test_a_partially_unreadable_payload_is_never_supported():
+    """CRITICAL. `verified` + one readable citation + one unreadable one.
+
+    `serialize._trail_entry` passes a draft field's stored `status` through
+    verbatim and sets `unavailable` when only PART of the payload could be read.
+    Its docstring says the pass-through "is defensible only BECAUSE
+    `unavailable`/`unavailable_reason` travel with it. Nothing here may present
+    that status as fully justified support."
+
+    `provenance` did not read `unavailable`, and `ENTRY_KEYS` had no slot to
+    carry it — so the entry reported `supported`, and the panel painted a green
+    Supported chip beneath a row it had already marked unavailable. Of the three
+    surfaces reading this data, provenance was the only one that lost the
+    disclosure.
+
+    MUTATION: delete the `if unavailable:` arm in `review_state` and this goes RED.
+    """
+    draft = {
+        "fields": {
+            "sample.material.formula": {
+                "value": "CuO",
+                "status": "verified",
+                # One readable entry and one that is not an evidence object.
+                "evidence": [_ev("spreadsheet", source_file="x.xlsx", locator="B2"), 7],
+            }
+        }
+    }
+    described = provenance.describe_experiment(draft)
+    entry = next(e for e in described["entries"] if e["address"] == "sample.material.formula")
+
+    assert entry["unavailable"] is True, "the disclosure must reach the wire"
+    assert entry["review_state"] == provenance.REVIEW_NEEDS_REVIEW, (
+        "a payload this build could only partly read must never read as supported"
+    )
+    # And the control: the SAME field with every entry readable IS supported, so
+    # the assertion above is not passing for an unrelated reason.
+    draft["fields"]["sample.material.formula"]["evidence"] = [
+        _ev("spreadsheet", source_file="x.xlsx", locator="B2")
+    ]
+    clean = provenance.describe_experiment(draft)
+    clean_entry = next(
+        e for e in clean["entries"] if e["address"] == "sample.material.formula"
+    )
+    assert clean_entry["unavailable"] is False
+    assert clean_entry["review_state"] == provenance.REVIEW_SUPPORTED
+
+
+def test_the_record_path_names_its_own_undescribed_blocks():
+    """CRITICAL. `blocks_not_described` was ALWAYS `[]` on the record path.
+
+    It was populated only from `resolutions`, and `describe_experiment` passes
+    `{}` — so the default call every client makes first reported that nothing had
+    been omitted, while `attribution`, `qc`, `series` and the rest were as
+    undescribed as they are for a run. Asking for the same record's RUN would
+    name `block:attribution`; the record-level answer was the less honest of the
+    two, in the one field whose entire purpose is to prevent that.
+
+    MUTATION: seed `blocks_not_described` as `[]` again and this goes RED.
+    """
+    draft = {
+        "fields": {"sample.material.formula": {"value": "CuO", "status": "verified", "evidence": []}},
+        "attribution": {"uploaded_by": None},
+        "qc": {"status": "pass"},
+        "series": [],
+        "block_evidence": {},
+    }
+    described = provenance.describe_experiment(draft)
+
+    assert described["blocks_not_described"] == [
+        ws.block_address("attribution"),
+        ws.block_address("block_evidence"),
+        ws.block_address("qc"),
+        ws.block_address("series"),
+    ]
+    # `fields` is DESCRIBED, so it must not appear; naming it would overstate the
+    # gap as badly as the empty list understated it.
+    assert ws.block_address("fields") not in described["blocks_not_described"]
+
+
+def test_the_described_keys_match_what_the_trail_reader_actually_walks():
+    """`_DESCRIBED_DRAFT_KEYS` mirrors `serialize.evidence_trail_from_draft`.
+
+    If that reader learns to walk a fourth key, this module would start naming it
+    as undescribed — reporting a gap that is not there. Pinned against the
+    reader's own source so the two cannot drift silently.
+    """
+    from isaac_api import serialize
+
+    source = inspect.getsource(serialize.evidence_trail_from_draft)
+    for key in provenance._DESCRIBED_DRAFT_KEYS:
+        assert f'"{key}"' in source, f"{key} is claimed as described but the reader never names it"
+    # And the guard-the-guard: the set is not empty, so the loop above is not vacuous.
+    assert provenance._DESCRIBED_DRAFT_KEYS == {"fields", "implicit", "assets"}
+
+
+def test_a_run_scoped_note_is_not_attributed_to_the_record(tmp_path, monkeypatch):
+    """IMPORTANT. The record view used to claim every note, including run ones.
+
+    The RUN branch narrows notes to `n.run_id == run` and explains why: attaching
+    a record-level note to whichever run is on screen "would be exactly the
+    invention `notes` refuses". The RECORD branch passed `exp.sorted_notes()` —
+    every note — and `_note_refs_by_path` keys purely on `mapped_field_path` and
+    never looks at `run_id`.
+
+    So a note captured against a run, mapped to a field path the record also
+    carries, appeared in the RECORD's `note_refs` with no run marker and was
+    counted in `notes_summary` as an unmapped entry of the record. The same
+    invention, in the opposite direction.
+
+    MUTATION: pass `exp.sorted_notes()` on the record branch again and the first
+    assertion goes RED.
+
+    Uses a PLAIN client, not the module's `client` fixture: that one is a
+    worked-example session, and creating an experiment inside a session is a 409
+    by design.
+    """
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    from isaac_api.app import create_app
+
+    client = TestClient(create_app())
+
+    created = client.post("/api/experiments", json={"title": "note scoping"})
+    assert created.status_code in (200, 201), created.text
+    experiment_id = created.json()["id"]
+
+    runs = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json={"label": "300 K", "confirmed_by_user": True},
+        headers={"If-Match": client.get(f"/api/experiments/{experiment_id}").headers["ETag"]},
+    )
+    assert runs.status_code in (200, 201), runs.text
+    run_id = runs.json()["run"]["id"]
+
+    # One note captured against the RUN.
+    noted = client.post(
+        f"/api/experiments/{experiment_id}/notes",
+        json={"text": "Ran hotter than planned.", "source": "typed_note", "run_id": run_id},
+        headers={"If-Match": client.get(f"/api/experiments/{experiment_id}").headers["ETag"]},
+    )
+    assert noted.status_code in (200, 201), noted.text
+
+    record_view = client.get(f"/api/experiments/{experiment_id}/provenance")
+    assert record_view.status_code == 200, record_view.text
+    assert record_view.json()["notes_summary"] == {"total": 0, "listed_as_unmapped": 0}, (
+        "a note captured against a run is not a note about the record"
+    )
+
+    # …and the run view DOES carry it, so the assertion above is not passing
+    # because the note simply vanished.
+    run_view = client.get(f"/api/experiments/{experiment_id}/provenance?run={run_id}")
+    assert run_view.status_code == 200, run_view.text
+    assert run_view.json()["notes_summary"]["listed_as_unmapped"] == 1

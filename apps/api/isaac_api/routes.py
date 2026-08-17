@@ -7830,7 +7830,20 @@ def get_provenance(
         return _not_found(experiment_id)
 
     if run is None:
-        body = provenance.describe_experiment(exp.draft, exp.sorted_notes())
+        # Narrowed to notes that are ABOUT THE RECORD, symmetrically with the run
+        # branch below. This used to pass every note, including ones captured
+        # against a specific run — and `_note_refs_by_path` keys purely on
+        # `mapped_field_path`, never on `run_id`. So a note captured against run 2
+        # and mapped to a field path the record also carries appeared in the
+        # RECORD's `note_refs` with no run marker, and was counted in
+        # `notes_summary` as an unmapped entry of the record. A reader had no way
+        # to tell it was about a different run's value.
+        #
+        # That is the exact invention the run branch is careful to refuse,
+        # committed in the opposite direction. One rule, both ways: a note is
+        # described by the subject it was captured against, and by nothing else.
+        record_notes = [n for n in exp.sorted_notes() if n.run_id is None]
+        body = provenance.describe_experiment(exp.draft, record_notes)
     else:
         run_obj = exp.get_run(run)
         if run_obj is None:

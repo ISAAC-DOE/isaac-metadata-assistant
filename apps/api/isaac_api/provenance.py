@@ -355,6 +355,7 @@ def review_state(
     evidence_count: int = 0,
     classification: object = None,
     note_state: object = None,
+    unavailable: bool = False,
 ) -> str:
     """Which of the four review states this item is in.
 
@@ -383,6 +384,27 @@ def review_state(
         return REVIEW_CONFLICT
     if note_state == notes_module.NOTE_UNREVIEWED:
         return REVIEW_UNMAPPED
+    # A PARTIALLY UNREADABLE PAYLOAD IS NEVER SUPPORT.
+    #
+    # `serialize._trail_entry` passes a draft field's stored `status` through
+    # VERBATIM, and sets `unavailable` when only part of the payload could be
+    # read. Its own docstring is explicit that the verbatim pass-through "is
+    # defensible only BECAUSE `unavailable`/`unavailable_reason` travel with it.
+    # Nothing here may present that status as fully justified support."
+    #
+    # This function used not to read `unavailable` at all, and `ENTRY_KEYS` had
+    # no slot to carry it, so the wire shape could not express it either. A field
+    # with `status: verified` and one readable citation beside one unreadable one
+    # returned `supported` — and `EvidenceTrailPanel` painted a green Supported
+    # chip directly beneath the row it had ALREADY marked unavailable. Of the
+    # three surfaces that read this data, provenance was the only one that lost
+    # the disclosure; `evidence_classify` keeps it in its explanation.
+    #
+    # Demoted rather than merely flagged, because the conservative arm is what
+    # this precedence is for: an item this module cannot positively place is one
+    # a person should look at.
+    if unavailable:
+        return REVIEW_NEEDS_REVIEW
     if status in _STATUS_ESTABLISHED and evidence_count >= 1:
         return REVIEW_SUPPORTED
     return REVIEW_NEEDS_REVIEW
@@ -403,8 +425,21 @@ ENTRY_KEYS: frozenset[str] = frozenset(
         "evidence_count",
         "inherited",
         "note_refs",
+        # Carried so a PARTIALLY unreadable payload cannot present as plain
+        # support. See `_entry` and `review_state` for why this is not optional.
+        "unavailable",
     }
 )
+
+#: The draft keys `serialize.evidence_trail_from_draft` actually walks, and
+#: therefore the only ones this module can describe. Everything else in a draft
+#: is a block it must OWN UP TO not describing, rather than pass over in silence.
+#:
+#: Kept beside the reader it mirrors: `evidence_trail_from_draft` iterates
+#: `draft["fields"]`, then `_bundle_list(draft, "implicit", …)`, then
+#: `_bundle_list(draft, "assets", …)`, and nothing else. A test pins this against
+#: that function's source so the two cannot drift apart silently.
+_DESCRIBED_DRAFT_KEYS: frozenset[str] = frozenset({"fields", "implicit", "assets"})
 
 
 def _entry(
@@ -416,6 +451,7 @@ def _entry(
     inherited: bool,
     note_refs: list[str],
     extra_origins: tuple[str, ...] = (),
+    unavailable: bool = False,
 ) -> dict:
     """One entry, both dimensions, from one item's already-read stored data."""
     origins = sorted(set(origins_from_evidence(evidence)) | set(extra_origins))
@@ -427,11 +463,18 @@ def _entry(
         "origins": origins,
         "primary_origin": primary_origin(origins),
         "review_state": review_state(
-            status=status, evidence_count=evidence_count, classification=classification
+            status=status,
+            evidence_count=evidence_count,
+            classification=classification,
+            unavailable=unavailable,
         ),
         "evidence_count": evidence_count,
         "inherited": inherited,
         "note_refs": note_refs,
+        # Carried on the wire, not just consumed: a client that renders its own
+        # chip must be able to reach the same verdict, and the frontend mirror
+        # does exactly that.
+        "unavailable": bool(unavailable),
     }
 
 
@@ -467,6 +510,10 @@ def _note_entry(note) -> dict:
         "evidence_count": 0,
         "inherited": False,
         "note_refs": [note.id],
+        # A note is read whole or not at all — there is no partial-payload state
+        # for one. Written explicitly rather than omitted so every entry on the
+        # wire carries the same keys, which is what `ENTRY_KEYS` is for.
+        "unavailable": False,
     }
 
 
@@ -501,6 +548,10 @@ def _trail_entries(
                 inherited=inherited,
                 note_refs=list(note_refs.get(address, ())),
                 extra_origins=extra_origins,
+                # `serialize._trail_entry` sets this when only PART of the stored
+                # payload could be read, and its docstring makes the verbatim
+                # `status` pass-through conditional on it travelling alongside.
+                unavailable=bool(item.get("unavailable")),
             )
         )
     return entries
@@ -555,7 +606,33 @@ def _describe(draft: dict, resolutions: dict, note_list) -> dict:
     entries = _trail_entries(draft, note_refs=refs)
     seen = {entry["address"] for entry in entries}
 
-    blocks_not_described: list[str] = []
+    # THE SUBJECT'S OWN UNDESCRIBED BLOCKS, SEEDED FIRST.
+    #
+    # This list used to be populated ONLY from `resolutions`, and
+    # `describe_experiment` passes `resolutions = {}` — so on the RECORD path,
+    # which is the default call every client makes first, it was unconditionally
+    # empty while `attribution`, `qc`, `series`, `descriptors_outputs`, `links`,
+    # `meta` and `block_evidence` were every bit as undescribed as they are for a
+    # run. `serialize.evidence_trail_from_draft` reads only `fields`, `implicit`
+    # and `assets`.
+    #
+    # The route's own response description promises this field carries "the
+    # record-level blocks that carry no value envelope to describe". Answering
+    # that with `[]` every time is worse than not offering the field at all: a
+    # reader whose `attribution` block is unevidenced was told nothing had been
+    # omitted, and asking for the same record's RUN would name
+    # `block:attribution` — the record-level answer being the less honest of the
+    # two, in the one field whose entire purpose is to prevent that.
+    #
+    # Seeding from the subject draft closes the run side too: a run's OWN
+    # `series`/`qc`/`descriptors_outputs` blocks were undescribed and unlisted as
+    # well, because `resolutions` only ever carries EXPERIMENT-level addresses.
+    described: list[str] = []
+    if isinstance(draft, dict):
+        described = [
+            ws.block_address(key) for key in sorted(draft) if key not in _DESCRIBED_DRAFT_KEYS
+        ]
+    blocks_not_described: list[str] = list(described)
     field_payloads: dict[str, object] = {}
     inherited_names: set[str] = set()
     for address in sorted(resolutions):
@@ -568,7 +645,11 @@ def _describe(draft: dict, resolutions: dict, note_list) -> dict:
             # arm; either way, nothing is invented for it.
             continue
         if kind != ws.ADDRESS_FIELD:
-            blocks_not_described.append(address)
+            # Deduped against the subject's own blocks seeded above: an
+            # experiment-level block address can arrive from both sources, and
+            # naming it twice would misreport how much is undescribed.
+            if address not in blocks_not_described:
+                blocks_not_described.append(address)
             continue
         if name in seen:
             continue
@@ -597,6 +678,9 @@ def _describe(draft: dict, resolutions: dict, note_list) -> dict:
                     inherited=is_inherited,
                     note_refs=list(refs.get(name, ())),
                     extra_origins=(ORIGIN_INHERITED,) if is_inherited else (),
+                    # An INHERITED envelope can be partially unreadable too, and
+                    # the resolved payload goes through the very same reader.
+                    unavailable=bool(item.get("unavailable")),
                 )
             )
 
