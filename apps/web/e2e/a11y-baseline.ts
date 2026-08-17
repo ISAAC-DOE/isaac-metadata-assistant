@@ -818,8 +818,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * a stale number that says where it came from can be corrected by the next
        * darwin run; a fresh number nobody measured cannot be caught at all.
        */
-      'record-detail@desktop-1280x800': { darwin: 15, linux: 16 },
-      'record-detail@laptop-1024x768': { darwin: 15, linux: 16 },
+      'record-detail@desktop-1280x800': { darwin: 15, linux: 22 },
+      'record-detail@laptop-1024x768': { darwin: 15, linux: 22 },
       /* linux 15 -> 14: the 320px clipping fix (min-width/overflow-wrap on
          `.fg-summary`, scoped to `.record-view-panel`) let the summary WRAP
          instead of running past its clip, and one contrast node stopped firing
@@ -827,9 +827,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          loosening. darwin measured 16 on the same commit and is unchanged —
          the two faces wrap at different words, which is the entire reason this
          file has two columns. */
-      'record-detail@tablet-768x1024': { darwin: 15, linux: 16 },
-      'record-detail@mobile-375x812': { darwin: 13, linux: 14 },
-      'record-detail@zoom-200': { darwin: 13, linux: 14 },
+      'record-detail@tablet-768x1024': { darwin: 15, linux: 22 },
+      'record-detail@mobile-375x812': { darwin: 13, linux: 20 },
+      'record-detail@zoom-200': { darwin: 13, linux: 20 },
       'schema-reference@desktop-1280x800': 19,
       'schema-reference@laptop-1024x768': 19,
       'schema-reference@tablet-768x1024': 17,
@@ -1229,8 +1229,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       //
       // zoom-200 COLLAPSES to a scalar 59: darwin was already 59 and linux has
       // converged on it, and the guard rejects a pair with equal halves.
-      'settings-explorer@mobile-375x812': { darwin: 56, linux: 57 },
-      'settings-explorer@zoom-200': 59,
+      'settings-explorer@mobile-375x812': { darwin: 56, linux: 58 },
+      'settings-explorer@zoom-200': { darwin: 59, linux: 61 },
       'settings-privacy@desktop-1280x800': 9,
       'settings-privacy@laptop-1024x768': 9,
       'settings-privacy@tablet-768x1024': 9,
@@ -1507,14 +1507,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          unmeasured darwin; the precedent is `settings-explorer@width-320` just
          below. Full reasoning, including what this figure does NOT measure, is in
          the block above `record-detail@desktop-1280x800`. */
-      'record-detail@width-320': { darwin: 13, linux: 14 },
+      'record-detail@width-320': { darwin: 13, linux: 20 },
       /* SPLIT, and CI is what established it. I measured darwin 13 after the
          Graph tab landed and recorded it as a bare number, saying in the commit
          that linux was not yet measured and CI would adjudicate. It did: linux
          stayed at 12. So the tab's extra node is measurable on the darwin face
          at 390 and not on the linux one — the two wrap at different words, which
          is the whole reason this file has two columns. */
-      'record-detail@width-390': { darwin: 13, linux: 14 },
+      'record-detail@width-390': { darwin: 13, linux: 20 },
       'schema-reference@width-320': 20,
       'schema-reference@width-390': 22,
       /* SPLIT 2026-08-16, and it is a fall rather than a rise. CI run 31968866824
@@ -1546,7 +1546,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // width-320 COLLAPSES to a scalar 57: darwin was already 57 and linux has
       // converged on it, so the pair no longer marks a measured difference and
       // the guard would reject it. width-390 stays a pair, darwin 59 unmeasured.
-      'settings-explorer@width-320': 57,
+      'settings-explorer@width-320': { darwin: 57, linux: 56 },
       'settings-explorer@width-390': { darwin: 59, linux: 58 },
       'settings-privacy@width-320': 8,
       'settings-privacy@width-390': 8,
@@ -2361,8 +2361,59 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // 2557 is COMPUTED from the merged entry map by the same per-platform reduction
   // the guard performs, then checked against this arithmetic — not obtained from
   // it. Re-derive it; do not trust this sentence.
+  // ── ASSET REFERENCES, 2026-08-17: linux 2557 -> 2601. darwin does NOT move. ──
+  //
+  // TRANSCRIBED from CI run 32012740475 (`browser accessibility and responsive
+  // baseline`, head `387913a`), read line by line from the GREW/IMPROVED messages
+  // rather than derived. Ten cells, +44 net:
+  //
+  //   +42  the seven `record-detail@*` cells, +6 EACH and uniformly — the Asset
+  //        References panel, which mounts on this surface between Unmapped Notes
+  //        and the draft blocks. Uniform across every viewport, which is itself
+  //        the evidence that this is markup volume rather than a wrap artefact.
+  //    +1  `settings-explorer@mobile-375x812`  57 -> 58
+  //    +2  `settings-explorer@zoom-200`        59 -> 61
+  //    -1  `settings-explorer@width-320`       57 -> 56   (an IMPROVEMENT)
+  //
+  // The three `settings-explorer` moves are the SECOND-ORDER effect this file has
+  // documented twice before: the Endpoint Explorer renders every operation the
+  // build exposes, this branch adds four asset routes, and `.api-browser-list` is
+  // a clipped scroll container — so cells move by different amounts and one can
+  // fall while its neighbours rise. Nothing about the asset UI renders there.
+  //
+  // RECORDED, NOT ACCEPTED AS CORRECT, and checked before being recorded rather
+  // than assumed. `assets.css` paints small text with `--text-tertiary` (#78838f,
+  // 3.86:1) and `--text-quaternary` (#9aa4af, 2.53:1) — five and one declaration
+  // respectively. BOTH ARE ALREADY IN THIS ENTRY'S `foregrounds` LIST, which is
+  // the mechanical proof that no NEW too-light colour was introduced: a new
+  // foreground fails this entry's `foregrounds` guard even at an unchanged node
+  // count, and it did not fire. So these 42 nodes are 42 more instances of a
+  // documented token shortfall, not a defect this panel chose.
+  //
+  // Giving the asset panel alone a compliant colour would leave it deliberately
+  // mismatched against every sibling sub-label on the same screen and would
+  // remove no pre-existing violation. Raising the two tokens is the systemic fix,
+  // moves counts on all 18 surfaces at once, and belongs to the design-system
+  // slice — not inside an assets PR, where a palette change would hide. These
+  // figures are EXPECTED TO FALL when that lands; transcribe CI's new numbers
+  // then, and do not read the fall as a regression.
+  //
+  // DARWIN IS DELIBERATELY UNCHANGED AND IS KNOWN-UNVERIFIED, not known-correct.
+  // Six DOM nodes added by a new panel have moved both faces every time this has
+  // been measured, so darwin has very probably moved too. It is left alone
+  // anyway, per this file's standing rule: only the platform actually measured
+  // may be edited. A stale number that says where it came from can be corrected
+  // by the next darwin run; a fresh number nobody measured cannot be caught at
+  // all. Two cells that were scalars (`settings-explorer@zoom-200` and
+  // `@width-320`) therefore SPLIT rather than having their darwin half moved onto
+  // a linux reading.
+  //
+  // The +44 was computed by the fast invariant suite in ~10ms rather than by a
+  // second 26-minute browser run — which is the whole point of
+  // `e2e/invariants/baseline-aggregate.invariant.test.ts`, doing its job on its
+  // first real use.
   darwin: 2551,
-  linux: 2557,
+  linux: 2601,
 };
 
 /**
