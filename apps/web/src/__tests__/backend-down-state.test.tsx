@@ -614,14 +614,16 @@ describe('both render sites guard the run command at build time', () => {
  * HOW. Every per-record path in that module is a single-line template literal of the
  * form `` `/experiments/${enc(…)}…` ``, so those literals are collected and each is
  * required to be either the bare record path or a sub-read. Measured, and re-measured
- * when the Unmapped Notes reads and writes were added: 26 literals → 2 bare + 21
- * distinct sub-read suffixes → 16 distinct first segments. (Was 23 → 2 + 19 → 15; the
- * three new literals are `notes` twice — the list read and the capture write share one
- * path, and the Set folds them into ONE suffix — plus `notes/${…}/review`, and the
- * segment count moves this time because `notes` is a first segment nothing else used.
- * Before that: 21 → 2 + 17 → 15, when the two per-run override writes were added as
- * `runs/${…}/overrides` and `runs/${…}/overrides/clear`, whose segment was already
- * covered by `runs`.) Those counts are asserted, so adding a sub-read fails this file.
+ * when the Asset References reads and writes were added: 30 literals → 2 bare + 24
+ * distinct sub-read suffixes → 17 distinct first segments. (Was 26 → 2 + 21 → 16; the
+ * four new literals are `assets` twice — the list read and the create write share one
+ * path, and the Set folds them into ONE suffix — plus `assets/${…}` and
+ * `assets/${…}/remove`, and the segment count moves because `assets` is a first
+ * segment nothing else used. Before that: 23 → 2 + 19 → 15, and the three literals
+ * added then were `notes` twice plus `notes/${…}/review`. Before that: 21 → 2 + 17 →
+ * 15, when the two per-run override writes were added as `runs/${…}/overrides` and
+ * `runs/${…}/overrides/clear`, whose segment was already covered by `runs`.) Those
+ * counts are asserted, so adding a sub-read fails this file.
  *
  * WHAT THIS CANNOT SEE, stated precisely because the obvious reading of the previous
  * paragraph is too generous. `unclassifiedLiterals` catches a literal that STARTS
@@ -667,16 +669,33 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // An unexpected interior shape in one of these literals would silently shrink
     // both guards below — see the limits paragraph above for what this misses.
     expect(unclassifiedLiterals).toEqual([]);
-    // 26 -> 27, 21 -> 22, 16 -> 17: `captureTranscript` adds ONE per-record
-    // literal (`.../transcript`), which is one new suffix and one new segment. It
-    // is a write rather than a read, exactly as `captureNote` is, and it is
-    // inventoried here for the same reason: the panel that issues it renders the
-    // same failure copy, so an unlabelled segment would leak the wire name into
-    // a sentence a scientist reads.
-    expect(experimentPathLiterals.length).toBe(27);
+    // MEASURED, not derived by adding the two branches' deltas together. Both
+    // the asset slice and this one add per-record route literals, and the merge
+    // of two counter edits is exactly where this repository has been bitten
+    // before — see the note on `A11Y_BASELINE_TOTAL_NODES`. These three numbers
+    // were read out of this test's own failure output after the merge, never
+    // computed from the pre-merge values.
+    expect(experimentPathLiterals.length).toBe(31);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(22);
-    expect(SUB_READ_SEGMENTS).toHaveLength(17);
+    expect(SUB_READ_SUFFIXES).toHaveLength(25);
+    // 18, AND THE ROUTE TO THAT NUMBER IS THE POINT.
+    //
+    // This line was NOT in the merge conflict. Both branches raised it from 16
+    // to 17 — the asset slice for its own new segment, this slice for
+    // `transcript` — so git saw two identical one-line changes and merged them
+    // without a murmur, leaving a literal that accounted for one of the two
+    // additions. The entries changed twice; the total recorded once.
+    //
+    // That is precisely the failure mode `A11Y_BASELINE_TOTAL_NODES` carries a
+    // long note about, reproduced here in a different counter within days, which
+    // says something about how easily it recurs. It was caught only because the
+    // count is DERIVED from `api.ts` and this assertion re-measures it; a
+    // hand-maintained pair with no derivation behind it would have merged clean
+    // and stayed wrong.
+    //
+    // All three numbers in this test were read out of its own failure output
+    // after the merge. None was computed by adding the two branches' deltas.
+    expect(SUB_READ_SEGMENTS).toHaveLength(18);
     // Spot-check the two shapes that are easiest to derive wrongly.
     expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');
     expect(SUB_READ_SUFFIXES).toContain('source-preview?source=SEG-1');

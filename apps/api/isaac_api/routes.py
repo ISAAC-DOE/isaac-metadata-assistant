@@ -44,6 +44,7 @@ from isaac_records.official import EXPECTED_VERSION, schema_path, validate_offic
 from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
+from . import assets
 from . import assistant_query
 from . import csv_ingest
 from . import db_provider
@@ -5717,6 +5718,657 @@ def post_transcript(
                     "only through that request, made by a person who accepted it."
                 ),
             },
+            "experiment_version": exp.version_token(),
+        }
+
+
+# --- 7b. asset references ------------------------------------------------------
+#
+# FOUR OPERATIONS OVER METADATA ABOUT FILES. NO BYTES, EVER.
+#
+# An asset reference records where a file is (`uri`), what role it plays
+# (`content_role`), and the digest the scientist says identifies it (`sha256`).
+# Nothing in this section opens a file, fetches a URI, accepts an upload or
+# computes a hash. `POST /api/uploads` is still an unconditional 403 and this
+# feature neither changes nor depends on it; no multipart parser is reachable from
+# here.
+#
+# WHY THESE ROUTES EXIST AT ALL. Before them, the only way a human could touch an
+# asset was to paste a digest into `GuidedPrompt` for an asset the extractor had
+# already detected — `apply_answers` is what CREATES the entry, from a blocker, so
+# a person could not originate one. That path is untouched and still works
+# (`_answers_to_apply_shape`); these routes are the missing "author one yourself".
+#
+# ONE VALIDATOR, THE RECORD'S. Every write here rewrites the experiment document —
+# the library lives in `experiment.draft["assets"]` and the associations live in
+# each run's `draft["assets"]`, and both are inside that one document. So all three
+# writes take the RECORD's `If-Match`, never a run's, exactly as `POST .../runs`
+# does for the same reason. The two stores are rewritten together inside one
+# `record_lock` and one save, which is what stops them drifting.
+
+#: The path parameter naming an asset reference. One description, so the wording
+#: cannot drift between the two operations that take it.
+AssetId = Annotated[
+    str,
+    Path(
+        description=(
+            "The `asset_id` of an asset reference on this record, as returned by "
+            "`GET /api/experiments/{experiment_id}/assets`."
+        )
+    ),
+]
+
+#: The question a CREATE records itself as answering, in the evidence entry.
+#:
+#: It says "recorded", never "verified", and it does not mention the file — because
+#: what the person confirmed is that these are the values they mean to store, and
+#: this application has not opened anything at the URI to confirm anything else. An
+#: evidence entry is read later by someone deciding whether to trust a record; a
+#: question that overstated what was checked would mislead exactly there.
+_ASSET_CREATE_QUESTION = (
+    "Record these asset reference details, as entered? (No file was read, fetched "
+    "or hashed by this application.)"
+)
+
+
+def _asset_edit_question(asset_id: str) -> str:
+    """The question an EDIT records itself as answering. Same care as the create one."""
+    return (
+        f"Change these details of asset reference {asset_id}, as entered? (No file "
+        "was read, fetched or hashed by this application.)"
+    )
+
+
+_R_ASSET_NOT_FOUND: dict = {
+    404: {
+        "description": (
+            "No experiment in the selected workspace has that id, that record holds "
+            "no asset reference under that `asset_id`, or the "
+            "`X-Isaac-Tutorial-Session` header named a worked-example session that "
+            "does not exist. The request is never silently answered from the "
+            "ordinary workspace instead."
+        )
+    },
+}
+
+
+def _asset_not_found(experiment_id: str, asset_id: str) -> JSONResponse:
+    """An asset this record does not hold. Distinct from `_not_found`.
+
+    Same reasoning as :func:`_run_not_found` and :func:`_note_not_found`: the two
+    404s mean different things — one says the workspace has no such record, this one
+    says the record was read successfully and holds no asset under that id — and
+    collapsing them sends a client looking in the wrong place.
+    """
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "asset_not_found",
+            "experiment_id": experiment_id,
+            "id": asset_id,
+        },
+    )
+
+
+def _asset_refusal(exc: "assets.UnsupportedAsset") -> JSONResponse:
+    """The domain model's own refusal, rendered as a typed 422 — never a 500.
+
+    `complete.py` type-guards `series` and `descriptor` because a wrong-typed
+    structured answer used to escape the truth core as an HTTP 500; a new write
+    surface must not reopen that. Every shape `isaac_api.assets` refuses arrives
+    here carrying its own error code and its own extra body keys, so a malformed
+    payload can never surface as a traceback.
+    """
+    return JSONResponse(
+        status_code=422,
+        content={"error": exc.error, "message": exc.message, **exc.extra},
+    )
+
+
+def _asset_view(exp: Experiment, entry: dict) -> dict:
+    """One asset reference, as this API presents it.
+
+    THREE DERIVED FACTS ARE ADDED, and each exists because a client would otherwise
+    have to compute it — which would put a second, drifting opinion in the browser:
+
+    * ``used_by_runs`` — every run whose own draft carries this asset, with its
+      label and ordinal, so "where is this used?" is answerable without N reads.
+    * ``export_reach`` — where this asset actually reaches an exported record. See
+      :func:`assets.export_reach`; ``none`` is the answer that has to exist, because
+      a library entry on a record that HAS runs and is associated with none of them
+      is invisible to export, and a scientist who is not told that will never find
+      out.
+    * ``sha256_wellformed`` — whether the stored digest is 64 lowercase hex
+      characters. **It is a statement about the STRING, not about the file.** This
+      application never reads the file at the URI, so it cannot and does not report
+      that a digest matches anything. The key is named for what it measures.
+
+    ``evidence`` is deep-copied on the way out for the reason
+    ``resolve_inherited`` copies its payloads: handing back a live reference into the
+    stored document lets a caller write through a read.
+    """
+    asset_id = entry.get("asset_id")
+    associated = set(assets.associated_run_ids(exp, asset_id))
+    stored_evidence = entry.get(assets.EVIDENCE_KEY)
+    evidence = list(stored_evidence) if isinstance(stored_evidence, list) else []
+    return {
+        **{k: v for k, v in entry.items() if k != assets.EVIDENCE_KEY},
+        "evidence": copy.deepcopy(evidence),
+        "evidence_count": len(evidence),
+        "sha256_wellformed": is_sha256_shaped(entry.get("sha256")),
+        "used_by_runs": [
+            {"run_id": run.id, "label": run.label, "ordinal": run.ordinal}
+            for run in exp.sorted_runs()
+            if run.id in associated
+        ],
+        "export_reach": assets.export_reach(exp, asset_id),
+    }
+
+
+def _assets_payload(exp: Experiment) -> dict:
+    """The listing body.
+
+    ``content_roles`` is served from the vendored official schema rather than from a
+    list written here, so the twelve values a client renders in a control are the
+    twelve the exported record is validated against. ``runs`` is included because
+    associating an asset needs the record's runs and a client should not have to
+    make a second read to draw the control.
+    """
+    entries = assets.library(exp.draft)
+    return {
+        "assets": [_asset_view(exp, entry) for entry in entries],
+        "total": len(entries),
+        # A DISCLOSURE OF WHAT THIS BUILD CANNOT PRESENT, counted rather than
+        # rendered and never removed from the document. Two kinds, deliberately not
+        # separated: an entry that is not an object, and one carrying no `asset_id`
+        # (which no route could address). Both stay in the record untouched.
+        #
+        # `_everywhere`, not `unreadable_count(exp.draft)`. The disclosure must
+        # cover the same ground the REFUSAL does: `refuse_unreadable_containers`
+        # checks the experiment AND every run, so a run-held unreadable container
+        # used to read as a clean `0` here and then 422 on the very next write,
+        # naming a run the reader had been told nothing about.
+        "unreadable_entries": assets.unreadable_count_everywhere(exp),
+        "content_roles": list(assets.content_roles()),
+        "runs": [
+            {"id": run.id, "label": run.label, "ordinal": run.ordinal}
+            for run in exp.sorted_runs()
+        ],
+        "experiment_version": exp.version_token(),
+    }
+
+
+def _resolve_run_ids(exp: Experiment, raw: object) -> tuple[set[str] | None, JSONResponse | None]:
+    """``run_ids`` as a set, or a typed 422. Absent means "leave associations alone".
+
+    WHOLE-SET SEMANTICS, not add/remove. A scientist is stating which runs use this
+    file; an add-only API would make "none of them" unreachable, and a diff-based one
+    would need the client to know the current set to express the new one.
+
+    A run id this record does not have is a `422`, not a `404`: the record exists,
+    the request is about an asset, and what is wrong is one entry of one body field.
+    Nothing is inferred — naming no runs on a record with exactly one run does NOT
+    associate it with that one.
+    """
+    if raw is None:
+        return None, None
+    if not isinstance(raw, list) or any(not isinstance(item, str) for item in raw):
+        return None, JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_run_ids",
+                "message": (
+                    "`run_ids` must be a list of run ids. Send `[]` to associate this "
+                    "asset with no run, or omit the key to leave its associations "
+                    "unchanged. Nothing was written."
+                ),
+            },
+        )
+    known = {run.id for run in exp.sorted_runs()}
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        return None, JSONResponse(
+            status_code=422,
+            content={
+                "error": "unknown_run",
+                "message": (
+                    "This record has no run with that id, so an asset cannot be "
+                    "associated with it. Run ids come from "
+                    "`GET /api/experiments/{experiment_id}/runs`; none is inferred. "
+                    "Nothing was written."
+                ),
+                "run_id": unknown[0],
+                "run_ids": unknown,
+            },
+        )
+    return set(raw), None
+
+
+def _asset_storable(entry: dict) -> JSONResponse | None:
+    """Bound what one asset entry may cost, with the guard every write path uses.
+
+    `_is_storable_value` is bounded size, bounded depth and real renderability —
+    the three conditions its own docstring records were each added after a measured
+    wedged-record defect. An asset is caller-shaped free text (`notes`,
+    `caption_verbatim`) plus two open objects (`citation`, `caption_highlights`),
+    so it is exactly the payload that guard exists for.
+    """
+    if _is_storable_value(entry):
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "unrepresentable_value",
+            "message": (
+                "This asset reference could not be stored intact — it is larger or "
+                "more deeply nested than one entry may be, or it contains characters "
+                "JSON cannot represent (a lone surrogate), so a record containing it "
+                "could not be read back. It is REFUSED rather than shortened. Nothing "
+                "was written."
+            ),
+        },
+    )
+
+
+_ASSETS_LIST_DESCRIPTION = (
+    "Lists the asset references on this record — metadata about files, never the "
+    "files themselves. Each entry carries the official ISAAC asset fields, the "
+    "evidence recorded for it, the runs it is associated with, and where it "
+    "actually reaches an exported record. Read-only.\n\n"
+    "NO FILE IS READ, FETCHED OR HASHED BY THIS APPLICATION. `sha256_wellformed` "
+    "says whether the stored digest is 64 lowercase hexadecimal characters — a "
+    "statement about the string, not about the file at the `uri`, which this server "
+    "has never opened. Nothing here should be presented as a verified or checked "
+    "hash.\n\n"
+    "`export_reach` is `record` when this experiment has no runs (it exports one "
+    "record from its own draft, carrying this asset), `runs` when the asset is "
+    "associated with at least one run, and `none` when the experiment HAS runs and "
+    "this asset is associated with none of them — in which case no exported record "
+    "will carry it, because assets are run-level content.\n\n"
+    "`content_roles` is the official schema's own enumeration, read from the "
+    "vendored schema rather than restated, so a client renders exactly the values "
+    "the exported record is validated against. `unreadable_entries` counts stored "
+    "entries this build cannot present — one that is not an object, or one carrying "
+    "no `asset_id` — which are left in the record untouched rather than dropped."
+)
+
+_ASSETS_CREATE_DESCRIPTION = (
+    "Records one asset reference on this record and returns it. Metadata only: no "
+    "file is uploaded, opened, fetched or hashed, and this operation accepts no "
+    "file content of any kind.\n\n"
+    "THE DIGEST IS YOURS, NOT THIS SERVER'S. `sha256` must be exactly 64 lowercase "
+    "hexadecimal characters, with nothing before or after it — not even a trailing "
+    "newline. It is never computed, completed, trimmed or corrected: this "
+    "application does not read the file at the `uri`, so the only digest it can hold "
+    "is the one you supply, and a malformed one is refused with `422` rather than "
+    "repaired.\n\n"
+    "`asset_id`, `content_role`, `uri` and `sha256` are required — the official ISAAC "
+    "schema requires them and none is invented here. `asset_id` must be unique on "
+    "this record, because the evidence sidecar is keyed by it. `content_role` must be "
+    "one of the twelve values the official schema enumerates; it is not inferred from "
+    "the URI, the file extension or the media type. Any key the official schema does "
+    "not declare on an asset is refused with `422` naming it, because that object is "
+    "closed and storing one would make the record unexportable.\n\n"
+    "`run_ids` associates this asset with those runs, and `[]` or an omitted key "
+    "associates it with none — nothing is chosen on your behalf, including on a "
+    "record that has exactly one run. Recording an asset rewrites the record, so "
+    "this requires `confirmed_by_user: true` and the RECORD's current `ETag` in "
+    "`If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with "
+    "nothing written."
+)
+
+_ASSETS_UPDATE_DESCRIPTION = (
+    "Edits the draft metadata of one asset reference, its run associations, or "
+    "both, and returns the refreshed entry. Metadata only: no file is uploaded, "
+    "opened, fetched or hashed.\n\n"
+    "Only the keys you send are changed; a key you omit keeps its current value. "
+    "Sending `null` clears an optional key by removing it — a stored `null` would "
+    "fail official validation. The four required keys cannot be cleared; remove the "
+    "whole reference instead. `asset_id` cannot be changed: it is the address of "
+    "this entry, the key of every run's copy of it and the key of its evidence "
+    "sidecar entry, so sending a different one is refused with `422`.\n\n"
+    "A new `sha256` is subject to the same rule as on creation — exactly 64 "
+    "lowercase hexadecimal characters, never computed or repaired here. `run_ids` "
+    "SETS the associations exactly: `[]` associates the asset with no run, and "
+    "omitting the key leaves them unchanged.\n\n"
+    "Every change appends a user confirmation to this asset's evidence; nothing "
+    "already recorded is replaced or removed. A request that changes nothing is a "
+    "no-op that does not advance the record's revision. A request that names no "
+    "asset field and no `run_ids` is refused with `422` rather than silently doing "
+    "nothing. Requires `confirmed_by_user: true` and the RECORD's current `ETag` in "
+    "`If-Match`."
+)
+
+_ASSETS_REMOVE_DESCRIPTION = (
+    "Removes one asset reference from this record's draft and from every run that "
+    "was associated with it, and reports what was removed.\n\n"
+    "This deletes a DRAFT reference — the metadata entry this application holds. It "
+    "does not touch the file at the `uri`, which this application has never read, "
+    "and it does not alter any record already exported: an exported record and its "
+    "evidence sidecar are written artifacts and are not rewritten by this "
+    "operation.\n\n"
+    "The evidence recorded on the reference is removed with it, because it is part "
+    "of the entry. Requires `confirmed_by_user: true` and the RECORD's current "
+    "`ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` "
+    "with nothing removed."
+)
+
+
+@router.get(
+    "/experiments/{experiment_id}/assets",
+    tags=[TAG_EXPERIMENTS],
+    summary="List a Record's Asset References",
+    description=_ASSETS_LIST_DESCRIPTION,
+    response_description=(
+        "The record's asset references, the official `content_role` vocabulary, the "
+        "record's runs, and the record's current `ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def list_assets(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
+    return _assets_payload(exp)
+
+
+@router.post(
+    "/experiments/{experiment_id}/assets",
+    tags=[TAG_EXPERIMENTS],
+    status_code=201,
+    summary="Record an Asset Reference",
+    description=_ASSETS_CREATE_DESCRIPTION,
+    response_description=(
+        "The stored asset reference and the record's new revision, with the record's "
+        "new `ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
+)
+def post_asset(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"asset_id\": \"<unique on this "
+            "record>\", \"content_role\": \"<one of the twelve schema values>\", "
+            "\"uri\": \"<where the file is>\", \"sha256\": \"<64 lowercase hex "
+            "characters>\", \"run_ids\": [\"<optional>\"]}`, plus any optional "
+            "official asset field. Any other key is refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. Asset references have no validator of their own."
+        ),
+    ),
+):
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does it,
+    # so a bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        if not isinstance(body, dict):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "invalid_body",
+                    "message": "The request body must be a JSON object.",
+                },
+            )
+        if body.get("confirmed_by_user") is not True:
+            return _confirmation_required("record an asset reference")
+        # REFUSE BEFORE WRITING IF A STORED CONTAINER IS UNREADABLE. See
+        # `assets.refuse_unreadable_containers`: every read surface promises that what
+        # this build cannot present is kept unchanged, and rewriting a non-list
+        # `assets` would break that promise silently.
+        try:
+            assets.refuse_unreadable_containers(exp)
+        except assets.UnsupportedAsset as refusal:
+            return _asset_refusal(refusal)
+        # EVERY INPUT IS RESOLVED BEFORE THE PRECONDITION IS CHECKED, so a malformed
+        # request is a 422 whether or not the caller's `If-Match` happens to be
+        # current — the ordering `post_note` and `post_run` both use.
+        try:
+            entry = assets.build_asset(
+                body,
+                timestamp=_now_iso(),
+                question=_ASSET_CREATE_QUESTION,
+            )
+        except assets.UnsupportedAsset as refusal:
+            return _asset_refusal(refusal)
+        unstorable = _asset_storable(entry)
+        if unstorable is not None:
+            return unstorable
+        if assets.find(exp.draft, entry["asset_id"]) is not None:
+            return _asset_refusal(
+                assets.UnsupportedAsset(
+                    "duplicate_asset_id",
+                    (
+                        f"This record already has an asset reference called "
+                        f"{entry['asset_id']!r}. Ids must be unique: the evidence "
+                        "sidecar is keyed by them, so two entries sharing one id "
+                        "would publish a single evidence list and lose the other. "
+                        "Nothing was written."
+                    ),
+                    key="asset_id",
+                )
+            )
+        run_ids, run_refusal = _resolve_run_ids(exp, body.get("run_ids"))
+        if run_refusal is not None:
+            return run_refusal
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+        try:
+            assets.upsert(exp, entry, creating=True)
+        except assets.UnsupportedAsset as refusal:  # pragma: no cover - guarded above
+            return _asset_refusal(refusal)
+        # `set_associations` with an explicit set writes the asset onto exactly those
+        # runs; `None` (the key omitted) leaves every run without it, because a
+        # brand-new asset is associated with nothing until someone says otherwise.
+        assets.set_associations(exp, entry, run_ids or set())
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this asset was not recorded
+        response.headers["ETag"] = exp.etag()
+        return {
+            "asset": _asset_view(exp, entry),
+            "experiment_version": exp.version_token(),
+        }
+
+
+@router.patch(
+    "/experiments/{experiment_id}/assets/{asset_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Edit One Asset Reference",
+    description=_ASSETS_UPDATE_DESCRIPTION,
+    response_description="The refreshed asset reference, with the record's new `ETag`.",
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_ASSET_NOT_FOUND, **_R_PRECONDITION},
+)
+def patch_asset(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    asset_id: AssetId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, <any official asset field to change>, "
+            "\"run_ids\": [\"<optional, sets the associations exactly>\"]}`. A "
+            "`null` clears an optional field. `asset_id` may only repeat the one in "
+            "the path. Any other key is refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it."
+        ),
+    ),
+):
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        existing = assets.find(exp.draft, asset_id)
+        if existing is None:
+            return _asset_not_found(experiment_id, asset_id)
+        if not isinstance(body, dict):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "invalid_body",
+                    "message": "The request body must be a JSON object.",
+                },
+            )
+        if body.get("confirmed_by_user") is not True:
+            return _confirmation_required("edit an asset reference")
+        try:
+            assets.refuse_unreadable_containers(exp)
+        except assets.UnsupportedAsset as refusal:
+            return _asset_refusal(refusal)
+        if "asset_id" in body and body["asset_id"] != asset_id:
+            return _asset_refusal(
+                assets.UnsupportedAsset(
+                    "immutable_asset_id",
+                    (
+                        "`asset_id` cannot be changed. It is the address of this "
+                        "entry, the key of every run's copy of it and the key of its "
+                        "evidence sidecar entry, so a rename would have to move all "
+                        "three at once. Record a new reference and remove this one "
+                        "instead. Nothing was written."
+                    ),
+                    key="asset_id",
+                )
+            )
+        # A BODY THAT NAMES NOTHING IS REFUSED, NOT SILENTLY HONOURED. `patch_run`
+        # takes the same position for the same reason: answering 200 to a request
+        # that could not have changed anything reports a write that did not happen.
+        touched = [key for key in body if key not in ("confirmed_by_user", "asset_id")]
+        if not touched:
+            return _asset_refusal(
+                assets.UnsupportedAsset(
+                    "empty_update",
+                    (
+                        "This request names no asset field to change and no "
+                        "`run_ids`, so there is nothing to apply. It is refused "
+                        "rather than answered as though something had been written."
+                    ),
+                )
+            )
+        try:
+            entry = assets.build_asset(
+                body,
+                existing=existing,
+                timestamp=_now_iso(),
+                question=_asset_edit_question(asset_id),
+            )
+        except assets.UnsupportedAsset as refusal:
+            return _asset_refusal(refusal)
+        unstorable = _asset_storable(entry)
+        if unstorable is not None:
+            return unstorable
+        run_ids, run_refusal = _resolve_run_ids(exp, body.get("run_ids"))
+        if run_refusal is not None:
+            return run_refusal
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+        try:
+            assets.upsert(exp, entry, creating=False)
+        except assets.UnsupportedAsset as refusal:  # pragma: no cover - not reachable
+            return _asset_refusal(refusal)
+        # EVERY RUN HOLDING THIS ASSET IS REWRITTEN FROM THE LIBRARY, even when the
+        # associations themselves are untouched (`run_ids is None`). That rewrite is
+        # what makes the library and the run copies one fact: an edited digest can
+        # never be left stale on a run that already cited it.
+        assets.set_associations(exp, entry, run_ids)
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; nothing was changed
+        response.headers["ETag"] = exp.etag()
+        return {
+            "asset": _asset_view(exp, entry),
+            "experiment_version": exp.version_token(),
+        }
+
+
+@router.post(
+    "/experiments/{experiment_id}/assets/{asset_id}/remove",
+    tags=[TAG_EXPERIMENTS],
+    summary="Remove an Asset Reference",
+    description=_ASSETS_REMOVE_DESCRIPTION,
+    response_description=(
+        "What was removed and the record's new revision, with the record's new "
+        "`ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_ASSET_NOT_FOUND, **_R_PRECONDITION},
+)
+def post_asset_remove(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    asset_id: AssetId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description="`{\"confirmed_by_user\": true}`. Nothing else is read.",
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it."
+        ),
+    ),
+):
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        if assets.find(exp.draft, asset_id) is None:
+            return _asset_not_found(experiment_id, asset_id)
+        if not isinstance(body, dict) or body.get("confirmed_by_user") is not True:
+            return _confirmation_required("remove an asset reference")
+        try:
+            assets.refuse_unreadable_containers(exp)
+        except assets.UnsupportedAsset as refusal:
+            return _asset_refusal(refusal)
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+        detached = assets.associated_run_ids(exp, asset_id)
+        assets.detach_everywhere(exp, asset_id)
+        assets.remove(exp, asset_id)
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; nothing was removed
+        response.headers["ETag"] = exp.etag()
+        return {
+            "removed_asset_id": asset_id,
+            # NAMED, NOT COUNTED. A removal that also detached the asset from three
+            # runs changed three runs, and a client that is told only "removed" cannot
+            # tell its reader which measurements stopped citing the file.
+            "detached_from_runs": detached,
             "experiment_version": exp.version_token(),
         }
 

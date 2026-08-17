@@ -465,6 +465,81 @@ export const notesEmpty = notesPage([]);
 
 export const notesOne = notesPage([noteFixture()]);
 
+/*
+ * --- Asset reference fixtures -------------------------------------------------
+ *
+ * The digests below are unmistakably synthetic — a repeated two-character pair,
+ * not the hash of anything — so no reader can mistake a fixture for a real
+ * artifact's digest, and no test can accidentally assert that ISAAC computed one.
+ */
+
+/** A structurally valid, obviously fake sha256: 64 lowercase hex characters. */
+export const FAKE_SHA_A = 'a1'.repeat(32);
+export const FAKE_SHA_B = 'b2'.repeat(32);
+
+export function assetFixture(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    asset_id: 'reduced_spectrum',
+    content_role: 'reduction_product',
+    uri: 'synthetic://example/reduced/CuO2_merged.xdi',
+    sha256: FAKE_SHA_A,
+    media_type: 'application/x-xdi',
+    evidence: [
+      {
+        source_type: 'user_confirmation',
+        question:
+          'Record these asset reference details, as entered? (No file was read, fetched or hashed by this application.)',
+        answer: FAKE_SHA_A,
+        timestamp: '2099-04-02T09:12:00Z',
+      },
+    ],
+    evidence_count: 1,
+    // A STATEMENT ABOUT THE STRING. The fixture name says so, because a fixture
+    // called `verified` would seed the very claim the feature must not make.
+    sha256_wellformed: true,
+    used_by_runs: [],
+    export_reach: 'record',
+    ...over,
+  };
+}
+
+/** The twelve official roles, in the schema's own order. Served, never invented. */
+export const ASSET_CONTENT_ROLES = [
+  'raw_data',
+  'raw_data_pointer',
+  'reduction_product',
+  'input_structure',
+  'workflow_recipe',
+  'processing_script',
+  'calibration_reference',
+  'auxiliary_reference',
+  'documentation',
+  'metadata_snapshot',
+  'supplementary_image',
+  'other',
+];
+
+export function assetsPage(
+  assets: unknown[],
+  over: {
+    unreadable_entries?: number;
+    content_roles?: string[];
+    runs?: { id: string; label: string; ordinal: number }[];
+    total?: number;
+  } = {},
+) {
+  return {
+    assets,
+    total: over.total ?? assets.length,
+    unreadable_entries: over.unreadable_entries ?? 0,
+    content_roles: over.content_roles ?? ASSET_CONTENT_ROLES,
+    runs: over.runs ?? [],
+    experiment_version: VERSION_FIELDS.version,
+  };
+}
+
+export const assetsEmpty = assetsPage([]);
+
 export const draftResponse = {
   groups: [
     {
@@ -1391,6 +1466,7 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     // record-screen assertion has to change. A test about notes supplies its own
     // body for this key.
     [`GET ${base}/notes`]: { body: notesEmpty },
+    [`GET ${base}/assets`]: { body: assetsEmpty },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
@@ -2734,6 +2810,14 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/experiments/{experiment_id}/notes/{note_id}", description: "Returns one note: its verbatim text, any revised wording, what produced it, the run it belongs to when that is known, its review state, and the full history of the acts performed on it. Read-only.\n\nA DISMISSED NOTE IS RETURNED NORMALLY. Dismissal is a state, not a deletion, and the history records when it happened and what it was dismissed from. The verbatim capture is returned even when the note has been edited — an edit stores the corrected wording beside the original and never replaces it, and each superseded wording is kept on the history entry that replaced it.\n\nThe `ETag` header carries THE RECORD's current revision, which is what capturing or reviewing a note requires in `If-Match`. Notes have no separate validator of their own, because a note is stored inside the record's own document." },
   { op: "POST /api/experiments/{experiment_id}/notes", description: "Stores one piece of captured content that has no confident schema home, verbatim, and returns it with the record's new revision.\n\nCapturing a note rewrites the record, so this requires the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written. `text` is stored exactly as sent: it is not trimmed, normalised or shortened, and text too large to store is REFUSED with `422` rather than truncated, because a shortened note misrepresents what was written.\n\n`source` must be one of the values `GET .../notes` reports under `sources`, and there is no default — a producer that cannot say what produced its own output is not described by inventing a label for it. These are this feature's own vocabulary and are deliberately not ISAAC evidence source types, because a note is not evidence.\n\n`run_id`, `candidate_field_path` and `candidate_rule` are optional and nothing supplies them on a caller's behalf. An omitted `run_id` means the note belongs to the record rather than to a run, and it is never filled in from the only run that happens to exist. A `candidate_field_path` must be one of the paths `GET .../notes` reports under `mappable_field_paths` — a subset of the official schema's paths, not the whole of it — AND must arrive with the `candidate_rule` that produced it — an unexplained proposal is a guess, and either half without the other is `422`. Absent is absent: an empty string is refused, not stored.\n\nAny other body key is refused with `422` naming it. A note carries no status, no verification and no evidence, so a request that tries to set one is rejected rather than accepted and quietly ignored." },
   { op: "POST /api/experiments/{experiment_id}/notes/{note_id}/review", description: "Performs one of the four review acts on a note — `map`, `edit`, `keep` or `dismiss` — and returns the note as it now stands. Each act is appended to the note's history with the state it moved from and the time it happened; nothing is ever removed.\n\nRequires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written. Re-performing an act that changes nothing is a no-op: it writes nothing, adds no history entry and does not advance the record's revision.\n\n`map` records the official field path a scientist says this note belongs to, and requires `field_path` to be one of the paths `GET .../notes` reports under `mappable_field_paths`. IT WRITES NO VALUE. Deriving a value from prose would mean deciding what the value is, which this application makes a person do through the confirmed-edit path that already exists; a mapped note says where the content belongs, not what the field should hold.\n\n`edit` stores a corrected wording BESIDE the verbatim capture and never replaces it, and leaves the review state alone — fixing a typo is not a triage decision. `keep` records that this content is prose about the experiment and belongs to no field, which is a first-class outcome and not an unfinished review. `dismiss` sets the note aside and is the closest thing to a delete this API offers, which is to say it is not one: the note remains listed, readable and unchanged, and an optional `reason` is stored when given and left absent when not, because a justification nobody wrote is not invented on their behalf.\n\nAny other body key, an unknown action, or a `field_path` outside `mappable_field_paths` is refused with `422` and nothing is written. That set is a subset of the official schema's paths, so such a refusal reports what this build can map a note to and never asserts that the official schema has no such field." },
+  // The four ASSET REFERENCE operations, transcribed from `create_app().openapi()`.
+  // `apps/api/tests/test_contract_description_parity.py` compares these strings byte
+  // for byte against the served document in BOTH directions, so a new operation that
+  // is not listed here fails the backend suite.
+  { op: "GET /api/experiments/{experiment_id}/assets", description: "Lists the asset references on this record — metadata about files, never the files themselves. Each entry carries the official ISAAC asset fields, the evidence recorded for it, the runs it is associated with, and where it actually reaches an exported record. Read-only.\n\nNO FILE IS READ, FETCHED OR HASHED BY THIS APPLICATION. `sha256_wellformed` says whether the stored digest is 64 lowercase hexadecimal characters — a statement about the string, not about the file at the `uri`, which this server has never opened. Nothing here should be presented as a verified or checked hash.\n\n`export_reach` is `record` when this experiment has no runs (it exports one record from its own draft, carrying this asset), `runs` when the asset is associated with at least one run, and `none` when the experiment HAS runs and this asset is associated with none of them — in which case no exported record will carry it, because assets are run-level content.\n\n`content_roles` is the official schema's own enumeration, read from the vendored schema rather than restated, so a client renders exactly the values the exported record is validated against. `unreadable_entries` counts stored entries this build cannot present — one that is not an object, or one carrying no `asset_id` — which are left in the record untouched rather than dropped." },
+  { op: "POST /api/experiments/{experiment_id}/assets", description: "Records one asset reference on this record and returns it. Metadata only: no file is uploaded, opened, fetched or hashed, and this operation accepts no file content of any kind.\n\nTHE DIGEST IS YOURS, NOT THIS SERVER'S. `sha256` must be exactly 64 lowercase hexadecimal characters, with nothing before or after it — not even a trailing newline. It is never computed, completed, trimmed or corrected: this application does not read the file at the `uri`, so the only digest it can hold is the one you supply, and a malformed one is refused with `422` rather than repaired.\n\n`asset_id`, `content_role`, `uri` and `sha256` are required — the official ISAAC schema requires them and none is invented here. `asset_id` must be unique on this record, because the evidence sidecar is keyed by it. `content_role` must be one of the twelve values the official schema enumerates; it is not inferred from the URI, the file extension or the media type. Any key the official schema does not declare on an asset is refused with `422` naming it, because that object is closed and storing one would make the record unexportable.\n\n`run_ids` associates this asset with those runs, and `[]` or an omitted key associates it with none — nothing is chosen on your behalf, including on a record that has exactly one run. Recording an asset rewrites the record, so this requires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written." },
+  { op: "PATCH /api/experiments/{experiment_id}/assets/{asset_id}", description: "Edits the draft metadata of one asset reference, its run associations, or both, and returns the refreshed entry. Metadata only: no file is uploaded, opened, fetched or hashed.\n\nOnly the keys you send are changed; a key you omit keeps its current value. Sending `null` clears an optional key by removing it — a stored `null` would fail official validation. The four required keys cannot be cleared; remove the whole reference instead. `asset_id` cannot be changed: it is the address of this entry, the key of every run's copy of it and the key of its evidence sidecar entry, so sending a different one is refused with `422`.\n\nA new `sha256` is subject to the same rule as on creation — exactly 64 lowercase hexadecimal characters, never computed or repaired here. `run_ids` SETS the associations exactly: `[]` associates the asset with no run, and omitting the key leaves them unchanged.\n\nEvery change appends a user confirmation to this asset's evidence; nothing already recorded is replaced or removed. A request that changes nothing is a no-op that does not advance the record's revision. A request that names no asset field and no `run_ids` is refused with `422` rather than silently doing nothing. Requires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match`." },
+  { op: "POST /api/experiments/{experiment_id}/assets/{asset_id}/remove", description: "Removes one asset reference from this record's draft and from every run that was associated with it, and reports what was removed.\n\nThis deletes a DRAFT reference — the metadata entry this application holds. It does not touch the file at the `uri`, which this application has never read, and it does not alter any record already exported: an exported record and its evidence sidecar are written artifacts and are not rewritten by this operation.\n\nThe evidence recorded on the reference is removed with it, because it is part of the entry. Requires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing removed." },
 ];
 
 // --- Statistics dashboard fixtures (the five page-level reads) --------------

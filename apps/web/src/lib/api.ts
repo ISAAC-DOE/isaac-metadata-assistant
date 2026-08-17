@@ -25,6 +25,9 @@ import type {
   ApiAboutResponse,
   ApiAnswersResponse,
   ApiArtifactsResponse,
+  ApiAssetRemoved,
+  ApiAssetsResponse,
+  ApiAssetWritten,
   ApiAuditResponse,
   AssistantQueryResponse,
   ApiCsvPreview,
@@ -679,6 +682,18 @@ async function mutationError(res: Response, path: string): Promise<ApiError> {
 const enc = encodeURIComponent;
 
 /**
+ * Drop `undefined` entries, KEEP `null` ones.
+ *
+ * The distinction is the whole point and it is a wire-level one: on the asset
+ * routes `undefined` means "I am not touching this field" and must not be sent at
+ * all, while `null` means "clear it" and must be. A single `?? null` anywhere in a
+ * form would turn every untouched field into a clear instruction.
+ */
+function definedOnly(fields: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+}
+
+/**
  * The optional query a run listing may carry. Every field is optional and every
  * absent field means "the server's default", which for `limit` is THE WHOLE
  * LIST — see `api.listRuns`.
@@ -1246,6 +1261,112 @@ export const api = {
         : {}),
     });
     if (res.ok) return readJson<ApiNoteReviewed>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /*
+   * --- Asset references ------------------------------------------------------
+   *
+   * METADATA ONLY. Nothing here uploads, opens, fetches or hashes a file, and no
+   * request body carries file content. `POST /api/uploads` remains an
+   * unconditional 403 and none of these calls touches it.
+   *
+   * THE DIGEST IS NEVER TOUCHED ON ITS WAY THROUGH. It is sent exactly as the
+   * scientist typed it — not trimmed, not lowercased, not padded — for the reason
+   * `captureNote` sends its text untrimmed: the server's "exactly 64 lowercase hex
+   * characters, and nothing else" refusal has to be about the string they entered,
+   * or they will never learn that what they pasted was not what was stored.
+   *
+   * ONE VALIDATOR, THE RECORD'S. The library and the run associations both live
+   * inside the experiment's document, so every write carries the EXPERIMENT's
+   * version — never a run's. The truthiness guard is `createRun`'s: an empty token
+   * must be sent as ABSENT (server 428) rather than as `If-Match: ""` (400).
+   *
+   * THE PATH LITERALS STAY WHOLE, as `listNotes` records: `backend-down-state.test.tsx`
+   * reads this module's source to derive its sub-read inventory.
+   */
+
+  listAssets(experimentId: string): Promise<ApiAssetsResponse> {
+    const path = `/experiments/${enc(experimentId)}/assets`;
+    return getJson<ApiAssetsResponse>(path);
+  },
+
+  /**
+   * Record one asset reference.
+   *
+   * `fields` is passed through as the caller built it, with `undefined` entries
+   * dropped so an untouched optional key travels as ABSENT rather than as `null`
+   * — the server reads `null` as "clear this", which is a different request.
+   */
+  async createAsset(
+    experimentId: string,
+    opts: { experimentVersion: string; fields: Record<string, unknown>; runIds?: string[] },
+  ): Promise<ApiAssetWritten> {
+    const path = `/experiments/${enc(experimentId)}/assets`;
+    const body: Record<string, unknown> = {
+      confirmed_by_user: true,
+      ...definedOnly(opts.fields),
+    };
+    if (opts.runIds !== undefined) body.run_ids = opts.runIds;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiAssetWritten>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * Edit one asset reference's draft metadata, its run associations, or both.
+   *
+   * `null` is preserved rather than dropped: it is how a caller clears an optional
+   * field, and collapsing it to "absent" would make clearing impossible.
+   */
+  async updateAsset(
+    experimentId: string,
+    assetId: string,
+    opts: { experimentVersion: string; fields?: Record<string, unknown>; runIds?: string[] },
+  ): Promise<ApiAssetWritten> {
+    const path = `/experiments/${enc(experimentId)}/assets/${enc(assetId)}`;
+    const body: Record<string, unknown> = {
+      confirmed_by_user: true,
+      ...definedOnly(opts.fields ?? {}),
+    };
+    if (opts.runIds !== undefined) body.run_ids = opts.runIds;
+    const res = await request(path, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiAssetWritten>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * Remove one asset REFERENCE — the metadata entry, and its association with
+   * every run. There is no DELETE verb here: this API has exactly one, for
+   * discarding a worked-example session, and a sub-path POST is the established
+   * shape for every other act (`.../notes/{id}/review`, `.../overrides/clear`).
+   */
+  async removeAsset(
+    experimentId: string,
+    assetId: string,
+    opts: { experimentVersion: string },
+  ): Promise<ApiAssetRemoved> {
+    const path = `/experiments/${enc(experimentId)}/assets/${enc(assetId)}/remove`;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed_by_user: true }),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiAssetRemoved>(res, path);
     throw await mutationError(res, path);
   },
 

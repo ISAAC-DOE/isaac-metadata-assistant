@@ -336,17 +336,12 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
     #
-    # 52 -> 55: transcript capture. `POST /api/experiments/{id}/transcript` reads a
-    # transcript a scientist finalized and stores every segment of it as a note;
-    # `POST /api/transcription` is the only consumer of the transcription seam and
-    # takes a handle to audio the caller holds, never audio; and
-    # `GET /api/providers/capabilities` publishes the per-seam status that the
-    # configuration module already computed and nothing served. The first writes
-    # notes and no field, and the accept step it points at is the run edit that
-    # already existed — so this is +3 operations and no new write path.
-    #
-    # MEASURED after adding them, per the paragraph above, not carried from 52.
-    assert checked == 55, f"expected 55 documented operations, found {checked}"
+    # MEASURED AFTER THE MERGE, and the arithmetic is deliberately not shown,
+    # because doing the arithmetic is how this goes wrong. Both branches raised
+    # this literal from 52 — the asset slice to 56, this one to 55 — for
+    # different, real additions. Adding the deltas would give one number;
+    # measuring gives the true one. `create_app().openapi()` is the authority.
+    assert checked == 59, f"expected 59 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -574,6 +569,15 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # 400/412/428 set. There is deliberately no per-note validator, and deliberately
     # NO DELETE — dismissal is a review act on the review operation, so it appears
     # here as a `200` on a POST and not as a `204` anywhere.
+    # The ASSET REFERENCE API. The library lives in the experiment's draft and the
+    # associations live in each run's draft — both inside the one experiment document
+    # — so all three writes carry the RECORD's `If-Match` and the whole 400/412/428
+    # set with it, exactly as `POST .../runs` does. There is no DELETE: removal is a
+    # sub-path POST, matching `.../notes/{id}/review` and `.../overrides/clear`.
+    ("/api/experiments/{experiment_id}/assets", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/assets", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/assets/{asset_id}", "patch"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/assets/{asset_id}/remove", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],

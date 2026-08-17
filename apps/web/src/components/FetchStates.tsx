@@ -214,6 +214,7 @@ export function recordPathExperimentId(path: string | undefined): string | undef
 export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   answers: 'saved answers',
   artifacts: 'exported artifacts',
+  assets: 'the asset references',
   assistant: 'an assistant answer',
   audit: 'the evidence audit',
   draft: 'the draft fields',

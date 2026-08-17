@@ -1087,8 +1087,12 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 55 operations, 131 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(55);
+  it('describes the contract it claims to: 59 operations, MEASURED after the merge', () => {
+    // Both branches raised this from 52 for real, different additions — the
+    // asset slice to 56, the transcript slice to 55. Adding the two deltas is
+    // how a merged counter goes wrong; the numbers here were read out of this
+    // test's own failure output after merging.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(59);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1647,22 +1651,21 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 52,567; this
     //     figure drops the 110 `\n\n` separators, and 52,567 - 220 = 52,347.
-    // 55,611 -> 60,222, 52 -> 55 operations, 119 -> 131 post-lead paragraphs:
-    // transcript capture publishes three operations —
-    // `POST /api/experiments/{experiment_id}/transcript`,
-    // `POST /api/transcription` and `GET /api/providers/capabilities`. No existing
-    // entry was re-transcribed, so this delta is entirely the three new ones.
+    // MEASURED AFTER THE MERGE, from the served document, and NOT by adding the
+    // two branches' deltas.
     //
-    // MEASURED the same two independent ways every corrected total above was, and
-    // NOT by adding a delta to 55,611:
-    //
-    //   . from the SERVED document: the splitPurpose paragraph rule re-implemented
-    //     in Python over `create_app().openapi()` gives total 60,222 and 131
-    //     post-lead paragraphs.
-    //   . internal consistency: raw sum of `d.description.length` = 60,484; this
-    //     figure drops the 131 `\n\n` separators, and 60,484 - 262 = 60,222.
-    expect(total).toBe(60222);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(131);
+    // Both slices moved these three figures from the same base for real,
+    // different reasons: the transcript slice publishes three operations
+    // (`POST .../transcript`, `POST /api/transcription`,
+    // `GET /api/providers/capabilities`) and reported 60,222 / 131; the asset
+    // slice publishes four (list, record, edit, remove) and reported 60,399 /
+    // 130. Neither figure is the merged one, and arithmetic on the pair would
+    // have produced a third wrong number — which is the whole lesson the
+    // 2026-08-16 note above records, and which this merge demonstrated again on
+    // a DIFFERENT counter in `backend-down-state.test.tsx`, where both branches
+    // wrote the same literal and git merged it with no conflict at all.
+    expect(total).toBe(65010);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(142);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

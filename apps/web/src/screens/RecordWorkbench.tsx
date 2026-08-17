@@ -12,6 +12,7 @@ import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel
 import { RunsSection } from '../components/RunsSection';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
+import { AssetReferencesPanel } from '../components/AssetReferencesPanel';
 import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
@@ -577,6 +578,22 @@ function LoadedWorkbench({
       <TranscriptCapturePanel experimentId={id} />
 
       <UnmappedNotesPanel experimentId={id} />
+
+      {/*
+        ASSET REFERENCES SIT BETWEEN THE UNMAPPED NOTES AND THE DRAFT BLOCKS, and the
+        position follows the same argument the two sections above it make. An asset
+        reference is not a field value — it is a top-level draft block, like the runs
+        and the notes — so it cannot live inside a field group below. And it belongs
+        AFTER the runs rather than before them, because associating a file with a run
+        needs the runs to exist first: a reader who has just added them is in exactly
+        the state where "which measurements used this file?" is answerable.
+
+        A section, not a tab, for `RunsSection`'s third reason: hiding it would conceal
+        from a reader on the fields view that this record points at files at all — and
+        for a record that has runs, an asset no run cites reaches no exported record,
+        which is precisely the thing a hidden section would let them not find out.
+      */}
+      <AssetReferencesPanel experimentId={id} />
 
       {groups.map((group) => (
         <FieldGroup
