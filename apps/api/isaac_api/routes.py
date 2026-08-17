@@ -17,7 +17,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Annotated, Literal, Mapping
+from typing import Annotated, Any, Literal, Mapping, Sequence
 
 import logging
 
@@ -48,9 +48,11 @@ from . import assistant_query
 from . import csv_ingest
 from . import db_provider
 from . import db_recon
+from . import db_write
 from . import dependencies
 from . import evidence_classify
 from . import experiment_repository
+from . import identity as identity_module
 from . import memory
 from . import memory_graph
 from . import notes
@@ -59,9 +61,12 @@ from . import runtime_records
 from . import search
 from . import serialize
 from . import sources
+from . import submission_store
+from . import submissions
 from . import verification
 from . import version_contract as vc
 from . import workspace as ws
+from .identity import require_human_actor
 from .workflow import derive_workflow
 from .workspace import REPO_ROOT, Experiment, atomic_write_text
 
@@ -1000,7 +1005,15 @@ def _build_commit() -> str | None:
         "not answering. The first two are read from configuration. The third is an "
         "observation, recorded when a real read or write against that database "
         "failed — so this operation still opens no connection of its own, and it "
-        "reports what has already happened rather than testing anything now."
+        "reports what has already happened rather than testing anything now.\n\n"
+        "It states, in `submission`, whether this deployment is configured to accept "
+        "a submission at all, and if not, why — submitting needs both durable "
+        "storage and a way to establish who is calling, and a deployment can have "
+        "one without the other. `configuration_permits` is named for what it is: "
+        "configuration is all this operation looked at, so it never promises the "
+        "write would land. It also reports the basis on which an author would be "
+        "recorded, so a deployment attributing on a test-fixture basis says so here "
+        "rather than only in its manifest."
     ),
     response_description="The liveness banner.",
 )
@@ -1034,6 +1047,22 @@ def health() -> dict:
         # APPLICATION'S OWN experiments are stored. A deployment can have the
         # second without the first ever being scanned.
         "experiment_storage": experiment_repository.storage_status(),
+        # A THIRD BLOCK, ADJACENT TO THE OTHER TWO AND DELIBERATELY NOT PART OF
+        # EITHER. `database` is about the read-only diagnostic over the
+        # production-derived sample; `experiment_storage` is about where this
+        # application's own experiments are stored; this is about whether a
+        # SUBMISSION — a durable, attributable declaration — can be recorded at all.
+        # A deployment can have durable storage and still be unable to submit,
+        # because submitting additionally requires an attributable person and the
+        # 0003/0004 tables.
+        #
+        # ZERO I/O, exactly like the two above: `capability` reads configuration and
+        # the resolved verifier and opens nothing. Its field is called
+        # `configuration_permits` rather than `available` for that reason — whether
+        # the tables exist cannot be known without a connection, and claiming
+        # availability from configuration alone is the precise defect
+        # `experiment_storage` was corrected for.
+        "submission": submission_store.capability(),
     }
 
 
@@ -5496,6 +5525,181 @@ def _unit_artifact_entry(unit: ws.ExportUnit) -> dict:
     }
 
 
+@dataclasses.dataclass
+class _Materialisation:
+    """What one pass of "turn every pending unit into its artifact pair" produced.
+
+    EXTRACTED FROM ``post_export`` SO ``post_submit`` CAN REUSE IT, and extracted
+    rather than re-implemented for a specific reason: submit must publish exactly
+    the records export publishes, from exactly the same validation gate. Two
+    materialisation paths would eventually disagree about which units are eligible,
+    what a failure means, or when the state is saved — and the disagreement would
+    show up as records that exist under one route and not the other.
+
+    ``post_submit`` DOES NOT CALL THE EXPORT ROUTE, and could not. ``post_export``
+    answers ``409 record_exists`` when every unit is already materialised, which is
+    the normal state of a fully-exported experiment — so routing submit through it
+    would make the most-ready experiments the ones that cannot be submitted.
+    """
+
+    #: ``(unit, ExportResult)`` for the units this pass attempted. Already
+    #: materialised units are never in here: they are skipped by the caller and are
+    #: never revalidated or rewritten, which is what keeps exported records
+    #: immutable across a partial fan-out.
+    results: list
+    #: The subset whose export gate refused. Non-empty means NOTHING was written.
+    failures: list
+    #: What ``save_versioned`` reported, so a caller reports a mutation that
+    #: happened rather than one it assumed.
+    changed: bool
+    #: A 412 to return verbatim, or ``None``. Its arrival means every artifact pair
+    #: WAS written and the state save was refused — see ``_save_versioned``.
+    stale: JSONResponse | None
+    #: ``_prune_orphan_artifacts``' three keys, or ``None`` when no prune ran (a
+    #: zero-run experiment, or a pass that wrote nothing).
+    prune: dict | None
+    #: Whether any artifact reached the disk during this pass.
+    written: bool
+
+
+def _materialise_pending_units(exp, pending_units, if_match, *, units) -> _Materialisation:
+    """Validate every pending unit, then write every one of them. THE COMMIT BOUNDARY.
+
+    PHASE 1 validates EVERY eligible unit and writes nothing — ``export_draft`` is a
+    pure transform plus two validations. A single failure means no artifact is
+    written for ANY unit, which is contract §3 D4's rule (a required validation
+    failure on any Run blocks the whole submission) and is why validation is a
+    separate pass rather than interleaved with the writes.
+
+    PHASE 2 writes each unit's pair and then saves the state ONCE. It is NOT atomic
+    across the individual file writes: a fault between them leaves some records on
+    disk with the state still saying they were not exported. That state is
+    recoverable rather than merely tolerated — the export route's reconciliation
+    branch republishes any unit that has an orphan artifact and no ``record_id`` —
+    and it is documented on the export operation itself.
+
+    The prune runs ONLY for a fan-out and ONLY after a successful state save, so a
+    run removed from the experiment cannot leave its record behind.
+    """
+    results = [
+        (unit, export_draft(unit.draft, REPO_ROOT, record_id=unit.target_id))
+        for unit in pending_units
+    ]
+    failures = [(unit, result) for unit, result in results if not result.ok]
+    if failures:
+        return _Materialisation(
+            results=results,
+            failures=failures,
+            changed=False,
+            stale=None,
+            prune=None,
+            written=False,
+        )
+    for unit, unit_result in results:
+        _write_record(exp, unit_result, unit)
+    # export normally changes the authoritative state (record_id: None -> id), so
+    # this bumps rev and stamps updated_utc, persisting the state atomically. On a
+    # self-heal of an already-exported record `record_id` is ALREADY set, the
+    # authoritative signature is unchanged, and it returns False without rewriting
+    # anything — a filesystem repair, not a scientific state change. That return
+    # value is PASSED THROUGH to the caller's invalidation rather than hardcoded.
+    changed, stale = _save_versioned(exp, if_match)
+    if stale is not None:
+        return _Materialisation(
+            results=results,
+            failures=[],
+            changed=False,
+            stale=stale,
+            prune=None,
+            written=True,
+        )
+    prune = None
+    if exp.runs:
+        # THE KEEP-SET, and both additions to it are review fixes.
+        #
+        # C7 — `unit.target_id` is what the keep-set was built from, but the file on
+        # disk is named by `current_record_id()`. `ExportUnit.mark_exported` now
+        # refuses to let those diverge, so this is belt-and-braces; it costs nothing
+        # and it means the keep-set is expressed in terms of the id that actually
+        # names a file, not only the id we track.
+        #
+        # C3 — `exp.id` unconditionally, NOT `exp.record_id`. The old rule kept
+        # `exp.record_id` "so a legacy 1:1 artifact is preserved even after runs are
+        # added", but `exp.record_id` is None in exactly the half-written state the
+        # reconciliation branch exists to repair (the artifact pair was written, the
+        # state save faulted). A run added afterwards therefore DELETED the
+        # previously exported record. A stem equal to the experiment's own id is
+        # never a fan-out record — record ids come from `Run.id` — so keeping it can
+        # only protect a legacy pair.
+        keep = {unit.target_id for unit in units}
+        keep.update(
+            record_id
+            for record_id in (unit.current_record_id() for unit in units)
+            if record_id is not None
+        )
+        keep.add(exp.id)
+        if exp.record_id is not None:
+            keep.add(exp.record_id)
+        prune = _prune_orphan_artifacts(exp, keep)
+    return _Materialisation(
+        results=results,
+        failures=[],
+        changed=changed,
+        stale=None,
+        prune=prune,
+        written=True,
+    )
+
+
+def _sibling_link_conflict(exp, units) -> JSONResponse | None:
+    """The ``409 sibling_link_conflict`` refusal, or ``None``. Shared by two routes.
+
+    C1 closed EMIT-TIME falsity: ``_linkable`` stops an export writing a link its
+    target disproves. Nothing asked the converse — does REWRITING a record falsify a
+    link a SURVIVING sibling already carries? Measured on ``c467dc7``: two runs share
+    ``SYN-A``, are exported and mutually linked; delete run 1's artifacts, change the
+    experiment's ``sample.sample_id``, export along the blessed self-heal path, and
+    the surviving immutable record still asserts a shared sample id that the rewritten
+    one now contradicts. There is no write that leaves both true, so the operation is
+    REFUSED rather than performed with a correction we are not allowed to make.
+
+    A zero-run experiment has no siblings, so this cannot fire for one.
+
+    ONE REMEDY, NOT TWO (review item F-B). The message used to end "Restore the sample
+    id, or remove the run." The second clause was measured end to end and it
+    manufactures the defect the prune exists to prevent: removing the run leaves the
+    immutable survivor's ``same_sample_as`` link naming a record that will never
+    exist, and nothing reports it. Restoring the sample id is the only remedy that
+    leaves both records true, so it is the only one offered.
+    """
+    if not exp.runs:
+        return None
+    conflicts = ws.sibling_link_conflicts(units)
+    if not conflicts:
+        return None
+    _log.warning(
+        "operation refused for record %s: writing %d run record(s) would "
+        "falsify a same_sample_as link an already-exported sibling carries",
+        exp.id,
+        len({conflict["record_id"] for conflict in conflicts}),
+    )
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "sibling_link_conflict",
+            "message": (
+                "This export would rewrite a record that an already-"
+                "exported record links to as sharing its sample id, with "
+                "a different sample id. Exported records are immutable, "
+                "so the link could not be corrected and one of the two "
+                "records would be false. Nothing was written. Restore the "
+                "sample id to match the one the exported record names."
+            ),
+            "conflicts": conflicts,
+        },
+    )
+
+
 @router.post(
     "/experiments/{experiment_id}/export",
     tags=[TAG_EXPORT],
@@ -5726,76 +5930,27 @@ def post_export(
 
         # ---- REWRITE-TIME FALSITY (review item F7), CHECKED BEFORE ANYTHING RUNS ---
         #
-        # C1 closed EMIT-TIME falsity: `_linkable` stops this export writing a link
-        # its target disproves. Nothing asked the converse — does REWRITING a record
-        # falsify a link a SURVIVING sibling already carries? Measured on `c467dc7`:
-        # two runs share `SYN-A`, are exported and mutually linked; delete run 1's
-        # artifacts, change the experiment's `sample.sample_id`, export along the
-        # blessed self-heal path, and the result was
-        #
-        #     01…63G  sample_id SYN-CHANGED  links []
-        #     01…63H  sample_id SYN-A        links ['01…63G']   <- asserts a shared id
-        #
-        # disprovable from the two records alone. The falsified record is the
-        # SURVIVING one, which is immutable, so there is no write that leaves both
-        # true. The export is therefore REFUSED rather than performed with a
-        # correction we are not allowed to make — see `workspace.sibling_link_conflicts`
-        # for why refusal is the answer and not a placeholder for a better one.
+        # The whole argument, the measurement behind it and the one-remedy decision
+        # now live at `_sibling_link_conflict`, which `post_submit` shares. It is one
+        # refusal with one wording; two copies would eventually be two wordings.
         #
         # A zero-run experiment has no siblings, so this cannot fire for one. That
         # used to read "…for any experiment this API can currently create", which
         # stopped being true the moment `POST .../runs` shipped: a client can add
         # runs to a record it created, so this branch IS reachable over HTTP.
-        #
-        # ONE REMEDY, NOT TWO (review item F-B). The message used to end "Restore the
-        # sample id, or remove the run." The second clause was measured end to end and
-        # it manufactures the defect the prune exists to prevent:
-        #
-        #     409 sibling_link_conflict -> remove the run -> export = 409 record_exists
-        #     survivor targets ['01…9H']   stems on disk ['01…9J']   DANGLING ['01…9H']
-        #
-        # The survivor is immutable, so its `same_sample_as` link names a record that
-        # will never exist, and nothing reports it. `protected_record_ids` cannot help:
-        # it protects an artifact a link names, and here the artifact was never
-        # written. Restoring the sample id is the only remedy that leaves both records
-        # true, so it is the only one offered.
-        if exp.runs:
-            conflicts = ws.sibling_link_conflicts(units)
-            if conflicts:
-                _log.warning(
-                    "export refused for record %s: writing %d run record(s) would "
-                    "falsify a same_sample_as link an already-exported sibling carries",
-                    exp.id,
-                    len({conflict["record_id"] for conflict in conflicts}),
-                )
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "error": "sibling_link_conflict",
-                        "message": (
-                            "This export would rewrite a record that an already-"
-                            "exported record links to as sharing its sample id, with "
-                            "a different sample id. Exported records are immutable, "
-                            "so the link could not be corrected and one of the two "
-                            "records would be false. Nothing was written. Restore the "
-                            "sample id to match the one the exported record names."
-                        ),
-                        "conflicts": conflicts,
-                    },
-                )
+        conflict = _sibling_link_conflict(exp, units)
+        if conflict is not None:
+            return conflict
 
         # ---- THE COMMIT BOUNDARY, stated exactly (see the endpoint description) ----
-        # PHASE 1: validate EVERY eligible unit. Nothing is written in this loop —
-        # `export_draft` is a pure transform + two validations. A single failure means
-        # no artifact is written for ANY unit, which is contract §3 D4's rule ("a
-        # required validation failure on any Run blocks the whole submission") and is
-        # the reason validation is a separate pass rather than interleaved with the
-        # writes.
-        results = [
-            (unit, export_draft(unit.draft, REPO_ROOT, record_id=unit.target_id))
-            for unit in pending_units
-        ]
-        failures = [(unit, result) for unit, result in results if not result.ok]
+        # Extracted to `_materialise_pending_units` so `post_submit` publishes exactly
+        # the records this route publishes, through exactly the same gate. The two
+        # phases and what each guarantees are documented there.
+        materialisation = _materialise_pending_units(
+            exp, pending_units, if_match, units=units
+        )
+        results = materialisation.results
+        failures = materialisation.failures
         if failures:
             # Nothing written. Surface the failing reports and a flat errors list.
             # No mutation happened, so report an honest changed=False invalidation
@@ -5820,66 +5975,28 @@ def post_export(
             )
             return JSONResponse(status_code=200, content=payload)
 
-        # PHASE 2: every unit validated, so write. See the endpoint's 412 description
-        # and the module note above for what a fault BETWEEN two units' writes leaves
-        # behind, and why that state is recoverable rather than merely tolerated.
-        result = results[0][1]
-        payload = serialize.export_result_to_dict(result)
-        for unit, unit_result in results:
-            _write_record(exp, unit_result, unit)
-        # export normally changes the authoritative state (record_id: None -> id), so
-        # this bumps rev and stamps updated_utc, persisting the state atomically. On a
-        # self-heal of an already-exported record `record_id` is ALREADY set, the
-        # authoritative signature is unchanged, and it returns False without rewriting
-        # anything — a filesystem repair, not a scientific state change.
-        #
-        # P4 review FIX E — that return value is PASSED THROUGH to the invalidation,
-        # exactly as the two sibling mutation handlers do (`post_answers`,
-        # `post_edit`). It used to be hardcoded `changed=True, ["record_id"]`, which on
-        # the self-heal path contradicted the same response's own `rev` (unchanged),
-        # its ETag (unchanged) and this handler's own failure-branch rule ("never
-        # fabricate a mutation that did not occur").
-        changed, stale = _save_versioned(exp, if_match)
-        if stale is not None:
-            # EVERY unit's artifact PAIR was already written to disk above and the
-            # state was not — the same half-written shape a fault between the two
-            # produces, and the one this handler's own reconciliation branch repairs
-            # on the next export (a unit with no `record_id` + an orphan artifact ->
+        # PHASE 2 ran inside `_materialise_pending_units`. See the endpoint's 412
+        # description and that helper for what a fault BETWEEN two units' writes
+        # leaves behind, and why that state is recoverable rather than merely
+        # tolerated.
+        if materialisation.stale is not None:
+            # EVERY unit's artifact PAIR was already written to disk and the state
+            # was not — the same half-written shape a fault between the two produces,
+            # and the one this handler's own reconciliation branch repairs on the
+            # next export (a unit with no `record_id` + an orphan artifact ->
             # republish from the current draft). So this degrades into a state the app
             # already handles rather than into a new one. With N units it is N orphan
             # pairs instead of one, repaired by the same loop.
-            return stale
+            return materialisation.stale
+        changed = materialisation.changed
+        result = results[0][1]
+        payload = serialize.export_result_to_dict(result)
         if exp.runs:
-            # Orphan pruning runs ONLY for a fan-out and ONLY after a successful state
+            # Orphan pruning ran ONLY for a fan-out and ONLY after a successful state
             # save, so a run removed from the experiment cannot leave its record
             # behind. See `_prune_orphan_artifacts` for the four bounds on what it may
-            # delete.
-            # THE KEEP-SET, and both additions to it are review fixes.
-            #
-            # C7 — `unit.target_id` is what the keep-set was built from, but the file
-            # on disk is named by `current_record_id()`. `ExportUnit.mark_exported`
-            # now refuses to let those diverge, so this is belt-and-braces; it costs
-            # nothing and it means the keep-set is expressed in terms of the id that
-            # actually names a file, not only the id we track.
-            #
-            # C3 — `exp.id` unconditionally, NOT `exp.record_id`. The old rule kept
-            # `exp.record_id` "so a legacy 1:1 artifact is preserved even after runs
-            # are added", but `exp.record_id` is None in exactly the half-written
-            # state this handler's own reconciliation branch exists to repair (the
-            # artifact pair was written, the state save faulted). A run added
-            # afterwards therefore DELETED the previously exported record. A stem
-            # equal to the experiment's own id is never a fan-out record — record ids
-            # come from `Run.id` — so keeping it can only protect a legacy pair.
-            keep = {unit.target_id for unit in units}
-            keep.update(
-                record_id
-                for record_id in (unit.current_record_id() for unit in units)
-                if record_id is not None
-            )
-            keep.add(exp.id)
-            if exp.record_id is not None:
-                keep.add(exp.record_id)
-            prune = _prune_orphan_artifacts(exp, keep)
+            # delete, and `_materialise_pending_units` for the keep-set.
+            prune = materialisation.prune or {"pruned": [], "protected": [], "declined": False}
             # FAN-OUT SHAPE. `record_id` / `artifact_refs` are SINGULAR by name and by
             # every existing client's reading of them, and a fan-out has N of each.
             # Filling them from an arbitrary one of the N would be a false singular,
@@ -5937,6 +6054,714 @@ def post_export(
         )
         response.headers["ETag"] = exp.etag()
         return payload
+
+
+# --- 8a-bis. SUBMISSION -------------------------------------------------------
+#
+# SUBMIT IS NOT EXPORT, AND NOTHING HERE MAY DERIVE ONE FROM THE OTHER.
+#
+# Export is a mechanical transform that answers "does this validate". Submission is
+# a DECLARATION BY A PERSON — "this experiment is finished, and I am the one saying
+# so" — and it answers "who finalised this, when, over exactly what content". An
+# export can be performed by any caller at any time, so treating an exported record
+# as submitted would attribute a declaration nobody made. `test_submission.py` pins
+# that in the one direction that matters: exporting sets no submission state.
+#
+# The submission and its revision snapshot live in the database (`0003_revisions`,
+# `0004_submissions`) and CANNOT live in the experiment document. Two mechanical
+# reasons, both measured, both written out at the top of `0003_revisions.sql`:
+# `Q_UPSERT_EXPERIMENT` refuses a CHANGED document at the SAME rev, and
+# `save_versioned` does not attempt a write unless `_authoritative_signature` moved,
+# which covers only `{title, source, draft, record_id, runs}`.
+
+
+def _publication_disclosure(published: Sequence[dict] | None) -> tuple[str, dict]:
+    """What THIS REQUEST published, as a sentence and as two response fields.
+
+    **C1 — EVERY SUBMISSION REFUSAL USED TO SAY "NOTHING WAS WRITTEN"
+    UNCONDITIONALLY, AND AFTER MATERIALISATION THAT IS THE OPPOSITE OF THE TRUTH.**
+    ``post_submit`` writes the official ISAAC records and saves the experiment
+    state BEFORE it opens the submission transaction (the order is deliberate and is
+    argued at the call site: it is the only recoverable one). So four refusals —
+    ``tables_absent`` raised from the write, ``already_submitted``,
+    ``idempotency_key_conflict`` and the generic ``submission_conflict``, all three
+    of which can also arrive AFTER the race — could fire with two artifact files on
+    disk, ``record_id`` set and ``rev`` moved, while telling the scientist that
+    nothing had been published.
+
+    That is not a cosmetic inaccuracy. Exported records are IMMUTABLE and no route
+    republishes one, so a scientist who believes nothing was published will edit the
+    record and retry — and the retry publishes nothing, leaving the artifacts
+    permanently holding the pre-edit science under ids the submission then names.
+
+    **THE TRUE HALF IS NOT WEAKENED.** No submission row exists, and both branches
+    say so. What changes is that the published half is now told as well, with the
+    record ids, so the scientist can act on it.
+
+    THE DATABASE SENTENCE IS DELIBERATELY THE WEAKER "nothing was committed" RATHER
+    THAN "the transaction issued only reads", and the first draft of this helper got
+    that wrong. "Only reads" is true of the tables-missing and already-recorded
+    paths, where the refusal is raised before any ``INSERT``. It is FALSE of a lost
+    race: by then the revision row, its run revisions and its change rows have all
+    been inserted, and what saves the caller is that ``write_transaction`` rolls the
+    whole thing back — not that nothing was attempted. It is also false of a
+    connection that never opened, where there was no transaction to speak of. One
+    sentence has to cover all three, so it claims only what all three support.
+
+    Returns ``(sentence, fields)``. ``fields`` carries ``published_record_count`` and
+    ``records`` on every refusal, exactly as the ``200`` carries them, so a client
+    never has to branch on the status code to learn what reached the disk.
+    """
+    entries = list(published or [])
+    if not entries:
+        return (
+            "Nothing was written, and no official record was published.",
+            {"published_record_count": 0, "records": []},
+        )
+    ids = [entry["record_id"] for entry in entries if entry.get("record_id")]
+    plural = "" if len(entries) == 1 else "s"
+    named = ", ".join(ids) if ids else "see `records`"
+    return (
+        "No submission was recorded, and nothing this request attempted in the "
+        f"database was committed — but it had ALREADY published {len(entries)} "
+        f"official ISAAC record{plural} before it was refused: {named}. Exported "
+        "records are immutable and no operation republishes one, so those artifacts "
+        "remain on disk exactly as written. If you edit this record before "
+        "retrying, the published files will still hold the content submitted here.",
+        {"published_record_count": len(entries), "records": entries},
+    )
+
+
+def _submission_unavailable(
+    reason: str, lead: str, published: Sequence[dict] | None = None
+) -> JSONResponse:
+    """The typed ``503`` for "this deployment cannot record a submission".
+
+    503 RATHER THAN 501 OR 409, and the choice is the same one
+    ``storage_unavailable_handler`` argues. The request is well formed and the
+    application is working; a dependency this deployment is configured to use is not
+    ready. Every reason this can carry is resolved by an operator action that is
+    already specified — configuring a database, applying a migration that is already
+    committed and reviewed, or restoring one that stopped answering — so "try again
+    later" is true rather than consoling.
+
+    It is deliberately NOT the ``human_actor_required`` 409, which is a different
+    fact about a different missing thing and would send an operator to the wrong
+    place. And it is deliberately not the generic ``experiment_storage_unavailable``
+    body: that one is raised by the EXPERIMENT write path, and this one is about the
+    submission tables specifically.
+
+    ``lead`` is the reason; the publication disclosure is appended by
+    :func:`_publication_disclosure`, because ``tables_absent`` is reachable from two
+    places — before anything is materialised, and after everything is.
+    """
+    note, fields = _publication_disclosure(published)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "submission_unavailable",
+            "reason": reason,
+            "message": f"{lead} {note}",
+            **fields,
+        },
+    )
+
+
+#: The reasons above, as prose, WITHOUT a claim about what was written. Each is
+#: completed by :func:`_publication_disclosure`, which is the one place in this
+#: module that decides whether "nothing was published" is a true sentence — because
+#: for two of these three it depends on where the refusal was raised from.
+_SUBMISSION_NO_STORAGE_LEAD = (
+    "Submitting records a durable, attributable declaration, and this deployment is "
+    "not configured with an application database to record one in — anything "
+    "written here would be lost when the server restarts."
+)
+_SUBMISSION_NO_TABLES_LEAD = (
+    "Submitting records a durable, attributable declaration, and this deployment's "
+    "database does not yet have the tables to record it in. The migration that "
+    "creates them has to be applied by an operator."
+)
+_SUBMISSION_DB_UNREACHABLE_LEAD = (
+    "Submitting records a durable, attributable declaration, and this deployment's "
+    "application database did not accept the connection, so none could be recorded. "
+    "This is an operator or infrastructure condition, not something about this "
+    "record."
+)
+
+
+@router.post(
+    "/experiments/{experiment_id}/submit",
+    tags=[TAG_EXPORT],
+    summary="Submit a Record",
+    description=(
+        "Finalises this record: it publishes an official ISAAC record for every "
+        "unit that does not have one yet, and then records a durable, attributable "
+        "submission over exactly that content, together with an immutable snapshot "
+        "of the record as it was.\n\n"
+        "**Submitting is not the same as exporting, and neither implies the other.** "
+        "Exporting is a mechanical transform that answers whether a record "
+        "validates; anyone can run it, at any time. Submitting is a declaration by a "
+        "named person that the work is finished. Exporting a record therefore never "
+        "marks it submitted, and this operation records who submitted it, when, and "
+        "over which content.\n\n"
+        "It requires an attributable person. A deployment that cannot establish who "
+        "is calling refuses with `409` and writes nothing — no partial submission, "
+        "no anonymous one, and no official record.\n\n"
+        "The gate is the record's own export-readiness and nothing more: every "
+        "question must be answered and every unit's export must pass its dry run. A "
+        "refusal names the units that failed and why. There is no override and no "
+        "force parameter, because a record that is not ready to export cannot be "
+        "finalised.\n\n"
+        "*Stated precisely, because the shorter phrase \"exactly the export gate\" "
+        "is not quite true: these are the two conditions `Experiment.export_ready()` "
+        "composes, and `POST .../export` itself checks only the second — it will "
+        "publish a record with unanswered questions. Submitting adds no rule beyond "
+        "export-readiness, but it does apply the answered-questions half that the "
+        "export route does not.*\n\n"
+        "**Evidence conflicts are reported, not blocked on.** A field whose evidence "
+        "asserts two different values is recorded in the submission and returned in "
+        "`conflict_summary`, and the submission proceeds. Correcting an answer adds a "
+        "second confirmation rather than replacing the first, so blocking on this "
+        "would refuse a record forever for the act of fixing a typo.\n\n"
+        "**What was published may not be what you submitted, and the response says "
+        "so.** Exported records are immutable, so a record you exported and then "
+        "edited is not republished by submitting — `published_artifact_state` "
+        "reports `stale` in that case, and `current` when the records on disk match "
+        "the content you submitted. It is reported rather than refused, because "
+        "there is no operation that republishes an immutable record, so refusing "
+        "would leave you with no way forward.\n\n"
+        "Submitting the same unchanged content twice is safe. The second call is "
+        "refused with `409` and echoes the submission already on record, so nothing "
+        "is duplicated. Send an `Idempotency-Key` header to have an exact retry "
+        "return the original `200` instead — the same key with different content is "
+        "refused rather than silently replayed.\n\n"
+        "Requires the record's current `ETag` in `If-Match`."
+    ),
+    response_description=(
+        "The recorded submission: its id, the revision snapshot it captured, the "
+        "records it published, the server-assigned time, who it is attributed to and "
+        "on what basis, and any evidence conflicts it disclosed."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+        412: {
+            "description": (
+                "The write was refused because another writer got there first, so "
+                "your change was not applied and the response echoes the current "
+                "`ETag` so a client can refresh in one further request.\n\n"
+                "Two arms, and they differ in what is left behind. If `If-Match` did "
+                "not match the revision this server read, nothing at all was "
+                "written. If the record's stored copy moved on while the official "
+                "records were being published, those records had ALREADY been "
+                "written and they remain — the record's own state was not updated, "
+                "so it still reports as not exported, and no submission was "
+                "recorded. Retrying republishes only what is missing and then "
+                "records the submission."
+            )
+        },
+        409: {
+            "description": (
+                "The submission was refused and **no submission was recorded**. "
+                "`error` says which: `human_actor_required` (this deployment cannot "
+                "establish who is calling), `tutorial_scope_forbidden` (a "
+                "worked-example session is never submitted), `submission_blocked` "
+                "(unanswered questions, or a unit whose export does not pass), "
+                "`already_submitted` (this exact content is already on record — the "
+                "existing submission is echoed), `idempotency_key_conflict` (that "
+                "key was used for different content), `submission_conflict` (a "
+                "concurrent writer won and its row could not be read back), or "
+                "`sibling_link_conflict`.\n\n"
+                "**Whether anything was PUBLISHED depends on which refusal it is, "
+                "and every 409 body says so.** The first four are raised before any "
+                "official record is materialised. The last three can also be raised "
+                "*after* materialisation, because the records are published before "
+                "the submission transaction is opened — so `published_record_count` "
+                "and `records` are present on every one of these bodies and are the "
+                "authoritative answer. A non-zero count means those records exist on "
+                "disk and, being immutable, will not be republished by a retry."
+            )
+        },
+        503: {
+            "description": (
+                "This deployment cannot record a submission: it is not configured "
+                "with an application database, that database did not accept a "
+                "connection, or it does not yet have the tables.\n\n"
+                "`reason` distinguishes them, and `published_record_count` / "
+                "`records` say what this request published before it was refused — "
+                "normally nothing, because the storage question is asked first, but "
+                "`tables_absent` can also be raised from the write itself, after the "
+                "official records have been published."
+            )
+        },
+    },
+)
+def post_submit(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    # THE DEPENDENCY, NOT A CALL IN THE BODY — and one observable consequence is
+    # stated here rather than left to be discovered. FastAPI resolves dependencies
+    # BEFORE the handler runs, so the attributability refusal precedes the 404: a
+    # deployment that cannot attribute anyone answers 409 for an id that does not
+    # exist, instead of 404. That ordering is kept, for two reasons. It is the
+    # designed seam — `identity.require_human_actor` is the only way to an actor and
+    # the handler never touches identity resolution itself, which is what keeps
+    # `if header exists: trust it` unwritable from here. And it is the safer order:
+    # a caller this deployment cannot attribute learns nothing about which record ids
+    # exist. Every other refusal below is in the documented order, and none of them
+    # writes anything.
+    identity: Annotated[Any, Depends(require_human_actor("submit"))],
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The record's current `ETag`, exactly as a read operation "
+            "returned it."
+        ),
+    ),
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        description=(
+            "Optional. An opaque client-chosen value. Repeating a submission with "
+            "the same key and the same content replays the original result; the same "
+            "key with different content is refused."
+        ),
+    ),
+):
+    # Cheap existence pre-check OUTSIDE the lock so a bogus/non-existent id never
+    # creates a permanent entry in the never-evicting per-record lock map. Same
+    # reasoning, same placement, as `post_export`.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+
+    # A WORKED-EXAMPLE SESSION IS NEVER SUBMITTED. The session is temporary and
+    # synthetic and is discarded with its records, so a durable declaration over one
+    # would outlive the thing it declares, attached to fabricated science. This is
+    # the FIRST of three independent enforcements — `stamp_actor` refuses to name an
+    # actor in any scoped request, and `PostgresOrdinaryStore.refuse_if_not_persistable`
+    # raises on a session record and on a canonical example id in any scope.
+    if scope is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "tutorial_scope_forbidden",
+                "operation": "POST /api/experiments/{experiment_id}/submit",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "Records in a worked-example session are temporary and are "
+                    "discarded with the session, so they are never submitted. "
+                    "Nothing was written."
+                ),
+            },
+        )
+
+    key = idempotency_key.strip() if idempotency_key is not None else None
+    if idempotency_key is not None and (
+        not key or len(key) > submission_store.IDEMPOTENCY_KEY_MAX
+    ):
+        # A REQUEST-SHAPE REFUSAL, and it is 400 rather than 422 to match
+        # `malformed_if_match`: both are malformed HEADERS, and a client that has to
+        # learn two codes for one class of mistake learns the wrong lesson. The bound
+        # exists because the column has no length limit of its own, so an unbounded
+        # header would otherwise become an unbounded row; the emptiness check exists
+        # because `''` is a key every keyless retry could collide with, which the
+        # database CHECK also refuses.
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "malformed_idempotency_key",
+                "experiment_id": experiment_id,
+                "message": (
+                    "Idempotency-Key must be a non-empty value of at most "
+                    f"{submission_store.IDEMPOTENCY_KEY_MAX} characters."
+                ),
+            },
+        )
+
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+
+        err = _check_if_match(if_match, exp)
+        if err is not None:
+            return err
+
+        pre_steps = _workflow_for(exp)["ordered_steps"]
+        units = exp.export_units()
+        signature = submissions.content_signature(exp.id, units)
+
+        # ---- STORAGE, BEFORE ANY ARTIFACT IS WRITTEN --------------------------
+        # The order is the point. Materialisation writes files and saves state; if
+        # the submission could not be recorded anyway, none of that should happen.
+        # So the storage question is asked FIRST, and it is asked with reads only.
+        store = submission_store.store()
+        if store is None:
+            return _submission_unavailable(
+                submission_store.BLOCKER_NO_DURABLE_STORAGE,
+                _SUBMISSION_NO_STORAGE_LEAD,
+            )
+        try:
+            preflight = store.preflight(exp.id, signature, key)
+        except db_write.WriteRefused:
+            # I1 — A CONFIGURED DATABASE THAT DOES NOT ANSWER IS A 503, NOT A 500.
+            # `store()` gates on the same two conditions `experiment_repository`
+            # does, so a wrong `PGDATABASE` never reaches here — but a database that
+            # is configured, correctly named and simply unreachable does, and
+            # `WriteRefused` is raised from inside `write_transaction` with no
+            # handler registered for it anywhere. Before this branch that surfaced as
+            # a bare 500, which is exactly what `_submission_unavailable`'s docstring
+            # promises will not happen and disagrees with `/api/health`, which
+            # already reports the deployment as unable to record a submission.
+            #
+            # The message is path-free and credential-free by construction:
+            # `WriteRefused` carries a fixed string and it is not interpolated here.
+            return _submission_unavailable("database_unavailable", _SUBMISSION_DB_UNREACHABLE_LEAD)
+        if not preflight["tables_present"]:
+            return _submission_unavailable("tables_absent", _SUBMISSION_NO_TABLES_LEAD)
+
+        # ---- ALREADY SUBMITTED ------------------------------------------------
+        # An exact repeat with the SAME key is a replay and returns the original
+        # 200; without a key — or with a different one — it is a 409 that echoes
+        # what is already on record. The distinction is what an `Idempotency-Key`
+        # is FOR: a client that cannot tell a lost response from a duplicate
+        # request needs the retry to succeed, and a client that did not ask for
+        # that needs to be told it already submitted.
+        existing = preflight["by_signature"]
+        if existing is not None:
+            if key is not None and existing.get("idempotency_key") == key:
+                return _submission_replay(exp, existing, response)
+            return _already_submitted(existing)
+        by_key = preflight["by_key"]
+        if by_key is not None:
+            return _idempotency_key_conflict(by_key)
+
+        # ---- HARD BLOCKERS: EXACTLY EXPORT-READINESS --------------------------
+        # `pending_count() == 0` over every unit, AND every unit's export dry run
+        # passes. No new rule, no fifth reason, no "Submit Anyway" — contract §3 D4.
+        #
+        # M5 — "exactly the export GATE" is the phrasing this comment and two others
+        # used, and it overstates by one condition. These two are exactly
+        # `Experiment.export_ready()`; `POST .../export` checks only the dry run and
+        # has no `pending_count()` test at all, so it will publish a record with
+        # unanswered questions. Submit adds nothing to export-readiness — but it is
+        # not identical to what the export ROUTE enforces, and the difference is in
+        # the direction of being stricter.
+        blockers = submissions.blocker_report(exp, units)
+        if blockers["blocked"]:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "submission_blocked",
+                    "experiment_id": exp.id,
+                    "message": (
+                        "This record cannot be submitted yet. Every question must be "
+                        "answered and every record it would publish must pass the "
+                        "export check. Nothing was written."
+                    ),
+                    "pending_count": blockers["pending_count"],
+                    "pending": blockers["pending"],
+                    "failing_units": blockers["failing_units"],
+                },
+            )
+
+        conflict = _sibling_link_conflict(exp, units)
+        if conflict is not None:
+            return conflict
+
+        # ---- MATERIALISE, THEN RECORD. ORDER IS RECOVERABILITY ----------------
+        # Artifacts and state first, submission rows second. A fault between them
+        # leaves records on disk and no submission — and a retry finds every unit
+        # already materialised, skips the export entirely, recomputes the SAME
+        # signature (it excludes `record_id`, `rev` and every timestamp precisely so
+        # that it can) and writes the rows. The reverse order is NOT recoverable: a
+        # submission naming records that were never written is indistinguishable
+        # from one whose files were later deleted.
+        #
+        # A unit that is already materialised is skipped here exactly as it is in
+        # `post_export`: never revalidated, never rewritten. So submitting a
+        # fully-exported record publishes nothing and records the declaration, which
+        # is the whole reason submit does not call the export route (that route
+        # answers 409 in precisely that case).
+        pending_units = [unit for unit in units if not unit.materialised()]
+        published: list[dict] = []
+        changed = False
+        if pending_units:
+            materialisation = _materialise_pending_units(
+                exp, pending_units, if_match, units=units
+            )
+            if materialisation.failures:
+                # Reachable even though `blocker_report` just passed, and the gap is
+                # real rather than defensive: the blocker dry run calls
+                # `export_draft` WITHOUT a `record_id` (matching
+                # `Experiment._all_units_pass_dry_run`), while materialisation passes
+                # `unit.target_id`. A unit whose id is not a ULID therefore passes the
+                # first and fails the second. Nothing was written in that case.
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "submission_blocked",
+                        "experiment_id": exp.id,
+                        "message": (
+                            "This record could not be published. The export check "
+                            "passed for its drafts but refused when the official "
+                            "records were built. Nothing was written."
+                        ),
+                        "pending_count": blockers["pending_count"],
+                        "pending": blockers["pending"],
+                        "failing_units": [
+                            {
+                                "unit_id": unit.target_id,
+                                "run_id": unit.run_id,
+                                "run_label": unit.run_label,
+                                "errors": _flat_export_errors(
+                                    serialize.export_result_to_dict(result), result
+                                ),
+                            }
+                            for unit, result in materialisation.failures
+                        ],
+                    },
+                )
+            if materialisation.stale is not None:
+                return materialisation.stale
+            changed = materialisation.changed
+            published = [_unit_artifact_entry(unit) for unit, _ in materialisation.results]
+
+        # ---- THE DURABLE WRITE ------------------------------------------------
+        # `stamp_actor` rather than `identity.human.subject`: it is the one place the
+        # tutorial rule and the tier rule are written down, and reaching past it
+        # would be the "a later slice writes uploaded_by=principal.subject" shape the
+        # identity contract warns about. `scope` is None on every path that reaches
+        # here (the session refusal is far above), so this returns the subject
+        # whenever the deployment can attribute one.
+        subject = identity_module.stamp_actor(identity, scope)
+        trust_basis = (
+            identity.human.trust_basis
+            if subject is not None and identity.human is not None
+            else submissions.TRUST_BASIS_UNATTRIBUTED
+        )
+        conflict_summary = submissions.conflict_summary(units)
+        try:
+            recorded = store.record_submission(
+                exp=exp,
+                units=units,
+                content_signature=signature,
+                conflict_summary=conflict_summary,
+                subject=subject,
+                trust_basis=trust_basis,
+                idempotency_key=key,
+            )
+        # EVERY REFUSAL BELOW IS RAISED *AFTER* MATERIALISATION, so every one of them
+        # is handed `published` and none of them may claim nothing was published. See
+        # `_publication_disclosure` for the failure this closes; the four helpers
+        # default `published` to empty so the pre-materialisation call sites above
+        # keep the sentence they had.
+        except submission_store.SubmissionTablesMissing:
+            # The tables went away between the preflight and the write. The
+            # transaction issued only SELECTs and rolled back, so no submission
+            # exists — but any record this request published is on disk and stays
+            # there, and the message now says both halves rather than only the first.
+            return _submission_unavailable(
+                "tables_absent", _SUBMISSION_NO_TABLES_LEAD, published
+            )
+        except db_write.WriteRefused:
+            # I1's other arm: the database stopped answering between the preflight
+            # and the write. Untyped by `submission_store` on purpose — it is
+            # `db_write`'s refusal, not a submission-lifecycle outcome — and it must
+            # not surface as a 500 here any more than it may on the preflight.
+            return _submission_unavailable(
+                "database_unavailable", _SUBMISSION_DB_UNREACHABLE_LEAD, published
+            )
+        except submission_store.SubmissionAlreadyExists as exc:
+            if key is not None and exc.existing.get("idempotency_key") == key:
+                return _submission_replay(exp, exc.existing, response, published)
+            return _already_submitted(exc.existing, published)
+        except submission_store.IdempotencyKeyConflict as exc:
+            return _idempotency_key_conflict(exc.existing, published)
+        except submission_store.SubmissionRaceLost:
+            # A CONCURRENT WRITER WON. This transaction COMMITTED nothing — and the
+            # distinction matters, because unlike the two branches above it did
+            # ISSUE inserts (the revision row, its run revisions, its change rows)
+            # before losing; what saves the caller is the rollback, not restraint.
+            # The winner's row therefore has to be read in a FRESH transaction:
+            # reading it inside the loser's would return the loser's own uncommitted
+            # view. Whether that is a replay or a refusal is decided exactly as it is
+            # on the preflight path, so the loser is answered the same way it would
+            # have been had it arrived one moment later.
+            #
+            # The lookup itself can fail against a database that has just stopped
+            # answering, and a 500 raised while reporting a conflict would be the
+            # worst of both: `winner` is therefore defaulted to "found nothing",
+            # which falls through to the honest generic conflict below.
+            try:
+                winner = store.lookup(exp.id, signature, key)
+            except db_write.WriteRefused:
+                winner = {"tables_present": False, "by_signature": None, "by_key": None}
+            settled = winner["by_signature"]
+            if settled is not None:
+                if key is not None and settled.get("idempotency_key") == key:
+                    return _submission_replay(exp, settled, response, published)
+                return _already_submitted(settled, published)
+            if winner["by_key"] is not None:
+                return _idempotency_key_conflict(winner["by_key"], published)
+            # The winner is gone or unreadable. Reporting a specific outcome here
+            # would be inventing one; 409 with the honest reason is the answer.
+            note, fields = _publication_disclosure(published)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "submission_conflict",
+                    "experiment_id": exp.id,
+                    "message": (
+                        "Another submission of this record was recorded at the same "
+                        f"moment, so this one was not. {note} Re-read the record and "
+                        "try again."
+                    ),
+                    **fields,
+                },
+            )
+
+        payload = dict(recorded)
+        payload["records"] = published
+        payload["published_record_count"] = len(published)
+        # DISCLOSED, NOT GATED ON — and this one is a defect I found while writing
+        # the real-engine proof rather than a hypothetical.
+        #
+        # Exported records are IMMUTABLE, so a unit that was already materialised is
+        # skipped here and never rewritten. Edit a draft after exporting it and the
+        # record on disk stops being a faithful projection of the draft — and a
+        # submission over that draft then names record ids whose artifacts hold
+        # something else. Saying nothing would let the response imply that what was
+        # submitted is what was published.
+        #
+        # IT IS NOT A REFUSAL, because the hard-blocker gate is EXACTLY
+        # export-readiness and nothing more (contract §3 D4, and the instruction this
+        # slice was built to; see the M5 note at the blocker check for why that is
+        # not word-for-word the same as "what `POST .../export` enforces"). Adding a
+        # fifth reason here would create a state a scientist cannot resolve through
+        # any surface this application offers: there is no route that republishes an
+        # immutable record.
+        #
+        # IT IS DERIVED AND DELIBERATELY NOT STORED. `dependencies.artifact_state` is
+        # the ONE definition of this freshness in the application — the record detail
+        # screen already renders it — and it is recomputable at any time from the
+        # revision snapshot and the artifacts. A column would be a second copy that
+        # can disagree with the first, and it would need its own migration.
+        payload["published_artifact_state"] = dependencies.artifact_state(exp)
+        payload.update(vc.version_fields(exp))
+        payload["workflow"] = _workflow_for(exp)
+        payload["invalidation"] = dependencies.build_invalidation(
+            changed=changed,
+            changed_fields=["record_id"] if changed else [],
+            pre_steps=pre_steps,
+            post_exp=exp,
+        )
+        response.headers["ETag"] = exp.etag()
+        return payload
+
+
+def _already_submitted(
+    existing: dict, published: Sequence[dict] | None = None
+) -> JSONResponse:
+    """``409``, echoing the submission already on record. No submission was recorded.
+
+    ``published`` DEFAULTS TO EMPTY AND IS NOT OPTIONAL AT THE POST-RACE CALL SITES.
+    This refusal is reachable from two places: the preflight, before any official
+    record is materialised, and the write, after every one of them is. The old
+    single sentence — "nothing was written and nothing was published again" — was
+    true of the first and false of the second. See :func:`_publication_disclosure`.
+    """
+    note, fields = _publication_disclosure(published)
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "already_submitted",
+            "message": (
+                "This record has already been submitted with exactly this content, "
+                f"so no second submission was recorded. {note} Send an "
+                "Idempotency-Key with your original key if you are retrying a "
+                "request whose response you did not receive."
+            ),
+            "submission": existing,
+            **fields,
+        },
+    )
+
+
+def _idempotency_key_conflict(
+    existing: dict, published: Sequence[dict] | None = None
+) -> JSONResponse:
+    """``409`` for a reused key over different content.
+
+    SEPARATE FROM ``already_submitted`` BECAUSE THE REMEDY IS DIFFERENT. One says
+    "you already did this, here is the receipt"; this one says "your key is reused,
+    choose a new one". A client cannot act on a merged message, and merging them
+    would make a genuine replay indistinguishable from a client bug.
+
+    ``published`` for the same reason as above: this is raised both before and after
+    materialisation, and only the caller knows which.
+    """
+    note, fields = _publication_disclosure(published)
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "idempotency_key_conflict",
+            "message": (
+                "That Idempotency-Key was already used for a submission of "
+                f"different content, so this request was refused. {note} Use a new "
+                "key."
+            ),
+            "submission": existing,
+            **fields,
+        },
+    )
+
+
+def _submission_replay(
+    exp, existing: dict, response: Response, published: Sequence[dict] | None = None
+) -> dict:
+    """The original ``200`` for an exact retry under the same ``Idempotency-Key``.
+
+    ``replayed: true`` IS PART OF THE BODY AND IS NOT COSMETIC. A client that cannot
+    tell a first success from a replay cannot tell whether its own retry logic is
+    working, and a UI that says "submitted just now" over a submission recorded an
+    hour ago is asserting a time that did not happen. Everything else in the body is
+    the ORIGINAL row read back from the database — the original id, the original
+    revision, the original server-assigned timestamp — because a replay reports what
+    is on record, never a fresh rendering of what would have been written.
+
+    ``records`` AND ``published_record_count`` REPORT WHAT **THIS** REQUEST
+    PUBLISHED, WHICH IS USUALLY NOTHING AND IS NOT ALWAYS NOTHING. On the preflight
+    path — an exact retry that finds the original row before doing anything — they
+    are empty, and the records the original submission published are named by that
+    submission's own rows rather than claimed here. But this helper is ALSO reached
+    after a lost race, by which point this request may itself have materialised
+    official records; the earlier unconditional zero asserted otherwise. The caller
+    passes what it published and this reports it, for the reason set out at
+    :func:`_publication_disclosure`.
+    """
+    entries = list(published or [])
+    payload = dict(existing)
+    payload["replayed"] = True
+    payload["records"] = entries
+    payload["published_record_count"] = len(entries)
+    # PRESENT ON THIS PATH TOO, so a client never has to branch on whether a key
+    # exists. It describes the artifacts as they are NOW, which on a replay may
+    # differ from how they were when the original submission was recorded — that is
+    # the honest reading of a derived signal, and it is why the key is derived
+    # rather than replayed out of the stored row.
+    payload["published_artifact_state"] = dependencies.artifact_state(exp)
+    payload.update(vc.version_fields(exp))
+    payload["workflow"] = _workflow_for(exp)
+    payload["invalidation"] = dependencies.build_invalidation(
+        changed=False, changed_fields=[], pre_steps=_workflow_for(exp)["ordered_steps"], post_exp=exp
+    )
+    response.headers["ETag"] = exp.etag()
+    return payload
 
 
 # --- 8b. CSV ingestion preview (P31.1 — read-only, no mutation) ---------------

@@ -323,7 +323,19 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # does: a note lives inside the experiment's own state document exactly as a
     # run does, and no table or migration was added. The four operations are list,
     # capture, read one, and perform one review act on one.
-    assert checked == 51, f"expected 51 documented operations, found {checked}"
+    #
+    # 51 -> 52: `POST /api/experiments/{experiment_id}/submit`, the scientist's
+    # submission. It is deliberately a SEPARATE operation from the export beside it
+    # rather than a flag on it: exporting is a mechanical transform anyone can run,
+    # and submitting is an attributable declaration by a named person, so deriving
+    # one from the other would attribute a declaration nobody made.
+    #
+    # THE TWO ENTRIES ABOVE ARRIVED ON SEPARATE BRANCHES AND BOTH COUNTED FROM 47.
+    # Notes wrote 51, submission wrote 48, and the merge of the two is neither: it
+    # is 47 + 4 + 1. This is the same shape as the a11y total that two branches each
+    # raised by seven, and the fix is the same — the number is MEASURED from
+    # `create_app().openapi()` after the merge, never carried across it.
+    assert checked == 52, f"expected 52 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -533,6 +545,16 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/evidence", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/evidence-classification", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/export", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
+    # THE SAME NINE AS THE EXPORT BESIDE IT, and the overlap is not a coincidence:
+    # submit runs the export gate unchanged and materialises through the same
+    # helper, so every refusal export can produce, submit can produce. The `400` is
+    # a malformed `If-Match` OR a malformed `Idempotency-Key` — both are malformed
+    # HEADERS, which is why they share a code rather than one of them being a 422.
+    # The `409` carries six distinct `error` values (see the operation's own
+    # description); the `503` is "this deployment cannot record a submission at
+    # all", which is a different fact from the shared storage-outage 503 and says so
+    # in its body.
+    ("/api/experiments/{experiment_id}/submit", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/ingestion/csv/preview", "post"): ["200", "400", "401", "403", "404", "412", "413", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/pending", "get"): ["200", "401", "404", "422", "503"],
     # Unmapped Notes. The split is the Run API's, for the Run API's reason: a note
