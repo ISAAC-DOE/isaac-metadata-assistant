@@ -5396,7 +5396,13 @@ def _assets_payload(exp: Experiment) -> dict:
         # rendered and never removed from the document. Two kinds, deliberately not
         # separated: an entry that is not an object, and one carrying no `asset_id`
         # (which no route could address). Both stay in the record untouched.
-        "unreadable_entries": assets.unreadable_count(exp.draft),
+        #
+        # `_everywhere`, not `unreadable_count(exp.draft)`. The disclosure must
+        # cover the same ground the REFUSAL does: `refuse_unreadable_containers`
+        # checks the experiment AND every run, so a run-held unreadable container
+        # used to read as a clean `0` here and then 422 on the very next write,
+        # naming a run the reader had been told nothing about.
+        "unreadable_entries": assets.unreadable_count_everywhere(exp),
         "content_roles": list(assets.content_roles()),
         "runs": [
             {"id": run.id, "label": run.label, "ordinal": run.ordinal}

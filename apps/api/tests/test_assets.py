@@ -188,6 +188,84 @@ def test_an_edit_that_changes_nothing_does_not_advance_the_revision(client, expe
     assert _listing(client, experiment_id)["assets"][0]["evidence_count"] == 1
 
 
+def test_a_no_op_edit_does_not_reorder_a_runs_assets(client, experiment_id):
+    """THE GAP THE TEST ABOVE LEFT OPEN, and a real defect lived in it.
+
+    ``test_an_edit_that_changes_nothing_does_not_advance_the_revision`` uses a
+    ZERO-RUN experiment holding ONE asset. Both facts matter: with no runs there
+    is no run copy to reorder, and with one asset a reorder is unobservable. So
+    the suite asserted the no-op contract on the only shape that could not break
+    it, and CI was green over a real defect.
+
+    ``set_associations`` used to filter the entry out and re-append it on EVERY
+    write, so a Save Changes that typed nothing moved the asset to the end of
+    every associated run's ``assets`` array. That array is the one exported into
+    that run's ISAAC record; ``_run_signature_payload`` includes ``run.draft``,
+    so it also advanced the experiment's ``rev`` — handing a second client a
+    **412 with no stale write behind it**.
+
+    Two runs and two assets: the smallest shape that can observe it.
+    """
+    run_a = _add_run(client, experiment_id, "300 K")
+    run_b = _add_run(client, experiment_id, "500 K")
+    _create(client, experiment_id, asset_id="asset_a", sha256=SHA_A, run_ids=[run_a, run_b])
+    _create(client, experiment_id, asset_id="asset_b", sha256=SHA_B, run_ids=[run_a, run_b])
+
+    def order_on_runs() -> dict[str, list[str]]:
+        exp = client_ws(client).load_experiment(experiment_id)
+        return {
+            run.id: [entry["asset_id"] for entry in assets.run_assets(run)]
+            for run in exp.sorted_runs()
+        }
+
+    def library_order() -> list[str]:
+        return [entry["asset_id"] for entry in _listing(client, experiment_id)["assets"]]
+
+    before_runs = order_on_runs()
+    before_library = library_order()
+    before_version = _listing(client, experiment_id)["experiment_version"]
+    assert before_runs[run_a] == ["asset_a", "asset_b"], before_runs
+
+    # A no-op edit: the panel always sends `run_ids`, and sends no changed field.
+    again = _patch(client, experiment_id, "asset_a", run_ids=[run_a, run_b])
+    assert again.status_code == 200, again.text
+
+    assert order_on_runs() == before_runs, "a no-op edit reordered a run's assets"
+    assert library_order() == before_library, "a no-op edit reordered the library"
+    assert again.json()["experiment_version"] == before_version, (
+        "a no-op edit advanced the revision, which manufactures a 412 for any "
+        "second client holding the previous ETag"
+    )
+    # And nothing was appended: this really was a no-op, not a recorded edit.
+    assert _listing(client, experiment_id)["assets"][0]["evidence_count"] == 1
+
+
+def test_a_new_association_appends_and_leaves_existing_positions_alone(client, experiment_id):
+    """The other half of the fix: a genuinely NEW association still appends.
+
+    Fixing the reorder must not become "never change the array" — a run that did
+    not hold the asset has no prior slot to preserve, and appending is the only
+    defensible position.
+    """
+    run_a = _add_run(client, experiment_id, "300 K")
+    run_b = _add_run(client, experiment_id, "500 K")
+    _create(client, experiment_id, asset_id="asset_a", sha256=SHA_A, run_ids=[run_a])
+    _create(client, experiment_id, asset_id="asset_b", sha256=SHA_B, run_ids=[run_a, run_b])
+
+    added = _patch(client, experiment_id, "asset_a", run_ids=[run_a, run_b])
+    assert added.status_code == 200, added.text
+
+    exp = client_ws(client).load_experiment(experiment_id)
+    order = {
+        run.id: [entry["asset_id"] for entry in assets.run_assets(run)]
+        for run in exp.sorted_runs()
+    }
+    # run_a kept asset_a in its original first slot…
+    assert order[run_a] == ["asset_a", "asset_b"], order
+    # …and run_b, which had never held it, gained it at the end.
+    assert order[run_b] == ["asset_b", "asset_a"], order
+
+
 def test_the_twelve_content_roles_come_from_the_official_schema(client, experiment_id):
     """The vocabulary a client renders is the schema's, not a transcription.
 
@@ -905,6 +983,52 @@ def test_an_unreadable_stored_container_is_refused_rather_than_overwritten(
     # And the route consults the guard on all three writes.
     source = __import__("pathlib").Path(routes.__file__).read_text(encoding="utf-8")
     assert source.count("assets.refuse_unreadable_containers(exp)") == 3
+
+
+def test_the_listing_discloses_an_unreadable_container_held_by_a_RUN():
+    """The disclosure must cover the same ground the refusal does.
+
+    `refuse_unreadable_containers` checks the experiment AND every run, but the
+    listing used to count only `exp.draft`. So a record whose RUN held a non-list
+    `assets` container reported `unreadable_entries: 0` — a clean panel with no
+    warning — and then refused every write with 422 `unreadable_asset_container`
+    naming that run. A refusal the reader was given no prior disclosure of.
+
+    Not a wrong value so much as a narrower scope than the one the feature acts
+    on, which is the harder kind of dishonesty to notice.
+
+    MUTATION: reverting the call site to `unreadable_count(exp.draft)` makes the
+    second assertion go RED while the first still passes — which is exactly how
+    the defect hid.
+    """
+
+    class _Run:
+        def __init__(self, draft):
+            self.draft = draft
+
+    class _Stub:
+        def __init__(self, draft, runs):
+            self.draft = draft
+            self._runs = runs
+
+        def sorted_runs(self):
+            return self._runs
+
+    # The library is clean; a run is not.
+    stub = _Stub({"assets": []}, [_Run({"assets": {"not": "a list"}})])
+    assert assets.unreadable_count(stub.draft) == 0, "the old, library-only count"
+    assert assets.unreadable_count_everywhere(stub) == 1, (
+        "the run-held unreadable container must be disclosed, because the write "
+        "path refuses on it"
+    )
+
+    # Both scopes counted, not just whichever is worse.
+    both = _Stub({"assets": [{"no_asset_id": True}]}, [_Run({"assets": {"bad": 1}})])
+    assert assets.unreadable_count_everywhere(both) == 2
+
+    # A clean record still reads clean — the guard is not simply always-positive.
+    clean = _Stub({"assets": [{"asset_id": "a"}]}, [_Run({"assets": [{"asset_id": "a"}]})])
+    assert assets.unreadable_count_everywhere(clean) == 0
 
 
 def test_a_malformed_element_is_preserved_by_a_library_write(experiment_id, client):

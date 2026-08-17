@@ -480,12 +480,15 @@ def library(draft: object) -> list[dict]:
 
 
 def unreadable_count(draft: object) -> int:
-    """How many stored asset entries this build cannot present. Never guessed at.
+    """How many stored asset entries this build cannot present, in ONE draft.
 
     Counts two kinds without separating them, exactly as the notes feature counts
     its own: an element that is not an object, and an object carrying no
     ``asset_id`` (which is unaddressable — no route below could name it). Both are
     left in the document untouched.
+
+    Callers wanting the figure a READER should be shown want
+    :func:`unreadable_count_everywhere`, not this. See its docstring for why.
     """
     if not isinstance(draft, dict):
         return 0
@@ -496,6 +499,32 @@ def unreadable_count(draft: object) -> int:
     return sum(
         1 for item in stored if not isinstance(item, dict) or not item.get("asset_id")
     )
+
+
+def unreadable_count_everywhere(exp) -> int:
+    """The same count over the library AND every run draft.
+
+    THE DISCLOSURE HAS TO COVER THE SAME GROUND THE REFUSAL DOES, and the first
+    version of this feature did not. The listing reported
+    ``unreadable_count(exp.draft)`` — the library only — while
+    :func:`refuse_unreadable_containers` checks the experiment *and every run*.
+
+    So a record whose RUN held a non-list ``assets`` container read as perfectly
+    clean (``unreadable_entries: 0``, no warning anywhere on the panel), and then
+    every write refused with 422 ``unreadable_asset_container`` naming that run.
+    A refusal a reader was given no prior disclosure of is the shape of surprise
+    this project's honesty rules exist to prevent: the panel was not lying about
+    a value, it was quietly reporting on a narrower scope than the one it acted
+    on.
+
+    Counting both is the fix rather than narrowing the refusal, because the
+    refusal is right: a run container this build cannot read is a real reason to
+    decline to write.
+    """
+    total = unreadable_count(getattr(exp, "draft", None))
+    for run in exp.sorted_runs():
+        total += unreadable_count(getattr(run, "draft", None))
+    return total
 
 
 def refuse_unreadable_containers(exp) -> None:
@@ -653,6 +682,33 @@ def set_associations(exp, entry: dict, run_ids: set[str] | None) -> None:
     A DEEP COPY PER RUN. Sharing one dict between the library and N runs would make
     the document's JSON serialisation correct and its in-memory aliasing a trap: a
     later mutation of one would silently move all of them.
+
+    AN EXISTING ASSOCIATION KEEPS ITS POSITION; only a NEW one is appended. The
+    first version of this function filtered the entry out and re-appended it
+    unconditionally, so every write reordered the run's ``assets`` array —
+    including a write that changed nothing.
+
+    That was not cosmetic, and independent review proved it by running it. Three
+    consequences, in increasing order of seriousness:
+
+      * ``upsert`` replaces IN PLACE in the library, so the two stores disagreed
+        about order after the very first edit — two copies of one fact that are
+        not byte-equal;
+      * the reordered array is the one that goes into that run's exported ISAAC
+        record;
+      * ``_run_signature_payload`` includes ``run.draft``, so the reorder advanced
+        the experiment's ``rev``. A second client holding the pre-click ETag then
+        got a **412 manufactured by a no-op** — a stale-write refusal with no
+        stale write behind it, which is precisely the signal ``_check_if_match``
+        exists to keep meaningful.
+
+    It also contradicted this feature's own shipped contract, which states that
+    "a request that changes nothing is a no-op that does not advance the record's
+    revision".
+
+    It was invisible to the suite because the no-op test used a ZERO-RUN
+    experiment holding ONE asset, and the reorder needs a run holding at least
+    two. ``test_a_no_op_edit_does_not_reorder_a_runs_assets`` closes that gap.
     """
     asset_id = entry["asset_id"]
     for run in exp.sorted_runs():
@@ -665,12 +721,21 @@ def set_associations(exp, entry: dict, run_ids: set[str] | None) -> None:
             for item in current
         )
         wanted = holds if run_ids is None else run.id in run_ids
-        rebuilt = [
-            item
-            for item in current
-            if not (isinstance(item, dict) and item.get("asset_id") == asset_id)
-        ]
-        if wanted:
+        rebuilt: list = []
+        placed = False
+        for item in current:
+            if isinstance(item, dict) and item.get("asset_id") == asset_id:
+                # Replace the FIRST occurrence in place and drop any later
+                # duplicate — matching `upsert`'s in-place behaviour rather than
+                # inventing a second ordering rule for the same fact.
+                if wanted and not placed:
+                    rebuilt.append(copy.deepcopy(entry))
+                    placed = True
+                continue
+            rebuilt.append(item)
+        if wanted and not placed:
+            # A genuinely NEW association. Appending is the only defensible
+            # position: there is no prior slot to preserve.
             rebuilt.append(copy.deepcopy(entry))
         if rebuilt or ASSETS_BLOCK in draft:
             draft[ASSETS_BLOCK] = rebuilt
