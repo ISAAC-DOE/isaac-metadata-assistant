@@ -1166,7 +1166,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // A/B-measured as already 64 on `b7792c1`.
       // UNMAPPED NOTES (PR #146), 2026-08-16: linux 63 -> 64, same cause as the
       // desktop/laptop cells above. darwin 65 carried forward unmeasured.
-      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 64 },
+      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 66 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1230,7 +1230,28 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // zoom-200 COLLAPSES to a scalar 59: darwin was already 59 and linux has
       // converged on it, and the guard rejects a pair with equal halves.
       'settings-explorer@mobile-375x812': { darwin: 56, linux: 58 },
-      'settings-explorer@zoom-200': { darwin: 59, linux: 61 },
+      /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
+         FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
+         same change moved linux DOWN one and darwin not at all.
+
+         Cause, traced rather than guessed: the run-removal slice reworded the served
+         409 response description for `POST .../runs/{run_id}/remove`, and the Endpoint
+         Explorer renders every response description VERBATIM. One fewer low-contrast
+         text node results. CI (linux, the authority) reported the fall from 61 to 60.
+
+         DARWIN IS LEFT AT 59 DELIBERATELY, AND IT IS KNOWN TO BE STALE. A local macOS
+         run measures 61 (+2) — and it measures 61 ON `main` TOO, with this slice's
+         changes absent, so the darwin drift is PRE-EXISTING and is NOT caused by this
+         slice. It went unnoticed because CI runs only linux, and darwin's authority is
+         a local macOS run that evidently has not been taken for this cell since it
+         drifted. Correcting it here would mean carrying an unrelated pre-existing
+         regression inside a run-removal diff, where the next reader would attribute it
+         to this slice; correcting it also needs the darwin TOTAL moved, which is the
+         one artefact in this file that makes a debt increase visible. So it is recorded
+         here as a measured finding for its own slice, not silently absorbed into this
+         one. Do not "fix" this line by copying the linux number across — the two
+         columns were measured separately and disagree in both value and direction. */
+      'settings-explorer@zoom-200': { darwin: 59, linux: 60 },
       'settings-privacy@desktop-1280x800': 9,
       'settings-privacy@laptop-1024x768': 9,
       'settings-privacy@tablet-768x1024': 9,
@@ -1547,7 +1568,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // converged on it, so the pair no longer marks a measured difference and
       // the guard would reject it. width-390 stays a pair, darwin 59 unmeasured.
       'settings-explorer@width-320': { darwin: 57, linux: 56 },
-      'settings-explorer@width-390': { darwin: 59, linux: 58 },
+      'settings-explorer@width-390': 59,
       'settings-privacy@width-320': 8,
       'settings-privacy@width-390': 8,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -2445,7 +2466,61 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // it too. Left alone per this file's standing rule: only the platform actually
   // measured may be edited. All seven cells therefore SPLIT from scalars rather
   // than having their darwin half moved onto a linux reading.
-  linux: 2804,
+
+  // ── TRANSCRIPT CAPTURE, 2026-08-17: linux 2601 -> 2604. darwin unchanged. ──
+  //
+  // TRANSCRIBED from CI run 32062179811. TWO cells, both `settings-explorer`,
+  // and NEITHER of them is the transcript UI:
+  //
+  //   settings-explorer@tablet-768x1024   64 -> 66  (+2)
+  //   settings-explorer@width-390         58 -> 59  (+1, and the pair COLLAPSES
+  //                                                  to the scalar 59)
+  //
+  // This is the SECOND-ORDER effect this file has now documented four times: the
+  // Endpoint Explorer renders every operation the build exposes, this branch adds
+  // three (`POST .../transcript`, `POST /api/transcription`,
+  // `GET /api/providers/capabilities`), and `.api-browser-list` is a clipped
+  // scroll container — so its cells move by different amounts and some do not
+  // move at all. Nothing about the transcript panel renders on that screen.
+  //
+  // THE TRANSCRIPT SURFACES THEMSELVES CONTRIBUTE NOTHING HERE, and that is a
+  // coverage statement rather than a clean bill of health. The panel is a CLOSED
+  // disclosure until a reader presses "Start a capture", and the scan does not
+  // press it — so the textarea, the run select, the candidate list, the four
+  // decision controls and every voice control are UNSCANNED. Reading `+0` on
+  // `record-detail` as "this feature adds no contrast debt" would be exactly
+  // wrong; it adds none that a scan which never opens it can see. Measuring the
+  // rest needs a scan that drives the disclosure, which is its own slice — the
+  // same gap the `.vr-sub` and Unmapped Notes notes above record.
+  //
+  // `@width-390` collapses to a scalar because linux rose onto darwin's existing
+  // 59. Both halves are measured; a pair whose numbers agree must be written as
+  // one, and the well-formedness guard rejects an equal pair.
+
+  // ── THE MERGE OF THE TWO ABOVE ─────────────────────────────────────────────
+  //
+  // BOTH notes are kept, because they describe DIFFERENT cells that both
+  // survive the merge: the provenance chips moved seven `evidence` cells, the
+  // transcript routes moved two `settings-explorer` cells. Keeping one and
+  // discarding the other would leave half the current numbers unexplained.
+  //
+  // The TOTAL below is neither branch's figure and is not their arithmetic. It
+  // is what the fast invariant suite computes from the merged entry map — the
+  // one number in this file that is arithmetic rather than measurement, which
+  // is exactly why it must be recomputed at a merge rather than chosen.
+  //
+  // 2807. Neither 2804 (provenance) nor 2604 (transcript), and the arithmetic
+  // confirms both cell sets survived: 2601 + 203 + 3. Had either branch's figure
+  // been carried across, the file would have been self-inconsistent and the fast
+  // invariant would have said so in milliseconds — which is what it did.
+  // 2807 -> 2806: the single MEASURED linux fall above,
+  // `settings-explorer@zoom-200` color-contrast 61 -> 60, caused by the reworded 409
+  // response description that the Endpoint Explorer renders verbatim. darwin is
+  // UNCHANGED at 2551 and that is not arithmetic: the darwin cell did not move on this
+  // change (a local run measures the same 61 on `main`), so there is nothing to add or
+  // subtract on that side. Per this file's standing rule, the number is corrected from
+  // the CI output and the assertion is not loosened.
+  linux: 2806,
 };
 
 /**

@@ -53,6 +53,8 @@ import type {
   ApiNoteState,
   ApiOpenApiResponse,
   ApiPendingResponse,
+  ApiProviderCapabilities,
+  ApiProviderRefusal,
   ApiRevisionDetail,
   ApiRevisionDiff,
   ApiRevisionHistory,
@@ -60,12 +62,15 @@ import type {
   ApiRunCreated,
   ApiRunOverrideCleared,
   ApiRunOverrideResponse,
+  ApiRunRemoved,
   ApiRunResponse,
   ApiRunsResponse,
   ApiSchemaResponse,
   ApiSearchResponse,
   ApiSearchScope,
   ApiSourcePreview,
+  ApiTranscriptCapture,
+  ApiTranscriptionResult,
   ApiTutorialSession,
   ApiDemoRunResponse,
   ApiDemoResetResult,
@@ -1188,6 +1193,49 @@ export const api = {
   },
 
   /**
+   * Remove one run from a record.
+   *
+   * THE TOKEN IS THE RECORD's, NOT THE RUN's, and this is the third place in this
+   * module that trap has to be called out. A run lives inside the record's
+   * document, so removing one REWRITES THE RECORD — exactly as `createRun` does,
+   * and unlike `updateRun`/`setRunOverride`, which are addressed to the run.
+   *
+   * `confirmed_by_user: true` is sent unconditionally, and unlike the override
+   * writes that is safe here rather than a shortcut: this client has exactly one
+   * caller, the confirmation panel on the run's own card, and there is no path
+   * that reaches this function without a reader having confirmed. The server
+   * enforces it regardless (`422 confirmation_required`).
+   *
+   * A 409 means the run keeps a published record claimed and was not removed; a
+   * 412 means the record moved and nothing was removed.
+   *
+   * WHICH OF THOSE REACHES THE SCREEN IN THE SERVER'S OWN WORDS, precisely,
+   * because an earlier version of this comment said "the screen renders the
+   * server's own words" of BOTH and that is false of one of them:
+   * `mutationError` parses a body for **400, 412 and 422 only**. A 409 body is
+   * not parsed, so its copy is written by the CALLER — `RunsSection.tsx` says so
+   * at its own call site, in the opposite words to the sentence this replaces.
+   * A future second consumer that trusted the old wording would ship a blank
+   * message on the one refusal a scientist most needs explained.
+   */
+  async removeRun(
+    experimentId: string,
+    runId: string,
+    opts: { experimentVersion: string },
+  ): Promise<ApiRunRemoved> {
+    const path = `/experiments/${enc(experimentId)}/runs/${enc(runId)}/remove`;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed_by_user: true }),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiRunRemoved>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
    * Check one run. READ-ONLY: it sends no `If-Match` because it writes nothing,
    * and the contract states its response advances no ETag. It is a POST only
    * because the check is computed rather than served.
@@ -1858,7 +1906,124 @@ export const api = {
       ]);
     return { detail, groups, evidence, artifacts, validate, warnings, classification };
   },
+
+  /* ---- Transcript capture ------------------------------------------------
+   *
+   * THREE FUNCTIONS, AND NONE OF THEM WRITES A FIELD. Accepting a candidate is
+   * `updateRun` above — the existing confirmed-edit path, with the RUN's own
+   * `If-Match`. There is deliberately no `acceptCandidate` here: a second write
+   * path would be a second place for the precondition to be forgotten.
+   */
+
+  /**
+   * The honest status of the three model seams, FROM THE SERVER.
+   *
+   * Deliberately not a constant in this bundle. A string compiled in here would
+   * describe the build the browser was built from rather than the deployment it
+   * is talking to, and the one thing this report must never do is claim a
+   * capability the server does not have.
+   */
+  getProviderCapabilities(): Promise<ApiProviderCapabilities> {
+    return getJson<ApiProviderCapabilities>('/providers/capabilities');
+  },
+
+  /**
+   * Ask for a transcript of audio the CALLER holds.
+   *
+   * `audioRef` is an opaque handle to audio in this tab's memory — never bytes,
+   * and there is no multipart form anywhere in this application to send bytes
+   * through. In a deployment with no transcription provider this rejects with a
+   * `501` whose body names what is missing; the caller must render that rather
+   * than a spinner, because nothing is being waited for.
+   */
+  async requestTranscription(opts: {
+    audioRef?: string;
+    manualTranscript?: string;
+    language?: string;
+  }): Promise<ApiTranscriptionResult> {
+    const path = '/transcription';
+    const body: Record<string, unknown> = {};
+    if (opts.audioRef) body.audio_ref = opts.audioRef;
+    if (opts.manualTranscript) body.manual_transcript = opts.manualTranscript;
+    if (opts.language) body.language = opts.language;
+    const res = await request(path, { method: 'POST', body: JSON.stringify(body) });
+    if (res.ok) return readJson<ApiTranscriptionResult>(res, path);
+    /*
+     * A REFUSAL IS NOT A GENERIC FAILURE, AND IT HAS TO REACH THE CALLER WHOLE.
+     *
+     * `mutationError` reads a response body only for the three
+     * precondition/validation statuses, which is exactly right for a write: on
+     * anything else the body is a stack of no use to a reader. Here the body IS
+     * the useful part — it names what is missing and where the decision is
+     * recorded — and the status is `501`. So it is read for this operation only,
+     * rather than by widening a helper that every write in this module shares.
+     *
+     * THE ORDER IS DELIBERATE. `mutationError` runs FIRST, so its two
+     * classifications survive: a sign-in page returned in place of the API keeps
+     * `htmlIntercept` (and is never parsed as JSON), and a status it already
+     * reads the body for arrives with `body` set and is left alone. Only a
+     * failure it left bodyless is read here, and it did not consume the stream in
+     * that case.
+     */
+    const failure = await mutationError(res, path);
+    if (failure.body !== undefined || failure.htmlIntercept) throw failure;
+    const refusal = await res.json().catch(() => undefined);
+    if (refusal === undefined) throw failure;
+    throw new ApiError(failure.message, {
+      status: failure.status,
+      path,
+      contentType: failure.contentType,
+      body: refusal,
+    });
+  },
+
+  /**
+   * Read one FINALIZED transcript.
+   *
+   * `finalized: true` is sent unconditionally and is not a parameter, because
+   * this client only calls this from a control the scientist activated after
+   * reviewing their own text — there is no path here that submits text still
+   * being typed. The server refuses without it in any case; sending it as a
+   * caller-supplied flag would invite a future component to pass `false` and
+   * discover what happens.
+   *
+   * `runId` is included only when the scientist chose one. An omitted run stays
+   * omitted rather than travelling as `null`, and is never filled in from the
+   * only run that happens to exist — the server asks instead.
+   */
+  async captureTranscript(
+    experimentId: string,
+    opts: { experimentVersion: string; text: string; runId?: string },
+  ): Promise<ApiTranscriptCapture> {
+    const path = `/experiments/${enc(experimentId)}/transcript`;
+    const body: Record<string, unknown> = { text: opts.text, finalized: true };
+    if (opts.runId) body.run_id = opts.runId;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiTranscriptCapture>(res, path);
+    throw await mutationError(res, path);
+  },
 } as const;
+
+/**
+ * The refusal body a `501` from the transcription operation carries, when it is
+ * readable. Returns `null` rather than a fabricated one — an invented "missing"
+ * list would be the fake status this whole surface exists to avoid.
+ */
+export function providerRefusalOf(error: unknown): ApiProviderRefusal | null {
+  if (!(error instanceof ApiError)) return null;
+  const body = error.body;
+  if (!body || typeof body !== 'object') return null;
+  const candidate = body as Partial<ApiProviderRefusal>;
+  if (candidate.refused !== true) return null;
+  if (typeof candidate.message !== 'string' || !Array.isArray(candidate.missing)) return null;
+  return candidate as ApiProviderRefusal;
+}
 
 /** Distinct source-file basenames referenced by any evidence entry (order kept). */
 /**

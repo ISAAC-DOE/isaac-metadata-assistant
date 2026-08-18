@@ -614,18 +614,22 @@ describe('both render sites guard the run command at build time', () => {
  * HOW. Every per-record path in that module is a single-line template literal of the
  * form `` `/experiments/${enc(…)}…` ``, so those literals are collected and each is
  * required to be either the bare record path or a sub-read. Measured, and re-measured
- * when the submission-history reads were added: 29 literals → 2 bare + 24
- * distinct sub-read suffixes → 17 distinct first segments. (Was 26 → 2 + 21 → 16,
- * before the three `/revisions…` reads — the listing, one revision, and the diff of
- * one revision against the current record — each of which is its own suffix, and
- * whose shared first segment `revisions` nothing else used, so the segment count
- * moves by one too. Before that, at the Unmapped Notes reads and writes: 23 → 2 + 19 → 15; the
- * three new literals are `notes` twice — the list read and the capture write share one
- * path, and the Set folds them into ONE suffix — plus `notes/${…}/review`, and the
- * segment count moves this time because `notes` is a first segment nothing else used.
- * Before that: 21 → 2 + 17 → 15, when the two per-run override writes were added as
- * `runs/${…}/overrides` and `runs/${…}/overrides/clear`, whose segment was already
- * covered by `runs`.) Those counts are asserted, so adding a sub-read fails this file.
+ * when the run REMOVAL write was added on top of the submission-history reads.
+ * The three numbers are asserted below and are MEASURED after this merge, never
+ * added: both merged branches raised them from a shared base, and the arithmetic
+ * on a pair of deltas is exactly the failure this file already carries a note
+ * about. (The run-removal literal is `runs/${…}/remove`, which adds one literal
+ * and one suffix and moves NO segment count, because `runs` was already a first
+ * segment. The submission-history reads before it added three `/revisions…`
+ * suffixes sharing one new first segment. Before those, the Asset References
+ * reads and writes added `assets` twice — the list read and the create write
+ * share one path, and the Set folds them into ONE suffix — plus `assets/${…}`
+ * and `assets/${…}/remove`, moving the segment count because `assets` is a first
+ * segment nothing else used. Before that, `notes` twice plus
+ * `notes/${…}/review`; and before that the two per-run override writes
+ * `runs/${…}/overrides` and `runs/${…}/overrides/clear`, whose segment `runs`
+ * already covered.) Those counts are asserted, so adding a sub-read fails this
+ * file.
  *
  * WHAT THIS CANNOT SEE, stated precisely because the obvious reading of the previous
  * paragraph is too generous. `unclassifiedLiterals` catches a literal that STARTS
@@ -671,28 +675,44 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // An unexpected interior shape in one of these literals would silently shrink
     // both guards below — see the limits paragraph above for what this misses.
     expect(unclassifiedLiterals).toEqual([]);
-    // ALL THREE NUMBERS BELOW ARE MEASURED AFTER THE MERGE, read out of this
-    // test's own failure output. None was computed by adding the asset slice's
-    // delta to this slice's — that arithmetic is exactly how a merged counter
-    // ends up wrong, and the sibling transcript merge caught a counter that both
-    // branches had set to the SAME literal, which git then merged with no
-    // conflict at all while the true value was one higher than either.
-    expect(experimentPathLiterals.length).toBe(33);
+    // MEASURED after the merge, not derived by adding the two branches' deltas
+    // together. Both the asset/submission-history side and the run-removal side
+    // add per-record route literals, and the merge of two counter edits is
+    // exactly where this repository has been bitten before — see the note on
+    // `A11Y_BASELINE_TOTAL_NODES`, and see the `SUB_READ_SEGMENTS` case below,
+    // where both branches wrote the SAME literal and git merged two additions
+    // while recording one. Every number here was read out of this test's own
+    // failure output after the merge.
+    expect(experimentPathLiterals.length).toBe(35);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(27);
-    // 18, AND THIS LINE WAS NOT IN THE MERGE CONFLICT.
+    expect(SUB_READ_SUFFIXES).toHaveLength(29);
+    // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
-    // Both branches raised it 16 -> 17 for different additions, so git saw two
-    // identical one-line changes and merged them without a murmur — the entries
-    // changed twice, the total recorded once. This is the SECOND independent
-    // branch in this series to hit it on this exact counter; the transcript
-    // merge hit it first.
+    // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
+    // independent review having noticed that the paragraph above still refers to
+    // "the `SUB_READ_SEGMENTS` case below" while the case itself had been deleted —
+    // a dangling reference to an incident this repository deliberately keeps.
     //
-    // It was caught only because this count is DERIVED from `api.ts` and the
-    // assertion re-measures it. A hand-maintained number with no derivation
-    // behind it would have merged clean and stayed wrong, which is the argument
-    // for deriving a counter wherever a derivation exists.
-    expect(SUB_READ_SEGMENTS).toHaveLength(18);
+    // What happened: this line was NOT in a merge conflict. Two branches both raised
+    // it from 16 to 17 — the asset slice for its own new segment, the transcript
+    // slice for `transcript` — so git saw two IDENTICAL one-line changes and merged
+    // them without a murmur, leaving a literal that accounted for one of the two
+    // additions. The entries changed twice; the total was recorded once. It was
+    // caught only because this count is DERIVED from `api.ts` and re-measured here;
+    // a hand-maintained pair with no derivation behind it would have merged clean
+    // and stayed wrong.
+    //
+    // That is the same failure mode `A11Y_BASELINE_TOTAL_NODES` carries a long note
+    // about, reproduced in a different counter within days, which says something
+    // about how easily it recurs. The run-removal merge then hit the SAME class a
+    // third time in four separate counters — and 19 is where this one lands, because
+    // run removal adds a suffix under `runs`, a first segment that already existed.
+    expect(SUB_READ_SEGMENTS).toHaveLength(19);
+    // The run REMOVAL write. It adds one literal and one suffix and moves NO
+    // segment count: `runs` was already a first segment, so the product word this
+    // panel uses for a failed read of it ("the measurement runs") already covers
+    // it and no new label is needed.
+    expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/remove');
     // Spot-check the two shapes that are easiest to derive wrongly.
     expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');
     expect(SUB_READ_SUFFIXES).toContain('source-preview?source=SEG-1');

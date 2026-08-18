@@ -336,19 +336,19 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
     #
-    # 52 -> 53: `GET /api/experiments/{experiment_id}/provenance`, the two-dimension
-    # provenance view. Like the notes model above it adds no storage — both
-    # dimensions are DERIVED on read from content the record already carries — but
-    # unlike it, it adds no vocabulary to the truth core either: it reads the ones
-    # that already exist and reports them as two independent answers.
+    # MEASURED from `create_app().openapi()` on the MERGED tree, and the
+    # arithmetic is deliberately not shown, because doing the arithmetic is how
+    # this goes wrong. Three slices raised this literal from 52 for real,
+    # different additions — the asset slice, the transcript slice, and this one,
+    # which adds `POST /api/experiments/{experiment_id}/runs/{run_id}/remove`.
+    # Adding the deltas would give one number; measuring gives the true one.
     #
-    # MEASURED, NOT CARRIED. See the note above about two branches each counting
-    # from 47: this number comes from running `create_app().openapi()` on this
-    # branch, and a merge must re-measure rather than add.
-    # MEASURED AFTER THE MERGE, not carried across it and not derived by adding
-    # deltas. Provenance publishes one operation and the asset slice four, both
-    # from the same base of 52; either branch's own figure is wrong for the merge.
-    assert checked == 60, f"expected 60 documented operations, found {checked}"
+    # That new operation is a sub-path POST rather than a DELETE for the reason
+    # every other removal here is; and it is a separate operation from the run
+    # PATCH rather than a `null` on it, because removing a run is a destructive
+    # act with its own confirmation and its own refusal for a run that has
+    # already been exported.
+    assert checked == 64, f"expected 64 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -602,6 +602,13 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}/review", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    # Transcript capture. Storing a finalized transcript REWRITES THE RECORD — every
+    # segment of it becomes a note inside the record's own document — so it carries
+    # the record's `If-Match` and the whole 400/412/428 set, exactly as capturing a
+    # note does. Its `422` covers the finalize gate, an unknown body key, an unknown
+    # run, the segment ceiling and a retention state this build cannot enforce; on
+    # every one of them nothing is stored.
+    ("/api/experiments/{experiment_id}/transcript", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     # The Run API. Adding a run REWRITES THE RECORD, so `POST .../runs` carries the
     # record's `If-Match` and the whole 400/412/428 set with it. `PATCH
     # .../runs/{run_id}` carries THE RUN's instead — the same three codes, a
@@ -618,6 +625,14 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/runs/{run_id}/overrides", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}/overrides/clear", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}/check", "post"): ["200", "401", "404", "422", "503"],
+    # Removing a run REWRITES THE RECORD — a run lives inside the record's document
+    # — so this carries the RECORD's `If-Match` and the whole 400/412/428 set with
+    # it, exactly as `POST .../runs` and `POST .../assets/{id}/remove` do. There is
+    # no DELETE: removal is a sub-path POST, the shape every other removal in this
+    # API uses. The `409` is its own refusal and appears on no other run operation:
+    # the run has been exported, so removing it would orphan a written official
+    # record, and it is refused with nothing written.
+    ("/api/experiments/{experiment_id}/runs/{run_id}/remove", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/source-preview", "get"): ["200", "400", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/validate", "post"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/warnings", "get"): ["200", "401", "404", "422", "503"],
@@ -632,6 +647,16 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/memory/graph", "get"): ["200", "401"],
     ("/api/memory/graph/detail", "get"): ["200", "401"],
     ("/api/openapi", "get"): ["200", "401"],
+    # The model-seam capability report. A read of this build's own constants: it
+    # opens no connection and reads no credential, so it has no failure of its own
+    # to document.
+    ("/api/providers/capabilities", "get"): ["200", "401"],
+    # `501` is the seam having no provider in this deployment — a statement about
+    # the deployment, not a fault and not a wait. `422` is the SEPARATE case of a
+    # request that supplied nothing to work on. They are deliberately different
+    # codes: a caller who retried the first would be waiting for a decision nobody
+    # has made.
+    ("/api/transcription", "post"): ["200", "401", "422", "501"],
     # 409 = a reconnaissance scan is already running; nothing is connected to.
     ("/api/runtime/database/recon", "get"): ["200", "401", "409"],
     ("/api/schema", "get"): ["200", "401"],

@@ -66,6 +66,10 @@ from . import serialize
 from . import sources
 from . import submission_store
 from . import submissions
+from . import transcript_capture as tc
+from .providers import config as provider_config
+from .providers import refusal as providers_refusal
+from .providers import transcription as providers_transcription
 from . import verification
 from . import version_contract as vc
 from . import workspace as ws
@@ -2663,6 +2667,21 @@ _R_RUN_NOT_FOUND: dict = {
     },
 }
 
+_R_RUN_EXPORTED: dict = {
+    409: {
+        "description": (
+            "An official ISAAC record for this run already exists, so it was not "
+            "removed and nothing was written. `error` is `run_exported`. "
+            "**`record_stem` names the artifact** — read that one, not `record_id`. "
+            "`record_id` reports the run's persisted record id and is `null` on the "
+            "arm where a record and/or its evidence sidecar are on disk but no "
+            "`record_id` was persisted; `record_stem` is the run's own id there. "
+            "Either file alone is enough to refuse, so a refusal does not imply "
+            "both exist. Only the removal operation can answer this."
+        )
+    },
+}
+
 #: The three states a run's view of one inherited experiment-level address can be in.
 RUN_INHERITED = "inherited"
 RUN_OVERRIDDEN = "overridden"
@@ -2715,6 +2734,111 @@ def _run_not_found(experiment_id: str, run_id: str) -> JSONResponse:
             "error": "run_not_found",
             "experiment_id": experiment_id,
             "id": run_id,
+        },
+    )
+
+
+def _run_published_stem(exp: "ws.Experiment", run: "ws.Run") -> str | None:
+    """The record stem this run keeps claimed, or ``None`` if it keeps none.
+
+    THE GUARD ASKS ABOUT DISK, NOT ONLY ABOUT STATE, AND THE DIFFERENCE IS A
+    DELETED OFFICIAL RECORD.
+
+    The first version of this guard was `run.record_id is not None`, on the stated
+    reasoning that "a run whose `record_id` is set has an official record and an
+    evidence sidecar on disk". That direction is true and is not the one the safety
+    argument needs. What it needs is the CONVERSE — a run whose `record_id` is not
+    set has no pair on disk — and this codebase names the state where the converse
+    is false, twice:
+
+      * `post_export`'s 412 branch: "EVERY unit's artifact PAIR was already written
+        to disk and the state was not";
+      * `_save_versioned`: "`post_export` writes the official record and its
+        evidence sidecar BEFORE calling this, and those two files remain on disk".
+
+    `_write_record` sets `record_id` in memory and writes both files; one
+    `_save_versioned` then persists. A lost durable compare-and-swap, or a raise
+    between two units' writes, leaves the pair on disk with `record_id`
+    unpersisted. Independent review reproduced exactly that shape and drove the
+    real routes: the removal returned 200, the next export pruned the orphan, and
+    a published record AND its evidence sidecar were deleted.
+
+    `ExportUnit.materialised()` already encodes the correct three-part test; this
+    is the same question asked of a run that may not be a current unit any more.
+    Two `stat()` calls under a lock this route already holds.
+
+    Returns the STEM rather than a bool so the refusal can name the artifact even
+    on the arm where `record_id` is unset — the arm where a message built from
+    `record_id` would say `null`.
+    """
+    record_id = run.record_id
+    if isinstance(record_id, str) and ws.is_record_id(record_id):
+        return record_id
+    # No persisted `record_id`. A pair may still be on disk under the RUN's own id:
+    # that is the stem `_write_record` uses for a run unit, and the stem the prune
+    # would delete.
+    #
+    # THE SHAPE IS CHECKED BEFORE THE ID BECOMES A PATH, for the reason
+    # `ExportUnit.record_path()` checks it (`workspace.py`): this is a place where
+    # document content would otherwise become a filesystem path, and `RunId` is a
+    # bare `str` path parameter with no pattern. Reaching it needs a crafted
+    # persisted document and the impact is bounded to two read-only `stat()` calls
+    # plus an echoed stem — so this is defence in depth, not a live hole. It is here
+    # because the sibling function guards the identical step and an asymmetry between
+    # them is the kind of thing that stops being harmless after a later change.
+    if not ws.is_record_id(run.id):
+        return None
+    records_dir = exp.records_dir
+    if (records_dir / f"{run.id}.json").exists() or (
+        records_dir / f"{run.id}.evidence.json"
+    ).exists():
+        return run.id
+    return None
+
+
+def _run_exported(experiment_id: str, run: "ws.Run", *, stem: str | None = None) -> JSONResponse:
+    """A run that has produced an official record, refused for removal.
+
+    THIS IS THE HISTORY GUARD, and it is stated here rather than only in the
+    operation's prose because it is the reason the operation is narrower than the
+    button a scientist sees. A run that keeps an official record and an evidence
+    sidecar claimed — whether by a persisted ``record_id`` or by a pair sitting on
+    disk under its own id; see :func:`_run_published_stem` for why both are asked —
+    holds a pair that is IMMUTABLE, because nothing in this application rewrites
+    one. Removing the run would leave the pair claimed by
+    no current unit, and the export prune deletes exactly that: a stem no current
+    unit claims, protected only if a surviving record happens to link to it. So the
+    removal that looks harmless here would become a DELETION of a published record
+    on the next export of this experiment, at a distance, with no confirmation.
+
+    Every run that has appeared in a submitted revision is such a run — a
+    submission materialises every unit before it records anything — so refusing
+    here is also what keeps a submitted record out of reach of this operation. The
+    revision rows and the submission rows are append-only and survive regardless;
+    this refusal is about the FILE.
+
+    409 rather than 422: the request is well formed and the state of the record is
+    what makes it impossible, which is what this API means by 409 everywhere else.
+    """
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "run_exported",
+            "experiment_id": experiment_id,
+            "id": run.id,
+            # The STEM that is claimed, which on the disk-only arm is the run's
+            # own id rather than a persisted `record_id`. `record_id` is reported
+            # separately and honestly, including when it is null.
+            "record_id": run.record_id,
+            "record_stem": stem if stem is not None else run.record_id,
+            "message": (
+                "An official ISAAC record for this run already exists, so it "
+                "cannot be removed. At least one published artifact is present — "
+                "the record, its evidence sidecar, or both; either alone is "
+                "enough. Published artifacts are never rewritten by this "
+                "application, and the run is what keeps them claimed. Nothing "
+                "was written."
+            ),
         },
     )
 
@@ -4583,6 +4707,155 @@ def post_run_check(
     }
 
 
+_RUN_REMOVE_DESCRIPTION = (
+    "Removes one run from this record and reports what was removed.\n\n"
+    "ONLY A RUN THAT KEEPS NO PUBLISHED RECORD CLAIMED. A run that has produced "
+    "an official ISAAC record holds a record and an evidence sidecar that this "
+    "application never rewrites. Removing the run that names them would leave "
+    "them claimed by nothing, and a later export of this record deletes exactly "
+    "such a pair — so this operation refuses that run with `409 run_exported` "
+    "and writes nothing. The refusal asks BOTH whether the run carries a "
+    "`record_id` AND whether an artifact pair is present on disk under its own "
+    "id, because an export writes both files before it persists the state and a "
+    "refused state save leaves the pair with no `record_id` naming it.\n\n"
+    "Every run that has appeared in a submitted revision carries a `record_id` — "
+    "a submission materialises every unit before it records anything — so a "
+    "SUBMITTED record is out of this operation's reach. That is a statement "
+    "about submitted records specifically, not a claim that removal is the only "
+    "way a record can stop being claimed. No revision, submission or official "
+    "record is deleted, rewritten or marked by this operation in any case.\n\n"
+    "WHAT IS REMOVED is the run's own draft content: the run-level values it "
+    "holds, the overrides it recorded, its association with any asset reference, "
+    "and its open questions. The record's own values are unchanged, no other run "
+    "is changed, the record's asset library keeps every entry, and no file at an "
+    "asset `uri` is read or altered — this application has never read one.\n\n"
+    "THE REMAINING RUNS KEEP THEIR NUMBERS. Ordinals are not renumbered, so a "
+    "record whose runs were 1, 2 and 3 reads 1 and 3 after the second is removed, "
+    "and every surviving run's revision and `ETag` are untouched by this request. "
+    "`ordinals_compacted` is `false` in the response so a client never has to "
+    "infer it. A run added afterwards takes the next number above the highest "
+    "still present.\n\n"
+    "Removing a run rewrites the record, so this requires `confirmed_by_user: "
+    "true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, "
+    "malformed is `400`, and stale is `412` with nothing removed. Repeating the "
+    "request for a run that is already gone is `404` rather than a second "
+    "success: this operation is addressed to a run, and every other run operation "
+    "answers `404` for an id this record does not hold."
+)
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/remove",
+    tags=[TAG_EXPERIMENTS],
+    summary="Remove a Run from a Record",
+    description=_RUN_REMOVE_DESCRIPTION,
+    response_description=(
+        "What was removed — the run's id, label and number, and the asset "
+        "references that went with it — together with how many runs remain, "
+        "whether the remaining numbers were changed, and the record's new "
+        "revision, with the record's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_RUN_NOT_FOUND,
+        **_R_RUN_EXPORTED,
+        **_R_PRECONDITION,
+    },
+)
+def post_run_remove(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description="`{\"confirmed_by_user\": true}`. Nothing else is read.",
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it — not the run's. A run lives inside the record's "
+            "document, so removing one rewrites the record."
+        ),
+    ),
+):
+    """Remove one run. THE ORDER OF THE FIVE REFUSALS IS THE CONTRACT.
+
+    It is `post_asset_remove`'s order, deliberately, because the two are the same
+    shape of act: exists -> confirmed -> domain refusal -> precondition -> write.
+
+    THE PRECONDITION IS CHECKED INSIDE THE SAME CRITICAL SECTION AS THE MUTATION,
+    and this repository has a written history of that exact defect on the reset
+    path, so it is worth stating rather than assuming. Both `_check_if_match` and
+    the removal happen under one `record_lock`, over an experiment re-read INSIDE
+    that lock — the copy read by the existence pre-check above is never mutated.
+    The durable compare-and-swap in the repository is the second half of it, for
+    the writers this process cannot lock against, and `_save_versioned` renders
+    its refusal as the same 412 with nothing removed.
+
+    IDEMPOTENCY IS 404, NOT A SECOND 200, and that is a decision. A retry whose
+    first attempt succeeded is the case that matters: the record moved, so the
+    token it carries is stale — but the run is gone, and the 404 is checked first,
+    so the retry is told the truth about the run rather than being sent to
+    re-read a version in order to remove something that no longer exists. A 200
+    would additionally require this operation to claim a run "was removed" for an
+    id that may never have existed on this record, which no other run operation
+    does and which is indistinguishable from a mistyped id.
+    """
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does
+    # it, so a bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        run = exp.get_run(run_id)
+        if run is None:
+            return _run_not_found(experiment_id, run_id)
+        if not isinstance(body, dict) or body.get("confirmed_by_user") is not True:
+            return _confirmation_required("remove a run")
+        published = _run_published_stem(exp, run)
+        if published is not None:
+            return _run_exported(experiment_id, run, stem=published)
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+        # READ BEFORE THE REMOVAL, because after it the run is not reachable from
+        # the experiment and the response would have nothing to name. NAMED, NOT
+        # COUNTED, for the reason `post_asset_remove` names its runs: a scientist
+        # told only "removed" cannot tell which files this measurement stopped
+        # citing. The library entries themselves are NOT removed — an asset may be
+        # cited by other runs, and by the record itself.
+        dropped_assets = [item["asset_id"] for item in assets.run_assets(run)]
+        removed_label, removed_ordinal = run.label, run.ordinal
+        removed = exp.remove_run(run_id)
+        assert removed is not None  # `get_run` above already resolved it under the lock
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this run was not removed
+        # `_changed` is structurally always True here — `_authoritative_signature`
+        # covers `runs`, so dropping one cannot leave the signature equal — so it is
+        # not branched on, exactly as `post_run` does not branch on it for a create.
+        response.headers["ETag"] = exp.etag()
+        return {
+            "removed_run_id": run_id,
+            "removed_run_label": removed_label,
+            "removed_run_ordinal": removed_ordinal,
+            "asset_references_dropped": dropped_assets,
+            "remaining_run_count": len(exp.runs),
+            # STATED, NOT INFERRED. The decision and its four reasons live on
+            # `Experiment.remove_run`; this is the wire half of it, so a client can
+            # tell the difference between "they were not renumbered" and "this
+            # build forgot to say".
+            "ordinals_compacted": False,
+            "experiment_version": exp.version_token(),
+        }
+
+
 # --- 7b. unmapped notes -------------------------------------------------------
 #
 # WHAT THESE FOUR OPERATIONS ARE FOR. A scientist captures things that no rule can
@@ -5236,6 +5509,488 @@ def post_note_review(
             return stale  # another writer won the race; this act was not recorded
         response.headers["ETag"] = exp.etag()
         return {"note": _note_view(revised), "experiment_version": exp.version_token()}
+
+
+# --- 7e. transcript capture ----------------------------------------------------
+#
+# THREE OPERATIONS, AND THE SPLIT IS THE DESIGN.
+#
+# `GET /api/providers/capabilities` is the honest status of the three AI seams,
+# read off the resolved implementations rather than off an environment value. It
+# existed as a function with no reader; a client that has to decide whether to
+# offer a microphone needs the answer from the server, because a string compiled
+# into the browser bundle is free to drift from what the deployment actually does.
+#
+# `POST /api/transcription` is the ONLY consumer of the transcription seam. It
+# takes an opaque handle to audio held in the caller's own memory and never audio
+# itself: no multipart form is declared anywhere in this application, file upload
+# is refused unconditionally, and nothing here opens a socket. In this build the
+# seam has no provider, so the operation reports that and transcribes nothing.
+#
+# `POST /api/experiments/{id}/transcript` is the working path and does not involve
+# a provider at all. It reads a transcript a scientist finalized, using this
+# repository's own closed table of literal patterns, and it PROPOSES. It writes
+# exactly one kind of thing — Unmapped Notes, which are structurally not values and
+# not evidence — and it writes them for EVERY segment, so no proposal being
+# accepted, and no acceptance succeeding, can lose what was typed.
+
+
+#: The body keys the transcript operation accepts. Anything else is REFUSED rather
+#: than ignored, for the reason the note operations refuse an unknown key: a caller
+#: that sends `{"confirmed": true}` alongside its transcript must be told the key
+#: means nothing here, not answered 200 while it is dropped.
+_TRANSCRIPT_KEYS = frozenset({"text", "finalized", "run_id", "retention"})
+
+#: What produced a note this operation stores. A member of the notes vocabulary,
+#: read from it rather than spelled out, so a rename there cannot leave a literal
+#: here that the note model would then refuse at capture time.
+_TRANSCRIPT_NOTE_SOURCE = "transcript"
+
+#: THE READER MAY NOT PROPOSE A PATH NOBODY CAN ACCEPT, AND THIS IS CHECKED AT
+#: IMPORT RATHER THAN BY A REVIEWER NOTICING.
+#:
+#: The transcript reader holds its own closed table of paths; the run edit holds
+#: the set of paths it will write. If the first ever grew a path outside the
+#: second, this operation would show a scientist a candidate with an Accept
+#: control whose only possible outcome is a refusal — the exact defect the run
+#: view's `overridable` flag was added to fix, arriving from the other direction.
+#: Failing to construct is louder than any comment.
+_UNACCEPTABLE_READER_PATHS = tc.READABLE_FIELD_PATHS - RUN_WRITABLE_FIELD_PATHS
+if _UNACCEPTABLE_READER_PATHS:  # pragma: no cover - a construction-time guard
+    raise RuntimeError(
+        "the transcript reader proposes field paths the run edit will not write: "
+        f"{sorted(_UNACCEPTABLE_READER_PATHS)}. A candidate at one of them could "
+        "never be accepted."
+    )
+if _TRANSCRIPT_NOTE_SOURCE not in notes.NOTE_SOURCES:  # pragma: no cover - ditto
+    raise RuntimeError(
+        f"{_TRANSCRIPT_NOTE_SOURCE!r} is not one of the note sources; a capture "
+        "would be refused by the note model at write time."
+    )
+
+#: The largest transcript one capture may carry, matching the per-note ceiling
+#: because every segment of it becomes a note. Over it is a refusal, never a
+#: truncation.
+_MAX_TRANSCRIPT_BYTES = _MAX_NOTE_BYTES
+
+
+def _transcript_refusal(error: str, message: str, **extra) -> JSONResponse:
+    """One typed 422. Every refusal on the transcript operation is one of these."""
+    return JSONResponse(
+        status_code=422, content={"error": error, "message": message, **extra}
+    )
+
+
+def _retention_disclosure(notes_captured: int) -> dict:
+    """What this build does with a finalized transcript, and what it will not claim.
+
+    ONE ENFORCED STATE, AND THE ABSENT ONES ARE NAMED. A retention control with
+    three options, two of which quietly did nothing, would be worse than no control
+    — so the two states this storage cannot enforce are reported as unimplemented
+    with the reason, rather than offered and ignored. `deletable` is `false` because
+    it is: nothing in this application removes a note, and a deletion guarantee
+    that cannot be demonstrated must not be printed next to a scientist's words.
+    """
+    return {
+        "state": tc.RETENTION_ENFORCED_STATE,
+        "notes_captured": notes_captured,
+        "deletable": False,
+        "description": (
+            "The finalized transcript is stored with this record as Unmapped "
+            "Notes and stays with it. Reviewing a note — including dismissing "
+            "one — records a decision and leaves the text readable."
+        ),
+        "not_implemented": [dict(entry) for entry in tc.RETENTION_STATES_NOT_IMPLEMENTED],
+        "raw_audio": {
+            "stored": False,
+            "reason": (
+                "No audio reaches this server. This operation accepts text only, "
+                "and the separate transcription operation accepts a handle to "
+                "audio the caller holds, never the audio. There is therefore no "
+                "raw-audio retention setting, because there is nothing retained "
+                "for one to govern."
+            ),
+        },
+    }
+
+
+def _capabilities_payload() -> dict:
+    """The provider report, with the two facts a reader needs beside it."""
+    payload = provider_config.capabilities()
+    return {
+        **payload,
+        "note": (
+            "`configured` is read off each resolved implementation, not inferred "
+            "from an environment value or a class name. Nothing in this build "
+            "sets it, so no seam here can report a provider."
+        ),
+        "manual_transcript_available": True,
+    }
+
+
+@router.get(
+    "/providers/capabilities",
+    tags=[TAG_META],
+    summary="Report Each Model Seam's Status",
+    description=(
+        "Reports, for each of the three model seams — transcription, capture "
+        "extraction, and the assistant — which implementation is resolved, "
+        "whether a production provider is configured, and why. Read-only: it "
+        "opens no connection, reads no credential, and performs no probe.\n\n"
+        "`configured` is read off the resolved implementation itself rather than "
+        "inferred from an environment value or a class name, and no "
+        "implementation in this build sets it. A client should render this "
+        "answer rather than a string compiled into its own bundle, so what a "
+        "scientist is told and what the deployment does cannot drift apart.\n\n"
+        "`manual_transcript_available` is always `true` and is deliberately "
+        "separate from every seam: reading a finalized transcript is this "
+        "repository's own deterministic operation and does not depend on any "
+        "provider, so it stays available when every seam reports nothing "
+        "configured.\n\n"
+        "No environment value is echoed back — only which implementation it "
+        "resolved to, and the name of the variable that selects it."
+    ),
+    response_description=(
+        "The per-seam status, whether any provider is configured at all, and the "
+        "document that records the outstanding decisions."
+    ),
+    responses={**_R_UNAUTHORIZED},
+)
+def get_provider_capabilities() -> dict:
+    return _capabilities_payload()
+
+
+@router.post(
+    "/transcription",
+    tags=[TAG_INGESTION],
+    summary="Request a Transcript for Held Audio",
+    description=(
+        "Asks the transcription seam to turn audio into text. The request "
+        "carries an opaque handle naming audio the CALLER holds, and never audio "
+        "itself — this application declares no multipart form anywhere, stores no "
+        "audio, and this operation opens no outbound connection.\n\n"
+        "In this build no transcription provider is configured, so the request is "
+        "answered with `501` and a body naming exactly what is missing. That is a "
+        "statement about this deployment, not a fault and not a wait: the missing "
+        "items are institutional decisions, and the body names the document that "
+        "records them.\n\n"
+        "Typing or pasting a transcript is the working path and needs none of "
+        "this. `POST /api/experiments/{experiment_id}/transcript` reads a "
+        "finalized transcript with this repository's own deterministic rules and "
+        "is unaffected by any seam's status.\n\n"
+        "Supplying neither a handle nor a transcript is `422`: the seam refuses "
+        "rather than returning an empty transcript, because an empty transcript "
+        "is a legitimate output of a working provider and the two must never "
+        "share a shape."
+    ),
+    response_description=(
+        "The transcript, its segmentation by character offset, and whether the "
+        "text is exactly what the caller supplied."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        501: {
+            "description": (
+                "No transcription provider is configured for this deployment. The "
+                "body names each missing item and the document that records the "
+                "decision, and nothing was transcribed, stored, or sent anywhere."
+            )
+        },
+    },
+)
+def post_transcription(
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"audio_ref\": \"<an opaque handle to audio the caller holds>\", "
+            "\"manual_transcript\": \"<text instead of audio>\", \"language\": "
+            "\"<optional BCP-47 tag>\"}`. Audio bytes are never accepted."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return _transcript_refusal(
+            "invalid_body", "The request body must be a JSON object."
+        )
+    audio_ref = body.get("audio_ref")
+    manual = body.get("manual_transcript")
+    language = body.get("language")
+    for name, value in (
+        ("audio_ref", audio_ref),
+        ("manual_transcript", manual),
+        ("language", language),
+    ):
+        if value is not None and not isinstance(value, str):
+            return _transcript_refusal(
+                "invalid_field_value",
+                f"`{name}` must be a string when it is supplied.",
+                key=name,
+            )
+    provider = provider_config.resolve_transcription_provider()
+    outcome = provider.transcribe(
+        providers_transcription.TranscriptionRequest(
+            audio_ref=audio_ref, manual_transcript=manual, language=language
+        )
+    )
+    if outcome.refused:
+        # TWO REFUSAL REASONS, TWO STATUS CODES, and collapsing them would be the
+        # error. "This build does not do that" is a fact about the deployment and
+        # is `501`; "you sent nothing to work on" is a fact about the request and
+        # is `422`. A client that retried the first would be waiting for something
+        # nobody has decided to build.
+        unconfigured = outcome.reason == providers_refusal.REASON_NO_PROVIDER_CONFIGURED
+        return JSONResponse(
+            status_code=501 if unconfigured else 422, content=outcome.to_dict()
+        )
+    return outcome.to_dict()
+
+
+@router.post(
+    "/experiments/{experiment_id}/transcript",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read a Finalized Transcript into Candidates and Notes",
+    description=(
+        "Reads one transcript a scientist has explicitly finalized, stores it "
+        "verbatim with the record, and returns the field values it PROPOSES — "
+        "plus every ambiguity it refused to resolve.\n\n"
+        "`finalized` must be `true`. There is no partial pass and no reading "
+        "while text is still being typed: a request without it is `422` and "
+        "nothing is stored, so text that is still being written can never move a "
+        "value.\n\n"
+        "NOTHING HERE IS A VALUE. Every proposal is a candidate carrying the "
+        "words it came from, the rule that read them, `verified: false`, "
+        "`is_evidence: false` and a `status` of `needs_confirmation`, which are "
+        "constants of the shape rather than fields a request can set. A candidate "
+        "becomes a value only when a person accepts it through "
+        "`PATCH /api/experiments/{experiment_id}/runs/{run_id}` with "
+        "`confirmed_by_user: true` and that run's own `ETag` — this operation "
+        "writes no field, and `accept_contract` in the response says where the "
+        "write happens.\n\n"
+        "EVERY SEGMENT OF THE TRANSCRIPT BECOMES AN UNMAPPED NOTE, including the "
+        "segments that produced a candidate. That redundancy is deliberate: a "
+        "candidate is not stored anywhere, so rejecting one — or failing to "
+        "accept it — would otherwise destroy the words behind it. `retention` "
+        "reports the one storage state this build enforces and names the states "
+        "it does not offer, rather than presenting a control that would do "
+        "nothing.\n\n"
+        "AMBIGUITY IS NEVER RESOLVED BY PREFERENCE. A run named by position, a "
+        "run this record does not have, a run matching more than one, and a run "
+        "other than the one this capture is addressed to each produce a "
+        "clarification listing the alternatives. Two statements giving different "
+        "values for one field produce both candidates grouped for review, with "
+        "neither dropped. A temperature in another unit, and the absorbing "
+        "element or absorption edge, each produce an abstention with the reason. "
+        "Everything else is stored as a note. `ambiguity_policy` in the response "
+        "states each rule.\n\n"
+        "CANDIDATES ARE WITHHELD WHENEVER THE RUN IS UNSETTLED — when no run was "
+        "selected, and whenever any run clarification was raised. A proposal a "
+        "scientist could accept against the wrong run is worse than no proposal, "
+        "and the transcript is stored either way.\n\n"
+        "Storing the transcript rewrites the record, so this requires the "
+        "RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is "
+        "`400`, and stale is `412` with nothing written. Text too large, or a "
+        "transcript that would exceed the segment ceiling, is REFUSED rather than "
+        "shortened. `retention` accepts only the state this build enforces; any "
+        "other value is `422` naming what is enforced."
+    ),
+    response_description=(
+        "The proposed candidates, the clarifications, abstentions and conflicts "
+        "the reader refused to resolve, the notes it stored, the retention state, "
+        "and the record's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
+        **_R_PRECONDITION,
+    },
+)
+def post_transcript(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"text\": \"<the finalized transcript>\", \"finalized\": true, "
+            "\"run_id\": \"<the run these notes describe>\", \"retention\": "
+            "\"<the enforced retention state>\"}`. Any other key is refused with "
+            "`422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. The transcript is stored inside the record's own "
+            "document, so there is no separate validator for it."
+        ),
+    ),
+):
+    # Existence pre-check OUTSIDE the lock, as every other mutation does it, so a
+    # bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        if not isinstance(body, dict):
+            return _transcript_refusal(
+                "invalid_body", "The request body must be a JSON object."
+            )
+        refused = _unknown_note_keys(body, _TRANSCRIPT_KEYS)
+        if refused is not None:
+            return refused
+        # THE FINALIZE GATE IS THE FIRST CHECK AND IS UNCONDITIONAL. It is checked
+        # before the precondition, before the text, and before anything is read, so
+        # there is no ordering in which unfinished text reaches the reader.
+        if body.get("finalized") is not True:
+            return _transcript_refusal(
+                "finalize_required",
+                (
+                    "`finalized` must be true. A transcript is read only when a "
+                    "person says it is finished — there is no reading of text that "
+                    "is still being written, and nothing was stored."
+                ),
+            )
+        raw_text = body.get("text")
+        text_refusal = _note_text_refusal(raw_text, what="text")
+        if text_refusal is not None:
+            return text_refusal
+        if not _is_storable_value(raw_text, max_bytes=_MAX_TRANSCRIPT_BYTES):
+            return _transcript_refusal(
+                "unrepresentable_value",
+                (
+                    "This transcript could not be stored intact. It is REFUSED "
+                    "rather than shortened, because a shortened transcript "
+                    "misrepresents what was said. Nothing was stored."
+                ),
+            )
+        retention = body.get("retention", tc.RETENTION_ENFORCED_STATE)
+        if retention != tc.RETENTION_ENFORCED_STATE:
+            return _transcript_refusal(
+                "unsupported_retention",
+                (
+                    "This build enforces one retention state and will not accept "
+                    "another. The states it does not offer are reported with the "
+                    "reason, and nothing was stored."
+                ),
+                retention=retention if isinstance(retention, str) else None,
+                enforced=tc.RETENTION_ENFORCED_STATE,
+                not_implemented=[
+                    dict(entry) for entry in tc.RETENTION_STATES_NOT_IMPLEMENTED
+                ],
+            )
+        run_id = body.get("run_id")
+        if run_id is not None and (
+            not isinstance(run_id, str) or exp.get_run(run_id) is None
+        ):
+            return _transcript_refusal(
+                "unknown_run",
+                (
+                    "This record has no run with that id, so a transcript cannot "
+                    "be addressed to it. Omit `run_id` to store the transcript "
+                    "against the record and be asked which run it describes — it "
+                    "is never inferred."
+                ),
+                run_id=run_id if isinstance(run_id, str) else None,
+            )
+
+        known_runs = tuple(
+            tc.RunRef(
+                id=run.id,
+                label=run.label,
+                ordinal=run.ordinal,
+                record_id=run.record_id,
+            )
+            for run in exp.sorted_runs()
+        )
+        reading = tc.read_transcript(
+            raw_text, selected_run=run_id, known_runs=known_runs
+        )
+        if len(reading.segments) > tc.MAX_SEGMENTS:
+            return _transcript_refusal(
+                "transcript_too_long",
+                (
+                    "This transcript is longer than one capture may store. It is "
+                    "REFUSED whole rather than partly stored, because a partly "
+                    "stored transcript loses words without saying which. Nothing "
+                    "was stored; finalize it in smaller pieces."
+                ),
+                segments=len(reading.segments),
+                maximum=tc.MAX_SEGMENTS,
+            )
+
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        # EVERY SEGMENT IS STORED, and the candidate a segment produced is recorded
+        # on its note ONLY when the segment produced exactly one — a note carries
+        # one candidate path, and writing one of two there would state a preference
+        # this reader does not hold.
+        captured: list["notes.Note"] = []
+        try:
+            for segment in reading.segments:
+                candidate = reading.candidate_for_segment(segment.index)
+                captured.append(
+                    exp.capture_note(
+                        text=segment.text,
+                        source=_TRANSCRIPT_NOTE_SOURCE,
+                        run_id=run_id,
+                        candidate_field_path=(
+                            candidate.field_path if candidate is not None else None
+                        ),
+                        candidate_rule=candidate.rule if candidate is not None else None,
+                    )
+                )
+        except notes.UnsupportedNote as refusal:
+            # The model's own refusals reach the client as a typed 422, never a 500.
+            # Nothing was saved: `capture_note` mutates the in-memory record only,
+            # and the save below has not run.
+            return _transcript_refusal("unsupported_note", str(refusal))
+
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; nothing was stored
+
+        response.headers["ETag"] = exp.etag()
+        return {
+            "capture": {
+                "finalized": True,
+                "run_id": run_id,
+                "segments": len(reading.segments),
+                "retention": _retention_disclosure(len(captured)),
+            },
+            # `applied` is a constant on the reading and is serialised so a client
+            # reading JSON sees the guarantee rather than having to know it.
+            "applied": reading.applied,
+            "candidates": [candidate.to_dict() for candidate in reading.candidates],
+            "clarifications": [entry.to_dict() for entry in reading.clarifications],
+            "abstentions": [entry.to_dict() for entry in reading.abstentions],
+            "review_required": [entry.to_dict() for entry in reading.review_required],
+            "notes": [_note_view(note) for note in captured],
+            "ambiguity_policy": [dict(entry) for entry in tc.AMBIGUITY_POLICY],
+            # THE SERVER'S OWN ANSWER TO "WHERE DOES ACCEPTING WRITE?", for the
+            # reason the notes list reports its mappable paths: the alternative is
+            # a second copy of the write contract in the browser bundle, free to
+            # drift from the operation that enforces it.
+            "accept_contract": {
+                "method": "PATCH",
+                "path": "/api/experiments/{experiment_id}/runs/{run_id}",
+                "requires": [
+                    "confirmed_by_user: true",
+                    "If-Match set to that run's own current ETag",
+                ],
+                "message": (
+                    "This operation writes no field. A candidate becomes a value "
+                    "only through that request, made by a person who accepted it."
+                ),
+            },
+            "experiment_version": exp.version_token(),
+        }
 
 
 # --- 7b. asset references ------------------------------------------------------

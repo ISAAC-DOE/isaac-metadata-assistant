@@ -53,6 +53,7 @@ import { RunCompare } from './RunCompare';
 import { LoadingPanel, BackendDown } from './FetchStates';
 import { Plus } from './icons';
 import { api, ApiError } from '../lib/api';
+import { disposeRun } from '../lib/runAutosaveStore';
 import { RECORD_COMPARE_PARAM, RECORD_RUN_PARAM, RUN_COMPARE_MAX } from '../lib/routes';
 import type { ApiRunView } from '../lib/types';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
@@ -197,7 +198,22 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   /** The run whose card header should take keyboard focus when it next mounts. */
   const [cardFocusId, setCardFocusId] = useState<string | null>(null);
 
+  /** The run whose removal is in flight. At most one at a time, by construction. */
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  /** The last removal refusal, ADDRESSED TO THE RUN it was about. */
+  const [removeError, setRemoveError] = useState<
+    { runId: string; message: string; stale: boolean } | null
+  >(null);
+  /** Said on screen, in a live region, after a removal succeeds. */
+  const [removeNote, setRemoveNote] = useState<string | null>(null);
+  /**
+   * True when a removal left no card for the caret to land on, so it goes to the
+   * section's own furniture instead. See the effect that consumes it.
+   */
+  const [fallbackFocus, setFallbackFocus] = useState(false);
+
   const searchRef = useRef<HTMLInputElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
 
   const filtering = query !== '' || overridesFilter !== '' || exportedFilter !== '';
 
@@ -670,8 +686,239 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   const reloadSection = () => {
     setAddError(null);
     setAddStale(false);
+    setRemoveError(null);
     setReloadNonce((n) => n + 1);
   };
+
+  /*
+   * REMOVING ONE RUN, AND THE FOUR THINGS THAT HAVE TO RECOVER WITH IT.
+   *
+   * The removal itself is one request. What makes this longer than `addRun` is
+   * that a run is referenced by four pieces of state that outlive its card, and
+   * every one of them would otherwise be left pointing at a run the server has
+   * forgotten:
+   *
+   *   1. FOCUS RUN is a query parameter. Removing the focused run would leave the
+   *      reader on `?run=<dead id>`, which resolves to "No run with that id is in
+   *      this record" — a true sentence, arrived at by the app's own action, over a
+   *      screen the reader cannot get out of except by pressing Back.
+   *   2. THE COMPARISON SELECTION is also in the URL and also by id.
+   *   3. AUTOSAVE STATE lives in a module map keyed `<experimentId>/<runId>` and is
+   *      disposed only when the record screen goes away.
+   *   4. THE KEYBOARD CARET is on a control inside a card that is about to
+   *      disappear. Left alone it drops to the top of the document.
+   *
+   * SEARCH AND FILTERS ARE DELIBERATELY LEFT ALONE, which is the opposite of what
+   * `addRun` does. A create can produce a run the current criteria exclude, so the
+   * criteria have to be cleared or the button looks broken. A removal cannot: the
+   * remaining runs match exactly what they matched before. Clearing here would
+   * throw away a search the reader is in the middle of, for no reason. The list is
+   * re-read with the SAME criteria, so both counts move and an empty result still
+   * offers its own Clear control.
+   */
+  const removeRun = useCallback(
+    (run: ApiRunView): Promise<void> => {
+      if (experimentVersion === null) return Promise.resolve();
+      setRemovingId(run.id);
+      setRemoveError(null);
+      setRemoveNote(null);
+      return api
+        .removeRun(experimentId, run.id, { experimentVersion })
+        .then((res) => {
+          setRemovingId(null);
+          setExperimentVersion(res.experiment_version);
+          // (3) — stop reporting on a run that no longer exists.
+          disposeRun(experimentId, run.id);
+
+          // (2) — take it out of the comparison, or the panel keeps resolving a
+          // dead id and renders its own not-found state about the app's own act.
+          const selected = compareIdsRef.current;
+          if (selected.includes(run.id)) {
+            setCompareIds(selected.filter((id) => id !== run.id));
+          }
+          setExpanded((prev) => {
+            if (!(run.id in prev)) return prev;
+            const next = { ...prev };
+            delete next[run.id];
+            return next;
+          });
+
+          // (1) and (4). The successor is read from the page the reader is looking
+          // at, BEFORE the reload replaces it, because that is the list the caret
+          // is currently in. The run below is preferred over the run above for the
+          // reason a list does: it now occupies the position the removed run held.
+          const onPage = runsRef.current;
+          const index = onPage.findIndex((r) => r.id === run.id);
+          const successor =
+            index === -1 ? undefined : onPage[index + 1] ?? onPage[index - 1];
+          if (focusRunId === run.id) {
+            setFocusRunRef.current(null);
+            setCardFocusId(null);
+            setFallbackFocus(true);
+          } else if (successor !== undefined) {
+            setCardFocusId(successor.id);
+          } else {
+            setCardFocusId(null);
+            setFallbackFocus(true);
+          }
+
+          /*
+           * WHAT THE NOTE MAY SAY. The counts are the SERVER's — `remaining_run_count`
+           * — never a number this component decremented, because the list it is
+           * holding may already be out of date. The asset clause is stated only when
+           * there were any, and it says associations ended, not that files were
+           * deleted: nothing here deletes a file, and this application has never
+           * opened one.
+           */
+          const dropped = res.asset_references_dropped.length;
+          /*
+           * THE NUMBERING CLAUSE READS THE SERVER'S FLAG, it does not restate this
+           * build's expectation. `ordinals_compacted` is `false` today and the
+           * sentence would become false the day it is not, which is exactly the
+           * kind of copy this project keeps finding stale. It is also withheld
+           * entirely when nothing remains: "the others keep their numbers" is not
+           * a statement about an empty set worth making.
+           */
+          const numbering =
+            res.remaining_run_count === 0
+              ? ''
+              : res.ordinals_compacted
+                ? ' The remaining runs were renumbered.'
+                : ' The others keep their numbers.';
+          setRemoveNote(
+            `Removed ${res.removed_run_label}. ` +
+              `${res.remaining_run_count} ${res.remaining_run_count === 1 ? 'run' : 'runs'} ` +
+              `remain in this record.` +
+              numbering +
+              (dropped === 0
+                ? ''
+                : ` It no longer cites ${dropped} ${dropped === 1 ? 'file' : 'files'};` +
+                  ` the record still lists ${dropped === 1 ? 'it' : 'them'}.`),
+          );
+
+          silentRef.current = true;
+          setReloadNonce((n) => n + 1);
+        })
+        .catch((err: unknown) => {
+          setRemovingId(null);
+          const status = err instanceof ApiError ? err.status : undefined;
+          if (status === 412) {
+            setRemoveError({
+              runId: run.id,
+              message:
+                'The record has changed since this list was loaded, so the run was not ' +
+                'removed — this can be your own edit elsewhere on this screen. Reload this ' +
+                'section to pick up the current version, then remove the run again.',
+              stale: true,
+            });
+            return;
+          }
+          if (status === 409) {
+            /*
+             * THE COPY IS OURS, NOT THE SERVER'S, and that is a deliberate
+             * narrowing rather than an oversight. `mutationError` parses a refusal
+             * body only for 400/412/422, so `err.message` here is the bare
+             * "Request failed (409)." — and widening that shared seam to reach one
+             * screen is a change every other 409 consumer would inherit.
+             *
+             * WRITING OUR OWN IS SAFE HERE BECAUSE THIS ROUTE HAS EXACTLY ONE 409.
+             * It is `run_exported`.
+             *
+             * IT SAYS *WHETHER*, NOT *WHEN*, AND THE EARLIER VERSION SAID WHEN.
+             * This copy used to read "...has been exported ... SINCE THIS LIST WAS
+             * LOADED", justified by the argument that the card only offers the
+             * control when the run carries no `record_id`, so an export must have
+             * happened after the read. THAT ARGUMENT IS INVALID, and it is invalid
+             * because of the very guard this slice added: `_run_published_stem`
+             * also refuses on the DISK-ONLY arm, where a record and/or sidecar sit
+             * in `records/` under the run's own id and no `record_id` was ever
+             * persisted. In that state `GET .../runs` reports `record_id: null`,
+             * `RunCard` therefore renders Remove, the click returns 409 — and the
+             * export happened BEFORE the list was read, not after.
+             *
+             * So the temporal clause was a claim this client cannot make, on a
+             * destructive-action surface, and an independent review demonstrated the
+             * state that falsifies it. The sentence now asserts only what the 409
+             * itself establishes: an official record for this run exists NOW. Whether
+             * it appeared before or after the read is not knowable here, and is not
+             * claimed.
+             *
+             * `stale: false`, so NO `Reload This Section` remedy — and that is right
+             * for a reason worth writing down, because "offer the reload" is the
+             * reflex. On the disk-only arm a reload changes nothing: the run view
+             * still reports `record_id: null`, so the list comes back identical and
+             * the control comes back too. Offering a remedy that cannot remedy is the
+             * same defect in a different place.
+             *
+             * KNOWN RESIDUAL, NAMED RATHER THAN IMPLIED FIXED. On that arm the card
+             * goes on offering Remove, because `RunCard` gates the control on
+             * `run.record_id === null` and that is all the run view exposes. So this
+             * surface can offer a control whose only outcome is a refusal — which is
+             * the written rule this file cites when it withholds Remove from a run
+             * that DOES carry a `record_id`. Closing it properly means the run view
+             * carrying the disk-only fact the server already computes in
+             * `_run_published_stem`, which is an API contract change and its own
+             * slice. The refusal is correct and nothing is destroyed; what is wrong
+             * is that the affordance is offered. Not fixed here, and not pretended
+             * fixed.
+             */
+            setRemoveError({
+              runId: run.id,
+              message:
+                'An official ISAAC record for this run already exists, so it was not ' +
+                'removed. A published record is never rewritten, and the run is what ' +
+                'keeps it claimed. Reloading will not change this.',
+              stale: false,
+            });
+            return;
+          }
+          setRemoveError({
+            runId: run.id,
+            message: mutationFailureCopy(
+              err,
+              err instanceof Error ? err.message : 'The run could not be removed.',
+            ),
+            stale: false,
+          });
+        });
+    },
+    [experimentId, experimentVersion, focusRunId, setCompareIds],
+  );
+
+  /*
+   * WHERE THE CARET GOES WHEN A REMOVAL LEFT NO CARD FOR IT.
+   *
+   * Two cases reach this: the removed run was the focused one (so the whole
+   * focused view is gone), or it was the last run on the page (so there is no
+   * neighbour). The search box is the section's first control and is the same
+   * landing place the deep-link recovery below already uses — but it is WITHHELD
+   * from a record with no runs, so `Add Run` is the fallback's fallback. It waits
+   * for the list to settle, because both controls are gated on a loaded list.
+   */
+  useEffect(() => {
+    if (!fallbackFocus || list.status !== 'data') return;
+    const target = searchRef.current ?? addRef.current;
+    if (target === null) {
+      /*
+       * IT WAITS RATHER THAN GIVING UP, and this branch is here because the first
+       * version did give up. Removing the FOCUSED run sets this flag in the same
+       * handler that leaves focus mode, and the effect ran first — while the
+       * focused view still owned the screen, where neither the search box nor
+       * `Add Run` is rendered (the toolbar shows "Back to all runs" instead). Both
+       * refs were null, the flag was consumed, and the caret was left on the
+       * document body: the exact outcome this whole path exists to prevent.
+       *
+       * So the flag survives until the furniture is there. It is dropped only when
+       * the section is out of focus mode AND still has nothing to focus, which is
+       * a genuine dead end rather than a moment too early.
+       */
+      if (focusRunId !== null) return;
+      setFallbackFocus(false);
+      return;
+    }
+    setFallbackFocus(false);
+    target.focus();
+  }, [fallbackFocus, list, focusRunId]);
 
   const focused = focusRunId !== null && focusRunId !== '';
   const loaded = list.status === 'data' ? list.loaded : null;
@@ -775,6 +1022,7 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
             </button>
           ) : (
             <button
+              ref={addRef}
               type="button"
               className="btn btn-primary"
               onClick={addRun}
@@ -918,6 +1166,24 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
         </p>
       )}
 
+      {/*
+        A REMOVAL IS ANNOUNCED IN WORDS, not only by a card disappearing. The caret
+        has just moved to a different control, and a reader who cannot see the list
+        would otherwise have nothing but silence to tell them the destructive act
+        they confirmed actually happened. `role="status"` rather than `alert`: it
+        is the successful outcome of something they asked for, not a problem.
+
+        THE REFUSAL IS NOT HERE. It is rendered inside the card's own confirmation
+        panel and associated with the button that caused it, because that is where
+        the reader is and because a banner at the top of a fifty-card list is not a
+        thing a keyboard reader will find.
+      */}
+      {removeNote !== null && (
+        <p className="runs-note" role="status">
+          {removeNote}
+        </p>
+      )}
+
       {addError !== null && (
         <div className="runs-error" role="alert">
           <p>{addError}</p>
@@ -946,6 +1212,10 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
               setExpanded((prev) => ({ ...prev, [focusRunId]: !(prev[focusRunId] ?? true) }))
             }
             onRun={replaceRun}
+            onRemove={removeRun}
+            removingId={removingId}
+            removeError={removeError}
+            onReloadSection={reloadSection}
             onLeave={() => {
               setCardFocusId(focusRunId);
               setFocusRun(null);
@@ -972,6 +1242,12 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
                   onCompare={() => toggleCompare(run.id)}
                   comparing={compareIds.includes(run.id)}
                   compareFull={compareIds.length >= RUN_COMPARE_MAX}
+                  onRemove={() => removeRun(run)}
+                  removing={removingId === run.id}
+                  removeError={
+                    removeError !== null && removeError.runId === run.id ? removeError : null
+                  }
+                  onReloadSection={reloadSection}
                 />
               ))}
             </div>
@@ -1169,6 +1445,10 @@ function FocusedRun({
   expanded,
   onToggle,
   onRun,
+  onRemove,
+  removingId,
+  removeError,
+  onReloadSection,
   onLeave,
 }: {
   experimentId: string;
@@ -1181,6 +1461,16 @@ function FocusedRun({
   expanded: boolean;
   onToggle: () => void;
   onRun: (run: ApiRunView) => void;
+  /**
+   * REMOVAL IS OFFERED HERE, unlike Focus and Compare. Those two are withheld
+   * because they would put the reader where they already are, or need a second
+   * run; removal needs neither, and a reader who has isolated one run is the
+   * likeliest to want it gone. The browser above returns them to the list.
+   */
+  onRemove: (run: ApiRunView) => Promise<void>;
+  removingId: string | null;
+  removeError: { runId: string; message: string; stale: boolean } | null;
+  onReloadSection: () => void;
   onLeave: () => void;
 }) {
   if (focus.status === 'loading') {
@@ -1225,6 +1515,12 @@ function FocusedRun({
         onRun={onRun}
         focusOnMount={cardFocusId === run.id}
         onFocused={onCardFocused}
+        onRemove={() => onRemove(run)}
+        removing={removingId === run.id}
+        removeError={
+          removeError !== null && removeError.runId === run.id ? removeError : null
+        }
+        onReloadSection={onReloadSection}
       />
     </div>
   );

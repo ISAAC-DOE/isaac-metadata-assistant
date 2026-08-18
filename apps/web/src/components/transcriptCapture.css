@@ -1,0 +1,314 @@
+/*
+ * Transcript capture.
+ *
+ * Built on the existing tokens — no new hue, no new radius, no new shadow. The
+ * card geometry is `.note-card`'s, so a stored transcript segment and an unmapped
+ * note read as the same kind of thing on one screen, which they are.
+ *
+ * NO VERDICT COLOUR ANYWHERE. `--pass-*` / `--fail-*` are reserved for a
+ * validator's ruling about a record, and a proposal is not a ruling. Painting an
+ * accepted proposal green would say, in the one language a reader cannot help
+ * absorbing, that the value has been checked against the schema. It has not; it
+ * has been confirmed by a person, which is a different claim.
+ *
+ * STATUS IS NEVER CARRIED BY COLOUR ALONE. Every state that is tinted also
+ * carries a word — "Accepted and written to the run.", "Rejected.", "Question",
+ * "Not proposed", "Needs review" — and the recording state is additionally
+ * announced to a live region. A reader who sees no colour loses no information.
+ *
+ * State is carried on `data-state` / `data-outcome`, matching `.run-card` and
+ * `.note-card`.
+ */
+
+.capture-section {
+  margin-bottom: 20px;
+}
+
+.capture-head {
+  margin-bottom: 10px;
+}
+
+.capture-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.capture-sub,
+.capture-note,
+.capture-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+.capture-subhead {
+  margin: 16px 0 4px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.capture-error {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-body);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-raised);
+}
+
+/* ---- first-use guidance ---- */
+
+.capture-guidance {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.capture-guidance-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.capture-guidance-lead {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-body);
+  max-width: 68ch;
+}
+
+.capture-guidance-label {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.capture-guidance-example {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-strong);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-body);
+  max-width: 68ch;
+}
+
+.capture-guidance-list,
+.capture-outcome-options {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+.capture-guidance-keeps,
+.capture-guidance-storage {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+.capture-guidance-reopen {
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-link, var(--text-body));
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- voice ---- */
+
+.capture-voice {
+  margin-top: 14px;
+}
+
+.capture-voice-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.capture-seam {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+.capture-seam-label {
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.capture-note-warn {
+  color: var(--text-body);
+}
+
+.capture-refusal {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.capture-refusal-message {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-body);
+  max-width: 68ch;
+}
+
+/* ---- form ---- */
+
+.capture-form {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.capture-label {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.capture-control {
+  width: 100%;
+  max-width: 68ch;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-body);
+  background: var(--surface-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+
+.capture-textarea {
+  min-height: 7em;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+/* ---- reading ---- */
+
+.capture-candidates,
+.capture-outcomes,
+.capture-stored {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 68ch;
+}
+
+.capture-stored li,
+.capture-outcomes li {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-raised);
+}
+
+.capture-outcome-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-body);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+}
+
+.capture-outcome-quote {
+  font-style: italic;
+}
+
+.capture-candidate {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.capture-candidate[data-state='accepted'],
+.capture-candidate[data-state='rejected'] {
+  border-color: var(--border-strong);
+}
+
+.capture-candidate-path {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.capture-candidate-value {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: var(--text-body);
+}
+
+.capture-candidate-quote,
+.capture-candidate-rule,
+.capture-candidate-conflict,
+.capture-candidate-state {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.capture-candidate-quote {
+  font-style: italic;
+}
+
+.capture-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.capture-candidate-actions .capture-control {
+  max-width: 24ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capture-section * {
+    transition: none !important;
+  }
+}

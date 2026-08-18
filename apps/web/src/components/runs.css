@@ -887,6 +887,73 @@
   border-top: 1px solid var(--border-hair);
 }
 
+/* ---- removing a run ----------------------------------------------------
+ *
+ * THE CONFIRMATION IS A DISCLOSURE INSIDE THE CARD, not a modal. The values the
+ * reader is about to lose are on the card above it, and a dialog would cover
+ * them. It follows `AssetReferencesPanel`'s removal shape exactly, so the two
+ * destructive acts in the record screen read as one pattern.
+ *
+ * NEVER COLOUR ALONE. The fail hue appears only on the resting border of the
+ * trigger and on the committed confirm; every state the reader has to act on is
+ * carried by words and, for the refusal, by a glyph beside them.
+ */
+
+.run-card-remove-withheld {
+  margin: 12px 16px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-hair);
+  max-width: 66ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.run-card-remove {
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--fail-border);
+  border-radius: 6px;
+  background: var(--fail-bg);
+}
+
+.run-card-remove-text {
+  margin: 0 0 8px;
+  max-width: 66ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.run-card-remove-failure {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+  max-width: 66ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--fail-text);
+}
+
+.run-card-remove-failure svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.run-card-remove-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .run-card-remove-actions {
+    flex-wrap: wrap;
+  }
+}
+
 /*
  * THE SAVE READOUT + RETRY, at card level rather than inside the panel — a
  * refused write has to be visible on a card the reader has collapsed.

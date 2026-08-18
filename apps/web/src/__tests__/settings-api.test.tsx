@@ -1087,11 +1087,12 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 60 operations, MEASURED after the merge', () => {
-    // MEASURED after the merge. Provenance adds one operation, the asset slice
-    // four, both from a base of 52 — so neither branch's own figure is the
-    // merged one, and adding the deltas would give a third wrong number.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(60);
+  it('describes the contract it claims to: 64 operations, MEASURED after the merge', () => {
+    // Three slices raised this from 52 for real, different additions — the asset
+    // slice, the transcript slice, and the run-removal slice. Adding the deltas
+    // is how a merged counter goes wrong; the number here was read out of this
+    // test's own failure output after merging.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(64);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1650,18 +1651,32 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     paragraphs.
     //   . internal consistency: raw sum of `d.description.length` = 52,567; this
     //     figure drops the 110 `\n\n` separators, and 52,567 - 220 = 52,347.
-    // 55,611 -> 57,254 and 52 -> 53 operations, 119 -> 122 post-lead paragraphs:
-    // the backend now publishes `GET /api/experiments/{experiment_id}/provenance`,
-    // the two-dimension provenance view. ONE entry moved: the new operation and its
-    // three post-lead paragraphs. No existing description changed, and the parity
-    // test named above proves that rather than leaving it asserted here.
+    // MEASURED AFTER THE MERGE, from the served document, and NOT by adding the
+    // two branches' deltas.
     //
-    // MEASURED on this branch by running these two reducers over the array, not by
-    // adding a delta to 55,611 — see the note at the top of this block about two
-    // branches each incrementing one counter.
-    // MEASURED after the merge, both figures, from this test's own failure output.
-    expect(total).toBe(67159);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(145);
+    // RE-MEASURED OVER THE WHOLE ARRAY after the merge, not added to any previous
+    // figure, because that is the lesson the 2026-08-16 note above records. Three
+    // slices moved these figures from the same base for real, different reasons:
+    // the transcript slice publishes three operations, the asset slice four, and
+    // the run-removal slice one (`POST …/runs/{run_id}/remove`, whose entry came
+    // out of `create_app().openapi()` and was not hand-written, which is why
+    // `test_contract_description_parity.py` is green in both directions). No
+    // pre-merge figure is the merged one, and arithmetic on the set would have
+    // produced a wrong number — which this merge demonstrated again on a
+    // DIFFERENT counter in `backend-down-state.test.tsx`, where two branches wrote
+    // the same literal and git merged it with no conflict at all.
+    //
+    // Measured THREE ways after the merge, all agreeing:
+    //
+    //   . the splitPurpose paragraph rule over this array gives 74,091 / 162.
+    //   . internal consistency: raw sum of `d.description.length` = 74,415; this
+    //     figure drops the 162 `\n\n` separators, and 74,415 - 324 = 74,091.
+    //   . independently, the same rule transcribed into Python over
+    //     `create_app().openapi()` also gives 64 operations, 74,091 and 162 —
+    //     which additionally proves this captured array still matches the merged
+    //     backend rather than either pre-merge branch.
+    expect(total).toBe(74091);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(162);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the
