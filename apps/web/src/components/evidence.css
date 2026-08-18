@@ -471,3 +471,16 @@
 @media (max-width: 640px) {
   .preview { padding: 16px 14px; }
 }
+
+/* The two provenance dimensions, on their own line beneath the trail entry's
+   button. Outside the button on purpose: they are a DESCRIPTION of the entry,
+   not part of the control that selects it, so they are not announced as part of
+   the button's name and cannot make its label a paragraph. */
+.trail-provenance {
+  padding: 0 12px 8px 34px;
+  font-size: 11px;
+}
+.trail-provenance .chip {
+  padding: 3px 8px;
+  font-size: 11px;
+}

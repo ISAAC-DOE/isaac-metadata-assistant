@@ -341,7 +341,7 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # this literal from 52 — the asset slice to 56, this one to 55 — for
     # different, real additions. Adding the deltas would give one number;
     # measuring gives the true one. `create_app().openapi()` is the authority.
-    assert checked == 62, f"expected 62 documented operations, found {checked}"
+    assert checked == 63, f"expected 63 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -572,6 +572,10 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/revisions/{revision_no}/diff", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/ingestion/csv/preview", "post"): ["200", "400", "401", "403", "404", "412", "413", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/pending", "get"): ["200", "401", "404", "422", "503"],
+    # The two-dimension provenance view. One `404` covers both "no such record"
+    # and "this record has no such run" — the bodies differ (`experiment_not_found`
+    # vs `run_not_found`), the documented status does not.
+    ("/api/experiments/{experiment_id}/provenance", "get"): ["200", "401", "404", "422", "503"],
     # Unmapped Notes. The split is the Run API's, for the Run API's reason: a note
     # is stored INSIDE the experiment's own document, so capturing one and reviewing
     # one both REWRITE THE RECORD and carry the record's `If-Match` with the whole
