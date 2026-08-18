@@ -2667,6 +2667,21 @@ _R_RUN_NOT_FOUND: dict = {
     },
 }
 
+_R_RUN_EXPORTED: dict = {
+    409: {
+        "description": (
+            "An official ISAAC record for this run already exists, so it was not "
+            "removed and nothing was written. `error` is `run_exported`. "
+            "**`record_stem` names the artifact** — read that one, not `record_id`. "
+            "`record_id` reports the run's persisted record id and is `null` on the "
+            "arm where a record and/or its evidence sidecar are on disk but no "
+            "`record_id` was persisted; `record_stem` is the run's own id there. "
+            "Either file alone is enough to refuse, so a refusal does not imply "
+            "both exist. Only the removal operation can answer this."
+        )
+    },
+}
+
 #: The three states a run's view of one inherited experiment-level address can be in.
 RUN_INHERITED = "inherited"
 RUN_OVERRIDDEN = "overridden"
@@ -2719,6 +2734,111 @@ def _run_not_found(experiment_id: str, run_id: str) -> JSONResponse:
             "error": "run_not_found",
             "experiment_id": experiment_id,
             "id": run_id,
+        },
+    )
+
+
+def _run_published_stem(exp: "ws.Experiment", run: "ws.Run") -> str | None:
+    """The record stem this run keeps claimed, or ``None`` if it keeps none.
+
+    THE GUARD ASKS ABOUT DISK, NOT ONLY ABOUT STATE, AND THE DIFFERENCE IS A
+    DELETED OFFICIAL RECORD.
+
+    The first version of this guard was `run.record_id is not None`, on the stated
+    reasoning that "a run whose `record_id` is set has an official record and an
+    evidence sidecar on disk". That direction is true and is not the one the safety
+    argument needs. What it needs is the CONVERSE — a run whose `record_id` is not
+    set has no pair on disk — and this codebase names the state where the converse
+    is false, twice:
+
+      * `post_export`'s 412 branch: "EVERY unit's artifact PAIR was already written
+        to disk and the state was not";
+      * `_save_versioned`: "`post_export` writes the official record and its
+        evidence sidecar BEFORE calling this, and those two files remain on disk".
+
+    `_write_record` sets `record_id` in memory and writes both files; one
+    `_save_versioned` then persists. A lost durable compare-and-swap, or a raise
+    between two units' writes, leaves the pair on disk with `record_id`
+    unpersisted. Independent review reproduced exactly that shape and drove the
+    real routes: the removal returned 200, the next export pruned the orphan, and
+    a published record AND its evidence sidecar were deleted.
+
+    `ExportUnit.materialised()` already encodes the correct three-part test; this
+    is the same question asked of a run that may not be a current unit any more.
+    Two `stat()` calls under a lock this route already holds.
+
+    Returns the STEM rather than a bool so the refusal can name the artifact even
+    on the arm where `record_id` is unset — the arm where a message built from
+    `record_id` would say `null`.
+    """
+    record_id = run.record_id
+    if isinstance(record_id, str) and ws.is_record_id(record_id):
+        return record_id
+    # No persisted `record_id`. A pair may still be on disk under the RUN's own id:
+    # that is the stem `_write_record` uses for a run unit, and the stem the prune
+    # would delete.
+    #
+    # THE SHAPE IS CHECKED BEFORE THE ID BECOMES A PATH, for the reason
+    # `ExportUnit.record_path()` checks it (`workspace.py`): this is a place where
+    # document content would otherwise become a filesystem path, and `RunId` is a
+    # bare `str` path parameter with no pattern. Reaching it needs a crafted
+    # persisted document and the impact is bounded to two read-only `stat()` calls
+    # plus an echoed stem — so this is defence in depth, not a live hole. It is here
+    # because the sibling function guards the identical step and an asymmetry between
+    # them is the kind of thing that stops being harmless after a later change.
+    if not ws.is_record_id(run.id):
+        return None
+    records_dir = exp.records_dir
+    if (records_dir / f"{run.id}.json").exists() or (
+        records_dir / f"{run.id}.evidence.json"
+    ).exists():
+        return run.id
+    return None
+
+
+def _run_exported(experiment_id: str, run: "ws.Run", *, stem: str | None = None) -> JSONResponse:
+    """A run that has produced an official record, refused for removal.
+
+    THIS IS THE HISTORY GUARD, and it is stated here rather than only in the
+    operation's prose because it is the reason the operation is narrower than the
+    button a scientist sees. A run that keeps an official record and an evidence
+    sidecar claimed — whether by a persisted ``record_id`` or by a pair sitting on
+    disk under its own id; see :func:`_run_published_stem` for why both are asked —
+    holds a pair that is IMMUTABLE, because nothing in this application rewrites
+    one. Removing the run would leave the pair claimed by
+    no current unit, and the export prune deletes exactly that: a stem no current
+    unit claims, protected only if a surviving record happens to link to it. So the
+    removal that looks harmless here would become a DELETION of a published record
+    on the next export of this experiment, at a distance, with no confirmation.
+
+    Every run that has appeared in a submitted revision is such a run — a
+    submission materialises every unit before it records anything — so refusing
+    here is also what keeps a submitted record out of reach of this operation. The
+    revision rows and the submission rows are append-only and survive regardless;
+    this refusal is about the FILE.
+
+    409 rather than 422: the request is well formed and the state of the record is
+    what makes it impossible, which is what this API means by 409 everywhere else.
+    """
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "run_exported",
+            "experiment_id": experiment_id,
+            "id": run.id,
+            # The STEM that is claimed, which on the disk-only arm is the run's
+            # own id rather than a persisted `record_id`. `record_id` is reported
+            # separately and honestly, including when it is null.
+            "record_id": run.record_id,
+            "record_stem": stem if stem is not None else run.record_id,
+            "message": (
+                "An official ISAAC record for this run already exists, so it "
+                "cannot be removed. At least one published artifact is present — "
+                "the record, its evidence sidecar, or both; either alone is "
+                "enough. Published artifacts are never rewritten by this "
+                "application, and the run is what keeps them claimed. Nothing "
+                "was written."
+            ),
         },
     )
 
@@ -4585,6 +4705,155 @@ def post_run_check(
         "blockers": blockers,
         "checked_run_version": run.version_token(),
     }
+
+
+_RUN_REMOVE_DESCRIPTION = (
+    "Removes one run from this record and reports what was removed.\n\n"
+    "ONLY A RUN THAT KEEPS NO PUBLISHED RECORD CLAIMED. A run that has produced "
+    "an official ISAAC record holds a record and an evidence sidecar that this "
+    "application never rewrites. Removing the run that names them would leave "
+    "them claimed by nothing, and a later export of this record deletes exactly "
+    "such a pair — so this operation refuses that run with `409 run_exported` "
+    "and writes nothing. The refusal asks BOTH whether the run carries a "
+    "`record_id` AND whether an artifact pair is present on disk under its own "
+    "id, because an export writes both files before it persists the state and a "
+    "refused state save leaves the pair with no `record_id` naming it.\n\n"
+    "Every run that has appeared in a submitted revision carries a `record_id` — "
+    "a submission materialises every unit before it records anything — so a "
+    "SUBMITTED record is out of this operation's reach. That is a statement "
+    "about submitted records specifically, not a claim that removal is the only "
+    "way a record can stop being claimed. No revision, submission or official "
+    "record is deleted, rewritten or marked by this operation in any case.\n\n"
+    "WHAT IS REMOVED is the run's own draft content: the run-level values it "
+    "holds, the overrides it recorded, its association with any asset reference, "
+    "and its open questions. The record's own values are unchanged, no other run "
+    "is changed, the record's asset library keeps every entry, and no file at an "
+    "asset `uri` is read or altered — this application has never read one.\n\n"
+    "THE REMAINING RUNS KEEP THEIR NUMBERS. Ordinals are not renumbered, so a "
+    "record whose runs were 1, 2 and 3 reads 1 and 3 after the second is removed, "
+    "and every surviving run's revision and `ETag` are untouched by this request. "
+    "`ordinals_compacted` is `false` in the response so a client never has to "
+    "infer it. A run added afterwards takes the next number above the highest "
+    "still present.\n\n"
+    "Removing a run rewrites the record, so this requires `confirmed_by_user: "
+    "true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, "
+    "malformed is `400`, and stale is `412` with nothing removed. Repeating the "
+    "request for a run that is already gone is `404` rather than a second "
+    "success: this operation is addressed to a run, and every other run operation "
+    "answers `404` for an id this record does not hold."
+)
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/remove",
+    tags=[TAG_EXPERIMENTS],
+    summary="Remove a Run from a Record",
+    description=_RUN_REMOVE_DESCRIPTION,
+    response_description=(
+        "What was removed — the run's id, label and number, and the asset "
+        "references that went with it — together with how many runs remain, "
+        "whether the remaining numbers were changed, and the record's new "
+        "revision, with the record's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_RUN_NOT_FOUND,
+        **_R_RUN_EXPORTED,
+        **_R_PRECONDITION,
+    },
+)
+def post_run_remove(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description="`{\"confirmed_by_user\": true}`. Nothing else is read.",
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it — not the run's. A run lives inside the record's "
+            "document, so removing one rewrites the record."
+        ),
+    ),
+):
+    """Remove one run. THE ORDER OF THE FIVE REFUSALS IS THE CONTRACT.
+
+    It is `post_asset_remove`'s order, deliberately, because the two are the same
+    shape of act: exists -> confirmed -> domain refusal -> precondition -> write.
+
+    THE PRECONDITION IS CHECKED INSIDE THE SAME CRITICAL SECTION AS THE MUTATION,
+    and this repository has a written history of that exact defect on the reset
+    path, so it is worth stating rather than assuming. Both `_check_if_match` and
+    the removal happen under one `record_lock`, over an experiment re-read INSIDE
+    that lock — the copy read by the existence pre-check above is never mutated.
+    The durable compare-and-swap in the repository is the second half of it, for
+    the writers this process cannot lock against, and `_save_versioned` renders
+    its refusal as the same 412 with nothing removed.
+
+    IDEMPOTENCY IS 404, NOT A SECOND 200, and that is a decision. A retry whose
+    first attempt succeeded is the case that matters: the record moved, so the
+    token it carries is stale — but the run is gone, and the 404 is checked first,
+    so the retry is told the truth about the run rather than being sent to
+    re-read a version in order to remove something that no longer exists. A 200
+    would additionally require this operation to claim a run "was removed" for an
+    id that may never have existed on this record, which no other run operation
+    does and which is indistinguishable from a mistyped id.
+    """
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does
+    # it, so a bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        run = exp.get_run(run_id)
+        if run is None:
+            return _run_not_found(experiment_id, run_id)
+        if not isinstance(body, dict) or body.get("confirmed_by_user") is not True:
+            return _confirmation_required("remove a run")
+        published = _run_published_stem(exp, run)
+        if published is not None:
+            return _run_exported(experiment_id, run, stem=published)
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+        # READ BEFORE THE REMOVAL, because after it the run is not reachable from
+        # the experiment and the response would have nothing to name. NAMED, NOT
+        # COUNTED, for the reason `post_asset_remove` names its runs: a scientist
+        # told only "removed" cannot tell which files this measurement stopped
+        # citing. The library entries themselves are NOT removed — an asset may be
+        # cited by other runs, and by the record itself.
+        dropped_assets = [item["asset_id"] for item in assets.run_assets(run)]
+        removed_label, removed_ordinal = run.label, run.ordinal
+        removed = exp.remove_run(run_id)
+        assert removed is not None  # `get_run` above already resolved it under the lock
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this run was not removed
+        # `_changed` is structurally always True here — `_authoritative_signature`
+        # covers `runs`, so dropping one cannot leave the signature equal — so it is
+        # not branched on, exactly as `post_run` does not branch on it for a create.
+        response.headers["ETag"] = exp.etag()
+        return {
+            "removed_run_id": run_id,
+            "removed_run_label": removed_label,
+            "removed_run_ordinal": removed_ordinal,
+            "asset_references_dropped": dropped_assets,
+            "remaining_run_count": len(exp.runs),
+            # STATED, NOT INFERRED. The decision and its four reasons live on
+            # `Experiment.remove_run`; this is the wire half of it, so a client can
+            # tell the difference between "they were not renumbered" and "this
+            # build forgot to say".
+            "ordinals_compacted": False,
+            "experiment_version": exp.version_token(),
+        }
 
 
 # --- 7b. unmapped notes -------------------------------------------------------

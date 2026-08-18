@@ -2677,6 +2677,45 @@ class Experiment:
         self.runs.append(run)
         return run
 
+    def remove_run(self, run_id: str) -> "Run | None":
+        """Drop one run from this experiment IN MEMORY. Does not save.
+
+        Returns the run that was dropped, or ``None`` when this experiment holds no
+        run under that id — the caller decides what a miss means, exactly as
+        :meth:`get_run` leaves that decision to it.
+
+        **THE SURVIVORS' ORDINALS ARE NOT RENUMBERED, and that is a decision rather
+        than an omission.** Compaction is defensible in the abstract and is wrong
+        here for four reasons that are properties of this codebase:
+
+        * :meth:`next_ordinal` is ``max + 1`` precisely so that a removal never
+          re-issues an ordinal an earlier sibling once had. Compacting here would
+          reintroduce the reordering that comment exists to prevent.
+        * ``ordinal`` is part of ``Run.to_state``, so renumbering rewrites every
+          surviving run's document. ``_bump_changed_runs`` would then advance every
+          run's ``rev`` — invalidating every per-run ``If-Match`` a client is
+          holding, so removing one run would answer every other run's next edit with
+          a 412 nobody caused.
+        * ``sorted_runs`` orders on ``(ordinal, created_utc, id)``. Sparse ordinals
+          are a total order just as dense ones are; nothing downstream reads an
+          ordinal as an index.
+        * The submission history stores each run's ``ordinal`` per revision. A
+          renumbering would make the same run appear to have MOVED between two
+          revisions when nothing about it changed.
+
+        The consequence is visible and is deliberately not hidden: after removing
+        the middle of three runs the survivors read ``1`` and ``3``, and the removal
+        operation reports ``ordinals_compacted: false`` so a client never has to
+        infer it.
+        """
+        run = self.get_run(run_id)
+        if run is None:
+            return None
+        # Rebound rather than mutated in place, so a caller holding the old list
+        # (a snapshot taken before the removal) still sees what it captured.
+        self.runs = [r for r in self.runs if r.id != run_id]
+        return run
+
     # -- unmapped notes --------------------------------------------------------
 
     def sorted_notes(self) -> list["Note"]:
