@@ -273,12 +273,17 @@ export interface AssistantAction {
 export interface AssistantMessage {
   text: string; // sentence case; never renders PASS/FAIL
   /**
-   * Set by the session scrubber when it withheld this message's `text` from
-   * browser storage — because the text contained a credential, an absolute path,
-   * or a long hex digest. The text is genuinely gone (see
-   * `assistantSession.WITHHELD_TEXT_MARKER` for why it is dropped whole rather
-   * than partially redacted); this flag exists so the archived message renders as
+   * Set by the session scrubber when it withheld this message's `text` from browser
+   * storage — the text contained a credential, an absolute path, or a long hex
+   * digest, and is genuinely gone. The flag exists so the archived message renders as
    * withheld instead of as an EMPTY bubble, which is what it did before.
+   *
+   * DECLARED HERE FOR COMPLETENESS AND READ ELSEWHERE: `ConversationMessage` takes
+   * `assistantSession.Msg`, which carries its own copy, so nothing consumes this
+   * member today. An independent review flagged it as dead; it is kept rather than
+   * removed because `AssistantMessage` is the shape a precomposed answer uses and a
+   * withheld answer is representable in it — but the comment now says which
+   * declaration the renderer actually reads, instead of leaving that to be guessed.
    */
   textWithheld?: boolean;
   answeredFrom: AssistantSource;

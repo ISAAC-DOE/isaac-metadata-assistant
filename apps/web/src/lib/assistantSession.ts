@@ -69,7 +69,15 @@ export const MAX_MESSAGES = 40;
 // Presentation-safe keys. Anything not in this allowlist is dropped by the
 // sanitizer before a value is ever written to sessionStorage.
 /**
- * The marker recorded in place of a message whose text the scrubber withheld.
+ * WHY A WITHHELD MESSAGE IS RECORDED AS A FLAG AND NOT AS A REDACTED STRING.
+ *
+ * This is documentation, not a mechanism. An earlier version of this constant was
+ * named as though the scrubber wrote it into the message in place of the text; it
+ * does not — it sets the boolean `textWithheld` and stores no marker at all. An
+ * independent review found the constant unused and three comments pointing at it as
+ * if it were the implementation, which is exactly the kind of comment that sends the
+ * next reader looking for code that is not there. The name is kept because the
+ * reasoning below is worth having somewhere findable; nothing reads the value.
  *
  * WHY A MARKER AND NOT A REDACTED STRING. `isUnsafeString` fires on a whole
  * string, and the honest options are (a) store nothing, or (b) attempt to excise
@@ -88,6 +96,10 @@ export const MAX_MESSAGES = 40;
  * still not stored; the fact that it was withheld now is.
  */
 export const WITHHELD_TEXT_MARKER = 'withheld_by_transcript_scrubber';
+// ^ Deliberately unread. See the note above: the mechanism is the `textWithheld`
+// boolean set in `sanitize`, and a reader who greps for this string will find only
+// this definition — which is the honest outcome, rather than a comment implying a
+// marker is stored.
 
 const SAFE_KEYS = new Set([
   'role',
@@ -195,7 +207,7 @@ function sanitize<T extends Record<string, unknown>>(obj: T): Partial<T> {
       // other allowlisted key is presentation metadata whose absence degrades
       // gracefully. Losing `text` produced an empty bubble, so its removal is
       // recorded rather than merely performed. `textWithheld` is a boolean and
-      // carries none of the withheld content — see WITHHELD_TEXT_MARKER.
+      // carries none of the withheld content — see the note on WITHHELD_TEXT_MARKER for why the text is dropped whole.
       if (key === 'text' && typeof value === 'string' && value.length > 0) {
         out.textWithheld = true;
       }

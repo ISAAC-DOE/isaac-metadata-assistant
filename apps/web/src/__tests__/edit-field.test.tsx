@@ -105,6 +105,35 @@ describe('S4 · summary-first edit of a confirmed field (P28.3)', () => {
     expect(editPosts()).toHaveLength(0);
   });
 
+  it('Cancel DISCARDS the abandoned correction — re-opening Edit shows the confirmed value', async () => {
+    /*
+     * THE STAGED STORE MUST NOT OUTLIVE THE INTENT, and in the first version of this
+     * fix it did. The staged answer is held in a ref on `GuidedCompletion` so a
+     * Refresh cannot destroy it; nothing cleared the `edit:` key, so Cancel — which
+     * this file documents as making no API call and no mutation — left the abandoned
+     * correction staged. Re-opening Edit then showed it INSTEAD of the confirmed
+     * value, and Save would have written it with `confirmed_by_user` semantics.
+     *
+     * An independent review found it. The existing pre-fill test above only opens Edit
+     * ONCE, so the suite could not see it.
+     */
+    stubFetchRoutes(completeRoutes());
+    const screen = renderAt('/record/demo/complete');
+    await answerNotebook(screen);
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit Asset Hash/ }));
+    const box = screen.getByDisplayValue(SHA) as HTMLInputElement;
+    fireEvent.change(box, { target: { value: 'ABANDONED-CORRECTION' } });
+    fireEvent.click(screen.getByText('Cancel'));
+
+    // Re-open. The confirmed value is back and the abandoned text is gone.
+    fireEvent.click(screen.getByRole('button', { name: /Edit Asset Hash/ }));
+    expect(screen.getByDisplayValue(SHA)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('ABANDONED-CORRECTION')).toBeNull();
+    // ...and Cancel still wrote nothing, which is the property this must not trade away.
+    expect(editPosts()).toHaveLength(0);
+  });
+
   it('a successful edit sends the held If-Match, adopts the new version, and surfaces the impact', async () => {
     stubFetchRoutes({
       ...completeRoutes(),

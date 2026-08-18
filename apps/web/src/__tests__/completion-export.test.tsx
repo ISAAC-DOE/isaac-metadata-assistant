@@ -545,6 +545,32 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
     expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
   });
 
+  it('declining a question DISCARDS what was typed — Answer Now does not re-offer it', async () => {
+    /*
+     * A REF THAT OUTLIVES THE INTENT IS ITS OWN DEFECT.
+     *
+     * The staged store exists so a Refresh cannot destroy typed text. Nothing cleared
+     * it when the reader chose "I don't know — leave honestly missing", so "Answer
+     * Now" came back pre-filled with a value the scientist had EXPLICITLY DECLINED to
+     * assert — one click from being written with `confirmed_by_user` semantics. An
+     * independent review found it; this is the assertion that was missing.
+     */
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { findByText, getByText, getByLabelText, queryByDisplayValue } = renderAt(
+      '/record/demo/complete',
+    );
+    await findByText(NOTEBOOK_Q);
+
+    fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'ABANDONED-ANSWER' } });
+    fireEvent.click(getByText("I don't know — leave honestly missing"));
+
+    // Come back to it. The declined value must be gone.
+    fireEvent.click(await findByText('Answer Now'));
+    await findByText(NOTEBOOK_Q);
+    expect(queryByDisplayValue('ABANDONED-ANSWER')).toBeNull();
+    expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('');
+  });
+
   it('export: a 412 shows the stale banner + Refresh and does NOT mark the record exported', async () => {
     const calls = stubFetchRoutes({
       ...exportReadyRoutes('demo'),
