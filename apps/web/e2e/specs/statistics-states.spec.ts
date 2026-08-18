@@ -84,12 +84,25 @@
  * ── Where the images come from, stated so nobody over-reads them ────────────
  *
  * Each state names the ELEMENT that IS the state and that element is
- * screenshotted, not the frame. This app's scroll container is not the document
- * (`div.screen-card` is `overflow: hidden`, `main#main` is `overflow: auto` —
- * see `helpers/layout.ts`), so a `fullPage` shot would be the first screenful
- * and would cut a long report in half. An element shot scrolls the whole element
- * through the viewport and captures all of it, which is what a reviewer of a
- * seven-panel section needs.
+ * screenshotted, not the frame. An element shot captures the whole element,
+ * above and below the fold, which is what a reviewer of a seven-panel section
+ * needs — and it makes each state its own picture rather than one shared shot of
+ * a route that carries several.
+ *
+ * CORRECTED 2026-08-18, comment only: the reason first given here was that "this
+ * app's scroll container is not the document (`div.screen-card` is
+ * `overflow: hidden`, `main#main` is `overflow: auto`), so a `fullPage` shot
+ * would be the first screenful and would cut a long report in half." Both CSS
+ * facts are true and the inference is FALSE. `.screen-card` sets
+ * `min-height: calc(100vh - 32px)`, not `height` (`src/components/
+ * chrome.css:13-16`), so the card grows with content, nothing constrains
+ * `.screen-main`'s height, and THE DOCUMENT is the scrollport — measured at
+ * 1280x900 over nine routes: the document scrolls on 8 of 9 and `main#main` on
+ * none. A `fullPage` shot would therefore have been the WHOLE document, not the
+ * first screenful. Nothing in this file changes: it takes element shots, which
+ * are right for the reason now given above. The same premise, drawing the
+ * opposite conclusion, DID cost `specs/visual-sweep.spec.ts` six of its thirty
+ * pictures — see the correction in that file's header.
  *
  * ── One project, six widths ────────────────────────────────────────────────
  *
