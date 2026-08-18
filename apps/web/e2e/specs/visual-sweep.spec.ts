@@ -348,6 +348,49 @@ const STATES: readonly VisualState[] = [
       await expect(start).toBeVisible({ timeout: 20_000 });
       return start;
     },
+    /*
+     * LEAVE THE SCOPE AGAIN, AND THIS IS NOT HOUSEKEEPING — IT IS THIS STATE'S
+     * CONTRACT WITH THE NEXT ONE.
+     *
+     * `app.open()` ENTERS the worked-example scope for a `scope: 'example'`
+     * surface and NOTHING EVER LEAVES IT. `scope: 'ordinary'` does not mean
+     * "leave the scope"; it means "do not enter it" — the branch in `fixtures.ts`
+     * is `if (surface.scope === 'example') await enterWorkedExample(page)`, with
+     * no `else`. What `enterWorkedExample` installs is a `page.route` on
+     * `API_ROUTE_GLOB` that attaches the session header to EVERY subsequent API
+     * request, so the scope is sticky for the life of the page.
+     *
+     * That trap was unreachable until this port: the original `tutorial-start`
+     * opened the ORDINARY experiments surface, so nothing before
+     * `experiments-empty` had ever entered a scope. Moving this state into a
+     * session — which the product forced; see the note above — made this file the
+     * first caller to hit it. MEASURED at width 1280, on the next state, with the
+     * scope still attached:
+     *
+     *     offers=0 rows=5 startBtn=0 launchBtn=0
+     *
+     * `.exp-row` was 5 rather than 0, so `experiments-empty` failed — and
+     * `Launch Guided Demo`, that state's primary, does not render at all while
+     * the queue is non-empty, so it would have failed a second time for a second
+     * reason. The screen was the worked example wearing the ordinary workspace's
+     * name, which is precisely the kind of thing a sweep that photographs
+     * "My Experiments" must not quietly publish.
+     *
+     * `unrouteAll` rather than `unroute(API_ROUTE_GLOB)`: it is the idiom the
+     * three other cleanups in this file already use, and it needs no assumption
+     * about pattern identity between this file and `worked-example.ts`. Safe,
+     * because every later example-scope state re-enters the scope on its own —
+     * `app.gotoExample()` and `app.open()` both call `enterWorkedExample` every
+     * time rather than once.
+     *
+     * WHY THE BLAST RADIUS WAS EXACTLY ONE STATE, stated so nobody reads that as
+     * "the leak was harmless": the state after `experiments-empty` is `loading`,
+     * whose cleanup already calls `unrouteAll`. The leak was cleared by accident,
+     * one state too late, by a cleanup written for an unrelated reason.
+     */
+    async cleanup({ page }) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+    },
   },
   {
     id: 'experiments-empty',
@@ -1008,10 +1051,21 @@ test.describe('visual state sweep', () => {
       { page, app, tutorial },
       testInfo
     ) => {
-      // ~29 states, several of which drive a multi-step interaction. The
-      // project-wide 60s timeout is for a single-surface test. Raised from the
-      // 900s this file carried at 21 states, in proportion rather than by
-      // guesswork: eight states were added, all of them plain navigations.
+      /*
+       * A CEILING, NOT A COST, AND NOW A MEASURED ONE. The project-wide 60s
+       * timeout is sized for a single-surface test; this drives ~29 states,
+       * several of them multi-step. A clean width MEASURES at ~26s
+       * (width 1280, host project, serial), so this ceiling is roughly 46x the
+       * observed time and exists only so that a genuinely stuck state fails with
+       * this file's own aggregated report rather than with a bare test timeout
+       * that names nothing.
+       *
+       * It is deliberately NOT tightened to the measurement. An unreachable state
+       * burns its own `expect` timeout before the loop moves on, so the run in
+       * which this number matters is precisely the run that is already much
+       * slower than 26s — and a ceiling that only holds while everything passes
+       * is a ceiling that converts findings into timeouts.
+       */
       test.setTimeout(1_200_000);
 
       await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
