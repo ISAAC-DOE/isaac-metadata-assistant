@@ -569,6 +569,14 @@
   color: var(--text-secondary);
 }
 
+/*
+ * The remaining-characters line. Over the limit it takes the failure colour — and the
+ * text says so too, so the colour is a second signal and never the only one (D5).
+ */
+.create-experiment-count[data-over='true'] {
+  color: var(--fail-text);
+}
+
 .create-experiment-error {
   margin: 0;
   font-size: 12.5px;

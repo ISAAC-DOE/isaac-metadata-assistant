@@ -11,9 +11,10 @@
  *     "Reporting it would need edit state that outlives the card's mount, which this
  *      hook does not have and which is a larger change than the loss warrants."
  *
- * That judgement was reasonable and is now overtaken: the loss is one click away (the
- * Runs section lives inside the `fields` tabpanel, so the Graph tab unmounts every
- * card), and a 412 arriving after a remount actively LIED — it said "Nothing you typed
+ * That judgement was reasonable and is now overtaken: the loss was one click away (the
+ * Runs section lives inside the `fields` tabpanel, and the Graph tab used to unmount
+ * every card — it no longer does; paging, searching and filtering the runs list still
+ * do), and a 412 arriving after a remount actively LIED — it said "Nothing you typed
  * was written" when the honest answer was "this browser cannot tell", because the ref
  * that knew an attempt had gone out unanswered died with the component.
  *
@@ -39,9 +40,14 @@
  *
  * WHAT THE MOVE BUYS, as behaviour rather than architecture:
  *
- *   * An edit typed and then abandoned — Graph tab, Evidence, anywhere inside the
- *     record screen — still reaches the server AND its outcome is still on screen when
- *     the reader returns. Previously the send happened and the verdict went nowhere.
+ *   * A PARSEABLE edit typed and then abandoned — Graph tab, Evidence, anywhere inside
+ *     the record screen — still reaches the server AND its outcome is still on screen
+ *     when the reader returns. Previously the send happened and the verdict went
+ *     nowhere. The qualifier is not decoration: `RunCard.onFieldChange` returns BEFORE
+ *     `queue` when `parseRunField` refuses the text, so an unparseable edit never
+ *     enters this store and reaches no server at all. It lives in the card's own
+ *     `draft` state, `RunCard` discloses that on screen while it holds one, and this
+ *     line asserted the opposite of it until it was measured.
  *   * A 412 after a remount can say "may or may not have been saved", truthfully.
  *   * `Retry Save` works on a card that has unmounted and remounted since the failure.
  *

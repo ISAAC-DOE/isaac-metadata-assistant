@@ -657,6 +657,54 @@ function EmptyExperiments({
   );
 }
 
+/*
+ * THE TWO LIMITS THE SERVER DECLARES, mirrored here so they can be STATED rather than
+ * enforced invisibly.
+ *
+ * They are the `max_length` values on `CreateExperimentRequest`
+ * (`apps/api/isaac_api/routes.py`): the server remains the authority and still refuses
+ * an over-long value with a typed 422. These constants exist so the form can tell the
+ * reader where the limit is BEFORE they hit it, and refuse in words if they pass it —
+ * which is what `maxLength` on the controls could not do. See the note in `submit`.
+ */
+const TITLE_MAX_LENGTH = 200;
+const DESCRIPTION_MAX_LENGTH = 1000;
+
+/**
+ * The remaining-characters line under one box.
+ *
+ * IT IS NOT A LIVE REGION, and that is deliberate: announcing a new number on every
+ * keystroke is noise, and the two facts a screen-reader user needs — that there is a
+ * limit, and where they are in it — are delivered by `aria-describedby` on focus and by
+ * the `role="alert"` refusal on submit. It states the LIMIT as well as the count,
+ * because a bare "163" is not information.
+ *
+ * OVER THE LIMIT IT SAYS SO IN WORDS, not in colour alone: the overage is in the text,
+ * so the state survives a reader who cannot distinguish the two colours.
+ */
+function CharacterCount({
+  id,
+  length,
+  limit,
+}: {
+  id: string;
+  length: number;
+  limit: number;
+}) {
+  const over = length - limit;
+  return (
+    <span
+      className="create-experiment-hint create-experiment-count"
+      id={id}
+      data-over={over > 0 ? 'true' : undefined}
+    >
+      {over > 0
+        ? `${length} characters — ${over} over the ${limit}-character limit. Nothing has been cut; shorten it to create the experiment.`
+        : `${length} of ${limit} characters`}
+    </span>
+  );
+}
+
 /**
  * CREATE EXPERIMENT — the button, the form it expands into, and the one call.
  *
@@ -698,13 +746,19 @@ function CreateExperimentControl({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const openRef = useRef<HTMLButtonElement>(null);
   const formId = useId();
   const titleId = `${formId}-title`;
   const descriptionId = `${formId}-description`;
   const descriptionHintId = `${formId}-description-hint`;
+  const titleCountId = `${formId}-title-count`;
+  const descriptionCountId = `${formId}-description-count`;
   const errorId = `${formId}-error`;
   const hintId = `${formId}-open-hint`;
+
+  const titleOver = title.length - TITLE_MAX_LENGTH;
+  const descriptionOver = description.length - DESCRIPTION_MAX_LENGTH;
 
   /*
    * FOCUS MOVES WITH THE FORM, IN BOTH DIRECTIONS, AND IT HAS TO BE AN EFFECT.
@@ -741,6 +795,41 @@ function CreateExperimentControl({
 
   const submit = async (event: { preventDefault: () => void }) => {
     event.preventDefault();
+    /*
+     * TOO LONG IS REFUSED HERE, LOUDLY, RATHER THAN TRUNCATED SILENTLY BY THE BROWSER.
+     *
+     * D5 — WHAT WAS WRONG. These two controls carried `maxLength` (200 and 1000), with
+     * no counter and no statement of the limit anywhere on the screen, while the hint
+     * beside the note said "It is stored with the record". `maxLength` does not warn: a
+     * pasted paragraph is silently cut at the limit, and the reader's next act is to
+     * submit a description that is missing its end and be told nothing. The server
+     * would have refused it — `CreateExperimentRequest` declares `max_length` on both
+     * fields, so an over-long value is a typed 422 — so the attribute converted a loud
+     * refusal into a silent edit of the reader's text. That is the exact inversion the
+     * notes path was built to avoid ("A REFUSAL, NEVER A TRUNCATION", `routes.py`).
+     *
+     * SO THE ATTRIBUTE IS GONE and the limit is stated instead: a live count under each
+     * box, and this refusal, which names the field, the limit and the overage and does
+     * not send anything. Nothing the reader typed is altered or dropped at any point —
+     * the text stays in the box, over the limit, until they shorten it.
+     *
+     * IT IS NOT INSTEAD OF THE SERVER'S CHECK, exactly as the empty-title check below
+     * is not: the same request is still refused by `POST /api/experiments` with a 422
+     * if it ever arrives. Raising either limit here would be a contract change and is
+     * deliberately NOT what this does.
+     */
+    if (titleOver > 0 || descriptionOver > 0) {
+      const overLong = titleOver > 0 ? 'title' : 'note';
+      const limit = titleOver > 0 ? TITLE_MAX_LENGTH : DESCRIPTION_MAX_LENGTH;
+      const over = titleOver > 0 ? titleOver : descriptionOver;
+      setError(
+        `The ${overLong} is ${over} character${over === 1 ? '' : 's'} over the ` +
+          `${limit}-character limit, so nothing was sent. Shorten it and try again — ` +
+          'what you typed is still here, and none of it has been cut.',
+      );
+      (titleOver > 0 ? titleRef.current : descriptionRef.current)?.focus();
+      return;
+    }
     const trimmed = title.trim();
     if (!trimmed) {
       // Checked here as well as at the server, because the server's answer would
@@ -789,14 +878,20 @@ function CreateExperimentControl({
           className="create-experiment-input"
           type="text"
           value={title}
-          maxLength={200}
           required
           aria-invalid={error !== null || undefined}
-          aria-describedby={error !== null ? errorId : undefined}
+          /* The count is always described, so a screen-reader user hears the limit and
+             their position in it on focus rather than having to find it. */
+          aria-describedby={error !== null ? `${errorId} ${titleCountId}` : titleCountId}
           onChange={(e) => {
             setTitle(e.target.value);
             if (error !== null) setError(null);
           }}
+        />
+        <CharacterCount
+          id={titleCountId}
+          length={title.length}
+          limit={TITLE_MAX_LENGTH}
         />
       </div>
 
@@ -805,17 +900,25 @@ function CreateExperimentControl({
           {LABELS.createExperimentDescriptionLabel}
         </label>
         <textarea
+          ref={descriptionRef}
           id={descriptionId}
           className="create-experiment-input create-experiment-textarea"
           value={description}
-          maxLength={1000}
           rows={2}
-          aria-describedby={descriptionHintId}
-          onChange={(e) => setDescription(e.target.value)}
+          aria-describedby={`${descriptionHintId} ${descriptionCountId}`}
+          onChange={(e) => {
+            setDescription(e.target.value);
+            if (error !== null) setError(null);
+          }}
         />
         <span className="create-experiment-hint" id={descriptionHintId}>
           {LABELS.createExperimentDescriptionHint}
         </span>
+        <CharacterCount
+          id={descriptionCountId}
+          length={description.length}
+          limit={DESCRIPTION_MAX_LENGTH}
+        />
       </div>
 
       {/* `role="alert"` rather than a bare paragraph: the message appears after a

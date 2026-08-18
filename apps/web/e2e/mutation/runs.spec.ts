@@ -533,10 +533,20 @@ test.describe('R5 · the Run workspace', () => {
 
     await fieldControl(card, 'timestamps.acquired_start_utc').fill('2026-01-31T09:00:00Z');
 
-    // Unmount every card while that first PATCH is still open. This is ONE CLICK
-    // AWAY in the product: the Runs section lives inside the fields tabpanel.
+    /*
+     * Leave the fields view while that first PATCH is still open. This is ONE CLICK
+     * AWAY in the product: the Runs section lives inside the fields tabpanel.
+     *
+     * IT NO LONGER UNMOUNTS THE CARDS, and this comment used to say it did. The panel
+     * is kept mounted and hidden (D1) because unmounting it destroyed every unsaved
+     * textarea on the record screen; the view switch now calls `flushExperiment`
+     * explicitly, so the flush this spec depends on happens for the same reason it
+     * always did. `flushPending` still declines to send while a request is in flight,
+     * so the second edit still has to travel via the settle handler — which is exactly
+     * what this spec is about, unchanged.
+     */
     await page.getByRole('tab', { name: 'Graph' }).click();
-    await expect(page.locator('article.run-card')).toHaveCount(0);
+    await expect(page.locator('article.run-card').first()).toBeHidden();
 
     // The guarantee: every accepted edit is handed to the network exactly once.
     // The second edit could not be sent at unmount — its token was the one the
@@ -568,7 +578,9 @@ test.describe('R5 · the Run workspace', () => {
      * look exactly the same." That was true of the in-component hook. Save state now
      * lives in `runAutosaveStore`, keyed by experiment and run and disposed at the
      * RECORD screen's boundary rather than the card's, so a verdict that arrives while
-     * every card is unmounted is still on screen when one comes back.
+     * no card is on screen is still there when one comes back. (Since D1 the view switch
+     * HIDES the cards rather than unmounting them; the store's guarantee is unchanged and
+     * is still what paging, searching and filtering the runs list rely on.)
      *
      * What is asserted below is the SUCCESS path, because that is what this spec's
      * sequence produces. The refusal path — where the old code was silent and the new

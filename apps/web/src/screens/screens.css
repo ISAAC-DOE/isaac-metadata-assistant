@@ -2984,6 +2984,18 @@
   min-width: 0;
 }
 
+/*
+ * The inactive record view is HIDDEN, not unmounted (see `RecordWorkbench`'s
+ * `fieldsMounted`). Stated here as well as relied on from the markup because the UA
+ * rule for `[hidden]` is `display: none` at the lowest possible specificity — any
+ * future `display` declaration on this class would silently un-hide the panel and put
+ * a whole second view on the page. This rule makes that a conflict a stylesheet author
+ * has to resolve deliberately rather than a regression nobody sees.
+ */
+.record-view-panel[hidden] {
+  display: none;
+}
+
 /* And the same refusal one level down, which is where it actually bit.
  *
  * `.fg-header` is a flex row and `.fg-summary` is a flex child, so both default

@@ -1452,8 +1452,15 @@ describe('PHASE 2 — save state that outlives the card', () => {
   /*
    * WHAT WAS IMPOSSIBLE BEFORE. Every one of these was a documented limit of the old
    * in-component hook, whose header said acceptance could not be reported once the
-   * card was gone. The Graph tab is the realistic trigger: the Runs section lives
-   * inside the `fields` tabpanel, so switching view unmounts every card.
+   * card was gone.
+   *
+   * THE TRIGGER USED TO BE AN UNMOUNT AND IS NOW A HIDE, and the sentence here used to
+   * say so the other way round: "the Runs section lives inside the `fields` tabpanel,
+   * so switching view unmounts every card". That is no longer true — the panel is kept
+   * mounted and hidden (D1), because unmounting it destroyed every unsaved textarea on
+   * the record screen. What these tests are about is unchanged: a verdict that arrives
+   * while no card is on screen has to be there when one comes back, and the card must
+   * not be reachable or announced while the graph is up.
    */
   function toGraph() {
     return act(async () => {
@@ -1488,9 +1495,23 @@ describe('PHASE 2 — save state that outlives the card', () => {
     });
     expect(patches).toBe(1);
 
-    // Leave the fields view entirely — every card unmounts.
+    /*
+     * Leave the fields view entirely.
+     *
+     * THIS ASSERTION USED TO BE `[data-run-id]` COUNT 0, i.e. it pinned the unmount —
+     * which was the defect (D1): unmounting the panel silently destroyed every unsaved
+     * textarea inside it. It is INVERTED rather than deleted, because what a reader
+     * needs from the graph view is unchanged and is what is asserted now: the card is
+     * still in the document, and it is not perceivable or reachable while the graph is
+     * up. `getByRole`/`getByLabelText` respect `hidden`, so an accessible query
+     * finding nothing IS the claim "not on screen".
+     */
     await toGraph();
-    expect(document.querySelectorAll('[data-run-id]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-run-id]')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /Add Run/ })).toBeNull();
+    expect(
+      (document.querySelector('#record-view-panel-fields') as HTMLElement).hidden,
+    ).toBe(true);
 
     // The refusal lands with nothing mounted. Under the old hook this verdict went
     // nowhere: the rejection was swallowed and the reader was never told.
@@ -1586,7 +1607,16 @@ describe('PHASE 2 — save state that outlives the card', () => {
 
     await toGraph();
     await toFields();
-    await expand('RUNAAA');
+    /*
+     * NO RE-EXPAND HERE, AND THAT IS THE SECOND THING D1 CHANGED. This line used to
+     * read `await expand('RUNAAA')`, because the round trip UNMOUNTED the card and a
+     * remounted one starts collapsed. The panel is now kept mounted and hidden, so the
+     * card keeps the state the reader left it in — and `expand` is a TOGGLE, so calling
+     * it here would collapse the card and hide the conflict panel, which lives inside
+     * the collapsible body. Asserted rather than assumed, because "still expanded" is
+     * now a property this test depends on.
+     */
+    expect(headerOf('RUNAAA')).toHaveAttribute('aria-expanded', 'true');
 
     stale = true;
     await act(async () => {
@@ -1703,7 +1733,11 @@ describe('PHASE 2 — save state that outlives the card', () => {
     });
     await screen.findByRole('button', { name: /Add Run/ });
     await expand('RUNAAA');
-    const note = /Changes this tab has not finished saving live here only/;
+    // The wording moved when D1 fixed the record-view switch: it said "live here only"
+    // and named "the tab", which on a screen whose own tabs are Record Fields / Graph
+    // read as the view tab — the very gesture that used to destroy the card. It now
+    // says "this browser tab" and states that the record's views keep the edit.
+    const note = /Changes this tab has not finished saving live in this browser tab only/;
 
     // Nothing held: no warning. A permanent one would be false most of the time.
     expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(note);
@@ -1720,6 +1754,9 @@ describe('PHASE 2 — save state that outlives the card', () => {
     // lost, in-flight is unknown. An earlier version asserted loss for both.
     expect(cardFor('RUNAAA').textContent ?? '').toMatch(/anything still unsent is lost/);
     expect(cardFor('RUNAAA').textContent ?? '').toMatch(/may or may not have been saved/);
+    // And it no longer carries the old ambiguous phrasing, in either direction.
+    expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(/saving live here only/);
+    expect(cardFor('RUNAAA').textContent ?? '').toMatch(/Moving between this record.s views keeps them/);
 
     // AND IT STAYS UP WHILE THE REQUEST IS IN FLIGHT. Gating on `pendingCount` hid it
     // for that whole window, because `send()` empties the pending map before dispatching

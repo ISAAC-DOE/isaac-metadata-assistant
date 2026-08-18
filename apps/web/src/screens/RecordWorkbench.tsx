@@ -14,7 +14,7 @@ import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { AssetReferencesPanel } from '../components/AssetReferencesPanel';
 import { ValidateReview } from '../components/ValidateReview';
-import { disposeExperiment } from '../lib/runAutosaveStore';
+import { disposeExperiment, flushExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
@@ -287,10 +287,50 @@ function LoadedWorkbench({
   const requestedView = searchParams.get(RECORD_VIEW_PARAM);
   const activeView: RecordViewId = isRecordView(requestedView) ? requestedView : 'fields';
   const selectView = (view: RecordViewId) => {
+    /*
+     * THE SWITCH FLUSHES THE RUNS' HELD EDITS. It used to get that for free: the
+     * fields panel was a conditional branch, so every `RunCard` unmounted and each
+     * card's teardown called `flushPending`. The panel now stays mounted (see the
+     * tabpanels below), so the property is asked for explicitly instead of being a
+     * side effect of destroying the screen. `flushExperiment` is a no-op for a run
+     * holding nothing, and never touches a halted or in-flight entry.
+     */
+    flushExperiment(id);
     const next = new URLSearchParams(searchParams);
     next.set(RECORD_VIEW_PARAM, view);
     setSearchParams(next, { replace: true });
   };
+
+  /*
+   * D1 — THE FIELDS PANEL IS MOUNTED ONCE AND THEN NEVER UNMOUNTED, and that is a
+   * data-loss fix rather than a rendering preference.
+   *
+   * It used to be one arm of `activeView === 'graph' ? <graph/> : <fields/>`, so a
+   * click on the Graph tab DESTROYED every piece of unsaved text inside it, silently
+   * and with no confirmation: the transcript box (typed or dictated), the "Capture a
+   * note" box, an open note's Edit-wording textarea and dismissal reason, an open
+   * asset create/edit form including its Notes and Caption-verbatim textareas, an open
+   * run override value, and any run-field text this build could not parse. `selectView`
+   * only writes `?view=` with `replace: true`, so there is no navigation a reader could
+   * read as leaving the screen — the text was gone because a tab had been clicked.
+   *
+   * WHY HIDDEN-BUT-MOUNTED RATHER THAN A DRAFT STORE PER BOX. Every one of the boxes
+   * above is a different component with a different shape, so a store would be six
+   * migrations and six new sources of truth; the panel is one element, and `hidden` is
+   * exactly the semantics wanted — the content leaves the layout AND the accessibility
+   * tree, so no duplicate heading, control or landmark is exposed while the graph is
+   * open, and axe scans see one view at a time.
+   *
+   * IT IS LAZY ON FIRST USE, so a deep link to `?view=graph` still costs nothing: the
+   * panel's own sections fetch on mount, and mounting them behind a graph the reader
+   * asked for would be a page-load cost that view never had.
+   *
+   * THE GRAPH STAYS CONDITIONAL, deliberately. `RecordGraphView` documents that it is
+   * rebuilt from a fresh read every time the view is opened, which is what makes a
+   * stale experiment graph structurally impossible; keeping it mounted would cache it.
+   */
+  const fieldsMounted = useRef(activeView === 'fields');
+  if (activeView === 'fields') fieldsMounted.current = true;
 
   const evidenceByPath = useMemo(
     () => new Map<string, ApiEvidenceEntry>(evidence.map((e) => [e.path, e])),
@@ -423,7 +463,7 @@ function LoadedWorkbench({
 
       <RecordViewTabs active={activeView} onSelect={selectView} />
 
-      {activeView === 'graph' ? (
+      {activeView === 'graph' && (
         <div
           id={viewPanelId('graph')}
           className="record-view-panel"
@@ -433,13 +473,18 @@ function LoadedWorkbench({
         >
           <RecordGraphView id={id} />
         </div>
-      ) : (
+      )}
+      {fieldsMounted.current && (
         <div
           id={viewPanelId('fields')}
           className="record-view-panel"
           role="tabpanel"
           aria-labelledby={viewTabId('fields')}
           tabIndex={-1}
+          /* Hidden, not removed — see the comment on `fieldsMounted`. `hidden` takes
+             the whole panel out of the layout and out of the accessibility tree, so
+             nothing in it is announced, focusable or scanned while the graph is up. */
+          hidden={activeView !== 'fields'}
         >
       {pending.length > 0 && (
         <div

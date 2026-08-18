@@ -10540,7 +10540,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "287988af798f0e24783130836fb7b6af59f326e50093a3a42cc5526e90776625"
+        "sha256": "a448ec5af175f98772f72c3f35717c2fd6d4cd47e1bf3d812eec27e626ec4b06"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "efd17bdad9bef36a08aa880f07614dd859f942c735a58ab499f8722cd94b7078"
+        "sha256": "3cf56fd0c150ecabc12969c449821ebda62bfff417e5fd3a1484985e46dc34d1"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "415c6eff2a5c784cbd5e39b769be7c96dcbd42cfa543923fed6dc9330e8d3554"
+    "served_manifest_fingerprint": "545cea2e18ebed0a6dae38cc8b622e36db368ff01760af779aec48480d99fcba"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

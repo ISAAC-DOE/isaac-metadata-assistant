@@ -569,13 +569,13 @@ export function RunCard({
 
       {/*
         THE ONE LIMIT THE APP CANNOT ENGINEER AWAY, SAID ON SCREEN.
-        Save state now outlives this card, so an edit abandoned by switching tabs still
-        reaches the server and its outcome still comes back. It does NOT outlive the
-        PAGE: nothing in a browser can promise that, because `beforeunload` cannot hold
-        a tab open for a fetch and `sendBeacon` can carry neither an `If-Match`
-        precondition nor a readable response, both of which a compare-and-swap write
-        needs. A reload deliberately discards held edits rather than replaying them over
-        a document that may have moved.
+        Save state now outlives this card, so a PARSEABLE edit abandoned by switching
+        views still reaches the server and its outcome still comes back. It does NOT
+        outlive the PAGE: nothing in a browser can promise that, because `beforeunload`
+        cannot hold a tab open for a fetch and `sendBeacon` can carry neither an
+        `If-Match` precondition nor a readable response, both of which a
+        compare-and-swap write needs. A reload deliberately discards held edits rather
+        than replaying them over a document that may have moved.
         Shown ONLY while something is unacknowledged — a permanent warning about work at
         risk would be false most of the time, and this project has enough copy that was
         true when written. Two file headers claimed this sentence existed before it did;
@@ -595,15 +595,35 @@ export function RunCard({
           dispatching — so the note VANISHED for the whole in-flight window and flickered
           back if the request failed. Absent in exactly the state it describes. Gating on
           the transport state instead covers both sub-states of `saving`.
+
+        A THIRD CORRECTION, MADE WHEN THE RECORD-VIEW SWITCH WAS FIXED (D1). The sentence
+        named the browser tab and a reload — and "tab" was ambiguous on a screen whose own
+        tabs are `Record Fields` / `Graph`, where switching one used to destroy this card
+        outright. It now says "browser tab", because the record's views no longer unmount
+        the panel.
+        AND IT LEFT OUT ONE FATE ENTIRELY: this disclosure also renders while
+        `heldInvalid`, and a held-invalid edit is NEVER queued to the store
+        (`onFieldChange` returns before `autosave.queue`), so it is not "not finished
+        saving" — nothing is being saved, and nothing will be until the text parses. Two
+        sentences rather than one wording that has to cover both, because the two states
+        have genuinely different fates: paging, searching or filtering the runs list
+        unmounts this card, which loses unparseable text and does NOT lose a queued edit.
       */}
       {(autosave.status === 'saving' ||
         autosave.status === 'failed' ||
-        autosave.status === 'conflict' ||
-        heldInvalid) && (
+        autosave.status === 'conflict') && (
         <p className="run-card-session-note">
-          Changes this tab has not finished saving live here only. If you close the tab or
-          reload, anything still unsent is lost — and anything already sent may or may not
-          have been saved.
+          Changes this tab has not finished saving live in this browser tab only. Moving
+          between this record’s views keeps them. If you close the browser tab or reload,
+          anything still unsent is lost — and anything already sent may or may not have
+          been saved.
+        </p>
+      )}
+      {heldInvalid && (
+        <p className="run-card-session-note">
+          Text this screen could not read has not been sent anywhere, and is held in this
+          card only. Moving between this record’s views keeps it; paging, searching or
+          filtering the runs list, or reloading the page, does not.
         </p>
       )}
 

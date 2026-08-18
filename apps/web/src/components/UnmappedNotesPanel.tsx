@@ -37,7 +37,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { api, ApiError } from '../lib/api';
-import { mutationFailureCopy } from '../lib/mutationErrors';
+import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import type { ApiNote, ApiNoteState, ApiNotesResponse } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import './unmappedNotes.css';
@@ -109,6 +109,33 @@ function unreadableClause(count: number): string {
     ' — kept unchanged on the record'
   );
 }
+
+/**
+ * What a 412 means here, and what this panel did about it before: NOTHING.
+ *
+ * D2 — THE DEAD END. Every write on this panel carries the experiment's version
+ * token, and the SUCCESS path adopted the new one from the write's own response. The
+ * failure path did not, so one refusal left the held token permanently one revision
+ * behind: the next attempt re-sent the same stale validator and was refused again, and
+ * again, with no way out. The only remedy on screen was `Reload This Section`, which
+ * put the list into `loading` — unmounting every note card and taking the rewritten
+ * wording or the dismissal reason with it. Refuse, then destroy what was typed to
+ * recover from the refusal.
+ *
+ * BOTH HALVES ARE FIXED, and they are separate fixes. (a) A 412 now ADOPTS the token
+ * the server reports (`staleWriteCurrentVersion` — the same `current_version` the
+ * route echoes as an `ETag` "so the client can refresh in one hop"), so the very next
+ * attempt is made against the current record; and (b) the reload the banner offers is
+ * SILENT, so the list is refreshed in place and nothing that was typed is unmounted.
+ *
+ * The copy names the likely cause rather than an unnamed third party, for the reason
+ * `RunsSection` records: the other writer is very often this same reader, on this same
+ * screen, seconds earlier.
+ */
+const STALE_REVIEW_COPY =
+  'The record changed since this section was loaded, so that was not recorded — it can ' +
+  'be your own edit elsewhere on this screen. Nothing was lost: this section has picked ' +
+  'up the current version and what you typed is still here, so try again.';
 
 type ListState =
   | { status: 'loading' }
@@ -186,6 +213,25 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
   }, []);
 
   /**
+   * Turn a refused write into a state a reader can act from — see `STALE_REVIEW_COPY`.
+   *
+   * On a 412 it adopts the token the server reported and refreshes the list SILENTLY,
+   * so the counts and states catch up while every open form, and everything typed into
+   * one, stays exactly where it is. On any other failure it changes nothing and returns
+   * the caller's own sentence: this must never claim a recovery it did not make.
+   */
+  const recoverFromStale = useCallback(
+    (err: unknown, fallback: string): string => {
+      const current = staleWriteCurrentVersion(err);
+      if (current === null) return mutationFailureCopy(asApiError(err), fallback);
+      setVersion(current);
+      reload(true);
+      return STALE_REVIEW_COPY;
+    },
+    [reload],
+  );
+
+  /**
    * Runs one review act and refreshes.
    *
    * THE REFRESH IS NOT OPTIONAL AND IS NOT A PATCH-IN-PLACE. The response carries
@@ -224,12 +270,7 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
         setAnnouncement(announce);
         reload(true);
       } catch (err: unknown) {
-        setMutationError(
-          mutationFailureCopy(
-            asApiError(err),
-            'That review could not be recorded. The note is unchanged.',
-          ),
-        );
+        setMutationError(recoverFromStale(err, 'That review could not be recorded. The note is unchanged.'));
         setAnnouncement('');
         /*
          * RETHROWN, EXACTLY AS `capture` BELOW RETHROWS, AND FOR THE SAME REASON.
@@ -264,12 +305,7 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
         setAnnouncement('Note captured. It is on the record and not yet reviewed.');
         reload(true);
       } catch (err: unknown) {
-        setMutationError(
-          mutationFailureCopy(
-            asApiError(err),
-            'That note could not be captured. Nothing was written.',
-          ),
-        );
+        setMutationError(recoverFromStale(err, 'That note could not be captured. Nothing was written.'));
         setAnnouncement('');
         throw err;
       }
@@ -340,7 +376,15 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
       {mutationError && (
         <div className="notes-error" role="alert">
           {mutationError}
-          <button type="button" className="btn btn-secondary" onClick={() => reload(false)}>
+          {/*
+            SILENT — `reload(true)`, not `reload(false)`. D2: the loud reload sets
+            `{status:'loading'}`, which unmounts the whole `<ul>` of note cards and so
+            destroys the rewritten wording or the dismissal reason the reader was
+            offered this control to recover. The refresh itself is unchanged; what
+            changed is that it no longer blanks the list to perform it, which is the
+            only thing that made it destructive.
+          */}
+          <button type="button" className="btn btn-secondary" onClick={() => reload(true)}>
             Reload This Section
           </button>
         </div>
@@ -513,6 +557,32 @@ function NoteCard({
   const [editText, setEditText] = useState(note.display_text);
   const [reason, setReason] = useState('');
 
+  /*
+   * D3 — WHAT A FORM HOLDS IS NOT DISCARDED BY CLOSING IT, only by Cancel and by a
+   * write that consumed it.
+   *
+   * WHAT WAS WRONG. `Edit wording`'s own handler ran `setEditText(note.display_text)`
+   * BEFORE opening, and `close()` reset all three inputs — so a reader who rewrote a
+   * paragraph, then pressed `Map to a field` or `Dismiss` to check something, then came
+   * back to `Edit wording`, found the box holding the ORIGINAL again. No confirmation,
+   * no notice, and the rewrite was not recoverable from anywhere on the screen.
+   *
+   * THE RULE NOW. Closing a form — by its own toggle, or by opening a sibling — keeps
+   * what is in it. Only two things clear an input: the form's own `Cancel`, which is a
+   * reader saying so; and a review the server RECORDED, which consumed it.
+   *
+   * THE SERVER STAYS AUTHORITATIVE, which is why this resync exists rather than a bare
+   * initial value. When a write lands, the list refreshes and this card is handed a new
+   * `note`; if its wording moved, the held text is stale by definition and is replaced.
+   * Adjusting state during render (rather than in an effect) is React's own documented
+   * shape for this, and it avoids rendering one frame of the superseded text.
+   */
+  const serverText = useRef(note.display_text);
+  if (serverText.current !== note.display_text) {
+    serverText.current = note.display_text;
+    setEditText(note.display_text);
+  }
+
   const pathId = useId();
   const editId = useId();
   const reasonId = useId();
@@ -552,12 +622,20 @@ function NoteCard({
     trigger?.focus();
   }, [open]);
 
-  const close = () => {
+  /**
+   * Close the open form. `discard` is what clears its input — see the D3 note above.
+   *
+   * `which` is passed rather than read from `open`, because the two callers know
+   * different things: a `Cancel` button knows which form it is inside, and a recorded
+   * review knows which ACT succeeded (`keep` has no form and consumes nothing).
+   */
+  const closeForm = (which: 'map' | 'edit' | 'dismiss' | null, discard: boolean) => {
     if (open !== null) returningTo.current = open;
     setOpen(null);
-    setFieldPath('');
-    setEditText(note.display_text);
-    setReason('');
+    if (!discard) return;
+    if (which === 'map') setFieldPath('');
+    if (which === 'edit') setEditText(note.display_text);
+    if (which === 'dismiss') setReason('');
   };
 
   /**
@@ -577,9 +655,15 @@ function NoteCard({
   ) => {
     try {
       await onReview(note, action, opts, announce);
-      close();
+      // Recorded, so the input this act consumed is cleared. Anything typed into a
+      // DIFFERENT form is not — `keep` in particular consumes nothing at all.
+      closeForm(action === 'keep' ? null : action, true);
     } catch {
-      /* Refused. The banner reports it; the form and its typed input stay put. */
+      /*
+       * Refused. The banner reports it; the form and its typed input stay put — and
+       * since D2 the banner's own remedy no longer unmounts this card either, so
+       * "stays put" is true of the remedy as well as of the refusal.
+       */
     }
   };
 
@@ -647,10 +731,10 @@ function NoteCard({
           disabled={busy}
           aria-expanded={open === 'edit'}
           aria-controls={open === 'edit' ? editId : undefined}
-          onClick={() => {
-            setEditText(note.display_text);
-            setOpen(open === 'edit' ? null : 'edit');
-          }}
+          /* NO `setEditText` HERE. Re-opening this form used to overwrite the reader's
+             rewrite with the note's stored wording — see the D3 note above. The box is
+             seeded once, and re-seeded only when the SERVER's wording moves. */
+          onClick={() => setOpen(open === 'edit' ? null : 'edit')}
         >
           Edit wording
         </button>
@@ -735,7 +819,11 @@ function NoteCard({
             >
               Map This Note
             </button>
-            <button type="button" className="btn btn-secondary" onClick={close}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => closeForm('map', true)}
+            >
               Cancel
             </button>
           </div>
@@ -758,6 +846,12 @@ function NoteCard({
             The original capture is kept unchanged and stays visible on this note.
             The review state is not affected — correcting a typo is not a decision.
           </p>
+          {/* SAID ON SCREEN, because the behaviour changed and a reader cannot see it
+              (D3). Closing this form used to discard the rewrite silently. */}
+          <p className="note-form-hint">
+            Closing this form, or opening another one on this note, keeps what you have
+            typed here. Only Cancel discards it.
+          </p>
           <div className="note-form-actions">
             <button
               type="button"
@@ -773,7 +867,11 @@ function NoteCard({
             >
               Save Wording
             </button>
-            <button type="button" className="btn btn-secondary" onClick={close}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => closeForm('edit', true)}
+            >
               Cancel
             </button>
           </div>
@@ -795,7 +893,8 @@ function NoteCard({
           <p className="note-form-hint">
             Dismissing sets this note aside. It is not deleted: it stays on the
             record, stays readable, and keeps its history. Leave the reason blank if
-            you do not have one — nothing is filled in on your behalf.
+            you do not have one — nothing is filled in on your behalf. Closing this
+            form keeps what you typed; only Cancel discards it.
           </p>
           <div className="note-form-actions">
             <button
@@ -812,7 +911,11 @@ function NoteCard({
             >
               Dismiss This Note
             </button>
-            <button type="button" className="btn btn-secondary" onClick={close}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => closeForm('dismiss', true)}
+            >
               Cancel
             </button>
           </div>
