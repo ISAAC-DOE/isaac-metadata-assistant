@@ -201,12 +201,29 @@ def derive_lifecycle(
 
     **WHAT `needs_review` DELIBERATELY IS NOT.** It is not "this record has
     conflicting evidence". ``submissions.conflict_summary`` records conflicting
-    evidence and is documented as disclosed-never-gated, for a measured reason: a
-    scientist who answers a question, notices a typo and answers it again has
-    manufactured a conflict **no surface in this build can clear**. Labelling such a
-    record "Needs Review" would put it in a state it cannot leave, which is exactly
-    the trap that disclosure exists to avoid. Conflicts are reported beside the
-    lifecycle, not inside it.
+    evidence and is documented as disclosed-never-gated. Conflicts are reported
+    beside the lifecycle, not inside it.
+
+    **THE REASON FOR THAT CHANGED, AND THE CONCLUSION DID NOT.** This paragraph used
+    to justify non-gating by saying a conflict is something **no surface in this
+    build can clear** — so labelling the record "Needs Review" would put it in a
+    state it could not leave. That was true when written and is no longer: the
+    conflict-resolution operations (``GET``/``POST .../conflicts``) let a scientist
+    record which competing answer they stand behind, so the trap argument no longer
+    applies.
+
+    The conclusion stands on a different and better footing: **gating is a product
+    decision no committed sentence in this repository authorises**, and
+    ``conflict_summary`` says so in its own ``gating`` field rather than leaving it
+    to be inferred. Note also that resolution does not make a conflict disappear —
+    a ``deferred`` decision is a recorded outcome that deliberately does NOT clear
+    it, and a resolution whose competing set has since moved reads ``stale``, which
+    counts as unresolved. So even with the surface in place, "has a conflict" would
+    be a poor lifecycle input.
+
+    Recorded rather than quietly rewritten, because the invalidating change was
+    made in this repository and a reader who finds the old argument elsewhere
+    should be able to see why it was retired.
 
     **INFRASTRUCTURE NEVER DOWNGRADES SCIENTIFIC READINESS.** Whether this deployment
     could actually record a submission — whether it has a database, whether it can
