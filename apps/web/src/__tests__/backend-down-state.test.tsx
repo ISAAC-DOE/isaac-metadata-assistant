@@ -614,16 +614,18 @@ describe('both render sites guard the run command at build time', () => {
  * HOW. Every per-record path in that module is a single-line template literal of the
  * form `` `/experiments/${enc(…)}…` ``, so those literals are collected and each is
  * required to be either the bare record path or a sub-read. Measured, and re-measured
- * when the Asset References reads and writes were added: 30 literals → 2 bare + 24
- * distinct sub-read suffixes → 17 distinct first segments. (Was 26 → 2 + 21 → 16; the
- * four new literals are `assets` twice — the list read and the create write share one
- * path, and the Set folds them into ONE suffix — plus `assets/${…}` and
- * `assets/${…}/remove`, and the segment count moves because `assets` is a first
- * segment nothing else used. Before that: 23 → 2 + 19 → 15, and the three literals
- * added then were `notes` twice plus `notes/${…}/review`. Before that: 21 → 2 + 17 →
- * 15, when the two per-run override writes were added as `runs/${…}/overrides` and
- * `runs/${…}/overrides/clear`, whose segment was already covered by `runs`.) Those
- * counts are asserted, so adding a sub-read fails this file.
+ * when the submission-history reads were added: 29 literals → 2 bare + 24
+ * distinct sub-read suffixes → 17 distinct first segments. (Was 26 → 2 + 21 → 16,
+ * before the three `/revisions…` reads — the listing, one revision, and the diff of
+ * one revision against the current record — each of which is its own suffix, and
+ * whose shared first segment `revisions` nothing else used, so the segment count
+ * moves by one too. Before that, at the Unmapped Notes reads and writes: 23 → 2 + 19 → 15; the
+ * three new literals are `notes` twice — the list read and the capture write share one
+ * path, and the Set folds them into ONE suffix — plus `notes/${…}/review`, and the
+ * segment count moves this time because `notes` is a first segment nothing else used.
+ * Before that: 21 → 2 + 17 → 15, when the two per-run override writes were added as
+ * `runs/${…}/overrides` and `runs/${…}/overrides/clear`, whose segment was already
+ * covered by `runs`.) Those counts are asserted, so adding a sub-read fails this file.
  *
  * WHAT THIS CANNOT SEE, stated precisely because the obvious reading of the previous
  * paragraph is too generous. `unclassifiedLiterals` catches a literal that STARTS
@@ -675,9 +677,9 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // before — see the note on `A11Y_BASELINE_TOTAL_NODES`. These three numbers
     // were read out of this test's own failure output after the merge, never
     // computed from the pre-merge values.
-    expect(experimentPathLiterals.length).toBe(31);
+    expect(experimentPathLiterals.length).toBe(34);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(25);
+    expect(SUB_READ_SUFFIXES).toHaveLength(28);
     // 18, AND THE ROUTE TO THAT NUMBER IS THE POINT.
     //
     // This line was NOT in the merge conflict. Both branches raised it from 16
@@ -695,7 +697,7 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     //
     // All three numbers in this test were read out of its own failure output
     // after the merge. None was computed by adding the two branches' deltas.
-    expect(SUB_READ_SEGMENTS).toHaveLength(18);
+    expect(SUB_READ_SEGMENTS).toHaveLength(19);
     // Spot-check the two shapes that are easiest to derive wrongly.
     expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');
     expect(SUB_READ_SUFFIXES).toContain('source-preview?source=SEG-1');
@@ -705,6 +707,13 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     expect(SUB_READ_SUFFIXES).toContain('notes');
     expect(SUB_READ_SUFFIXES).toContain('notes/SEG-1/review');
     expect(SUB_READ_SEGMENTS).toContain('notes');
+    // The three submission-history reads share ONE first segment and are three
+    // distinct suffixes — the inverse of the `notes` case above, and the shape a
+    // hand-written inventory gets wrong in the other direction.
+    expect(SUB_READ_SUFFIXES).toContain('revisions');
+    expect(SUB_READ_SUFFIXES).toContain('revisions/SEG-1');
+    expect(SUB_READ_SUFFIXES).toContain('revisions/SEG-1/diff');
+    expect(SUB_READ_SEGMENTS).toContain('revisions');
   });
 });
 

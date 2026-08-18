@@ -225,6 +225,9 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   ingestion: 'a CSV comparison',
   notes: 'the unmapped notes',
   pending: 'the missing fields',
+  // The three `/revisions…` reads. "Submission history" is the product's word for
+  // them; `revisions` is the wire segment and never reaches a scientist.
+  revisions: 'the submission history',
   runs: 'the measurement runs',
   'source-preview': 'a reference source file',
   transcript: 'the transcript capture',

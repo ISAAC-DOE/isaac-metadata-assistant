@@ -1087,12 +1087,12 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 59 operations, MEASURED after the merge', () => {
+  it('describes the contract it claims to: 62 operations, MEASURED after the merge', () => {
     // Both branches raised this from 52 for real, different additions — the
     // asset slice to 56, the transcript slice to 55. Adding the two deltas is
     // how a merged counter goes wrong; the numbers here were read out of this
     // test's own failure output after merging.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(59);
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(62);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1664,8 +1664,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // 2026-08-16 note above records, and which this merge demonstrated again on
     // a DIFFERENT counter in `backend-down-state.test.tsx`, where both branches
     // wrote the same literal and git merged it with no conflict at all.
-    expect(total).toBe(65010);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(142);
+    expect(total).toBe(70127);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(154);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

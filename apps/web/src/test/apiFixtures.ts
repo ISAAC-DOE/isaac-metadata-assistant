@@ -1455,6 +1455,7 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     // owner fetches on every record screen (not just S5).
     [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
+    [`GET ${base}/revisions`]: revisionHistoryUnavailable(id),
     // The Runs section on the record screen reads this on mount. An EMPTY list
     // is the neutral default: the section renders its heading and Add Run and
     // nothing else, so no existing assertion in any other file has to change.
@@ -1699,6 +1700,84 @@ export const exportConflict = {
 };
 
 /** S6 routes: all blockers resolved, dry-run would pass, nothing exported yet. */
+/**
+ * SUBMISSION HISTORY, AS THIS DEPLOYMENT ACTUALLY ANSWERS IT — a `503` naming the
+ * unapplied migration, with NO `revisions` key at all.
+ *
+ * It is the DEFAULT for every export-screen fixture set deliberately, rather than
+ * an available history, because it is what the hosted deployment returns today:
+ * `0003_revisions` and `0004_submissions` are applied by an operator, separately
+ * from the image, and they have not been applied. A fixture that showed a readable
+ * history everywhere would make the honest-unavailable path the one nobody looks at.
+ *
+ * The `revisions` key is ABSENT rather than empty on purpose — that is the whole
+ * contract, and a fixture with `revisions: []` here would let a panel that renders
+ * "no submitted revisions" over an unreadable database pass every test in the suite.
+ */
+export const REVISION_HISTORY_TABLES_ABSENT_MESSAGE =
+  "This deployment's database does not yet have the submission-history tables, so " +
+  'the history could not be read. The migration that creates them has to be ' +
+  'applied by an operator. This is not a statement that this record has never ' +
+  'been submitted — it is a statement that this server could not find out.';
+
+export function revisionHistoryUnavailable(id: string = EXP_ID): StubbedRoute {
+  return {
+    status: 503,
+    body: {
+      error: 'revision_history_unavailable',
+      experiment_id: id,
+      record_rev: VERSION_FIELDS.rev,
+      current_content_signature: 'f'.repeat(64),
+      signature_scope: 'export_unit_ids_and_drafts',
+      limit: 200,
+      availability: {
+        state: 'unavailable',
+        reason: 'tables_absent',
+        message: REVISION_HISTORY_TABLES_ABSENT_MESSAGE,
+      },
+      lifecycle: {
+        state: 'ready_to_submit',
+        label: 'Ready to Submit',
+        reasons: [
+          {
+            code: 'no_scientific_blockers',
+            message: 'Every question is answered and every unit passes the export gate.',
+          },
+          {
+            code: 'submission_state_unknown',
+            message:
+              'This deployment could not read the submission history, so whether ' +
+              'this content has already been submitted is unknown rather than no.',
+          },
+        ],
+        scientific_readiness: {
+          blocked: false,
+          pending_count: 0,
+          failing_unit_count: 0,
+          failing_units: [],
+        },
+        submission: {
+          known: false,
+          submitted_for_current_content: null,
+          unknown_reason: 'tables_absent',
+        },
+        submission_blocked_by_deployment: {
+          blocked: true,
+          blockers: ['no_attributable_actor'],
+          basis: 'configuration_only',
+          requires_attributable_actor: true,
+          actor_trust_basis: null,
+          message:
+            'This deployment cannot currently accept a submission of any record. ' +
+            'This says nothing about whether this record is ready — it is a fact ' +
+            'about how this server is configured, and it is resolved by an ' +
+            'operator, not by editing the record.',
+        },
+      },
+    },
+  };
+}
+
 export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
   return {
@@ -1718,6 +1797,7 @@ export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRo
     // P29.4 — the shared record-session owner's AgentContext evidence input.
     [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
+    [`GET ${base}/revisions`]: revisionHistoryUnavailable(id),
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
@@ -2141,6 +2221,7 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
     // P29.4 — the shared record-session owner's AgentContext evidence input.
     [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsExported },
+    [`GET ${base}/revisions`]: revisionHistoryUnavailable(id),
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
@@ -2810,6 +2891,9 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/experiments/{experiment_id}/notes/{note_id}", description: "Returns one note: its verbatim text, any revised wording, what produced it, the run it belongs to when that is known, its review state, and the full history of the acts performed on it. Read-only.\n\nA DISMISSED NOTE IS RETURNED NORMALLY. Dismissal is a state, not a deletion, and the history records when it happened and what it was dismissed from. The verbatim capture is returned even when the note has been edited — an edit stores the corrected wording beside the original and never replaces it, and each superseded wording is kept on the history entry that replaced it.\n\nThe `ETag` header carries THE RECORD's current revision, which is what capturing or reviewing a note requires in `If-Match`. Notes have no separate validator of their own, because a note is stored inside the record's own document." },
   { op: "POST /api/experiments/{experiment_id}/notes", description: "Stores one piece of captured content that has no confident schema home, verbatim, and returns it with the record's new revision.\n\nCapturing a note rewrites the record, so this requires the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written. `text` is stored exactly as sent: it is not trimmed, normalised or shortened, and text too large to store is REFUSED with `422` rather than truncated, because a shortened note misrepresents what was written.\n\n`source` must be one of the values `GET .../notes` reports under `sources`, and there is no default — a producer that cannot say what produced its own output is not described by inventing a label for it. These are this feature's own vocabulary and are deliberately not ISAAC evidence source types, because a note is not evidence.\n\n`run_id`, `candidate_field_path` and `candidate_rule` are optional and nothing supplies them on a caller's behalf. An omitted `run_id` means the note belongs to the record rather than to a run, and it is never filled in from the only run that happens to exist. A `candidate_field_path` must be one of the paths `GET .../notes` reports under `mappable_field_paths` — a subset of the official schema's paths, not the whole of it — AND must arrive with the `candidate_rule` that produced it — an unexplained proposal is a guess, and either half without the other is `422`. Absent is absent: an empty string is refused, not stored.\n\nAny other body key is refused with `422` naming it. A note carries no status, no verification and no evidence, so a request that tries to set one is rejected rather than accepted and quietly ignored." },
   { op: "POST /api/experiments/{experiment_id}/notes/{note_id}/review", description: "Performs one of the four review acts on a note — `map`, `edit`, `keep` or `dismiss` — and returns the note as it now stands. Each act is appended to the note's history with the state it moved from and the time it happened; nothing is ever removed.\n\nRequires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written. Re-performing an act that changes nothing is a no-op: it writes nothing, adds no history entry and does not advance the record's revision.\n\n`map` records the official field path a scientist says this note belongs to, and requires `field_path` to be one of the paths `GET .../notes` reports under `mappable_field_paths`. IT WRITES NO VALUE. Deriving a value from prose would mean deciding what the value is, which this application makes a person do through the confirmed-edit path that already exists; a mapped note says where the content belongs, not what the field should hold.\n\n`edit` stores a corrected wording BESIDE the verbatim capture and never replaces it, and leaves the review state alone — fixing a typo is not a triage decision. `keep` records that this content is prose about the experiment and belongs to no field, which is a first-class outcome and not an unfinished review. `dismiss` sets the note aside and is the closest thing to a delete this API offers, which is to say it is not one: the note remains listed, readable and unchanged, and an optional `reason` is stored when given and left absent when not, because a justification nobody wrote is not invented on their behalf.\n\nAny other body key, an unknown action, or a `field_path` outside `mappable_field_paths` is refused with `422` and nothing is written. That set is a subset of the official schema's paths, so such a refusal reports what this build can map a note to and never asserts that the official schema has no such field." },
+  { op: "GET /api/experiments/{experiment_id}/revisions", description: "Lists the immutable snapshots captured when this record was submitted, newest first, and reports the record's derived submission lifecycle. Read-only: nothing here writes a revision, and the only writer of one is `POST /api/experiments/{experiment_id}/submit`.\n\n**`availability` is the field to read first, and an empty list is never a refusal.** The submission-history tables are created by a migration an operator applies separately from the image, so a running server can meet a database that does not have them. When that happens this operation answers `503` with `availability.state: \"unavailable\"` and **no `revisions` key at all** — never an empty list, because \"this record was never submitted\" and \"this server could not find out\" are different statements and only one of them was observed. `availability.reason` is `no_durable_storage`, `tables_absent` or `database_unavailable`; the three have three different remedies. A worked-example record answers `200` with `availability.state: \"not_applicable\"`, which is a fact rather than an inability: such records are never submitted.\n\n`lifecycle.state` is DERIVED on every read and is never stored: `draft`, `needs_review`, `ready_to_submit` or `submitted`. `submitted` means a submission is on record for exactly the content this record holds NOW — it is never derived from whether the record was exported, which is a mechanical transform any caller can perform and is not a declaration by anyone. `lifecycle.submission.known` is `false` whenever the history could not be read, and the state then falls back to the scientific derivation rather than to `not submitted`.\n\n`lifecycle.submission_blocked_by_deployment` is reported SEPARATELY and never lowers `lifecycle.state`. A record whose science is finished reads `ready_to_submit` even where this deployment can accept no submission at all — which is every deployment shipped today, because no edge-trust verifier is configured and submission requires an attributable person.\n\nThe listing is bounded; `total` is how many revisions EXIST, whatever the bounded list returned. No stored record snapshot is ever included." },
+  { op: "GET /api/experiments/{experiment_id}/revisions/{revision_no}", description: "Returns one submitted revision of this record: when it was captured, who is on record for it, the run snapshots it holds, the field addresses that changed since the revision before it, and the submission that captured it. Read-only.\n\n**The stored record snapshot is deliberately NOT returned.** The revision holds a complete copy of the record as it was, and this operation reports what that revision IS rather than shipping the document; the field values themselves are available, scoped to what actually differs, from `GET .../revisions/{revision_no}/diff`.\n\n`actor.subject` is `null` and `actor.attributed` is `false` whenever the revision was recorded without an attributable person. No placeholder name is ever substituted. `actor.trust_basis` says what the attribution is worth: `test_fixture` is a real shipped basis and is **not** proof anyone authenticated.\n\n`changes` are the field addresses this revision differed from its PREDECESSOR at, exactly as they were recorded at submission time. They cover draft field values only — evidence entries, run overrides, answer logs and assets are not compared — so an empty list means no field value differed, never that nothing changed. A revision with no predecessor records no changes at all, which is not the same as having changed nothing.\n\n`503` with `availability.state: \"unavailable\"` when the history cannot be read; `404` when the record exists and holds no such revision number. Those are different answers and are never merged." },
+  { op: "GET /api/experiments/{experiment_id}/revisions/{revision_no}/diff", description: "Compares the record AS IT IS NOW against the immutable snapshot captured by one submitted revision, and reports every draft field address whose value differs, with the value on each side. Read-only.\n\n**The comparison is narrow, and it says so in `changes_scope`.** Only draft field values are compared — the same scope the stored change rows use. Evidence entries, run overrides, answer logs, assets and implicit claims are NOT compared, and neither is anything nested inside a value beyond that value's canonical form. An empty `changes` list therefore means no field value differed; it does not mean nothing changed.\n\n`content_signature_matches` is the stronger, authoritative statement and covers more than `changes` does: it is `true` only when this record's current content signature equals the one the revision recorded. **An empty `changes` list beside `content_signature_matches: false` is a real and meaningful state** — it means something outside draft field values differs, and this operation is telling you it did not look there.\n\n`units` reports which export units (runs, or the record itself when it has none) were added and removed, separately from the field changes. A removed run also contributes one `removed` field row per value it held, so the two describe the same event at two altitudes.\n\n`comparable` is `false` when the stored snapshot could not be read back into a comparable record. `changes` is then absent rather than empty, because an empty list would assert a comparison this server did not make." },
   // The four ASSET REFERENCE operations, transcribed from `create_app().openapi()`.
   // `apps/api/tests/test_contract_description_parity.py` compares these strings byte
   // for byte against the served document in BOTH directions, so a new operation that

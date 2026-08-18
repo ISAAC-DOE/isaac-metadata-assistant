@@ -19,6 +19,13 @@ application would otherwise pass:
   * rollback restoring the pre-transaction row sets, so "everything or nothing" is
     an OUTCOME this suite can assert rather than a protocol shape.
 
+IT ALSO MODELS THE READ PATH (``isaac_api.revision_history``), against the SAME
+rows the write path put in it. A reader with a store of its own could not catch a
+listing that disagrees with what a submission actually wrote, which is the main
+thing a history read surface can get wrong. Ordering is modelled rather than left
+to insertion order, because ``ORDER BY revision_no DESC`` is what puts the newest
+revision first and a fake that ignored it would let an oldest-first surface pass.
+
 IT PROVES NOTHING ABOUT POSTGRESQL. Whether the committed SQL is valid, whether the
 other CHECK constraints reject what they claim to, whether the foreign keys behave
 as described, and whether ``jsonb`` round-trips the documents — none of that is
@@ -32,6 +39,7 @@ from __future__ import annotations
 import json
 
 import isaac_api.db_write as dbw
+import isaac_api.revision_history as rhist
 import isaac_api.submission_store as sstore
 
 #: What the fake stamps as the server-assigned submission time. A FIXED string
@@ -39,6 +47,13 @@ import isaac_api.submission_store as sstore
 #: DATABASE stamped, and a moving value would let a test pass while the application
 #: substituted its own timestamp.
 FAKE_SUBMITTED_UTC = "2026-01-01T00:00:00+00:00"
+
+#: The same device for the ``created_utc DEFAULT now()`` the history tables carry.
+#: The application never sends one — the column is absent from every INSERT — so a
+#: fake that did not stamp one would let a read surface report ``None`` for a time
+#: the server always assigns, and a test asserting on it would be asserting the
+#: wrong thing.
+FAKE_CREATED_UTC = "2026-01-01T00:00:00+00:00"
 
 
 class FakeSubmissionCursor:
@@ -165,6 +180,8 @@ class FakeSubmissionCursor:
                     "reason": reason,
                     "subject": subject,
                     "trust_basis": trust_basis,
+                    # The column's `DEFAULT now()`, modelled — see FAKE_CREATED_UTC.
+                    "created_utc": FAKE_CREATED_UTC,
                 }
             )
             self._pending = [(revision_id,)]
@@ -173,13 +190,17 @@ class FakeSubmissionCursor:
 
         if sql == sstore.Q_INSERT_RUN_REVISION:
             keys = ("run_revision_id", "revision_id", "run_id", "ordinal", "state", "rev", "generation")
-            conn.run_revisions.append(dict(zip(keys, params)))
+            row = dict(zip(keys, params))
+            row["created_utc"] = FAKE_CREATED_UTC
+            conn.run_revisions.append(row)
             self.rowcount = 1
             return
 
         if sql == sstore.Q_INSERT_REVISION_CHANGE:
             keys = ("change_id", "revision_id", "unit_id", "address", "change_kind")
-            conn.changes.append(dict(zip(keys, params)))
+            row = dict(zip(keys, params))
+            row["created_utc"] = FAKE_CREATED_UTC
+            conn.changes.append(row)
             self.rowcount = 1
             return
 
@@ -248,6 +269,140 @@ class FakeSubmissionCursor:
                 )
             conn.submission_runs.append(row)
             self.rowcount = 1
+            return
+
+        # --- the READ path (`isaac_api.revision_history`) ---------------------
+        #
+        # Modelled here rather than in a second double, because the read surface and
+        # the write surface have to agree about ONE set of rows: a reader with its
+        # own store could never catch a listing that disagrees with what the submit
+        # path actually wrote, which is the main thing there is to get wrong.
+        #
+        # ORDERING IS MODELLED, not left to insertion order. `ORDER BY revision_no
+        # DESC` is what makes the newest revision first, and a fake that returned
+        # insertion order would let a surface that renders oldest-first pass.
+
+        if sql == rhist.Q_REVISIONS_FOR_EXPERIMENT:
+            experiment_id, limit = params
+            rows = sorted(
+                (r for r in conn.revisions if r["experiment_id"] == experiment_id),
+                key=lambda r: r["revision_no"],
+                reverse=True,
+            )[: int(limit)]
+            self._pending = [
+                (
+                    r["revision_id"],
+                    r["revision_no"],
+                    r["experiment_rev"],
+                    r["generation"],
+                    r["content_signature"],
+                    r["reason"],
+                    r["subject"],
+                    r["trust_basis"],
+                    r.get("created_utc"),
+                )
+                for r in rows
+            ]
+            self.rowcount = len(self._pending)
+            return
+
+        if sql == rhist.Q_REVISION_COUNT:
+            total = sum(1 for r in conn.revisions if r["experiment_id"] == params[0])
+            self._pending = [(total,)]
+            self.rowcount = 1
+            return
+
+        if sql == rhist.Q_REVISION_BY_NO:
+            experiment_id, revision_no = params
+            match = [
+                r
+                for r in conn.revisions
+                if r["experiment_id"] == experiment_id
+                and int(r["revision_no"]) == int(revision_no)
+            ]
+            self._pending = [
+                (
+                    r["revision_id"],
+                    r["revision_no"],
+                    r["experiment_rev"],
+                    r["generation"],
+                    r["content_signature"],
+                    r["reason"],
+                    r["subject"],
+                    r["trust_basis"],
+                    r.get("created_utc"),
+                    # psycopg2 returns `jsonb` as a dict; the write path stores the
+                    # serialised text it sent, so the decode happens here — the same
+                    # shape a real driver produces.
+                    json.loads(r["state"]),
+                )
+                for r in match
+            ]
+            self.rowcount = len(self._pending)
+            return
+
+        if sql == rhist.Q_SUBMISSION_BY_REVISION:
+            self._pending = [
+                conn.submission_row(r)
+                for r in conn.submissions
+                if r["revision_id"] == params[0]
+            ]
+            self.rowcount = len(self._pending)
+            return
+
+        if sql == rhist.Q_CHANGE_COUNTS_FOR_REVISION:
+            counts: dict[str, int] = {}
+            for r in conn.changes:
+                if r["revision_id"] != params[0]:
+                    continue
+                counts[r["change_kind"]] = counts.get(r["change_kind"], 0) + 1
+            self._pending = sorted(counts.items())
+            self.rowcount = len(self._pending)
+            return
+
+        if sql == rhist.Q_CHANGES_FOR_REVISION:
+            rows = sorted(
+                (r for r in conn.changes if r["revision_id"] == params[0]),
+                key=lambda r: (r["unit_id"], r["address"]),
+            )
+            self._pending = [
+                (r["unit_id"], r["address"], r["change_kind"]) for r in rows
+            ]
+            self.rowcount = len(self._pending)
+            return
+
+        if sql == rhist.Q_RUN_REVISIONS_FOR_REVISION:
+            rows = sorted(
+                (r for r in conn.run_revisions if r["revision_id"] == params[0]),
+                key=lambda r: (int(r["ordinal"]), r["run_id"]),
+            )
+            self._pending = [
+                (
+                    r["run_revision_id"],
+                    r["run_id"],
+                    r["ordinal"],
+                    r["rev"],
+                    r["generation"],
+                    r.get("created_utc"),
+                    # `state ->> 'label'` — the SERVER extracts one string, so the
+                    # fake does too. A fake that returned the whole document here
+                    # would let a route that ships the snapshot to a client pass.
+                    json.loads(r["state"]).get("label"),
+                )
+                for r in rows
+            ]
+            self.rowcount = len(self._pending)
+            return
+
+        if sql == rhist.Q_SUBMISSION_RUNS_FOR_SUBMISSION:
+            rows = sorted(
+                (r for r in conn.submission_runs if r["submission_id"] == params[0]),
+                key=lambda r: r["unit_id"],
+            )
+            self._pending = [
+                (r["unit_id"], r["run_id"], r["record_id"]) for r in rows
+            ]
+            self.rowcount = len(self._pending)
             return
 
         raise AssertionError(f"the fake was handed an unmodelled statement: {sql!r}")
@@ -401,3 +556,13 @@ def fake_env(**overrides) -> dict:
 
 def fake_store(conn: FakeSubmissionConnection) -> sstore.PostgresSubmissionStore:
     return sstore.PostgresSubmissionStore(fake_env(), connect=lambda env: conn)
+
+
+def fake_reader(conn: FakeSubmissionConnection) -> rhist.PostgresRevisionReader:
+    """The READ path bound to the same connection double the writes went through.
+
+    Deliberately the SAME ``conn``: a reader over its own store could not catch a
+    listing that disagrees with what the submit path wrote, which is the main thing
+    a history read surface can get wrong.
+    """
+    return rhist.PostgresRevisionReader(fake_env(), connect=lambda env: conn)
