@@ -60,11 +60,14 @@ __all__ = [
     "TRUST_BASIS_UNATTRIBUTED",
     "UnitBlocker",
     "address_changes",
+    "address_value_changes",
     "blocker_report",
     "canonical_json",
     "conflict_summary",
     "content_signature",
     "field_values",
+    "present_field_values",
+    "unit_membership_changes",
     "unit_payloads",
     "units_by_id",
 ]
@@ -256,6 +259,135 @@ def address_changes(
             elif was[address] != now[address]:
                 out.append((unit_id, address, CHANGE_MODIFIED))
     return out
+
+
+def present_field_values(draft: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The SAME addresses :func:`field_values` reports, carrying the RAW values.
+
+    :func:`field_values` returns each value's canonical JSON *text*, which is what a
+    change comparison needs and is deliberately all it needs. A surface that shows a
+    scientist what a field used to hold needs the value itself, so that it can be
+    rendered by the same rules every other value on that surface is rendered by
+    (one line for a scalar; "cannot be shown in one line" for an object).
+
+    **IT IS NOT A SECOND DEFINITION OF "PRESENT".** The presence rule is
+    :func:`field_values`' rule, restated in one place and pinned in another:
+    ``test_revision_history`` asserts, over a matrix of drafts, that
+    ``{k: canonical_json(v) for k, v in present_field_values(d).items()}`` equals
+    ``field_values(d)`` exactly. If the two ever diverge, that test fails rather
+    than a diff quietly disagreeing with the change log stored beside it.
+    """
+    fields = (draft or {}).get("fields")
+    if not isinstance(fields, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for address, envelope in fields.items():
+        if not isinstance(address, str) or not address:
+            continue
+        if not isinstance(envelope, dict):
+            continue
+        value = envelope.get("value")
+        if value is None:
+            continue
+        out[address] = value
+    return out
+
+
+def address_value_changes(
+    previous: Mapping[str, Mapping[str, Any] | None] | None,
+    current: Mapping[str, Mapping[str, Any] | None],
+) -> list[dict]:
+    """:func:`address_changes`, plus the two values — for a surface, not for a row.
+
+    Returns dicts of ``{unit_id, address, change_kind, previous_value,
+    current_value}``, in the SAME order and with the SAME membership as
+    :func:`address_changes`. That equality is not asserted by construction — the two
+    functions are written out separately — it is asserted by test, over a matrix of
+    inputs, because a diff shown to a scientist that disagreed with the change rows
+    stored in ``isaac_revision_changes`` would be the worse kind of wrong: both
+    plausible, and only one of them written down.
+
+    WHY NOT SIMPLY EXTEND :func:`address_changes`. That function is on the
+    SUBMISSION WRITE PATH — its output becomes ``isaac_revision_changes`` rows inside
+    the one durable transaction — and this slice adds a read surface. Changing the
+    shape a write path emits in order to serve a screen is how a read requirement
+    ends up embedded in a durable record. So the write path is left exactly as it
+    was, and the drift risk that creates is paid for with a test rather than with a
+    refactor.
+
+    ``previous`` of ``None`` yields an empty list for the reason
+    :func:`address_changes` yields one: **there was nothing to compare against**, and
+    that is not the same statement as "nothing changed". Every caller must disclose
+    which of the two it is reporting.
+
+    THE VALUES ARE THE DRAFT'S OWN, UNTRANSFORMED. Nothing here rounds, formats,
+    truncates, units-converts or summarises a scientific value; a value too large or
+    too structured to render is a rendering decision made where the rendering happens.
+    """
+    if previous is None:
+        return []
+    out: list[dict] = []
+    for unit_id in sorted(set(previous) | set(current)):
+        was_text = field_values(previous.get(unit_id))
+        now_text = field_values(current.get(unit_id))
+        was_raw = present_field_values(previous.get(unit_id))
+        now_raw = present_field_values(current.get(unit_id))
+        for address in sorted(set(was_text) | set(now_text)):
+            if address not in was_text:
+                kind = CHANGE_ADDED
+            elif address not in now_text:
+                kind = CHANGE_REMOVED
+            elif was_text[address] != now_text[address]:
+                kind = CHANGE_MODIFIED
+            else:
+                continue
+            out.append(
+                {
+                    "unit_id": unit_id,
+                    "address": address,
+                    "change_kind": kind,
+                    # `None` HERE MEANS "NOT RECORDED AT THAT POINT", and it can only
+                    # occur on the side the change kind already says is absent —
+                    # `field_values` excludes an envelope whose `value` is null, so a
+                    # present value is never `None`. The two facts therefore agree
+                    # rather than needing a reader to reconcile them.
+                    "previous_value": was_raw.get(address),
+                    "current_value": now_raw.get(address),
+                }
+            )
+    return out
+
+
+def unit_membership_changes(
+    previous: Mapping[str, Any] | None, current: Mapping[str, Any]
+) -> dict:
+    """Which export units this record gained and lost since a stored revision.
+
+    An export unit is a RUN for a record that has them, and the record itself for one
+    that does not (``workspace.ExportUnit``), so for the fan-out case this is exactly
+    "which runs were added and which were removed".
+
+    IT IS REPORTED SEPARATELY FROM THE FIELD CHANGES RATHER THAN FOLDED INTO THEM.
+    :func:`address_changes` already contributes one ``added``/``removed`` row per
+    field value a unit holds, so a removed run appears there as forty removed fields
+    — which is true, and is not the sentence a reader wants first. "One run was
+    removed" and "forty values are no longer recorded" are the same event described
+    at two altitudes, and a surface that only had the second would make the reader
+    reconstruct the first.
+
+    ``previous`` of ``None`` yields empty lists and ``comparable: false``, for the
+    reason :func:`address_changes` yields an empty list: there was no baseline.
+    """
+    if previous is None:
+        return {"comparable": False, "added": [], "removed": [], "unchanged": []}
+    was = set(previous)
+    now = set(current)
+    return {
+        "comparable": True,
+        "added": sorted(now - was),
+        "removed": sorted(was - now),
+        "unchanged": sorted(now & was),
+    }
 
 
 def conflict_summary(units: Sequence[Any]) -> dict:

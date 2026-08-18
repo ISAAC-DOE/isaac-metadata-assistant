@@ -335,7 +335,20 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # is 47 + 4 + 1. This is the same shape as the a11y total that two branches each
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
-    assert checked == 56, f"expected 56 documented operations, found {checked}"
+    #
+    # 52 -> 53: `GET /api/experiments/{experiment_id}/provenance`, the two-dimension
+    # provenance view. Like the notes model above it adds no storage — both
+    # dimensions are DERIVED on read from content the record already carries — but
+    # unlike it, it adds no vocabulary to the truth core either: it reads the ones
+    # that already exist and reports them as two independent answers.
+    #
+    # MEASURED, NOT CARRIED. See the note above about two branches each counting
+    # from 47: this number comes from running `create_app().openapi()` on this
+    # branch, and a merge must re-measure rather than add.
+    # MEASURED AFTER THE MERGE, not carried across it and not derived by adding
+    # deltas. Provenance publishes one operation and the asset slice four, both
+    # from the same base of 52; either branch's own figure is wrong for the merge.
+    assert checked == 60, f"expected 60 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -555,8 +568,21 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # all", which is a different fact from the shared storage-outage 503 and says so
     # in its body.
     ("/api/experiments/{experiment_id}/submit", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
+    # The three submission-history READS. 503 is declared because it is REACHABLE
+    # and is the operation's normal answer on a deployment whose history migration
+    # an operator has not applied — which is the hosted one. It covers both 503s
+    # these handlers can produce (see `routes._R_REVISION_HISTORY_UNAVAILABLE`).
+    # 404 on the two per-revision operations is TWO facts, distinguished by the
+    # body's `error`: no such record, and no such revision on a record that exists.
+    ("/api/experiments/{experiment_id}/revisions", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/revisions/{revision_no}", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/revisions/{revision_no}/diff", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/ingestion/csv/preview", "post"): ["200", "400", "401", "403", "404", "412", "413", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/pending", "get"): ["200", "401", "404", "422", "503"],
+    # The two-dimension provenance view. One `404` covers both "no such record"
+    # and "this record has no such run" — the bodies differ (`experiment_not_found`
+    # vs `run_not_found`), the documented status does not.
+    ("/api/experiments/{experiment_id}/provenance", "get"): ["200", "401", "404", "422", "503"],
     # Unmapped Notes. The split is the Run API's, for the Run API's reason: a note
     # is stored INSIDE the experiment's own document, so capturing one and reviewing
     # one both REWRITE THE RECORD and carry the record's `If-Match` with the whole
