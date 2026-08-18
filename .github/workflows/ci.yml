@@ -982,7 +982,17 @@ jobs:
           # in the same commit as any added or removed scenario. If you are reading
           # this because the step failed after you added one, the fix is to change
           # the number here to the new count and say so in the PR.
-          expected_scenarios=29
+          #
+          # 29 -> 30: the Run REMOVAL slice adds exactly one scenario,
+          # `test_parity_removing_a_run_over_HTTP_removes_its_row_and_moves_no_other`.
+          # It is the parity half of removal — the document loses a run, so
+          # `Q_DELETE_ABSENT_RUNS` must take its row and leave every sibling's
+          # ordinal, rev and generation untouched. Counted by MEASUREMENT: this
+          # step's own failure output said 30 where 29 was expected, and the diff
+          # of the slice adds one `@real_engine` function and no other. The guard
+          # worked exactly as its note above describes, which is why the number is
+          # being changed here deliberately rather than discovered later.
+          expected_scenarios=30
           passed=$(grep -Eo '[0-9]+ passed' /tmp/parity.log | grep -Eo '^[0-9]+' || echo 0)
           [ "$passed" = "$expected_scenarios" ] || {
             echo "::error::$passed parity test(s) passed; exactly $expected_scenarios are expected."
