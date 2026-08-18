@@ -336,18 +336,19 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
     #
-    # 56 -> 57: `POST /api/experiments/{experiment_id}/runs/{run_id}/remove`. The
-    # Run API could add, read, edit and check a run and had no way to take one back
-    # out, so a run created by a mis-click was permanent. It is a sub-path POST
-    # rather than a DELETE for the reason every other removal here is; and it is a
-    # separate operation from the run PATCH rather than a `null` on it, because
-    # removing a run is a destructive act with its own confirmation and its own
-    # refusal for a run that has already been exported.
+    # MEASURED from `create_app().openapi()` on the MERGED tree, and the
+    # arithmetic is deliberately not shown, because doing the arithmetic is how
+    # this goes wrong. Three slices raised this literal from 52 for real,
+    # different additions — the asset slice, the transcript slice, and this one,
+    # which adds `POST /api/experiments/{experiment_id}/runs/{run_id}/remove`.
+    # Adding the deltas would give one number; measuring gives the true one.
     #
-    # MEASURED from `create_app().openapi()` on this branch after the change, not
-    # carried across from another one — see the note immediately above for why that
-    # distinction has already cost this file twice.
-    assert checked == 57, f"expected 57 documented operations, found {checked}"
+    # That new operation is a sub-path POST rather than a DELETE for the reason
+    # every other removal here is; and it is a separate operation from the run
+    # PATCH rather than a `null` on it, because removing a run is a destructive
+    # act with its own confirmation and its own refusal for a run that has
+    # already been exported.
+    assert checked == 64, f"expected 64 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -567,8 +568,21 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # all", which is a different fact from the shared storage-outage 503 and says so
     # in its body.
     ("/api/experiments/{experiment_id}/submit", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
+    # The three submission-history READS. 503 is declared because it is REACHABLE
+    # and is the operation's normal answer on a deployment whose history migration
+    # an operator has not applied — which is the hosted one. It covers both 503s
+    # these handlers can produce (see `routes._R_REVISION_HISTORY_UNAVAILABLE`).
+    # 404 on the two per-revision operations is TWO facts, distinguished by the
+    # body's `error`: no such record, and no such revision on a record that exists.
+    ("/api/experiments/{experiment_id}/revisions", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/revisions/{revision_no}", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/revisions/{revision_no}/diff", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/ingestion/csv/preview", "post"): ["200", "400", "401", "403", "404", "412", "413", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/pending", "get"): ["200", "401", "404", "422", "503"],
+    # The two-dimension provenance view. One `404` covers both "no such record"
+    # and "this record has no such run" — the bodies differ (`experiment_not_found`
+    # vs `run_not_found`), the documented status does not.
+    ("/api/experiments/{experiment_id}/provenance", "get"): ["200", "401", "404", "422", "503"],
     # Unmapped Notes. The split is the Run API's, for the Run API's reason: a note
     # is stored INSIDE the experiment's own document, so capturing one and reviewing
     # one both REWRITE THE RECORD and carry the record's `If-Match` with the whole
@@ -588,6 +602,13 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}/review", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    # Transcript capture. Storing a finalized transcript REWRITES THE RECORD — every
+    # segment of it becomes a note inside the record's own document — so it carries
+    # the record's `If-Match` and the whole 400/412/428 set, exactly as capturing a
+    # note does. Its `422` covers the finalize gate, an unknown body key, an unknown
+    # run, the segment ceiling and a retention state this build cannot enforce; on
+    # every one of them nothing is stored.
+    ("/api/experiments/{experiment_id}/transcript", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     # The Run API. Adding a run REWRITES THE RECORD, so `POST .../runs` carries the
     # record's `If-Match` and the whole 400/412/428 set with it. `PATCH
     # .../runs/{run_id}` carries THE RUN's instead — the same three codes, a
@@ -626,6 +647,16 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/memory/graph", "get"): ["200", "401"],
     ("/api/memory/graph/detail", "get"): ["200", "401"],
     ("/api/openapi", "get"): ["200", "401"],
+    # The model-seam capability report. A read of this build's own constants: it
+    # opens no connection and reads no credential, so it has no failure of its own
+    # to document.
+    ("/api/providers/capabilities", "get"): ["200", "401"],
+    # `501` is the seam having no provider in this deployment — a statement about
+    # the deployment, not a fault and not a wait. `422` is the SEPARATE case of a
+    # request that supplied nothing to work on. They are deliberately different
+    # codes: a caller who retried the first would be waiting for a decision nobody
+    # has made.
+    ("/api/transcription", "post"): ["200", "401", "422", "501"],
     # 409 = a reconnaissance scan is already running; nothing is connected to.
     ("/api/runtime/database/recon", "get"): ["200", "401", "409"],
     ("/api/schema", "get"): ["200", "401"],

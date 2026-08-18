@@ -1,6 +1,8 @@
 import './evidence.css';
 import { SOURCE_ICON, sourceIcon, Check, CircleAlert } from './icons';
+import { ProvenanceChipPair } from './ProvenanceChips';
 import { LABELS } from '../lib/labels';
+import { originsFromEvidence, primaryOrigin, reviewStateFor } from '../lib/provenance';
 import type { EvidenceTrailEntry } from '../lib/types';
 
 interface EvidenceTrailPanelProps {
@@ -148,6 +150,28 @@ function TrailEntryRow({
           entry.resolved && <Check className="trail-resolved" size={14} strokeWidth={2.4} aria-label="resolved" />
         )}
       </button>
+      {/* THE TWO PROVENANCE DIMENSIONS, ADDED WITHOUT REMOVING ANYTHING ABOVE.
+          The key, the source glyph, the unavailable marker, the namespaced dots
+          and the resolved check are all untouched; this is a second line beneath
+          them.
+
+          TWO CHIPS, NEVER ONE. The origin chip answers "where did this come
+          from"; the review chip answers "what establishes it". They are computed
+          by two separate pure functions and neither is derived from the other, so
+          "From a file" can and does sit beside "Needs review".
+
+          THE SERVER IS AUTHORITATIVE. `GET .../provenance` computes the same two
+          dimensions from the same stored content; these helpers exist so this
+          panel — which already holds the trail — does not need a second request
+          to show them. An entry whose stored evidence could not be read carries
+          the `unavailable` status, which is not a field status and therefore
+          falls to the conservative `needs_review`, never to anything reassuring. */}
+      <div className="trail-provenance">
+        <ProvenanceChipPair
+          origin={primaryOrigin(originsFromEvidence(entry.evidence))}
+          reviewState={reviewStateFor({ status: entry.status, evidence: entry.evidence })}
+        />
+      </div>
     </div>
   );
 }

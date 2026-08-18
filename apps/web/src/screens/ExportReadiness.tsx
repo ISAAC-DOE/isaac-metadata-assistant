@@ -15,6 +15,7 @@ import { AssistantPanel } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
+import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
 import { ROUTES } from '../lib/routes';
@@ -701,6 +702,14 @@ function LoadedExport({
       {validate.runs && validate.runs.length > 0 && (
         <RunFindings runs={validate.runs} warningRuns={warnings.runs} />
       )}
+
+      {/* SUBMISSION HISTORY, AND IT IS DELIBERATELY BELOW EXPORT RATHER THAN BESIDE
+          IT. Export and submission are different acts and this screen must not blur
+          them: exporting writes official records, submitting is a person declaring
+          the record finished. The panel is read-only, opens its own request, and
+          renders an honest unavailable state on a deployment whose submission-history
+          migration has not been applied — which is this one. */}
+      <RevisionHistoryPanel experimentId={id} />
 
       {/* The fan-out success report. It names what was WRITTEN — the export
           response is the only place those filenames exist; no read operation lists

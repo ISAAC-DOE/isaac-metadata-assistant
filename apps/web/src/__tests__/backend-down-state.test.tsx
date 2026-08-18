@@ -614,18 +614,22 @@ describe('both render sites guard the run command at build time', () => {
  * HOW. Every per-record path in that module is a single-line template literal of the
  * form `` `/experiments/${enc(…)}…` ``, so those literals are collected and each is
  * required to be either the bare record path or a sub-read. Measured, and re-measured
- * when the run REMOVAL write was added: 31 literals → 2 bare + 25 distinct sub-read
- * suffixes → 17 distinct first segments. (The one new literal is
- * `runs/${…}/remove`; the segment count does not move, because `runs` was already a
- * first segment. Before that, the Asset References reads and writes took it to
- * 30 → 2 + 24 → 17, whose four new literals were `assets` twice — the list read and the create write share one
- * path, and the Set folds them into ONE suffix — plus `assets/${…}` and
- * `assets/${…}/remove`, and the segment count moves because `assets` is a first
- * segment nothing else used. Before that: 23 → 2 + 19 → 15, and the three literals
- * added then were `notes` twice plus `notes/${…}/review`. Before that: 21 → 2 + 17 →
- * 15, when the two per-run override writes were added as `runs/${…}/overrides` and
- * `runs/${…}/overrides/clear`, whose segment was already covered by `runs`.) Those
- * counts are asserted, so adding a sub-read fails this file.
+ * when the run REMOVAL write was added on top of the submission-history reads.
+ * The three numbers are asserted below and are MEASURED after this merge, never
+ * added: both merged branches raised them from a shared base, and the arithmetic
+ * on a pair of deltas is exactly the failure this file already carries a note
+ * about. (The run-removal literal is `runs/${…}/remove`, which adds one literal
+ * and one suffix and moves NO segment count, because `runs` was already a first
+ * segment. The submission-history reads before it added three `/revisions…`
+ * suffixes sharing one new first segment. Before those, the Asset References
+ * reads and writes added `assets` twice — the list read and the create write
+ * share one path, and the Set folds them into ONE suffix — plus `assets/${…}`
+ * and `assets/${…}/remove`, moving the segment count because `assets` is a first
+ * segment nothing else used. Before that, `notes` twice plus
+ * `notes/${…}/review`; and before that the two per-run override writes
+ * `runs/${…}/overrides` and `runs/${…}/overrides/clear`, whose segment `runs`
+ * already covered.) Those counts are asserted, so adding a sub-read fails this
+ * file.
  *
  * WHAT THIS CANNOT SEE, stated precisely because the obvious reading of the previous
  * paragraph is too generous. `unclassifiedLiterals` catches a literal that STARTS
@@ -671,10 +675,18 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // An unexpected interior shape in one of these literals would silently shrink
     // both guards below — see the limits paragraph above for what this misses.
     expect(unclassifiedLiterals).toEqual([]);
-    expect(experimentPathLiterals.length).toBe(31);
+    // MEASURED after the merge, not derived by adding the two branches' deltas
+    // together. Both the asset/submission-history side and the run-removal side
+    // add per-record route literals, and the merge of two counter edits is
+    // exactly where this repository has been bitten before — see the note on
+    // `A11Y_BASELINE_TOTAL_NODES`, and see the `SUB_READ_SEGMENTS` case below,
+    // where both branches wrote the SAME literal and git merged two additions
+    // while recording one. Every number here was read out of this test's own
+    // failure output after the merge.
+    expect(experimentPathLiterals.length).toBe(35);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(25);
-    expect(SUB_READ_SEGMENTS).toHaveLength(17);
+    expect(SUB_READ_SUFFIXES).toHaveLength(29);
+    expect(SUB_READ_SEGMENTS).toHaveLength(19);
     // The run REMOVAL write. It adds one literal and one suffix and moves NO
     // segment count: `runs` was already a first segment, so the product word this
     // panel uses for a failed read of it ("the measurement runs") already covers
@@ -689,6 +701,13 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     expect(SUB_READ_SUFFIXES).toContain('notes');
     expect(SUB_READ_SUFFIXES).toContain('notes/SEG-1/review');
     expect(SUB_READ_SEGMENTS).toContain('notes');
+    // The three submission-history reads share ONE first segment and are three
+    // distinct suffixes — the inverse of the `notes` case above, and the shape a
+    // hand-written inventory gets wrong in the other direction.
+    expect(SUB_READ_SUFFIXES).toContain('revisions');
+    expect(SUB_READ_SUFFIXES).toContain('revisions/SEG-1');
+    expect(SUB_READ_SUFFIXES).toContain('revisions/SEG-1/diff');
+    expect(SUB_READ_SEGMENTS).toContain('revisions');
   });
 });
 

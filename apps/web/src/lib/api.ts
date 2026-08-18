@@ -53,6 +53,11 @@ import type {
   ApiNoteState,
   ApiOpenApiResponse,
   ApiPendingResponse,
+  ApiProviderCapabilities,
+  ApiProviderRefusal,
+  ApiRevisionDetail,
+  ApiRevisionDiff,
+  ApiRevisionHistory,
   ApiRunCheckResponse,
   ApiRunCreated,
   ApiRunOverrideCleared,
@@ -64,6 +69,8 @@ import type {
   ApiSearchResponse,
   ApiSearchScope,
   ApiSourcePreview,
+  ApiTranscriptCapture,
+  ApiTranscriptionResult,
   ApiTutorialSession,
   ApiDemoRunResponse,
   ApiDemoResetResult,
@@ -627,6 +634,49 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
  * statuses that carry a conflict payload (412 / 400), and the methods that use it
  * surface failures inline rather than through `BackendDown`.
  */
+/**
+ * A REVISION-HISTORY envelope, which arrives on `200` AND on `503`.
+ *
+ * WHY THIS EXISTS INSTEAD OF `getJson`. The three history operations answer `503`
+ * when the deployment cannot READ its own submission history — no application
+ * database, migrations not applied, or a database that did not answer. That status
+ * is the right one (a dependency this deployment is configured to use is not
+ * ready, and every cause is fixed by an operator), and the body is the SAME
+ * envelope the `200` carries, minus the rows. `getJson` would turn it into a bare
+ * `ApiError`, and the screen would then have to render "something went wrong" over
+ * a state the server described precisely.
+ *
+ * IT IS NOT A BLANKET "TREAT 503 AS SUCCESS". The body has to actually be one of
+ * these envelopes — `availability.state` must be present and must be one of the
+ * three the contract defines — and anything else falls through to the normal typed
+ * error. Otherwise an unrelated `503` (the storage handler's
+ * `experiment_storage_unavailable`, or a proxy's own page) would be handed to a
+ * caller as a history answer with no availability in it.
+ *
+ * An HTML intercept is still an intercept: `readJson` tests provenance BEFORE it
+ * parses, so a sign-in page served on this path throws rather than being mistaken
+ * for an envelope.
+ */
+const HISTORY_STATES = ['available', 'unavailable', 'not_applicable'];
+
+function isHistoryEnvelope(body: unknown): boolean {
+  const availability = (body as { availability?: { state?: unknown } } | null)?.availability;
+  return (
+    typeof availability?.state === 'string' && HISTORY_STATES.includes(availability.state)
+  );
+}
+
+async function getHistoryEnvelope<T>(path: string): Promise<T> {
+  const res = await request(path);
+  if (res.ok) return readJson<T>(res, path);
+  if (res.status !== 503) throw await httpErrorWithReason(res, path);
+  // `readJson` throws a typed ApiError for an intercept or an unparseable body,
+  // which is exactly what a non-envelope 503 should produce.
+  const body = await readJson<T>(res, path);
+  if (!isHistoryEnvelope(body)) throw httpError(res, path);
+  return body;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await request(path);
   if (!res.ok) throw await httpErrorWithReason(res, path);
@@ -1530,6 +1580,35 @@ export const api = {
     return getJson<ApiArtifactsResponse>(`/experiments/${enc(id)}/artifacts`);
   },
 
+  /*
+   * SUBMISSION REVISION HISTORY — three read-only operations, one envelope.
+   *
+   * All three resolve on `503` as well as `200`, because a `503` here is a
+   * DESCRIBED state ("this deployment cannot read its own submission history, and
+   * here is which of the three reasons applies") rather than a failure the screen
+   * has nothing to say about. See `getHistoryEnvelope`.
+   *
+   * THE CALLER MUST BRANCH ON `availability.state` BEFORE READING `revisions` OR
+   * `changes`. Those keys are ABSENT — not empty — whenever the history was not
+   * read, which is what makes it impossible to render "no revisions" over a
+   * database nobody successfully asked.
+   */
+  getRevisionHistory(id: string): Promise<ApiRevisionHistory> {
+    return getHistoryEnvelope<ApiRevisionHistory>(`/experiments/${enc(id)}/revisions`);
+  },
+
+  getRevision(id: string, revisionNo: number): Promise<ApiRevisionDetail> {
+    return getHistoryEnvelope<ApiRevisionDetail>(
+      `/experiments/${enc(id)}/revisions/${enc(String(revisionNo))}`,
+    );
+  },
+
+  getRevisionDiff(id: string, revisionNo: number): Promise<ApiRevisionDiff> {
+    return getHistoryEnvelope<ApiRevisionDiff>(
+      `/experiments/${enc(id)}/revisions/${enc(String(revisionNo))}/diff`,
+    );
+  },
+
   // P34.2 — the READ-ONLY grounded assistant resolver. A non-mutating POST (a
   // GET-like query carrying a JSON body): it resolves a free-form question
   // against the current record context and returns a source-labeled answer. It
@@ -1827,7 +1906,124 @@ export const api = {
       ]);
     return { detail, groups, evidence, artifacts, validate, warnings, classification };
   },
+
+  /* ---- Transcript capture ------------------------------------------------
+   *
+   * THREE FUNCTIONS, AND NONE OF THEM WRITES A FIELD. Accepting a candidate is
+   * `updateRun` above — the existing confirmed-edit path, with the RUN's own
+   * `If-Match`. There is deliberately no `acceptCandidate` here: a second write
+   * path would be a second place for the precondition to be forgotten.
+   */
+
+  /**
+   * The honest status of the three model seams, FROM THE SERVER.
+   *
+   * Deliberately not a constant in this bundle. A string compiled in here would
+   * describe the build the browser was built from rather than the deployment it
+   * is talking to, and the one thing this report must never do is claim a
+   * capability the server does not have.
+   */
+  getProviderCapabilities(): Promise<ApiProviderCapabilities> {
+    return getJson<ApiProviderCapabilities>('/providers/capabilities');
+  },
+
+  /**
+   * Ask for a transcript of audio the CALLER holds.
+   *
+   * `audioRef` is an opaque handle to audio in this tab's memory — never bytes,
+   * and there is no multipart form anywhere in this application to send bytes
+   * through. In a deployment with no transcription provider this rejects with a
+   * `501` whose body names what is missing; the caller must render that rather
+   * than a spinner, because nothing is being waited for.
+   */
+  async requestTranscription(opts: {
+    audioRef?: string;
+    manualTranscript?: string;
+    language?: string;
+  }): Promise<ApiTranscriptionResult> {
+    const path = '/transcription';
+    const body: Record<string, unknown> = {};
+    if (opts.audioRef) body.audio_ref = opts.audioRef;
+    if (opts.manualTranscript) body.manual_transcript = opts.manualTranscript;
+    if (opts.language) body.language = opts.language;
+    const res = await request(path, { method: 'POST', body: JSON.stringify(body) });
+    if (res.ok) return readJson<ApiTranscriptionResult>(res, path);
+    /*
+     * A REFUSAL IS NOT A GENERIC FAILURE, AND IT HAS TO REACH THE CALLER WHOLE.
+     *
+     * `mutationError` reads a response body only for the three
+     * precondition/validation statuses, which is exactly right for a write: on
+     * anything else the body is a stack of no use to a reader. Here the body IS
+     * the useful part — it names what is missing and where the decision is
+     * recorded — and the status is `501`. So it is read for this operation only,
+     * rather than by widening a helper that every write in this module shares.
+     *
+     * THE ORDER IS DELIBERATE. `mutationError` runs FIRST, so its two
+     * classifications survive: a sign-in page returned in place of the API keeps
+     * `htmlIntercept` (and is never parsed as JSON), and a status it already
+     * reads the body for arrives with `body` set and is left alone. Only a
+     * failure it left bodyless is read here, and it did not consume the stream in
+     * that case.
+     */
+    const failure = await mutationError(res, path);
+    if (failure.body !== undefined || failure.htmlIntercept) throw failure;
+    const refusal = await res.json().catch(() => undefined);
+    if (refusal === undefined) throw failure;
+    throw new ApiError(failure.message, {
+      status: failure.status,
+      path,
+      contentType: failure.contentType,
+      body: refusal,
+    });
+  },
+
+  /**
+   * Read one FINALIZED transcript.
+   *
+   * `finalized: true` is sent unconditionally and is not a parameter, because
+   * this client only calls this from a control the scientist activated after
+   * reviewing their own text — there is no path here that submits text still
+   * being typed. The server refuses without it in any case; sending it as a
+   * caller-supplied flag would invite a future component to pass `false` and
+   * discover what happens.
+   *
+   * `runId` is included only when the scientist chose one. An omitted run stays
+   * omitted rather than travelling as `null`, and is never filled in from the
+   * only run that happens to exist — the server asks instead.
+   */
+  async captureTranscript(
+    experimentId: string,
+    opts: { experimentVersion: string; text: string; runId?: string },
+  ): Promise<ApiTranscriptCapture> {
+    const path = `/experiments/${enc(experimentId)}/transcript`;
+    const body: Record<string, unknown> = { text: opts.text, finalized: true };
+    if (opts.runId) body.run_id = opts.runId;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiTranscriptCapture>(res, path);
+    throw await mutationError(res, path);
+  },
 } as const;
+
+/**
+ * The refusal body a `501` from the transcription operation carries, when it is
+ * readable. Returns `null` rather than a fabricated one — an invented "missing"
+ * list would be the fake status this whole surface exists to avoid.
+ */
+export function providerRefusalOf(error: unknown): ApiProviderRefusal | null {
+  if (!(error instanceof ApiError)) return null;
+  const body = error.body;
+  if (!body || typeof body !== 'object') return null;
+  const candidate = body as Partial<ApiProviderRefusal>;
+  if (candidate.refused !== true) return null;
+  if (typeof candidate.message !== 'string' || !Array.isArray(candidate.missing)) return null;
+  return candidate as ApiProviderRefusal;
+}
 
 /** Distinct source-file basenames referenced by any evidence entry (order kept). */
 /**

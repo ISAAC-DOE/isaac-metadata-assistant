@@ -572,6 +572,30 @@ export const BOUNDARY_CAVEAT_MARKERS: readonly string[] = [
   'aggregate only',
   'withheld',
   'does not connect',
+  /*
+   * ── ADDED FOR `GET .../revisions/{revision_no}/diff`, THE SAME MISS AGAIN ──
+   *
+   * That operation shipped four post-lead paragraphs — 1,320 characters, well over
+   * the threshold — and every one of them is scope copy: which content the
+   * comparison covers ("Evidence entries, run overrides, answer logs, assets and
+   * implicit claims are NOT compared"), what an empty result does and does not
+   * mean, and that an unreadable snapshot yields no comparison rather than an empty
+   * one. Hiding that behind the disclosure would leave the visible lead — "reports
+   * every draft field address whose value differs" — reading as a complete
+   * comparison, which is precisely the overstatement this list exists to prevent.
+   *
+   * It contained NOT ONE token from the list above, and CI caught it this time
+   * (`settings-api.test.tsx`, "hides ZERO characters of the real contract"), which
+   * is the difference from the `runtime/verification` miss recorded above.
+   *
+   * EACH WAS MEASURED AGAINST THE REAL SERVED STRING, per the rule stated above,
+   * and each fires on its own paragraph: `not compared` on ¶2, `did not look` on
+   * ¶3, `could not` on ¶5. ¶4 carries none, which is correct and is why the rule is
+   * ALL-OR-NOTHING over the remainder rather than per-paragraph.
+   */
+  'not compared',
+  'did not look',
+  'could not',
 ];
 
 /** Does this paragraph carry a boundary/honesty claim that must stay visible? */

@@ -12,6 +12,15 @@ import type {
   SourceType,
 } from './types';
 import { LABELS } from './labels';
+// The two provenance dimensions own their own product words, next to the pure
+// helpers that produce them — so a chip label and the dimension it names cannot
+// drift apart, and the cross-language parity test has one file to check.
+import {
+  ORIGIN_LABEL,
+  REVIEW_STATE_LABEL,
+  type ProvenanceOrigin,
+  type ProvenanceReviewState,
+} from './provenance';
 
 export type ChipKind =
   | 'verified'
@@ -39,7 +48,27 @@ export type ChipKind =
   // mean valid / complete / exportable, and no reconciled field is editable.
   | 'reconMatch'
   | 'reconConflict'
-  | 'reconAbsent';
+  | 'reconAbsent'
+  // The unified-provenance ORIGIN axis — WHERE a value came from. Eight kinds,
+  // and every one of them is visually NEUTRAL by design (see `ORIGIN_CHIP`):
+  // where a value came from says nothing about whether anything establishes it,
+  // so an origin must not be able to read as an approval, through its words or
+  // through its palette.
+  | 'origManual'
+  | 'origFile'
+  | 'origVoice'
+  | 'origInherited'
+  | 'origAssistant'
+  | 'origDerived'
+  | 'origEvidence'
+  | 'origUnknown'
+  // The unified-provenance REVIEW axis — what, if anything, establishes the
+  // value. This is the half that carries colour, and it is still not a validity,
+  // completion or export verdict.
+  | 'revSupported'
+  | 'revNeedsReview'
+  | 'revConflict'
+  | 'revUnmapped';
 
 export interface ChipMeta {
   label: string;
@@ -73,6 +102,49 @@ export const CHIP_META: Record<ChipKind, ChipMeta> = {
   reconMatch: { label: LABELS.chipReconMatch, className: 'chip-recon-match' },
   reconConflict: { label: LABELS.chipReconConflict, className: 'chip-recon-conflict' },
   reconAbsent: { label: LABELS.chipReconAbsent, className: 'chip-recon-absent' },
+  // ORIGIN axis. SEVEN of the eight share ONE neutral palette class, and that
+  // repetition is the assertion, not an oversight: no origin may be styled as
+  // reassuring or as alarming. `origUnknown` gets the dashed variant of the same
+  // neutral palette because it is an ABSENCE, which is a different fact from any
+  // of the seven — not a different level of confidence in the value.
+  origManual: { label: ORIGIN_LABEL.manual, className: 'chip-origin' },
+  origFile: { label: ORIGIN_LABEL.file, className: 'chip-origin' },
+  origVoice: { label: ORIGIN_LABEL.voice, className: 'chip-origin' },
+  origInherited: { label: ORIGIN_LABEL.inherited, className: 'chip-origin' },
+  origAssistant: { label: ORIGIN_LABEL.assistant, className: 'chip-origin' },
+  origDerived: { label: ORIGIN_LABEL.derived, className: 'chip-origin' },
+  origEvidence: { label: ORIGIN_LABEL.evidence, className: 'chip-origin' },
+  origUnknown: { label: ORIGIN_LABEL.unknown, className: 'chip-origin-absent' },
+  // REVIEW axis. `revUnmapped` is dashed for the same reason `missing` is: it is
+  // content that has not been placed, never an established fact.
+  revSupported: { label: REVIEW_STATE_LABEL.supported, className: 'chip-rev-supported' },
+  revNeedsReview: { label: REVIEW_STATE_LABEL.needs_review, className: 'chip-rev-needsreview' },
+  revConflict: { label: REVIEW_STATE_LABEL.conflict, className: 'chip-rev-conflict' },
+  revUnmapped: { label: REVIEW_STATE_LABEL.unmapped, className: 'chip-rev-unmapped' },
+};
+
+/**
+ * Map an ORIGIN to its chip kind (single source). Kept strictly apart from
+ * `REVIEW_STATE_CHIP` below — the two dimensions are independent, and no code
+ * path derives one from the other.
+ */
+export const ORIGIN_CHIP: Record<ProvenanceOrigin, ChipKind> = {
+  manual: 'origManual',
+  file: 'origFile',
+  voice: 'origVoice',
+  inherited: 'origInherited',
+  assistant: 'origAssistant',
+  derived: 'origDerived',
+  evidence: 'origEvidence',
+  unknown: 'origUnknown',
+};
+
+/** Map a REVIEW STATE to its chip kind (single source). */
+export const REVIEW_STATE_CHIP: Record<ProvenanceReviewState, ChipKind> = {
+  supported: 'revSupported',
+  needs_review: 'revNeedsReview',
+  conflict: 'revConflict',
+  unmapped: 'revUnmapped',
 };
 
 /**
