@@ -70,6 +70,10 @@
 .chip-rev-needsreview { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border); }
 .chip-rev-conflict    { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);     font-weight: 600; }
 .chip-rev-unmapped    { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);  border-style: dashed; }
+/* `resolved` wears the CONFIRMED palette, not the verified one: a person decided
+ * which citation to stand behind, which is a different fact from a value with
+ * established evidence support. Not dashed — a recorded decision is a real act. */
+.chip-rev-resolved    { color: var(--confirmed-text); background: var(--confirmed-bg); border-color: var(--confirmed-border); }
 
 /* ---- VerdictCard — the hard gate (largest, most saturated) ---------- */
 .verdict {

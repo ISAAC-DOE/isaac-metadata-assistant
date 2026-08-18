@@ -1185,3 +1185,202 @@ def test_an_armed_deployment_discloses_the_fixture_basis_on_health(armed, monkey
     assert body["actor_trust_basis"] == identity.TRUST_BASIS_TEST_FIXTURE
     assert body["verifier_id"] == identity.FIXTURE_VERIFIER
     assert sstore.BLOCKER_NO_ATTRIBUTABLE_ACTOR not in body["blockers"]
+
+
+# =============================================================================
+# conflict_summary's RESOLUTION DISCLOSURE — five keys on a durably stored row
+# =============================================================================
+#
+# WHY THIS BLOCK EXISTS. An independent review grepped the whole tree and found that
+# `resolved_field_count`, `unresolved_field_count`, `stale_resolution_count`,
+# `deferred_field_count`, `resolutions_supplied` and the per-unit `resolution_states`
+# map appeared in NO test, backend or frontend. Five new keys on a row that is written
+# durably at submit, plus a two-step scoping rule that is not obvious — and nothing
+# holding any of it. The review verified the behaviour was correct; these are the
+# tests it wrote as throwaway probes, committed so the next slice to touch the scoping
+# rule has something to break.
+
+
+def _conflicted_draft(address: str = "sample.sample_id") -> dict:
+    """A draft carrying exactly one conflicting address, the ordinary way.
+
+    Two `user_confirmation` entries with different answers — the state produced by
+    answering a question, noticing a typo, and answering again.
+    """
+    draft = ws._full_draft()
+    draft.setdefault("fields", {})[address] = field_value(
+        "SYN-SECOND",
+        status="verified",
+        evidence=[
+            user_confirmation("Sample id?", "SYN-FIRST", "2026-01-01T00:00:00Z"),
+            user_confirmation("Sample id?", "SYN-SECOND", "2026-01-02T00:00:00Z"),
+        ],
+    )
+    return draft
+
+
+def _third_answer(exp, address: str = "sample.sample_id") -> None:
+    """Append a THIRD distinct answer, which moves the competing set."""
+    entry = exp.draft["fields"][address]
+    entry["evidence"] = [
+        *entry["evidence"],
+        user_confirmation("Sample id?", "SYN-THIRD", "2026-01-03T00:00:00Z"),
+    ]
+    exp.save_versioned()
+
+
+def _decision(exp, address: str, *, outcome: str, value=None, run_id=None):
+    """A decision recorded directly against the draft, at the model layer.
+
+    Deliberately NOT through the HTTP route: this block is about
+    `conflict_summary`'s arithmetic, and routing through the API would make a
+    failure ambiguous between the two.
+    """
+    import isaac_api.conflict_resolution as cr
+
+    competing = cr.competing_from_evidence(exp.draft["fields"][address]["evidence"])
+    return cr.new_resolution(
+        resolution_id=ws.new_record_id(),
+        recorded_utc="2026-01-05T00:00:00Z",
+        address=address,
+        run_id=run_id,
+        outcome=outcome,
+        chosen_from=cr.CHOSEN_FROM_CANDIDATE if outcome == cr.OUTCOME_RESOLVED else None,
+        chosen_value=value,
+        competing_values=competing,
+        rationale=None,
+        subject=None,
+        trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+    )
+
+
+def test_conflict_summary_counts_a_resolved_address_as_resolved(workspace):
+    import isaac_api.conflict_resolution as cr
+
+    address = "sample.sample_id"
+    _make(draft=_conflicted_draft(address))
+    exp = ws.load_experiment(EXPERIMENT_ID)
+    decision = _decision(exp, address, outcome=cr.OUTCOME_RESOLVED, value="SYN-SECOND")
+
+    summary = submissions.conflict_summary(exp.export_units(), resolutions=[decision])
+    assert summary["conflicting_field_count"] == 1, summary
+    assert summary["resolved_field_count"] == 1, summary
+    assert summary["unresolved_field_count"] == 0, summary
+    assert summary["stale_resolution_count"] == 0, summary
+    assert summary["deferred_field_count"] == 0, summary
+    assert summary["resolutions_supplied"] is True, summary
+    assert summary["affected_units"][0]["resolution_states"][address] == cr.RESOLUTION_CURRENT
+
+
+def test_conflict_summary_counts_a_STALE_decision_as_unresolved(workspace):
+    """The load-bearing one. A decision made over a different competing set does not
+    cover the conflict a reader now sees, and `unresolved` must say so."""
+    import isaac_api.conflict_resolution as cr
+
+    address = "sample.sample_id"
+    _make(draft=_conflicted_draft(address))
+    exp = ws.load_experiment(EXPERIMENT_ID)
+    decision = _decision(exp, address, outcome=cr.OUTCOME_RESOLVED, value="SYN-SECOND")
+    _third_answer(exp, address)
+    exp = ws.load_experiment(EXPERIMENT_ID)
+
+    summary = submissions.conflict_summary(exp.export_units(), resolutions=[decision])
+    assert summary["resolved_field_count"] == 0, summary
+    assert summary["stale_resolution_count"] == 1, summary
+    # STALE IS UNRESOLVED. Asserted here as well as in the model, because this is the
+    # figure that lands on the stored row and the two could drift apart.
+    assert summary["unresolved_field_count"] == 1, summary
+    assert summary["affected_units"][0]["resolution_states"][address] == cr.RESOLUTION_STALE
+
+
+def test_conflict_summary_counts_a_DEFERRED_decision_as_unresolved_and_does_not_gate(workspace):
+    import isaac_api.conflict_resolution as cr
+
+    address = "sample.sample_id"
+    _make(draft=_conflicted_draft(address))
+    exp = ws.load_experiment(EXPERIMENT_ID)
+    decision = _decision(exp, address, outcome=cr.OUTCOME_DEFERRED)
+
+    summary = submissions.conflict_summary(exp.export_units(), resolutions=[decision])
+    assert summary["deferred_field_count"] == 1, summary
+    assert summary["unresolved_field_count"] == 1, summary
+    assert summary["resolved_field_count"] == 0, summary
+    # A deferred decision is a recorded outcome and STILL does not gate.
+    assert summary["gating"] == "disclosed_not_gated", summary
+
+
+def test_conflict_summary_distinguishes_no_decisions_from_no_question(workspace):
+    """`resolutions_supplied` exists so "nothing was resolved" and "nobody asked
+    about resolutions" are not the same bytes on a stored row."""
+    import isaac_api.conflict_resolution as cr
+
+    address = "sample.sample_id"
+    _make(draft=_conflicted_draft(address))
+    exp = ws.load_experiment(EXPERIMENT_ID)
+
+    summary = submissions.conflict_summary(exp.export_units())
+    assert summary["resolutions_supplied"] is False, summary
+    assert summary["resolved_field_count"] == 0, summary
+    assert summary["unresolved_field_count"] == 1, summary
+    assert summary["affected_units"][0]["resolution_states"][address] == cr.RESOLUTION_ABSENT
+
+
+def test_conflict_summary_lets_a_RECORD_level_decision_cover_a_RUN_unit(workspace):
+    """THE TWO-STEP SCOPING RULE, pinned because it is not obvious and because it is
+    NOT the same rule `conflict_report` applies.
+
+    `conflict_summary` scopes to `resolution.run_id in (unit.run_id, None)` and then
+    prefers a run-specific decision over a record-level one — so a record-level
+    decision covers a run unit that inherits the address. `conflict_report` describes
+    a run by the run's OWN draft and does not do this. Both are deliberate; a slice
+    that changes one and not the other will fail here.
+    """
+    import isaac_api.conflict_resolution as cr
+
+    address = "sample.sample_id"
+    _make(draft=_conflicted_draft(address), runs=("run A",))
+    exp = ws.load_experiment(EXPERIMENT_ID)
+    # run_id=None — a RECORD-level decision.
+    decision = _decision(exp, address, outcome=cr.OUTCOME_RESOLVED, value="SYN-SECOND")
+
+    summary = submissions.conflict_summary(exp.export_units(), resolutions=[decision])
+    units = summary["affected_units"]
+    assert units, summary
+    for unit in units:
+        assert unit["resolution_states"][address] == cr.RESOLUTION_CURRENT, unit
+    assert summary["unresolved_field_count"] == 0, summary
+
+
+def test_the_resolution_disclosure_still_carries_no_value_of_any_kind(workspace):
+    """The invariant the whole summary exists under, re-asserted over the NEW keys.
+
+    `conflict_summary` may emit addresses and counts and nothing else. A decision
+    carries a chosen value and a rationale, so the disclosure is exactly where one
+    could leak.
+    """
+    import isaac_api.conflict_resolution as cr
+
+    address = "sample.sample_id"
+    _make(draft=_conflicted_draft(address))
+    exp = ws.load_experiment(EXPERIMENT_ID)
+    decision = cr.new_resolution(
+        resolution_id=ws.new_record_id(),
+        recorded_utc="2026-01-05T00:00:00Z",
+        address=address,
+        run_id=None,
+        outcome=cr.OUTCOME_RESOLVED,
+        chosen_from=cr.CHOSEN_FROM_CANDIDATE,
+        chosen_value="SYN-SECOND",
+        competing_values=cr.competing_from_evidence(exp.draft["fields"][address]["evidence"]),
+        rationale="SYN-RATIONALE-CANARY",
+        subject=None,
+        trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+    )
+
+    blob = json.dumps(submissions.conflict_summary(exp.export_units(), resolutions=[decision]))
+    for leaked in ("SYN-SECOND", "SYN-FIRST", "SYN-RATIONALE-CANARY", "competing"):
+        assert leaked not in blob, (leaked, blob)
+    # ...while the address and the counts ARE there, so this is not passing by
+    # emitting nothing at all.
+    assert address in blob
+    assert '"resolved_field_count": 1' in blob

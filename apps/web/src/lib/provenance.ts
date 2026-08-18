@@ -120,6 +120,11 @@ export const PROVENANCE_REVIEW_STATES = [
   'needs_review',
   'conflict',
   'unmapped',
+  // A conflict a PERSON decided, and only while that decision still covers the
+  // answers a reader is looking at. Declaration order mirrors the backend tuple
+  // exactly — `provenance.test.tsx` reads that tuple out of the Python source and
+  // compares it element for element, so this list is not free to be tidied.
+  'resolved',
 ] as const;
 
 export type ProvenanceReviewState = (typeof PROVENANCE_REVIEW_STATES)[number];
@@ -129,6 +134,7 @@ export const REVIEW_STATE_LABEL: Record<ProvenanceReviewState, string> = {
   needs_review: 'Needs review',
   conflict: 'Conflicting',
   unmapped: 'Not yet placed',
+  resolved: 'Conflict decided',
 };
 
 export const REVIEW_STATE_MEANING: Record<ProvenanceReviewState, string> = {
@@ -138,6 +144,8 @@ export const REVIEW_STATE_MEANING: Record<ProvenanceReviewState, string> = {
     'Something is outstanding — an unconfirmed value, a value with no citation, or content this application cannot place on its own.',
   conflict: 'Two or more citations assert values that cannot both be right. A person must decide.',
   unmapped: 'Captured content that has no schema home and that nobody has reviewed yet.',
+  resolved:
+    'The citations still disagree, and a person recorded which answer they stand behind. Nothing was removed and the field\u2019s own value is unchanged; if further competing evidence arrives, this returns to Conflicting.',
 };
 
 // --- pure derivations (mirrors of the backend, for data already on screen) ----
@@ -210,6 +218,11 @@ export function hasConflictingEvidence(evidence: readonly FieldEvidence[] | unde
  * `'unavailable'`, which is not a field status and must land in `needs_review`
  * rather than being coerced into something reassuring.
  */
+// THIS MIRROR NEVER RETURNS `resolved`, DELIBERATELY. A recorded decision is not
+// in the data this function is given — it lives in the record's own document and
+// reaches a client only through the provenance response's `review_state` and
+// `resolution_state`. Deriving `resolved` from evidence alone is impossible, and
+// guessing it would be the one thing this mirror must not do.
 export function reviewStateFor(item: {
   status?: FieldStatus | 'unavailable' | string | null;
   evidence?: readonly FieldEvidence[];
