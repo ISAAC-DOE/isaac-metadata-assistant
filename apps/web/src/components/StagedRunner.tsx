@@ -49,8 +49,17 @@ export function StagedRunner({ stages }: StagedRunnerProps) {
   return (
     <div className="runner">
       {stages.map((stage) => {
-        // `current` still reads as `done` — an in-flight step has genuinely got
-        // that far — but `failed` is its own class and never borrows the tick.
+        // `failed` is its own class and never borrows the tick.
+        //
+        // TWO OF THESE BRANCHES ARE UNREACHABLE FROM THE ONLY PRODUCER, and saying so
+        // is the point. `demoStepsToStages` is the sole producer (`LoadMaterials` is
+        // its sole call site) and it now emits only `done` | `failed`. `upcoming` was
+        // already unreachable before this change; `current` became unreachable with
+        // it. An earlier version of this comment claimed "an in-flight step has
+        // genuinely got that far", which describes a state the app never produces —
+        // in the very file whose docstring itemises branches deleted for being
+        // reachable only through a never-set flag. They are kept as DEFENSIVE
+        // handling for a second producer, and are labelled rather than implied live.
         const cls =
           stage.state === 'failed'
             ? 'failed'

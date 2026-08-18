@@ -1554,6 +1554,73 @@ describe('a report over an empty corpus claims no passes', () => {
     expect(cardByLabel('Official Validation').textContent).toContain('not a pass');
   });
 
+  it('withholds the pass tone from the MUTATION panel groups too, not just the headline', async () => {
+    /*
+     * The first version of this fix guarded four of roughly nine pass-tinted surfaces
+     * for the identical input, while its comment read as though the class were closed.
+     * An independent review rendered the empty-corpus fixture and found green still on
+     * "Changes That Behaved as Designed", "Changes That Behaved Unexpectedly", "Checks
+     * on the Verification Run Itself" and the trial-count reconciliation — all over
+     * ZERO trials.
+     */
+    await renderReport(verificationReportEmptyCorpus);
+    const groups = Array.from(document.querySelectorAll('.stats-verify-group'));
+    const byLabel = (label: string) =>
+      Array.from(document.querySelectorAll('.stats-mini-label, .stats-figure-group-label'))
+        .find((n) => (n.textContent ?? '').includes(label))
+        ?.closest('[data-tone]');
+
+    // The reconciliation: zero trials balance TRIVIALLY, so `balanced` is vacuous.
+    const accounting = byLabel('How the Trial Counts Add Up');
+    expect(accounting, 'the reconciliation group did not render').not.toBeNull();
+    expect(accounting?.getAttribute('data-tone')).not.toBe('good');
+
+    // NOT A BLANKET RULE: the statement-count safeguard KEEPS its pass tone, because
+    // "the run counted no statement that would have changed data" is true and earned
+    // whether the corpus held thirty records or none. Asserting that here stops a
+    // later slice from neutralising it in the name of consistency.
+    const statements = byLabel('Statements Counted During the Run');
+    expect(statements, 'the statement-count group did not render').not.toBeNull();
+    expect(statements?.getAttribute('data-tone')).toBe('good');
+
+    // And no group anywhere claims a pass off zero trials.
+    const greenWithZeroTrials = groups.filter(
+      (g) =>
+        g.getAttribute('data-tone') === 'good' &&
+        !(g.textContent ?? '').includes('Statements Counted During the Run'),
+    );
+    expect(greenWithZeroTrials.map((g) => (g.textContent ?? '').slice(0, 60))).toEqual([]);
+  });
+
+  it('mode-gates the causal sentence: a private-mode empty run claims no cause', async () => {
+    /*
+     * "its directory is absent" and "every file failed to parse" are both
+     * `load_public_corpus` paths. In `authorized_private_sample` there is no directory
+     * and no file, so stating those causes there was a confident explanation that
+     * cannot apply — on the screen whose subject is not overclaiming.
+     */
+    await renderReport({
+      ...verificationReportEmptyCorpus,
+      metadata: {
+        ...verificationReportEmptyCorpus.metadata,
+        verification_mode: 'authorized_private_sample',
+      },
+    });
+    const note = document.querySelector('.stats-empty-note');
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain('no records');
+    expect(note?.textContent).not.toContain('directory is absent');
+    expect(note?.textContent).not.toContain('failed to parse');
+  });
+
+  it('DOES state the cause in public mode, where it is true', async () => {
+    // The positive half — without it, deleting the sentence entirely would pass.
+    await renderReport(verificationReportEmptyCorpus);
+    expect(document.querySelector('.stats-empty-note')?.textContent).toContain(
+      'directory is absent',
+    );
+  });
+
   it('still grants the pass tone when a corpus WAS examined and nothing failed', async () => {
     // The other half. Without this, "never say good" would pass the tests above and
     // destroy the signal the cards exist to carry.

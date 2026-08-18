@@ -417,15 +417,22 @@ export const verificationFutureFormat = {
  * A FULL report over an EMPTY corpus — the state that produced three green cards.
  *
  * Reachable, and produced silently by the backend rather than refused:
- * `verification.py` returns `()` for a missing corpus directory and `continue`s a
- * file that will not parse, so one malformed fixture, or a fixtures directory left
- * out of the image, empties the corpus with no error surfacing. `failing` is then
- * `total - passing` = 0, and every "no failures" tone fired.
+ * `verification.py` returns `()` for a missing corpus directory and `continue`s a file
+ * that will not parse, so a fixtures directory left out of the image — or EVERY file in
+ * it failing to parse — empties the corpus with no error surfacing. (One bad file of
+ * ten leaves nine: it is a `continue`, not a `return`. An earlier version of this
+ * docstring said "one malformed fixture … empties the corpus", which overstated it.)
+ * `failing` is then `total - passing` = 0, and every "no failures" tone fired.
  *
  * `status: 'ok'` is the load-bearing part of this fixture. This is NOT the pending
  * or refused envelope, which the client already handles correctly — it is a report
- * that claims to have run. Every count is zero and INTERNALLY CONSISTENT, so nothing
- * else in the screen has grounds to reject it.
+ * that claims to have run.
+ *
+ * INTERNALLY CONSISTENT, and this sentence used to be false. The first version spread
+ * `format_shadow` wholesale, keeping histograms of 28 and 19 findings over ZERO
+ * records — a body the backend cannot produce, rendered directly beneath a banner
+ * saying nothing was examined. Both histograms are now empty. See the comment on
+ * `format_shadow` below.
  */
 export const verificationReportEmptyCorpus = {
   ...verificationReportOk,
@@ -440,6 +447,27 @@ export const verificationReportEmptyCorpus = {
     ...verificationReportOk.format_shadow,
     records_passing: 0,
     records_failing: 0,
+    // THE HISTOGRAMS MUST BE EMPTY TOO, and the first version of this fixture left
+    // them spread from `verificationReportOk`. It therefore rendered "Total 28
+    // occurrences" and "Total 19 occurrences" directly beneath a banner saying the run
+    // examined no records — a body `build_report` cannot produce, because both
+    // histograms are accumulated per-finding inside `_sweep`'s per-record loop. An
+    // independent review caught it, and the docstring above had asserted internal
+    // consistency while it was untrue: exactly what this file's own header rule 1
+    // exists to prevent ("a fixture that mixes the two teaches every assertion built
+    // on it that the pairing is possible").
+    failures_by_error_code: {
+      cells: [],
+      suppressed_categories: 0,
+      suppressed_total: 0,
+      floor: verificationReportOk.format_shadow.failures_by_error_code.floor,
+    },
+    failures_by_schema_path: {
+      cells: [],
+      suppressed_categories: 0,
+      suppressed_total: 0,
+      floor: verificationReportOk.format_shadow.failures_by_schema_path.floor,
+    },
   },
   mutations: {
     ...verificationReportOk.mutations,

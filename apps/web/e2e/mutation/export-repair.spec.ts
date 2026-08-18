@@ -120,30 +120,47 @@ test.describe('R4 · export, repaired and refused', () => {
      * observable signal that `Use This Value` reached the component that is now
      * mounted.
      */
+    /*
+     * WAIT ON THE OBSERVABLES THAT ACTUALLY MOVE — and the previous two attempts at
+     * this loop are worth recording, because both were wrong in instructive ways.
+     *
+     * The race is real. `confirmAnswer` keeps the SAME `GuidedPrompt` mounted
+     * (`key={blocker.id}`) for the whole in-flight POST, so `.first()` deterministically
+     * resolves to the PREVIOUS prompt while that POST is unresolved. The click re-stages
+     * the old value; the remount then resets `staged`, and `Confirm` is disabled forever.
+     * Note what this is NOT: not a "detaching copy", which is what the second attempt's
+     * comment claimed.
+     *
+     * ATTEMPT 1 asserted a heading `Answer ${n} Questions`. The heading renders
+     * `Answer {total} Questions` and `total` is CONSTANT for the screen's life, so it
+     * passed once and failed once. CI caught it.
+     *
+     * ATTEMPT 2 waited for `Use This Value` and `Confirm` to be enabled, and its comment
+     * called `toBeEnabled()` "the observable signal that Use This Value reached the
+     * component that is now mounted". THAT WAS FALSE: `Use This Value` has no `disabled`
+     * prop at all, so the wait is satisfied the instant the button attaches and signals
+     * nothing. An independent review proved it by forcing the window open with a 1000ms
+     * route delay on `POST .../answers` — 27 polls against a disabled `Confirm` with
+     * nothing staged. It converted a 60s mystery timeout into a 15s named failure, which
+     * is a real diagnostic gain and no fix at all.
+     *
+     * THIS version waits on two things that genuinely move, both proved to pass under
+     * that same forced delay:
+     *   . `.completion-counter` — counts up as questions close, so it establishes that
+     *     the PREVIOUS answer landed and this iteration is acting on a new question.
+     *     (The heading does not; the counter does.)
+     *   . `.guided-staged` — the "Ready to confirm" status the prompt renders only once
+     *     a value is staged. This is the staging observable attempt 2 claimed to use.
+     */
     for (let i = 0; i < 2; i++) {
-      /*
-       * NO HEADING ASSERTION HERE, AND THE FIRST VERSION OF THIS FIX HAD ONE.
-       *
-       * It asserted `Answer ${2 - i} Questions`, on the assumption that the heading
-       * counts DOWN as questions close. It does not: `GuidedCompletion` renders
-       * `Answer {total} Questions to Finish This Record`, where `total` is the TOTAL
-       * and is constant for the life of the screen. So the assertion passed on the
-       * first iteration and failed on the second, and CI caught it — a wait invented
-       * to fix a race became a second, different failure.
-       *
-       * The load-bearing waits are the two `toBeEnabled()` calls below. They observe
-       * the actual precondition rather than a proxy for it, which is why they survived
-       * and the heading did not.
-       */
-      const stage = page.getByRole('button', { name: 'Use This Value' }).first();
-      await expect(stage).toBeEnabled();
-      await stage.click();
-      const confirm = page.getByRole('button', { name: 'Confirm' });
-      // Not `.click()` straight away: an unstaged Confirm is legitimately disabled,
-      // and clicking it would wait 60s and then report a timeout instead of the real
-      // fact, which is that nothing was staged.
-      await expect(confirm, 'Confirm must become enabled once a value is staged').toBeEnabled();
-      await confirm.click();
+      await expect(page.locator('.completion-counter')).toHaveText(`${i} / 2`);
+      await page.getByRole('button', { name: 'Use This Value' }).first().click();
+      await expect(
+        page.locator('.guided-staged'),
+        'a value must be staged before Confirm is pressed: an unstaged Confirm is ' +
+          'legitimately disabled, and clicking it proves nothing',
+      ).toBeVisible();
+      await page.getByRole('button', { name: 'Confirm' }).click();
     }
     await expect(page.getByRole('heading', { name: 'All Fields Resolved' })).toBeVisible();
     expect((await server.read(SEED.partial)).pendingIds, 'the repair must close both questions').toEqual([]);

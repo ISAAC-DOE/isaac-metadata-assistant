@@ -699,17 +699,34 @@ function VerificationReportBody({
         this is a FULL report, not the pending envelope, so the client's existing
         refused/partial branches never see it.
 
-        `evaluated` gates all three. A green tone must assert something was checked;
-        `neutral` says only that no failure was counted, which is the truth when
-        nothing was examined. The same codebase already does this correctly two files
+        A green tone must assert that something was CHECKED; `neutral` says only that no
+        failure was counted, which is the truth when nothing was examined. (An earlier
+        version of this paragraph said "`evaluated` gates all three" and named an
+        identifier that does not exist anywhere in this file — it was replaced by the
+        per-card gates below and the sentence was not updated.) The same codebase already does this correctly two files
         away — `StatisticsPage` writes "No records were returned, so no fields were
         classified and no count is stated." rather than drawing an empty verdict.
       */}
       {(() => {
         /* Each card gates on ITS OWN denominator rather than on a single
-           `records_scanned > 0` flag. They can differ: a record can be scanned and
-           still be absent from the shadow tier, so one shared gate would either
-           over- or under-claim for one of the three. */
+           `records_scanned > 0` flag.
+
+           THE REASON FIRST GIVEN FOR THIS WAS FALSE, and is corrected rather than
+           quietly dropped. It said "a record can be scanned and still be absent from
+           the shadow tier". It cannot: `build_report` computes
+           `format_shadow.records_failing = total - shadow_passing` and
+           `official_validation.failing = total - official_passing` from the same
+           `total`, so `shadow.total`, `official.total` and `records_scanned` are equal
+           by construction. An independent review measured that.
+
+           The per-card gate is KEPT anyway, and the honest reason is different: it is
+           strictly more conservative than a shared flag, and it makes each card's claim
+           depend on the denominator that card actually displays — so a hand-built or
+           future report whose parts disagree cannot green one card off another's count.
+           Note the consequence, since it is the cost of that choice: the banner gates on
+           `records_scanned` while the cards gate on their own totals, so an
+           INTERNALLY INCONSISTENT report could show a green card under a banner saying
+           nothing passed. That is a strictly better failure than the reverse. */
         const nothingExamined =
           ' No records were examined, so this is not a pass — nothing was checked.';
         return (
@@ -772,15 +789,35 @@ function VerificationReportBody({
         /*
           AND IT IS STATED ONCE, PLAINLY, ABOVE THE SECTIONS. A reader who takes in
           only the headline row should not have to notice that three tones went
-          neutral to learn that the run examined nothing. `role="status"` rather
-          than `alert`: it is a fact about the run, not an error in the page.
+          neutral to learn that the run examined nothing.
+
+          THE CAUSAL SENTENCE IS MODE-GATED, and the first version of it was not.
+          "its directory is absent" and "every file failed to parse" are both
+          `load_public_corpus` paths. In `authorized_private_sample` there is no
+          directory and no file: an empty corpus arises when the datastore drain
+          returns no readable row, after which a FULL report is still built. So the
+          sentence was a confident causal explanation that cannot apply in that mode,
+          on a screen whose whole subject is not overclaiming — found by an independent
+          review. `corpusDisclosure` was already computed two lines above.
+
+          `role="status"` rather than `alert`: it is a fact about the run, not an error
+          in the page. Noted honestly: a live region present at first paint is
+          generally NOT announced, so this is a visible disclosure rather than an
+          announced one — `status` is still the right role, and no announcement is
+          claimed.
         */
         <p className="stats-empty-note" role="status">
-          This run examined <strong>no records</strong>. Every figure below is
-          therefore a count over an empty corpus, and none of them is evidence that
-          anything passed. A corpus can be empty because its directory is absent or
-          because every file in it failed to parse — neither is reported as an error
-          by the run itself.
+          This run examined <strong>no records</strong>. Every figure below is therefore
+          a count over an empty corpus, and none of them is evidence that anything
+          passed — including the ones tinted green further down this page.
+          {report.metadata.verification_mode === 'public_reference' ? (
+            <>
+              {' '}
+              A public corpus can be empty because its directory is absent or because
+              every file in it failed to parse; neither is reported as an error by the
+              run itself.
+            </>
+          ) : null}
         </p>
       )}
 
@@ -1189,6 +1226,22 @@ function MutationPanel({ report }: { report: VerificationReport }) {
   const identities = mutationReconciliation(report.mutations);
   const unexpected = report.mutations.unexpected_outcomes;
   const selfChecks = oracleTotal(report.oracles);
+  /*
+   * NOTHING RAN MEANS NOTHING PASSED HERE EITHER, and this panel had the same defect
+   * the headline cards did.
+   *
+   * The three groups below tinted with the reserved pass palette on `=== 0`, with no
+   * denominator guard — so over a report with zero trials they read "No trial produced
+   * an outcome other than the one its change was designed to produce" and "0 is the
+   * expected reading" in green, which is true of the arithmetic and false as a claim
+   * about the record. An independent review found that the headline fix covered four
+   * of roughly nine pass-tinted surfaces for the identical input while its comment
+   * read as though the class were closed; this closes the rest of this panel.
+   *
+   * `attempted` is the one denominator every group here depends on: expected outcomes,
+   * unexpected outcomes and the self-checks are all counts of TRIALS.
+   */
+  const attempted = report.mutations.trials_attempted > 0;
 
   return (
     <div className="stats-block stats-group">
@@ -1230,25 +1283,27 @@ function MutationPanel({ report }: { report: VerificationReport }) {
 
       <FigureGroup
         label="Changes That Behaved as Designed"
-        tone="good"
+        tone={attempted ? 'good' : 'neutral'}
         figures={groups.expected}
         summary="These are the trials where the validator reacted exactly as the injected change intended. A high count here is the expected outcome."
       />
 
       <FigureGroup
         label="Changes That Behaved Unexpectedly"
-        tone={unexpected === 0 ? 'good' : 'attention'}
+        tone={!attempted ? 'neutral' : unexpected === 0 ? 'good' : 'attention'}
         figures={groups.unexpected}
         summary={
           unexpected === 0
-            ? 'No trial produced an outcome other than the one its change was designed to produce.'
+            ? attempted
+              ? 'No trial produced an outcome other than the one its change was designed to produce.'
+              : 'No trials ran, so nothing was checked — this is not a pass.'
             : 'Each of these trials produced an outcome other than the one its change was designed to produce.'
         }
       />
 
       <FigureGroup
         label="Checks on the Verification Run Itself"
-        tone={selfChecks === 0 ? 'good' : 'attention'}
+        tone={!attempted ? 'neutral' : selfChecks === 0 ? 'good' : 'attention'}
         figures={oracleFigures(report.oracles)}
         summary={
           selfChecks === 0
@@ -1272,13 +1327,29 @@ function MutationPanel({ report }: { report: VerificationReport }) {
  */
 function MutationAccounting({ identities }: { identities: readonly MutationIdentity[] }) {
   const balanced = identities.every((identity) => identity.balances);
+  /*
+   * ZERO TRIALS BALANCE TRIVIALLY, so `balanced` is VACUOUSLY true over an empty run
+   * and "every trial is accounted for exactly once" is a statement about no trials.
+   * The pass tone is withheld there for the same reason the headline cards withhold it:
+   * a green tone must assert that something was checked.
+   *
+   * `attention` is withheld too — nothing failed to reconcile either.
+   */
+  const anyTrials = identities.some(
+    (identity) => identity.total.value > 0 || identity.partsSum > 0,
+  );
   return (
-    <div className="stats-verify-group" data-tone={balanced ? 'good' : 'attention'}>
+    <div
+      className="stats-verify-group"
+      data-tone={!anyTrials ? 'neutral' : balanced ? 'good' : 'attention'}
+    >
       <p className="stats-mini-label">How the Trial Counts Add Up</p>
       <p className="stats-verify-group-note">
-        {balanced
-          ? 'Every trial is accounted for exactly once in each of these two readings.'
-          : 'These counts do not account for every trial exactly once. Both sides of each reading are shown as they arrived.'}
+        {!anyTrials
+          ? 'No trials ran, so there is nothing to reconcile — this is not a pass.'
+          : balanced
+            ? 'Every trial is accounted for exactly once in each of these two readings.'
+            : 'These counts do not account for every trial exactly once. Both sides of each reading are shown as they arrived.'}
       </p>
       <ul className="stats-verify-identities">
         {identities.map((identity) => (
@@ -1392,6 +1463,19 @@ function SafeguardsSection({ report }: { report: VerificationReport }) {
           </div>
         ))}
       </dl>
+      {/*
+        THIS ONE KEEPS ITS PASS TONE OVER AN EMPTY RUN, DELIBERATELY, and the reasoning
+        is the inverse of every other guard added in this pass.
+
+        "The run counted no statement that would have changed data or structure" is a
+        statement about what the RUN DID, not about how many records it examined. It is
+        true, and meaningful, whether the corpus held thirty records or none — a run
+        that examined nothing also issued no DML and no DDL, and that is exactly the
+        safety property a reader wants confirmed. Neutralising it would withhold a
+        verdict that has genuinely been earned, which is the mirror image of the defect
+        the rest of this pass fixes. Zero denominators are not all alike; this one has
+        no denominator.
+      */}
       <div className="stats-verify-group" data-tone={counts.every((c) => c.value === 0) ? 'good' : 'attention'}>
         <p className="stats-mini-label">Statements Counted During the Run</p>
         <p className="stats-verify-group-note">

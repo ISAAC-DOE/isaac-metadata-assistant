@@ -160,6 +160,11 @@ describe('a failing pipeline step is presented as failing', () => {
     const discHtml = (row: Element) => row.querySelector('.stage-disc')?.innerHTML ?? '';
     expect(discHtml(rows[0])).not.toBe('');
     expect(discHtml(failing)).not.toBe(discHtml(rows[0]));
+    // AND THE FAILING DISC MUST NOT BE EMPTY. Without this the assertion above is
+    // satisfied by rendering NO glyph at all for a failure — an independent review
+    // proved it by deleting the `CircleAlert` line and watching all 11 tests still
+    // pass. "Different from the passing row" is not the same as "says something".
+    expect(discHtml(failing)).not.toBe('');
   });
 
   it('announces the failure in text, because the disc is aria-hidden', () => {
