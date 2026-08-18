@@ -208,6 +208,7 @@ const EXPECTED_STATE_IDS = [
   'record-evidence',
   'record-evidence-graph',
   'record-validation',
+  'record-revision-history',
   'export-blocked',
   'export-success',
   'export-conflict',
@@ -769,6 +770,45 @@ const STATES: readonly VisualState[] = [
       const exportBtn = page.getByRole('button', { name: /Export Official Record \+ Sidecar/ });
       await expect(exportBtn).toBeVisible({ timeout: 20_000 });
       return exportBtn;
+    },
+  },
+  {
+    /*
+     * ADDED THE MOMENT IT BECAME PHOTOGRAPHABLE, which is the whole discipline
+     * this file exists to enforce.
+     *
+     * `RevisionHistoryPanel` began mounting UNCONDITIONALLY on
+     * `/record/:id/export` when the revision-history slice merged — a route this
+     * sweep already visited three times without photographing the new markup.
+     * That is exactly the failure mode the header describes: new content on a
+     * measured route that the sweep walks past.
+     *
+     * On this deployment the panel renders its UNAVAILABLE state, because the
+     * `0003`/`0004` migrations are not applied here — the panel's own comment
+     * says so. That is deterministic and worth a picture: it is the state every
+     * reader of this build actually sees, and the one where a careless wording
+     * would read as "this record has never been submitted" rather than "this
+     * deployment cannot know".
+     *
+     * The heading is unconditional, so it is the primary; the availability copy
+     * below it varies with deployment and is not asserted here.
+     */
+    id: 'record-revision-history',
+    what: 'Submission History on Export Readiness — read-only, and honest about what it cannot read here',
+    async reach({ page, app }) {
+      await app.gotoExample(`/record/${SEED.ready}/export`);
+      await settled(page);
+      // `.first()`, because the role query matches TWICE on this screen and a
+      // multi-match locator makes `toBeVisible` a strict-mode violation rather
+      // than a visibility check — which reports as "expect(locator).toBeVisible()
+      // failed" and reads exactly like an unreachable state. Probed rather than
+      // assumed: `h2` text is `["Submission History"]` (one), while the heading
+      // ROLE resolves to 2. Same treatment `record-confirmation` already uses.
+      const heading = page
+        .getByRole('heading', { name: 'Submission History' })
+        .first();
+      await expect(heading).toBeVisible({ timeout: 20_000 });
+      return heading;
     },
   },
   {
