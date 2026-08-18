@@ -27,22 +27,59 @@
  *     visual review asks. The assertions below answer the questions that have
  *     objective answers, and the images are for the ones that do not.
  *
- * ── Where the images actually come from, stated so nobody over-reads them ────
+ * ── Where the images come from — AND A MEASURED CORRECTION TO WHAT THIS FILE
+ *    USED TO CLAIM THEY WERE ───────────────────────────────────────────────────
  *
- * `fullPage: true` is passed, and on most of these screens it captures exactly
- * the visible frame — because THIS APP'S SCROLL CONTAINER IS NOT THE DOCUMENT.
- * `div.screen-card` is `overflow: hidden` and `main#main` is `overflow: auto`
- * (see the `findClippedText` note in `helpers/layout.ts` about that nesting), so
- * the document's scrollHeight equals its clientHeight and "full page" and "the
- * frame" are the same picture. The viewport is therefore 900px tall rather than
- * the 812 `layout-widths.spec.ts` uses, purely to put more of each screen in the
- * shot. A reviewer must not read an attachment as "the whole screen"; it is the
- * screenful CONTAINING THE STATE'S PRIMARY ELEMENT — `primaryHealth()` scrolls
- * that element into view before the shot is taken, which is what makes the five
- * record-screen SECTIONS below (Runs, Validate & Review, Unmapped Notes, Asset
- * References, the compare panel) photographable at all: they live below the fold
- * of one long route, and without that scroll every one of them would have
- * produced the same picture of the top of the record.
+ * This section is kept as a correction rather than quietly rewritten, because the
+ * claim it replaces was this file's central architectural premise and it was
+ * false. It said:
+ *
+ *     "`fullPage: true` is passed, and on most of these screens it captures
+ *      exactly the visible frame — because THIS APP'S SCROLL CONTAINER IS NOT THE
+ *      DOCUMENT. `div.screen-card` is `overflow: hidden` and `main#main` is
+ *      `overflow: auto`, so the document's scrollHeight equals its clientHeight
+ *      and 'full page' and 'the frame' are the same picture … `primaryHealth()`
+ *      scrolls [the primary] into view before the shot is taken, which is what
+ *      makes the five record-screen SECTIONS below photographable at all."
+ *
+ * BOTH CSS FACTS ARE TRUE AND THE INFERENCE FROM THEM IS FALSE. `.screen-card`
+ * sets `min-height: calc(100vh - 32px)` — NOT `height` (`src/components/
+ * chrome.css:13-16`) — so the card GROWS with its content, `.screen-main` is never
+ * height-constrained, and `overflow-y: auto` on an unconstrained box scrolls
+ * nothing. THE DOCUMENT IS THE SCROLLPORT. Measured at 1280x900 over the nine
+ * routes this file opens: the document scrolls on 8 of 9 and `main#main` scrolls
+ * on NONE.
+ *
+ * WHAT THAT COST, measured on the last passing run before this fix (width 1280,
+ * host project): 30 attachments were 25 DISTINCT IMAGES.
+ * `record-edit`, `record-runs`, `record-validate-review`, `record-unmapped-notes`
+ * and `record-asset-references` were ONE byte-identical 416,847-byte PNG — the
+ * whole ~2400px document, which already contained all five of those sections in
+ * one frame — and `record-validation` and `record-revision-history` were a second
+ * such pair. `fullPage` captures the whole document REGARDLESS of scroll position,
+ * so the `scrollIntoViewIfNeeded` this header credited with making those sections
+ * photographable never affected a single pixel. At width 320 all 30 hashes DID
+ * differ, and that MASKED the defect instead of fixing it: the page content was
+ * still the entire document every time, and only the `position: fixed` chrome —
+ * painted at whatever scroll offset the state happened to leave behind — moved.
+ *
+ * SO EVERY STATE NOW NAMES THE ELEMENT THAT IS THE STATE, AND THAT ELEMENT IS
+ * SCREENSHOTTED (`frame`, below). This is not a new technique: it is exactly what
+ * the sibling sweep `specs/statistics-states.spec.ts` does, and this file is
+ * following it rather than inventing something. An element shot captures the whole
+ * element, above and below the fold, so a section of a long route is a picture of
+ * that section and of nothing else. The default frame is the app frame
+ * `div.screen-card`; the states that are SECTIONS of a shared route name their own
+ * `<section>`; three states whose subject is a `position: fixed` overlay
+ * photograph THE VIEWPORT, which is the frame a reader of an overlay actually has.
+ *
+ * The one guarantee this replaces the old prose with is mechanical rather than
+ * argued: every attachment at a width is SHA-256'd and two states attaching the
+ * same bytes is a FINDING (`duplicateImages`). The defect above passed every
+ * assertion in this file for as long as it existed; it cannot do so again.
+ *
+ * A reviewer must not read an attachment as "the whole screen" unless its caption
+ * is a whole screen: it is the frame the state declared, and nothing more.
  *
  * ── One project, seven widths ───────────────────────────────────────────────
  *
@@ -105,6 +142,7 @@
  * Nothing was dropped. Every id in the original 21 is still captured.
  */
 
+import { createHash } from 'node:crypto';
 import { currentPlatform } from '../a11y-baseline';
 import { API_BASE, API_ROUTE_GLOB, SEED } from '../env';
 import { LOADING_PANEL, expect, test, type AppHelper, type TutorialHelper } from '../fixtures';
@@ -177,8 +215,53 @@ const WIDTHS: readonly number[] = [
   ...SWEEP_WIDTHS.filter((w) => w !== OMITTED_WIDTH && w !== EXTRA_WIDTH),
 ];
 
-/** See the header: taller than the width sweep's 812, to show more per shot. */
+/**
+ * 900 — KEPT, but its REASON IS REPLACED, and 812 was tried and measured first.
+ *
+ * The reason this file used to give was "taller than the width sweep's 812, to
+ * show more per shot", and that was never true of any capture it has ever taken:
+ * `fullPage` ignores viewport height for EXTENT, and so does an element shot.
+ * Height only ever changed REFLOW. So the honest question is which height serves
+ * this file's NON-image findings, and the obvious candidate was 812 — the height
+ * at which `specs/layout-widths.spec.ts` measures horizontal page scroll and
+ * `findClippedText` (the same two tiers asserted below) and at which every value
+ * in `layout-baseline.ts` was recorded. A finding taken at the same geometry as
+ * the layout sweep is a finding either sweep can reproduce.
+ *
+ * IT WAS SET TO 812, RUN, AND REVERTED, on this measurement (host project,
+ * width 320):
+ *
+ *     reset-warning: primary element is covered at its centre by div.tutorial-mark
+ *
+ * At 320x812 the running walkthrough's coach mark paints OVER the reset dialog's
+ * confirm button; at 320x900 it does not, and every other width passes at both
+ * heights. That is a REAL, reachable finding — a reader who replays the
+ * walkthrough on a phone-height viewport and then opens Reset Worked Example from
+ * the session bar meets it — and it is an overlay/z-order question in
+ * `GuidedTutorial`/`ResetDemoDialog`, i.e. a PRODUCT change this test-only change
+ * is not authorized to make. Adopting 812 here would therefore have left the
+ * suite red on a defect this file cannot fix, so the height stays and the finding
+ * is written down instead of being silently absorbed by it.
+ *
+ * Two consequences, both deliberate: this file's content-loss findings are NOT
+ * taken at the layout sweep's geometry (so a difference between the two is
+ * explained by this comment, not by a bug), and `specs/statistics-states.spec.ts`
+ * still sets 900 for the old, false "more per shot" reason — same number,
+ * different justification, and its own header now says so.
+ */
 const VIEWPORT_HEIGHT = 900;
+
+/**
+ * The DEFAULT frame — the app frame, which is `AppShell`'s outermost box inside
+ * `div.app`: top bar, worked-example bar, sidebar, `<main>` and status bar
+ * (`src/components/AppShell.tsx`). It GROWS with content (see the header), so an
+ * element shot of it is the whole screen including everything below the fold.
+ *
+ * It deliberately excludes the walkthrough overlay and the reset dialog, which
+ * `AppShell` mounts as SIBLINGS of the card — the three states whose subject is
+ * one of those photograph the viewport instead.
+ */
+const DEFAULT_FRAME = 'div.screen-card';
 
 /**
  * THE DECLARED SET. Every id here must be captured at every width, and nothing
@@ -237,8 +320,34 @@ interface VisualState {
    */
   readonly reach: (ctx: Ctx) => Promise<Locator>;
   /**
+   * WHAT GETS PHOTOGRAPHED: the element that IS this state, or the string
+   * `'viewport'`. Omit it for a state whose subject is the whole screen, and the
+   * shot is of `DEFAULT_FRAME`.
+   *
+   * This exists because of the measured defect in the header: a page-level shot
+   * of a route that carries several states is the SAME IMAGE for every one of
+   * them, and neither the assertions here nor a human reading the report could
+   * tell. A state that is a SECTION of a shared route must name its section.
+   *
+   * `'viewport'` for a state whose subject is `position: fixed` — a coach mark,
+   * a modal. An element shot of a fixed overlay inside a document-tall frame
+   * paints it once at one scroll offset, which is a picture of an arrangement no
+   * reader ever sees; the viewport IS the frame in that case.
+   *
+   * The primary is passed in so a frame can be derived from it, but no state
+   * currently needs to: a primary is a control or a heading, and a picture of a
+   * button is not a picture of a state.
+   */
+  readonly frame?: (ctx: Ctx, primary: Locator) => Promise<Locator | 'viewport'> | Locator | 'viewport';
+  /**
    * Clean up anything that would leak into the next state (a `page.route`, an
    * open overlay). Runs even when `reach` threw.
+   *
+   * NOTE, since the sticky-scope finding: the loop ALSO calls
+   * `page.unrouteAll()` after this, unconditionally, so a missing cleanup can no
+   * longer leak a route into the next state. The per-state cleanups are kept
+   * anyway — they say what a state is responsible for, and a cleanup that closes
+   * an overlay (`reset-warning`) is not something the loop can guess.
    */
   readonly cleanup?: (ctx: Ctx) => Promise<void>;
 }
@@ -421,7 +530,23 @@ const STATES: readonly VisualState[] = [
       // other viewport projects in parallel and must not be disturbed.
       let release!: () => void;
       const gate = new Promise<void>((r) => (release = r));
+      /*
+       * WHETHER THE HOLD ACTUALLY FIRED IS ASSERTED, NOT ASSUMED.
+       *
+       * The route pattern is an EXACT URL and matches only because `lib/api.ts`
+       * asks for `/experiments` with no query string today (`api.ts` →
+       * `const path = '/experiments'`). Add one parameter — a page size, a sort —
+       * and this handler silently stops matching. The panel assertion below would
+       * NOT catch that: `toBeVisible` auto-retries, so it can pass on the
+       * ordinary navigation's own transient loading panel, and the shot would then
+       * be of the LOADED screen under a caption that says "a pending fetch".
+       *
+       * So the state's real precondition is "our hold is what is keeping this
+       * panel up", and that is what is checked.
+       */
+      let held = false;
       await page.route(`${API_BASE}/experiments`, async (route) => {
+        held = true;
         await gate;
         await route.continue();
       });
@@ -433,6 +558,16 @@ const STATES: readonly VisualState[] = [
       const loading = page.locator(LOADING_PANEL);
       await expect(loading).toBeVisible({ timeout: 20_000 });
       await expect(loading).toContainText(/Loading/i);
+      await expect
+        .poll(() => held, {
+          timeout: 10_000,
+          message:
+            `the held route \`${API_BASE}/experiments\` never fired, so the loading panel on ` +
+            'screen is a transient one this state does not control and the screenshot may be of ' +
+            'the loaded screen. The request URL has almost certainly gained a query string — ' +
+            'match on the pathname rather than loosening this assertion away.',
+        })
+        .toBe(true);
       return loading;
     },
     async cleanup({ page }) {
@@ -571,10 +706,32 @@ const STATES: readonly VisualState[] = [
      * WHAT THE PORT ADDED. `/record/:id` has since grown five more surfaces
      * BELOW the field workbench — the Runs workspace, the Compare Runs panel,
      * Validate & Review, Unmapped Notes and Asset References — plus a `?view=`
-     * graph. They are separate entries rather than one, because they are
+     * graph.
+     *
+     * WHY THEY ARE SEPARATE ENTRIES — CORRECTED, because the reason first given
+     * here was measured false and is worth keeping visible. It said: "they are
      * separate screenfuls: each is reached by scrolling its own heading into
-     * view (see the header note on where the images come from), so one picture
-     * of this route would have shown none of them.
+     * view, so one picture of this route would have shown none of them." The
+     * opposite is true. This route is ONE ~2400px document (see the header), a
+     * `fullPage` shot of it contained every one of these sections, and the four
+     * that share the URL with `record-edit` attached a BYTE-IDENTICAL image to it
+     * — the same 416,847 bytes, five times.
+     *
+     * What they genuinely add, now that each names its own `<section>` as its
+     * frame, is two things per section: a `primaryHealth()` check on a heading
+     * nothing else checks, and a CROP a reviewer can actually read — one section
+     * rather than a 2400px page in which it is a band. That is worth four
+     * ~830ms re-navigations (measured, width 1280); it was not worth them while
+     * the images were identical.
+     *
+     * THE PER-STATE PAGE SCANS ARE DELIBERATELY *NOT* DEDUPLICATED, and this was
+     * re-checked rather than assumed. `findClippedText` over this route MEASURES
+     * at 4-5ms (width 1280, all five states), so the "redundant full rescan" is
+     * ~16ms per width — and skipping it would be wrong, not just unnecessary:
+     * these sections mount from their own fetches, so `record-edit`'s scan can
+     * legitimately run before a section's text exists, and each section state
+     * waits for its own heading first. The rescans cover DOM the first scan may
+     * never have seen.
      */
     id: 'record-edit',
     what: 'Record workbench (needs attention) — field groups and the confirmation banner',
@@ -626,6 +783,9 @@ const STATES: readonly VisualState[] = [
       await expect(page.locator('.runs-empty')).not.toHaveCount(0, { timeout: 20_000 });
       return heading;
     },
+    // `RunsSection.tsx:124`. The section, not the page: this state shares its URL
+    // with four others.
+    frame: ({ page }) => page.locator('section.runs-section'),
   },
   {
     /*
@@ -661,6 +821,9 @@ const STATES: readonly VisualState[] = [
       await expect(page.locator('.rc-scope').first()).toContainText(/nothing here changes either run/i);
       return heading;
     },
+    // `RunCompare.tsx:276`. The panel is the state; the record page around it is
+    // already photographed by `record-edit`.
+    frame: ({ page }) => page.locator('section.rc-panel'),
   },
   {
     /*
@@ -683,6 +846,8 @@ const STATES: readonly VisualState[] = [
       await expect(page.locator('.validate-review .vr-status').first()).toBeVisible();
       return heading;
     },
+    // `ValidateReview.tsx:339`. Shares its URL with four other states.
+    frame: ({ page }) => page.locator('section.validate-review'),
   },
   {
     /*
@@ -700,6 +865,8 @@ const STATES: readonly VisualState[] = [
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },
+    // `UnmappedNotesPanel.tsx:120`. Shares its URL with four other states.
+    frame: ({ page }) => page.locator('section.notes-section'),
   },
   {
     /*
@@ -720,6 +887,14 @@ const STATES: readonly VisualState[] = [
       await expect(page.locator('.assets-sub').first()).toContainText(/does not upload, open, download or hash/i);
       return heading;
     },
+    /*
+     * `AssetReferencesPanel.tsx:195`. Shares its URL with four other states — and
+     * this is the one where the crop is load-bearing rather than merely tidier:
+     * the disclosure asserted above is what stops a sha256 beside a filename
+     * reading as a verification, and in a 2400px page shot it is four lines
+     * somewhere in the lower third.
+     */
+    frame: ({ page }) => page.locator('section.assets-section'),
   },
   {
     id: 'record-confirmation',
@@ -810,6 +985,10 @@ const STATES: readonly VisualState[] = [
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },
+    // `RevisionHistoryPanel.tsx:91`. This state shares `/record/:id/export` with
+    // `record-validation`, and before this frame existed the two attached the
+    // same image.
+    frame: ({ page }) => page.locator('section.revhist-section'),
   },
   {
     id: 'export-blocked',
@@ -891,6 +1070,27 @@ const STATES: readonly VisualState[] = [
       await expect(log.locator('.assistant-msg')).not.toHaveCount(0, { timeout: 25_000 });
       return log.locator('.assistant-msg').first();
     },
+    // The drawer IS the state. Below 1024px it is a slide-over that covers the
+    // record; at or above it, it is a static column beside it — either way the
+    // conversation is what this caption promises.
+    frame: ({ page }) => page.locator('aside.assistant-drawer-panel'),
+    /*
+     * ADDED — this state had NO cleanup, and that was a live sticky-scope leak
+     * rather than a tidiness gap.
+     *
+     * `app.gotoExample()` calls `enterWorkedExample`, which installs a
+     * `page.route` attaching the session header to EVERY subsequent API request,
+     * and nothing removes it (see the long note on `tutorial-start`'s cleanup for
+     * why "ordinary scope" does not mean "leave the scope"). The next state,
+     * `tutorial-coach-mark`, then navigated ORDINARY-scope with the header still
+     * attached. It was benign only by ordering and luck: move
+     * `statistics-general` — whose caption claims "every figure derived from an
+     * empty list" — after this state, and it would silently photograph the worked
+     * example's five records under that caption.
+     */
+    async cleanup({ page }) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+    },
   },
   {
     /*
@@ -928,6 +1128,12 @@ const STATES: readonly VisualState[] = [
       await expect(next).toBeVisible();
       return next;
     },
+    // THE VIEWPORT, because the claim in the caption is about the RELATIONSHIP
+    // between a fixed overlay and the control under it. `.screen-card` would omit
+    // the mark entirely (`AppShell` mounts `GuidedTutorial` as its sibling), and
+    // an element shot of a fixed mark inside a document-tall frame is a picture
+    // of an arrangement no reader ever sees.
+    frame: () => 'viewport',
   },
   {
     id: 'reset-warning',
@@ -961,6 +1167,9 @@ const STATES: readonly VisualState[] = [
       await expect(action).toBeDisabled();
       return action;
     },
+    // The viewport: a modal and its backdrop over the surface it was opened from
+    // is what a reader sees, and the dialog is `position: fixed`.
+    frame: () => 'viewport',
     async cleanup({ page }) {
       // Escape cancels the dialog and — per the app's own capture-phase guard —
       // leaves the walkthrough running, which the next state needs.
@@ -1021,6 +1230,8 @@ const STATES: readonly VisualState[] = [
       await expect(back).toBeVisible();
       return back;
     },
+    // Fixed overlay, as above.
+    frame: () => 'viewport',
   },
 ];
 
@@ -1093,7 +1304,7 @@ test.describe('visual state sweep', () => {
     ) => {
       /*
        * A CEILING, NOT A COST, AND NOW A MEASURED ONE. The project-wide 60s
-       * timeout is sized for a single-surface test; this drives ~29 states,
+       * timeout is sized for a single-surface test; this drives 30 states,
        * several of them multi-step. A clean width MEASURES at ~26s
        * (width 1280, host project, serial), so this ceiling is roughly 46x the
        * observed time and exists only so that a genuinely stuck state fails with
@@ -1114,11 +1325,20 @@ test.describe('visual state sweep', () => {
 
       const captured: string[] = [];
       /** id → the reason it could not be captured. Failed at the end, all at
-       *  once, so one broken state does not hide the other twenty-eight. */
+       *  once, so one broken state does not hide the other twenty-nine. */
       const unreachable: string[] = [];
       const pageScroll: string[] = [];
       const primaryFailures: string[] = [];
       const clippedFailures: string[] = [];
+      /**
+       * sha256 of every attached image → the FIRST state that attached those
+       * bytes. Two states attaching the same image is a finding, not a curiosity:
+       * it is the exact defect this file shipped with (see the header), it passed
+       * every other assertion here, and at narrow widths it hid itself behind
+       * `position: fixed` chrome painted at a different scroll offset.
+       */
+      const imageOwners = new Map<string, string>();
+      const duplicateImages: string[] = [];
       let font = '(not measured)';
 
       for (const state of STATES) {
@@ -1144,8 +1364,10 @@ test.describe('visual state sweep', () => {
           }
 
           // ── 2. the state's primary element is really there ────────────────
-          // Also SCROLLS IT INTO VIEW, which is what puts the below-the-fold
-          // record sections into their own screenshots. See the header.
+          // It also scrolls the primary into view. That is for the OFF-SCREEN
+          // check's benefit and for nothing else: the header used to credit this
+          // scroll with framing the shot, which was measured false — the image
+          // comes from `frame` below and does not depend on scroll position.
           const health = await primaryHealth(primary);
           if (health !== 'ok') primaryFailures.push(`${state.id}: ${health}`);
 
@@ -1160,7 +1382,34 @@ test.describe('visual state sweep', () => {
           if (lost.length) clippedFailures.push(`${state.id}:\n${render(lost)}`);
 
           // ── 4. the artifact ──────────────────────────────────────────────
-          const shot = await page.screenshot({ fullPage: true, animations: 'disabled' });
+          // THE ELEMENT THAT IS THE STATE, not `fullPage`. See the header for the
+          // measurement that forced this, and `VisualState.frame` for the rules.
+          const frame = state.frame ? await state.frame(ctx, primary) : page.locator(DEFAULT_FRAME);
+          let shot: Buffer;
+          if (frame === 'viewport') {
+            shot = await page.screenshot({ animations: 'disabled' });
+          } else {
+            if ((await frame.count()) === 0) {
+              // Reached but not photographable. Loud, and honest about which of
+              // the two it is — `captured` means "an image is attached".
+              throw new Error(
+                'state reached, but its declared frame element is not on the page, so there is ' +
+                  'no image to attach. Point `frame` at the element that is really this state.'
+              );
+            }
+            const target = frame.first();
+            // Playwright scrolls a target into view itself; done explicitly for
+            // parity with `specs/statistics-states.spec.ts` and so a failure here
+            // names the scroll rather than the screenshot.
+            await target.scrollIntoViewIfNeeded().catch(() => undefined);
+            shot = await target.screenshot({ animations: 'disabled' });
+          }
+
+          const digest = createHash('sha256').update(shot).digest('hex');
+          const twin = imageOwners.get(digest);
+          if (twin === undefined) imageOwners.set(digest, state.id);
+          else duplicateImages.push(`${state.id}: byte-identical to ${twin} (sha256 ${digest.slice(0, 12)})`);
+
           await testInfo.attach(`${width}px · ${state.id} — ${state.what}`, {
             body: shot,
             contentType: 'image/png',
@@ -1170,6 +1419,26 @@ test.describe('visual state sweep', () => {
           unreachable.push(`${state.id}: ${(err as Error).message.split('\n')[0]}`);
         } finally {
           if (state.cleanup) await state.cleanup(ctx).catch(() => undefined);
+          /*
+           * UNCONDITIONAL, and it is a structural fix rather than housekeeping.
+           *
+           * Two measured problems, one line. (1) A state that forgets a cleanup
+           * leaks `enterWorkedExample`'s session-header `page.route` into the next
+           * state — `assistant-answer` did exactly that, and the state after it
+           * navigated ordinary-scope inside the worked example. (2) Every
+           * `gotoExample`/`open` STACKS another handler for the same glob, so by
+           * the last state a width had accumulated roughly fifteen of them, each
+           * one an extra `route.fallback()` hop on every API request.
+           *
+           * Safe, for the reason `tutorial-start`'s cleanup already records: every
+           * example-scope state re-enters the scope itself, on every navigation.
+           * And safe for the walkthrough states that follow, whose session is the
+           * APP's own (minted through the Replay control) rather than a header this
+           * harness attaches — plus `tutorial.sessionsCreated()` observes
+           * `page.on('response')`, not a route, so unrouting cannot blind it or
+           * strand a session.
+           */
+          await page.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => undefined);
         }
       }
 
@@ -1179,11 +1448,14 @@ test.describe('visual state sweep', () => {
           `${layoutWidthId(width)} on ${platform} — font: ${font}; ` +
           `${captured.length}/${STATES.length} states captured as attachments; ` +
           `${unreachable.length} unreachable, ${pageScroll.length} page-scroll, ` +
-          `${primaryFailures.length} primary-element, ${clippedFailures.length} content-loss finding(s).`,
+          `${primaryFailures.length} primary-element, ${clippedFailures.length} content-loss, ` +
+          `${duplicateImages.length} duplicate-image finding(s); ` +
+          `${imageOwners.size} distinct image(s) for ${captured.length} attachment(s).`,
       });
       // eslint-disable-next-line no-console
       console.log(
         `[visual-sweep] ${width}px — font: ${font}; captured ${captured.length}/${STATES.length}` +
+          `; ${imageOwners.size} distinct image(s)` +
           (unreachable.length ? `; UNREACHABLE: ${unreachable.join(' | ')}` : '')
       );
 
@@ -1197,6 +1469,27 @@ test.describe('visual state sweep', () => {
             `Nothing is skipped silently:\n${unreachable.join('\n')}`
           : `The captured set must equal the declared set at ${width}px.`
       ).toEqual(DECLARED);
+
+      /*
+       * EVERY ATTACHMENT MUST BE ITS OWN PICTURE. Second, and directly after the
+       * set, because "thirty attachments" and "thirty pictures" are different
+       * claims and this file used to make the first while the report read as the
+       * second: five states shared one image and two more shared another, and
+       * nothing failed.
+       *
+       * Duplicate bytes mean one of two things, and both are findings: two states
+       * are photographing the same frame (fix `frame`), or two states are the same
+       * state (fix `STATES`).
+       */
+      expect(
+        duplicateImages,
+        duplicateImages.length
+          ? `Two or more states attached the SAME IMAGE at ${width}px, so the report shows fewer ` +
+            `pictures than it appears to. Either a state's \`frame\` is not the element that IS ` +
+            `that state — a page-level frame on a route several states share is how this happened ` +
+            `before — or two entries in STATES are the same state:\n${duplicateImages.join('\n')}`
+          : undefined
+      ).toEqual([]);
 
       expect(
         pageScroll,
@@ -1315,9 +1608,10 @@ async function primaryHealth(locator: Locator): Promise<string> {
 /**
  * ── PROBE SELF-CHECK ────────────────────────────────────────────────────────
  *
- * The sweep above captures ~200 states and, when the app is healthy, reports
- * zero primary-element findings. That is the same output a probe with a bug in
- * it would produce, so the probe is falsified here against INJECTED geometry —
+ * The sweep above takes 210 captures (30 states x 7 widths) and, when the app is
+ * healthy, reports zero primary-element findings. That is the same output a probe
+ * with a bug in it would produce, so the probe is falsified here against INJECTED
+ * geometry —
  * the technique `self-check.spec.ts` and `layout-widths.spec.ts`'s regression
  * cases already use. All four mutations are browser-side only; nothing is
  * written to the backend.
