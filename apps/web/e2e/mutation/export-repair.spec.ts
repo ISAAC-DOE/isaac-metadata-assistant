@@ -121,11 +121,20 @@ test.describe('R4 · export, repaired and refused', () => {
      * mounted.
      */
     for (let i = 0; i < 2; i++) {
-      // The heading counts DOWN as questions close, so it also pins that the
-      // previous iteration really advanced rather than silently repeating.
-      await expect(
-        page.getByRole('heading', { name: new RegExp(`Answer ${2 - i} Questions?`) }),
-      ).toBeVisible();
+      /*
+       * NO HEADING ASSERTION HERE, AND THE FIRST VERSION OF THIS FIX HAD ONE.
+       *
+       * It asserted `Answer ${2 - i} Questions`, on the assumption that the heading
+       * counts DOWN as questions close. It does not: `GuidedCompletion` renders
+       * `Answer {total} Questions to Finish This Record`, where `total` is the TOTAL
+       * and is constant for the life of the screen. So the assertion passed on the
+       * first iteration and failed on the second, and CI caught it — a wait invented
+       * to fix a race became a second, different failure.
+       *
+       * The load-bearing waits are the two `toBeEnabled()` calls below. They observe
+       * the actual precondition rather than a proxy for it, which is why they survived
+       * and the heading did not.
+       */
       const stage = page.getByRole('button', { name: 'Use This Value' }).first();
       await expect(stage).toBeEnabled();
       await stage.click();
