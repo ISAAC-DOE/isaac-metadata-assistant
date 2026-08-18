@@ -336,18 +336,18 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
     #
-    # MEASURED AFTER THE MERGE, and the arithmetic is deliberately not shown,
-    # because doing the arithmetic is how this goes wrong. Both branches raised
-    # this literal from 52 — the asset slice to 56, this one to 55 — for
-    # different, real additions. Adding the deltas would give one number;
-    # measuring gives the true one. `create_app().openapi()` is the authority.
+    # MEASURED from `create_app().openapi()` on the MERGED tree. The arithmetic is
+    # deliberately not shown, because doing the arithmetic is how this goes wrong:
+    # four slices have now raised this literal from 52 for real, different additions
+    # — the asset slice, the transcript slice, run removal
+    # (`POST .../runs/{run_id}/remove`), and this one, which adds the two CONFLICT
+    # RESOLUTION operations: read the disagreements a record's own evidence carries,
+    # and record which competing answer a scientist stands behind.
     #
-    # 63 -> 65: the CONFLICT RESOLUTION operations — read the disagreements a
-    # record's own evidence carries, and record which competing answer a scientist
-    # stands behind. MEASURED from `create_app().openapi()` after adding them, not
-    # obtained by adding two to the line above; the whole point of every note in
-    # this comment is that the arithmetic is what goes wrong.
-    assert checked == 65, f"expected 65 documented operations, found {checked}"
+    # Both sides of this merge conflict carried a number that was correct for its own
+    # branch and wrong for the merge. Neither was kept. `create_app().openapi()` is
+    # the authority and was re-run on the merged tree.
+    assert checked == 66, f"expected 66 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -636,6 +636,14 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/runs/{run_id}/overrides", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}/overrides/clear", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}/check", "post"): ["200", "401", "404", "422", "503"],
+    # Removing a run REWRITES THE RECORD — a run lives inside the record's document
+    # — so this carries the RECORD's `If-Match` and the whole 400/412/428 set with
+    # it, exactly as `POST .../runs` and `POST .../assets/{id}/remove` do. There is
+    # no DELETE: removal is a sub-path POST, the shape every other removal in this
+    # API uses. The `409` is its own refusal and appears on no other run operation:
+    # the run has been exported, so removing it would orphan a written official
+    # record, and it is refused with nothing written.
+    ("/api/experiments/{experiment_id}/runs/{run_id}/remove", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/source-preview", "get"): ["200", "400", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/validate", "post"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/warnings", "get"): ["200", "401", "404", "422", "503"],

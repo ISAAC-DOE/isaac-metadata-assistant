@@ -1,12 +1,35 @@
 # Migration approval packet — `0003_revisions`
 
-> ## STATUS: **NOT APPROVED, NOT APPLIED, ANYWHERE.**
+> ## STATUS: **APPROVED BY THE PROJECT OWNER 2026-08-17. NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.**
 >
-> This packet is a request. Nothing in it has been run against the hosted database, and no agent may
-> run it. `CLAUDE.md` §15's hard stop is unchanged by the fact that `0001` and `0002` have both been
-> applied by Dean: *"two migrations having been applied by the infrastructure owner is not a
-> precedent, a delegation, or a standing permission; `0003` and later each need their own packet,
-> their own owner approval, and their own operator action."*
+> **Read both halves. They are different acts by different people, and collapsing them is the one
+> misreading this block exists to prevent.**
+>
+> **The approval (Krish, project owner, 2026-08-17).** Krish approves the **exact bytes** recorded in
+> the digest table below, conditional on five mechanical checks which were performed before this line
+> was written and are recorded in §12D:
+>
+> 1. the forward file's SHA-256 still matches this packet's table — **verified, matches**;
+> 2. the rollback file's SHA-256 still matches — **verified, matches**;
+> 3. no material SQL change since technical review — **verified, and stronger than asked**: both SQL
+>    files and both packets were introduced in ONE commit, `0896b07`, and `git log` shows no commit
+>    has touched either `.sql` file since, so these bytes have had exactly one version, ever;
+> 4. the prior review findings remain resolved — **verified**, see §12D;
+> 5. no new material safety defect — **none found**, see §12D for what was actually checked.
+>
+> The approval is of these bytes and of nothing else. Editing either `.sql` file voids it: the digest
+> would move, `test_the_approval_packet_digests_match_the_committed_files` would go red, and the
+> correspondence between "the bytes approved" and "the bytes applied" — the only thing that makes an
+> approval mean anything — would be gone. Re-issue the packet instead.
+>
+> **The application (Dean / the infrastructure operator) — STILL NOT DONE, AND STILL NOT THE AGENT'S
+> TO DO.** Nothing in this packet has been run against the hosted database, and no agent may run it.
+> `CLAUDE.md` §15's hard stop is unchanged by the fact that `0001` and `0002` have both been applied by
+> Dean, and it is unchanged by this approval: owner approval is a **precondition** for the operator's
+> act, not a substitute for it — as `CLAUDE.md` §15 puts it: *"two migrations having been applied by
+> the infrastructure owner is not a precedent, a delegation, or a standing permission; `0003` and later
+> each need their own packet, their own owner approval, and their own operator action."* This packet now
+> has the first two. **The third is outstanding.**
 >
 > **Local and CI testing is authorized. Applying it to the hosted environment is the owner's act.**
 > Do not request a kubeconfig, a port-forward, or a Secret, and do not connect to the SLAC database
@@ -461,24 +484,78 @@ psql -c "\copy (SELECT * FROM isaac_revision_changes) TO 'changes.csv' CSV HEADE
 | No committed migration or rollback names `records` | same | **yes** |
 | The change kinds, the revision reason and the three trust bases agree between Python and SQL | same | **yes** |
 | The application's write path against a connection double: one transaction, deterministic rollback, nothing written on any refusal | same | **yes** |
-| **The SQL is valid PostgreSQL** | `.github/workflows/ci.yml` → `postgres-migration` | **not yet — see 12B** |
-| **Every constraint rejects what it claims to reject** | same, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* | **not yet** |
-| **The submission lifecycle works end to end against a real engine** | same, step *"Exercise the submission lifecycle against the real engine"* | **not yet** |
-| **The rollbacks return the database to its prior table set** | same | **not yet** |
+| **The SQL is valid PostgreSQL** | `.github/workflows/ci.yml` → `postgres-migration` | **YES — see 12B** |
+| **Every constraint THAT STEP NAMES rejects what it claims to reject — 27 of the 46 declared** | same, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* | **YES, for the 27.** The other 19 are declared and unexercised — see §12B |
+| **The submission lifecycle works end to end against a real engine** | same, step *"Exercise the submission lifecycle against the real engine"* | **YES** |
+| **The rollbacks return the database to its prior table set** | same, incl. the wrong-order refusal | **YES** |
 
-### 12B. What has NOT been executed, stated plainly
+### 12B. What a real PostgreSQL has and has not executed
 
-**No PostgreSQL has ever executed this file.** The machine it was written on has no PostgreSQL and no
-psycopg2 (`which psql` → not found). Every local proof above is a property of the committed **text**
-and of the application's behaviour against an **in-process connection double**. Until the
-`postgres-migration` job runs on this branch, *"this is valid SQL"* is an **unverified claim**, and
-this packet must not be cited for it.
+**CORRECTED 2026-08-17, and the old text is quoted here rather than silently replaced, because it was
+a claim this packet was pinned on and it had gone false.** This section used to read:
 
-CI, when it runs, removes the *"is this even valid SQL / is it idempotent / does it touch anything it
-does not own / do the constraints behave"* class of risk. It does **not** remove the *"does it behave
-against the real data"* class: the service container is an empty `postgres:18` with a two-row
-synthetic stand-in for `records`, not the hosted database with its 30 production-derived records, its
-roles, and its existing grants. Only the owner applying it resolves that.
+> *"**No PostgreSQL has ever executed this file.** The machine it was written on has no PostgreSQL and
+> no psycopg2 (`which psql` → not found). Every local proof above is a property of the committed
+> **text** and of the application's behaviour against an **in-process connection double**. Until the
+> `postgres-migration` job runs on this branch, `"this is valid SQL"` is an **unverified claim**, and
+> this packet must not be cited for it."*
+
+That was true when written, and **it is false now**, because the condition it named as the thing that
+would falsify it — *"until the `postgres-migration` job runs"* — has happened. Worse, a test
+(`test_the_packets_do_not_claim_a_hosted_application`) **pinned the sentence as a required literal**,
+so the repository was mechanically enforcing a false claim about itself. The test has been changed in
+the same commit to pin the invariant that actually matters — that this packet does not read as
+hosted-applied — instead of a sentence about CI that time was always going to invalidate.
+
+**What a real PostgreSQL HAS executed.** GitHub Actions run
+[`32099627898`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32099627898), job
+*"migration and durable repository against a real PostgreSQL"*, **conclusion `success`**, on `main` at
+commit `fe374c0` — which carries these exact bytes (the digests in the table above are the digests at
+that commit). Against a `postgres:18` service container it applied `0001`→`0004` forward, proved the
+pending/applied plan at each step, ran the submission lifecycle end to end, and proved the rollback
+order — including that `0003`'s rollback **fails** while `isaac_submissions` still references it, and
+that the failed attempt destroys nothing.
+
+**CONSTRAINT COVERAGE IS PARTIAL, AND AN EARLIER REVISION OF THIS SECTION SAID "EVERY".** Corrected
+after an independent review measured it; the measurement was then reproduced independently before this
+paragraph was written. The two forward files declare **46 named constraints**. CI's step *"Prove every
+0003 and 0004 constraint rejects what it claims to reject"* makes 31 `refuse()` calls blaming **27
+distinct constraints**, and `refuse()`'s third argument is the object PostgreSQL must be shown to
+blame — so a constraint the workflow never names is a constraint that was never exercised. **17
+declared constraint names do not appear in `.github/workflows/ci.yml` at all:**
+
+`isaac_experiment_revisions_no_positive`, `_rev_non_negative`, `_state_is_object`;
+`isaac_run_revisions_id_shape`, `_run_id_shape`, `_ordinal_non_negative`, `_rev_non_negative`,
+`_state_is_object`; `isaac_revision_changes_id_shape`, `_unit_id_shape`;
+`isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`;
+`isaac_submission_runs_id_shape`, `_unit_id_shape`, `_run_id_shape`, `_record_id_shape`.
+
+*(46 − 27 = 19 unexercised, of which 17 are never named anywhere in the workflow and 2 are named
+elsewhere in it without being driven by a `refuse()` call.)*
+
+**Why this matters enough to correct rather than footnote.** The owner's approval in the STATUS block
+is recorded as resting partly on this evidence, and the flip of these rows from *"not yet"* to *"YES"*
+was this slice's own act — so an overstatement here inflates the basis of an approval. Seven of the
+seventeen are the anchored `^…$` id-shape CHECKs, which is the class CI's own commentary singles out as
+data-correctness-critical. That class is genuinely proven for
+`isaac_experiment_revisions_id_shape` and for the two signature columns, and **generalised to the rest
+without being run**. Nothing suggests the unexercised constraints are wrong; the point is that this
+packet may not be cited as evidence that they behave.
+
+**The still-unproven class, which CI does not touch and which is the whole reason the operator's act
+is separate.** The service container is an **empty** `postgres:18` with a two-row synthetic stand-in
+for `records` — not the hosted database with its 30 production-derived records, its roles, and its
+existing grants. So *"is this valid, idempotent, self-contained SQL whose constraints behave"* is now
+**answered**; *"does it behave against the real data, roles and grants"* is **not**, and only the owner
+applying it resolves that. **Do not cite this section as evidence for the second question.**
+
+~~*"CI, when it runs, removes the … class of risk."*~~ **That sentence is struck as of 2026-08-17: CI
+HAS run** (see above), and *"when it runs"* read as though it had not — the very defect this section
+was corrected for, surviving four lines below the correction. The distinction it drew is still right
+and is stated once, above, rather than twice: CI retires *"is this valid, idempotent, self-contained
+SQL"*; it does not retire *"does it behave against the real data, roles and grants"*, and — per the
+paragraph immediately above — it retires the constraint question only for the 27 constraints its step
+actually names.
 
 ### 12C. The immutability limit — do not let a reader infer a guarantee that is not here
 
@@ -499,6 +576,34 @@ every module-level `Q_*` constant in every backend module and fails if one issue
 defect wearing the upsert's clothes. That is a real guard over **this application's own code**. It is
 **not** a guarantee about a psql session, a superuser, or a future application, and nothing in this
 repository may describe these rows as immutable at the database level.
+
+
+### 12D. The five approval checks, and what each one actually verified
+
+Recorded here because the STATUS block's approval is *conditional* on them, and a condition nobody can
+audit is not a condition. Performed 2026-08-17 on `main` at `fe374c0`, before the STATUS block was
+written.
+
+| # | Condition | Command / method | Result |
+|---|---|---|---|
+| 1 | Forward SHA-256 still matches this packet's table | `shasum -a 256` on the file, compared to the digest table above | **match** |
+| 2 | Rollback SHA-256 still matches | same | **match** |
+| 3 | No material SQL change since technical review | `git log --oneline -- <both .sql files>` | **one commit, ever** (`0896b07`); no commit has touched either file since, so there has never been a second version of these bytes to drift from |
+| 4 | Prior review findings remain resolved | read the forward SQL end to end; the review items it names as fixed (**M1** the non-empty `subject` CHECK, **M4** the disclosed `content_signature` stability exception) are present in the committed text, and `test_the_approval_packets_named_constraints_are_in_the_committed_text` pins every constraint the packet claims | **resolved, and pinned** |
+| 5 | No new material safety defect | structural scan of both files for `ALTER`/`DROP`/`TRUNCATE`/`GRANT`/`REVOKE`/DML and for any identifier naming `records`; verb inventory of the forward file; rollback inventory | **none found** — see below |
+
+**What check 5 actually looked at, so it is not read as broader than it was.** Every statement in the
+forward file is `CREATE TABLE IF NOT EXISTS` or `CREATE INDEX IF NOT EXISTS` and nothing else: no
+`ALTER`, no `DROP`, no `TRUNCATE`, no `GRANT`/`REVOKE`, no DML, no dollar-quoted body, and no
+`ON DELETE` clause in any statement — the phrase occurs only in comments — so every foreign key takes
+the SQL default, `NO ACTION`, and no cascade exists. The identifier `records` appears in no statement in either file. The rollback drops only
+tables this migration creates, children before parents, and deletes only its own bookkeeping row.
+
+**This check was a READ of the committed text plus a structural scan — not a runtime observation, and
+not a substitute for the independent technical review that produced this packet.** It is the
+"has anything changed, and is anything obviously unsafe" pass the approval was made conditional on. The
+behavioural evidence is §12A/§12B's; the residual risk is the one §12B names and only the operator can
+retire.
 
 ## 13. What this packet does not cover
 

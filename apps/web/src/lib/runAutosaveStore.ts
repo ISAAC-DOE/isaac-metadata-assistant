@@ -497,6 +497,37 @@ export function disposeExperiment(experimentId: string): void {
   }
 }
 
+/**
+ * Drop the entry for ONE run, because that run no longer exists.
+ *
+ * `disposeExperiment`'s narrower sibling, and it exists for the one event that
+ * genuinely ends a single run's save state: the reader removed the run. Without
+ * it the module map keeps an entry keyed on a run id the server has forgotten,
+ * and a later remount of the same record would resubscribe a card to save state
+ * for a run that is gone.
+ *
+ * IT DOES NOT ABORT AN IN-FLIGHT REQUEST, and does not delete an entry that still
+ * has one — the same rule `disposeExperiment` follows, for the same reason: the
+ * request is the reader's own confirmed edit and is already on its way, and the
+ * honest thing is to stop REPORTING rather than to pretend it did not happen.
+ * Such an edit will be refused by the server (the run is gone, so the run PATCH is
+ * a 404), which is the truthful outcome and not a state this function should
+ * fabricate. The entry is left marked silent and is collected the next time
+ * `disposeExperiment` runs.
+ */
+export function disposeRun(experimentId: string, runId: string): void {
+  const key = runKey(experimentId, runId);
+  const entry = entries.get(key);
+  if (entry === undefined) return;
+  entry.onRun = null;
+  entry.listeners.clear();
+  if (!entry.inFlight && Object.keys(entry.pending).length === 0) {
+    clearTimers(entry);
+    entry.disposed = true;
+    entries.delete(key);
+  }
+}
+
 /** TEST SEAM ONLY. Never called by the app. */
 export function __resetRunAutosaveStore(): void {
   for (const entry of entries.values()) {

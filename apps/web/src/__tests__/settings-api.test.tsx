@@ -1087,24 +1087,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 65 operations, MEASURED not derived', () => {
-    // Both branches raised this from 52 for real, different additions — the
-    // asset slice to 56, the transcript slice to 55. Adding the two deltas is
-    // how a merged counter goes wrong; the numbers here were read out of this
-    // test's own failure output after merging.
-    // 63 -> 65 operations, 71,770 -> 77,243 characters, 157 -> 167 post-lead
-    // paragraphs: the backend now publishes the two CONFLICT RESOLUTION
-    // operations — read the disagreements a record's own evidence carries, and
-    // record which competing answer a scientist stands behind. TWO operations were
-    // ADDED and none was edited, so the deltas happen to be exact this time; the
-    // numbers below were still MEASURED rather than added, because "the deltas
-    // happen to be exact" is a claim only a measurement can make. Cross-checked
-    // the two ways every corrected total above was: the paragraph rule transcribed
-    // into Python over `create_app().openapi()` gives 65 documented operations,
-    // total 77,243 and 167 post-lead paragraphs, and internal consistency holds —
-    // the raw sum of `d.description.length` is 77,577, this figure drops the 167
-    // `\n\n` separators, and 77,577 - 334 = 77,243.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(65);
+  it('describes the contract it claims to: 66 operations, MEASURED on the merged tree', () => {
+    // FOUR slices have now raised this from 52 for real, different additions — the
+    // asset slice, the transcript slice, run removal, and the two CONFLICT
+    // RESOLUTION operations. Both sides of this merge conflict carried a number
+    // correct for its own branch and wrong for the merge; neither was kept.
+    // Re-measured on the merged tree by the paragraph rule transcribed into Python
+    // over `create_app().openapi()`.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(66);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1666,18 +1656,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // MEASURED AFTER THE MERGE, from the served document, and NOT by adding the
     // two branches' deltas.
     //
-    // Both slices moved these three figures from the same base for real,
-    // different reasons: the transcript slice publishes three operations
-    // (`POST .../transcript`, `POST /api/transcription`,
-    // `GET /api/providers/capabilities`) and reported 60,222 / 131; the asset
-    // slice publishes four (list, record, edit, remove) and reported 60,399 /
-    // 130. Neither figure is the merged one, and arithmetic on the pair would
-    // have produced a third wrong number — which is the whole lesson the
-    // 2026-08-16 note above records, and which this merge demonstrated again on
-    // a DIFFERENT counter in `backend-down-state.test.tsx`, where both branches
-    // wrote the same literal and git merged it with no conflict at all.
-    expect(total).toBe(77243);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(167);
+    // RE-MEASURED OVER THE WHOLE ARRAY on the merged tree, not added to either
+    // side's figure — which is the lesson every note above this line records. Four
+    // slices have moved these numbers from the same base for real, different
+    // reasons, and both sides of this merge conflict held a number that was right
+    // for its own branch and wrong here.
+    //
+    // Measured THREE ways after the merge, all agreeing:
+    //
+    //   . the splitPurpose paragraph rule over this array gives 79,564 / 172.
+    //   . internal consistency: raw sum of `d.description.length` = 79,908; this
+    //     figure drops the 172 blank-line separators, and 79,908 - 344 = 79,564.
+    //   . independently, the same rule transcribed into Python over
+    //     `create_app().openapi()` gives 66 operations, 79,564 and 172 — which also
+    //     proves this captured array matches the MERGED backend rather than either
+    //     pre-merge branch.
+    expect(total).toBe(79564);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(172);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the
