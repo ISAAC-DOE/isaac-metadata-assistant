@@ -1201,3 +1201,87 @@ def test_the_removal_route_writes_nothing_under_the_truth_core(workspace):
 
     after = {p: p.stat().st_mtime_ns for p in sorted(core.rglob("*")) if p.is_file()}
     assert after == before
+
+
+def test_a_HALF_WRITTEN_export_still_refuses_removal_and_keeps_the_published_pair(workspace):
+    """CRITICAL from independent review, reproduced and then closed.
+
+    The guard was `run.record_id is not None`, justified by "a run whose
+    `record_id` is set HAS a record on disk". That direction is true and is not
+    the one the safety argument needs. It needs the CONVERSE — a run whose
+    `record_id` is NOT set has no pair on disk — and this codebase names the state
+    where the converse is false, in `post_export`'s own 412 branch: "EVERY unit's
+    artifact PAIR was already written to disk and the state was not".
+
+    `_write_record` sets `record_id` in memory and writes both files; one
+    `_save_versioned` then persists. A lost durable compare-and-swap, or a raise
+    between two units' writes, leaves the pair on disk with `record_id`
+    unpersisted.
+
+    The reviewer drove the real routes in exactly that shape: removal returned
+    **200**, the next export pruned the orphan, and a published official record
+    AND its evidence sidecar were deleted — at a distance, with no confirmation,
+    and the documented repair ("republish from the current draft") impossible
+    because the run was gone.
+
+    This test recreates the documented half-written shape directly: export, then
+    clear `record_id` on the persisted document while LEAVING the pair on disk.
+
+    MUTATION: restore the guard to `run.record_id is not None` and this goes RED
+    at the first assertion.
+    """
+    _make(runs=("run A", "run B"))
+    ids = _run_ids()
+    client = _client()
+    exported = client.post(
+        f"/api/experiments/{EXPERIMENT_ID}/export", headers={"If-Match": _etag(client)}
+    )
+    assert exported.status_code == 200, exported.text
+
+    exp = ws.load_experiment(EXPERIMENT_ID)
+    before = {name: (exp.records_dir / name).read_bytes() for name in _artifacts(exp)}
+    assert before, "the fixture did not actually export anything"
+    target = exp.get_run(ids[0])
+    stem = target.record_id
+    assert stem is not None, "the fixture did not materialise the run under test"
+    assert (exp.records_dir / f"{stem}.json").exists()
+
+    # THE DOCUMENTED HALF-WRITTEN STATE: files on disk, `record_id` not persisted.
+    target.record_id = None
+    exp.save()
+    reloaded = ws.load_experiment(EXPERIMENT_ID)
+    assert reloaded.get_run(ids[0]).record_id is None, "the fixture did not take"
+    assert (reloaded.records_dir / f"{stem}.json").exists(), "the pair must remain"
+
+    # THE GUARD MUST STILL REFUSE — on disk evidence, not on state.
+    response = _remove(client, ids[0])
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["error"] == "run_exported"
+    # And it must name the artifact it is protecting, even though `record_id` is
+    # null on this arm — a message built from `record_id` alone would say "null".
+    assert body["record_stem"] == stem
+    assert body["record_id"] is None
+
+    # The run survives, and so does every published byte.
+    assert ids[0] in _run_ids()
+    after_exp = ws.load_experiment(EXPERIMENT_ID)
+    after = {name: (after_exp.records_dir / name).read_bytes() for name in _artifacts(after_exp)}
+    assert after == before, "a published record or sidecar was disturbed"
+
+
+def test_the_half_written_guard_does_not_refuse_an_ordinary_unexported_run(workspace):
+    """The other half: raising the bar must not refuse a run with nothing on disk.
+
+    Without this, the fix above could be 'refuse everything', which would pass the
+    test above and destroy the feature.
+    """
+    _make(runs=("run A", "run B"))
+    ids = _run_ids()
+    client = _client()
+    exp = ws.load_experiment(EXPERIMENT_ID)
+    assert not _artifacts(exp), "this test needs a record with nothing exported"
+
+    response = _remove(client, ids[0])
+    assert response.status_code == 200, response.text
+    assert ids[0] not in _run_ids()

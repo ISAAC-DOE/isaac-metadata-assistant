@@ -2728,14 +2728,63 @@ def _run_not_found(experiment_id: str, run_id: str) -> JSONResponse:
     )
 
 
-def _run_exported(experiment_id: str, run: "ws.Run") -> JSONResponse:
+def _run_published_stem(exp: "ws.Experiment", run: "ws.Run") -> str | None:
+    """The record stem this run keeps claimed, or ``None`` if it keeps none.
+
+    THE GUARD ASKS ABOUT DISK, NOT ONLY ABOUT STATE, AND THE DIFFERENCE IS A
+    DELETED OFFICIAL RECORD.
+
+    The first version of this guard was `run.record_id is not None`, on the stated
+    reasoning that "a run whose `record_id` is set has an official record and an
+    evidence sidecar on disk". That direction is true and is not the one the safety
+    argument needs. What it needs is the CONVERSE — a run whose `record_id` is not
+    set has no pair on disk — and this codebase names the state where the converse
+    is false, twice:
+
+      * `post_export`'s 412 branch: "EVERY unit's artifact PAIR was already written
+        to disk and the state was not";
+      * `_save_versioned`: "`post_export` writes the official record and its
+        evidence sidecar BEFORE calling this, and those two files remain on disk".
+
+    `_write_record` sets `record_id` in memory and writes both files; one
+    `_save_versioned` then persists. A lost durable compare-and-swap, or a raise
+    between two units' writes, leaves the pair on disk with `record_id`
+    unpersisted. Independent review reproduced exactly that shape and drove the
+    real routes: the removal returned 200, the next export pruned the orphan, and
+    a published record AND its evidence sidecar were deleted.
+
+    `ExportUnit.materialised()` already encodes the correct three-part test; this
+    is the same question asked of a run that may not be a current unit any more.
+    Two `stat()` calls under a lock this route already holds.
+
+    Returns the STEM rather than a bool so the refusal can name the artifact even
+    on the arm where `record_id` is unset — the arm where a message built from
+    `record_id` would say `null`.
+    """
+    record_id = run.record_id
+    if isinstance(record_id, str) and ws.is_record_id(record_id):
+        return record_id
+    # No persisted `record_id`. A pair may still be on disk under the RUN's own id:
+    # that is the stem `_write_record` uses for a run unit, and the stem the prune
+    # would delete.
+    records_dir = exp.records_dir
+    if (records_dir / f"{run.id}.json").exists() or (
+        records_dir / f"{run.id}.evidence.json"
+    ).exists():
+        return run.id
+    return None
+
+
+def _run_exported(experiment_id: str, run: "ws.Run", *, stem: str | None = None) -> JSONResponse:
     """A run that has produced an official record, refused for removal.
 
     THIS IS THE HISTORY GUARD, and it is stated here rather than only in the
     operation's prose because it is the reason the operation is narrower than the
-    button a scientist sees. A run whose ``record_id`` is set has an official
-    record and an evidence sidecar on disk, and that pair is IMMUTABLE — nothing in
-    this application rewrites one. Removing the run would leave the pair claimed by
+    button a scientist sees. A run that keeps an official record and an evidence
+    sidecar claimed — whether by a persisted ``record_id`` or by a pair sitting on
+    disk under its own id; see :func:`_run_published_stem` for why both are asked —
+    holds a pair that is IMMUTABLE, because nothing in this application rewrites
+    one. Removing the run would leave the pair claimed by
     no current unit, and the export prune deletes exactly that: a stem no current
     unit claims, protected only if a surviving record happens to link to it. So the
     removal that looks harmless here would become a DELETION of a published record
@@ -2756,7 +2805,11 @@ def _run_exported(experiment_id: str, run: "ws.Run") -> JSONResponse:
             "error": "run_exported",
             "experiment_id": experiment_id,
             "id": run.id,
+            # The STEM that is claimed, which on the disk-only arm is the run's
+            # own id rather than a persisted `record_id`. `record_id` is reported
+            # separately and honestly, including when it is null.
             "record_id": run.record_id,
+            "record_stem": stem if stem is not None else run.record_id,
             "message": (
                 "This run has been exported to an official ISAAC record, so it "
                 "cannot be removed. The record and its evidence sidecar are "
@@ -4633,14 +4686,20 @@ def post_run_check(
 
 _RUN_REMOVE_DESCRIPTION = (
     "Removes one run from this record and reports what was removed.\n\n"
-    "ONLY A RUN THAT HAS NOT BEEN EXPORTED. A run whose `record_id` is set has "
-    "already produced an official ISAAC record, and that record and its evidence "
-    "sidecar are written artifacts this application never rewrites. Removing the "
-    "run that names them would leave them claimed by nothing, and a later export "
-    "of this record deletes exactly such a pair — so this operation refuses that "
-    "run with `409 run_exported` and writes nothing. Every run that has appeared "
-    "in a submitted revision is such a run, which is what keeps a submitted "
-    "record out of this operation's reach. No revision, submission or official "
+    "ONLY A RUN THAT KEEPS NO PUBLISHED RECORD CLAIMED. A run that has produced "
+    "an official ISAAC record holds a record and an evidence sidecar that this "
+    "application never rewrites. Removing the run that names them would leave "
+    "them claimed by nothing, and a later export of this record deletes exactly "
+    "such a pair — so this operation refuses that run with `409 run_exported` "
+    "and writes nothing. The refusal asks BOTH whether the run carries a "
+    "`record_id` AND whether an artifact pair is present on disk under its own "
+    "id, because an export writes both files before it persists the state and a "
+    "refused state save leaves the pair with no `record_id` naming it.\n\n"
+    "Every run that has appeared in a submitted revision carries a `record_id` — "
+    "a submission materialises every unit before it records anything — so a "
+    "SUBMITTED record is out of this operation's reach. That is a statement "
+    "about submitted records specifically, not a claim that removal is the only "
+    "way a record can stop being claimed. No revision, submission or official "
     "record is deleted, rewritten or marked by this operation in any case.\n\n"
     "WHAT IS REMOVED is the run's own draft content: the run-level values it "
     "holds, the overrides it recorded, its association with any asset reference, "
@@ -4736,8 +4795,9 @@ def post_run_remove(
             return _run_not_found(experiment_id, run_id)
         if not isinstance(body, dict) or body.get("confirmed_by_user") is not True:
             return _confirmation_required("remove a run")
-        if run.record_id is not None:
-            return _run_exported(experiment_id, run)
+        published = _run_published_stem(exp, run)
+        if published is not None:
+            return _run_exported(experiment_id, run, stem=published)
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
             return precondition

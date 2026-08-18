@@ -878,13 +878,15 @@ export function RunCard({
               <p className="run-card-remove-text">
                 Removing <strong>{run.label}</strong> takes this run out of the record,
                 with the values it holds: the fields on this card, any record-level
-                value it overrides, and the files it cites. The record’s own values are
-                unchanged, no other run is changed, and the files themselves are not
-                touched — ISAAC has never opened them.
+                value it overrides, and this run’s citations of the files it uses. The
+                record’s own values are unchanged, no other run is changed, and the
+                record’s list of those files still names them — only this run stops
+                citing them. The files themselves are not touched: ISAAC has never
+                opened them.
               </p>
               <p className="run-card-remove-text">
                 The other runs keep their numbers, so the numbering can end up with a
-                gap. This cannot be undone from this screen.
+                gap. This cannot be undone.
               </p>
               {removeError !== null && (
                 <div className="run-card-remove-failure" id={removeErrorId} role="alert">

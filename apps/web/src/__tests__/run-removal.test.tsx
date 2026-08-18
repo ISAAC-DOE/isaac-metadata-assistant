@@ -259,8 +259,19 @@ describe('the confirmation', () => {
     // What it must say.
     expect(copy).toContain('The record’s own values are unchanged');
     expect(copy).toContain('no other run is changed');
-    expect(copy).toContain('the files themselves are not touched');
+    expect(copy).toContain('files themselves are not touched');
     expect(copy).toContain('keep their numbers');
+    // THE ASSET LIBRARY SURVIVES, AND THE CONFIRMATION SAYS SO. Independent
+    // review found the panel listing "the files it cites" among what goes, while
+    // only the POST-HOC note mentioned that the record still lists them — so the
+    // one surface where understatement matters, the panel a reader reads BEFORE
+    // a destructive act, let them conclude the library entries go too.
+    expect(copy).toContain('still names them');
+    // AND NO IMPLIED REMEDY. It read "cannot be undone from this screen", which
+    // implies one exists elsewhere. Nothing in this application restores a
+    // removed run.
+    expect(copy).toContain('cannot be undone');
+    expect(copy).not.toMatch(/undone from this screen/i);
     // What it must NOT say. A removal deletes no file and touches no published
     // record; copy that implied either would be false, and false in the one
     // direction that makes a scientist hesitate to use a safe control.
@@ -400,11 +411,18 @@ describe('Focus Run recovery', () => {
     );
 
     await waitFor(() => expect(renderedIds()).toEqual(['RUN002', 'RUN003']));
-    const url = screen.getByTestId('url').textContent ?? '';
-    expect(url).not.toContain('RUN001');
-    // The other selection is untouched — a removal takes out one run, not the
-    // reader's whole comparison.
-    expect(url).toContain('RUN003');
+    // WAITED FOR, not read once. The list re-render and the URL rewrite are
+    // separate effects, so a synchronous read after the list settles is a race:
+    // it passed this file alone and with one sibling, and failed in the full
+    // suite, which is the signature of an ordering-sensitive assertion rather
+    // than of a product defect.
+    await waitFor(() => {
+      const url = screen.getByTestId('url').textContent ?? '';
+      expect(url).not.toContain('RUN001');
+      // The other selection is untouched — a removal takes out one run, not the
+      // reader's whole comparison.
+      expect(url).toContain('RUN003');
+    });
   });
 });
 
@@ -555,7 +573,7 @@ describe('a refused removal', () => {
     expect(renderedIds()).toEqual(['RUN001']);
   });
 
-  it('a 409 is rendered in the SERVER’s words, and the run stays', async () => {
+  it('a 409 is rendered in THIS CLIENT’s words, and the run stays', async () => {
     const state = stubBackend([mkRun(1)]);
     state.refuse = {
       status: 409,

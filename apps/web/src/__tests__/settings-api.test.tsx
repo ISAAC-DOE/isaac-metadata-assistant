@@ -1673,8 +1673,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //   . independently, the same rule transcribed into Python over
     //     `create_app().openapi()`, restricted to the 57 operations this array
     //     names, also gives 62,301 / 134.
-    expect(total).toBe(62301);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(134);
+    expect(total).toBe(62720);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(135);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

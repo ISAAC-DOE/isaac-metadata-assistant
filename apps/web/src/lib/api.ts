@@ -1156,10 +1156,17 @@ export const api = {
    * that reaches this function without a reader having confirmed. The server
    * enforces it regardless (`422 confirmation_required`).
    *
-   * A 409 means the run has been EXPORTED and was not removed; a 412 means the
-   * record moved and nothing was removed. `mutationError` attaches the parsed
-   * body, so the screen renders the server's own words rather than inventing a
-   * reason.
+   * A 409 means the run keeps a published record claimed and was not removed; a
+   * 412 means the record moved and nothing was removed.
+   *
+   * WHICH OF THOSE REACHES THE SCREEN IN THE SERVER'S OWN WORDS, precisely,
+   * because an earlier version of this comment said "the screen renders the
+   * server's own words" of BOTH and that is false of one of them:
+   * `mutationError` parses a body for **400, 412 and 422 only**. A 409 body is
+   * not parsed, so its copy is written by the CALLER — `RunsSection.tsx` says so
+   * at its own call site, in the opposite words to the sentence this replaces.
+   * A future second consumer that trusted the old wording would ship a blank
+   * message on the one refusal a scientist most needs explained.
    */
   async removeRun(
     experimentId: string,
