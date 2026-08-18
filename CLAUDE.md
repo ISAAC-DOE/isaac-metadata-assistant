@@ -782,7 +782,33 @@ Out of scope unless explicitly approved:
   **What listing those five covers, precisely:** creating them, by an owner-applied migration, and
   writing them through `submission_store.py`'s append-only `INSERT`s. It covers **no** read surface
   over the history, **no** change to `records`, and — per the hard stop below — **no hosted
-  application of `0003` or `0004`**, both of which remain NOT APPROVED and NOT APPLIED anywhere.
+  application of `0003` or `0004`**.
+
+  ***APPROVAL STATUS CHANGED 2026-08-17, and only one of the two halves moved.*** The sentence above
+  used to end *"both of which remain NOT APPROVED and NOT APPLIED anywhere"*, and it is corrected
+  rather than deleted because the two halves are different people's acts and the old wording bundled
+  them. **The project owner (Krish) has now APPROVED the exact bytes** of `0003_revisions` and
+  `0004_submissions`, conditional on five mechanical checks that were performed and recorded — digests
+  match the packets, the SQL has had exactly one version ever (commit `0896b07`, never since touched),
+  prior review findings remain resolved, and a structural safety scan found no new defect. See
+  [`docs/migration-approval-packet-0003.md`](docs/migration-approval-packet-0003.md) §12D and
+  [`-0004.md`](docs/migration-approval-packet-0004.md) §12D. **HOSTED APPLICATION REMAINS NOT DONE AND
+  IS NOT THE AGENT'S ACT** — owner approval is a precondition for the operator's step, never a
+  substitute for it, and the hard stop below is unchanged in every respect.
+
+  **A second, separate correction made in the same change, because a test was enforcing a false
+  claim.** Both packets' §12B asserted *"No PostgreSQL has ever executed this file"*, and
+  `test_the_packets_do_not_claim_a_hosted_application` **required that literal to be present**. The
+  sentence named its own expiry condition (*"until the `postgres-migration` job runs"*); that job has
+  since run and passed on `main` at `fe374c0` (Actions run `32099627898`), applying `0001`–`0004`
+  forward against a `postgres:18` container, exercising every constraint against input it should
+  reject, and proving the rollback order. So the repository was mechanically requiring itself to keep
+  asserting something untrue, with the test reading as evidence of honesty. The guard now pins the
+  **invariant** — that the packets do not read as hosted-applied — and a paired negative control
+  asserts the expired sentence survives only as a quoted correction. **What CI still does not prove is
+  unchanged and is the whole reason the operator's act is separate:** the container is empty, with a
+  two-row synthetic stand-in for `records`, so *"behaves against the real data, roles and grants"*
+  remains unproven.
 
   **What writing `isaac_runs` covers, precisely:** a SHADOW write only. Rows are maintained as a
   pure function of the experiment document inside the one existing durable write, and **nothing

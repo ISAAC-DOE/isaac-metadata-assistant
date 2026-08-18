@@ -417,16 +417,72 @@ def test_the_approval_packet_digests_match_the_committed_files(version, packet):
 
 
 def test_the_packets_do_not_claim_a_hosted_application(version="0003"):
-    """A packet that read as applied would be a standing permission nobody granted."""
+    """A packet that read as applied would be a standing permission nobody granted.
+
+    WHAT THIS PINS, AND WHAT IT DELIBERATELY NO LONGER PINS (changed 2026-08-17).
+
+    It used to require two literals. The first — that the packet says it has not been
+    applied to the hosted database — is the invariant, and is kept. The second was
+    ``"No PostgreSQL has ever executed this file"``, and requiring it was a mistake
+    of a specific and instructive kind: it pinned a sentence whose truth had an
+    EXPIRY DATE BUILT INTO IT. The sentence itself named the event that would
+    falsify it ("until the ``postgres-migration`` job runs on this branch"), that job
+    then ran and passed on ``main``, and this assertion went on mechanically
+    REQUIRING THE REPOSITORY TO KEEP ASSERTING A FALSE CLAIM ABOUT ITSELF — with the
+    test reading as evidence of honesty while enforcing the opposite.
+
+    So the rule this file now follows: **pin the invariant, never the transient.**
+    "Nobody has applied this to the hosted database" is an invariant until an
+    operator acts and amends the packet deliberately. "No PostgreSQL anywhere has
+    ever run this SQL" was always going to stop being true the moment CI worked as
+    designed, and a test cannot tell the difference between that and a regression.
+
+    The owner's APPROVAL is likewise not pinned here, in either direction. An
+    approval is a fact about a person's decision, recorded in the packet's STATUS
+    block; asserting a literal about it would mean this test had to be edited to
+    record a decision, which is backwards. What must never drift is the APPLICATION
+    claim, because that is the one a reader could mistake for standing permission.
+    """
     root = Path(sstore.__file__).resolve().parents[3]
     for packet in ("0003", "0004"):
         doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
             encoding="utf-8"
         )
-        assert "NOT APPROVED, NOT APPLIED, ANYWHERE." in doc, packet
-        # ...and it must say plainly that no PostgreSQL has run the file, because
-        # that is true today and is the single most load-bearing limit in it.
-        assert "No PostgreSQL has ever executed this file" in doc, packet
+        assert "NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE." in doc, packet
+        # The operator's act is outstanding, and the packet must say so in a form a
+        # reader cannot mistake for a delegation.
+        assert "no agent may run it" in doc, packet
+        # And it must not have quietly acquired the opposite claim.
+        for forbidden in (
+            "APPLIED TO THE HOSTED DATABASE BY DEAN",
+            "has been applied to the hosted database",
+        ):
+            assert forbidden not in doc, (packet, forbidden)
+
+
+def test_the_packets_do_not_still_carry_the_expired_ci_claim():
+    """The negative control for the change above: the stale sentence must be GONE.
+
+    Dropping an assertion is how a guard silently becomes weaker, so the removal of
+    the ``"No PostgreSQL has ever executed this file"`` requirement is paired with a
+    positive assertion that the claim itself is no longer made anywhere in the
+    packets except inside the quoted correction that explains why it was wrong.
+    """
+    root = Path(sstore.__file__).resolve().parents[3]
+    for packet in ("0003", "0004"):
+        doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
+            encoding="utf-8"
+        )
+        # The claim survives ONLY as a block-quoted historical citation — every
+        # occurrence must sit on a line that is quoting the old text.
+        for line in doc.splitlines():
+            if "No PostgreSQL has ever executed this file" in line:
+                assert line.lstrip().startswith(">"), (
+                    f"packet {packet} asserts the expired CI claim as its own "
+                    f"statement rather than quoting it as corrected: {line!r}"
+                )
+        # ...and the correction that explains it must be present.
+        assert "CORRECTED 2026-08-17" in doc, packet
 
 
 # =============================================================================
