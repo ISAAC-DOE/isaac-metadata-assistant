@@ -125,6 +125,9 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   revNeedsReview: CircleAlert,
   revConflict: TriangleAlert,
   revUnmapped: Inbox,
+  // A PERSON decided. `UserCheck` rather than `Check`, which `revSupported`
+  // wears: the glyph says who settled it, not that the value is established.
+  revResolved: UserCheck,
 };
 
 // Evidence source-type glyphs (icons-and-symbols.md).
