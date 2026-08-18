@@ -51,6 +51,7 @@ from . import db_provider
 from . import db_recon
 from . import db_write
 from . import dependencies
+from . import conflict_resolution as cr
 from . import evidence_classify
 from . import experiment_repository
 from . import identity as identity_module
@@ -7684,7 +7685,14 @@ def post_submit(
             if subject is not None and identity.human is not None
             else submissions.TRUST_BASIS_UNATTRIBUTED
         )
-        conflict_summary = submissions.conflict_summary(units)
+        # THE RECORD's decisions, all of them, scoped per unit inside
+        # `conflict_summary`. Read here rather than off each unit because
+        # `resolved_run_draft` does not copy the key into a run's composed draft —
+        # see that function's docstring for why one record-level list is the storage.
+        # Unreadable stored entries are ignored for the disclosure and preserved on
+        # disk; the count of them is not part of a submission row's contract.
+        record_resolutions, _unreadable_resolutions = cr.resolutions_from_draft(exp.draft)
+        conflict_summary = submissions.conflict_summary(units, record_resolutions)
         try:
             recorded = store.record_submission(
                 exp=exp,

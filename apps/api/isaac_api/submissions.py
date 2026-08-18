@@ -36,6 +36,19 @@ manufactured a conflict **they cannot clear through any surface this build offer
 Gating submission on it would be a permanent block produced by correcting a
 mistake. :func:`conflict_summary` therefore reports it, the submission row stores
 it, and the response discloses it — and none of that stops the submission.
+
+**THE "CANNOT CLEAR IT" HALF IS NO LONGER TRUE, AND THE PARAGRAPH IS KEPT RATHER
+THAN REWRITTEN, because the argument it makes is still the one that decides the
+gating.** :mod:`isaac_api.conflict_resolution` gives a person an explicit way to
+record which competing answer is right, so the defect above is addressable; the two
+facts that made gating wrong are untouched. First, **nothing removes the competing
+evidence**, so the classification stays ``conflicting_evidence`` forever and gating on
+it would still be a permanent block. Second, **a resolution is not required**: a
+scientist may legitimately submit with a conflict undecided, and ``deferred`` is a
+recorded outcome precisely because declining to decide is allowed. So ``gating``
+stays ``disclosed_not_gated`` — no committed sentence in this repository authorises a
+gate — and what :func:`conflict_summary` gained is the ability to say *which* of the
+conflicts somebody has already decided.
 """
 
 from __future__ import annotations
@@ -390,47 +403,114 @@ def unit_membership_changes(
     }
 
 
-def conflict_summary(units: Sequence[Any]) -> dict:
-    """Which fields carry conflicting evidence, per unit. RECORDED, NEVER GATING.
+def conflict_summary(units: Sequence[Any], resolutions: Sequence[Any] = ()) -> dict:
+    """Which fields carry conflicting evidence, per unit, and which were DECIDED.
+
+    RECORDED, NEVER GATING — see the module docstring, whose argument survives the
+    arrival of conflict resolution intact.
 
     Reuses :func:`isaac_api.evidence_classify.classify_fields`, which is the one
     definition of ``conflicting_evidence`` in this application — recomputing the
     rule here would create a second definition that could disagree with the one the
-    Evidence screen shows.
+    Evidence screen shows. Resolution state is delegated the same way, to
+    ``conflict_resolution.state_of``.
 
-    THE OUTPUT CARRIES ADDRESSES AND COUNTS, NEVER VALUES. The conflicting values
-    are in the revision snapshot beside this row; copying them into a disclosure
-    column would put scientific content into a field whose job is navigation, and
-    would give the same value two places to live.
+    THE OUTPUT CARRIES ADDRESSES AND COUNTS, NEVER VALUES, AND THAT IS UNCHANGED.
+    The conflicting values are in the revision snapshot beside this row, and the
+    ``GET .../conflicts`` resolution surface serves them because a scientist cannot
+    choose between answers they are not shown. Copying them into a disclosure column
+    would put scientific content into a field whose job is navigation, and would give
+    the same value two places to live. ``resolution_states`` is a map of address to a
+    ``conflict_resolution.RESOLUTION_STATES`` member — four fixed words, no value, no
+    rationale text, no subject.
+
+    ``resolutions`` IS PASSED IN RATHER THAN READ OFF THE UNIT, and the asymmetry is
+    the reason. A resolution lives at the RECORD level (one list, run-scoped rows
+    distinguished by ``run_id``), and ``workspace.resolved_run_draft`` does not copy
+    that key into a run's composed draft — so for a fan-out experiment ``unit.draft``
+    carries no resolutions at all, while for a zero-run experiment ``unit.draft`` IS
+    ``exp.draft`` and carries them. Reading from the unit would therefore have
+    reported resolutions for one record shape and silently none for the other. The
+    default of ``()`` keeps this function callable without them, and a caller that
+    omits them gets ``absent`` for every address — honest, and visibly so, because
+    ``resolutions_supplied`` says which happened.
+
+    A resolution matches a unit when its ``run_id`` is the unit's OR is ``None``: an
+    inherited experiment-level address is decided once, at the record, and the run
+    that inherits it inherits the decision with the value. That is the same
+    inheritance ``resolve_inherited`` already implements for the value itself.
 
     ``gating`` is stated IN THE DATA rather than left to documentation, because this
     object is stored and is read back by surfaces that were not written today. A
     reader who finds a non-zero count must be able to see, from the object itself,
     that it did not block anything.
     """
+    from . import conflict_resolution as cr  # noqa: PLC0415 - see below
+    from . import serialize as _serialize  # noqa: PLC0415
+
+    # LAZY IMPORTS, because `conflict_resolution` imports this module (for
+    # `canonical_json` and `TRUST_BASIS_UNATTRIBUTED`) and a module-level import here
+    # would close the cycle. The direction is deliberate: the digest and the
+    # unattributed basis are this module's, and a domain module reading them is
+    # better than a second copy of either.
+    supplied = list(resolutions)
     affected: list[dict] = []
     total = 0
+    tally = {state: 0 for state in cr.RESOLUTION_STATES}
     for unit in units:
-        addresses = sorted(
-            entry["field"]
+        classified = {
+            entry["field"]: entry
             for entry in evidence_classify.classify_fields(unit.draft)
+            if isinstance(entry.get("field"), str)
+        }
+        addresses = sorted(
+            field
+            for field, entry in classified.items()
             if entry.get("classification") == "conflicting_evidence"
-            and isinstance(entry.get("field"), str)
         )
         if not addresses:
             continue
         total += len(addresses)
+        evidence_by_address = {
+            str(item.get("path")): item.get("evidence") or []
+            for item in _serialize.evidence_trail_from_draft(unit.draft)
+        }
+        scoped = [
+            resolution
+            for resolution in supplied
+            if resolution.run_id in (unit.run_id, None)
+        ]
+        states = {}
+        for address in addresses:
+            state = cr.state_of(
+                cr.find(scoped, address, unit.run_id)
+                or cr.find(scoped, address, None),
+                cr.competing_from_evidence(evidence_by_address.get(address)),
+            )
+            states[address] = state
+            tally[state] += 1
         affected.append(
             {
                 "unit_id": unit.target_id,
                 "run_id": unit.run_id,
                 "addresses": addresses,
+                "resolution_states": states,
             }
         )
     return {
         "scope": CONFLICT_SCOPE,
         "gating": "disclosed_not_gated",
         "conflicting_field_count": total,
+        # WHETHER THE CALLER SUPPLIED ANY DECISIONS AT ALL. Without it, "nothing was
+        # resolved" and "nobody asked about resolutions" are the same bytes, and only
+        # the first is a statement about the record.
+        "resolutions_supplied": bool(supplied),
+        "resolved_field_count": tally[cr.RESOLUTION_CURRENT],
+        "deferred_field_count": tally[cr.RESOLUTION_DEFERRED],
+        "stale_resolution_count": tally[cr.RESOLUTION_STALE],
+        # `stale` counts as unresolved, deliberately and in one place: a decision made
+        # over a different competing set does not cover the conflict a reader sees.
+        "unresolved_field_count": total - tally[cr.RESOLUTION_CURRENT],
         "affected_units": affected,
     }
 
