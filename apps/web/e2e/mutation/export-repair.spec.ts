@@ -97,9 +97,44 @@ test.describe('R4 · export, repaired and refused', () => {
     // the assistant never types a scientific value.
     await page.locator('.preexport-gate').getByRole('button', { name: 'Back to Complete →' }).click();
     await expect(page.getByRole('heading', { name: /Answer 2 Questions/ })).toBeVisible();
+    /*
+     * THE LOOP USED TO RACE THE REMOUNT, and it cost a 60-second timeout roughly one
+     * run in several — including on two branches whose diffs could not possibly have
+     * caused it (a read-only spec file, and a change to the demo-runner stage type).
+     * That is what made it look like flake rather than a defect worth reading.
+     *
+     * The mechanism, from the failure's own call log: after the first `Confirm`,
+     * `GuidedPrompt` remounts under a new `key` (the next blocker's id). The next
+     * iteration's `Use This Value` click resolves against whichever copy is present
+     * at that instant — sometimes the DETACHING one — so the new question is left
+     * with nothing staged. `Confirm` is then correctly `disabled`, because
+     * `canConfirm` is false with no value staged, and Playwright retries a click on a
+     * button the product is right to keep disabled until the 60s ceiling. The log
+     * shows exactly that: `<button disabled ...>Confirm</button>`, element not
+     * enabled, retried to death.
+     *
+     * So this is a TEST race, not a product bug — the product's refusal to enable
+     * Confirm without a staged value is the behaviour we want. The fix is to wait for
+     * each question to actually BE the current one, and for the staging to have
+     * taken, before acting. `toBeEnabled()` is the load-bearing wait: it is the
+     * observable signal that `Use This Value` reached the component that is now
+     * mounted.
+     */
     for (let i = 0; i < 2; i++) {
-      await page.getByRole('button', { name: 'Use This Value' }).first().click();
-      await page.getByRole('button', { name: 'Confirm' }).click();
+      // The heading counts DOWN as questions close, so it also pins that the
+      // previous iteration really advanced rather than silently repeating.
+      await expect(
+        page.getByRole('heading', { name: new RegExp(`Answer ${2 - i} Questions?`) }),
+      ).toBeVisible();
+      const stage = page.getByRole('button', { name: 'Use This Value' }).first();
+      await expect(stage).toBeEnabled();
+      await stage.click();
+      const confirm = page.getByRole('button', { name: 'Confirm' });
+      // Not `.click()` straight away: an unstaged Confirm is legitimately disabled,
+      // and clicking it would wait 60s and then report a timeout instead of the real
+      // fact, which is that nothing was staged.
+      await expect(confirm, 'Confirm must become enabled once a value is staged').toBeEnabled();
+      await confirm.click();
     }
     await expect(page.getByRole('heading', { name: 'All Fields Resolved' })).toBeVisible();
     expect((await server.read(SEED.partial)).pendingIds, 'the repair must close both questions').toEqual([]);
