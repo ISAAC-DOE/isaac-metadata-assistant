@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "45631d694b65422e9b837d3ac6bb1f8f2672f247051ecb80856620db5f100cc6"
+        "sha256": "2e440069757e35609fac93fb290b60f6d7a6b0becd4abcb4bad1b26eddf9f43c"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "7b269a82f2796ad8b366314948278f0ac5d62472bdbcbdd01c3506b26ba688a1"
+        "sha256": "7c44c55be1e0d1ac2a97251a789f9ec91eecb55ba6de53645995b4e84523f0cf"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "b7ab2d03ab6930fa6beb1352d4e15b6494c5d7829c02cf36b236b2dabbaff630"
+        "sha256": "c52d99565f8dd83d6a16bf6adc7069fe13c7d5d0f0c85f42f9d73ece34ea064f"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "4c0193ad2a30d10f073bf0a33563a838d618b33c9b43da35aa7a5b79a9a42e77"
+        "sha256": "1a02c0c6370c9ea004e9a7220953f26a9ab4d93c7175f268bd3ba9947690cce2"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "c0c4f8b63eb98cba96b3bc6bf5fa6d2b5ab161e11af80356c14b0ffbfaa384a4"
+        "sha256": "7cf392ef2b758b22a369bec92c484901b77253a4d3fd334abbcdc3296c132564"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "75eff7e13c4969ee3331807e969bc70583c4f368f4789ff2298f8c6e04ea3124"
+    "served_manifest_fingerprint": "ce18afd70b0bf4d9bc03f36865f21a1e95a7afeba851b8872000ea29176c5649"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
