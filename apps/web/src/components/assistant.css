@@ -1659,3 +1659,12 @@ button.assistant-source-chip-nav:focus-visible {
   color: var(--text-secondary);
 }
 .guided-staged .mono { font-size: 11.5px; color: var(--text-muted); }
+
+/* A message whose text the browser-transcript scrubber withheld. Muted and italic:
+   it is an absence, not an error — nothing failed, and the live turn was answered
+   normally. Only the archived copy is affected. Before this existed the message
+   rendered as an EMPTY paragraph, which is the defect it replaces. */
+.assistant-msg-withheld {
+  color: var(--text-muted);
+  font-style: italic;
+}

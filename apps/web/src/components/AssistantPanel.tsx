@@ -1822,7 +1822,28 @@ function ConversationMessage({
           </span>
         )}
       </div>
-      <p className="assistant-msg-text">{text}</p>
+      {message.textWithheld === true && text === undefined ? (
+        /*
+          THE MESSAGE WAS NOT STORED, AND THAT IS NOW WHAT IT SAYS.
+          `assistantSession`'s scrubber withholds a message whose text contains a
+          credential, an absolute path, or a long hex digest — and it drops the whole
+          string rather than guessing where a path ends, because a partial redaction
+          that guesses wrong leaks. That is unchanged. What changed is the render:
+          `{text}` with `text === undefined` produced an EMPTY paragraph under the
+          "You" label, so a scientist who asked about a specific sha256 saw a blank
+          bubble on the next turn while Settings promised the transcript survives.
+          Not `role="alert"`: nothing failed, and the live turn was answered
+          normally — only the archived copy is affected.
+        */
+        <p className="assistant-msg-text assistant-msg-withheld">
+          This message is not shown because it was not stored. It contained a file
+          path, a credential, or a long digest, which this browser transcript
+          withholds rather than keep. The answer you were given at the time was not
+          affected.
+        </p>
+      ) : (
+        <p className="assistant-msg-text">{text}</p>
+      )}
       {isAssistant && source && (
         <div className="assistant-sources">
           {/* P36V S-A — Title-Case label ("Source:"), replacing the lowercase

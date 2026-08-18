@@ -177,7 +177,9 @@ describe('P27.6 · live-sync screen wiring', () => {
     // a change elsewhere → the poller signals; NO auto-refetch, only the banner
     live.bump();
     await settle(POLL_INTERVAL_MS);
-    expect(getByText(/This record changed elsewhere\. Your input is kept/)).toBeInTheDocument();
+    expect(
+      getByText(/This record changed elsewhere\. What you typed is kept, including through Refresh/),
+    ).toBeInTheDocument();
     // the staged input is preserved (GuidedPrompt was not unmounted / not refetched)
     expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-hash');
     expect(countCalls('/experiments/demo/answers')).toBe(0); // nothing submitted
@@ -188,6 +190,17 @@ describe('P27.6 · live-sync screen wiring', () => {
     await settle();
     expect(countCalls('/experiments/demo/pending')).toBeGreaterThan(beforePending);
     expect(queryByText(/This record changed elsewhere/)).toBeNull();
+
+    /*
+     * AND THE STAGED INPUT SURVIVED THE REFRESH — asserted here for the first time.
+     *
+     * This test preserved the input across the POLLER's signal, which never
+     * refetched, and then pressed the very button that did. `reload` unmounts
+     * `LoadedCompletion` and `GuidedPrompt` with it, so the field came back empty
+     * beside a banner promising otherwise. The staged text now lives in a ref on the
+     * parent, which the reload does not unmount.
+     */
+    expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-hash');
   });
 
   it('S6: a change signal silently refetches the export readiness', async () => {
