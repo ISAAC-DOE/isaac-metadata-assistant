@@ -341,7 +341,13 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # this literal from 52 — the asset slice to 56, this one to 55 — for
     # different, real additions. Adding the deltas would give one number;
     # measuring gives the true one. `create_app().openapi()` is the authority.
-    assert checked == 63, f"expected 63 documented operations, found {checked}"
+    #
+    # 63 -> 65: the CONFLICT RESOLUTION operations — read the disagreements a
+    # record's own evidence carries, and record which competing answer a scientist
+    # stands behind. MEASURED from `create_app().openapi()` after adding them, not
+    # obtained by adding two to the line above; the whole point of every note in
+    # this comment is that the arithmetic is what goes wrong.
+    assert checked == 65, f"expected 65 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -591,6 +597,18 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/assets", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/assets/{asset_id}", "patch"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/assets/{asset_id}/remove", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    # CONFLICT RESOLUTION. The read is the only surface that shows a scientist the
+    # competing values, so it is a plain read with the record's `ETag`. Recording a
+    # decision REWRITES THE RECORD — one record-level list inside the experiment's
+    # own document holds run-scoped decisions too — so it carries the RECORD's
+    # `If-Match` and the whole 400/412/428 set with it, exactly as capturing a note
+    # does, and there is deliberately no separate validator for a decision. Its
+    # `422` covers the missing confirmation, an unknown or non-conflicting address,
+    # an unknown run, an unknown outcome or `chosen_from`, a `candidate` value that
+    # is none of the competing answers, and a wrong-typed body; on every one of them
+    # nothing is written. There is NO DELETE: a decision is revised, which appends.
+    ("/api/experiments/{experiment_id}/conflicts", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/conflicts/resolve", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],

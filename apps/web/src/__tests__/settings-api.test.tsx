@@ -1087,12 +1087,24 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 63 operations, MEASURED after the merge', () => {
+  it('describes the contract it claims to: 65 operations, MEASURED not derived', () => {
     // Both branches raised this from 52 for real, different additions — the
     // asset slice to 56, the transcript slice to 55. Adding the two deltas is
     // how a merged counter goes wrong; the numbers here were read out of this
     // test's own failure output after merging.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(63);
+    // 63 -> 65 operations, 71,770 -> 77,243 characters, 157 -> 167 post-lead
+    // paragraphs: the backend now publishes the two CONFLICT RESOLUTION
+    // operations — read the disagreements a record's own evidence carries, and
+    // record which competing answer a scientist stands behind. TWO operations were
+    // ADDED and none was edited, so the deltas happen to be exact this time; the
+    // numbers below were still MEASURED rather than added, because "the deltas
+    // happen to be exact" is a claim only a measurement can make. Cross-checked
+    // the two ways every corrected total above was: the paragraph rule transcribed
+    // into Python over `create_app().openapi()` gives 65 documented operations,
+    // total 77,243 and 167 post-lead paragraphs, and internal consistency holds —
+    // the raw sum of `d.description.length` is 77,577, this figure drops the 167
+    // `\n\n` separators, and 77,577 - 334 = 77,243.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(65);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1664,8 +1676,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // 2026-08-16 note above records, and which this merge demonstrated again on
     // a DIFFERENT counter in `backend-down-state.test.tsx`, where both branches
     // wrote the same literal and git merged it with no conflict at all.
-    expect(total).toBe(71770);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(157);
+    expect(total).toBe(77243);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(167);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

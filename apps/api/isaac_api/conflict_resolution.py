@@ -787,14 +787,38 @@ def write_resolution(draft: dict, resolution: ConflictResolution) -> None:
     Unreadable stored entries are written back out verbatim, at the end, which is
     what makes "no recorded decision is silently discarded" hold across a save of a
     document this build could not fully parse.
+
+    AN UPSERT KEEPS THE ROW'S POSITION, and that is a correctness property rather
+    than tidiness. ``Experiment.save_versioned`` writes nothing when the record's
+    authoritative state — the draft included — is byte-for-byte unchanged, and
+    :func:`revise_resolution` returns the EXISTING object for a re-submission that
+    changes nothing. Removing the row and appending it would reorder the list
+    whenever the upserted decision was not already last, so an identical
+    re-submission on a record holding two decisions would rewrite the document and
+    advance the revision — exactly the double-click audit row that function's
+    idempotence exists to prevent.
+
+    The position kept is the one :func:`find` calls current (the LAST match), so a
+    hand-edited document holding two rows for one pair collapses to one row where
+    the row that was being read used to sit — deterministic, and never a merge of
+    two decisions.
     """
     readable, unreadable = resolutions_from_draft(draft)
-    kept = [
-        entry
-        for entry in readable
-        if not (entry.address == resolution.address and entry.run_id == resolution.run_id)
+    matches = [
+        index
+        for index, entry in enumerate(readable)
+        if entry.address == resolution.address and entry.run_id == resolution.run_id
     ]
-    kept.append(resolution)
+    if matches:
+        target = matches[-1]
+        superseded = set(matches)
+        kept = [
+            resolution if index == target else entry
+            for index, entry in enumerate(readable)
+            if index == target or index not in superseded
+        ]
+    else:
+        kept = [*readable, resolution]
     draft[DRAFT_KEY] = [entry.to_state() for entry in kept] + list(unreadable)
 
 
