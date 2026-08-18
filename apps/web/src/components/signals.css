@@ -51,6 +51,26 @@
 .chip-recon-conflict { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);      font-weight: 600; }
 .chip-recon-absent   { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);   border-style: dashed; }
 
+/* ---- Unified provenance: two dimensions, and only ONE of them is coloured ----
+ *
+ * ORIGIN IS DELIBERATELY NEUTRAL, ALL EIGHT OF THEM. Where a value came from says
+ * nothing about whether anything establishes it, so an origin must not be able to
+ * read as an approval or as an alarm — not through its words and not through its
+ * palette. Seven origins share this one class; the glyph and the label are what
+ * tell them apart. `chip-origin-absent` is the dashed variant, worn only by
+ * "Origin not recorded", because an absence is a different FACT, not a lower
+ * confidence in the value. */
+.chip-origin        { color: var(--text-muted); background: var(--surface-subtle); border-color: var(--border); }
+.chip-origin-absent { color: var(--text-muted); background: var(--surface-subtle); border-color: var(--border); border-style: dashed; }
+
+/* REVIEW STATE carries the colour — and still decides nothing about validity,
+ * completion or export. `unmapped` is dashed: content that has not been placed is
+ * never an established fact. */
+.chip-rev-supported   { color: var(--verified-text); background: var(--verified-bg); border-color: var(--verified-border); }
+.chip-rev-needsreview { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border); }
+.chip-rev-conflict    { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);     font-weight: 600; }
+.chip-rev-unmapped    { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);  border-style: dashed; }
+
 /* ---- VerdictCard — the hard gate (largest, most saturated) ---------- */
 .verdict {
   display: flex;
@@ -249,4 +269,16 @@
 .advisory-none {
   font-size: 12.5px;
   color: var(--advisory-text);
+}
+
+/* ---- Provenance chip pair (two chips, never one) -------------------- */
+.prov-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.prov-chip {
+  display: inline-flex;
 }

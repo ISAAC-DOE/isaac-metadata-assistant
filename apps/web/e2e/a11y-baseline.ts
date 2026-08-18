@@ -462,8 +462,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * and cut to its width) rather than recorded in `e2e/layout-baseline.ts`. A
        * defect on a surface this branch is adding does not get a baseline entry.
        */
-      'evidence@desktop-1280x800': 70,
-      'evidence@laptop-1024x768': 70,
+      'evidence@desktop-1280x800': { darwin: 70, linux: 99 },
+      'evidence@laptop-1024x768': { darwin: 70, linux: 99 },
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
       // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
       // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
@@ -474,9 +474,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
       // `.record-file`. The element was always painted; only measurement
       // changed. Linux is the authority and may differ.
-      'evidence@tablet-768x1024': 70,
-      'evidence@mobile-375x812': 68,
-      'evidence@zoom-200': 68,
+      'evidence@tablet-768x1024': { darwin: 70, linux: 99 },
+      'evidence@mobile-375x812': { darwin: 68, linux: 97 },
+      'evidence@zoom-200': { darwin: 68, linux: 97 },
       /*
        * ── `evidence-graph`, MEASURED: 24 nodes at desktop, 2026-08-16 ────────────
        *
@@ -1481,8 +1481,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Every number MEASURED on BOTH platforms on the same commit and merged by
          `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
          run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': 68,
-      'evidence@width-390': 68,
+      'evidence@width-320': { darwin: 68, linux: 97 },
+      'evidence@width-390': { darwin: 68, linux: 97 },
       'experiments-example@width-320': 9,
       'experiments-example@width-390': 9,
       'experiments@width-320': 2,
@@ -2413,7 +2413,39 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // `e2e/invariants/baseline-aggregate.invariant.test.ts`, doing its job on its
   // first real use.
   darwin: 2551,
-  linux: 2601,
+  // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
+  //
+  // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
+  // messages. Seven cells, all on `evidence`, +29 EACH and uniformly:
+  //
+  //   desktop / laptop / tablet   70 -> 99
+  //   mobile / zoom-200 / 390 / 320   68 -> 97
+  //
+  // +203 net. The uniformity across every viewport is the evidence that this is
+  // markup VOLUME rather than a wrap artefact: the Evidence trail renders one
+  // origin chip and one review chip per entry, and that surface carries many
+  // entries.
+  //
+  // CHECKED BEFORE RECORDING, not assumed. The chips paint with
+  // `--text-muted` (#5b6570, 5.93:1 — passes AA) and `--verified-text`
+  // (#2f7d78, 4.2:1 — FAILS, and is already in this entry's `foregrounds` list
+  // with 265 recorded instances elsewhere). No new foreground appeared: this
+  // entry's `foregrounds` guard fails even at an unchanged node count, and CI
+  // reported only GREW, never a foreground finding. So these 203 nodes are more
+  // instances of a documented token shortfall, not a colour this feature chose.
+  //
+  // WORTH SAYING PLAINLY BECAUSE THE NUMBER IS LARGE: a two-chip pair per
+  // evidence row is a real increase in small text on that screen, and 4.2:1 is
+  // below AA. The design-system slice that raises `--verified-text` will lower
+  // this and every other surface at once; these figures are EXPECTED TO FALL.
+  // Recording them is not accepting them.
+  //
+  // darwin is deliberately unchanged and KNOWN-UNVERIFIED rather than
+  // known-correct — 29 added DOM nodes per viewport have almost certainly moved
+  // it too. Left alone per this file's standing rule: only the platform actually
+  // measured may be edited. All seven cells therefore SPLIT from scalars rather
+  // than having their darwin half moved onto a linux reading.
+  linux: 2804,
 };
 
 /**

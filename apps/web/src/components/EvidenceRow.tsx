@@ -1,5 +1,7 @@
 import './evidence.css';
 import { sourceIcon } from './icons';
+import { OriginChip } from './ProvenanceChips';
+import { SOURCE_TYPE_ORIGIN } from '../lib/provenance';
 import type { FieldEvidence, SourceType } from '../lib/types';
 
 const SRC_CLASS: Record<SourceType, string> = {
@@ -41,6 +43,16 @@ export function EvidenceRow({ evidence }: { evidence: FieldEvidence }) {
   return (
     <div className="ev-row">
       <SourceTypeToken sourceType={evidence.source_type} />
+      {/* THE ORIGIN DIMENSION, ADDED BESIDE the existing detail rather than
+          instead of it — the exact source type, the rule, the confirmation, the
+          file, the locator and the quote all still render below. A citation has
+          an ORIGIN; it has no review state of its own, because what establishes a
+          value is a property of the field, not of one of its citations. That
+          asymmetry is why only one chip appears here and the pair appears on the
+          trail entry. An unrecognised source type falls back to `evidence` —
+          "a citation exists, its channel is not one this build can name" — never
+          to `unknown`, which would claim nothing is recorded. */}
+      <OriginChip origin={SOURCE_TYPE_ORIGIN[evidence.source_type] ?? 'evidence'} />
       {evidence.source_type === 'derivation' && evidence.rule && (
         <span className="ev-rule">rule: {evidence.rule}</span>
       )}

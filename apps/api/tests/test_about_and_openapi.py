@@ -336,24 +336,19 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
     #
-    # 52 -> 55: the three READ-ONLY submission-history operations —
-    # `GET .../revisions`, `GET .../revisions/{revision_no}` and its `/diff`. They
-    # add no write of any kind: `submission_store.record_submission` is still the
-    # only writer of a revision row, and every statement the read module declares is
-    # a `SELECT` (pinned by `test_revision_history.py`). Three operations rather than
-    # one because "list what was submitted", "read one snapshot" and "compare the
-    # record as it stands against one snapshot" answer three different questions and
-    # degrade differently — the diff can be `comparable: false` while the listing is
-    # perfectly readable.
+    # 52 -> 53: `GET /api/experiments/{experiment_id}/provenance`, the two-dimension
+    # provenance view. Like the notes model above it adds no storage — both
+    # dimensions are DERIVED on read from content the record already carries — but
+    # unlike it, it adds no vocabulary to the truth core either: it reads the ones
+    # that already exist and reports them as two independent answers.
     #
-    # MEASURED from `create_app().openapi()` after the change, per the paragraph
-    # above, and not carried across from any branch's own count.
-    # MEASURED AFTER THE MERGE, never carried across it and never derived by
-    # adding the two branches' deltas. Revision history publishes three
-    # operations and the asset slice four, both from a base of 52, so either
-    # branch's own figure is wrong for the merged tree and their sum would be a
-    # third wrong number.
-    assert checked == 59, f"expected 59 documented operations, found {checked}"
+    # MEASURED, NOT CARRIED. See the note above about two branches each counting
+    # from 47: this number comes from running `create_app().openapi()` on this
+    # branch, and a merge must re-measure rather than add.
+    # MEASURED AFTER THE MERGE, not carried across it and not derived by adding
+    # deltas. Provenance publishes one operation and the asset slice four, both
+    # from the same base of 52; either branch's own figure is wrong for the merge.
+    assert checked == 60, f"expected 60 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -584,6 +579,10 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/revisions/{revision_no}/diff", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/ingestion/csv/preview", "post"): ["200", "400", "401", "403", "404", "412", "413", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/pending", "get"): ["200", "401", "404", "422", "503"],
+    # The two-dimension provenance view. One `404` covers both "no such record"
+    # and "this record has no such run" — the bodies differ (`experiment_not_found`
+    # vs `run_not_found`), the documented status does not.
+    ("/api/experiments/{experiment_id}/provenance", "get"): ["200", "401", "404", "422", "503"],
     # Unmapped Notes. The split is the Run API's, for the Run API's reason: a note
     # is stored INSIDE the experiment's own document, so capturing one and reviewing
     # one both REWRITE THE RECORD and carry the record's `If-Match` with the whole
