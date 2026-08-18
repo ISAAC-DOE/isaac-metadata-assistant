@@ -748,3 +748,116 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
     expect(dismiss).toHaveAttribute('type', 'button');
   }, 20000);
 });
+
+// --- D6 — a coach mark never covers an open modal dialog ----------------------
+
+/*
+ * WHAT WAS MEASURED. At 320x812, with the walkthrough running and the guarded reset
+ * dialog open, a Playwright probe reported the dialog's primary control "covered at its
+ * centre" by `div.tutorial-mark`. The arithmetic is not subtle: the mark is
+ * `position: fixed; z-index: 71` and the dialog's backdrop is `z-index: 40`, and at
+ * 320px the mark is `min(360px, 100vw - 32px)` — 288 of 320 available pixels.
+ *
+ * THE FIX IS SUPPRESSION, NOT A HIGHER `z-index`, and these tests are written against
+ * that rather than against a pixel: a z-index answer holds only while no ancestor
+ * creates a stacking context, and it would have to be re-argued for each surface that
+ * renders a modal. A modal dialog makes the rest of the page inert, so a coach mark on
+ * top of one is wrong even where it covers nothing.
+ *
+ * DETECTED ON `aria-modal="true"`, the same structural signal the Escape guard already
+ * uses. So this is asserted with a bare element carrying that attribute rather than by
+ * mounting the reset dialog: what the walkthrough must yield to is "a modal", and
+ * naming one particular modal would leave the other four unprotected.
+ */
+describe('D6 · the coach mark yields to a modal dialog', () => {
+  /*
+   * Appended to `document.body`, so REMOVED BY HAND. Testing-library cleans up only
+   * what it rendered, and a leftover `aria-modal` element keeps the mark hidden for
+   * every later case in this block — which is how the first draft of these tests
+   * failed, in two places, for a reason that had nothing to do with the component.
+   */
+  const opened: HTMLElement[] = [];
+  beforeEach(() => {
+    // `isTutorialCompleted` reads localStorage, which earlier cases in this file set by
+    // finishing the walkthrough; the file's own afterEach clears only sessionStorage.
+    localStorage.clear();
+  });
+  afterEach(() => {
+    while (opened.length > 0) opened.pop()!.remove();
+  });
+
+  /** Mount a modal the way a dialog does — appended to the document, not to the mark. */
+  function openModal(): HTMLElement {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.textContent = 'Reset the example workspace';
+    document.body.appendChild(dialog);
+    opened.push(dialog);
+    return dialog;
+  }
+
+  it('hides the mark and the ring while a modal is open, and brings them back', async () => {
+    renderHarness();
+    const bubble = await openFirstStep();
+    expect(bubble.hidden).toBe(false);
+    expect(document.querySelector('[data-testid="tutorial-ring"]')).not.toBeNull();
+
+    const dialog = openModal();
+    await waitFor(() => expect(mark()!.hidden).toBe(true));
+    // The ring is gone too: it is `pointer-events: none`, but it still paints a
+    // highlight over a page the reader cannot act on.
+    expect(document.querySelector('[data-testid="tutorial-ring"]')).toBeNull();
+
+    dialog.remove();
+    await waitFor(() => expect(mark()!.hidden).toBe(false));
+    expect(document.querySelector('[data-testid="tutorial-ring"]')).not.toBeNull();
+  });
+
+  it('is hidden from the accessibility tree while the modal is up, not merely behind it', async () => {
+    renderHarness();
+    await openFirstStep();
+    // Reachable before.
+    expect(screen.queryByRole('button', { name: LABELS.actionSkipTutorial })).not.toBeNull();
+
+    openModal();
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: LABELS.actionSkipTutorial })).toBeNull(),
+    );
+  });
+
+  it('does not advance, dismiss or otherwise touch the walkthrough', async () => {
+    renderHarness();
+    const bubble = await openFirstStep();
+    const step = bubble.getAttribute('data-tutorial-step');
+
+    const dialog = openModal();
+    await waitFor(() => expect(mark()!.hidden).toBe(true));
+    dialog.remove();
+    await waitFor(() => expect(mark()!.hidden).toBe(false));
+
+    // The same step, still running — a modal is not a reason to leave a walkthrough,
+    // and `isTutorialCompleted` must not have been set by passing through one.
+    expect(mark()!.getAttribute('data-tutorial-step')).toBe(step);
+    expect(isTutorialCompleted()).toBe(false);
+  });
+
+  it('a NON-modal dialog does not hide it — the mark itself is one', async () => {
+    /*
+     * THE NEGATIVE CONTROL, and it is not hypothetical: the coach mark carries
+     * `role="dialog"` itself. Detecting on the ROLE rather than on `aria-modal` would
+     * make the mark hide itself the moment it appeared, and every test above would
+     * still pass while the walkthrough was invisible.
+     */
+    renderHarness();
+    const bubble = await openFirstStep();
+    expect(bubble.getAttribute('role')).toBe('dialog');
+    expect(bubble.hasAttribute('aria-modal')).toBe(false);
+
+    const nonModal = document.createElement('div');
+    nonModal.setAttribute('role', 'dialog');
+    document.body.appendChild(nonModal);
+    opened.push(nonModal);
+    await waitFor(() => expect(mark()!.hidden).toBe(false));
+  });
+});

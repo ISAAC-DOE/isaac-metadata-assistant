@@ -51,6 +51,17 @@
   transition: top 160ms ease, left 160ms ease;
 }
 
+/*
+ * A coach mark YIELDS TO A MODAL DIALOG (D6): at 320px it was measured painting over
+ * the guarded reset dialog's confirm control, and a mark on top of a modal invites a
+ * click the dialog will not accept even where it covers nothing. `GuidedTutorial` sets
+ * `hidden`; this rule is stated so a future `display` declaration on `.tutorial-mark`
+ * cannot silently out-specify the UA rule for `[hidden]` and put it back on top.
+ */
+.tutorial-mark[hidden] {
+  display: none;
+}
+
 /* Centered variant: the honest "this step cannot be shown" state and the
    completion panel, neither of which has a control to point at. */
 .tutorial-mark.centered {

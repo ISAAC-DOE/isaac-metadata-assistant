@@ -100,6 +100,17 @@ interface GuidedTutorialProps {
   anchorTimeoutMs?: number;
 }
 
+/**
+ * Is a modal dialog on screen? See the D6 note inside the component.
+ *
+ * The coach mark itself carries `role="dialog"` but never `aria-modal`, so it cannot
+ * match itself — which is what makes the attribute, rather than the role, the right
+ * thing to look for.
+ */
+function hasOpenModal(): boolean {
+  return document.querySelector('[aria-modal="true"]') !== null;
+}
+
 export function GuidedTutorial({
   anchorTimeoutMs = DEFAULT_ANCHOR_TIMEOUT_MS,
 }: GuidedTutorialProps = {}) {
@@ -332,6 +343,53 @@ export function GuidedTutorial({
     };
   }, [anchorEl, reposition]);
 
+  /*
+   * D6 — WHILE A MODAL DIALOG IS OPEN, THE COACH MARK YIELDS TO IT.
+   *
+   * WHAT WAS MEASURED. At 320x812 with the walkthrough running, `div.tutorial-mark`
+   * painted OVER the guarded reset dialog's confirm control — a Playwright probe
+   * reported the primary element covered at its centre. The mark is
+   * `position: fixed; z-index: 71` and the dialog's backdrop is `z-index: 40`, so the
+   * mark wins; and at a phone width the mark is `min(360px, 100vw - 32px)` of a 320px
+   * viewport, which is most of the screen.
+   *
+   * WHY SUPPRESSION RATHER THAN A HIGHER `z-index` ON THE DIALOG. Two reasons, and the
+   * second is the deciding one. (1) A z-index answer is only correct while nothing
+   * between the two elements creates a stacking context, so it is a fact about today's
+   * ancestor chain rather than a property of the components — and it would have to be
+   * re-argued for each of the five surfaces that render a modal. (2) A modal dialog
+   * means everything else on the page is inert; a coach mark ON TOP of one is wrong
+   * even where it happens to cover nothing, because it invites a click that the dialog
+   * will not accept. So the mark is hidden outright, at every width, and the ring with
+   * it.
+   *
+   * DETECTED STRUCTURALLY, exactly as the Escape guard below already detects the same
+   * condition and for the reason recorded there: `aria-modal="true"` IS the contract
+   * "this thing is modal", the mark deliberately does not set it (it is not modal — the
+   * control it describes must stay operable), and any future modal is covered without
+   * touching this file.
+   *
+   * IT DOES NOT TOUCH THE WALKTHROUGH'S STATE. The step does not advance, nothing is
+   * dismissed, and `overlayOpen` is unchanged — so the focus effect below does not
+   * re-fire when the dialog closes and cannot yank focus away from wherever the dialog
+   * returned it. The mark simply comes back.
+   */
+  const [modalOpen, setModalOpen] = useState(() => hasOpenModal());
+  useEffect(() => {
+    const check = () => setModalOpen(hasOpenModal());
+    check();
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      // `aria-modal` is set as an attribute by `AssistantDrawer` on an element that is
+      // already mounted, so watching `childList` alone would miss it opening.
+      attributeFilter: ['aria-modal'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
   // --- 6. focus, and give it back --------------------------------------------
   const showMark = running && step !== undefined && (anchorSettled || missingRecord);
   const finished = state.phase === 'finished';
@@ -454,6 +512,9 @@ export function GuidedTutorial({
         {notice}
       <CompletionPanel
         markRef={markRef}
+        // The completion panel is `.tutorial-mark centered` — the same element at the
+        // same `z-index`, so it yields to a modal for the same reason (D6).
+        hidden={modalOpen}
         onGoToExperiments={() => {
           closeCompletion();
           navigate(ROUTES.experiments);
@@ -481,7 +542,7 @@ export function GuidedTutorial({
         {`${progress}: ${current.title}`}
       </div>
 
-      {ring !== null && !unavailable && (
+      {ring !== null && !unavailable && !modalOpen && (
         <div
           className="tutorial-ring"
           aria-hidden="true"
@@ -496,6 +557,9 @@ export function GuidedTutorial({
         role="dialog"
         aria-labelledby="tutorial-mark-title"
         aria-describedby="tutorial-mark-body"
+        /* Yields to a modal dialog — see the D6 note. `hidden` rather than an unmount,
+           so the walkthrough's own state and this node's identity are untouched. */
+        hidden={modalOpen || undefined}
         data-tutorial-step={current.id}
         data-tutorial-step-available={unavailable ? 'false' : 'true'}
         /* A separate attribute rather than a third value of the one above: "the
@@ -654,10 +718,13 @@ function TutorialSessionNotice({ reason }: { reason: TutorialSessionError }) {
  */
 function CompletionPanel({
   markRef,
+  hidden,
   onGoToExperiments,
   onReplay,
 }: {
   markRef: RefObject<HTMLDivElement>;
+  /** True while a modal dialog is on screen — see the D6 note. */
+  hidden: boolean;
   onGoToExperiments: () => void;
   onReplay: () => void;
 }) {
@@ -668,6 +735,7 @@ function CompletionPanel({
       role="dialog"
       aria-labelledby="tutorial-done-title"
       aria-describedby="tutorial-done-body"
+      hidden={hidden || undefined}
       data-tutorial-step="complete"
       tabIndex={-1}
     >

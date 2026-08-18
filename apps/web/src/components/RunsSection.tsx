@@ -43,6 +43,15 @@
  * record screen itself goes away — so an edit in flight when a filter changes
  * still reaches the server and its outcome still comes back. Nothing in this file
  * calls `disposeExperiment`, and nothing in it may start to.
+ *
+ * "SAFE" IS ABOUT SAVE STATE, NOT ABOUT EVERY CHARACTER IN THE CARD, and that
+ * distinction is stated here because this paragraph is where a reader comes to check
+ * it. An edit reaches the store only once `parseRunField` has accepted the text
+ * (`RunCard.onFieldChange` returns first when it does not), so text this build cannot
+ * shape lives in the card's own state and IS lost when paging, searching or filtering
+ * unmounts the card. `RunCard` discloses that on screen while it holds such text. The
+ * record's own view tabs no longer unmount anything (`RecordWorkbench` hides the
+ * fields panel instead), so this list is now the only in-screen gesture that does.
  */
 
 import './runs.css';

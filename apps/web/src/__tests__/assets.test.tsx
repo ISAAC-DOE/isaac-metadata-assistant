@@ -612,3 +612,172 @@ describe('when a write is refused', () => {
     expect((screen.getByLabelText(/^sha256/) as HTMLInputElement).value).toBe(FAKE_SHA_B);
   });
 });
+
+// --- D2/D4 — a refusal is recoverable, and no toggle destroys an open form -----
+
+/*
+ * TWO DEFECTS, THE SAME SHAPE AS THE NOTES PANEL'S, both behind a green suite.
+ *
+ * D2 — A 412 WAS A DEAD END. `create`, `update` and `remove` all adopted the new
+ * version token on SUCCESS and did nothing with it on a refusal, so one 412 stranded
+ * the panel on a validator the server had already rejected: every later write re-sent
+ * it and was refused again. The only remedy on screen, `Reload This Section`, called
+ * `reload(false)` — which blanks the list, unmounts every open edit form, and discards
+ * all nine of its values.
+ *
+ * D4 — THE BUTTON THAT OPENED THE CREATE FORM WAS THE BUTTON THAT DESTROYED IT. It is
+ * a toggle, and its label read `Record an Asset Reference` in both states, one word
+ * from the submit control inside the form (`Record This Reference`). The three
+ * disclosures on a card did the same to an open edit form: `Edit`, `Evidence (n)` and
+ * `Remove` all call `setOpen`. Nine values in local state, no confirmation, nothing on
+ * screen to recover them from.
+ */
+describe('a refused write is recoverable, and no toggle destroys an open form', () => {
+  const CREATE = `POST /api/experiments/${EXP}/assets`;
+
+  it('adopts the version the 412 reported, so the very next attempt is not refused', async () => {
+    let attempts = 0;
+    let listReads = 0;
+    const ifMatches: (string | undefined)[] = [];
+    stubFetchRoutes({
+      // The refresh a refusal triggers is held open, so this test is about the 412's
+      // own body and not about the re-read — see the same note in `unmapped-notes`.
+      [ASSETS]: () => {
+        listReads += 1;
+        if (listReads === 1) return { body: assetsEmpty };
+        return new Promise(() => {}) as never;
+      },
+      [CREATE]: (init?: RequestInit) => {
+        attempts += 1;
+        ifMatches.push((init?.headers as Record<string, string> | undefined)?.['If-Match']);
+        if (attempts === 1) {
+          return {
+            status: 412,
+            body: { error: 'stale_write', current_version: '9.9', current_rev: 9 },
+          };
+        }
+        return {
+          body: { asset: assetFixture({ asset_id: 'merged' }), experiment_version: '9.10' },
+        };
+      },
+    });
+    renderPanel();
+
+    await openCreateForm();
+    typeInto(/^Name/, 'merged');
+    fireEvent.change(screen.getByLabelText(/^Role/), {
+      target: { value: 'reduction_product' },
+    });
+    typeInto(/^Location/, 'synthetic://example/merged.xdi');
+    typeInto(/^sha256/, FAKE_SHA_B);
+    fireEvent.click(screen.getByRole('button', { name: 'Record This Reference' }));
+
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent ?? '').toMatch(/has picked up the current version/);
+    // Everything typed is still in the form — the refusal did not close it.
+    expect(screen.getByLabelText(/^sha256/)).toHaveValue(FAKE_SHA_B);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Record This Reference' }));
+    await waitFor(() => expect(attempts).toBe(2));
+    expect(ifMatches[1]).toBe('"9.9"');
+    expect(ifMatches[1]).not.toBe(ifMatches[0]);
+  });
+
+  it('says nothing about picking up a version when the refusal did not report one', async () => {
+    // The negative control: a failure that carries no `current_version` must not be
+    // reported as a recovery that did not happen.
+    stubFetchRoutes({
+      [ASSETS]: { body: assetsEmpty },
+      [CREATE]: { status: 500, body: {} },
+    });
+    renderPanel();
+
+    await openCreateForm();
+    typeInto(/^Name/, 'merged');
+    fireEvent.change(screen.getByLabelText(/^Role/), {
+      target: { value: 'reduction_product' },
+    });
+    typeInto(/^Location/, 'synthetic://example/merged.xdi');
+    typeInto(/^sha256/, FAKE_SHA_B);
+    fireEvent.click(screen.getByRole('button', { name: 'Record This Reference' }));
+
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent ?? '').toMatch(/could not be recorded/);
+    expect(banner.textContent ?? '').not.toMatch(/picked up the current version/);
+  });
+
+  it('closing the create form keeps every value, and the label says which act it is', async () => {
+    stubFetchRoutes({ [ASSETS]: { body: assetsEmpty } });
+    renderPanel();
+
+    await openCreateForm();
+    typeInto(/^Name/, 'merged');
+    typeInto(/^Notes/, 'exported from the beamline reduction');
+    typeInto(/^Caption/, 'Figure 2, as printed');
+
+    // While the form is open the control names the act it performs, so it cannot be
+    // mistaken for the submit inside the form.
+    const toggle = screen.getByRole('button', { name: 'Close This Form' });
+    fireEvent.click(toggle);
+    expect(screen.queryByLabelText(/^Notes/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Record an Asset Reference' }));
+    expect(screen.getByLabelText(/^Name/)).toHaveValue('merged');
+    expect(screen.getByLabelText(/^Notes/)).toHaveValue(
+      'exported from the beamline reduction',
+    );
+    expect(screen.getByLabelText(/^Caption/)).toHaveValue('Figure 2, as printed');
+  });
+
+  it('Cancel — and only Cancel — discards the create form', async () => {
+    // The negative control: if nothing discarded it, an abandoned draft would follow
+    // the reader around with no way to be rid of it.
+    stubFetchRoutes({ [ASSETS]: { body: assetsEmpty } });
+    renderPanel();
+
+    await openCreateForm();
+    typeInto(/^Name/, 'merged');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Record an Asset Reference' }));
+
+    expect(screen.getByLabelText(/^Name/)).toHaveValue('');
+  });
+
+  it('opening Evidence over an open edit form keeps what was typed in it', async () => {
+    stubFetchRoutes({ [ASSETS]: { body: assetsPage([assetFixture()]) } });
+    renderPanel();
+
+    await screen.findByText('reduced_spectrum');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    typeInto(/^Notes/, 'the digest was pasted from the reduction log');
+    // A peer disclosure — this is `setOpen`, so it unmounted the whole edit form.
+    fireEvent.click(screen.getByRole('button', { name: /^Evidence \(/ }));
+    expect(screen.queryByLabelText(/^Notes/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText(/^Notes/)).toHaveValue(
+      'the digest was pasted from the reduction log',
+    );
+  });
+
+  it('an edit that WAS saved does not leave its draft behind', async () => {
+    // The other negative control: once the server has taken the change, the form must
+    // reopen on the stored reference rather than on a superseded draft.
+    stubFetchRoutes({
+      [ASSETS]: { body: assetsPage([assetFixture()]) },
+      [`PATCH /api/experiments/${EXP}/assets/reduced_spectrum`]: {
+        body: { asset: assetFixture(), experiment_version: 'v.2' },
+      },
+    });
+    renderPanel();
+
+    await screen.findByText('reduced_spectrum');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    typeInto(/^Notes/, 'saved and consumed');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(screen.queryByLabelText(/^Notes/)).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText(/^Notes/)).toHaveValue('');
+  });
+});

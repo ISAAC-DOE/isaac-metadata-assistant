@@ -10,12 +10,12 @@
  *      and the detached send's rejection is swallowed … If the server refuses that
  *      last write the edit is lost and nobody is told."
  *
- * That limit is one click away from a scientist. The Runs section lives inside the
- * `fields` tabpanel, so switching to Graph unmounts every card; so does navigating to
- * Evidence and back. A save refused in that window was reported nowhere, and a 412
- * after a remount said "Nothing you typed was written" when the honest answer was
- * "this browser cannot tell" — because the ref that knew an attempt had gone out
- * unanswered died with the component.
+ * That limit is one click away from a scientist. Navigating to Evidence and back
+ * unmounts every card, and so did switching to the Graph view until the fields panel
+ * was made to stay mounted (see below). A save refused in that window was reported
+ * nowhere, and a 412 after a remount said "Nothing you typed was written" when the
+ * honest answer was "this browser cannot tell" — because the ref that knew an attempt
+ * had gone out unanswered died with the component.
  *
  * SO THE STATE OUTLIVES THE COMPONENT. It lives here, in a module-level map keyed by
  * `<experimentId>/<runId>`, and the card SUBSCRIBES to it. Nothing about the network
@@ -47,6 +47,19 @@
  * no user-facing text saying either thing, in the commit whose subject was closing an
  * honesty gap. `RunCard` now renders the disclosure while edits are held; the claim is
  * kept here because it is now checkable, and pinned by a test.
+ *
+ * A THIRD LIMIT, ADDED BECAUSE THIS HEADER AND `useRunAutosave`'s BOTH IMPLIED IT AWAY.
+ * What outlives a card is what reached THIS STORE, and an edit reaches it only once
+ * `parseRunField` has accepted the text: `RunCard.onFieldChange` returns before
+ * `autosave.queue` when the box holds something this build cannot shape. So the
+ * companion claim "an edit typed and then abandoned … still reaches the server" is true
+ * of a PARSEABLE edit and false of an unparseable one, which is held in the card's own
+ * `draft` state and reaches nothing. That text now survives a record-view switch
+ * because `RecordWorkbench` no longer unmounts the fields panel — but it is still lost
+ * by anything that genuinely unmounts the card (paging, searching or filtering the runs
+ * list) and by a page reload, and `RunCard` says so on screen while it holds one.
+ * Moving the raw text into this store would be a different feature: it would mean
+ * storing input the server has already been told cannot be sent.
  */
 
 import { ApiError, api } from './api';
@@ -422,6 +435,32 @@ export function flushPending(experimentId: string, runId: string): void {
   if (Object.keys(entry.pending).length === 0) return;
   clearTimers(entry);
   send(entry);
+}
+
+/**
+ * Flush every run of ONE experiment, without unmounting anything.
+ *
+ * WHY IT EXISTS. `flushPending` used to be reached only from a card's unmount
+ * teardown, and the one gesture that reliably unmounted every card was switching the
+ * record's view tab — which is exactly the gesture that has stopped unmounting them
+ * (`RecordWorkbench` now keeps the fields panel mounted and hides it, because the
+ * unmount was destroying every unsaved textarea on the screen). Losing the flush with
+ * it would have been a silent regression in the OTHER direction: the store keeps the
+ * debounce alive, so the edit still goes out eventually, but between the switch and
+ * the timer a closed tab loses it, and that window is what the flush closes.
+ *
+ * So the property is preserved rather than carried by the unmount that used to
+ * provide it: the view switch flushes explicitly. `flushPending`'s own guards still
+ * apply per run — a halted or in-flight entry is left alone, and an entry holding
+ * nothing is a no-op — so calling this on every view switch costs nothing.
+ */
+export function flushExperiment(experimentId: string): void {
+  const prefix = `${experimentId}/`;
+  for (const key of [...entries.keys()]) {
+    if (!key.startsWith(prefix)) continue;
+    const runId = key.slice(prefix.length);
+    flushPending(experimentId, runId);
+  }
 }
 
 /* ── subscription ─────────────────────────────────────────────────────────── */

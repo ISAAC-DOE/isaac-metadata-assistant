@@ -44,7 +44,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { api, ApiError } from '../lib/api';
-import { mutationFailureCopy } from '../lib/mutationErrors';
+import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import type {
   ApiAsset,
   ApiAssetExportReach,
@@ -121,6 +121,34 @@ type ListState =
 
 /** A draft of the form's text inputs. Everything is a string until it is sent. */
 type FormValues = Record<string, string>;
+
+/**
+ * What a form was holding when it closed — the D4 fix.
+ *
+ * THE DEFECT. The control labelled `Record an Asset Reference` was a TOGGLE
+ * (`setAdding((open) => !open)`), so the button that opened the create form was the
+ * button that destroyed it: nine values in the form's own state, gone on a second
+ * click, with no confirmation and nothing on screen to recover them from. The submit
+ * inside the form reads `Record This Reference` — near enough to the toggle's label
+ * that pressing the wrong one is an ordinary mistake, not carelessness. The peer
+ * disclosures on a card did the same to an OPEN EDIT form: `Evidence (n)` and `Remove`
+ * both call `setOpen`, and so does `Edit` itself.
+ *
+ * THE FIX IS THAT NOTHING IS DESTROYED, rather than a confirmation before destroying
+ * it. What the form held is kept OUTSIDE the form — in a ref on the component that
+ * decides whether the form is mounted — so closing and re-opening finds it as it was.
+ * Two things clear it, and only two: the form's own `Cancel`, and a write the server
+ * recorded.
+ *
+ * IT IS SEPARATE FROM `initial`, DELIBERATELY. `initial` is the DIFF BASELINE — an
+ * edit sends only what changed, which is what stops an untouched `page` from being
+ * rewritten as a string (see `submit`) — so restoring a draft into `initial` would
+ * silently redefine "changed" as "different from what I typed last time".
+ */
+interface FormDraft {
+  values: FormValues;
+  runIds: string[];
+}
 
 const EMPTY_FORM: FormValues = {
   asset_id: '',
@@ -211,6 +239,20 @@ export function AssetReferencesPanel({ experimentId }: { experimentId: string })
   );
 }
 
+/**
+ * The same dead end `UnmappedNotesPanel` had, and the same two-part fix — read that
+ * file's `STALE_REVIEW_COPY` note for the measurement.
+ *
+ * In short: create, update and remove all adopted the new version token on SUCCESS and
+ * did nothing with it on a 412, so one refusal stranded the panel on a stale validator
+ * for good; and the only remedy offered (`Reload This Section`) blanked the list, which
+ * unmounted every open edit form and every one of the nine values inside it.
+ */
+const STALE_ASSET_COPY =
+  'The record changed since this section was loaded, so that was not recorded — it can ' +
+  'be your own edit elsewhere on this screen. Nothing was lost: this section has picked ' +
+  'up the current version and what you typed is still here, so try again.';
+
 function AssetsBrowser({ experimentId }: { experimentId: string }) {
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [version, setVersion] = useState<string | null>(null);
@@ -224,6 +266,8 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
   const silentRef = useRef(false);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const wasAddingRef = useRef(false);
+  /** What the create form held when it last closed — see `FormDraft`. */
+  const createDraft = useRef<FormDraft | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -269,6 +313,24 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
     setReloadNonce((n) => n + 1);
   }, []);
 
+  /**
+   * Turn a refused write into a state a reader can act from — see `STALE_ASSET_COPY`.
+   * On a 412 it adopts the token the server reported and refreshes SILENTLY, so every
+   * open form and everything typed into one stays put. On any other failure it changes
+   * nothing and returns the caller's own sentence: it must never claim a recovery it
+   * did not make.
+   */
+  const recoverFromStale = useCallback(
+    (err: unknown, fallback: string): string => {
+      const current = staleWriteCurrentVersion(err);
+      if (current === null) return mutationFailureCopy(asApiError(err), fallback);
+      setVersion(current);
+      reload(true);
+      return STALE_ASSET_COPY;
+    },
+    [reload],
+  );
+
   const create = useCallback(
     async (fields: Record<string, unknown>, runIds: string[]) => {
       if (!version) return;
@@ -286,18 +348,13 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
         );
         reload(true);
       } catch (err: unknown) {
-        setMutationError(
-          mutationFailureCopy(
-            asApiError(err),
-            'That asset reference could not be recorded. Nothing was written.',
-          ),
-        );
+        setMutationError(recoverFromStale(err, 'That asset reference could not be recorded. Nothing was written.'));
         setAnnouncement('');
         // Rethrown so the form knows to stay open and keep what was typed.
         throw err;
       }
     },
-    [experimentId, version, reload],
+    [experimentId, version, reload, recoverFromStale],
   );
 
   const update = useCallback(
@@ -320,19 +377,14 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
         setAnnouncement(announce);
         reload(true);
       } catch (err: unknown) {
-        setMutationError(
-          mutationFailureCopy(
-            asApiError(err),
-            'That change could not be saved. The asset reference is unchanged.',
-          ),
-        );
+        setMutationError(recoverFromStale(err, 'That change could not be saved. The asset reference is unchanged.'));
         setAnnouncement('');
         throw err;
       } finally {
         setBusyAssetId(null);
       }
     },
-    [experimentId, version, reload],
+    [experimentId, version, reload, recoverFromStale],
   );
 
   const remove = useCallback(
@@ -352,19 +404,14 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
         );
         reload(true);
       } catch (err: unknown) {
-        setMutationError(
-          mutationFailureCopy(
-            asApiError(err),
-            'That asset reference could not be removed. Nothing was changed.',
-          ),
-        );
+        setMutationError(recoverFromStale(err, 'That asset reference could not be removed. Nothing was changed.'));
         setAnnouncement('');
         throw err;
       } finally {
         setBusyAssetId(null);
       }
     },
-    [experimentId, version, reload],
+    [experimentId, version, reload, recoverFromStale],
   );
 
   /**
@@ -390,6 +437,15 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
   return (
     <div className="assets-browser">
       <div className="assets-toolbar">
+        {/*
+          THE LABEL CHANGES WHEN THE FORM IS OPEN, and that is part of the D4 fix rather
+          than polish. Closed, this control opens the form; open, it CLOSES it — and
+          while it was labelled `Record an Asset Reference` in both states it was one
+          word away from the submit control inside the form (`Record This Reference`),
+          so the two readings of one label were "start recording" and "throw away what I
+          have recorded". Saying which act this is removes the ambiguity, and the form
+          now keeps its content either way, so neither reading loses anything.
+        */}
         <button
           ref={addButtonRef}
           type="button"
@@ -398,7 +454,7 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
           aria-expanded={adding}
           onClick={() => setAdding((open) => !open)}
         >
-          Record an Asset Reference
+          {adding ? 'Close This Form' : 'Record an Asset Reference'}
         </button>
         <p className="assets-count" aria-live="polite" aria-atomic="true">
           {list.status === 'loading' ? '' : countLine}
@@ -412,7 +468,14 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
       {mutationError && (
         <div className="assets-error" role="alert">
           {mutationError}
-          <button type="button" className="btn btn-secondary" onClick={() => reload(false)}>
+          {/*
+            SILENT — `reload(true)`, not `reload(false)`. The loud reload sets
+            `{status:'loading'}`, which unmounts the `<ul>` and every open edit form
+            inside it, so the one control offered as a remedy destroyed the nine values
+            the reader had typed. The refresh is unchanged; it just no longer blanks the
+            list to perform it.
+          */}
+          <button type="button" className="btn btn-secondary" onClick={() => reload(true)}>
             Reload This Section
           </button>
         </div>
@@ -425,11 +488,21 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
           contentRoles={loaded.content_roles}
           initial={EMPTY_FORM}
           initialRunIds={[]}
+          restored={createDraft.current}
+          onDraft={(draft) => {
+            createDraft.current = draft;
+          }}
           takenIds={loaded.assets.map((a) => a.asset_id)}
           headingLevel={3}
-          onCancel={() => setAdding(false)}
+          onCancel={() => {
+            // Cancel is a reader saying discard it. The toggle above is not.
+            createDraft.current = null;
+            setAdding(false);
+          }}
           onSubmit={async (fields, runIds) => {
             await create(fields, runIds);
+            // Recorded, so the draft is consumed and the next create starts empty.
+            createDraft.current = null;
             setAdding(false);
           }}
         />
@@ -500,6 +573,12 @@ function AssetCard({
   onRemove: (asset: ApiAsset) => Promise<void>;
 }) {
   const [open, setOpen] = useState<'edit' | 'remove' | 'provenance' | null>(null);
+  /*
+   * What the edit form held when it last closed — see `FormDraft`. `Edit`, `Evidence`
+   * and `Remove` all call `setOpen`, so any of the three could unmount an open edit
+   * form and take its nine values with it; the draft outlives all three.
+   */
+  const editDraft = useRef<FormDraft | null>(null);
   const editRef = useRef<HTMLButtonElement>(null);
   const removeRef = useRef<HTMLButtonElement>(null);
   const provenanceRef = useRef<HTMLButtonElement>(null);
@@ -640,9 +719,17 @@ function AssetCard({
             contentRoles={contentRoles}
             initial={formFromAsset(asset)}
             initialRunIds={asset.used_by_runs.map((use) => use.run_id)}
+            restored={editDraft.current}
+            onDraft={(draft) => {
+              editDraft.current = draft;
+            }}
             takenIds={[]}
             headingLevel={4}
-            onCancel={close}
+            onCancel={() => {
+              // Cancel discards; the three disclosure toggles above do not.
+              editDraft.current = null;
+              close();
+            }}
             onSubmit={async (fields, runIds) => {
               await onUpdate(
                 asset,
@@ -650,6 +737,8 @@ function AssetCard({
                 runIds,
                 `Saved ${asset.asset_id}. Any digest you changed was stored as entered; no file was read.`,
               );
+              // Recorded, so the draft is consumed; the card now reads from the server.
+              editDraft.current = null;
               close();
             }}
           />
@@ -747,6 +836,8 @@ function AssetForm({
   contentRoles,
   initial,
   initialRunIds,
+  restored,
+  onDraft,
   takenIds,
   headingLevel,
   onCancel,
@@ -757,6 +848,12 @@ function AssetForm({
   contentRoles: string[];
   initial: FormValues;
   initialRunIds: string[];
+  /** What this form held last time it closed, if it is being re-opened — see
+   *  `FormDraft`. It seeds the state and NOTHING else; `initial` remains the diff
+   *  baseline, so what an edit sends is still measured against what was loaded. */
+  restored?: FormDraft | null;
+  /** Reports every change so the owner can re-seed this form after it unmounts. */
+  onDraft?: (draft: FormDraft) => void;
   takenIds: string[];
   /*
    * THE HEADING LEVEL IS PASSED IN, NOT FIXED, AND THAT IS NOT FUSSINESS. The create
@@ -771,11 +868,39 @@ function AssetForm({
   onSubmit: (fields: Record<string, unknown>, runIds: string[]) => Promise<void>;
 }) {
   const Heading = (headingLevel === 3 ? 'h3' : 'h4') as 'h3' | 'h4';
-  const [values, setValues] = useState<FormValues>(initial);
-  const [runIds, setRunIds] = useState<string[]>(initialRunIds);
+  const [values, setValues] = useState<FormValues>(restored?.values ?? initial);
+  const [runIds, setRunIds] = useState<string[]>(restored?.runIds ?? initialRunIds);
   const [saving, setSaving] = useState(false);
   const [showProblems, setShowProblems] = useState(false);
   const base = useId();
+
+  /*
+   * REPORTED UPWARD ON EVERY CHANGE, so this form's owner can put it back after it
+   * unmounts (see `FormDraft`). Held in a ref by the owner, so a keystroke here costs
+   * no render there. The callback identity is captured in a ref for the reason every
+   * other callback in this file is: an owner that re-creates it would otherwise
+   * re-fire this effect on each of its own renders.
+   */
+  const onDraftRef = useRef(onDraft);
+  onDraftRef.current = onDraft;
+  useEffect(() => {
+    /*
+     * ONLY ONCE IT DIFFERS FROM THE BASELINE, and the first version reported on MOUNT.
+     *
+     * That meant opening Edit and closing it WITHOUT TYPING left a draft of the
+     * then-current server values. If the asset moved out of band before the form
+     * re-opened, `restored` re-seeded those stale values while `initial` — the diff
+     * baseline — had advanced, so Save would send fields the reader never touched, with
+     * a valid `If-Match`, silently reverting the other write. An independent review
+     * found it; it needs an out-of-band writer, so it is narrow rather than harmless.
+     *
+     * A dirty check is the whole fix: an untouched form has nothing worth restoring.
+     */
+    const dirty =
+      JSON.stringify(values) !== JSON.stringify(initial) ||
+      JSON.stringify([...runIds].sort()) !== JSON.stringify([...initialRunIds].sort());
+    if (dirty) onDraftRef.current?.({ values, runIds });
+  }, [values, runIds, initial, initialRunIds]);
 
   const set = (key: string, value: string) =>
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -969,6 +1094,17 @@ function AssetForm({
           </>
         )}
       </fieldset>
+
+      {/* SAID ON SCREEN, because the behaviour changed and a reader cannot see it (D4).
+          Closing this form used to discard every value in it, silently. */}
+      {/* SCOPED, for the same reason as the notes panel's sibling sentence: "Only
+          Cancel discards it" is an ABSOLUTE, and a failed re-read of the list still
+          unmounts every card and every open form. Disclosed rather than denied. */}
+      <p className="asset-form-hint">
+        Closing this form keeps what you have typed here, and so does opening another
+        panel on the same reference. Cancel discards it — as does a failed re-read of
+        the list, which replaces the whole list.
+      </p>
 
       <div className="asset-form-actions">
         <button

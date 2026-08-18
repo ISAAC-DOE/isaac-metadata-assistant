@@ -638,3 +638,137 @@ describe('My Experiments · exactly one create control, in the right places', ()
     expect(screen.queryByRole('button', { name: LABELS.actionCreateExperiment })).toBeNull();
   });
 });
+
+// =============================================================================
+// D5 — the two length limits are STATED and REFUSED, never silently applied
+// =============================================================================
+
+/*
+ * WHAT WAS WRONG. The title carried `maxLength={200}` and the note `maxLength={1000}`,
+ * with no counter and the limit written nowhere on the screen, while the hint beside the
+ * note said "It is stored with the record". `maxLength` does not warn: a pasted
+ * paragraph is cut at the limit, in silence, and the reader submits a description
+ * missing its end and is told nothing. The server would have refused it — both fields
+ * declare `max_length` on `CreateExperimentRequest` — so the attribute converted a loud
+ * refusal into a silent edit of the reader's own text, which is the inversion the notes
+ * path was built to avoid ("A REFUSAL, NEVER A TRUNCATION").
+ *
+ * These fail if `maxLength` comes back, and they fail if the refusal is dropped.
+ */
+describe('My Experiments · Create Experiment length limits', () => {
+  const TITLE_LIMIT = 200;
+  const NOTE_LIMIT = 1000;
+
+  async function openCreateForm() {
+    await openEmptyState(EPHEMERAL);
+    fireEvent.click(screen.getByRole('button', { name: LABELS.actionCreateExperiment }));
+    return {
+      title: await screen.findByLabelText(LABELS.createExperimentTitleLabel),
+      note: screen.getByLabelText(LABELS.createExperimentDescriptionLabel),
+    };
+  }
+
+  it('states each limit and the reader’s position in it, before it is reached', async () => {
+    const { title, note } = await openCreateForm();
+    expect(screen.getByText(`0 of ${TITLE_LIMIT} characters`)).toBeInTheDocument();
+    expect(screen.getByText(`0 of ${NOTE_LIMIT} characters`)).toBeInTheDocument();
+
+    fireEvent.change(title, { target: { value: 'Cu K-edge' } });
+    expect(screen.getByText(`9 of ${TITLE_LIMIT} characters`)).toBeInTheDocument();
+
+    // Wired to the control, so a screen-reader user hears the limit at the field.
+    fireEvent.change(note, { target: { value: 'ab' } });
+    const countId = screen.getByText(`2 of ${NOTE_LIMIT} characters`).id;
+    expect(note.getAttribute('aria-describedby') ?? '').toContain(countId);
+  });
+
+  it('does NOT truncate a pasted note — the browser attribute is gone', async () => {
+    const { note } = await openCreateForm();
+    const pasted = 'x'.repeat(NOTE_LIMIT + 37);
+    fireEvent.change(note, { target: { value: pasted } });
+
+    // THE ASSERTION THAT CATCHES THE DEFECT: every character the reader pasted is
+    // still there. With `maxLength` present, jsdom keeps the value but a browser cuts
+    // it — so the attribute's absence is asserted directly as well.
+    expect(note).toHaveValue(pasted);
+    expect(note).not.toHaveAttribute('maxlength');
+    expect(
+      screen.getByLabelText(LABELS.createExperimentTitleLabel),
+    ).not.toHaveAttribute('maxlength');
+    // And the overage is stated in WORDS, not by colour alone.
+    expect(screen.getByText(/37 over the 1000-character limit/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing has been cut/)).toBeInTheDocument();
+  });
+
+  it('refuses to send an over-long note, and says so, keeping every character', async () => {
+    const calls = stubFetchRoutes({
+      ...emptyRoutes(EPHEMERAL),
+      'POST /api/experiments': { status: 201, body: created },
+    } as never);
+    renderAt();
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
+    fireEvent.click(screen.getByRole('button', { name: LABELS.actionCreateExperiment }));
+
+    const pasted = 'x'.repeat(NOTE_LIMIT + 1);
+    fireEvent.change(await screen.findByLabelText(LABELS.createExperimentTitleLabel), {
+      target: { value: 'Cu K-edge, run 3' },
+    });
+    fireEvent.change(screen.getByLabelText(LABELS.createExperimentDescriptionLabel), {
+      target: { value: pasted },
+    });
+    fireEvent.click(screen.getByRole('button', { name: LABELS.createExperimentSubmit }));
+
+    const refusal = await screen.findByRole('alert');
+    expect(refusal.textContent ?? '').toMatch(/1 character over the 1000-character limit/);
+    expect(refusal.textContent ?? '').toMatch(/nothing was sent/);
+    // Nothing was sent, and nothing was altered.
+    expect(calls).not.toContain('POST /api/experiments');
+    expect(screen.getByLabelText(LABELS.createExperimentDescriptionLabel)).toHaveValue(pasted);
+  });
+
+  it('refuses an over-long title, naming the title rather than the note', async () => {
+    const calls = stubFetchRoutes({
+      ...emptyRoutes(EPHEMERAL),
+      'POST /api/experiments': { status: 201, body: created },
+    } as never);
+    renderAt();
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
+    fireEvent.click(screen.getByRole('button', { name: LABELS.actionCreateExperiment }));
+
+    fireEvent.change(await screen.findByLabelText(LABELS.createExperimentTitleLabel), {
+      target: { value: 'y'.repeat(TITLE_LIMIT + 4) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: LABELS.createExperimentSubmit }));
+
+    const refusal = await screen.findByRole('alert');
+    expect(refusal.textContent ?? '').toMatch(/The title is 4 characters over the 200-character limit/);
+    expect(calls).not.toContain('POST /api/experiments');
+  });
+
+  it('a title and note WITHIN the limits still create the experiment', async () => {
+    // The negative control: a refusal that fired on ordinary input would be worse than
+    // the truncation it replaced.
+    const calls = stubFetchRoutes({
+      // `bundleRoutes` FIRST: it carries a one-row `GET /api/experiments`, and
+      // spreading it last would make the queue non-empty so the empty state — and the
+      // Create control on it — would never render. The same ordering trap is recorded
+      // at the happy-path test above.
+      ...bundleRoutes(NEW_ID),
+      ...emptyRoutes(EPHEMERAL),
+      'POST /api/experiments': { status: 201, body: created },
+    } as never);
+    renderAt();
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
+    fireEvent.click(screen.getByRole('button', { name: LABELS.actionCreateExperiment }));
+
+    fireEvent.change(await screen.findByLabelText(LABELS.createExperimentTitleLabel), {
+      target: { value: 'y'.repeat(TITLE_LIMIT) },
+    });
+    fireEvent.change(screen.getByLabelText(LABELS.createExperimentDescriptionLabel), {
+      target: { value: 'x'.repeat(NOTE_LIMIT) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: LABELS.createExperimentSubmit }));
+
+    await waitFor(() => expect(calls).toContain('POST /api/experiments'));
+  });
+});

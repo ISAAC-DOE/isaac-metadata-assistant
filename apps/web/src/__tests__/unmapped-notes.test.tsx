@@ -786,3 +786,201 @@ describe('accessibility', () => {
     expect(document.getElementById(controls as string)).toBeTruthy();
   });
 });
+
+// --- 12. D2/D3 — a refusal is recoverable, and nothing typed is destroyed -----
+
+/*
+ * TWO DEFECTS THAT EVERY TEST ABOVE PASSED THROUGH, and they compounded.
+ *
+ * D2 — A 412 WAS AN UNRECOVERABLE DEAD END. The success path adopted the new version
+ * token from the write's own response; the failure path did not. So one refusal left
+ * the held token permanently one revision behind: the next attempt re-sent the same
+ * stale validator, was refused again, and there was no gesture on screen that could
+ * ever make it succeed. Section 8 above proves the typed text SURVIVES the refusal —
+ * which it did — and says nothing about whether the reader can then do anything with
+ * it. They could not.
+ *
+ * AND THE ONE EXIT OFFERED DESTROYED THE TEXT. `Reload This Section` called
+ * `reload(false)`, which sets `{status:'loading'}`, unmounts the `<ul>` of note cards,
+ * and takes the rewritten wording with it. Changing the `Show` filter still does this,
+ * deliberately — see the last test here.
+ *
+ * D3 — RE-OPENING `Edit wording` OVERWROTE THE REWRITE. The trigger ran
+ * `setEditText(note.display_text)` before opening, and `close()` reset every input, so
+ * a reader who rewrote a paragraph, checked something under `Dismiss`, and came back
+ * lost it — silently, with no confirmation.
+ */
+describe('a refused review is recoverable, and no gesture destroys what was typed', () => {
+  const REVIEW = `POST /api/experiments/${EXP}/notes/${noteFixture().id}/review`;
+  /** Set by the review stub in the last case, so the LIST can answer differently
+   *  afterwards — the server having moved on is the whole point of that test. */
+  let posted = false;
+  afterEach(() => {
+    posted = false;
+  });
+
+  it('adopts the version the 412 reported, so the very next attempt is not refused', async () => {
+    let attempts = 0;
+    let listReads = 0;
+    const ifMatches: (string | undefined)[] = [];
+    stubFetchRoutes({
+      /*
+       * THE FIRST LIST READ ANSWERS; THE REFRESH THE REFUSAL TRIGGERS NEVER DOES, and
+       * that is what makes this test about the 412 body rather than about the refresh.
+       *
+       * A refusal does two things: it adopts the token the server REPORTED, and it
+       * kicks off a silent re-read which will bring an even fresher one. If both
+       * resolved here, this test would pass on the re-read alone and would prove
+       * nothing about the body — so the re-read is held open, which is also a real
+       * state: a reader can press the button again before it lands.
+       */
+      [NOTES]: () => {
+        listReads += 1;
+        if (listReads === 1) return { body: notesPage([noteFixture()]) };
+        return new Promise(() => {}) as never;
+      },
+      [REVIEW]: (init?: RequestInit) => {
+        attempts += 1;
+        ifMatches.push((init?.headers as Record<string, string> | undefined)?.['If-Match']);
+        // Refused once, with the server's own `current_version` — the same payload
+        // `_stale_write` sends, and the same value it echoes as a strong ETag.
+        if (attempts === 1) {
+          return {
+            status: 412,
+            body: { error: 'stale_write', current_version: '9.9', current_rev: 9 },
+          };
+        }
+        return {
+          body: { note: noteFixture({ state: 'dismissed' }), experiment_version: '9.10' },
+        };
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.change(screen.getByLabelText('Why (optional)'), {
+      target: { value: 'superseded by the run remark' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss This Note' }));
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent ?? '').toMatch(/has picked up the current version/);
+
+    // The retry is the SAME gesture, with nothing reloaded and nothing retyped.
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss This Note' }));
+    await screen.findByRole('status');
+
+    expect(attempts).toBe(2);
+    // THE ASSERTION THAT CATCHES THE DEFECT: the second write carried the token the
+    // server reported, not the stale one it had already refused.
+    expect(ifMatches[1]).toBe('"9.9"');
+    expect(ifMatches[1]).not.toBe(ifMatches[0]);
+  });
+
+  it('says nothing about picking up a version when the refusal did not report one', async () => {
+    // The negative control for the test above: a failure that carries no
+    // `current_version` must not be reported as a recovery that did not happen.
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [REVIEW]: { status: 500, body: {} },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss This Note' }));
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent ?? '').toMatch(/could not be recorded/);
+    expect(banner.textContent ?? '').not.toMatch(/picked up the current version/);
+  });
+
+  it('Reload This Section keeps the rewritten wording on screen', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [REVIEW]: { status: 412, body: { error: 'stale_write' } },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.change(screen.getByLabelText('Corrected wording'), {
+      target: { value: 'three corrected paragraphs' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Wording' }));
+    await screen.findByRole('alert');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reload This Section' }));
+    // The remedy refreshed the list without blanking it, so the card — and the
+    // rewrite inside it — was never unmounted.
+    expect(
+      (await screen.findByLabelText('Corrected wording')) as HTMLTextAreaElement,
+    ).toHaveValue('three corrected paragraphs');
+  });
+
+  it('re-opening Edit wording finds the rewrite, not the stored wording', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.change(screen.getByLabelText('Corrected wording'), {
+      target: { value: 'realigned after scan 3, not before it' },
+    });
+    // Off to check something else — the gesture that used to lose it.
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByLabelText('Corrected wording')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit wording' }));
+
+    expect(screen.getByLabelText('Corrected wording')).toHaveValue(
+      'realigned after scan 3, not before it',
+    );
+  });
+
+  it('Cancel — and only Cancel — discards it', async () => {
+    // The negative control: "nothing is ever discarded" would be its own defect,
+    // because then there would be no way to abandon an edit at all.
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.change(screen.getByLabelText('Corrected wording'), {
+      target: { value: 'abandoned' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit wording' }));
+
+    expect(screen.getByLabelText('Corrected wording')).toHaveValue(
+      noteFixture().display_text as string,
+    );
+  });
+
+  it('a recorded edit lets the SERVER’s new wording replace the box', async () => {
+    // The other negative control, and the reason the resync exists: once a write has
+    // landed the server is authoritative, so a held draft must not outlive it.
+    const revised = 'realigned after scan 3, not before it';
+    stubFetchRoutes({
+      [NOTES]: {
+        body: () =>
+          notesPage([
+            noteFixture(posted ? { revised_text: revised, display_text: revised } : {}),
+          ]),
+      },
+      [REVIEW]: () => {
+        posted = true;
+        return {
+          body: {
+            note: noteFixture({ revised_text: revised, display_text: revised }),
+            experiment_version: '1.1',
+          },
+        };
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.change(screen.getByLabelText('Corrected wording'), {
+      target: { value: revised },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Wording' }));
+    await screen.findByRole('status');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit wording' }));
+    expect(screen.getByLabelText('Corrected wording')).toHaveValue(revised);
+  });
+});

@@ -126,3 +126,34 @@ export function mutationFailureCopy(err: unknown, fallback: string): string {
   }
   return fallback;
 }
+
+/**
+ * The version token the SERVER says the record now carries, from a 412 refusal —
+ * or `null` when the refusal does not say.
+ *
+ * WHY THIS EXISTS. A panel that holds a version token and writes with it has to be
+ * able to recover from a stale one. `_stale_write` (`apps/api/isaac_api/routes.py`)
+ * answers 412 with `current_version` and echoes the same value as a strong `ETag`,
+ * precisely so "the client can refresh in one hop" — and `mutationError` in
+ * `lib/api.ts` attaches that body to the thrown `ApiError` for exactly this read.
+ *
+ * WHAT WENT WRONG WITHOUT IT, measured on two panels. `UnmappedNotesPanel` and
+ * `AssetReferencesPanel` adopted the new token on SUCCESS and did nothing with it on
+ * a 412, so a single refusal left the held token one revision behind for good: every
+ * subsequent write re-sent the same stale validator and was refused again, forever.
+ * The only exit on screen was `Reload This Section`, which took the reader's typed
+ * text with it.
+ *
+ * Duck-typed and fail-closed for the reasons the helpers above are: an unrecognised
+ * body returns `null`, which leaves the caller on its old token rather than adopting
+ * something it cannot read. It deliberately does NOT check the status — the caller
+ * knows which refusal it is handling, and `current_version` is only ever emitted by
+ * the 412 path.
+ */
+export function staleWriteCurrentVersion(err: unknown): string | null {
+  if (typeof err !== 'object' || err === null) return null;
+  const body = (err as { body?: unknown }).body;
+  if (typeof body !== 'object' || body === null) return null;
+  const version = (body as { current_version?: unknown }).current_version;
+  return typeof version === 'string' && version !== '' ? version : null;
+}
