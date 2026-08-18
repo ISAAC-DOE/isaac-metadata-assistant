@@ -1820,6 +1820,32 @@ export interface ApiRunResponse {
 }
 
 /**
+ * What `POST …/runs/{id}/remove` returns.
+ *
+ * `ordinals_compacted` IS ON THE WIRE ON PURPOSE, and it is always `false` today.
+ * The remaining runs keep their numbers, so a record whose runs were 1, 2 and 3
+ * reads 1 and 3 afterwards. A client that had to infer that from two list reads
+ * could not tell "they were not renumbered" apart from "this build forgot to
+ * renumber them", and the gap is visible on screen.
+ *
+ * `asset_references_dropped` names the asset ids this run cited and no longer
+ * does. The record's asset LIBRARY keeps every entry — an asset can be cited by
+ * other runs and by the record itself — so this is a list of associations that
+ * ended, never of files that were deleted. No file is deleted by anything here.
+ */
+export interface ApiRunRemoved {
+  removed_run_id: string;
+  removed_run_label: string;
+  removed_run_ordinal: number;
+  /** NAMED rather than counted, exactly as the asset removal names its runs. */
+  asset_references_dropped: string[];
+  remaining_run_count: number;
+  ordinals_compacted: boolean;
+  /** The experiment's NEW version after the removal. */
+  experiment_version: string;
+}
+
+/**
  * What `POST …/runs/{id}/overrides` returns: the refreshed run, and WHEN the
  * override was recorded.
  *

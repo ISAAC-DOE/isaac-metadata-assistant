@@ -1230,7 +1230,28 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // zoom-200 COLLAPSES to a scalar 59: darwin was already 59 and linux has
       // converged on it, and the guard rejects a pair with equal halves.
       'settings-explorer@mobile-375x812': { darwin: 56, linux: 58 },
-      'settings-explorer@zoom-200': { darwin: 59, linux: 61 },
+      /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
+         FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
+         same change moved linux DOWN one and darwin not at all.
+
+         Cause, traced rather than guessed: the run-removal slice reworded the served
+         409 response description for `POST .../runs/{run_id}/remove`, and the Endpoint
+         Explorer renders every response description VERBATIM. One fewer low-contrast
+         text node results. CI (linux, the authority) reported the fall from 61 to 60.
+
+         DARWIN IS LEFT AT 59 DELIBERATELY, AND IT IS KNOWN TO BE STALE. A local macOS
+         run measures 61 (+2) — and it measures 61 ON `main` TOO, with this slice's
+         changes absent, so the darwin drift is PRE-EXISTING and is NOT caused by this
+         slice. It went unnoticed because CI runs only linux, and darwin's authority is
+         a local macOS run that evidently has not been taken for this cell since it
+         drifted. Correcting it here would mean carrying an unrelated pre-existing
+         regression inside a run-removal diff, where the next reader would attribute it
+         to this slice; correcting it also needs the darwin TOTAL moved, which is the
+         one artefact in this file that makes a debt increase visible. So it is recorded
+         here as a measured finding for its own slice, not silently absorbed into this
+         one. Do not "fix" this line by copying the linux number across — the two
+         columns were measured separately and disagree in both value and direction. */
+      'settings-explorer@zoom-200': { darwin: 59, linux: 60 },
       'settings-privacy@desktop-1280x800': 9,
       'settings-privacy@laptop-1024x768': 9,
       'settings-privacy@tablet-768x1024': 9,
@@ -2492,7 +2513,14 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // confirms both cell sets survived: 2601 + 203 + 3. Had either branch's figure
   // been carried across, the file would have been self-inconsistent and the fast
   // invariant would have said so in milliseconds — which is what it did.
-  linux: 2807,
+  // 2807 -> 2806: the single MEASURED linux fall above,
+  // `settings-explorer@zoom-200` color-contrast 61 -> 60, caused by the reworded 409
+  // response description that the Endpoint Explorer renders verbatim. darwin is
+  // UNCHANGED at 2551 and that is not arithmetic: the darwin cell did not move on this
+  // change (a local run measures the same 61 on `main`), so there is nothing to add or
+  // subtract on that side. Per this file's standing rule, the number is corrected from
+  // the CI output and the assertion is not loosened.
+  linux: 2806,
 };
 
 /**

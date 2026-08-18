@@ -1543,6 +1543,51 @@ def test_FAKE_an_inherited_address_never_reaches_the_projected_run_row():
     )
 
 
+@real_engine
+def test_parity_removing_a_run_over_HTTP_removes_its_row_and_moves_no_other(workspace):
+    """REAL ENGINE. The removal operation's half of the shadow contract.
+
+    Every other scenario in this file drives the document directly. This one drives
+    the HTTP route that a scientist's Remove button calls, because the row set has to
+    follow THE DOCUMENT THE PRODUCT WRITES, not a document a test composed.
+
+    Two properties, and the second is the one a partial implementation would miss:
+
+    * the removed run's row is gone;
+    * every SURVIVOR's row is byte-for-byte what it was — ordinal included. The
+      removal deliberately does not renumber, so a row diff that decided to rewrite
+      the survivors "while it was in there" would fail here rather than silently
+      churning every row on every removal.
+
+    ``assert_parity`` then re-states the whole invariant against the document, so a
+    row that was deleted for the wrong reason fails too.
+    """
+    from fastapi.testclient import TestClient
+
+    from isaac_api.app import create_app
+
+    exp = _with_runs("parity: removal over HTTP", 3)
+    ids = [run.id for run in exp.sorted_runs()]
+    assert_parity(exp)
+    before = {run_id: row for run_id, row in _full_rows(exp.id).items()}
+    assert set(before) == set(ids)
+
+    client = TestClient(create_app())
+    tag = client.get(f"/api/experiments/{exp.id}").headers["ETag"]
+    response = client.post(
+        f"/api/experiments/{exp.id}/runs/{ids[1]}/remove",
+        json={"confirmed_by_user": True},
+        headers={"If-Match": tag},
+    )
+    assert response.status_code == 200, response.text
+
+    after = _full_rows(exp.id)
+    assert set(after) == {ids[0], ids[2]}
+    for run_id in (ids[0], ids[2]):
+        assert after[run_id] == before[run_id], f"{run_id}'s row moved"
+    assert_parity(ws.load_experiment(exp.id))
+
+
 def test_FAKE_hydration_issues_no_statement_naming_isaac_runs(workspace):
     """FAKE-DRIVER. The read half of the pod-restart property, stated as a shape.
 
