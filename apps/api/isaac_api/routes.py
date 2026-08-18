@@ -66,6 +66,10 @@ from . import serialize
 from . import sources
 from . import submission_store
 from . import submissions
+from . import transcript_capture as tc
+from .providers import config as provider_config
+from .providers import refusal as providers_refusal
+from .providers import transcription as providers_transcription
 from . import verification
 from . import version_contract as vc
 from . import workspace as ws
@@ -5236,6 +5240,488 @@ def post_note_review(
             return stale  # another writer won the race; this act was not recorded
         response.headers["ETag"] = exp.etag()
         return {"note": _note_view(revised), "experiment_version": exp.version_token()}
+
+
+# --- 7e. transcript capture ----------------------------------------------------
+#
+# THREE OPERATIONS, AND THE SPLIT IS THE DESIGN.
+#
+# `GET /api/providers/capabilities` is the honest status of the three AI seams,
+# read off the resolved implementations rather than off an environment value. It
+# existed as a function with no reader; a client that has to decide whether to
+# offer a microphone needs the answer from the server, because a string compiled
+# into the browser bundle is free to drift from what the deployment actually does.
+#
+# `POST /api/transcription` is the ONLY consumer of the transcription seam. It
+# takes an opaque handle to audio held in the caller's own memory and never audio
+# itself: no multipart form is declared anywhere in this application, file upload
+# is refused unconditionally, and nothing here opens a socket. In this build the
+# seam has no provider, so the operation reports that and transcribes nothing.
+#
+# `POST /api/experiments/{id}/transcript` is the working path and does not involve
+# a provider at all. It reads a transcript a scientist finalized, using this
+# repository's own closed table of literal patterns, and it PROPOSES. It writes
+# exactly one kind of thing — Unmapped Notes, which are structurally not values and
+# not evidence — and it writes them for EVERY segment, so no proposal being
+# accepted, and no acceptance succeeding, can lose what was typed.
+
+
+#: The body keys the transcript operation accepts. Anything else is REFUSED rather
+#: than ignored, for the reason the note operations refuse an unknown key: a caller
+#: that sends `{"confirmed": true}` alongside its transcript must be told the key
+#: means nothing here, not answered 200 while it is dropped.
+_TRANSCRIPT_KEYS = frozenset({"text", "finalized", "run_id", "retention"})
+
+#: What produced a note this operation stores. A member of the notes vocabulary,
+#: read from it rather than spelled out, so a rename there cannot leave a literal
+#: here that the note model would then refuse at capture time.
+_TRANSCRIPT_NOTE_SOURCE = "transcript"
+
+#: THE READER MAY NOT PROPOSE A PATH NOBODY CAN ACCEPT, AND THIS IS CHECKED AT
+#: IMPORT RATHER THAN BY A REVIEWER NOTICING.
+#:
+#: The transcript reader holds its own closed table of paths; the run edit holds
+#: the set of paths it will write. If the first ever grew a path outside the
+#: second, this operation would show a scientist a candidate with an Accept
+#: control whose only possible outcome is a refusal — the exact defect the run
+#: view's `overridable` flag was added to fix, arriving from the other direction.
+#: Failing to construct is louder than any comment.
+_UNACCEPTABLE_READER_PATHS = tc.READABLE_FIELD_PATHS - RUN_WRITABLE_FIELD_PATHS
+if _UNACCEPTABLE_READER_PATHS:  # pragma: no cover - a construction-time guard
+    raise RuntimeError(
+        "the transcript reader proposes field paths the run edit will not write: "
+        f"{sorted(_UNACCEPTABLE_READER_PATHS)}. A candidate at one of them could "
+        "never be accepted."
+    )
+if _TRANSCRIPT_NOTE_SOURCE not in notes.NOTE_SOURCES:  # pragma: no cover - ditto
+    raise RuntimeError(
+        f"{_TRANSCRIPT_NOTE_SOURCE!r} is not one of the note sources; a capture "
+        "would be refused by the note model at write time."
+    )
+
+#: The largest transcript one capture may carry, matching the per-note ceiling
+#: because every segment of it becomes a note. Over it is a refusal, never a
+#: truncation.
+_MAX_TRANSCRIPT_BYTES = _MAX_NOTE_BYTES
+
+
+def _transcript_refusal(error: str, message: str, **extra) -> JSONResponse:
+    """One typed 422. Every refusal on the transcript operation is one of these."""
+    return JSONResponse(
+        status_code=422, content={"error": error, "message": message, **extra}
+    )
+
+
+def _retention_disclosure(notes_captured: int) -> dict:
+    """What this build does with a finalized transcript, and what it will not claim.
+
+    ONE ENFORCED STATE, AND THE ABSENT ONES ARE NAMED. A retention control with
+    three options, two of which quietly did nothing, would be worse than no control
+    — so the two states this storage cannot enforce are reported as unimplemented
+    with the reason, rather than offered and ignored. `deletable` is `false` because
+    it is: nothing in this application removes a note, and a deletion guarantee
+    that cannot be demonstrated must not be printed next to a scientist's words.
+    """
+    return {
+        "state": tc.RETENTION_ENFORCED_STATE,
+        "notes_captured": notes_captured,
+        "deletable": False,
+        "description": (
+            "The finalized transcript is stored with this record as Unmapped "
+            "Notes and stays with it. Reviewing a note — including dismissing "
+            "one — records a decision and leaves the text readable."
+        ),
+        "not_implemented": [dict(entry) for entry in tc.RETENTION_STATES_NOT_IMPLEMENTED],
+        "raw_audio": {
+            "stored": False,
+            "reason": (
+                "No audio reaches this server. This operation accepts text only, "
+                "and the separate transcription operation accepts a handle to "
+                "audio the caller holds, never the audio. There is therefore no "
+                "raw-audio retention setting, because there is nothing retained "
+                "for one to govern."
+            ),
+        },
+    }
+
+
+def _capabilities_payload() -> dict:
+    """The provider report, with the two facts a reader needs beside it."""
+    payload = provider_config.capabilities()
+    return {
+        **payload,
+        "note": (
+            "`configured` is read off each resolved implementation, not inferred "
+            "from an environment value or a class name. Nothing in this build "
+            "sets it, so no seam here can report a provider."
+        ),
+        "manual_transcript_available": True,
+    }
+
+
+@router.get(
+    "/providers/capabilities",
+    tags=[TAG_META],
+    summary="Report Each Model Seam's Status",
+    description=(
+        "Reports, for each of the three model seams — transcription, capture "
+        "extraction, and the assistant — which implementation is resolved, "
+        "whether a production provider is configured, and why. Read-only: it "
+        "opens no connection, reads no credential, and performs no probe.\n\n"
+        "`configured` is read off the resolved implementation itself rather than "
+        "inferred from an environment value or a class name, and no "
+        "implementation in this build sets it. A client should render this "
+        "answer rather than a string compiled into its own bundle, so what a "
+        "scientist is told and what the deployment does cannot drift apart.\n\n"
+        "`manual_transcript_available` is always `true` and is deliberately "
+        "separate from every seam: reading a finalized transcript is this "
+        "repository's own deterministic operation and does not depend on any "
+        "provider, so it stays available when every seam reports nothing "
+        "configured.\n\n"
+        "No environment value is echoed back — only which implementation it "
+        "resolved to, and the name of the variable that selects it."
+    ),
+    response_description=(
+        "The per-seam status, whether any provider is configured at all, and the "
+        "document that records the outstanding decisions."
+    ),
+    responses={**_R_UNAUTHORIZED},
+)
+def get_provider_capabilities() -> dict:
+    return _capabilities_payload()
+
+
+@router.post(
+    "/transcription",
+    tags=[TAG_INGESTION],
+    summary="Request a Transcript for Held Audio",
+    description=(
+        "Asks the transcription seam to turn audio into text. The request "
+        "carries an opaque handle naming audio the CALLER holds, and never audio "
+        "itself — this application declares no multipart form anywhere, stores no "
+        "audio, and this operation opens no outbound connection.\n\n"
+        "In this build no transcription provider is configured, so the request is "
+        "answered with `501` and a body naming exactly what is missing. That is a "
+        "statement about this deployment, not a fault and not a wait: the missing "
+        "items are institutional decisions, and the body names the document that "
+        "records them.\n\n"
+        "Typing or pasting a transcript is the working path and needs none of "
+        "this. `POST /api/experiments/{experiment_id}/transcript` reads a "
+        "finalized transcript with this repository's own deterministic rules and "
+        "is unaffected by any seam's status.\n\n"
+        "Supplying neither a handle nor a transcript is `422`: the seam refuses "
+        "rather than returning an empty transcript, because an empty transcript "
+        "is a legitimate output of a working provider and the two must never "
+        "share a shape."
+    ),
+    response_description=(
+        "The transcript, its segmentation by character offset, and whether the "
+        "text is exactly what the caller supplied."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        501: {
+            "description": (
+                "No transcription provider is configured for this deployment. The "
+                "body names each missing item and the document that records the "
+                "decision, and nothing was transcribed, stored, or sent anywhere."
+            )
+        },
+    },
+)
+def post_transcription(
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"audio_ref\": \"<an opaque handle to audio the caller holds>\", "
+            "\"manual_transcript\": \"<text instead of audio>\", \"language\": "
+            "\"<optional BCP-47 tag>\"}`. Audio bytes are never accepted."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return _transcript_refusal(
+            "invalid_body", "The request body must be a JSON object."
+        )
+    audio_ref = body.get("audio_ref")
+    manual = body.get("manual_transcript")
+    language = body.get("language")
+    for name, value in (
+        ("audio_ref", audio_ref),
+        ("manual_transcript", manual),
+        ("language", language),
+    ):
+        if value is not None and not isinstance(value, str):
+            return _transcript_refusal(
+                "invalid_field_value",
+                f"`{name}` must be a string when it is supplied.",
+                key=name,
+            )
+    provider = provider_config.resolve_transcription_provider()
+    outcome = provider.transcribe(
+        providers_transcription.TranscriptionRequest(
+            audio_ref=audio_ref, manual_transcript=manual, language=language
+        )
+    )
+    if outcome.refused:
+        # TWO REFUSAL REASONS, TWO STATUS CODES, and collapsing them would be the
+        # error. "This build does not do that" is a fact about the deployment and
+        # is `501`; "you sent nothing to work on" is a fact about the request and
+        # is `422`. A client that retried the first would be waiting for something
+        # nobody has decided to build.
+        unconfigured = outcome.reason == providers_refusal.REASON_NO_PROVIDER_CONFIGURED
+        return JSONResponse(
+            status_code=501 if unconfigured else 422, content=outcome.to_dict()
+        )
+    return outcome.to_dict()
+
+
+@router.post(
+    "/experiments/{experiment_id}/transcript",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read a Finalized Transcript into Candidates and Notes",
+    description=(
+        "Reads one transcript a scientist has explicitly finalized, stores it "
+        "verbatim with the record, and returns the field values it PROPOSES — "
+        "plus every ambiguity it refused to resolve.\n\n"
+        "`finalized` must be `true`. There is no partial pass and no reading "
+        "while text is still being typed: a request without it is `422` and "
+        "nothing is stored, so text that is still being written can never move a "
+        "value.\n\n"
+        "NOTHING HERE IS A VALUE. Every proposal is a candidate carrying the "
+        "words it came from, the rule that read them, `verified: false`, "
+        "`is_evidence: false` and a `status` of `needs_confirmation`, which are "
+        "constants of the shape rather than fields a request can set. A candidate "
+        "becomes a value only when a person accepts it through "
+        "`PATCH /api/experiments/{experiment_id}/runs/{run_id}` with "
+        "`confirmed_by_user: true` and that run's own `ETag` — this operation "
+        "writes no field, and `accept_contract` in the response says where the "
+        "write happens.\n\n"
+        "EVERY SEGMENT OF THE TRANSCRIPT BECOMES AN UNMAPPED NOTE, including the "
+        "segments that produced a candidate. That redundancy is deliberate: a "
+        "candidate is not stored anywhere, so rejecting one — or failing to "
+        "accept it — would otherwise destroy the words behind it. `retention` "
+        "reports the one storage state this build enforces and names the states "
+        "it does not offer, rather than presenting a control that would do "
+        "nothing.\n\n"
+        "AMBIGUITY IS NEVER RESOLVED BY PREFERENCE. A run named by position, a "
+        "run this record does not have, a run matching more than one, and a run "
+        "other than the one this capture is addressed to each produce a "
+        "clarification listing the alternatives. Two statements giving different "
+        "values for one field produce both candidates grouped for review, with "
+        "neither dropped. A temperature in another unit, and the absorbing "
+        "element or absorption edge, each produce an abstention with the reason. "
+        "Everything else is stored as a note. `ambiguity_policy` in the response "
+        "states each rule.\n\n"
+        "CANDIDATES ARE WITHHELD WHENEVER THE RUN IS UNSETTLED — when no run was "
+        "selected, and whenever any run clarification was raised. A proposal a "
+        "scientist could accept against the wrong run is worse than no proposal, "
+        "and the transcript is stored either way.\n\n"
+        "Storing the transcript rewrites the record, so this requires the "
+        "RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is "
+        "`400`, and stale is `412` with nothing written. Text too large, or a "
+        "transcript that would exceed the segment ceiling, is REFUSED rather than "
+        "shortened. `retention` accepts only the state this build enforces; any "
+        "other value is `422` naming what is enforced."
+    ),
+    response_description=(
+        "The proposed candidates, the clarifications, abstentions and conflicts "
+        "the reader refused to resolve, the notes it stored, the retention state, "
+        "and the record's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
+        **_R_PRECONDITION,
+    },
+)
+def post_transcript(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"text\": \"<the finalized transcript>\", \"finalized\": true, "
+            "\"run_id\": \"<the run these notes describe>\", \"retention\": "
+            "\"<the enforced retention state>\"}`. Any other key is refused with "
+            "`422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. The transcript is stored inside the record's own "
+            "document, so there is no separate validator for it."
+        ),
+    ),
+):
+    # Existence pre-check OUTSIDE the lock, as every other mutation does it, so a
+    # bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        if not isinstance(body, dict):
+            return _transcript_refusal(
+                "invalid_body", "The request body must be a JSON object."
+            )
+        refused = _unknown_note_keys(body, _TRANSCRIPT_KEYS)
+        if refused is not None:
+            return refused
+        # THE FINALIZE GATE IS THE FIRST CHECK AND IS UNCONDITIONAL. It is checked
+        # before the precondition, before the text, and before anything is read, so
+        # there is no ordering in which unfinished text reaches the reader.
+        if body.get("finalized") is not True:
+            return _transcript_refusal(
+                "finalize_required",
+                (
+                    "`finalized` must be true. A transcript is read only when a "
+                    "person says it is finished — there is no reading of text that "
+                    "is still being written, and nothing was stored."
+                ),
+            )
+        raw_text = body.get("text")
+        text_refusal = _note_text_refusal(raw_text, what="text")
+        if text_refusal is not None:
+            return text_refusal
+        if not _is_storable_value(raw_text, max_bytes=_MAX_TRANSCRIPT_BYTES):
+            return _transcript_refusal(
+                "unrepresentable_value",
+                (
+                    "This transcript could not be stored intact. It is REFUSED "
+                    "rather than shortened, because a shortened transcript "
+                    "misrepresents what was said. Nothing was stored."
+                ),
+            )
+        retention = body.get("retention", tc.RETENTION_ENFORCED_STATE)
+        if retention != tc.RETENTION_ENFORCED_STATE:
+            return _transcript_refusal(
+                "unsupported_retention",
+                (
+                    "This build enforces one retention state and will not accept "
+                    "another. The states it does not offer are reported with the "
+                    "reason, and nothing was stored."
+                ),
+                retention=retention if isinstance(retention, str) else None,
+                enforced=tc.RETENTION_ENFORCED_STATE,
+                not_implemented=[
+                    dict(entry) for entry in tc.RETENTION_STATES_NOT_IMPLEMENTED
+                ],
+            )
+        run_id = body.get("run_id")
+        if run_id is not None and (
+            not isinstance(run_id, str) or exp.get_run(run_id) is None
+        ):
+            return _transcript_refusal(
+                "unknown_run",
+                (
+                    "This record has no run with that id, so a transcript cannot "
+                    "be addressed to it. Omit `run_id` to store the transcript "
+                    "against the record and be asked which run it describes — it "
+                    "is never inferred."
+                ),
+                run_id=run_id if isinstance(run_id, str) else None,
+            )
+
+        known_runs = tuple(
+            tc.RunRef(
+                id=run.id,
+                label=run.label,
+                ordinal=run.ordinal,
+                record_id=run.record_id,
+            )
+            for run in exp.sorted_runs()
+        )
+        reading = tc.read_transcript(
+            raw_text, selected_run=run_id, known_runs=known_runs
+        )
+        if len(reading.segments) > tc.MAX_SEGMENTS:
+            return _transcript_refusal(
+                "transcript_too_long",
+                (
+                    "This transcript is longer than one capture may store. It is "
+                    "REFUSED whole rather than partly stored, because a partly "
+                    "stored transcript loses words without saying which. Nothing "
+                    "was stored; finalize it in smaller pieces."
+                ),
+                segments=len(reading.segments),
+                maximum=tc.MAX_SEGMENTS,
+            )
+
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        # EVERY SEGMENT IS STORED, and the candidate a segment produced is recorded
+        # on its note ONLY when the segment produced exactly one — a note carries
+        # one candidate path, and writing one of two there would state a preference
+        # this reader does not hold.
+        captured: list["notes.Note"] = []
+        try:
+            for segment in reading.segments:
+                candidate = reading.candidate_for_segment(segment.index)
+                captured.append(
+                    exp.capture_note(
+                        text=segment.text,
+                        source=_TRANSCRIPT_NOTE_SOURCE,
+                        run_id=run_id,
+                        candidate_field_path=(
+                            candidate.field_path if candidate is not None else None
+                        ),
+                        candidate_rule=candidate.rule if candidate is not None else None,
+                    )
+                )
+        except notes.UnsupportedNote as refusal:
+            # The model's own refusals reach the client as a typed 422, never a 500.
+            # Nothing was saved: `capture_note` mutates the in-memory record only,
+            # and the save below has not run.
+            return _transcript_refusal("unsupported_note", str(refusal))
+
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; nothing was stored
+
+        response.headers["ETag"] = exp.etag()
+        return {
+            "capture": {
+                "finalized": True,
+                "run_id": run_id,
+                "segments": len(reading.segments),
+                "retention": _retention_disclosure(len(captured)),
+            },
+            # `applied` is a constant on the reading and is serialised so a client
+            # reading JSON sees the guarantee rather than having to know it.
+            "applied": reading.applied,
+            "candidates": [candidate.to_dict() for candidate in reading.candidates],
+            "clarifications": [entry.to_dict() for entry in reading.clarifications],
+            "abstentions": [entry.to_dict() for entry in reading.abstentions],
+            "review_required": [entry.to_dict() for entry in reading.review_required],
+            "notes": [_note_view(note) for note in captured],
+            "ambiguity_policy": [dict(entry) for entry in tc.AMBIGUITY_POLICY],
+            # THE SERVER'S OWN ANSWER TO "WHERE DOES ACCEPTING WRITE?", for the
+            # reason the notes list reports its mappable paths: the alternative is
+            # a second copy of the write contract in the browser bundle, free to
+            # drift from the operation that enforces it.
+            "accept_contract": {
+                "method": "PATCH",
+                "path": "/api/experiments/{experiment_id}/runs/{run_id}",
+                "requires": [
+                    "confirmed_by_user: true",
+                    "If-Match set to that run's own current ETag",
+                ],
+                "message": (
+                    "This operation writes no field. A candidate becomes a value "
+                    "only through that request, made by a person who accepted it."
+                ),
+            },
+            "experiment_version": exp.version_token(),
+        }
 
 
 # --- 7b. asset references ------------------------------------------------------

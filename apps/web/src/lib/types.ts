@@ -2029,6 +2029,30 @@ export interface ApiNoteReviewed {
   experiment_version: string;
 }
 
+/* --------------------------------------------------------------------------
+ * Transcript capture.
+ *
+ * THE FOUR OUTCOMES ARE A CLOSED UNION AND ARE NOT INTERCHANGEABLE. A
+ * clarification is a question with alternatives; a review is two proposals the
+ * reader refused to choose between; an abstention is a subject it recognised
+ * and declined; an unmapped note is text nothing matched. Rendering them under
+ * one heading would lose exactly the distinction the server went to trouble to
+ * make.
+ * ------------------------------------------------------------------------ */
+
+export type ApiCaptureOutcome =
+  | 'clarification'
+  | 'needs_review'
+  | 'abstention'
+  | 'unmapped';
+
+/** One run offered as an answer to a clarification. Identifiers only. */
+export interface ApiCaptureRunOption {
+  run_id: string;
+  label: string;
+  ordinal: number;
+}
+
 /* ── submission revision history (read-only) ────────────────────────────────
  *
  * WHY `availability` EXISTS AND WHY IT IS ON EVERY ONE OF THESE SHAPES. The
@@ -2238,10 +2262,162 @@ export interface ApiRevisionHistory {
 /** One of the twelve `content_role` values the official ISAAC schema enumerates. */
 export type ApiAssetContentRole = string;
 
+/*
+ * Structurally identical to `ApiCaptureRunOption` above, and deliberately NOT
+ * merged with it: one names a run a reader may pick as the subject of a
+ * transcript, the other names a run an asset is used by. A shared alias would
+ * couple two unrelated contracts, so narrowing either would silently narrow the
+ * other. Their identical shape is why the two slices collided here at all.
+ */
 export interface ApiAssetRunUse {
   run_id: string;
   label: string;
   ordinal: number;
+}
+
+export interface ApiCaptureClarification {
+  outcome: 'clarification';
+  kind: string;
+  question: string;
+  /** The words that raised it, or `null` when the question is about the capture. */
+  quote: string | null;
+  options: ApiCaptureRunOption[];
+  segment_index: number | null;
+}
+
+export interface ApiCaptureAbstention {
+  outcome: 'abstention';
+  kind: string;
+  reason: string;
+  quote: string;
+  segment_index: number;
+}
+
+export interface ApiCaptureReviewRequired {
+  outcome: 'needs_review';
+  kind: string;
+  field_path: string;
+  reason: string;
+  /** Indexes into `candidates`. Every one of them is still present there. */
+  candidate_indexes: number[];
+}
+
+/**
+ * A PROPOSED field value. Never a value.
+ *
+ * The four constants are typed as literals so no code can branch on one of them
+ * being true — the same technique `ApiNote` uses, and for the same reason: the
+ * guarantee has to survive the boundary rather than stopping at it.
+ */
+export interface ApiFieldCandidate {
+  field_path: string;
+  proposed_value: unknown;
+  /** The words this came from, verbatim, so a reader checks the transcript. */
+  quote: string;
+  start_char: number;
+  end_char: number;
+  origin: string;
+  produced_by: string;
+  /** The rule that read the quote, stated in full rather than as an id. */
+  rule: string;
+  provenance: Record<string, unknown>;
+  status: 'needs_confirmation';
+  verified: false;
+  is_evidence: false;
+  requires_user_confirmation: true;
+}
+
+/** A retention state this build does not offer, with the reason it does not. */
+export interface ApiCaptureRetentionAbsent {
+  state: string;
+  reason: string;
+}
+
+export interface ApiCaptureRetention {
+  /** The ONE state this storage enforces. */
+  state: string;
+  notes_captured: number;
+  /** Always `false`: nothing in this application removes a note. */
+  deletable: boolean;
+  description: string;
+  not_implemented: ApiCaptureRetentionAbsent[];
+  raw_audio: { stored: boolean; reason: string };
+}
+
+export interface ApiTranscriptCapture {
+  capture: {
+    finalized: boolean;
+    run_id: string | null;
+    segments: number;
+    retention: ApiCaptureRetention;
+  };
+  /** Always `false`. This operation writes no field, anywhere. */
+  applied: boolean;
+  candidates: ApiFieldCandidate[];
+  clarifications: ApiCaptureClarification[];
+  abstentions: ApiCaptureAbstention[];
+  review_required: ApiCaptureReviewRequired[];
+  notes: ApiNote[];
+  ambiguity_policy: { kind: string; outcome: ApiCaptureOutcome; rule: string }[];
+  /** The server's own statement of where accepting a candidate writes. */
+  accept_contract: {
+    method: string;
+    path: string;
+    requires: string[];
+    message: string;
+  };
+  experiment_version: string;
+}
+
+/* --------------------------------------------------------------------------
+ * Model-seam capability report.
+ * ------------------------------------------------------------------------ */
+
+export interface ApiProviderSeam {
+  seam: string;
+  implementation: string;
+  /** Read off the resolved implementation. Nothing in the build sets it true. */
+  configured: boolean;
+  is_test_double: boolean;
+  reason: string;
+  /** The name of the variable that selects it. Never its value. */
+  selected_by: string;
+}
+
+export interface ApiProviderCapabilities {
+  any_provider_configured: boolean;
+  decision_reference: string;
+  seams: ApiProviderSeam[];
+  note: string;
+  /** Always `true`: reading a finalized transcript depends on no provider. */
+  manual_transcript_available: boolean;
+}
+
+/** A seam declining to act, with the missing items named. Never an empty result. */
+export interface ApiProviderRefusal {
+  refused: true;
+  seam: string;
+  reason: string;
+  missing: string[];
+  message: string;
+  decision_reference: string;
+}
+
+export interface ApiTranscriptSegment {
+  index: number;
+  text: string;
+  start_char: number;
+  end_char: number;
+}
+
+export interface ApiTranscriptionResult {
+  refused: false;
+  text: string;
+  segments: ApiTranscriptSegment[];
+  produced_by: string;
+  /** `true` when the text is exactly what the caller supplied. */
+  verbatim: boolean;
+  language: string | null;
 }
 
 /**

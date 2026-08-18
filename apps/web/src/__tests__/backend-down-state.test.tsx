@@ -671,28 +671,33 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // An unexpected interior shape in one of these literals would silently shrink
     // both guards below — see the limits paragraph above for what this misses.
     expect(unclassifiedLiterals).toEqual([]);
-    // ALL THREE NUMBERS BELOW ARE MEASURED AFTER THE MERGE, read out of this
-    // test's own failure output. None was computed by adding the asset slice's
-    // delta to this slice's — that arithmetic is exactly how a merged counter
-    // ends up wrong, and the sibling transcript merge caught a counter that both
-    // branches had set to the SAME literal, which git then merged with no
-    // conflict at all while the true value was one higher than either.
-    expect(experimentPathLiterals.length).toBe(33);
+    // MEASURED, not derived by adding the two branches' deltas together. Both
+    // the asset slice and this one add per-record route literals, and the merge
+    // of two counter edits is exactly where this repository has been bitten
+    // before — see the note on `A11Y_BASELINE_TOTAL_NODES`. These three numbers
+    // were read out of this test's own failure output after the merge, never
+    // computed from the pre-merge values.
+    expect(experimentPathLiterals.length).toBe(34);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(27);
-    // 18, AND THIS LINE WAS NOT IN THE MERGE CONFLICT.
+    expect(SUB_READ_SUFFIXES).toHaveLength(28);
+    // 18, AND THE ROUTE TO THAT NUMBER IS THE POINT.
     //
-    // Both branches raised it 16 -> 17 for different additions, so git saw two
-    // identical one-line changes and merged them without a murmur — the entries
-    // changed twice, the total recorded once. This is the SECOND independent
-    // branch in this series to hit it on this exact counter; the transcript
-    // merge hit it first.
+    // This line was NOT in the merge conflict. Both branches raised it from 16
+    // to 17 — the asset slice for its own new segment, this slice for
+    // `transcript` — so git saw two identical one-line changes and merged them
+    // without a murmur, leaving a literal that accounted for one of the two
+    // additions. The entries changed twice; the total recorded once.
     //
-    // It was caught only because this count is DERIVED from `api.ts` and the
-    // assertion re-measures it. A hand-maintained number with no derivation
-    // behind it would have merged clean and stayed wrong, which is the argument
-    // for deriving a counter wherever a derivation exists.
-    expect(SUB_READ_SEGMENTS).toHaveLength(18);
+    // That is precisely the failure mode `A11Y_BASELINE_TOTAL_NODES` carries a
+    // long note about, reproduced here in a different counter within days, which
+    // says something about how easily it recurs. It was caught only because the
+    // count is DERIVED from `api.ts` and this assertion re-measures it; a
+    // hand-maintained pair with no derivation behind it would have merged clean
+    // and stayed wrong.
+    //
+    // All three numbers in this test were read out of its own failure output
+    // after the merge. None was computed by adding the two branches' deltas.
+    expect(SUB_READ_SEGMENTS).toHaveLength(19);
     // Spot-check the two shapes that are easiest to derive wrongly.
     expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');
     expect(SUB_READ_SUFFIXES).toContain('source-preview?source=SEG-1');

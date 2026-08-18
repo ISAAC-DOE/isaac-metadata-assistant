@@ -1166,7 +1166,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // A/B-measured as already 64 on `b7792c1`.
       // UNMAPPED NOTES (PR #146), 2026-08-16: linux 63 -> 64, same cause as the
       // desktop/laptop cells above. darwin 65 carried forward unmeasured.
-      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 64 },
+      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 66 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1547,7 +1547,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // converged on it, so the pair no longer marks a measured difference and
       // the guard would reject it. width-390 stays a pair, darwin 59 unmeasured.
       'settings-explorer@width-320': { darwin: 57, linux: 56 },
-      'settings-explorer@width-390': { darwin: 59, linux: 58 },
+      'settings-explorer@width-390': 59,
       'settings-privacy@width-320': 8,
       'settings-privacy@width-390': 8,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -2445,7 +2445,54 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // it too. Left alone per this file's standing rule: only the platform actually
   // measured may be edited. All seven cells therefore SPLIT from scalars rather
   // than having their darwin half moved onto a linux reading.
-  linux: 2804,
+
+  // ── TRANSCRIPT CAPTURE, 2026-08-17: linux 2601 -> 2604. darwin unchanged. ──
+  //
+  // TRANSCRIBED from CI run 32062179811. TWO cells, both `settings-explorer`,
+  // and NEITHER of them is the transcript UI:
+  //
+  //   settings-explorer@tablet-768x1024   64 -> 66  (+2)
+  //   settings-explorer@width-390         58 -> 59  (+1, and the pair COLLAPSES
+  //                                                  to the scalar 59)
+  //
+  // This is the SECOND-ORDER effect this file has now documented four times: the
+  // Endpoint Explorer renders every operation the build exposes, this branch adds
+  // three (`POST .../transcript`, `POST /api/transcription`,
+  // `GET /api/providers/capabilities`), and `.api-browser-list` is a clipped
+  // scroll container — so its cells move by different amounts and some do not
+  // move at all. Nothing about the transcript panel renders on that screen.
+  //
+  // THE TRANSCRIPT SURFACES THEMSELVES CONTRIBUTE NOTHING HERE, and that is a
+  // coverage statement rather than a clean bill of health. The panel is a CLOSED
+  // disclosure until a reader presses "Start a capture", and the scan does not
+  // press it — so the textarea, the run select, the candidate list, the four
+  // decision controls and every voice control are UNSCANNED. Reading `+0` on
+  // `record-detail` as "this feature adds no contrast debt" would be exactly
+  // wrong; it adds none that a scan which never opens it can see. Measuring the
+  // rest needs a scan that drives the disclosure, which is its own slice — the
+  // same gap the `.vr-sub` and Unmapped Notes notes above record.
+  //
+  // `@width-390` collapses to a scalar because linux rose onto darwin's existing
+  // 59. Both halves are measured; a pair whose numbers agree must be written as
+  // one, and the well-formedness guard rejects an equal pair.
+
+  // ── THE MERGE OF THE TWO ABOVE ─────────────────────────────────────────────
+  //
+  // BOTH notes are kept, because they describe DIFFERENT cells that both
+  // survive the merge: the provenance chips moved seven `evidence` cells, the
+  // transcript routes moved two `settings-explorer` cells. Keeping one and
+  // discarding the other would leave half the current numbers unexplained.
+  //
+  // The TOTAL below is neither branch's figure and is not their arithmetic. It
+  // is what the fast invariant suite computes from the merged entry map — the
+  // one number in this file that is arithmetic rather than measurement, which
+  // is exactly why it must be recomputed at a merge rather than chosen.
+  //
+  // 2807. Neither 2804 (provenance) nor 2604 (transcript), and the arithmetic
+  // confirms both cell sets survived: 2601 + 203 + 3. Had either branch's figure
+  // been carried across, the file would have been self-inconsistent and the fast
+  // invariant would have said so in milliseconds — which is what it did.
+  linux: 2807,
 };
 
 /**
