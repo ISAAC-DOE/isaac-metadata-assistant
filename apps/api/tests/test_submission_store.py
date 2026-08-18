@@ -473,16 +473,93 @@ def test_the_packets_do_not_still_carry_the_expired_ci_claim():
         doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
             encoding="utf-8"
         )
-        # The claim survives ONLY as a block-quoted historical citation — every
-        # occurrence must sit on a line that is quoting the old text.
-        for line in doc.splitlines():
-            if "No PostgreSQL has ever executed this file" in line:
-                assert line.lstrip().startswith(">"), (
-                    f"packet {packet} asserts the expired CI claim as its own "
-                    f"statement rather than quoting it as corrected: {line!r}"
-                )
-        # ...and the correction that explains it must be present.
-        assert "CORRECTED 2026-08-17" in doc, packet
+        # The claim survives ONLY as a block-quoted historical citation, AND ONLY
+        # INSIDE THE CORRECTION THAT EXPLAINS IT. An earlier version of this check
+        # accepted any line beginning with ">", which an independent review defeated
+        # in one line: the whole STATUS block is block-quoted, so a fresh assertion
+        # planted there satisfied "is quoted" while asserting the false claim as
+        # fact. The window is now anchored to the correction's own opening phrase.
+        marker = "CORRECTED 2026-08-17"
+        assert marker in doc, packet
+        window_starts_at = doc.index(marker)
+        for lineno, line in enumerate(doc.splitlines(), start=1):
+            if "No PostgreSQL has ever executed this file" not in line:
+                continue
+            assert line.lstrip().startswith(">"), (
+                f"packet {packet}:{lineno} asserts the expired CI claim as its own "
+                f"statement rather than quoting it as corrected: {line!r}"
+            )
+            assert doc.index(line) > window_starts_at, (
+                f"packet {packet}:{lineno} carries the expired claim OUTSIDE the "
+                f"correction block that explains it — being inside a blockquote is "
+                f"not the same as being a citation: {line!r}"
+            )
+
+
+def test_the_packets_do_not_overstate_CI_constraint_coverage():
+    """The number in the packets must equal the number CI actually exercises.
+
+    THIS TEST EXISTS BECAUSE THE PACKETS ONCE CLAIMED "every constraint". They did
+    not; an independent review measured 27 of 46, and the overstatement sat in the
+    evidence an owner approval is recorded as resting on. Correcting the sentence
+    without a guard would leave the next slice free to re-inflate it, so the claim is
+    now DERIVED here and compared against the committed text.
+
+    `refuse()`'s third argument in CI is the object PostgreSQL must be shown to
+    blame, so a constraint the workflow never NAMES was never exercised. That is the
+    measurement: declared names minus names absent from the workflow file.
+
+    The assertion is deliberately two-sided. Too high and the packets overstate the
+    evidence, which is the original defect. Too low and someone has widened CI's
+    coverage without crediting it, which quietly keeps a stale limitation in a
+    document a reader trusts.
+    """
+    import re
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    declared: set[str] = set()
+    for version in ("0003_revisions", "0004_submissions"):
+        text = (MIGRATIONS / f"{version}.sql").read_text(encoding="utf-8")
+        code = "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("--")
+        )
+        declared |= set(re.findall(r"CONSTRAINT\s+([a-z0-9_]+)", code))
+
+    workflow_lines = (
+        (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8").splitlines()
+    )
+    # BLAMED, NOT MERELY MENTIONED, and the difference is the whole measurement. A
+    # `refuse()` call's third argument is the object PostgreSQL must be shown to
+    # blame, and it sits on its own continuation line as a bare quoted name. Counting
+    # names that merely APPEAR anywhere in the workflow gives 29 and overstates the
+    # evidence by two: `isaac_revision_changes_revision_fk` and
+    # `isaac_submissions_experiment_fk` are referenced for other reasons without any
+    # refusal being blamed on them. The first version of this guard made exactly that
+    # mistake, which is a small demonstration of why the packets made the larger one.
+    blamed = {
+        m.group(1)
+        for m in (re.fullmatch(r'"([a-z0-9_]+)"', line.strip()) for line in workflow_lines)
+        if m is not None and m.group(1) in declared
+    }
+
+    assert len(declared) == 46, (
+        f"the two migrations now declare {len(declared)} constraints, not 46. "
+        f"Re-measure and update both packets' §12A/§12B and CLAUDE.md."
+    )
+    assert len(blamed) == 27, (
+        f"CI's constraint step now blames {len(blamed)} of the {len(declared)} declared "
+        f"constraints, not 27. Update both packets' §12A/§12B and CLAUDE.md to the "
+        f"measured number — upward if coverage improved, and do not leave a stale "
+        f"limitation sitting in a document a reader trusts."
+    )
+
+    for packet in ("0003", "0004"):
+        doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
+            encoding="utf-8"
+        )
+        assert "27" in doc and "46" in doc, packet
+        # And the packets must not have re-acquired the overstatement.
+        assert "exercised every constraint these five tables declare" not in doc, packet
 
 
 # =============================================================================

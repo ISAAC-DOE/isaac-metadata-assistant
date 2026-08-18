@@ -373,6 +373,13 @@ connection double**; the `postgres-migration` job proves the SQL and the constra
 `postgres:18`, and **HAS NOW RUN — successfully.** See §12B for the exact run and for the class of
 risk it still does not remove.
 
+**Its constraint coverage is PARTIAL.** 0003's packet §12B carries the measurement: 46 constraints are
+declared across the two files and CI's step names 27 of them, so 19 are declared and unexercised, 17 of
+them never named in the workflow at all. Four of the unexercised belong to this migration's own tables
+(`isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`, and every id-shape
+CHECK on `isaac_submission_runs`). The list below of what the step DOES exercise is therefore the
+authoritative scope for this migration — read it as an enumeration, not as a sample.
+
 Constraints CI's *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* step
 exercises for this migration specifically: the one-submission-per-revision uniqueness, the
 content-signature uniqueness, the idempotency-key uniqueness **and** its NULLS DISTINCT absence, the
@@ -427,8 +434,8 @@ written.
 **What check 5 actually looked at, so it is not read as broader than it was.** Every statement in the
 forward file is `CREATE TABLE IF NOT EXISTS` or `CREATE INDEX IF NOT EXISTS` and nothing else: no
 `ALTER`, no `DROP`, no `TRUNCATE`, no `GRANT`/`REVOKE`, no DML, no dollar-quoted body, and no
-`ON DELETE` clause anywhere (so every foreign key takes the SQL default, `NO ACTION`, and no cascade
-exists). The identifier `records` appears in no statement in either file. The rollback drops only
+`ON DELETE` clause in any statement — the phrase occurs only in comments — so every foreign key takes
+the SQL default, `NO ACTION`, and no cascade exists. The identifier `records` appears in no statement in either file. The rollback drops only
 tables this migration creates, children before parents, and deletes only its own bookkeeping row.
 
 **This check was a READ of the committed text plus a structural scan — not a runtime observation, and

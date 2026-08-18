@@ -485,7 +485,7 @@ psql -c "\copy (SELECT * FROM isaac_revision_changes) TO 'changes.csv' CSV HEADE
 | The change kinds, the revision reason and the three trust bases agree between Python and SQL | same | **yes** |
 | The application's write path against a connection double: one transaction, deterministic rollback, nothing written on any refusal | same | **yes** |
 | **The SQL is valid PostgreSQL** | `.github/workflows/ci.yml` → `postgres-migration` | **YES — see 12B** |
-| **Every constraint rejects what it claims to reject** | same, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* | **YES** |
+| **Every constraint THAT STEP NAMES rejects what it claims to reject — 27 of the 46 declared** | same, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* | **YES, for the 27.** The other 19 are declared and unexercised — see §12B |
 | **The submission lifecycle works end to end against a real engine** | same, step *"Exercise the submission lifecycle against the real engine"* | **YES** |
 | **The rollbacks return the database to its prior table set** | same, incl. the wrong-order refusal | **YES** |
 
@@ -512,10 +512,35 @@ hosted-applied — instead of a sentence about CI that time was always going to 
 *"migration and durable repository against a real PostgreSQL"*, **conclusion `success`**, on `main` at
 commit `fe374c0` — which carries these exact bytes (the digests in the table above are the digests at
 that commit). Against a `postgres:18` service container it applied `0001`→`0004` forward, proved the
-pending/applied plan at each step, exercised every constraint these five tables declare against
-input each one is supposed to reject, ran the submission lifecycle end to end, and proved the rollback
+pending/applied plan at each step, ran the submission lifecycle end to end, and proved the rollback
 order — including that `0003`'s rollback **fails** while `isaac_submissions` still references it, and
 that the failed attempt destroys nothing.
+
+**CONSTRAINT COVERAGE IS PARTIAL, AND AN EARLIER REVISION OF THIS SECTION SAID "EVERY".** Corrected
+after an independent review measured it; the measurement was then reproduced independently before this
+paragraph was written. The two forward files declare **46 named constraints**. CI's step *"Prove every
+0003 and 0004 constraint rejects what it claims to reject"* makes 31 `refuse()` calls blaming **27
+distinct constraints**, and `refuse()`'s third argument is the object PostgreSQL must be shown to
+blame — so a constraint the workflow never names is a constraint that was never exercised. **17
+declared constraint names do not appear in `.github/workflows/ci.yml` at all:**
+
+`isaac_experiment_revisions_no_positive`, `_rev_non_negative`, `_state_is_object`;
+`isaac_run_revisions_id_shape`, `_run_id_shape`, `_ordinal_non_negative`, `_rev_non_negative`,
+`_state_is_object`; `isaac_revision_changes_id_shape`, `_unit_id_shape`;
+`isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`;
+`isaac_submission_runs_id_shape`, `_unit_id_shape`, `_run_id_shape`, `_record_id_shape`.
+
+*(46 − 27 = 19 unexercised, of which 17 are never named anywhere in the workflow and 2 are named
+elsewhere in it without being driven by a `refuse()` call.)*
+
+**Why this matters enough to correct rather than footnote.** The owner's approval in the STATUS block
+is recorded as resting partly on this evidence, and the flip of these rows from *"not yet"* to *"YES"*
+was this slice's own act — so an overstatement here inflates the basis of an approval. Seven of the
+seventeen are the anchored `^…$` id-shape CHECKs, which is the class CI's own commentary singles out as
+data-correctness-critical. That class is genuinely proven for
+`isaac_experiment_revisions_id_shape` and for the two signature columns, and **generalised to the rest
+without being run**. Nothing suggests the unexercised constraints are wrong; the point is that this
+packet may not be cited as evidence that they behave.
 
 **The still-unproven class, which CI does not touch and which is the whole reason the operator's act
 is separate.** The service container is an **empty** `postgres:18` with a two-row synthetic stand-in
@@ -524,11 +549,13 @@ existing grants. So *"is this valid, idempotent, self-contained SQL whose constr
 **answered**; *"does it behave against the real data, roles and grants"* is **not**, and only the owner
 applying it resolves that. **Do not cite this section as evidence for the second question.**
 
-CI, when it runs, removes the *"is this even valid SQL / is it idempotent / does it touch anything it
-does not own / do the constraints behave"* class of risk. It does **not** remove the *"does it behave
-against the real data"* class: the service container is an empty `postgres:18` with a two-row
-synthetic stand-in for `records`, not the hosted database with its 30 production-derived records, its
-roles, and its existing grants. Only the owner applying it resolves that.
+~~*"CI, when it runs, removes the … class of risk."*~~ **That sentence is struck as of 2026-08-17: CI
+HAS run** (see above), and *"when it runs"* read as though it had not — the very defect this section
+was corrected for, surviving four lines below the correction. The distinction it drew is still right
+and is stated once, above, rather than twice: CI retires *"is this valid, idempotent, self-contained
+SQL"*; it does not retire *"does it behave against the real data, roles and grants"*, and — per the
+paragraph immediately above — it retires the constraint question only for the 27 constraints its step
+actually names.
 
 ### 12C. The immutability limit — do not let a reader infer a guarantee that is not here
 
@@ -568,8 +595,8 @@ written.
 **What check 5 actually looked at, so it is not read as broader than it was.** Every statement in the
 forward file is `CREATE TABLE IF NOT EXISTS` or `CREATE INDEX IF NOT EXISTS` and nothing else: no
 `ALTER`, no `DROP`, no `TRUNCATE`, no `GRANT`/`REVOKE`, no DML, no dollar-quoted body, and no
-`ON DELETE` clause anywhere (so every foreign key takes the SQL default, `NO ACTION`, and no cascade
-exists). The identifier `records` appears in no statement in either file. The rollback drops only
+`ON DELETE` clause in any statement — the phrase occurs only in comments — so every foreign key takes
+the SQL default, `NO ACTION`, and no cascade exists. The identifier `records` appears in no statement in either file. The rollback drops only
 tables this migration creates, children before parents, and deletes only its own bookkeeping row.
 
 **This check was a READ of the committed text plus a structural scan — not a runtime observation, and
@@ -577,6 +604,7 @@ not a substitute for the independent technical review that produced this packet.
 "has anything changed, and is anything obviously unsafe" pass the approval was made conditional on. The
 behavioural evidence is §12A/§12B's; the residual risk is the one §12B names and only the operator can
 retire.
+
 ## 13. What this packet does not cover
 
 * **`0004_submissions`.** Separate packet, same decision — read both.
