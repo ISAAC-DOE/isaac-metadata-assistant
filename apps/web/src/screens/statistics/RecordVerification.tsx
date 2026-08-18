@@ -681,31 +681,108 @@ function VerificationReportBody({
           of headlines becomes a second, worse copy of the sections below it.
           `stats-cards-headline` is a NARROW-WIDTH treatment only (two-up rather
           than one-up under 560px); it changes no count and no wording. */}
-      <div className="stats-cards stats-cards-headline">
-        <StatCard
-          label="Records Evaluated"
-          value={String(report.corpus.records_scanned)}
-          note="records in the corpus this run examined."
-        />
-        <StatCard
-          label="Official Validation"
-          value={`${report.official_validation.passing} of ${official.total}`}
-          note={`records satisfying the official ISAAC schema; ${report.official_validation.failing} do not.`}
-          tone={report.official_validation.failing === 0 ? 'good' : 'neutral'}
-        />
-        <StatCard
-          label="Format Shadow"
-          value={`${report.format_shadow.records_passing} of ${shadow.total}`}
-          note={`records with no format issue found by the stricter second validator; ${report.format_shadow.records_failing} have at least one.`}
-          tone={report.format_shadow.records_failing === 0 ? 'good' : 'neutral'}
-        />
-        <StatCard
-          label="Mutation Verification"
-          value={String(mutations.trials_attempted)}
-          note={`trials run; ${mutations.unexpected_outcomes} behaved unexpectedly.`}
-          tone={mutations.unexpected_outcomes === 0 ? 'good' : 'attention'}
-        />
-      </div>
+      {/*
+        NOTHING EXAMINED MEANS NOTHING PASSED, AND THESE CARDS USED TO SAY OTHERWISE.
+
+        Each tone was `x === 0 ? 'good' : …` with no zero-DENOMINATOR guard, and
+        `data-tone='good'` is the reserved pass palette (`statistics.css` paints it
+        with `--pass-bg`/`--pass-border`/`--pass-text`). A corpus of zero therefore
+        produced three green cards reading "0 of 0" and "0 behaved unexpectedly",
+        with the only honest signal being the neutral fourth card, `Records
+        Evaluated: 0`.
+
+        This is REACHABLE, not theoretical, and the backend produces it silently
+        rather than refusing: `verification.py` returns `()` for a missing corpus
+        directory and `continue`s a file that will not parse, so a single malformed
+        fixture — or a fixtures directory absent from the image — shrinks the corpus
+        without any error surfacing. `failing = total - passing` is then `0`. And
+        this is a FULL report, not the pending envelope, so the client's existing
+        refused/partial branches never see it.
+
+        `evaluated` gates all three. A green tone must assert something was checked;
+        `neutral` says only that no failure was counted, which is the truth when
+        nothing was examined. The same codebase already does this correctly two files
+        away — `StatisticsPage` writes "No records were returned, so no fields were
+        classified and no count is stated." rather than drawing an empty verdict.
+      */}
+      {(() => {
+        /* Each card gates on ITS OWN denominator rather than on a single
+           `records_scanned > 0` flag. They can differ: a record can be scanned and
+           still be absent from the shadow tier, so one shared gate would either
+           over- or under-claim for one of the three. */
+        const nothingExamined =
+          ' No records were examined, so this is not a pass — nothing was checked.';
+        return (
+          <div className="stats-cards stats-cards-headline">
+            <StatCard
+              label="Records Evaluated"
+              value={String(report.corpus.records_scanned)}
+              note="records in the corpus this run examined."
+            />
+            <StatCard
+              label="Official Validation"
+              value={`${report.official_validation.passing} of ${official.total}`}
+              note={
+                official.total > 0
+                  ? `records satisfying the official ISAAC schema; ${report.official_validation.failing} do not.`
+                  : `records satisfying the official ISAAC schema.${nothingExamined}`
+              }
+              tone={
+                official.total > 0 && report.official_validation.failing === 0
+                  ? 'good'
+                  : 'neutral'
+              }
+            />
+            <StatCard
+              label="Format Shadow"
+              value={`${report.format_shadow.records_passing} of ${shadow.total}`}
+              note={
+                shadow.total > 0
+                  ? `records with no format issue found by the stricter second validator; ${report.format_shadow.records_failing} have at least one.`
+                  : `records with no format issue found by the stricter second validator.${nothingExamined}`
+              }
+              tone={
+                shadow.total > 0 && report.format_shadow.records_failing === 0
+                  ? 'good'
+                  : 'neutral'
+              }
+            />
+            <StatCard
+              label="Mutation Verification"
+              value={String(mutations.trials_attempted)}
+              note={
+                mutations.trials_attempted > 0
+                  ? `trials run; ${mutations.unexpected_outcomes} behaved unexpectedly.`
+                  : `trials run.${nothingExamined}`
+              }
+              /* `attention` is withheld too when nothing ran: zero unexpected
+                 outcomes out of zero trials is not a finding either way. */
+              tone={
+                mutations.trials_attempted === 0
+                  ? 'neutral'
+                  : mutations.unexpected_outcomes === 0
+                    ? 'good'
+                    : 'attention'
+              }
+            />
+          </div>
+        );
+      })()}
+      {report.corpus.records_scanned === 0 && (
+        /*
+          AND IT IS STATED ONCE, PLAINLY, ABOVE THE SECTIONS. A reader who takes in
+          only the headline row should not have to notice that three tones went
+          neutral to learn that the run examined nothing. `role="status"` rather
+          than `alert`: it is a fact about the run, not an error in the page.
+        */
+        <p className="stats-empty-note" role="status">
+          This run examined <strong>no records</strong>. Every figure below is
+          therefore a count over an empty corpus, and none of them is evidence that
+          anything passed. A corpus can be empty because its directory is absent or
+          because every file in it failed to parse — neither is reported as an error
+          by the run itself.
+        </p>
+      )}
 
       <ValidatorComparison groups={groups} />
 

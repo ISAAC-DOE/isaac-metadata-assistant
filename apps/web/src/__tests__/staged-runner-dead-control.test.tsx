@@ -123,3 +123,68 @@ describe('R1b · the retired flag and prop are gone from the contract', () => {
     }
   });
 });
+
+/*
+ * A FAILING STEP MUST NOT WEAR THE SUCCESS MARK.
+ *
+ * `REAL_STEPS` above has always contained a step with `ok: false` — the fixture was
+ * right and nothing asserted anything about how it rendered. It rendered a tick.
+ * `demoStepsToStages` mapped `ok: false` to `current`, `StagedRunner` collapsed
+ * `current` into `done`, and `done` draws `Check`, which `icons.tsx` binds to both
+ * `verified` and `pass`. So the one step the server reported as failing was visually
+ * identical to the two that passed, beside its own failure detail.
+ *
+ * These tests are written against the RENDERED OUTPUT rather than the state string,
+ * because the state string was never the defect: `current` was a defensible name for
+ * it. The defect was the glyph and the class it inherited.
+ */
+describe('a failing pipeline step is presented as failing', () => {
+  it('maps the server’s ok:false to `failed`, not to a state that reads as done', () => {
+    const stages = demoStepsToStages(REAL_STEPS);
+    expect(stages.map((s) => s.state)).toEqual(['done', 'done', 'failed']);
+  });
+
+  it('gives the failing step its own class and withholds the success check mark', () => {
+    const { container } = render(<StagedRunner stages={demoStepsToStages(REAL_STEPS)} />);
+    const rows = Array.from(container.querySelectorAll('.stage'));
+    expect(rows).toHaveLength(3);
+
+    const failing = rows[2];
+    // THE REGRESSION ASSERTION. Before the fix this element carried `stage done`.
+    expect(failing.className).toContain('failed');
+    expect(failing.className).not.toContain('done');
+
+    // ...and the disc must not contain the glyph the two passing rows use. Compared
+    // AGAINST A PASSING ROW rather than against a hard-coded selector, so the test
+    // cannot pass by the icon set changing under it.
+    const discHtml = (row: Element) => row.querySelector('.stage-disc')?.innerHTML ?? '';
+    expect(discHtml(rows[0])).not.toBe('');
+    expect(discHtml(failing)).not.toBe(discHtml(rows[0]));
+  });
+
+  it('announces the failure in text, because the disc is aria-hidden', () => {
+    const { container } = render(<StagedRunner stages={demoStepsToStages(REAL_STEPS)} />);
+    // Without this the fix would have been sighted-only.
+    expect(container.querySelector('.stage-disc')?.getAttribute('aria-hidden')).toBe('true');
+    const rows = Array.from(container.querySelectorAll('.stage'));
+    expect(rows[2].textContent).toContain('Failed:');
+    // And it must NOT be announced on the steps that passed — announcing every
+    // state buries the one that matters.
+    expect(rows[0].textContent).not.toContain('Failed:');
+  });
+
+  it('keeps `failed` distinct from `upcoming`: ran-and-failed is not has-not-run', () => {
+    const { container } = render(
+      <StagedRunner
+        stages={[
+          ...demoStepsToStages([{ name: 'a', ok: false, detail: 'no' }]),
+          { key: 'b', label: 'B', command: 'b', state: 'upcoming' },
+        ]}
+      />,
+    );
+    const rows = Array.from(container.querySelectorAll('.stage'));
+    expect(rows[0].className).toContain('failed');
+    expect(rows[1].className).toContain('upcoming');
+    expect(rows[0].className).not.toContain('upcoming');
+  });
+});

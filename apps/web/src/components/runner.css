@@ -59,6 +59,19 @@
   border: 1px dashed var(--border-strong);
   color: var(--text-disabled);
 }
+/* `failed` — a step the server reported `ok: false`. It used to be collapsed into
+   `.done` and painted with the success check mark; see the long note in
+   StagedRunner.tsx. It borrows the shared failure tokens rather than inventing a
+   colour, and it is deliberately NOT the reserved validation-verdict green's
+   counterpart `--fail-solid` at full strength: this is a pipeline step, not a
+   validation verdict, so it uses the tinted pair the way other non-verdict failure
+   surfaces do. */
+.stage.failed .stage-disc {
+  background: var(--fail-bg);
+  border: 1px solid var(--fail-border);
+  color: var(--fail-text);
+}
+.stage.failed .stage-label { color: var(--fail-text); }
 .stage-main { flex: 1; min-width: 0; }
 .stage-label {
   font-size: 13.5px;

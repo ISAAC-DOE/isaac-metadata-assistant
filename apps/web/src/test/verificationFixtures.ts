@@ -412,3 +412,42 @@ export const verificationFutureFormat = {
   ...verificationReportOk,
   report_format_version: 4,
 };
+
+/**
+ * A FULL report over an EMPTY corpus — the state that produced three green cards.
+ *
+ * Reachable, and produced silently by the backend rather than refused:
+ * `verification.py` returns `()` for a missing corpus directory and `continue`s a
+ * file that will not parse, so one malformed fixture, or a fixtures directory left
+ * out of the image, empties the corpus with no error surfacing. `failing` is then
+ * `total - passing` = 0, and every "no failures" tone fired.
+ *
+ * `status: 'ok'` is the load-bearing part of this fixture. This is NOT the pending
+ * or refused envelope, which the client already handles correctly — it is a report
+ * that claims to have run. Every count is zero and INTERNALLY CONSISTENT, so nothing
+ * else in the screen has grounds to reject it.
+ */
+export const verificationReportEmptyCorpus = {
+  ...verificationReportOk,
+  metadata: { ...verificationReportOk.metadata, corpus_size: 0 },
+  corpus: {
+    records_scanned: 0,
+    records_passing_baseline: 0,
+    records_failing_baseline: 0,
+  },
+  official_validation: { passing: 0, failing: 0 },
+  format_shadow: {
+    ...verificationReportOk.format_shadow,
+    records_passing: 0,
+    records_failing: 0,
+  },
+  mutations: {
+    ...verificationReportOk.mutations,
+    trials_attempted: 0,
+    trials_applicable: 0,
+    trials_skipped_not_applicable: 0,
+    expected_outcome_matches: 0,
+    unexpected_outcomes: 0,
+    observation_only_trials: 0,
+  },
+};
