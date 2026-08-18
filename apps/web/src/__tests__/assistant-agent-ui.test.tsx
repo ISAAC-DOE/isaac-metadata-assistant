@@ -27,7 +27,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { api } from '../lib/api';
 import * as agentModule from '../lib/assistantAgent';
-import { clearAllSessions } from '../lib/assistantSession';
+import { appendMessage, clearAllSessions } from '../lib/assistantSession';
 import type { AgentContext, Proposal } from '../lib/assistantAgent';
 import type { AssistantMessage, SuggestedPrompt } from '../lib/types';
 
@@ -499,5 +499,41 @@ describe('P29.4b leak-safe boundary on the agent result + proposal path', () => 
     expect(container.textContent).not.toContain('sk-');
     expect(container.textContent).not.toContain(HEX);
     expect(JSON.stringify(sessionStorage)).not.toContain(HEX);
+  });
+});
+
+/*
+ * THE WITHHELD-MESSAGE RENDER, WHICH NO TEST PINNED.
+ *
+ * An independent review deleted the entire withheld-render branch — restoring the
+ * exact blank-bubble defect the fix exists to remove — and the whole frontend suite
+ * still passed, 153 files / 4033 tests. Every test for that fix was storage-level:
+ * they proved `textWithheld` is recorded and that no fragment is stored, and nothing
+ * proved a reader is ever told. The user-visible half was unprotected.
+ */
+describe('a message whose text was withheld says so instead of rendering blank', () => {
+  it('renders the withheld sentence, not an empty bubble', () => {
+    // Seeded through the REAL store, and through the real scrubber: a text carrying a
+    // 64-hex digest is exactly what `sanitize` withholds. Constructing the stored
+    // shape by hand would let the test pass even if `sanitize` stopped setting the
+    // flag.
+    appendMessage(EXP, { role: 'user', text: `is sha256 ${'9'.repeat(64)} recorded?` });
+    const view = panel();
+    const bubble = view.container.querySelector('.assistant-msg-withheld');
+    expect(bubble, 'the withheld branch did not render').not.toBeNull();
+    expect(bubble?.textContent ?? '').toMatch(/not shown because it was not stored/);
+    // THE DEFECT ASSERTION: the paragraph must not be empty, which is what it was.
+    expect((bubble?.textContent ?? '').trim().length).toBeGreaterThan(20);
+    // And it must not claim the live answer was affected — only the archive is.
+    expect(bubble?.textContent ?? '').toMatch(/was not affected/);
+  });
+
+  it('does NOT render the withheld sentence for an ordinary message', () => {
+    // The positive half: without this, always rendering the notice would satisfy the
+    // assertions above and put it on every message.
+    appendMessage(EXP, { role: 'user', text: 'what is the sample formula?' });
+    const view = panel();
+    expect(view.container.querySelector('.assistant-msg-withheld')).toBeNull();
+    expect(view.container.textContent).toContain('what is the sample formula?');
   });
 });

@@ -513,7 +513,9 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
 
     // the honest conflict banner — nothing applied, input kept
     expect(
-      await findByText(/This record changed elsewhere\. Nothing was applied — your input is kept\./),
+      await findByText(
+        /This record changed elsewhere\. Nothing was applied — what you typed is kept, including through Refresh\./,
+      ),
     ).toBeInTheDocument();
     // the typed input is preserved (GuidedPrompt was not unmounted)
     expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
@@ -527,6 +529,46 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
     await findByText(NOTEBOOK_Q); // reloaded to a fresh LoadedCompletion
     const after = calls.filter((c) => c === 'GET /api/experiments/demo').length;
     expect(after).toBeGreaterThan(before);
+
+    /*
+     * AND THE INPUT SURVIVED THE REFRESH — the assertion this test was missing.
+     *
+     * It checked the field BEFORE the click and then only counted fetches, so the
+     * one thing the banner promises about the button beside it went unasserted. It
+     * was also false: `reload` sets `{status:'loading'}`, which unmounts
+     * `LoadedCompletion` and `GuidedPrompt` with it, so the field came back empty —
+     * after a banner that told the reader to press exactly that button.
+     *
+     * The staged text now lives in a ref on the parent, which the reload does not
+     * unmount, and is handed back through `initialValue`.
+     */
+    expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
+  });
+
+  it('declining a question DISCARDS what was typed — Answer Now does not re-offer it', async () => {
+    /*
+     * A REF THAT OUTLIVES THE INTENT IS ITS OWN DEFECT.
+     *
+     * The staged store exists so a Refresh cannot destroy typed text. Nothing cleared
+     * it when the reader chose "I don't know — leave honestly missing", so "Answer
+     * Now" came back pre-filled with a value the scientist had EXPLICITLY DECLINED to
+     * assert — one click from being written with `confirmed_by_user` semantics. An
+     * independent review found it; this is the assertion that was missing.
+     */
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { findByText, getByText, getByLabelText, queryByDisplayValue } = renderAt(
+      '/record/demo/complete',
+    );
+    await findByText(NOTEBOOK_Q);
+
+    fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'ABANDONED-ANSWER' } });
+    fireEvent.click(getByText("I don't know — leave honestly missing"));
+
+    // Come back to it. The declined value must be gone.
+    fireEvent.click(await findByText('Answer Now'));
+    await findByText(NOTEBOOK_Q);
+    expect(queryByDisplayValue('ABANDONED-ANSWER')).toBeNull();
+    expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('');
   });
 
   it('export: a 412 shows the stale banner + Refresh and does NOT mark the record exported', async () => {

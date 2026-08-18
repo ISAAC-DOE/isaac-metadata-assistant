@@ -28,6 +28,19 @@ interface GuidedPromptProps {
   dontKnowLabel?: string;
   /** Hide the "a blank stays blank" completion hint (irrelevant in edit mode). */
   hideBlankHint?: boolean;
+  /**
+   * Report every keystroke upward so the caller can hold the staged answer somewhere
+   * that OUTLIVES this component.
+   *
+   * WHY IT EXISTS. `text` is local state, and the completion screen's `Refresh`
+   * button calls `useFetch`'s `reload`, which sets `{status: 'loading'}` and
+   * unmounts `LoadedCompletion` — and this component with it. The banner beside that
+   * button said "your input is kept", and one variant told the reader to press it.
+   * The claim was true only until they followed the instruction. The caller now keeps
+   * the value in a ref on a component the reload does NOT unmount, and hands it back
+   * through `initialValue`.
+   */
+  onTextChange?: (value: string) => void;
 }
 
 /**
@@ -56,8 +69,16 @@ export function GuidedPrompt({
   confirmLabel = LABELS.actionConfirm,
   dontKnowLabel = LABELS.actionDontKnow,
   hideBlankHint = false,
+  onTextChange,
 }: GuidedPromptProps) {
-  const [text, setText] = useState(initialValue ?? ''); // pasted value for hash/text inputs
+  const [text, setTextState] = useState(initialValue ?? ''); // pasted value for hash/text inputs
+  /* Every write goes through here so the caller's surviving copy cannot drift from
+     what is on screen. A second setter would be one `setTextState` away from a
+     half-preserved field, which is worse than none. */
+  const setText = (value: string) => {
+    setTextState(value);
+    onTextChange?.(value);
+  };
   const [staged, setStaged] = useState(initialStaged); // structured: demo value accepted for confirm
 
   const demo = blocker.demo_answer;

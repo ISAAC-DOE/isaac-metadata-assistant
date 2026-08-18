@@ -1,6 +1,6 @@
 import './screens.css';
 import '../components/assistant.css';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef, type MutableRefObject } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
@@ -56,6 +56,43 @@ export function GuidedCompletion() {
   // re-read and nothing here may keep describing it.
   const scopeChanged = useWorkspaceScopeChanged();
 
+  /*
+   * THE STAGED ANSWER, HELD WHERE A REFRESH CANNOT REACH IT.
+   *
+   * `reload` sets `{status: 'loading'}`, which takes the branch above and unmounts
+   * `LoadedCompletion` — and `GuidedPrompt`'s local `text` with it. Three banners on
+   * this screen said "your input is kept" beside a `Refresh` button, and two of them
+   * told the reader to press it; the claim held only until they did. THIS component
+   * is not unmounted by that reload, so a ref here survives it.
+   *
+   * Keyed by blocker id, because the answer belongs to a question rather than to the
+   * screen: after a reload the pending list may have changed, and restoring one
+   * question's text into a different question would be worse than losing it.
+   *
+   * A ref rather than state, deliberately: this must not re-render on every
+   * keystroke, and nothing reads it during render except as an initial value.
+   */
+  const staged = useRef<Record<string, string>>({});
+
+  /*
+   * RESET ON A RECORD CHANGE, because a blocker id is not record-scoped.
+   *
+   * `blocker_id` is the blocker KIND or an asset URI, not a per-record id, and this
+   * ref sits ABOVE `LoadedCompletion`'s `key={id}` — deliberately, so a Refresh
+   * cannot destroy it. The consequence an independent review pointed out: if the
+   * `:id` param ever changed while this component stayed mounted, one record's staged
+   * text could be offered on another record's identical blocker.
+   *
+   * It found no reachable path today (every `ROUTES.complete(...)` call site passes
+   * the current id, so no in-app gesture goes record A -> record B on this route),
+   * and one "next record needing attention" link would make it live. Closing it now
+   * costs one effect; discovering it later costs a scientist seeing someone else's
+   * value under their own question.
+   */
+  useEffect(() => {
+    staged.current = {};
+  }, [id]);
+
   // Before the fetch-state branches, so no question, answered row or heading from
   // the discarded workspace reaches the DOM. `replace`, so Back does not return
   // the reader to a record that no longer exists.
@@ -90,6 +127,7 @@ export function GuidedCompletion() {
       detail={load.data.detail}
       initialPending={load.data.pending}
       reload={load.reload}
+      staged={staged}
     />
   );
 }
@@ -160,11 +198,15 @@ function LoadedCompletion({
   detail,
   initialPending,
   reload,
+  staged,
 }: {
   id: string;
   detail: ApiExperimentDetail;
   initialPending: ApiPendingItem[];
   reload: () => void;
+  /** Staged answers keyed by blocker id, held by the parent so a `reload` — which
+   *  unmounts this component — cannot destroy what the reader typed. */
+  staged: MutableRefObject<Record<string, string>>;
 }) {
   const navigate = useNavigate();
   const [pending, setPending] = useState<ApiPendingItem[]>(initialPending);
@@ -233,6 +275,13 @@ function LoadedCompletion({
         // and the fresh If-Match token are facts either way.
         setPending(resp.pending);
         setCurrentVersion(resp.version); // adopt the fresh token for the next submit
+        if (answerWasApplied(resp, blocker.id)) {
+          // APPLIED, so the staged copy has done its job. Kept only until the record
+          // holds the value: leaving it would re-offer a value the record already has
+          // if this blocker ever returned to `pending` through a downstream
+          // invalidation, which reads as an unsaved edit that is not one.
+          discardStaged(blocker.id);
+        }
         if (!answerWasApplied(resp, blocker.id)) {
           // The server did not report this value as applied, so this screen may not
           // show it as answered. No `answered` row (so no "Confirmed by You" chip
@@ -274,7 +323,30 @@ function LoadedCompletion({
     setEditImpact(null);
     setEditNotApplied(null);
   };
+  /*
+   * DISCARD A STAGED ANSWER, because a ref that outlives the INTENT is its own defect.
+   *
+   * The staged store exists so a Refresh cannot destroy what the reader typed. It must
+   * NOT survive an act by which the reader abandoned that text — and in the first
+   * version of this fix it did, which an independent review caught in two places:
+   *
+   *   * Cancel on an Edit restored the abandoned correction the next time Edit was
+   *     opened, in place of the confirmed value, and Save would have written it with
+   *     `confirmed_by_user` semantics;
+   *   * "I don't know — leave honestly missing" left the typed answer staged, so
+   *     "Answer Now" came back pre-filled with a value the scientist had explicitly
+   *     declined to assert, one click from being confirmed.
+   *
+   * Both are the same root cause and this is the one place that fixes it. Keyed
+   * exactly as the read is keyed, so a rename cannot silently stop discarding.
+   */
+  const discardStaged = (key: string) => {
+    delete staged.current[key];
+  };
+
   const cancelEdit = () => {
+    // The reader abandoned this correction. It must not come back.
+    if (editingId !== null) discardStaged(`edit:${editingId}`);
     setEditingId(null);
     setEditError(null);
     setEditNotApplied(null);
@@ -312,6 +384,9 @@ function LoadedCompletion({
           ),
         );
         setEditImpact(resp.invalidation);
+        // The correction is stored, so the staged copy is spent. Same reason as the
+        // answer path above.
+        discardStaged(`edit:${blocker.id}`);
         setEditingId(null);
       })
       .catch((err: ApiError) => setEditError(err))
@@ -319,6 +394,9 @@ function LoadedCompletion({
   };
 
   const leaveMissing = (blockerId: string) => {
+    // Declining to answer is an ABANDONMENT of whatever was typed. Without this the
+    // value returns pre-filled under "Answer Now", one click from being confirmed.
+    discardStaged(blockerId);
     setSkipped((prev) => new Set(prev).add(blockerId));
     // The reader has moved on from this question; the not-applied note described the
     // submit they just abandoned, so it must not be waiting for them if they come
@@ -486,8 +564,8 @@ function LoadedCompletion({
       {changedElsewhere && (
         <div className="livesync-changed completion-submit-error" role="status">
           <span className="livesync-changed-text">
-            This record changed elsewhere. Your input is kept — review the current record before
-            submitting.
+            This record changed elsewhere. What you typed is kept, including through Refresh —
+            review the current record before submitting.
           </span>
           <button type="button" className="btn btn-secondary" onClick={reload}>
             Refresh
@@ -512,8 +590,8 @@ function LoadedCompletion({
         <BackendDown error={editError} onRetry={() => setEditError(null)} />
       ) : editError.status === 412 ? (
         <div className="completion-submit-error" role="alert">
-          This record changed elsewhere. Nothing was applied — your input is kept. Refresh to load
-          the current state.
+          This record changed elsewhere. Nothing was applied — what you typed is kept, including
+          through Refresh. Refresh to load the current state.
           <button
             type="button"
             className="btn btn-secondary"
@@ -597,7 +675,17 @@ function LoadedCompletion({
           index={0}
           total={1}
           submitting={editSubmitting}
-          initialValue={typeof ans.rawValue === 'string' ? ans.rawValue : undefined}
+          /* An IN-PROGRESS edit takes precedence over the confirmed value, so a
+             Refresh mid-edit restores what the reader had rewritten rather than
+             snapping back to the stored value. Namespaced `edit:` so an edit and a
+             fresh answer to the same blocker cannot overwrite one another. */
+          initialValue={
+            staged.current[`edit:${ans.id}`] ??
+            (typeof ans.rawValue === 'string' ? ans.rawValue : undefined)
+          }
+          onTextChange={(value) => {
+            staged.current[`edit:${ans.id}`] = value;
+          }}
           initialStaged={ans.blocker.inputType === 'structured'}
           confirmLabel={LABELS.actionSave}
           dontKnowLabel={LABELS.actionCancel}
@@ -775,6 +863,12 @@ function LoadedCompletion({
             index={Math.min(answered.length + skippedItems.length, total - 1)}
             total={total}
             submitting={submitting}
+            /* Restored across a Refresh, and kept current on every keystroke. See
+               the `staged` ref in the parent for why it lives there. */
+            initialValue={staged.current[blocker.id]}
+            onTextChange={(value) => {
+              staged.current[blocker.id] = value;
+            }}
             onConfirm={(value) => confirmAnswer(blocker, value)}
             onDontKnow={() => leaveMissing(blocker.id)}
           />
@@ -833,9 +927,15 @@ function LoadedCompletion({
             // applied and the user's staged/unsent input stays put (GuidedPrompt is
             // not unmounted here). Refresh re-fetches current state via the parent
             // useFetch reload — no auto-retry, no auto-merge.
+            //
+            // AND THE INPUT NOW SURVIVES THAT REFRESH TOO. The parenthetical above was
+            // true of the 412 itself and false of the remedy offered beside it: the
+            // reload DOES unmount this component. The parent holds the staged text in
+            // a ref it hands back through `initialValue`, so the sentence below is now
+            // accurate rather than accurate-until-you-press-the-button.
             <div className="completion-submit-error" role="alert">
-              This record changed elsewhere. Nothing was applied — your input is kept. Refresh to
-              load the current state.
+              This record changed elsewhere. Nothing was applied — what you typed is kept, including
+              through Refresh. Refresh to load the current state.
               <button
                 type="button"
                 className="btn btn-secondary"

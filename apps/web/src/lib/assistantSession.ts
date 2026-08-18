@@ -34,6 +34,12 @@ export type Msg = {
   // safe machine enum ('schema' | 'audit' | …), never free text.
   answeredFrom?: string;
   stale?: boolean;
+  /**
+   * Set when the scrubber withheld this message's `text` from browser storage.
+   * The text is gone; this says so, instead of leaving an empty bubble. See
+   * `WITHHELD_TEXT_MARKER`.
+   */
+  textWithheld?: boolean;
   id?: string;
   timestamp?: number;
   [key: string]: unknown;
@@ -62,9 +68,43 @@ export const MAX_MESSAGES = 40;
 
 // Presentation-safe keys. Anything not in this allowlist is dropped by the
 // sanitizer before a value is ever written to sessionStorage.
+/**
+ * WHY A WITHHELD MESSAGE IS RECORDED AS A FLAG AND NOT AS A REDACTED STRING.
+ *
+ * This is documentation, not a mechanism. An earlier version of this constant was
+ * named as though the scrubber wrote it into the message in place of the text; it
+ * does not — it sets the boolean `textWithheld` and stores no marker at all. An
+ * independent review found the constant unused and three comments pointing at it as
+ * if it were the implementation, which is exactly the kind of comment that sends the
+ * next reader looking for code that is not there. The name is kept because the
+ * reasoning below is worth having somewhere findable; nothing reads the value.
+ *
+ * WHY A MARKER AND NOT A REDACTED STRING. `isUnsafeString` fires on a whole
+ * string, and the honest options are (a) store nothing, or (b) attempt to excise
+ * the offending substring. (b) was rejected: `Bearer ` and a >=32-char hex run
+ * have clean boundaries, but an absolute path does not — deciding where
+ * `/Users/kverma/data/scan 01.h5` ends needs a path grammar, and a partial
+ * redaction that guesses wrong LEAKS, which is strictly worse than storing
+ * nothing. So the scrub is unchanged and its SECURITY behaviour is byte-for-byte
+ * what it was.
+ *
+ * What changes is that the drop is no longer SILENT. It used to delete the `text`
+ * key, and `ConversationMessage` renders `{text}` — so `undefined` rendered an
+ * EMPTY paragraph under the "You" label. A scientist who asked whether a
+ * particular sha256 was recorded against a run got a blank bubble, while the
+ * Settings screen told them the transcript survives a reload. The message is
+ * still not stored; the fact that it was withheld now is.
+ */
+export const WITHHELD_TEXT_MARKER = 'withheld_by_transcript_scrubber';
+// ^ Deliberately unread. See the note above: the mechanism is the `textWithheld`
+// boolean set in `sanitize`, and a reader who greps for this string will find only
+// this definition — which is the honest outcome, rather than a comment implying a
+// marker is stored.
+
 const SAFE_KEYS = new Set([
   'role',
   'text',
+  'textWithheld',
   'recordRev',
   'resultType',
   'authority',
@@ -162,7 +202,17 @@ function sanitize<T extends Record<string, unknown>>(obj: T): Partial<T> {
     if (UNSAFE_KEY_PATTERN.test(key)) continue;
     if (VERDICT_KEYS.has(key)) continue;
     const cleaned = deepSanitize(value);
-    if (cleaned === undefined) continue;
+    if (cleaned === undefined) {
+      // THE ONE KEY WHOSE LOSS A READER CAN SEE. `text` is the message body; every
+      // other allowlisted key is presentation metadata whose absence degrades
+      // gracefully. Losing `text` produced an empty bubble, so its removal is
+      // recorded rather than merely performed. `textWithheld` is a boolean and
+      // carries none of the withheld content — see the note on WITHHELD_TEXT_MARKER for why the text is dropped whole.
+      if (key === 'text' && typeof value === 'string' && value.length > 0) {
+        out.textWithheld = true;
+      }
+      continue;
+    }
     out[key] = cleaned;
   }
   return out as Partial<T>;

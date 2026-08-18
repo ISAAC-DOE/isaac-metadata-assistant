@@ -171,3 +171,80 @@ describe('P29.1 ephemeral session context', () => {
     expect(blob).not.toContain('"validate"');
   });
 });
+
+/*
+ * "STRIPPED" MEANT "THE WHOLE MESSAGE DELETED", AND THE UI SHOWED A BLANK BUBBLE.
+ *
+ * `isUnsafeString` fires on a whole string, and `sanitize` dropped the key — so a
+ * message whose TEXT contained a sha256 or an absolute path was stored with no
+ * `text` at all. `ConversationMessage` renders `{text}`, and `undefined` renders an
+ * empty paragraph under the "You" label. Meanwhile Settings promised the transcript
+ * "survives a page reload".
+ *
+ * The SECURITY behaviour is deliberately unchanged and is re-asserted below: the
+ * text is still not stored. What is added is that the omission is RECORDED, so the
+ * archived message can say it was withheld instead of rendering blank.
+ *
+ * Partial redaction was rejected rather than overlooked: `Bearer ` and a >=32-char
+ * hex run have clean boundaries, but an absolute path does not, and a redaction
+ * that guesses where a path ends would LEAK — strictly worse than storing nothing.
+ */
+describe('a withheld message text is recorded as withheld, not silently blanked', () => {
+  const stored = (): string => JSON.stringify(sessionStorage);
+
+  it('still stores no part of the offending text — the scrub is unchanged', () => {
+    appendMessage(EXP_A, msg('q', { text: `is sha256 ${'9'.repeat(64)} recorded?` }));
+    expect(stored()).not.toContain('9'.repeat(64));
+    expect(stored()).not.toContain('is sha256');
+  });
+
+  it('records `textWithheld` so the message is not an empty bubble', () => {
+    appendMessage(EXP_A, msg('q', { text: `is sha256 ${'9'.repeat(64)} recorded?` }));
+    const [only] = loadSession(EXP_A).messages;
+    // THE REGRESSION ASSERTIONS. Before the fix: `text` absent and no flag at all,
+    // so nothing downstream could tell "withheld" from "never had text".
+    expect(only.text).toBeUndefined();
+    expect(only.textWithheld).toBe(true);
+  });
+
+  it('fires for a path and for a credential, not only for a digest', () => {
+    appendMessage(EXP_A, msg('p', { text: 'does the record cite /Users/kverma/scan.h5 ?' }));
+    appendMessage(EXP_A, msg('c', { text: 'my token is Bearer ABC-SECRET' }));
+    const msgs = loadSession(EXP_A).messages;
+    expect(msgs.every((m) => m.textWithheld === true)).toBe(true);
+    expect(stored()).not.toContain('/Users/');
+    expect(stored()).not.toContain('ABC-SECRET');
+  });
+
+  it('does NOT flag an ordinary message — the flag must mean something', () => {
+    // The positive half. Without it, "always set textWithheld" would satisfy the
+    // assertions above and make every archived message claim it was withheld.
+    appendMessage(EXP_A, msg('ok', { text: 'what is the sample formula?' }));
+    const [only] = loadSession(EXP_A).messages;
+    expect(only.text).toBe('what is the sample formula?');
+    expect(only.textWithheld).toBeUndefined();
+  });
+
+  it('does not flag a message that genuinely had no text', () => {
+    // An absent `text` and a WITHHELD `text` are different facts; conflating them
+    // would put the withheld notice on a message that never had a body.
+    appendMessage(EXP_A, msg('empty', { text: '' }));
+    const [only] = loadSession(EXP_A).messages;
+    expect(only.textWithheld).toBeUndefined();
+  });
+
+  it('carries none of the withheld content in the flag itself', () => {
+    appendMessage(EXP_A, msg('q', { text: `path /Users/x and ${'f'.repeat(40)}` }));
+    const blob = stored();
+    // The flag is asserted through `loadSession` rather than by string-matching the
+    // blob: sessionStorage holds the session as a JSON STRING, so
+    // `JSON.stringify(sessionStorage)` double-encodes it and the key appears as
+    // `\"textWithheld\":true`. Matching the escaped form would be a test that
+    // passes for a reason unrelated to the behaviour.
+    expect(loadSession(EXP_A).messages[0].textWithheld).toBe(true);
+    // The blob check is the one that matters here: the flag must carry NONE of the
+    // withheld content, however the storage layer encodes it.
+    expect(blob).not.toContain('/Users/x');
+    expect(blob).not.toContain('f'.repeat(40));
+  });
+});
