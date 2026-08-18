@@ -1819,3 +1819,19 @@
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
+
+/* An empty-corpus disclosure on Record Verification. Neutral, not alarming: an
+   empty corpus is a fact about the run, not a validation failure — and painting it
+   as a failure would be the mirror of the defect it exists to correct. It sits
+   above the sections so a reader who takes in only the headline row still learns
+   that nothing was examined. */
+.stats-empty-note {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--cover-bg);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}

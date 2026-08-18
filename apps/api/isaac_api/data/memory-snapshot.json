@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "e17e7bffc2fe8bdbac8f9a9272256cbe4f4874cd732a49c117282efabea55638"
+        "sha256": "aa15e78f1ef5455b187d0d9164aa3872f9d1a344211b0dff7074bf56bb438dd3"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10376,7 +10376,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-status.test.tsx",
-        "sha256": "379ff5a4b28e37880e069ada3f9aedf647baa704b74a068b762f5a913e749a8d"
+        "sha256": "081f40b3466c58a9002f7e0d797e1a4bfc02b08fef60012e7f8633a0ba51a383"
       },
       {
         "path": "apps/web/src/__tests__/modal-a11y.test.tsx",
@@ -10472,7 +10472,7 @@
       },
       {
         "path": "apps/web/src/components/StagedRunner.tsx",
-        "sha256": "c7f6bde56f74f95f5cce620106927d11266df764482af32b2cbd12efdf17dcd8"
+        "sha256": "57c420d404491ed24c201277eefbdbd401fe3b467bb2c989947ab20f6a44cc97"
       },
       {
         "path": "apps/web/src/components/StatusBar.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "b2b614a06a1069e64a742321416e27e486de844debc30e3a9902690dcbd96149"
+        "sha256": "ebadf93b5d71f7c5d8b40cdd6cff1f49bb156e8f05bea0a4f218955282570cc6"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "0b508d7ee00df3ca96eddf5bfef7e7db60ee1cb76fae4db3811275bc302ebef8"
+        "sha256": "19fe31376c9b8ee7d22a91c06cb4944cdcf5cb62c01d7b281c706d7412d8620c"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "d301b45bc38e7b2ad6c6ad62e89a14107a5505f80e39b6c536f2163ecb2177a4"
+    "served_manifest_fingerprint": "db6eae8656d517d114645f539bac0e36376a16e186f8c3e01116b18b59668455"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

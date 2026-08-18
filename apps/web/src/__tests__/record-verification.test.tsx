@@ -23,6 +23,7 @@ import {
   verificationRefusedEnvelope,
   verificationReportLoneWithheldCategory,
   verificationReportNoSuppression,
+  verificationReportEmptyCorpus,
   verificationReportOk,
   verificationReportPrivateSample,
   verificationReportPrivateSampleShort,
@@ -1498,5 +1499,133 @@ describe('accessibility of the rendered section', () => {
     const start = css.indexOf('.statistics .stats-verify-controls-row');
     const block = css.slice(start, css.indexOf('}', start));
     expect(block).toMatch(/flex-wrap:\s*wrap/);
+  });
+});
+
+
+/*
+ * AN EMPTY CORPUS IS NOT THREE PASSES.
+ *
+ * Every headline tone was `x === 0 ? 'good' : ...` with no zero-DENOMINATOR guard,
+ * and `data-tone='good'` is the reserved pass palette. Over an empty corpus the
+ * screen therefore rendered "0 of 0" twice and "0 behaved unexpectedly" once, all
+ * three green, with only the neutral `Records Evaluated: 0` telling the truth.
+ *
+ * The fixture is a `status: 'ok'` FULL report, deliberately — the refused and pending
+ * envelopes were already handled correctly, so a test built on those would have
+ * proved nothing about this defect.
+ */
+describe('a report over an empty corpus claims no passes', () => {
+  /* Scoped to the HEADLINE row on purpose: these labels also appear in the sections
+     below, so an unscoped `getByText` matches several nodes and the test fails for a
+     reason that has nothing to do with the defect. */
+  const cardByLabel = (label: string): HTMLElement => {
+    const row = document.querySelector('.stats-cards-headline');
+    expect(row).not.toBeNull();
+    const card = Array.from((row as HTMLElement).querySelectorAll('.stat-card')).find(
+      (c) => (c.textContent ?? '').includes(label),
+    );
+    expect(card, `no headline card labelled ${label}`).toBeTruthy();
+    return card as HTMLElement;
+  };
+
+  it('withholds the pass tone from all three verdict cards', async () => {
+    await renderReport(verificationReportEmptyCorpus);
+    // THE REGRESSION ASSERTIONS. Each of these was 'good' before the fix.
+    for (const label of ['Official Validation', 'Format Shadow', 'Mutation Verification']) {
+      expect(cardByLabel(label).getAttribute('data-tone')).not.toBe('good');
+    }
+  });
+
+  it('withholds `attention` from Mutation Verification too — zero of zero is not a finding', async () => {
+    await renderReport(verificationReportEmptyCorpus);
+    expect(cardByLabel('Mutation Verification').getAttribute('data-tone')).toBe('neutral');
+  });
+
+  it('says outright that nothing was examined, above the sections', async () => {
+    await renderReport(verificationReportEmptyCorpus);
+    const note = document.querySelector('.stats-empty-note');
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain('no records');
+    // It must not overclaim in the other direction either: an empty corpus is a
+    // fact about the run, not an error, so it is a status rather than an alert.
+    expect(note?.getAttribute('role')).toBe('status');
+    // And each card says it too, for a reader who never reaches the note.
+    expect(cardByLabel('Official Validation').textContent).toContain('not a pass');
+  });
+
+  it('withholds the pass tone from the MUTATION panel groups too, not just the headline', async () => {
+    /*
+     * The first version of this fix guarded four of roughly nine pass-tinted surfaces
+     * for the identical input, while its comment read as though the class were closed.
+     * An independent review rendered the empty-corpus fixture and found green still on
+     * "Changes That Behaved as Designed", "Changes That Behaved Unexpectedly", "Checks
+     * on the Verification Run Itself" and the trial-count reconciliation — all over
+     * ZERO trials.
+     */
+    await renderReport(verificationReportEmptyCorpus);
+    const groups = Array.from(document.querySelectorAll('.stats-verify-group'));
+    const byLabel = (label: string) =>
+      Array.from(document.querySelectorAll('.stats-mini-label, .stats-figure-group-label'))
+        .find((n) => (n.textContent ?? '').includes(label))
+        ?.closest('[data-tone]');
+
+    // The reconciliation: zero trials balance TRIVIALLY, so `balanced` is vacuous.
+    const accounting = byLabel('How the Trial Counts Add Up');
+    expect(accounting, 'the reconciliation group did not render').not.toBeNull();
+    expect(accounting?.getAttribute('data-tone')).not.toBe('good');
+
+    // NOT A BLANKET RULE: the statement-count safeguard KEEPS its pass tone, because
+    // "the run counted no statement that would have changed data" is true and earned
+    // whether the corpus held thirty records or none. Asserting that here stops a
+    // later slice from neutralising it in the name of consistency.
+    const statements = byLabel('Statements Counted During the Run');
+    expect(statements, 'the statement-count group did not render').not.toBeNull();
+    expect(statements?.getAttribute('data-tone')).toBe('good');
+
+    // And no group anywhere claims a pass off zero trials.
+    const greenWithZeroTrials = groups.filter(
+      (g) =>
+        g.getAttribute('data-tone') === 'good' &&
+        !(g.textContent ?? '').includes('Statements Counted During the Run'),
+    );
+    expect(greenWithZeroTrials.map((g) => (g.textContent ?? '').slice(0, 60))).toEqual([]);
+  });
+
+  it('mode-gates the causal sentence: a private-mode empty run claims no cause', async () => {
+    /*
+     * "its directory is absent" and "every file failed to parse" are both
+     * `load_public_corpus` paths. In `authorized_private_sample` there is no directory
+     * and no file, so stating those causes there was a confident explanation that
+     * cannot apply — on the screen whose subject is not overclaiming.
+     */
+    await renderReport({
+      ...verificationReportEmptyCorpus,
+      metadata: {
+        ...verificationReportEmptyCorpus.metadata,
+        verification_mode: 'authorized_private_sample',
+      },
+    });
+    const note = document.querySelector('.stats-empty-note');
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain('no records');
+    expect(note?.textContent).not.toContain('directory is absent');
+    expect(note?.textContent).not.toContain('failed to parse');
+  });
+
+  it('DOES state the cause in public mode, where it is true', async () => {
+    // The positive half — without it, deleting the sentence entirely would pass.
+    await renderReport(verificationReportEmptyCorpus);
+    expect(document.querySelector('.stats-empty-note')?.textContent).toContain(
+      'directory is absent',
+    );
+  });
+
+  it('still grants the pass tone when a corpus WAS examined and nothing failed', async () => {
+    // The other half. Without this, "never say good" would pass the tests above and
+    // destroy the signal the cards exist to carry.
+    await renderReport(verificationReportOk);
+    expect(cardByLabel('Mutation Verification').getAttribute('data-tone')).toBe('good');
+    expect(document.querySelector('.stats-empty-note')).toBeNull();
   });
 });

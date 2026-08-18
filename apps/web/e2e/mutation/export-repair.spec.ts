@@ -97,8 +97,69 @@ test.describe('R4 · export, repaired and refused', () => {
     // the assistant never types a scientific value.
     await page.locator('.preexport-gate').getByRole('button', { name: 'Back to Complete →' }).click();
     await expect(page.getByRole('heading', { name: /Answer 2 Questions/ })).toBeVisible();
+    /*
+     * THE LOOP USED TO RACE THE REMOUNT, and it cost a 60-second timeout roughly one
+     * run in several — including on two branches whose diffs could not possibly have
+     * caused it (a read-only spec file, and a change to the demo-runner stage type).
+     * That is what made it look like flake rather than a defect worth reading.
+     *
+     * The mechanism, from the failure's own call log: after the first `Confirm`,
+     * `GuidedPrompt` remounts under a new `key` (the next blocker's id). The next
+     * iteration's `Use This Value` click resolves against whichever copy is present
+     * at that instant — sometimes the DETACHING one — so the new question is left
+     * with nothing staged. `Confirm` is then correctly `disabled`, because
+     * `canConfirm` is false with no value staged, and Playwright retries a click on a
+     * button the product is right to keep disabled until the 60s ceiling. The log
+     * shows exactly that: `<button disabled ...>Confirm</button>`, element not
+     * enabled, retried to death.
+     *
+     * So this is a TEST race, not a product bug — the product's refusal to enable
+     * Confirm without a staged value is the behaviour we want. The fix is to wait for
+     * each question to actually BE the current one, and for the staging to have
+     * taken, before acting. `toBeEnabled()` is the load-bearing wait: it is the
+     * observable signal that `Use This Value` reached the component that is now
+     * mounted.
+     */
+    /*
+     * WAIT ON THE OBSERVABLES THAT ACTUALLY MOVE — and the previous two attempts at
+     * this loop are worth recording, because both were wrong in instructive ways.
+     *
+     * The race is real. `confirmAnswer` keeps the SAME `GuidedPrompt` mounted
+     * (`key={blocker.id}`) for the whole in-flight POST, so `.first()` deterministically
+     * resolves to the PREVIOUS prompt while that POST is unresolved. The click re-stages
+     * the old value; the remount then resets `staged`, and `Confirm` is disabled forever.
+     * Note what this is NOT: not a "detaching copy", which is what the second attempt's
+     * comment claimed.
+     *
+     * ATTEMPT 1 asserted a heading `Answer ${n} Questions`. The heading renders
+     * `Answer {total} Questions` and `total` is CONSTANT for the screen's life, so it
+     * passed once and failed once. CI caught it.
+     *
+     * ATTEMPT 2 waited for `Use This Value` and `Confirm` to be enabled, and its comment
+     * called `toBeEnabled()` "the observable signal that Use This Value reached the
+     * component that is now mounted". THAT WAS FALSE: `Use This Value` has no `disabled`
+     * prop at all, so the wait is satisfied the instant the button attaches and signals
+     * nothing. An independent review proved it by forcing the window open with a 1000ms
+     * route delay on `POST .../answers` — 27 polls against a disabled `Confirm` with
+     * nothing staged. It converted a 60s mystery timeout into a 15s named failure, which
+     * is a real diagnostic gain and no fix at all.
+     *
+     * THIS version waits on two things that genuinely move, both proved to pass under
+     * that same forced delay:
+     *   . `.completion-counter` — counts up as questions close, so it establishes that
+     *     the PREVIOUS answer landed and this iteration is acting on a new question.
+     *     (The heading does not; the counter does.)
+     *   . `.guided-staged` — the "Ready to confirm" status the prompt renders only once
+     *     a value is staged. This is the staging observable attempt 2 claimed to use.
+     */
     for (let i = 0; i < 2; i++) {
+      await expect(page.locator('.completion-counter')).toHaveText(`${i} / 2`);
       await page.getByRole('button', { name: 'Use This Value' }).first().click();
+      await expect(
+        page.locator('.guided-staged'),
+        'a value must be staged before Confirm is pressed: an unstaged Confirm is ' +
+          'legitimately disabled, and clicking it proves nothing',
+      ).toBeVisible();
       await page.getByRole('button', { name: 'Confirm' }).click();
     }
     await expect(page.getByRole('heading', { name: 'All Fields Resolved' })).toBeVisible();
