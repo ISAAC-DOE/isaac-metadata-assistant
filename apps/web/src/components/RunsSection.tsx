@@ -822,17 +822,52 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
              * screen is a change every other 409 consumer would inherit.
              *
              * WRITING OUR OWN IS SAFE HERE BECAUSE THIS ROUTE HAS EXACTLY ONE 409.
-             * It is `run_exported`, and this card only offers the control when the
-             * run it holds carries no `record_id` — so a 409 means the run was
-             * exported AFTER this list was read. The sentence says that, and says
-             * nothing it cannot know.
+             * It is `run_exported`.
+             *
+             * IT SAYS *WHETHER*, NOT *WHEN*, AND THE EARLIER VERSION SAID WHEN.
+             * This copy used to read "...has been exported ... SINCE THIS LIST WAS
+             * LOADED", justified by the argument that the card only offers the
+             * control when the run carries no `record_id`, so an export must have
+             * happened after the read. THAT ARGUMENT IS INVALID, and it is invalid
+             * because of the very guard this slice added: `_run_published_stem`
+             * also refuses on the DISK-ONLY arm, where a record and/or sidecar sit
+             * in `records/` under the run's own id and no `record_id` was ever
+             * persisted. In that state `GET .../runs` reports `record_id: null`,
+             * `RunCard` therefore renders Remove, the click returns 409 — and the
+             * export happened BEFORE the list was read, not after.
+             *
+             * So the temporal clause was a claim this client cannot make, on a
+             * destructive-action surface, and an independent review demonstrated the
+             * state that falsifies it. The sentence now asserts only what the 409
+             * itself establishes: an official record for this run exists NOW. Whether
+             * it appeared before or after the read is not knowable here, and is not
+             * claimed.
+             *
+             * `stale: false`, so NO `Reload This Section` remedy — and that is right
+             * for a reason worth writing down, because "offer the reload" is the
+             * reflex. On the disk-only arm a reload changes nothing: the run view
+             * still reports `record_id: null`, so the list comes back identical and
+             * the control comes back too. Offering a remedy that cannot remedy is the
+             * same defect in a different place.
+             *
+             * KNOWN RESIDUAL, NAMED RATHER THAN IMPLIED FIXED. On that arm the card
+             * goes on offering Remove, because `RunCard` gates the control on
+             * `run.record_id === null` and that is all the run view exposes. So this
+             * surface can offer a control whose only outcome is a refusal — which is
+             * the written rule this file cites when it withholds Remove from a run
+             * that DOES carry a `record_id`. Closing it properly means the run view
+             * carrying the disk-only fact the server already computes in
+             * `_run_published_stem`, which is an API contract change and its own
+             * slice. The refusal is correct and nothing is destroyed; what is wrong
+             * is that the affordance is offered. Not fixed here, and not pretended
+             * fixed.
              */
             setRemoveError({
               runId: run.id,
               message:
-                'This run has been exported to an official ISAAC record since this list ' +
-                'was loaded, so it was not removed. An exported record is never rewritten, ' +
-                'and the run is what keeps it claimed.',
+                'An official ISAAC record for this run already exists, so it was not ' +
+                'removed. A published record is never rewritten, and the run is what ' +
+                'keeps it claimed. Reloading will not change this.',
               stale: false,
             });
             return;

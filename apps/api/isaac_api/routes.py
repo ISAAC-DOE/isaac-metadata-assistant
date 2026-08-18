@@ -2670,10 +2670,14 @@ _R_RUN_NOT_FOUND: dict = {
 _R_RUN_EXPORTED: dict = {
     409: {
         "description": (
-            "This run has already been exported to an official ISAAC record, so it "
-            "was not removed and nothing was written. `error` is `run_exported` and "
-            "`record_id` names the record that was written. Only the removal "
-            "operation can answer this."
+            "An official ISAAC record for this run already exists, so it was not "
+            "removed and nothing was written. `error` is `run_exported`. "
+            "**`record_stem` names the artifact** — read that one, not `record_id`. "
+            "`record_id` reports the run's persisted record id and is `null` on the "
+            "arm where a record and/or its evidence sidecar are on disk but no "
+            "`record_id` was persisted; `record_stem` is the run's own id there. "
+            "Either file alone is enough to refuse, so a refusal does not imply "
+            "both exist. Only the removal operation can answer this."
         )
     },
 }
@@ -2773,6 +2777,17 @@ def _run_published_stem(exp: "ws.Experiment", run: "ws.Run") -> str | None:
     # No persisted `record_id`. A pair may still be on disk under the RUN's own id:
     # that is the stem `_write_record` uses for a run unit, and the stem the prune
     # would delete.
+    #
+    # THE SHAPE IS CHECKED BEFORE THE ID BECOMES A PATH, for the reason
+    # `ExportUnit.record_path()` checks it (`workspace.py`): this is a place where
+    # document content would otherwise become a filesystem path, and `RunId` is a
+    # bare `str` path parameter with no pattern. Reaching it needs a crafted
+    # persisted document and the impact is bounded to two read-only `stat()` calls
+    # plus an echoed stem — so this is defence in depth, not a live hole. It is here
+    # because the sibling function guards the identical step and an asymmetry between
+    # them is the kind of thing that stops being harmless after a later change.
+    if not ws.is_record_id(run.id):
+        return None
     records_dir = exp.records_dir
     if (records_dir / f"{run.id}.json").exists() or (
         records_dir / f"{run.id}.evidence.json"
@@ -2817,10 +2832,12 @@ def _run_exported(experiment_id: str, run: "ws.Run", *, stem: str | None = None)
             "record_id": run.record_id,
             "record_stem": stem if stem is not None else run.record_id,
             "message": (
-                "This run has been exported to an official ISAAC record, so it "
-                "cannot be removed. The record and its evidence sidecar are "
-                "written artifacts that this application never rewrites, and the "
-                "run is what keeps them claimed. Nothing was written."
+                "An official ISAAC record for this run already exists, so it "
+                "cannot be removed. At least one published artifact is present — "
+                "the record, its evidence sidecar, or both; either alone is "
+                "enough. Published artifacts are never rewritten by this "
+                "application, and the run is what keeps them claimed. Nothing "
+                "was written."
             ),
         },
     )

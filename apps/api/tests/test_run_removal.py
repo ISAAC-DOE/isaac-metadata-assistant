@@ -1285,3 +1285,85 @@ def test_the_half_written_guard_does_not_refuse_an_ordinary_unexported_run(works
     response = _remove(client, ids[0])
     assert response.status_code == 200, response.text
     assert ids[0] not in _run_ids()
+
+
+def test_a_DURABLE_CAS_refusal_removes_nothing_and_reports_412(workspace, monkeypatch):
+    """The route's docstring claims this, and until now nothing measured it.
+
+    WHY THIS TEST EXISTS AND THE OTHERS DO NOT COVER IT. Every other refusal on this
+    route precedes ``exp.remove_run()``. This one does not: the durable
+    compare-and-swap can only refuse *inside* ``_save_versioned``, which runs AFTER
+    the run has already been taken out of the in-memory experiment. So it is the one
+    path where a refusal follows a mutation, which makes it the one path where
+    "nothing was removed" is a claim rather than a tautology — and the route's
+    docstring asserted it without a test behind it. An independent review found that
+    gap; this closes it.
+
+    It cannot be reached through the ``workspace`` fixture alone, which deliberately
+    unsets ``PGHOST``, so the refusal is injected at the store seam — the same shape
+    a real collision presents to the route, and the same technique
+    ``test_experiment_repository.py`` already uses for the create path.
+
+    The property proved is the FULL one, not just the status code: the run is still
+    present in the persisted document afterwards, its ordinal and version are
+    untouched, and its sibling is untouched too.
+    """
+    _make(runs=("run A", "run B"))
+    ids = _run_ids()
+    victim, sibling = ids[0], ids[1]
+    client = _client()
+
+    before = ws.load_experiment(EXPERIMENT_ID).to_state()
+
+    # THE WINNER IS BUILT FROM `before`, NOT FROM `exp`, AND THAT DISTINCTION IS THE
+    # WHOLE TEST. A real durable refusal means ANOTHER writer got there first, so the
+    # winning document is THAT writer's — one that still contains both runs. On the
+    # refusal path `Experiment.save` adopts the winner into the workspace file before
+    # re-raising, which is what makes "nothing was removed" true: the local file is
+    # overwritten with a document that never lost the run.
+    #
+    # The first version of this test built the winner as `dict(exp.to_state(), rev=…)`,
+    # copying the shape from `test_experiment_repository.py`'s create-path test. That
+    # is correct THERE (the record being created is the only document in play) and
+    # WRONG here: `exp` is the already-mutated experiment, so the fake handed back a
+    # "winner" that had itself lost the run, adoption faithfully wrote the removal to
+    # disk, and the test failed reporting one run where two were expected. It looked
+    # exactly like a product defect — a 412 that removed the run anyway — and it was
+    # the fixture lying about what a competing writer holds. Worth the paragraph,
+    # because the failure it produces is indistinguishable from the real bug this
+    # test is here to detect.
+    def _always_conflict(self, exp):
+        raise repo.DurableWriteConflict(
+            dict(copy.deepcopy(before), rev=before["rev"] + 3),
+            experiment_id=exp.id,
+        )
+
+    # BOTH variables, because `_postgres_available` runs two gates: `PGHOST` must be
+    # set AND `PGDATABASE` must equal `dbw.EXPECTED_DATABASE`. Setting only `PGHOST`
+    # selects the FILESYSTEM store, the durable path is never entered, and the
+    # removal returns 200 — which is exactly what the first version of this test did,
+    # and it would have passed as a vacuous "no 412 here" if the assertion had been
+    # written the other way round. The host is deliberately unroutable: the seam is
+    # patched, so no connection should be attempted, and an unroutable host means a
+    # regression that tried to connect fails loudly instead of hanging.
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    monkeypatch.setattr(repo.PostgresOrdinaryStore, "persist", _always_conflict)
+
+    response = _remove(client, victim)
+    assert response.status_code == 412, response.text
+    body = response.json()
+    # The SPECIFIC error, not merely a non-2xx: a malformed request would also be
+    # rejected, and would prove nothing about the durable path.
+    assert body["error"] == "stale_write", body
+    assert body["current_rev"] == before["rev"] + 3, body
+
+    # AND NOTHING WAS REMOVED. Read the persisted document back rather than the
+    # in-memory object, because the in-memory one is exactly what was mutated before
+    # the refusal — asserting on it would prove nothing.
+    monkeypatch.delenv("PGHOST", raising=False)
+    monkeypatch.delenv("PGDATABASE", raising=False)
+    after = ws.load_experiment(EXPERIMENT_ID).to_state()
+    assert [r["id"] for r in after["runs"]] == [r["id"] for r in before["runs"]]
+    assert after["runs"] == before["runs"], "a surviving run's document moved"
+    assert {victim, sibling} <= set(_run_ids())

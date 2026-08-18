@@ -594,14 +594,31 @@ describe('a refused removal', () => {
     // THE COPY IS THIS CLIENT'S, and the test says so rather than pretending it is
     // the server's. `mutationError` parses a body only for 400/412/422, so a 409's
     // `message` is the bare "Request failed (409)." — which names nothing a reader
-    // can act on. This route has exactly one 409 (`run_exported`) and the control
-    // is withheld from a run already carrying a `record_id`, so the sentence below
-    // is the only thing a 409 here can mean.
-    expect(alert.textContent).toContain('exported to an official ISAAC record');
-    expect(alert.textContent).toContain('since this list was loaded');
+    // can act on. This route has exactly one 409 (`run_exported`).
+    expect(alert.textContent).toContain('official ISAAC record for this run already exists');
     expect(alert.textContent).not.toContain('Request failed');
-    // A 409 is not a staleness problem, so it must NOT offer the reload remedy.
+
+    // IT MUST SAY *WHETHER*, NOT *WHEN* — AND THIS ASSERTION IS THE INVERSE OF THE
+    // ONE IT REPLACES. This test used to REQUIRE the phrase "since this list was
+    // loaded". An independent review showed that claim is false on the disk-only
+    // refusal arm: a record and/or sidecar can sit in `records/` under the run's own
+    // id with no persisted `record_id`, so the run view reports `record_id: null`,
+    // the control is offered, the click 409s — and the export happened BEFORE the
+    // read, not after. The test was pinning a false sentence as required copy, on a
+    // destructive-action surface, which is the worst place for it.
+    //
+    // So the phrase is now FORBIDDEN rather than required. Asserting its absence is
+    // deliberate: deleting the old assertion would have left nothing preventing the
+    // sentence from coming back, and it came from a plausible-sounding argument that
+    // someone could easily re-derive.
+    expect(alert.textContent).not.toContain('since this list was loaded');
+    expect(alert.textContent).not.toMatch(/\bsince\b/);
+
+    // A 409 is not a staleness problem, so it must NOT offer the reload remedy — and
+    // on the disk-only arm a reload would return an identical list, so the copy says
+    // so outright rather than leaving the reader to discover it.
     expect(within(alert).queryByRole('button', { name: 'Reload This Section' })).toBeNull();
+    expect(alert.textContent).toContain('Reloading will not change this');
     expect(renderedIds()).toEqual(['RUN001']);
   });
 });

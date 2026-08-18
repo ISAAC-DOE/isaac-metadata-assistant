@@ -686,6 +686,27 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     expect(experimentPathLiterals.length).toBe(35);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     expect(SUB_READ_SUFFIXES).toHaveLength(29);
+    // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
+    //
+    // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
+    // independent review having noticed that the paragraph above still refers to
+    // "the `SUB_READ_SEGMENTS` case below" while the case itself had been deleted —
+    // a dangling reference to an incident this repository deliberately keeps.
+    //
+    // What happened: this line was NOT in a merge conflict. Two branches both raised
+    // it from 16 to 17 — the asset slice for its own new segment, the transcript
+    // slice for `transcript` — so git saw two IDENTICAL one-line changes and merged
+    // them without a murmur, leaving a literal that accounted for one of the two
+    // additions. The entries changed twice; the total was recorded once. It was
+    // caught only because this count is DERIVED from `api.ts` and re-measured here;
+    // a hand-maintained pair with no derivation behind it would have merged clean
+    // and stayed wrong.
+    //
+    // That is the same failure mode `A11Y_BASELINE_TOTAL_NODES` carries a long note
+    // about, reproduced in a different counter within days, which says something
+    // about how easily it recurs. The run-removal merge then hit the SAME class a
+    // third time in four separate counters — and 19 is where this one lands, because
+    // run removal adds a suffix under `runs`, a first segment that already existed.
     expect(SUB_READ_SEGMENTS).toHaveLength(19);
     // The run REMOVAL write. It adds one literal and one suffix and moves NO
     // segment count: `runs` was already a first segment, so the product word this
