@@ -782,7 +782,36 @@ Out of scope unless explicitly approved:
   **What listing those five covers, precisely:** creating them, by an owner-applied migration, and
   writing them through `submission_store.py`'s append-only `INSERT`s. It covers **no** read surface
   over the history, **no** change to `records`, and — per the hard stop below — **no hosted
-  application of `0003` or `0004`**, both of which remain NOT APPROVED and NOT APPLIED anywhere.
+  application of `0003` or `0004`**.
+
+  ***APPROVAL STATUS CHANGED 2026-08-17, and only one of the two halves moved.*** The sentence above
+  used to end *"both of which remain NOT APPROVED and NOT APPLIED anywhere"*, and it is corrected
+  rather than deleted because the two halves are different people's acts and the old wording bundled
+  them. **The project owner (Krish) has now APPROVED the exact bytes** of `0003_revisions` and
+  `0004_submissions`, conditional on five mechanical checks that were performed and recorded — digests
+  match the packets, the SQL has had exactly one version ever (commit `0896b07`, never since touched),
+  prior review findings remain resolved, and a structural safety scan found no new defect. See
+  [`docs/migration-approval-packet-0003.md`](docs/migration-approval-packet-0003.md) §12D and
+  [`-0004.md`](docs/migration-approval-packet-0004.md) §12D. **HOSTED APPLICATION REMAINS NOT DONE AND
+  IS NOT THE AGENT'S ACT** — owner approval is a precondition for the operator's step, never a
+  substitute for it, and the hard stop below is unchanged in every respect.
+
+  **A second, separate correction made in the same change, because a test was enforcing a false
+  claim.** Both packets' §12B asserted *"No PostgreSQL has ever executed this file"*, and
+  `test_the_packets_do_not_claim_a_hosted_application` **required that literal to be present**. The
+  sentence named its own expiry condition (*"until the `postgres-migration` job runs"*); that job has
+  since run and passed on `main` at `fe374c0` (Actions run `32099627898`), applying `0001`–`0004`
+  forward against a `postgres:18` container, exercising **27 of the 46 declared constraints** against
+  input each should reject, and proving the rollback order. *An earlier revision of this bullet said
+  "every constraint"; that was measured and corrected — 17 declared constraint names appear nowhere in
+  the workflow, so they are declared and unexercised. The packets' §12B lists them by name. Nothing
+  suggests they are wrong; the packets may simply not be cited as evidence that they behave.* So the repository was mechanically requiring itself to keep
+  asserting something untrue, with the test reading as evidence of honesty. The guard now pins the
+  **invariant** — that the packets do not read as hosted-applied — and a paired negative control
+  asserts the expired sentence survives only as a quoted correction. **What CI still does not prove is
+  unchanged and is the whole reason the operator's act is separate:** the container is empty, with a
+  two-row synthetic stand-in for `records`, so *"behaves against the real data, roles and grants"*
+  remains unproven.
 
   **What writing `isaac_runs` covers, precisely:** a SHADOW write only. Rows are maintained as a
   pure function of the experiment document inside the one existing durable write, and **nothing
@@ -858,6 +887,7 @@ amended §2 for exactly what is and is not permitted.
 | **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. **Do not read this row as covering the 2026-08-07 lift**: that authorizes storing experiments THIS APPLICATION CREATES in its own new tables. It authorizes no repository over `records`, no record loading, and no upload write. |
 | **Create Experiment durable persistence** (`isaac_experiments`) | **authorized 2026-08-07**, narrowly — see the scope note above. Implementation and local/CI testing only; **applying the migration to the hosted database is the owner's act, not the agent's.** Dean applied `0001_experiments` to the hosted database on **2026-08-09** ([evidence](docs/evidence/hosted-0001-verification-2026-08-09.md)) — which changes nothing about gate **G2**, gate **G3**, or the prohibition on an agent connecting to that database. ~~which changes nothing about `0002` (still unapplied and unauthorized for hosted application)~~ — **superseded 2026-08-12, see the next row.** |
 | **`0002_runs`** (the `isaac_runs` table) | **APPLIED TO THE HOSTED DATABASE BY DEAN, 2026-08-12 00:30 UTC** ([evidence](docs/evidence/hosted-0002-verification-2026-08-12.md); packet [`docs/migration-approval-packet-0002.md`](docs/migration-approval-packet-0002.md), STATUS + §12C). Both SHA-256 digests Dean reported were **recomputed here and MATCH** the committed files, so the bytes applied are the bytes Krish approved on 2026-08-11. Verified from the hosted server: table, PK, FK, five CHECKs, the index, no `ON DELETE`/`CASCADE`, row count **0**, idempotent re-run, app health OK / `postgres` / `durable`. **Operator testimony, not a captured artifact** — no agent connected to that database. **NOT reported, and named as gaps:** the `records` and `isaac_experiments` before/after counts (packet postchecks 1 and 2) and the hosted engine build string. **The table existing is NOT permission to write it** — the run write path is a later, separately-reviewed slice, and `db_write.OWNED_TABLES` listing `isaac_runs` "grants nothing on its own". |
+| **`0003_revisions` + `0004_submissions`** (the five submission-lifecycle tables) | **APPROVED BY THE PROJECT OWNER 2026-08-17; NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.** Two different people's acts — see the paragraph above and each packet's STATUS block. They are ONE decision (`0004` declares a foreign key into a table `0003` creates) and must be applied together or not at all. Proven forward, rollback and wrong-order-refusal against a `postgres:18` container in CI; **27 of the 46 declared constraints** are exercised there. Applying them is the operator's act, and no agent may do it. |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
 Two separate **questions**, which Dean's guide is explicit about not conflating: **writing** to this
@@ -1153,11 +1183,38 @@ The one path that is served but **not** content-hashed is
 circular). So "201 served files" and "200 manifest entries" are both correct statements about
 different sets.
 
-The manifest **is far broader than documentation** — measured composition: **64 `apps/web/src/**` files**
-(the largest single bucket, including component, lib and `__tests__` files), 37 under `docs/` (35 `.md`
-plus two sample JSON artifacts), 36 `tests/**`, 15 `apps/api/**`,
-15 `src/**` (the truth core), 7 `docs/superpowers/**`, 5 `.claude/skills/*/SKILL.md`, plus root files
-(`CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `pyproject.toml`, …).
+The manifest **is far broader than documentation.** Composition **re-measured 2026-08-17** over
+`snapshot["memory_inputs"]["served_content_manifest"]`, and it sums to all 200 entries — the previous
+version of this paragraph said *"measured composition"* while listing buckets that summed to **187**,
+so it implied completeness it did not have, and the buckets it omitted are exactly the ones that catch
+a slice by surprise:
+
+| Count | Bucket |
+|---:|---|
+| 64 | `apps/web/src/**` — the largest single bucket, including component, `lib` and `__tests__` files |
+| 37 | `docs/**` (excluding `docs/superpowers/`) — `.md` plus two sample JSON artifacts |
+| 35 | `tests/**` |
+| 15 | `apps/api/**` |
+| 15 | `src/**` — the truth core |
+| 7 | `docs/superpowers/**` |
+| 7 | `apps/web/*` — `package.json`, `index.html`, `vite.config.ts`, the three `tsconfig*.json`, `README.md` |
+| 6 | root files — `CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `pyproject.toml` |
+| 5 | `.claude/skills/*/SKILL.md` |
+| 4 | `scripts/**` |
+| 3 | `schema/**` |
+| 1 | `vocabulary/descriptor_class.json` |
+| 1 | **`.github/workflows/ci.yml`** |
+| **200** | **total** |
+
+**Two entries in that table were previously wrong or missing, and both were found the hard way.**
+`tests/**` was listed as 36 and measures **35**. And **`.github/workflows/ci.yml` was not listed at
+all** — discovered when a one-line `expected_scenarios` bump in the CI workflow drifted the snapshot,
+which is precisely the surprise the next paragraph warns about, arriving through a bucket this list had
+omitted. Re-measure rather than trusting this table:
+
+```bash
+.venv/bin/python -c "import json,collections; d=json.load(open('apps/api/isaac_api/data/memory-snapshot.json')); m=d['memory_inputs']['served_content_manifest']; print(len(m))"
+```
 
 **Practical consequence:** an ordinary frontend component edit, or even a test-file edit, causes snapshot
 drift. Do not assume a slice is "frontend only, so the snapshot is not my problem" — three P36V slices hit

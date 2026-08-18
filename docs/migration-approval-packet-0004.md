@@ -1,12 +1,35 @@
 # Migration approval packet — `0004_submissions`
 
-> ## STATUS: **NOT APPROVED, NOT APPLIED, ANYWHERE.**
+> ## STATUS: **APPROVED BY THE PROJECT OWNER 2026-08-17. NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.**
 >
-> This packet is a request. Nothing in it has been run against the hosted database, and no agent may
-> run it. `CLAUDE.md` §15's hard stop is unchanged by the fact that `0001` and `0002` have both been
-> applied by Dean: *"two migrations having been applied by the infrastructure owner is not a
-> precedent, a delegation, or a standing permission; `0003` and later each need their own packet,
-> their own owner approval, and their own operator action."*
+> **Read both halves. They are different acts by different people, and collapsing them is the one
+> misreading this block exists to prevent.**
+>
+> **The approval (Krish, project owner, 2026-08-17).** Krish approves the **exact bytes** recorded in
+> the digest table below, conditional on five mechanical checks which were performed before this line
+> was written and are recorded in §12D:
+>
+> 1. the forward file's SHA-256 still matches this packet's table — **verified, matches**;
+> 2. the rollback file's SHA-256 still matches — **verified, matches**;
+> 3. no material SQL change since technical review — **verified, and stronger than asked**: both SQL
+>    files and both packets were introduced in ONE commit, `0896b07`, and `git log` shows no commit
+>    has touched either `.sql` file since, so these bytes have had exactly one version, ever;
+> 4. the prior review findings remain resolved — **verified**, see §12D;
+> 5. no new material safety defect — **none found**, see §12D for what was actually checked.
+>
+> The approval is of these bytes and of nothing else. Editing either `.sql` file voids it: the digest
+> would move, `test_the_approval_packet_digests_match_the_committed_files` would go red, and the
+> correspondence between "the bytes approved" and "the bytes applied" — the only thing that makes an
+> approval mean anything — would be gone. Re-issue the packet instead.
+>
+> **The application (Dean / the infrastructure operator) — STILL NOT DONE, AND STILL NOT THE AGENT'S
+> TO DO.** Nothing in this packet has been run against the hosted database, and no agent may run it.
+> `CLAUDE.md` §15's hard stop is unchanged by the fact that `0001` and `0002` have both been applied by
+> Dean, and it is unchanged by this approval: owner approval is a **precondition** for the operator's
+> act, not a substitute for it — as `CLAUDE.md` §15 puts it: *"two migrations having been applied by
+> the infrastructure owner is not a precedent, a delegation, or a standing permission; `0003` and later
+> each need their own packet, their own owner approval, and their own operator action."* This packet now
+> has the first two. **The third is outstanding.**
 >
 > **Local and CI testing is authorized. Applying it to the hosted environment is the owner's act.**
 > Do not request a kubeconfig, a port-forward, or a Secret, and do not connect to the SLAC database
@@ -347,7 +370,15 @@ Same criteria as 0003's packet §11.
 Identical in structure to 0003's packet §12A, over the same two test files and the same CI job. The
 local suite proves the committed **text** and the application's behaviour against an **in-process
 connection double**; the `postgres-migration` job proves the SQL and the constraints against a real
-`postgres:18`, and **has not yet run on this branch.**
+`postgres:18`, and **HAS NOW RUN — successfully.** See §12B for the exact run and for the class of
+risk it still does not remove.
+
+**Its constraint coverage is PARTIAL.** 0003's packet §12B carries the measurement: 46 constraints are
+declared across the two files and CI's step names 27 of them, so 19 are declared and unexercised, 17 of
+them never named in the workflow at all. Four of the unexercised belong to this migration's own tables
+(`isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`, and every id-shape
+CHECK on `isaac_submission_runs`). The list below of what the step DOES exercise is therefore the
+authoritative scope for this migration — read it as an enumeration, not as a sample.
 
 Constraints CI's *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* step
 exercises for this migration specifically: the one-submission-per-revision uniqueness, the
@@ -356,16 +387,62 @@ empty-key CHECK, the `unit_count >= 1` CHECK, the attribution CHECK in both dire
 one-run-one-record CHECK, the run-matches-unit CHECK, the per-submission unit uniqueness, and that
 each foreign key **refuses a parent delete** rather than cascading.
 
-### 12B. What has NOT been executed
+### 12B. What a real PostgreSQL has and has not executed
 
-**No PostgreSQL has ever executed this file.** Same statement, same reasons, same limits as 0003's
-packet §12B, and the same distinction between what CI removes and what only the owner applying it can.
+**CORRECTED 2026-08-17.** This section used to say:
+
+> *"**No PostgreSQL has ever executed this file.** Same statement, same reasons, same limits as
+> 0003's packet §12B, and the same distinction between what CI removes and what only the owner
+> applying it can."*
+
+That was true when written and is **false now**, and it was pinned as a required literal by a test
+that has been corrected in the same commit. 0003's packet
+§12B carries the full correction, the reasoning, and the reason a test enforcing a stale sentence is
+worse than no test.
+
+In brief: GitHub Actions run
+[`32099627898`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32099627898), job
+*"migration and durable repository against a real PostgreSQL"*, **conclusion `success`**, on `main` at
+`fe374c0` — these exact bytes — applied this migration against a `postgres:18` service container,
+exercised every constraint listed in §12A against input each is meant to reject, and proved the
+rollback in the documented `0004, 0003, 0002, 0001` order.
+
+**Unchanged, and the reason the operator's act is still separate:** that container is **empty**, with a
+two-row synthetic stand-in for `records`. *"Valid, idempotent SQL whose constraints behave"* is now
+answered; *"behaves against the real data, roles and grants"* is not.
 
 ### 12C. The immutability limit
 
 Identical to 0003's packet §12C, and it applies to these two tables equally: **append-only by
 statement inventory and by test, not by the database.** Nothing here may be described as immutable at
 the database level.
+
+### 12D. The five approval checks, and what each one actually verified
+
+Recorded here because the STATUS block's approval is *conditional* on them, and a condition nobody can
+audit is not a condition. Performed 2026-08-17 on `main` at `fe374c0`, before the STATUS block was
+written.
+
+| # | Condition | Command / method | Result |
+|---|---|---|---|
+| 1 | Forward SHA-256 still matches this packet's table | `shasum -a 256` on the file, compared to the digest table above | **match** |
+| 2 | Rollback SHA-256 still matches | same | **match** |
+| 3 | No material SQL change since technical review | `git log --oneline -- <both .sql files>` | **one commit, ever** (`0896b07`); no commit has touched either file since, so there has never been a second version of these bytes to drift from |
+| 4 | Prior review findings remain resolved | read the forward SQL end to end; the review items it names as fixed (**M1** the non-empty `subject` CHECK, **M4** the disclosed `content_signature` stability exception) are present in the committed text, and `test_the_approval_packets_named_constraints_are_in_the_committed_text` pins every constraint the packet claims | **resolved, and pinned** |
+| 5 | No new material safety defect | structural scan of both files for `ALTER`/`DROP`/`TRUNCATE`/`GRANT`/`REVOKE`/DML and for any identifier naming `records`; verb inventory of the forward file; rollback inventory | **none found** — see below |
+
+**What check 5 actually looked at, so it is not read as broader than it was.** Every statement in the
+forward file is `CREATE TABLE IF NOT EXISTS` or `CREATE INDEX IF NOT EXISTS` and nothing else: no
+`ALTER`, no `DROP`, no `TRUNCATE`, no `GRANT`/`REVOKE`, no DML, no dollar-quoted body, and no
+`ON DELETE` clause in any statement — the phrase occurs only in comments — so every foreign key takes
+the SQL default, `NO ACTION`, and no cascade exists. The identifier `records` appears in no statement in either file. The rollback drops only
+tables this migration creates, children before parents, and deletes only its own bookkeeping row.
+
+**This check was a READ of the committed text plus a structural scan — not a runtime observation, and
+not a substitute for the independent technical review that produced this packet.** It is the
+"has anything changed, and is anything obviously unsafe" pass the approval was made conditional on. The
+behavioural evidence is §12A/§12B's; the residual risk is the one §12B names and only the operator can
+retire.
 
 ## 13. What this packet does not cover
 
