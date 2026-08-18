@@ -1,9 +1,26 @@
 # Autonomous run checkpoint — 2026-08-18
 
-**Why this file exists.** The run was interrupted by an external boundary, not by a design
-problem: **the organisation's monthly API spend limit was reached**, and six subagents were
-terminated mid-task by the platform. `CLAUDE.md` §16 and the run's own stop policy require a
-precise recovery record so the next session resumes from verified facts instead of an audit.
+**Why this file exists.** The run hit an external boundary: **the organisation's monthly API spend
+limit was reached**, and six subagents were terminated mid-task by the platform. `CLAUDE.md` §16
+requires a precise recovery record so a later session resumes from verified facts rather than an
+audit.
+
+> ## THE RUN THEN RESUMED — this file is kept as the record of the interruption, not as current state
+>
+> The limit was lifted and work continued in the same session. **Two things this file said are no
+> longer true, and they are corrected in place rather than deleted**, because the point of the
+> record is what was true at the interruption:
+>
+> - **#156 and #158 are MERGED** (`c8cd376` and `068e4be`). §2 lists them as open/pending.
+> - **The PR #157 unknown finding is now KNOWN, and it was real.** §1 records that its reviewer died
+>   mid-investigation. A re-run review found the same thing and measured it: the spec's header makes
+>   a **false claim about the application's layout architecture** — `.screen-card` sets
+>   `min-height`, not `height`, so the **document** is the scrollport, `fullPage` ignores the scroll
+>   the header calls load-bearing, and **6 of 30 "photographs" are byte-identical duplicates** (five
+>   record-screen states share one image, two more share another). Holding that merge on an
+>   interrupted review was the correct call.
+>
+> For the current state, read the session report and `git log`, not this file.
 
 Everything below was **measured in this session**. Nothing is carried forward from prose.
 
