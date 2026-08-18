@@ -1179,11 +1179,38 @@ The one path that is served but **not** content-hashed is
 circular). So "201 served files" and "200 manifest entries" are both correct statements about
 different sets.
 
-The manifest **is far broader than documentation** — measured composition: **64 `apps/web/src/**` files**
-(the largest single bucket, including component, lib and `__tests__` files), 37 under `docs/` (35 `.md`
-plus two sample JSON artifacts), 36 `tests/**`, 15 `apps/api/**`,
-15 `src/**` (the truth core), 7 `docs/superpowers/**`, 5 `.claude/skills/*/SKILL.md`, plus root files
-(`CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `pyproject.toml`, …).
+The manifest **is far broader than documentation.** Composition **re-measured 2026-08-17** over
+`snapshot["memory_inputs"]["served_content_manifest"]`, and it sums to all 200 entries — the previous
+version of this paragraph said *"measured composition"* while listing buckets that summed to **187**,
+so it implied completeness it did not have, and the buckets it omitted are exactly the ones that catch
+a slice by surprise:
+
+| Count | Bucket |
+|---:|---|
+| 64 | `apps/web/src/**` — the largest single bucket, including component, `lib` and `__tests__` files |
+| 37 | `docs/**` (excluding `docs/superpowers/`) — `.md` plus two sample JSON artifacts |
+| 35 | `tests/**` |
+| 15 | `apps/api/**` |
+| 15 | `src/**` — the truth core |
+| 7 | `docs/superpowers/**` |
+| 7 | `apps/web/*` — `package.json`, `index.html`, `vite.config.ts`, the three `tsconfig*.json`, `README.md` |
+| 6 | root files — `CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `pyproject.toml` |
+| 5 | `.claude/skills/*/SKILL.md` |
+| 4 | `scripts/**` |
+| 3 | `schema/**` |
+| 1 | `vocabulary/descriptor_class.json` |
+| 1 | **`.github/workflows/ci.yml`** |
+| **200** | **total** |
+
+**Two entries in that table were previously wrong or missing, and both were found the hard way.**
+`tests/**` was listed as 36 and measures **35**. And **`.github/workflows/ci.yml` was not listed at
+all** — discovered when a one-line `expected_scenarios` bump in the CI workflow drifted the snapshot,
+which is precisely the surprise the next paragraph warns about, arriving through a bucket this list had
+omitted. Re-measure rather than trusting this table:
+
+```bash
+.venv/bin/python -c "import json,collections; d=json.load(open('apps/api/isaac_api/data/memory-snapshot.json')); m=d['memory_inputs']['served_content_manifest']; print(len(m))"
+```
 
 **Practical consequence:** an ordinary frontend component edit, or even a test-file edit, causes snapshot
 drift. Do not assume a slice is "frontend only, so the snapshot is not my problem" — three P36V slices hit
