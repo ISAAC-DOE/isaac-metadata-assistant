@@ -587,6 +587,43 @@ describe('autosave', () => {
     expect(within(card).getByText('Enter a number.')).toBeInTheDocument();
   });
 
+  it('DISCLOSES that unparseable text is held only in this card, and where it is lost', async () => {
+    /*
+     * The disclosure this card renders for held-invalid text was added by the same
+     * change that made the Graph tab stop unmounting cards, and an independent review
+     * found it pinned by NO test — while the sibling saving-state sentence IS pinned.
+     * That file's own header records two earlier claims that were false when written,
+     * which is the argument for asserting this one.
+     *
+     * The claim has three parts and all three are checked: the text was not sent
+     * anywhere, a view switch keeps it, and paging/searching/filtering or a reload does
+     * not. The third is the honest half — a loss this change deliberately did not fix.
+     */
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    const card = cardFor('RUNAAA');
+    const temp = within(card).getByLabelText('Temperature (K)');
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(temp, { target: { value: 'warm' } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    vi.useRealTimers();
+
+    const note = within(cardFor('RUNAAA')).getByText(
+      /Text this screen could not read has not been sent anywhere/,
+    );
+    expect(note).toBeInTheDocument();
+    // It must NOT claim a view switch loses it — that is what the change fixed.
+    expect(note.textContent).toMatch(/Moving between this record’s views keeps it/);
+    // ...and it must still name what DOES lose it, rather than implying nothing does.
+    expect(note.textContent).toMatch(/paging, searching or filtering the runs list, or reloading/);
+  });
+
   it('announces the save status in a live region', async () => {
     renderRecord({
       [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },

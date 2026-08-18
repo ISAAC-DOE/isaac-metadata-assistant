@@ -343,7 +343,22 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
             id={filterId}
             className="notes-filter"
             value={filter}
-            onChange={(e) => setFilter(e.target.value as 'all' | ApiNoteState)}
+            onChange={(e) => {
+              /*
+               * SILENT, so changing the filter does not unmount an open form and take
+               * the rewrite with it. The effect below shows the loading state only when
+               * `silentRef` is unset, and that is what destroyed the text: a filter
+               * change is a list-changing act, but it is not a reason to discard what
+               * the reader typed into a form that is still on screen.
+               *
+               * The cost, stated because it is real: for the duration of the read the
+               * counts beside each filter still describe the PREVIOUS selection. That
+               * is a visibly transient number, which is a better trade than a silently
+               * destroyed paragraph.
+               */
+              silentRef.current = true;
+              setFilter(e.target.value as 'all' | ApiNoteState);
+            }}
           >
             {FILTERS.map((f) => (
               <option key={f.id} value={f.id}>
@@ -573,14 +588,29 @@ function NoteCard({
    *
    * THE SERVER STAYS AUTHORITATIVE, which is why this resync exists rather than a bare
    * initial value. When a write lands, the list refreshes and this card is handed a new
-   * `note`; if its wording moved, the held text is stale by definition and is replaced.
-   * Adjusting state during render (rather than in an effect) is React's own documented
-   * shape for this, and it avoids rendering one frame of the superseded text.
+   * `note`; if its wording moved, the held text is replaced. Adjusting state during
+   * render (rather than in an effect) is React's own documented shape for this, and it
+   * avoids rendering one frame of the superseded text.
+   *
+   * BUT ONLY IF THE READER HAS NOT TOUCHED THE BOX -- and the first version of this
+   * resync had no such condition, which made it contradict the panel's own 412 banner.
+   * An independent review found the composition: a 412 fires a silent reload, and a
+   * concurrent change to THIS note's wording is the plausible cause of that 412 -- so
+   * the resync fired exactly when `STALE_REVIEW_COPY` was on screen saying "what you
+   * typed is still here". Two fixes in the same change, one falsifying the other.
+   *
+   * "Stale by definition" was the justification, and it is only true of text the reader
+   * has not edited. A rewrite in progress is not stale; it is unsaved. So the server's
+   * wording is adopted when the box still matches what the server last sent, and
+   * otherwise the reader keeps what they wrote and the banner's claim stays true. The
+   * two ways a box IS cleared are unchanged: the form's own Cancel, and a review the
+   * server recorded.
    */
   const serverText = useRef(note.display_text);
   if (serverText.current !== note.display_text) {
+    const untouched = editText === serverText.current;
     serverText.current = note.display_text;
-    setEditText(note.display_text);
+    if (untouched) setEditText(note.display_text);
   }
 
   const pathId = useId();
@@ -848,9 +878,16 @@ function NoteCard({
           </p>
           {/* SAID ON SCREEN, because the behaviour changed and a reader cannot see it
               (D3). Closing this form used to discard the rewrite silently. */}
+          {/* SCOPED, because the first version of this sentence was an ABSOLUTE and
+              therefore false. It said "Only Cancel discards it" while a failed
+              re-read of the list still unmounts every card and every open form -- and
+              at the time, so did changing the filter (now silent). An independent
+              review found the filter case; the failed-read case is disclosed here
+              rather than denied, since it is the one this panel cannot prevent. */}
           <p className="note-form-hint">
             Closing this form, or opening another one on this note, keeps what you have
-            typed here. Only Cancel discards it.
+            typed here, and so does changing the filter above. Cancel discards it — as
+            does a failed re-read of the list, which replaces the whole list.
           </p>
           <div className="note-form-actions">
             <button

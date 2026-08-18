@@ -150,9 +150,14 @@ export function RecordWorkbench() {
    * THE RUN AUTOSAVE STORE IS DISPOSED HERE — at the RECORD screen's boundary, not at a
    * card's, and that difference is the whole of the Phase-2 change.
    *
-   * Save state deliberately outlives a `RunCard`, because a card unmounts one click
-   * away (the Runs section is inside the `fields` tabpanel, so the Graph tab takes it
-   * down) and an edit's outcome must survive that. It must not outlive the record
+   * Save state deliberately outlives a `RunCard`, because a card can unmount and an
+   * edit's outcome must survive that. NOTE THE CORRECTION: this used to say a card
+   * unmounts "one click away … the Graph tab takes it down". IT NO LONGER DOES — the
+   * fields tabpanel is now kept mounted and hidden, precisely so an unsaved textarea is
+   * not destroyed by a tab switch, and three other headers in this change were
+   * corrected for exactly this while this one was missed. A card still unmounts on
+   * paging, searching, filtering and leaving the record, so the reason this store
+   * exists is unchanged; only the example was falsified. It must not outlive the record
    * screen either, or the map keeps an entry for every run a session ever opened.
    *
    * `disposeExperiment` IS CONSERVATIVE, AND THE COST OF THAT IS REAL RATHER THAN

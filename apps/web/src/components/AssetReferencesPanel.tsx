@@ -884,8 +884,23 @@ function AssetForm({
   const onDraftRef = useRef(onDraft);
   onDraftRef.current = onDraft;
   useEffect(() => {
-    onDraftRef.current?.({ values, runIds });
-  }, [values, runIds]);
+    /*
+     * ONLY ONCE IT DIFFERS FROM THE BASELINE, and the first version reported on MOUNT.
+     *
+     * That meant opening Edit and closing it WITHOUT TYPING left a draft of the
+     * then-current server values. If the asset moved out of band before the form
+     * re-opened, `restored` re-seeded those stale values while `initial` — the diff
+     * baseline — had advanced, so Save would send fields the reader never touched, with
+     * a valid `If-Match`, silently reverting the other write. An independent review
+     * found it; it needs an out-of-band writer, so it is narrow rather than harmless.
+     *
+     * A dirty check is the whole fix: an untouched form has nothing worth restoring.
+     */
+    const dirty =
+      JSON.stringify(values) !== JSON.stringify(initial) ||
+      JSON.stringify([...runIds].sort()) !== JSON.stringify([...initialRunIds].sort());
+    if (dirty) onDraftRef.current?.({ values, runIds });
+  }, [values, runIds, initial, initialRunIds]);
 
   const set = (key: string, value: string) =>
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -1082,9 +1097,13 @@ function AssetForm({
 
       {/* SAID ON SCREEN, because the behaviour changed and a reader cannot see it (D4).
           Closing this form used to discard every value in it, silently. */}
+      {/* SCOPED, for the same reason as the notes panel's sibling sentence: "Only
+          Cancel discards it" is an ABSOLUTE, and a failed re-read of the list still
+          unmounts every card and every open form. Disclosed rather than denied. */}
       <p className="asset-form-hint">
         Closing this form keeps what you have typed here, and so does opening another
-        panel on the same reference. Only Cancel discards it.
+        panel on the same reference. Cancel discards it — as does a failed re-read of
+        the list, which replaces the whole list.
       </p>
 
       <div className="asset-form-actions">

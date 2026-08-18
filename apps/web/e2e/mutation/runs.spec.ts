@@ -546,6 +546,12 @@ test.describe('R5 · the Run workspace', () => {
      * what this spec is about, unchanged.
      */
     await page.getByRole('tab', { name: 'Graph' }).click();
+    // ATTACHED *AND* HIDDEN, and both halves are needed. Playwright reports a
+    // non-existent element as hidden, so `toBeHidden()` alone passes whether the card
+    // is hidden (the fixed behaviour) or unmounted (the defect) — it stopped
+    // distinguishing the two worlds, which the old `toHaveCount(0)` did decisively in
+    // the other direction. An independent review caught it.
+    await expect(page.locator('article.run-card').first()).toBeAttached();
     await expect(page.locator('article.run-card').first()).toBeHidden();
 
     // The guarantee: every accepted edit is handed to the network exactly once.
