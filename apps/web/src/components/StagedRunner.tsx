@@ -1,5 +1,5 @@
 import './runner.css';
-import { Check, Circle } from './icons';
+import { Check, Circle, CircleAlert } from './icons';
 import type { RunnerStage } from '../lib/types';
 
 interface StagedRunnerProps {
@@ -26,23 +26,67 @@ interface StagedRunnerProps {
  *      count.
  *
  * The amber "blocker" stage treatment went with it: it was reachable only through
- * the same never-set flag. Every stage now renders `done` or `upcoming` from the
- * server's own `ok`, which is the only signal the API supplies. Pinned by
+ * the same never-set flag.
+ *
+ * AND REMOVING IT LEFT A REAL DEFECT, WHICH THIS PARAGRAPH USED TO DENY. It said
+ * "every stage now renders `done` or `upcoming` from the server's own `ok`, which is
+ * the only signal the API supplies". The first half was false. `demoStepsToStages`
+ * mapped `ok: false` to `current`, the `cls` line below collapsed `current` into
+ * `done`, and `done` renders `Check` — this app's success glyph (`icons.tsx` binds
+ * `Check` to both `verified` and `pass`). So a FAILING step got a tick, beside its
+ * own failure text: the API's `detail` for those steps is literally
+ * "draft ok: false" and "official schema valid: False" (`routes.py`). The failure
+ * signal was computed and discarded, and the sentence claiming otherwise made it
+ * harder to see.
+ *
+ * There is now a fourth state, `failed`, produced from `ok` and rendered with
+ * `CircleAlert` and its own class. It is deliberately NOT folded into `upcoming`
+ * either: "has not run yet" and "ran and failed" are different facts, and a reader
+ * who cannot tell them apart cannot act. Pinned by
  * `__tests__/staged-runner-dead-control.test.tsx`.
  */
 export function StagedRunner({ stages }: StagedRunnerProps) {
   return (
     <div className="runner">
       {stages.map((stage) => {
-        const cls = stage.state === 'done' || stage.state === 'current' ? 'done' : 'upcoming';
+        // `failed` is its own class and never borrows the tick.
+        //
+        // TWO OF THESE BRANCHES ARE UNREACHABLE FROM THE ONLY PRODUCER, and saying so
+        // is the point. `demoStepsToStages` is the sole producer (`LoadMaterials` is
+        // its sole call site) and it now emits only `done` | `failed`. `upcoming` was
+        // already unreachable before this change; `current` became unreachable with
+        // it. An earlier version of this comment claimed "an in-flight step has
+        // genuinely got that far", which describes a state the app never produces —
+        // in the very file whose docstring itemises branches deleted for being
+        // reachable only through a never-set flag. They are kept as DEFENSIVE
+        // handling for a second producer, and are labelled rather than implied live.
+        const cls =
+          stage.state === 'failed'
+            ? 'failed'
+            : stage.state === 'done' || stage.state === 'current'
+              ? 'done'
+              : 'upcoming';
         return (
           <div className={`stage ${cls}`} key={stage.key}>
             <span className="stage-disc" aria-hidden="true">
               {cls === 'done' && <Check size={13} strokeWidth={2.4} />}
               {cls === 'upcoming' && <Circle size={12} strokeWidth={2} />}
+              {cls === 'failed' && <CircleAlert size={13} strokeWidth={2.4} />}
             </span>
             <div className="stage-main">
-              <div className="stage-label">{stage.label}</div>
+              <div className="stage-label">
+                {/*
+                  THE GLYPH IS `aria-hidden`, SO THE STATE NEEDS TEXT. Without this
+                  the whole fix would have been sighted-only: a screen reader got the
+                  label, the command and the detail, but nothing saying the step
+                  failed — and the detail strings the API sends ("draft ok: false")
+                  are not reliably self-explanatory read aloud in isolation.
+                  Only the failure is announced; "passed" is the unremarkable case
+                  and announcing it on every step would bury the one that matters.
+                */}
+                {stage.state === 'failed' && <span className="sr-only">Failed: </span>}
+                {stage.label}
+              </div>
               <div className="stage-cmd">{stage.command}</div>
               {stage.detail && <p className="stage-detail">{stage.detail}</p>}
             </div>

@@ -550,6 +550,37 @@ Current state:
     screenshot sweep; `.section-tab` contrast (pre-existing, now documented in the a11y baseline).
   - **HOSTED QA PENDING (Krish)** for every image from this phase. `/krish` returns `302` here.
     Manual sequence: `docs/krish-manual-verification-checklist.md`.
+- **Session of 2026-08-18 — an honesty-defect sweep, conflict resolution, and two external packages.**
+  Nothing about the hosted deployment, the truth path, or any external authorization changed. What a
+  future session must not re-derive:
+  - **The owner's approval of `0003_revisions` and `0004_submissions` is RECORDED** (§15 and each
+    packet's STATUS block). **Hosted application remains NOT DONE and is not an agent's act.** A test
+    that had been *requiring* the false literal *"No PostgreSQL has ever executed this file"* was
+    corrected to pin the invariant instead — CI has executed both migrations against `postgres:18`.
+    **Constraint coverage is 27 of 46 declared**, now guarded by a test so the figure cannot re-inflate.
+  - **Explicit conflict resolution exists** (`apps/api/isaac_api/conflict_resolution.py` + two
+    operations). It closes a real defect this file had only described in prose: a scientist who fixed a
+    typo owned a permanent conflict no surface could clear. Decisions **supersede without deleting**
+    evidence, staleness is detected by `competing_digest`, nothing auto-picks a winner, and the chosen
+    value deliberately does **not** become the field's value — that is a separate decision.
+  - **Four classes of honesty defect were fixed, each mutation-tested**: a failed pipeline step wore
+    the success check mark; Record Verification painted three green cards for a corpus it never
+    examined; three banners promised "your input is kept" beside a Refresh that destroyed it; and an
+    assistant message containing a digest or path lost its whole text and rendered blank. Several
+    *existing tests pinned the defect* and were **inverted rather than deleted** — that is now the
+    established remedy here.
+  - **Repository hygiene:** local branches 141 → 8, with three superseded ones renamed `preserve/*`
+    rather than deleted; seven merged worktrees removed. All deletions were preceded by a mechanical
+    `git rev-list --count origin/main..<branch>` = 0 proof.
+  - **Two external packages are ready and UNSENT:** `docs/dean-handoff-consolidated-2026-08-18.md`
+    (migrations, external configuration, open gates) and the re-measured
+    `docs/run-scope-decision-packet.md`. The six `system.configuration.*` fields remain
+    **`unclassified`, verified** — and nothing in the programme is blocked on Angel's answer.
+  - **Not done, and named rather than implied:** `isaac_runs` Stage 2 (its blocker is measured — no
+    completeness marker and no backfill, so a read cutover cannot distinguish "zero runs" from "never
+    projected"); actor stamping (authorized by Dean, blocked in practice — no trusted boundary
+    exists, and the seam stays unset); the native assistant, MCP and voice product surfaces beyond
+    their existing seams; and the scale/concurrency benchmarks.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 

@@ -472,7 +472,18 @@ export interface QueueGroup {
 
 // --- staged runner (S2) -----------------------------------------------
 
-export type RunnerStageState = 'done' | 'current' | 'upcoming';
+/**
+ * A runner stage's state.
+ *
+ * `failed` EXISTS BECAUSE ITS ABSENCE WAS A DEFECT. The API reports each step's own
+ * `ok`, and `demoStepsToStages` used to map `ok: false` to `current` — which
+ * `StagedRunner` then collapsed into `done` and rendered with this app's success
+ * check mark. So a step the server had reported as FAILING got a tick, beside its
+ * own failure text ("official schema valid: False"). The failure signal was
+ * computed and then discarded, and the amber treatment that would have shown it had
+ * been removed earlier along with a dead CTA.
+ */
+export type RunnerStageState = 'done' | 'current' | 'upcoming' | 'failed';
 
 export interface RunnerStage {
   key: string;

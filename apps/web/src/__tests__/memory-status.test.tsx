@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
-import { render, fireEvent, within, act } from '@testing-library/react';
+import { render, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import {
@@ -319,8 +319,42 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     // it flushes the update and then either finds the answer or fails at once
     // against the real DOM. The timeout was NOT raised and nothing was retried,
     // skipped or marked flaky — the polling was removed instead.
+    /*
+     * WAIT FOR THE PRECONDITION, NOT FOR THE RESULT — and this is a CORRECTION to the
+     * paragraph above, which was right about `ask()` and wrong about what could go
+     * missing.
+     *
+     * `ask()` really is synchronous: no fetch, no promise, no timer. But it OPENS
+     * with `if (!prompt?.answer) return;`. A prompt's `answer` is precomposed from
+     * the memory payloads, and the chip renders with the SAME THREE QUESTION TEXTS
+     * whether or not that composition has produced answers yet — which is why the
+     * `chips` assertion above passes in both states and cannot distinguish them. So
+     * a click landing before the answers compose is a SILENT NO-OP, and the next
+     * line then fails with "unable to find the answer text", naming the symptom and
+     * not the cause.
+     *
+     * That is exactly what happened in CI on this branch: the failure dump shows the
+     * panel still in its `.assistant-empty` state with all three chips present and
+     * un-activated. `await findByText('Memory Available')` awaits the STATUS card,
+     * which is a different payload from the one the answers come from, so it is not
+     * the precondition this click needs.
+     *
+     * The remedy is NOT to restore `findByText` on the answer — the previous session
+     * was right that polling for a synchronous result hides a real defect behind a
+     * 1 s window. It is to wait for the chip to become ACTIVATABLE, then assert
+     * synchronously. An enabled chip is the observable signal that `prompt.answer`
+     * exists, so if this ever stalls the failure names the cause.
+     */
+    const provenanceChip = panel.getByText('Where do these leads come from?').closest('button')!;
+    await waitFor(() =>
+      expect(
+        provenanceChip,
+        'the chip must become activatable before it is clicked: a disabled chip means ' +
+          'the answers have not composed yet, and clicking it is a silent no-op',
+      ).toBeEnabled(),
+    );
     act(() => {
-      fireEvent.click(panel.getByText('Where do these leads come from?').closest('button')!);
+      fireEvent.click(provenanceChip);
     });
     expect(
       panel.getByText(/Leads come from indexed project files and concepts/),
