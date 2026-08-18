@@ -57,6 +57,7 @@ from __future__ import annotations
 
 from isaac_records.models import SOURCE_TYPES
 
+from . import conflict_resolution as cr
 from . import evidence_classify, notes as notes_module, serialize, workspace as ws
 
 # =============================================================================
@@ -263,6 +264,23 @@ REVIEW_CONFLICT = "conflict"
 #: note is not a weakly-supported field, it is content that is not a field at all.
 REVIEW_UNMAPPED = "unmapped"
 
+#: A conflict a PERSON decided. Reached only through
+#: :mod:`isaac_api.conflict_resolution` — an explicit, confirmed, recorded decision
+#: naming which competing answer is right — and only while that decision still
+#: covers the conflict a reader is looking at.
+#:
+#: NOT "the conflict went away", and not a claim about the field's VALUE. The
+#: competing citations are all still stored (nothing in this application removes an
+#: evidence entry) and the field's value is whatever it was; what changed is that
+#: somebody said which answer they stand behind, so nobody has to look again.
+#:
+#: A STALE decision — one made over a different competing set, because new competing
+#: evidence arrived afterwards — is NOT this state. It reads
+#: :data:`REVIEW_CONFLICT`, because a person does have to look again. See
+#: :func:`review_state` for why staleness is a boolean on the resolution rather than
+#: a fifth review state.
+REVIEW_RESOLVED = "resolved"
+
 #: The closed review-state vocabulary. Declaration order; see
 #: :func:`review_state` for the precedence actually applied.
 REVIEW_STATES: tuple[str, ...] = (
@@ -270,6 +288,7 @@ REVIEW_STATES: tuple[str, ...] = (
     REVIEW_NEEDS_REVIEW,
     REVIEW_CONFLICT,
     REVIEW_UNMAPPED,
+    REVIEW_RESOLVED,
 )
 
 #: Draft statuses that mean the value is established as fact by its author.
@@ -356,8 +375,9 @@ def review_state(
     classification: object = None,
     note_state: object = None,
     unavailable: bool = False,
+    resolution_state: object = None,
 ) -> str:
-    """Which of the four review states this item is in.
+    """Which of the five review states this item is in.
 
     **THIS FUNCTION TAKES NO ORIGIN, AND THAT IS THE POINT.** Where a value came
     from must never decide whether anything establishes it, so there is no
@@ -366,8 +386,22 @@ def review_state(
 
     Precedence, highest first — each arm is the answer a person most needs:
 
-    1. :data:`REVIEW_CONFLICT` — ``evidence_classify`` found incompatible
-       assertions. Nothing below matters until a person resolves them.
+    1a. :data:`REVIEW_RESOLVED` — ``evidence_classify`` found incompatible
+       assertions AND a person recorded a decision that still covers exactly those
+       assertions (``conflict_resolution.RESOLUTION_CURRENT``).
+    1b. :data:`REVIEW_CONFLICT` — incompatible assertions with no such decision.
+       Nothing below matters until a person resolves them.
+
+    **``resolution_state`` IS READ ONLY UNDER THE CONFLICT ARM, DELIBERATELY.** A
+    decision recorded against an address that is not conflicting resolves nothing —
+    there was no disagreement to decide — and reporting ``resolved`` there would
+    announce a resolution of something that never happened. The one arm is also why a
+    stale decision needs no state of its own: it falls through to
+    :data:`REVIEW_CONFLICT`, which is exactly the answer a reader needs, and a fifth
+    member that every surface had to treat identically to ``conflict`` would be an
+    invitation for one surface to treat it differently and quietly stop showing a
+    live disagreement. The staleness itself is not lost: it travels as
+    ``conflict_resolution.RESOLUTION_STALE`` on the entry and in the resolution view.
     2. :data:`REVIEW_UNMAPPED` — an unreviewed note. Not a field, so none of the
        field-shaped answers below can be true of it.
     3. :data:`REVIEW_SUPPORTED` — status ``verified`` AND at least one readable
@@ -381,6 +415,8 @@ def review_state(
        declares fine.
     """
     if classification == _CONFLICT_CLASSIFICATION:
+        if resolution_state == cr.RESOLUTION_CURRENT:
+            return REVIEW_RESOLVED
         return REVIEW_CONFLICT
     if note_state == notes_module.NOTE_UNREVIEWED:
         return REVIEW_UNMAPPED
@@ -428,6 +464,14 @@ ENTRY_KEYS: frozenset[str] = frozenset(
         # Carried so a PARTIALLY unreadable payload cannot present as plain
         # support. See `_entry` and `review_state` for why this is not optional.
         "unavailable",
+        # WHICH RECORDED DECISION, IF ANY, COVERS THIS ADDRESS — one of
+        # `conflict_resolution.RESOLUTION_STATES`. On the wire and not merely
+        # consumed, for `unavailable`'s reason: `review_state` collapses `stale` and
+        # `absent` into the same `conflict`, so a client that cannot see this key
+        # cannot tell "nobody has looked" from "somebody decided and then the
+        # evidence moved on" — and only the second one has a superseded decision to
+        # show.
+        "resolution_state",
     }
 )
 
@@ -452,8 +496,17 @@ def _entry(
     note_refs: list[str],
     extra_origins: tuple[str, ...] = (),
     unavailable: bool = False,
+    resolution_state: str = cr.RESOLUTION_ABSENT,
 ) -> dict:
-    """One entry, both dimensions, from one item's already-read stored data."""
+    """One entry, both dimensions, from one item's already-read stored data.
+
+    ``resolution_state`` arrives ALREADY DERIVED, from
+    ``conflict_resolution.resolution_states``. This module does not look a resolution
+    up, does not know which scope's decisions apply to which subject, and does not
+    compare a staleness digest — the same delegation that keeps the conflict RULE in
+    ``evidence_classify`` keeps the resolution rule in its own module, so there is one
+    place each can be wrong.
+    """
     origins = sorted(set(origins_from_evidence(evidence)) | set(extra_origins))
     if not origins:
         origins = [ORIGIN_UNKNOWN]
@@ -467,6 +520,7 @@ def _entry(
             evidence_count=evidence_count,
             classification=classification,
             unavailable=unavailable,
+            resolution_state=resolution_state,
         ),
         "evidence_count": evidence_count,
         "inherited": inherited,
@@ -475,6 +529,7 @@ def _entry(
         # chip must be able to reach the same verdict, and the frontend mirror
         # does exactly that.
         "unavailable": bool(unavailable),
+        "resolution_state": resolution_state,
     }
 
 
@@ -514,6 +569,11 @@ def _note_entry(note) -> dict:
         # for one. Written explicitly rather than omitted so every entry on the
         # wire carries the same keys, which is what `ENTRY_KEYS` is for.
         "unavailable": False,
+        # A note carries no evidence (`is_evidence: false`, a read-only constant), so
+        # it can never be in conflict and there is nothing about it to resolve.
+        # `absent` rather than a fifth "not applicable" member, for the same reason:
+        # every entry carries the same keys.
+        "resolution_state": cr.RESOLUTION_ABSENT,
     }
 
 
@@ -523,6 +583,7 @@ def _trail_entries(
     note_refs: dict[str, list[str]],
     inherited: bool = False,
     extra_origins: tuple[str, ...] = (),
+    resolution_states: dict[str, str] | None = None,
 ) -> list[dict]:
     """Entries for one draft's own evidence trail, in the draft's own order.
 
@@ -552,12 +613,15 @@ def _trail_entries(
                 # payload could be read, and its docstring makes the verbatim
                 # `status` pass-through conditional on it travelling alongside.
                 unavailable=bool(item.get("unavailable")),
+                resolution_state=(resolution_states or {}).get(
+                    address, cr.RESOLUTION_ABSENT
+                ),
             )
         )
     return entries
 
 
-def describe_experiment(draft: object, note_list=()) -> dict:
+def describe_experiment(draft: object, note_list=(), resolution_states=None) -> dict:
     """Provenance for an experiment's OWN draft, plus its unreviewed notes.
 
     ``inherited`` is ``False`` on every entry: an experiment inherits from
@@ -565,10 +629,17 @@ def describe_experiment(draft: object, note_list=()) -> dict:
     ``notes_summary`` key of the result, and the count of what was left out is
     beside it, so the list never reads as the whole picture.
     """
-    return _describe(draft if isinstance(draft, dict) else {}, {}, note_list)
+    return _describe(
+        draft if isinstance(draft, dict) else {},
+        {},
+        note_list,
+        resolution_states=resolution_states,
+    )
 
 
-def describe_run(run_draft: object, resolutions: dict, note_list=()) -> dict:
+def describe_run(
+    run_draft: object, resolutions: dict, note_list=(), resolution_states=None
+) -> dict:
     """Provenance for one RUN: its own draft fields plus what it inherits.
 
     ``resolutions`` is ``workspace.resolve_inherited(experiment_draft, run)``
@@ -584,11 +655,14 @@ def describe_run(run_draft: object, resolutions: dict, note_list=()) -> dict:
     about.
     """
     return _describe(
-        run_draft if isinstance(run_draft, dict) else {}, resolutions or {}, note_list
+        run_draft if isinstance(run_draft, dict) else {},
+        resolutions or {},
+        note_list,
+        resolution_states=resolution_states,
     )
 
 
-def _describe(draft: dict, resolutions: dict, note_list) -> dict:
+def _describe(draft: dict, resolutions: dict, note_list, *, resolution_states=None) -> dict:
     """The one composer both public entry points use.
 
     Ordering, and why it is fixed: the item's OWN draft first (what it stores),
@@ -603,7 +677,8 @@ def _describe(draft: dict, resolutions: dict, note_list) -> dict:
     note_list = list(note_list or ())
     refs = _note_refs_by_path(note_list)
 
-    entries = _trail_entries(draft, note_refs=refs)
+    states: dict[str, str] = dict(resolution_states or {})
+    entries = _trail_entries(draft, note_refs=refs, resolution_states=states)
     seen = {entry["address"] for entry in entries}
 
     # THE SUBJECT'S OWN UNDESCRIBED BLOCKS, SEEDED FIRST.
@@ -681,6 +756,11 @@ def _describe(draft: dict, resolutions: dict, note_list) -> dict:
                     # An INHERITED envelope can be partially unreadable too, and
                     # the resolved payload goes through the very same reader.
                     unavailable=bool(item.get("unavailable")),
+                    # AN INHERITED ADDRESS IS RESOLVED AT THE RECORD, NOT AT THE RUN,
+                    # so the caller merges the record's states under the run's own —
+                    # see `routes.get_provenance`. Read from the same map for that
+                    # reason: a second lookup here would be a second scope rule.
+                    resolution_state=states.get(name, cr.RESOLUTION_ABSENT),
                 )
             )
 

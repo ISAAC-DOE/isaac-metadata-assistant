@@ -68,10 +68,16 @@ _EXPLANATIONS = {
 #: not. The class then describes only the readable part, which is a true
 #: statement about less than the whole entry — so the rest is said out loud
 #: rather than left to read as completeness.
-_PARTIAL_DISCLOSURE = (
+PARTIAL_DISCLOSURE = (
     "Part of this entry's stored evidence could not be read; this describes only "
     "the part that could."
 )
+
+#: The pre-`conflict_resolution` private name, kept as an alias so this module's own
+#: history stays greppable. `conflict_resolution` appends the SAME sentence to its
+#: conflict explanations, and a second copy of that wording would let the two
+#: surfaces disagree about how much of an entry they read.
+_PARTIAL_DISCLOSURE = PARTIAL_DISCLOSURE
 
 
 def _is_derivation_with_rule(evidence: list) -> bool:
@@ -81,11 +87,32 @@ def _is_derivation_with_rule(evidence: list) -> bool:
     )
 
 
-def _asserted_values(evidence: list) -> list[str]:
+def canonical_answer(value) -> str:
+    """ONE asserted answer as the stable text the conflict rule compares.
+
+    THE SINGLE DEFINITION OF "THE SAME ANSWER" IN THIS APPLICATION. Extracted from
+    :func:`asserted_values` so that :mod:`isaac_api.conflict_resolution` can ask
+    whether a value a scientist picked is one of the competing answers WITHOUT a
+    second canonicalisation. Two canonicalisations would eventually disagree about
+    what "the same value" means, and the disagreement would surface as a resolution
+    that can never clear the conflict it was recorded against.
+
+    ``sort_keys`` so key order cannot make one value look like two. ``default=str``
+    is retained EXACTLY as it was rather than tightened: it is what has decided
+    every conflict this application has ever reported, and a stricter form would
+    change existing verdicts as a side effect of a refactor.
+    """
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def asserted_values(evidence: list) -> list[str]:
     """Distinct non-null asserted answers (e.g. ``user_confirmation.answer``).
 
     Values are normalized to a stable JSON key so ordering never affects the
     conflict decision; the return is sorted for determinism.
+
+    PUBLIC because the conflict rule's own input is what a resolution has to be
+    recorded over — see :func:`isaac_api.conflict_resolution.competing_from_evidence`.
     """
     seen: set[str] = set()
     for e in evidence:
@@ -94,8 +121,12 @@ def _asserted_values(evidence: list) -> list[str]:
         answer = e.get("answer")
         if answer is None:
             continue
-        seen.add(json.dumps(answer, sort_keys=True, default=str))
+        seen.add(canonical_answer(answer))
     return sorted(seen)
+
+
+#: The pre-`conflict_resolution` private name, kept as an alias.
+_asserted_values = asserted_values
 
 
 def _looks_unsafe(s: str) -> bool:
@@ -121,8 +152,14 @@ def _safe_locator(e: dict) -> str | None:
     return None
 
 
-def _sources(evidence: list) -> list[dict]:
-    """Minimal, safe per-entry source refs: ``{source_type, locator?}``."""
+def sources_for(evidence: list) -> list[dict]:
+    """Minimal, safe per-entry source refs: ``{source_type, locator?}``.
+
+    PUBLIC so the conflict-resolution surface projects citations through the SAME
+    filter this classification does — ``_looks_unsafe`` and the deliberate exclusion
+    of ``answer``/``quote`` are the whole of why a source ref is safe to serve, and a
+    second projection would be free to omit one of them.
+    """
     out: list[dict] = []
     for e in evidence:
         if not isinstance(e, dict):
@@ -136,6 +173,10 @@ def _sources(evidence: list) -> list[dict]:
             src["locator"] = loc
         out.append(src)
     return out
+
+
+#: The pre-`conflict_resolution` private name, kept as an alias.
+_sources = sources_for
 
 
 def _classify_entry(entry: dict) -> tuple[str, str]:

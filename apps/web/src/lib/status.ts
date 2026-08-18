@@ -68,7 +68,8 @@ export type ChipKind =
   | 'revSupported'
   | 'revNeedsReview'
   | 'revConflict'
-  | 'revUnmapped';
+  | 'revUnmapped'
+  | 'revResolved';
 
 export interface ChipMeta {
   label: string;
@@ -121,6 +122,12 @@ export const CHIP_META: Record<ChipKind, ChipMeta> = {
   revNeedsReview: { label: REVIEW_STATE_LABEL.needs_review, className: 'chip-rev-needsreview' },
   revConflict: { label: REVIEW_STATE_LABEL.conflict, className: 'chip-rev-conflict' },
   revUnmapped: { label: REVIEW_STATE_LABEL.unmapped, className: 'chip-rev-unmapped' },
+  // A conflict a person DECIDED. It borrows the `confirmed` palette — "somebody
+  // said so" — and deliberately NOT the `verified` palette `revSupported` wears:
+  // a recorded decision about which citation to stand behind is not the same fact
+  // as a value with established evidence support, and one shade apart is how two
+  // different facts come to read as one.
+  revResolved: { label: REVIEW_STATE_LABEL.resolved, className: 'chip-rev-resolved' },
 };
 
 /**
@@ -145,6 +152,7 @@ export const REVIEW_STATE_CHIP: Record<ProvenanceReviewState, ChipKind> = {
   needs_review: 'revNeedsReview',
   conflict: 'revConflict',
   unmapped: 'revUnmapped',
+  resolved: 'revResolved',
 };
 
 /**

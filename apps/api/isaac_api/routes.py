@@ -37,7 +37,7 @@ from isaac_records.draft_validator import UPLOADED_BY_PATH, validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
 from isaac_records.extract.structured import FIELD_MAP as EXTRACTOR_FIELD_MAP
-from isaac_records.ids import is_record_id
+from isaac_records.ids import is_record_id, new_record_id
 from isaac_records.models import user_confirmation
 from isaac_records.exactness import check_exactness, combined_summary
 from isaac_records.official import EXPECTED_VERSION, schema_path, validate_official
@@ -51,6 +51,7 @@ from . import db_provider
 from . import db_recon
 from . import db_write
 from . import dependencies
+from . import conflict_resolution as cr
 from . import evidence_classify
 from . import experiment_repository
 from . import identity as identity_module
@@ -170,8 +171,11 @@ OPENAPI_TAGS: list[dict] = [
         "name": TAG_EVIDENCE,
         "description": (
             "The per-field evidence trail, its evidence-support classification, "
-            "where each value came from and what establishes it, and previews of "
-            "the reference source files the evidence cites. Read-only."
+            "where each value came from and what establishes it, previews of the "
+            "reference source files the evidence cites, and the conflicts a "
+            "record's own evidence carries. Every operation here is read-only "
+            "except the one that records a scientist's decision about a conflict, "
+            "which stores that decision beside the evidence and changes no value."
         ),
     },
     {
@@ -7953,7 +7957,14 @@ def post_submit(
             if subject is not None and identity.human is not None
             else submissions.TRUST_BASIS_UNATTRIBUTED
         )
-        conflict_summary = submissions.conflict_summary(units)
+        # THE RECORD's decisions, all of them, scoped per unit inside
+        # `conflict_summary`. Read here rather than off each unit because
+        # `resolved_run_draft` does not copy the key into a run's composed draft —
+        # see that function's docstring for why one record-level list is the storage.
+        # Unreadable stored entries are ignored for the disclosure and preserved on
+        # disk; the count of them is not part of a submission row's contract.
+        record_resolutions, _unreadable_resolutions = cr.resolutions_from_draft(exp.draft)
+        conflict_summary = submissions.conflict_summary(units, record_resolutions)
         try:
             recorded = store.record_submission(
                 exp=exp,
@@ -9930,6 +9941,34 @@ def get_evidence_classification(
 # --- 12c. unified provenance (two dimensions, read-only) ----------------------
 
 
+def _record_resolution_states(exp: Experiment) -> dict[str, str]:
+    """``address -> resolution state`` for the RECORD's own draft.
+
+    Scoped here rather than inside ``conflict_resolution``, which requires its
+    caller to pre-filter: a record-level decision carries ``run_id is None``, and
+    letting that module infer the scope would put the scope rule in two places.
+    """
+    readable, _unreadable = cr.resolutions_from_draft(exp.draft)
+    return cr.resolution_states(
+        exp.draft, [entry for entry in readable if entry.run_id is None]
+    )
+
+
+def _run_resolution_states(exp: Experiment, run_obj) -> dict[str, str]:
+    """``address -> resolution state`` for ONE run's own draft.
+
+    The decisions are read from the RECORD's draft whatever the subject is, because
+    one record-level list holds run-scoped rows too — see
+    ``conflict_resolution``'s module docstring for why the storage is not per-run.
+    """
+    readable, _unreadable = cr.resolutions_from_draft(exp.draft)
+    return cr.resolution_states(
+        run_obj.draft, [entry for entry in readable if entry.run_id == run_obj.id]
+    )
+
+
+
+
 @router.get(
     "/experiments/{experiment_id}/provenance",
     tags=[TAG_EVIDENCE],
@@ -10013,7 +10052,9 @@ def get_provenance(
         # committed in the opposite direction. One rule, both ways: a note is
         # described by the subject it was captured against, and by nothing else.
         record_notes = [n for n in exp.sorted_notes() if n.run_id is None]
-        body = provenance.describe_experiment(exp.draft, record_notes)
+        body = provenance.describe_experiment(
+            exp.draft, record_notes, _record_resolution_states(exp)
+        )
     else:
         run_obj = exp.get_run(run)
         if run_obj is None:
@@ -10023,7 +10064,20 @@ def get_provenance(
         # is being viewed would be exactly the invention `notes` refuses when it
         # keeps `run_id` absent rather than guessing one.
         run_notes = [n for n in exp.sorted_notes() if n.run_id == run]
-        body = provenance.describe_run(run_obj.draft, exp.resolve_run(run_obj), run_notes)
+        # THE RECORD'S STATES UNDER THE RUN'S OWN. An inherited address is decided
+        # once, at the record, so its state has to reach a run's view — and a run's
+        # own decision about its own address must win over a record-level one that
+        # happens to share the address name. `provenance` does no scope reasoning at
+        # all, deliberately, so the merge is stated here.
+        body = provenance.describe_run(
+            run_obj.draft,
+            exp.resolve_run(run_obj),
+            run_notes,
+            {
+                **_record_resolution_states(exp),
+                **_run_resolution_states(exp, run_obj),
+            },
+        )
 
     response.headers["ETag"] = exp.etag()
     return {
@@ -10032,6 +10086,608 @@ def get_provenance(
         "record_rev": exp.rev,
         **body,
     }
+
+
+# --- 12d. conflict resolution (read the disagreement, record ONE human decision) --
+#
+# WHAT THESE TWO OPERATIONS ARE FOR. `evidence_classify` flags an address the
+# moment two distinct non-null answers are recorded against it, and NOTHING in this
+# application removes an evidence entry — `POST .../answers` and `POST .../edit`
+# each APPEND a `user_confirmation`. So a scientist who answers a question, notices
+# a typo and answers it again has manufactured a finding that no surface this build
+# offered could clear. `GET .../conflicts` is where they can finally SEE the
+# competing answers, and `POST .../conflicts/resolve` is where they can say which
+# one they stand behind.
+#
+# WHAT THEY ARE NOT. The resolve operation writes NO scientific value. It records
+# WHICH of the already-recorded answers a person chose; making that the field's
+# value would be a SECOND path by which scientific content changes, and this
+# application deliberately has exactly one (a confirmed answer or edit, recorded as
+# `user_confirmation` evidence). `conflict_resolution.ConflictResolution` cannot
+# even represent an applied value — `is_field_value` and `is_evidence` are
+# read-only constants on a frozen, slotted dataclass, and both are serialised on
+# the wire so the guarantee survives the boundary.
+#
+# NOTHING IS EVER REMOVED HERE EITHER, in either direction. The competing evidence
+# is untouched by a resolution — the decision is written BESIDE it, under the
+# draft's own top-level key — so a resolved address keeps every citation it had and
+# is still reported by this surface. `resolution_state` is what a reader branches
+# on, never the absence of a row.
+#
+# TWO SCOPES, AND THE GAP THAT MADE THE SECOND ONE NECESSARY.
+# `GET .../evidence-classification` classifies the RECORD's own draft only, so a
+# conflict living in a run's own fields was invisible outside submit time. `run`
+# narrows the subject to that run's OWN draft. It is deliberately not the run's
+# RESOLVED draft: an inherited address's evidence lives at the record and is
+# reported there, and describing it under both scopes would offer a scientist two
+# places to decide one disagreement, producing two resolutions with different
+# `run_id`s for a single conflict.
+#
+# ONE VALIDATOR, THE RECORD'S. A resolution is stored inside the experiment's own
+# state document — one record-level list, run-scoped rows distinguished by their
+# `run_id` — so writing one REWRITES THE RECORD and takes the RECORD's `If-Match`
+# even when it is about a run. That is the rule the note operations already follow,
+# for the reason `patch_run`'s description records: a second concurrency scheme
+# with no consumer is a trap.
+
+
+#: The body keys the resolve operation accepts. Anything else is REFUSED rather
+#: than ignored, exactly as the note operations refuse an unknown key and for the
+#: same reason: a caller that sends `{"applied": true}` or `{"verified": true}`
+#: alongside its decision must be told the key means nothing here, not answered
+#: 200 while it is silently dropped. A resolution records a choice; it applies
+#: nothing and verifies nothing, so a key naming either is refused.
+_CONFLICT_RESOLVE_KEYS = frozenset(
+    {
+        "address",
+        "run_id",
+        "outcome",
+        "chosen_value",
+        "chosen_from",
+        "rationale",
+        "confirmed_by_user",
+    }
+)
+
+
+def _conflict_refusal(error: str, message: str, **extra) -> JSONResponse:
+    """One typed 422. Every refusal on these two operations is one of these.
+
+    THE SAME SHAPE AS ``_note_refusal`` AND DELIBERATELY NOT THE SAME FUNCTION.
+    That helper's docstring claims every refusal on the NOTE routes is one of its
+    responses, and a shared helper would make the claim unverifiable for either
+    feature. The shape is the module's convention; the name says which contract the
+    body belongs to.
+    """
+    return JSONResponse(
+        status_code=422, content={"error": error, "message": message, **extra}
+    )
+
+
+def _unknown_conflict_keys(body: dict) -> JSONResponse | None:
+    """Refuse a body key the resolve operation does not accept."""
+    refused = sorted(str(key) for key in body if key not in _CONFLICT_RESOLVE_KEYS)
+    if not refused:
+        return None
+    return _conflict_refusal(
+        "unrecognized_field",
+        (
+            "These keys are not part of this request. Nothing was written. A "
+            "resolution records which of the competing answers a person chose; it "
+            "writes no field value, mints no evidence and verifies nothing, so a "
+            "key naming one of those is refused rather than accepted and ignored."
+        ),
+        key=refused[0],
+        keys=refused,
+    )
+
+
+def _conflict_subject(exp: Experiment, run: str | None):
+    """``(draft, None)`` for the described subject, or ``(None, <404 response>)``.
+
+    A RUN IS DESCRIBED BY ITS OWN DRAFT. See the section comment for why the
+    resolved draft is deliberately not used: an inherited address is decided once,
+    at the record, and offering it under a run's scope as well would let one
+    disagreement collect two decisions.
+    """
+    if run is None:
+        return exp.draft, None
+    run_obj = exp.get_run(run)
+    if run_obj is None:
+        return None, _run_not_found(exp.id, run)
+    return run_obj.draft, None
+
+
+def _conflict_payload(exp: Experiment, draft: dict, run: str | None) -> dict:
+    """The conflict surface for one subject, plus what it could not read.
+
+    The resolutions are read from ``exp.draft`` whatever the subject is, because one
+    record-level list holds run-scoped decisions too — see
+    ``conflict_resolution``'s module docstring for why the storage is not per-run.
+    """
+    readable, unreadable = cr.resolutions_from_draft(exp.draft)
+    # The live run ids, so a decision whose run has been REMOVED is still reported at
+    # record scope rather than being reachable from nowhere. `remove_run` leaves the
+    # decision row in the draft on purpose (nothing here deletes one), and the run
+    # scope answers 404 for a run the record no longer has, so without this the row is
+    # invisible while sitting in the document. See `conflict_report`'s `live_run_ids`
+    # note for why it is flagged rather than folded in with the ordinary orphans.
+    report = cr.conflict_report(
+        draft,
+        resolutions=readable,
+        run_id=run,
+        live_run_ids=frozenset(r.id for r in exp.sorted_runs()),
+    )
+    return {
+        "experiment_id": exp.id,
+        "run_id": run,
+        "record_rev": exp.rev,
+        **report,
+        # A DISCLOSURE OF WHAT THIS BUILD COULD NOT PRESENT AS A DECISION, counted
+        # rather than rendered, for the reason the notes list counts its own: this
+        # server can neither say what a refused entry contains without inventing it
+        # nor drop it, so the entry is preserved in the record verbatim and the
+        # count of them travels beside what could be read. Reporting nothing here
+        # when there are some would be the silent discard the whole feature refuses.
+        "unreadable_resolution_entries": len(unreadable),
+        # THE SERVER'S OWN VOCABULARIES, for the reason the notes list serves its
+        # `sources`: the alternative is transcribing three closed sets into a client
+        # bundle, where they are free to drift from the sets this route enforces.
+        "outcomes": list(cr.RESOLUTION_OUTCOMES),
+        "chosen_from_values": list(cr.CHOSEN_FROM_VALUES),
+        "states": list(cr.RESOLUTION_STATES),
+        "experiment_version": exp.version_token(),
+    }
+
+
+_R_CONFLICT_RUN = {
+    404: {
+        "description": (
+            "No experiment in the selected workspace has that id, that experiment "
+            "has no run with the id given in `run`, or the "
+            "`X-Isaac-Tutorial-Session` header named a worked-example session that "
+            "does not exist. A run is never answered from the record instead."
+        )
+    },
+}
+
+
+@router.get(
+    "/experiments/{experiment_id}/conflicts",
+    tags=[TAG_EVIDENCE],
+    summary="List a Record's Evidence Conflicts",
+    description=(
+        "Every address on this record whose own evidence asserts more than one "
+        "distinct value, with the competing answers themselves, the citations "
+        "behind each one, a deterministic explanation of why they are treated as a "
+        "disagreement, and whichever decision a person has already recorded about "
+        "it. Read-only, and it takes no lock.\n\n"
+        "THIS OPERATION RETURNS THE COMPETING VALUES, and the conflict disclosure "
+        "stored on a submission deliberately returns addresses only. The two are "
+        "not an inconsistency to be tidied up in either direction: that disclosure "
+        "exists for navigation — which addresses carried conflicts when the record "
+        "was submitted — and the values live in the revision snapshot beside it, so "
+        "copying them in would give one value two homes. This is the surface a "
+        "person decides on, and a scientist cannot choose between answers they are "
+        "not shown.\n\n"
+        "A conflict is always WITHIN one address's own evidence list. It is not a "
+        "disagreement between two fields, and it is not a disagreement about where "
+        "a value came from: two citations asserting the same value are not in "
+        "conflict however different their sources, so the answers are grouped by "
+        "value and each group carries the citations that assert it.\n\n"
+        "AN ALREADY-DECIDED ADDRESS IS STILL LISTED. Nothing in this API removes an "
+        "evidence entry, so the competing citations remain stored forever and the "
+        "address goes on classifying as conflicting; hiding it would hide the "
+        "decision along with the disagreement. Read `resolution_state`, which is "
+        "`absent` when nobody has decided, `current` for a decision that still "
+        "covers exactly these answers, `stale` for one made over a different set "
+        "because further competing evidence has arrived since, and `deferred` when "
+        "a person looked and declined to decide. Only `current` clears a conflict, "
+        "and a superseded decision is still returned in full rather than deleted.\n\n"
+        "Pass `run` to describe one run's OWN fields instead of the record's. An "
+        "address a run inherits is decided once, at the record, so it is described "
+        "there and not under each run — otherwise one disagreement could collect "
+        "two decisions. `resolutions_without_conflict` reports the other direction: "
+        "a stored decision whose address this subject carries no conflict at, "
+        "reported rather than silently omitted. `unreadable_resolution_entries` "
+        "counts stored decisions this build could not read; they are preserved in "
+        "the record untouched and counted rather than rendered, because saying what "
+        "one contains would mean inventing it."
+    ),
+    response_description=(
+        "One entry per conflicting address with its competing answers, the "
+        "per-state counts, the closed vocabularies a decision must use, and the "
+        "record's current `ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_CONFLICT_RUN},
+)
+def get_conflicts(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    run: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Describe this run's own fields rather than the record's. Omit it "
+                "for the record. An id this record has no run for is refused "
+                "rather than answered from the record."
+            )
+        ),
+    ] = None,
+):
+    """The resolution surface: what is in conflict, and what was decided about it.
+
+    Read-only and lock-free. Everything is DERIVED on read from content the record
+    already carries — the conflict rule from ``evidence_classify``, the staleness
+    comparison from ``conflict_resolution.state_of`` — so no state is written and
+    nothing about official validation or export is consulted.
+    """
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    draft, missing = _conflict_subject(exp, run)
+    if missing is not None:
+        return missing
+    response.headers["ETag"] = exp.etag()
+    return _conflict_payload(exp, draft, run)
+
+
+@router.post(
+    "/experiments/{experiment_id}/conflicts/resolve",
+    tags=[TAG_EVIDENCE],
+    summary="Record a Decision About an Evidence Conflict",
+    description=(
+        "Records which of an address's competing answers a scientist stands "
+        "behind — or that they looked and declined to decide — and returns the "
+        "decision with its full history.\n\n"
+        "IT DOES NOT CHANGE THE FIELD'S VALUE, and that is a design decision rather "
+        "than an omission. Recording which recorded answer a person chose and "
+        "writing that answer into the field are two different acts, and the second "
+        "already has exactly one path in this application: an answer or a "
+        "correction sent with `confirmed_by_user: true`, stored as user-confirmation "
+        "evidence. Wiring a decision into that path would create a second way for "
+        "scientific content to change, which is a decision for its own slice. The "
+        "stored decision reports `is_field_value: false` and `is_evidence: false` "
+        "on the wire for the same reason.\n\n"
+        "NOTHING PICKS A WINNER FOR YOU. `chosen_value` arrives only from a request "
+        "that carried `confirmed_by_user: true`; an outcome of `resolved` with no "
+        "chosen value is refused, so \"the system decided\" is not a state this API "
+        "can be made to store. NOTHING IS REMOVED EITHER: the competing citations "
+        "are untouched, the address goes on being reported as conflicting, and what "
+        "changes is that `resolution_state` becomes `current`.\n\n"
+        "`outcome` is `resolved` or `deferred`. `deferred` is a first-class "
+        "outcome — a person may legitimately decline to decide — and it does NOT "
+        "clear the conflict; it carries no chosen value and no `chosen_from`, "
+        "because \"nobody chose\" and \"somebody chose and we filed it as undecided\" "
+        "are different facts. For `resolved`, `chosen_from` says whether the value "
+        "is one of the recorded answers (`candidate`) or a new one the scientist "
+        "typed because all of them were wrong (`edited`); the two are different "
+        "claims, and a value that was never asserted cannot be labelled "
+        "`candidate`.\n\n"
+        "Requires `confirmed_by_user: true` and the RECORD's current `ETag` in "
+        "`If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with "
+        "nothing written. The record's validator is the right one even for a "
+        "run-scoped decision, because a decision is stored inside the record's own "
+        "document; there is deliberately no separate validator for a decision. "
+        "Every part of the body is resolved BEFORE the precondition is checked, so "
+        "a malformed request is refused whether or not the caller's `ETag` happens "
+        "to be current, and a refused request leaves no partial act behind.\n\n"
+        "REVISING AN EARLIER DECISION IS ALLOWED and never overwrites it silently: "
+        "the act is appended to the decision's history together with the value it "
+        "superseded and the set of answers that value was chosen from. "
+        "Re-submitting an identical decision OVER THE SAME COMPETING SET is a no-op "
+        "— no history entry, and the record's revision does not move. If new evidence "
+        "has arrived since, the same body is a RE-AFFIRMATION rather than a no-op: it "
+        "is recorded, carrying the digest of the set the earlier value was chosen "
+        "from, because standing behind a value again after the disagreement changed is "
+        "a different act from standing behind it the first time.\n\n"
+        "An address this subject does not carry, an address that is not currently "
+        "in conflict, a `chosen_from` of `candidate` whose value is none of the "
+        "competing answers, a missing confirmation, a `resolved` outcome with no "
+        "value, an unknown run, and a wrong-typed body are each refused with `422` "
+        "naming what was wrong. Nothing is written in any of those cases."
+    ),
+    response_description=(
+        "The recorded decision, its derived state against the current competing "
+        "answers, and the record's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
+        **_R_PRECONDITION,
+    },
+)
+def post_conflict_resolution(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"address\": \"<an address this "
+            "operation reported as conflicting>\", \"outcome\": "
+            "\"resolved|deferred\", \"chosen_value\": \"<required for resolved>\", "
+            "\"chosen_from\": \"candidate|edited\", \"run_id\": \"<optional>\", "
+            "\"rationale\": \"<optional>\"}`. Any other key is refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it — a decision is stored inside the record's own document, "
+            "so a run-scoped one takes this validator too."
+        ),
+    ),
+):
+    """Record one human decision about one conflicting address.
+
+    THE CHOSEN VALUE DOES NOT BECOME THE FIELD'S VALUE, deliberately. See the
+    operation description: this application has exactly one path by which
+    scientific content changes, and adding a second one is a decision for a later
+    slice rather than an assumption for this one.
+
+    THE RECORD's ``If-Match``, even for a run-scoped decision, because a decision
+    lives in one record-level list inside the experiment's own state document
+    (``conflict_resolution.DRAFT_KEY``) — the arrangement, and the reason, that the
+    note operations already follow.
+
+    EVERY INPUT IS RESOLVED BEFORE THE PRECONDITION IS EVEN CHECKED, so a refused
+    request can never leave a partial act behind and a malformed body is a 422
+    whether or not the caller's validator happens to be current. The model's own
+    refusals are caught and returned as a typed 422 rather than escaping as a 500 —
+    ``complete.py`` once answered a wrong-typed structured value with a traceback
+    out of the truth core, and that is the shape this catch exists to refuse.
+    """
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does it,
+    # so a bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock window
+        if not isinstance(body, dict):
+            return _conflict_refusal(
+                "invalid_body", "The request body must be a JSON object."
+            )
+        refused = _unknown_conflict_keys(body)
+        if refused is not None:
+            return refused
+        outcome = body.get("outcome")
+        if outcome not in cr.RESOLUTION_OUTCOMES:
+            return _conflict_refusal(
+                "unknown_resolution_outcome",
+                (
+                    "`outcome` must be `resolved` — a person decided which of the "
+                    "competing answers is right — or `deferred` — a person looked "
+                    "and declined to decide, which is a recorded outcome and does "
+                    "not clear the conflict. There is no default: nothing here "
+                    "decides on a scientist's behalf."
+                ),
+                outcome=outcome if isinstance(outcome, str) else None,
+                allowed=list(cr.RESOLUTION_OUTCOMES),
+            )
+        if body.get("confirmed_by_user") is not True:
+            return _confirmation_required("record a decision about a conflict")
+
+        run_id = body.get("run_id")
+        if run_id is not None:
+            # A DECISION MAY NOT NAME A RUN THIS RECORD DOES NOT HAVE. A `422` and
+            # not a `404`, exactly as it is when capturing a note: the record was
+            # found, and what is wrong is one field of the body.
+            if not isinstance(run_id, str) or exp.get_run(run_id) is None:
+                return _conflict_refusal(
+                    "unknown_run",
+                    (
+                        "This record has no run with that id, so a decision cannot "
+                        "be recorded against it. Omit `run_id` to decide an address "
+                        "of the record itself — it is never inferred from the only "
+                        "run that happens to exist."
+                    ),
+                    run_id=run_id if isinstance(run_id, str) else None,
+                )
+        subject = exp.draft if run_id is None else exp.get_run(run_id).draft
+
+        address = body.get("address")
+        if not isinstance(address, str) or not address.strip():
+            return _conflict_refusal(
+                "invalid_address",
+                (
+                    "`address` must be the non-blank address of an entry this "
+                    "record describes, exactly as the conflict list reports it. "
+                    "Nothing was written."
+                ),
+            )
+        trail = {
+            str(entry.get("path")): entry
+            for entry in serialize.evidence_trail_from_draft(subject)
+        }
+        entry = trail.get(address)
+        if entry is None:
+            return _conflict_refusal(
+                "unknown_address",
+                (
+                    "This subject describes no entry at that address, so there is "
+                    "no disagreement there to decide. Addresses are reported by the "
+                    "conflict list; a run's own addresses and the record's are "
+                    "different sets, so check that `run_id` names the subject you "
+                    "mean. Nothing was written."
+                ),
+                address=address,
+            )
+        classified = {
+            result["field"]: result
+            for result in evidence_classify.classify_fields(subject)
+        }
+        classification = (classified.get(address) or {}).get("classification")
+        if classification != cr.CONFLICT_CLASSIFICATION:
+            return _conflict_refusal(
+                "address_not_conflicting",
+                (
+                    "This address is not currently in conflict — its evidence does "
+                    "not assert two different values — so there is nothing here for "
+                    "a decision to be about, and recording one would assert that a "
+                    "disagreement existed. Nothing was written."
+                ),
+                address=address,
+                classification=classification if isinstance(classification, str) else None,
+            )
+        competing = cr.competing_from_evidence(entry.get("evidence"))
+
+        chosen_value = body.get("chosen_value")
+        chosen_from = body.get("chosen_from")
+        rationale = body.get("rationale")
+        if rationale is not None and (
+            not isinstance(rationale, str) or not rationale.strip()
+        ):
+            return _conflict_refusal(
+                "invalid_rationale",
+                (
+                    "`rationale` must be a non-blank string when it is supplied. "
+                    "Absent is a meaning here — omit it rather than sending an "
+                    "empty string, which would be stored as though somebody had "
+                    "written a reason. Nothing was written."
+                ),
+            )
+        if rationale is not None and not _is_storable_value(
+            rationale, max_bytes=_MAX_NOTE_BYTES
+        ):
+            return _conflict_refusal(
+                "unrepresentable_value",
+                (
+                    "This rationale could not be stored intact — either it is "
+                    "larger than one may be, or it contains characters JSON cannot "
+                    "represent — so a record containing it could not be read back. "
+                    "It is REFUSED rather than shortened. Nothing was written."
+                ),
+            )
+
+        if outcome == cr.OUTCOME_RESOLVED:
+            if chosen_value is None:
+                return _conflict_refusal(
+                    "resolution_requires_chosen_value",
+                    (
+                        "A resolved conflict must record the value the scientist "
+                        "chose. Nothing here picks one, so a resolved outcome with "
+                        "no value would claim a decision nobody made. Send "
+                        "`outcome: \"deferred\"` to record that the conflict was "
+                        "looked at and left undecided. Nothing was written."
+                    ),
+                )
+            if chosen_from not in cr.CHOSEN_FROM_VALUES:
+                return _conflict_refusal(
+                    "unknown_chosen_from",
+                    (
+                        "`chosen_from` must be `candidate` — the value is one of "
+                        "the answers already recorded against this address — or "
+                        "`edited` — every recorded answer was wrong and this is a "
+                        "new value the scientist typed. They are different claims "
+                        "and neither is a default."
+                    ),
+                    chosen_from=chosen_from if isinstance(chosen_from, str) else None,
+                    allowed=list(cr.CHOSEN_FROM_VALUES),
+                )
+            if not _is_storable_value(chosen_value):
+                return _conflict_refusal(
+                    "unrepresentable_value",
+                    (
+                        "This value could not be stored intact — it is too large, "
+                        "too deeply nested, or contains something JSON cannot "
+                        "represent — so a record containing it could not be read "
+                        "back. It is REFUSED rather than reshaped. Nothing was "
+                        "written."
+                    ),
+                )
+            if (
+                chosen_from == cr.CHOSEN_FROM_CANDIDATE
+                and evidence_classify.canonical_answer(chosen_value) not in competing
+            ):
+                return _conflict_refusal(
+                    "chosen_value_not_a_candidate",
+                    (
+                        "`chosen_from` says the value is one of the answers already "
+                        "recorded against this address, and it is not one of them. A "
+                        "value nothing asserted is an `edited` decision; labelling "
+                        "it `candidate` would attribute it to a citation that does "
+                        "not carry it. Nothing was written."
+                    ),
+                    address=address,
+                    candidate_count=len(competing),
+                )
+        elif chosen_value is not None or chosen_from is not None:
+            return _conflict_refusal(
+                "deferred_carries_no_choice",
+                (
+                    "A deferred outcome records that nobody chose, so it carries "
+                    "neither a chosen value nor a `chosen_from`. Storing a choice "
+                    "under an outcome that says none was made would make the "
+                    "outcome unreadable. Nothing was written."
+                ),
+            )
+
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        at = _now_iso()
+        stored, _unreadable = cr.resolutions_from_draft(exp.draft)
+        existing = cr.find(stored, address, run_id)
+        try:
+            if existing is None:
+                resolution = cr.new_resolution(
+                    resolution_id=new_record_id(),
+                    address=address,
+                    outcome=outcome,
+                    competing_values=competing,
+                    recorded_utc=at,
+                    # THE ACTOR SEAM STAYS UNSET, and that is the honest answer
+                    # rather than a gap. This deployment establishes nobody: no
+                    # shipped verifier reads a request, and the trusted
+                    # authentication boundary that would make an arriving edge
+                    # identity worth anything has not been built. A subject beside
+                    # a recognised basis would be a name nothing vouched for, and
+                    # the model refuses that shape outright.
+                    trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+                    run_id=run_id,
+                    chosen_value=chosen_value,
+                    chosen_from=chosen_from,
+                    rationale=rationale,
+                )
+            else:
+                # REVISING APPENDS. The superseded value and the answer set it was
+                # chosen from are kept on the appended transition, so every version
+                # of the decision stays recoverable. `trust_basis` is deliberately
+                # not passed: whether this deployment could attribute the caller is
+                # not a change to the decision.
+                resolution = cr.revise_resolution(
+                    existing,
+                    at=at,
+                    outcome=outcome,
+                    competing_values=competing,
+                    chosen_value=chosen_value,
+                    chosen_from=chosen_from,
+                    rationale=rationale,
+                )
+        except cr.UnsupportedResolution as refusal:
+            # THE MODEL'S OWN REFUSALS REACH THE CLIENT AS A TYPED 422, NEVER A 500.
+            # The checks above cover every shape a client can send; this covers the
+            # ones only the model knows, so a malformed payload can never escape as
+            # a traceback.
+            return _conflict_refusal("unsupported_resolution", str(refusal))
+
+        cr.write_resolution(exp.draft, resolution)
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this decision was not stored
+        response.headers["ETag"] = exp.etag()
+        return {
+            "resolution": cr.resolution_view(resolution, competing),
+            "experiment_version": exp.version_token(),
+        }
 
 
 # --- 13. source preview -------------------------------------------------------
