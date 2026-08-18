@@ -129,6 +129,10 @@ export function RunCard({
   onCompare,
   comparing = false,
   compareFull = false,
+  onRemove,
+  removing = false,
+  removeError = null,
+  onReloadSection,
 }: {
   experimentId: string;
   run: ApiRunView;
@@ -163,10 +167,40 @@ export function RunCard({
   comparing?: boolean;
   /** True when two OTHER runs are already selected, so this one cannot be added. */
   compareFull?: boolean;
+  /**
+   * Remove this run from the record. Supplied by the LIST and by the focused view
+   * alike — unlike Focus and Compare, a reader who has isolated one run is exactly
+   * the reader most likely to want it gone, and withholding it there would make
+   * removal reachable only by first leaving the view they are in.
+   *
+   * IT IS OFFERED ONLY INSIDE THE EXPANDED CARD, and that is a safety decision
+   * rather than a layout one. A destructive control in the header row of fifty
+   * collapsed cards is one mis-click away from a run's contents; opening the run
+   * first is a step the reader takes deliberately, and it also means the values
+   * they are about to lose are on screen while they read the confirmation.
+   *
+   * Absent means the card renders no such control at all.
+   */
+  onRemove?: () => Promise<void>;
+  /** True while THIS card's removal request is in flight. */
+  removing?: boolean;
+  /**
+   * Why the last removal of this run was refused, in the server's own words.
+   *
+   * `stale` is the one failure a reader can act on without leaving the screen: the
+   * record moved, so re-reading this section and trying again is the whole remedy.
+   * It is a separate flag rather than a substring test on the message, because a
+   * screen must never decide what a failure was by reading prose.
+   */
+  removeError?: { message: string; stale: boolean } | null;
+  /** Re-read this section's first page. Rendered only for a `stale` refusal. */
+  onReloadSection?: () => void;
 }) {
   const baseId = useId();
   const headerId = `${baseId}-header`;
   const panelId = `${baseId}-panel`;
+  const removeId = `${baseId}-remove`;
+  const removeErrorId = `${baseId}-remove-error`;
 
   const autosave = useRunAutosave({
     experimentId,
@@ -215,6 +249,27 @@ export function RunCard({
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [check, setCheck] = useState<CheckState>({ status: 'idle' });
+  /** Whether the removal confirmation is open. Closed is the only initial state. */
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const removeTriggerRef = useRef<HTMLButtonElement>(null);
+  /*
+   * FOCUS RETURNS TO THE CONTROL THAT OPENED THE PANEL when the panel closes
+   * WITHOUT removing anything — the same rule `AssetReferencesPanel` follows for
+   * its three disclosures. It deliberately does NOT fire on a successful removal:
+   * the trigger is inside the card that is about to unmount, so focusing it would
+   * put the caret on an element that is leaving, and the section owns where focus
+   * goes next.
+   */
+  const returningFocus = useRef(false);
+  useEffect(() => {
+    if (confirmingRemove || !returningFocus.current) return;
+    returningFocus.current = false;
+    removeTriggerRef.current?.focus();
+  }, [confirmingRemove]);
+  const closeRemove = () => {
+    if (confirmingRemove) returningFocus.current = true;
+    setConfirmingRemove(false);
+  };
 
   // A refresh replaced the run wholesale, so the boxes must stop showing the
   // text the reader chose not to keep.
@@ -762,11 +817,121 @@ export function RunCard({
               {check.status === 'busy' ? 'Checking…' : 'Check Run'}
             </button>
             {/*
+              THE CONTROL IS WITHHELD FROM A RUN THAT CANNOT BE REMOVED, and the
+              reason is stated instead. This surface has a written rule against
+              offering a control whose only possible outcome is a refusal (see the
+              `RUN_FIELDS` note in this file's header, and `overridable` on the
+              inherited rows), and an exported run's removal can only ever be a
+              409. This is a DISCLOSURE, not the enforcement: the route refuses
+              such a request whatever this card renders.
+            */}
+            {onRemove && run.record_id === null && (
+              <button
+                ref={removeTriggerRef}
+                type="button"
+                className="btn btn-danger-quiet"
+                /*
+                  THE ACCESSIBLE NAME CARRIES THE RUN, exactly as Focus and Compare
+                  do: fifty cards each offering a control called "Remove Run" is
+                  fifty identically named controls in a screen reader's list. It
+                  CONTAINS the visible words, so WCAG 2.5.3 still holds and speech
+                  input still reaches it by saying "Remove". The visible word is one
+                  word for that reason: "Remove Run" is not a substring of "Remove
+                  run <label> from this record" — the case differs — and WCAG 2.5.3
+                  is about the LITERAL string a speech user says. `run-removal
+                  .test.tsx` failed on exactly that before this was one word.
+                */
+                aria-label={`Remove run ${run.label} from this record`}
+                aria-expanded={confirmingRemove}
+                aria-controls={confirmingRemove ? removeId : undefined}
+                disabled={removing}
+                onClick={() => (confirmingRemove ? closeRemove() : setConfirmingRemove(true))}
+              >
+                Remove
+              </button>
+            )}
+            {/*
               The save readout and Retry Save used to live here. They are at
               card level now — see the note above the header — because both of
               them have to work on a card the reader has collapsed.
             */}
           </div>
+
+          {onRemove && run.record_id !== null && (
+            <p className="run-card-remove-withheld">
+              This run has been exported to official record{' '}
+              <span className="mono">{run.record_id}</span>, so it cannot be removed.
+              That record and its evidence file are written and are never rewritten,
+              and the run is what keeps them claimed.
+            </p>
+          )}
+
+          {onRemove && confirmingRemove && run.record_id === null && (
+            <div className="run-card-remove" id={removeId}>
+              {/*
+                WHAT THE COPY MAY AND MAY NOT SAY. It names exactly what goes: the
+                run's own draft content. It must not say that an exported record, a
+                submitted revision or a submission is affected — none of them is, and
+                a run that has any of them cannot reach this panel at all. It must
+                not say a FILE is deleted: this application has never opened one.
+              */}
+              <p className="run-card-remove-text">
+                Removing <strong>{run.label}</strong> takes this run out of the record,
+                with the values it holds: the fields on this card, any record-level
+                value it overrides, and the files it cites. The record’s own values are
+                unchanged, no other run is changed, and the files themselves are not
+                touched — ISAAC has never opened them.
+              </p>
+              <p className="run-card-remove-text">
+                The other runs keep their numbers, so the numbering can end up with a
+                gap. This cannot be undone from this screen.
+              </p>
+              {removeError !== null && (
+                <div className="run-card-remove-failure" id={removeErrorId} role="alert">
+                  <TriangleAlert size={14} strokeWidth={2.2} aria-hidden="true" />
+                  <span>{removeError.message}</span>
+                  {removeError.stale && onReloadSection && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={onReloadSection}
+                    >
+                      Reload This Section
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="run-card-remove-actions">
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={removing}
+                  /*
+                    THE REFUSAL IS ASSOCIATED WITH THE CONTROL THAT CAUSED IT, so a
+                    screen reader moving to the button hears why the last attempt was
+                    refused rather than finding an unexplained control that did
+                    nothing.
+                  */
+                  aria-describedby={removeError !== null ? removeErrorId : undefined}
+                  onClick={() => {
+                    void onRemove().catch(() => {
+                      /* Refused. The panel stays open and renders the reason above. */
+                    });
+                  }}
+                >
+                  {removing ? 'Removing…' : 'Remove This Run'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={removing}
+                  onClick={closeRemove}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           <CheckResult check={check} />
         </div>

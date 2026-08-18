@@ -335,7 +335,19 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # is 47 + 4 + 1. This is the same shape as the a11y total that two branches each
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
-    assert checked == 56, f"expected 56 documented operations, found {checked}"
+    #
+    # 56 -> 57: `POST /api/experiments/{experiment_id}/runs/{run_id}/remove`. The
+    # Run API could add, read, edit and check a run and had no way to take one back
+    # out, so a run created by a mis-click was permanent. It is a sub-path POST
+    # rather than a DELETE for the reason every other removal here is; and it is a
+    # separate operation from the run PATCH rather than a `null` on it, because
+    # removing a run is a destructive act with its own confirmation and its own
+    # refusal for a run that has already been exported.
+    #
+    # MEASURED from `create_app().openapi()` on this branch after the change, not
+    # carried across from another one — see the note immediately above for why that
+    # distinction has already cost this file twice.
+    assert checked == 57, f"expected 57 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -592,6 +604,14 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/runs/{run_id}/overrides", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}/overrides/clear", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}/check", "post"): ["200", "401", "404", "422", "503"],
+    # Removing a run REWRITES THE RECORD — a run lives inside the record's document
+    # — so this carries the RECORD's `If-Match` and the whole 400/412/428 set with
+    # it, exactly as `POST .../runs` and `POST .../assets/{id}/remove` do. There is
+    # no DELETE: removal is a sub-path POST, the shape every other removal in this
+    # API uses. The `409` is its own refusal and appears on no other run operation:
+    # the run has been exported, so removing it would orphan a written official
+    # record, and it is refused with nothing written.
+    ("/api/experiments/{experiment_id}/runs/{run_id}/remove", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/source-preview", "get"): ["200", "400", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/validate", "post"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/warnings", "get"): ["200", "401", "404", "422", "503"],

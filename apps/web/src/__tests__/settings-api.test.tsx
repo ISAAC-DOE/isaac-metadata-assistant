@@ -1087,8 +1087,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 56 operations, 130 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(56);
+  it('describes the contract it claims to: 57 operations, 134 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(57);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1659,8 +1659,22 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //   . the splitPurpose paragraph rule over the array gives 60,399 / 130.
     //   . internal consistency: raw sum of `d.description.length` = 60,659; this figure
     //     drops the 130 `\n\n` separators, and 60,659 - 260 = 60,399.
-    expect(total).toBe(60399);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(130);
+    // 60,399 -> 62,301, 56 -> 57 operations, 130 -> 134 post-lead paragraphs: the
+    // backend now publishes `POST …/runs/{run_id}/remove`. The entry came out of
+    // `create_app().openapi()` — it was not hand-written — which is why
+    // `test_contract_description_parity.py` is green in both directions.
+    //
+    // RE-MEASURED OVER THE WHOLE ARRAY, not added to the previous figure, for the
+    // reason the 2026-08-16 note above records. Measured THREE ways, all agreeing:
+    //
+    //   . the splitPurpose paragraph rule over the array gives 62,301 / 134.
+    //   . internal consistency: raw sum of `d.description.length` = 62,569; this
+    //     figure drops the 134 `\n\n` separators, and 62,569 - 268 = 62,301.
+    //   . independently, the same rule transcribed into Python over
+    //     `create_app().openapi()`, restricted to the 57 operations this array
+    //     names, also gives 62,301 / 134.
+    expect(total).toBe(62301);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(134);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

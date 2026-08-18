@@ -614,9 +614,11 @@ describe('both render sites guard the run command at build time', () => {
  * HOW. Every per-record path in that module is a single-line template literal of the
  * form `` `/experiments/${enc(…)}…` ``, so those literals are collected and each is
  * required to be either the bare record path or a sub-read. Measured, and re-measured
- * when the Asset References reads and writes were added: 30 literals → 2 bare + 24
- * distinct sub-read suffixes → 17 distinct first segments. (Was 26 → 2 + 21 → 16; the
- * four new literals are `assets` twice — the list read and the create write share one
+ * when the run REMOVAL write was added: 31 literals → 2 bare + 25 distinct sub-read
+ * suffixes → 17 distinct first segments. (The one new literal is
+ * `runs/${…}/remove`; the segment count does not move, because `runs` was already a
+ * first segment. Before that, the Asset References reads and writes took it to
+ * 30 → 2 + 24 → 17, whose four new literals were `assets` twice — the list read and the create write share one
  * path, and the Set folds them into ONE suffix — plus `assets/${…}` and
  * `assets/${…}/remove`, and the segment count moves because `assets` is a first
  * segment nothing else used. Before that: 23 → 2 + 19 → 15, and the three literals
@@ -669,10 +671,15 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // An unexpected interior shape in one of these literals would silently shrink
     // both guards below — see the limits paragraph above for what this misses.
     expect(unclassifiedLiterals).toEqual([]);
-    expect(experimentPathLiterals.length).toBe(30);
+    expect(experimentPathLiterals.length).toBe(31);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(24);
+    expect(SUB_READ_SUFFIXES).toHaveLength(25);
     expect(SUB_READ_SEGMENTS).toHaveLength(17);
+    // The run REMOVAL write. It adds one literal and one suffix and moves NO
+    // segment count: `runs` was already a first segment, so the product word this
+    // panel uses for a failed read of it ("the measurement runs") already covers
+    // it and no new label is needed.
+    expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/remove');
     // Spot-check the two shapes that are easiest to derive wrongly.
     expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');
     expect(SUB_READ_SUFFIXES).toContain('source-preview?source=SEG-1');

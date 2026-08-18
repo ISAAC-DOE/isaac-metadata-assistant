@@ -57,6 +57,7 @@ import type {
   ApiRunCreated,
   ApiRunOverrideCleared,
   ApiRunOverrideResponse,
+  ApiRunRemoved,
   ApiRunResponse,
   ApiRunsResponse,
   ApiSchemaResponse,
@@ -1138,6 +1139,42 @@ export const api = {
       ...(runVersion ? { headers: { 'If-Match': `"${runVersion}"` } } : {}),
     });
     if (res.ok) return readJson<ApiRunOverrideCleared>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * Remove one run from a record.
+   *
+   * THE TOKEN IS THE RECORD's, NOT THE RUN's, and this is the third place in this
+   * module that trap has to be called out. A run lives inside the record's
+   * document, so removing one REWRITES THE RECORD — exactly as `createRun` does,
+   * and unlike `updateRun`/`setRunOverride`, which are addressed to the run.
+   *
+   * `confirmed_by_user: true` is sent unconditionally, and unlike the override
+   * writes that is safe here rather than a shortcut: this client has exactly one
+   * caller, the confirmation panel on the run's own card, and there is no path
+   * that reaches this function without a reader having confirmed. The server
+   * enforces it regardless (`422 confirmation_required`).
+   *
+   * A 409 means the run has been EXPORTED and was not removed; a 412 means the
+   * record moved and nothing was removed. `mutationError` attaches the parsed
+   * body, so the screen renders the server's own words rather than inventing a
+   * reason.
+   */
+  async removeRun(
+    experimentId: string,
+    runId: string,
+    opts: { experimentVersion: string },
+  ): Promise<ApiRunRemoved> {
+    const path = `/experiments/${enc(experimentId)}/runs/${enc(runId)}/remove`;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed_by_user: true }),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiRunRemoved>(res, path);
     throw await mutationError(res, path);
   },
 
