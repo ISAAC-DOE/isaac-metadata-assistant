@@ -1,5 +1,49 @@
 # Which fields belong to a Run, and which to the Experiment — the six that need a scientist
 
+> ## RE-MEASURED 2026-08-18 — one number in this packet went stale, and the QUESTION did not change
+>
+> Everything below was written on 2026-08-10. Re-measured today against `main`, and the only
+> material drift is that **the gap this packet described has CLOSED**:
+>
+> | Claim below | Then | **Now, measured** |
+> |---|---|---|
+> | Run fields the workspace OFFERS (`RUN_FIELDS`, `apps/web/src/lib/runFields.ts`) | three | **five** |
+> | Run fields the backend ACCEPTS (`RUN_WRITABLE_FIELD_PATHS`, derived in `apps/api/isaac_api/routes.py`) | five | **five** — unchanged |
+> | Experiment-level addresses a run may override (`EXPERIMENT_OVERRIDABLE_ADDRESSES`) | not stated | **15** |
+>
+> So *"the Run workspace works today on the three fields it offers, of the five the backend will
+> accept"* now reads **five of five**. The two sets are equal, and the offered set is:
+> `context.environment`, `context.temperature_K`, `context.thermodynamics.atmosphere`,
+> `timestamps.acquired_start_utc`, `timestamps.acquired_end_utc`.
+>
+> Commands, so the next reader re-measures rather than trusts this table:
+>
+> ```bash
+> grep -nE "^\s+path: '" apps/web/src/lib/runFields.ts | wc -l
+> PYTHONPATH=apps/api:src .venv/bin/python -c "import isaac_api.routes as r; print(len(r.RUN_WRITABLE_FIELD_PATHS), len(r.EXPERIMENT_OVERRIDABLE_ADDRESSES))"
+> ```
+>
+> **THE SIX FIELDS ARE STILL UNCLASSIFIED, VERIFIED RATHER THAN ASSUMED.**
+> `workspace.field_level()` returns `unclassified` for every one of them today:
+>
+> ```bash
+> PYTHONPATH=apps/api:src .venv/bin/python -c "
+> import isaac_api.workspace as ws
+> for f in ['system.configuration.detector_model','system.configuration.monochromator_crystal','system.configuration.spectrometer_geometry','system.configuration.n_scans','system.configuration.proposal_id','system.configuration.session_id']:
+>     print(f, '->', ws.field_level(f))"
+> ```
+>
+> That is the intended state: nothing has guessed a scope for them, and **nothing in the programme is
+> blocked on the answer.** Since 2026-08-10 the Run workspace has gained per-run overrides,
+> revert-to-inherited, server-authoritative overridability, paging, search/filter, asset references,
+> revision history, a submission lifecycle, safe Run removal, and explicit conflict resolution — all
+> **without** classifying any of the six. The cost of a wrong answer is therefore unchanged and the
+> question is unchanged; only the "three" is corrected.
+>
+> **The line-number citation `apps/web/src/lib/runFields.ts:80-100` is also stale** — `RUN_FIELDS`
+> now begins at `:87`. Cite the symbol, not the line, when re-reading.
+
+
 **Status:** open question for Angel (scientific) with Dean cc'd on the two that may be operational
 rather than scientific. **Nothing is blocked from shipping by this** — the Run workspace works today
 on the three fields it offers, of the five the backend will accept. What is blocked is *widening* it

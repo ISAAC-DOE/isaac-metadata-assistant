@@ -1087,12 +1087,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 64 operations, MEASURED after the merge', () => {
-    // Three slices raised this from 52 for real, different additions — the asset
-    // slice, the transcript slice, and the run-removal slice. Adding the deltas
-    // is how a merged counter goes wrong; the number here was read out of this
-    // test's own failure output after merging.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(64);
+  it('describes the contract it claims to: 66 operations, MEASURED on the merged tree', () => {
+    // FOUR slices have now raised this from 52 for real, different additions — the
+    // asset slice, the transcript slice, run removal, and the two CONFLICT
+    // RESOLUTION operations. Both sides of this merge conflict carried a number
+    // correct for its own branch and wrong for the merge; neither was kept.
+    // Re-measured on the merged tree by the paragraph rule transcribed into Python
+    // over `create_app().openapi()`.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(66);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1654,29 +1656,28 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // MEASURED AFTER THE MERGE, from the served document, and NOT by adding the
     // two branches' deltas.
     //
-    // RE-MEASURED OVER THE WHOLE ARRAY after the merge, not added to any previous
-    // figure, because that is the lesson the 2026-08-16 note above records. Three
-    // slices moved these figures from the same base for real, different reasons:
-    // the transcript slice publishes three operations, the asset slice four, and
-    // the run-removal slice one (`POST …/runs/{run_id}/remove`, whose entry came
-    // out of `create_app().openapi()` and was not hand-written, which is why
-    // `test_contract_description_parity.py` is green in both directions). No
-    // pre-merge figure is the merged one, and arithmetic on the set would have
-    // produced a wrong number — which this merge demonstrated again on a
-    // DIFFERENT counter in `backend-down-state.test.tsx`, where two branches wrote
-    // the same literal and git merged it with no conflict at all.
+    // RE-MEASURED OVER THE WHOLE ARRAY on the merged tree, not added to either
+    // side's figure — which is the lesson every note above this line records. Four
+    // slices have moved these numbers from the same base for real, different
+    // reasons, and both sides of this merge conflict held a number that was right
+    // for its own branch and wrong here.
     //
     // Measured THREE ways after the merge, all agreeing:
     //
-    //   . the splitPurpose paragraph rule over this array gives 74,091 / 162.
-    //   . internal consistency: raw sum of `d.description.length` = 74,415; this
-    //     figure drops the 162 `\n\n` separators, and 74,415 - 324 = 74,091.
+    //   . the splitPurpose paragraph rule over this array gives 79,892 / 172.
     //   . independently, the same rule transcribed into Python over
-    //     `create_app().openapi()` also gives 64 operations, 74,091 and 162 —
-    //     which additionally proves this captured array still matches the merged
-    //     backend rather than either pre-merge branch.
-    expect(total).toBe(74091);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(162);
+    //     `create_app().openapi()` gives 66 operations, 79,892 and 172 — which also
+    //     proves this captured array matches the served backend.
+    //
+    // 79,564 -> 79,892, paragraph count UNCHANGED at 172: the resolve operation's
+    // description was corrected after an independent review measured that its
+    // "re-submitting an identical decision is a no-op" claim is false once the
+    // competing set has moved (the same body is then a recorded RE-AFFIRMATION). The
+    // sentence gained `revise_resolution`'s own "and the same competing set" clause,
+    // which its wire copy had dropped. Re-measured, not adjusted by the length of
+    // the new text.
+    expect(total).toBe(79892);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(172);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

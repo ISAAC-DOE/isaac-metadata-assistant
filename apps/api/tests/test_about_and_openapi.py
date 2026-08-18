@@ -336,19 +336,18 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # raised by seven, and the fix is the same — the number is MEASURED from
     # `create_app().openapi()` after the merge, never carried across it.
     #
-    # MEASURED from `create_app().openapi()` on the MERGED tree, and the
-    # arithmetic is deliberately not shown, because doing the arithmetic is how
-    # this goes wrong. Three slices raised this literal from 52 for real,
-    # different additions — the asset slice, the transcript slice, and this one,
-    # which adds `POST /api/experiments/{experiment_id}/runs/{run_id}/remove`.
-    # Adding the deltas would give one number; measuring gives the true one.
+    # MEASURED from `create_app().openapi()` on the MERGED tree. The arithmetic is
+    # deliberately not shown, because doing the arithmetic is how this goes wrong:
+    # four slices have now raised this literal from 52 for real, different additions
+    # — the asset slice, the transcript slice, run removal
+    # (`POST .../runs/{run_id}/remove`), and this one, which adds the two CONFLICT
+    # RESOLUTION operations: read the disagreements a record's own evidence carries,
+    # and record which competing answer a scientist stands behind.
     #
-    # That new operation is a sub-path POST rather than a DELETE for the reason
-    # every other removal here is; and it is a separate operation from the run
-    # PATCH rather than a `null` on it, because removing a run is a destructive
-    # act with its own confirmation and its own refusal for a run that has
-    # already been exported.
-    assert checked == 64, f"expected 64 documented operations, found {checked}"
+    # Both sides of this merge conflict carried a number that was correct for its own
+    # branch and wrong for the merge. Neither was kept. `create_app().openapi()` is
+    # the authority and was re-run on the merged tree.
+    assert checked == 66, f"expected 66 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -598,6 +597,18 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/assets", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/assets/{asset_id}", "patch"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/assets/{asset_id}/remove", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    # CONFLICT RESOLUTION. The read is the only surface that shows a scientist the
+    # competing values, so it is a plain read with the record's `ETag`. Recording a
+    # decision REWRITES THE RECORD — one record-level list inside the experiment's
+    # own document holds run-scoped decisions too — so it carries the RECORD's
+    # `If-Match` and the whole 400/412/428 set with it, exactly as capturing a note
+    # does, and there is deliberately no separate validator for a decision. Its
+    # `422` covers the missing confirmation, an unknown or non-conflicting address,
+    # an unknown run, an unknown outcome or `chosen_from`, a `candidate` value that
+    # is none of the competing answers, and a wrong-typed body; on every one of them
+    # nothing is written. There is NO DELETE: a decision is revised, which appends.
+    ("/api/experiments/{experiment_id}/conflicts", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/conflicts/resolve", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],

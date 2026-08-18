@@ -103,7 +103,10 @@ describe('the Python source can actually be read', () => {
     // every parity assertion below vacuously true.
     expect(backendConstants().size).toBeGreaterThanOrEqual(12);
     expect(backendTuple('ORIGINS')).toHaveLength(8);
-    expect(backendTuple('REVIEW_STATES')).toHaveLength(4);
+    // 4 -> 5: the backend gained `resolved`, a conflict a person decided. MEASURED
+    // by reading the tuple out of the Python source, which is what this whole file
+    // does — the number is not maintained by hand on either side.
+    expect(backendTuple('REVIEW_STATES')).toHaveLength(5);
     expect(backendTuple('ORIGIN_PRECEDENCE')).toHaveLength(8);
     expect(Object.keys(backendTable('SOURCE_TYPE_ORIGIN'))).toHaveLength(7);
     expect(Object.keys(backendTable('NOTE_SOURCE_ORIGIN'))).toHaveLength(5);

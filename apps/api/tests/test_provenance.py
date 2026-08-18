@@ -46,12 +46,17 @@ MODULE_PATH = Path(provenance.__file__)
 ENTRY_KEYS = set(provenance.ENTRY_KEYS)
 
 
-def test_the_entry_shape_is_the_eight_documented_keys():
+def test_the_entry_shape_is_the_nine_documented_keys():
     """Pins the constant itself, so reading it above is not circular.
 
     `unavailable` was added after independent review found that a PARTIALLY
     unreadable payload reported `supported`. The wire shape had no slot to carry
     the disclosure, so no client could have reached a different verdict either.
+
+    `resolution_state` joined it with conflict resolution, for the SAME structural
+    reason: `review_state` reports `conflict` for an address with no decision and for
+    one whose decision has gone stale, so without this key no client could tell the
+    two apart — and only one of them has a superseded decision to show.
     """
     assert ENTRY_KEYS == {
         "address",
@@ -62,6 +67,7 @@ def test_the_entry_shape_is_the_eight_documented_keys():
         "inherited",
         "note_refs",
         "unavailable",
+        "resolution_state",
     }
 
 
@@ -103,6 +109,11 @@ def test_the_two_dimensions_are_the_declared_closed_vocabularies():
         "needs_review",
         "conflict",
         "unmapped",
+        # `resolved` is reachable ONLY through an explicit, confirmed, recorded
+        # decision (`conflict_resolution`) that still covers the exact competing set
+        # the conflict is about. It is not "the conflict went away" and not a claim
+        # about the field's value.
+        "resolved",
     )
     # No member of one dimension is a member of the other. If they ever overlapped,
     # a single string could not be read unambiguously as one axis or the other.
@@ -271,6 +282,11 @@ def test_review_state_takes_no_origin_parameter():
         "classification",
         "note_state",
         "unavailable",
+        # `resolution_state` says whether a PERSON recorded a decision about this
+        # address's conflicting evidence. Like `unavailable` it is a fact about the
+        # record's own stored content, not about where a value came from, so the
+        # invariant this test guards is untouched.
+        "resolution_state",
     }
     assert not {p for p in params if "origin" in p}
 
