@@ -1664,14 +1664,19 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //
     // Measured THREE ways after the merge, all agreeing:
     //
-    //   . the splitPurpose paragraph rule over this array gives 79,564 / 172.
-    //   . internal consistency: raw sum of `d.description.length` = 79,908; this
-    //     figure drops the 172 blank-line separators, and 79,908 - 344 = 79,564.
+    //   . the splitPurpose paragraph rule over this array gives 79,892 / 172.
     //   . independently, the same rule transcribed into Python over
-    //     `create_app().openapi()` gives 66 operations, 79,564 and 172 — which also
-    //     proves this captured array matches the MERGED backend rather than either
-    //     pre-merge branch.
-    expect(total).toBe(79564);
+    //     `create_app().openapi()` gives 66 operations, 79,892 and 172 — which also
+    //     proves this captured array matches the served backend.
+    //
+    // 79,564 -> 79,892, paragraph count UNCHANGED at 172: the resolve operation's
+    // description was corrected after an independent review measured that its
+    // "re-submitting an identical decision is a no-op" claim is false once the
+    // competing set has moved (the same body is then a recorded RE-AFFIRMATION). The
+    // sentence gained `revise_resolution`'s own "and the same competing set" clause,
+    // which its wire copy had dropped. Re-measured, not adjusted by the length of
+    // the new text.
+    expect(total).toBe(79892);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(172);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the

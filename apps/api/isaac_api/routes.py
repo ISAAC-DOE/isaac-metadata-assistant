@@ -10206,7 +10206,18 @@ def _conflict_payload(exp: Experiment, draft: dict, run: str | None) -> dict:
     ``conflict_resolution``'s module docstring for why the storage is not per-run.
     """
     readable, unreadable = cr.resolutions_from_draft(exp.draft)
-    report = cr.conflict_report(draft, resolutions=readable, run_id=run)
+    # The live run ids, so a decision whose run has been REMOVED is still reported at
+    # record scope rather than being reachable from nowhere. `remove_run` leaves the
+    # decision row in the draft on purpose (nothing here deletes one), and the run
+    # scope answers 404 for a run the record no longer has, so without this the row is
+    # invisible while sitting in the document. See `conflict_report`'s `live_run_ids`
+    # note for why it is flagged rather than folded in with the ordinary orphans.
+    report = cr.conflict_report(
+        draft,
+        resolutions=readable,
+        run_id=run,
+        live_run_ids=frozenset(r.id for r in exp.sorted_runs()),
+    )
     return {
         "experiment_id": exp.id,
         "run_id": run,
@@ -10365,8 +10376,12 @@ def get_conflicts(
         "REVISING AN EARLIER DECISION IS ALLOWED and never overwrites it silently: "
         "the act is appended to the decision's history together with the value it "
         "superseded and the set of answers that value was chosen from. "
-        "Re-submitting an identical decision is a no-op — no history entry, and the "
-        "record's revision does not move.\n\n"
+        "Re-submitting an identical decision OVER THE SAME COMPETING SET is a no-op "
+        "— no history entry, and the record's revision does not move. If new evidence "
+        "has arrived since, the same body is a RE-AFFIRMATION rather than a no-op: it "
+        "is recorded, carrying the digest of the set the earlier value was chosen "
+        "from, because standing behind a value again after the disagreement changed is "
+        "a different act from standing behind it the first time.\n\n"
         "An address this subject does not carry, an address that is not currently "
         "in conflict, a `chosen_from` of `candidate` whose value is none of the "
         "competing answers, a missing confirmation, a `resolved` outcome with no "

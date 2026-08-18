@@ -819,6 +819,43 @@ def write_resolution(draft: dict, resolution: ConflictResolution) -> None:
         ]
     else:
         kept = [*readable, resolution]
+
+    # UNREADABLE ROWS KEEP THEIR POSITIONS TOO, and an earlier version of this line
+    # did not give them that.
+    #
+    # It was `[entry.to_state() for entry in kept] + list(unreadable)`, which appends
+    # every unreadable row at the END unconditionally. So a document whose unreadable
+    # row sits FIRST was reordered on every write, and an identical re-submission
+    # rewrote the document and advanced the revision — the exact double-click audit
+    # row the paragraph above says this function's idempotence exists to prevent. The
+    # invariant was stated and then held only for the readable half; an independent
+    # review measured the gap (ETag `.2` -> `.3` on a byte-identical re-send).
+    #
+    # Rebuilt by walking the ORIGINAL stored list so every position is the one it was.
+    # Only reachable through a hand-edited document today, because no route produces
+    # an unreadable row — which is why it is a small fix and not a small matter: the
+    # whole point of preserving an unreadable row is that this build does not
+    # understand it, so it must not be moved either.
+    stored = draft.get(DRAFT_KEY) if isinstance(draft, dict) else None
+    if isinstance(stored, list) and unreadable:
+        rebuilt: list = []
+        replacements = iter(entry.to_state() for entry in kept)
+        for entry in stored:
+            if isinstance(entry, dict):
+                try:
+                    ConflictResolution.from_state(entry)
+                except (UnsupportedResolution, TypeError, ValueError, AttributeError):
+                    rebuilt.append(entry)  # unreadable — verbatim, in place
+                    continue
+                nxt = next(replacements, None)
+                if nxt is not None:
+                    rebuilt.append(nxt)
+                continue
+            rebuilt.append(entry)  # unreadable non-dict — verbatim, in place
+        # Anything left is a genuinely NEW decision, which belongs at the end.
+        rebuilt.extend(replacements)
+        draft[DRAFT_KEY] = rebuilt
+        return
     draft[DRAFT_KEY] = [entry.to_state() for entry in kept] + list(unreadable)
 
 
@@ -901,6 +938,18 @@ def _candidates(evidence: object) -> list[dict]:
     ``sources`` is delegated to ``evidence_classify``'s safe projection —
     ``{source_type, locator?}`` only, never a raw quote, an absolute path or a
     token-shaped blob.
+
+    **``evidence_count`` AND ``len(sources)`` CAN DISAGREE, AND THE SHAPE SAYS SO.**
+    The count is every entry asserting this value; the projection SKIPS an entry with
+    no ``source_type``, because there is nothing safe to name. So a candidate can read
+    ``evidence_count: 1`` with ``sources: []``, and a reader who assumed the two were
+    the same number would conclude a citation had been withheld.
+
+    ``uncited_evidence_count`` is emitted for exactly that reason — the difference,
+    stated rather than left to be inferred from two numbers that look like they should
+    match. The asymmetry is inherited from ``evidence_classify`` and is NOT corrected
+    here: changing that projection would move a shared safety boundary to improve one
+    surface's arithmetic, which is the wrong trade.
     """
     entries = evidence if isinstance(evidence, list) else []
     grouped: dict[str, dict] = {}
@@ -917,11 +966,18 @@ def _candidates(evidence: object) -> list[dict]:
                 "canonical": canonical,
                 "value": answer,
                 "evidence_count": 0,
+                "uncited_evidence_count": 0,
                 "sources": [],
             }
             grouped[canonical] = candidate
         candidate["evidence_count"] += 1
-        candidate["sources"].extend(evidence_classify.sources_for([item]))
+        safe = evidence_classify.sources_for([item])
+        if not safe:
+            # This entry asserts the value and names nothing safe to cite. Counted
+            # separately so `evidence_count` and `len(sources)` disagreeing is a
+            # DISCLOSED difference rather than an unexplained one.
+            candidate["uncited_evidence_count"] += 1
+        candidate["sources"].extend(safe)
     return [grouped[key] for key in sorted(grouped)]
 
 
@@ -930,6 +986,7 @@ def conflict_report(
     *,
     resolutions: Iterable[ConflictResolution],
     run_id: str | None,
+    live_run_ids: frozenset[str] | None = None,
 ) -> dict:
     """Every conflicting address in one draft, with what a person needs to decide.
 
@@ -1009,10 +1066,45 @@ def conflict_report(
             "run_id": resolution.run_id,
             "outcome": resolution.outcome,
             "resolution_id": resolution.resolution_id,
+            "orphaned_run": False,
         }
         for resolution in resolutions
         if resolution.run_id == run_id and resolution.address not in seen_addresses
     ]
+    # A DECISION WHOSE RUN IS GONE IS STILL A RECORDED HUMAN ACT, and it used to be
+    # reported by nobody.
+    #
+    # `remove_run` drops the run and leaves the decision row in the draft, by design:
+    # this module never deletes one. But the filter above matches `run_id == run_id`,
+    # so at RECORD scope (`run_id is None`) a run-scoped row was skipped, and the run
+    # scope answers 404 for a run the record no longer has. The row sat in the
+    # document, reachable from no surface — which is exactly the failure this module's
+    # own docstring refuses: "a read path that silently deletes a recorded human
+    # decision is worse than one that admits it could not read it."
+    #
+    # An independent review found it, and found the asymmetry that makes it a defect
+    # rather than a choice: `GET .../notes` lists `sorted_notes()` UNFILTERED by run,
+    # so an orphaned NOTE stays visible after the same removal. Two features, one
+    # storage model, opposite behaviour.
+    #
+    # `live_run_ids` is OPTIONAL and the behaviour without it is the old behaviour, so
+    # a caller that cannot cheaply enumerate runs is not forced to guess. When it IS
+    # supplied at record scope, a row naming a run that no longer exists is reported
+    # with `orphaned_run: True` — flagged rather than folded in, because "no conflict
+    # at this address" and "the run this belongs to is gone" are different facts and a
+    # client must be able to say which.
+    if run_id is None and live_run_ids is not None:
+        orphaned.extend(
+            {
+                "address": resolution.address,
+                "run_id": resolution.run_id,
+                "outcome": resolution.outcome,
+                "resolution_id": resolution.resolution_id,
+                "orphaned_run": True,
+            }
+            for resolution in resolutions
+            if resolution.run_id is not None and resolution.run_id not in live_run_ids
+        )
     return {
         "scope": CONFLICT_SCOPE,
         "conflicts": conflicts,

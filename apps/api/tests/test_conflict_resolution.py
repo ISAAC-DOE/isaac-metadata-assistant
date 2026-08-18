@@ -822,8 +822,65 @@ def test_a_decision_whose_address_stops_conflicting_is_reported_not_dropped(clie
             "run_id": run_id,
             "outcome": cr.OUTCOME_DEFERRED,
             "resolution_id": resolution["resolution_id"],
+            # The run still EXISTS here, so this is an ORDINARY orphan — no conflict
+            # at the address — rather than one whose run was removed. The flag keeps
+            # the two apart, and a test that ignored it would not notice them merging.
+            "orphaned_run": False,
         }
     ]
+
+
+def test_a_decision_whose_RUN_WAS_REMOVED_is_still_reported_at_record_scope(client):
+    """The gap an independent review found: reachable from no surface at all.
+
+    `remove_run` drops the run and LEAVES the decision row in the draft, on purpose —
+    nothing in this module deletes one. But `conflict_report` filtered orphans on
+    `run_id == run_id`, so at record scope a run-scoped row was skipped, and the run
+    scope answers 404 for a run the record no longer has. The recorded human act sat
+    in the document, reported by nobody.
+
+    The asymmetry is what made it a defect rather than a choice: `GET .../notes` lists
+    `sorted_notes()` unfiltered by run, so an orphaned NOTE survives the same removal
+    visibly. Two features, one storage model, opposite behaviour.
+
+    Note this exercises the REAL removal route, not a hand-edited document, so it is a
+    reachable state rather than a constructed one.
+    """
+    experiment_id = _experiment(client, {ADDRESS: _envelope("LiFePO4", "LiFePO3")})
+    run_id = _with_run(client, experiment_id, {ADDRESS: _envelope("LiFePO4", "LiMnPO4")})
+    resolution = _resolved(
+        client,
+        experiment_id,
+        address=ADDRESS,
+        run_id=run_id,
+        outcome=cr.OUTCOME_RESOLVED,
+        chosen_from=cr.CHOSEN_FROM_CANDIDATE,
+        chosen_value="LiFePO4",
+    )
+
+    removed = client.post(
+        f"/api/experiments/{experiment_id}/runs/{run_id}/remove",
+        json={"confirmed_by_user": True},
+        headers={"If-Match": _etag(client, experiment_id)},
+    )
+    assert removed.status_code == 200, removed.text
+
+    # The run scope is gone, and says so rather than inventing an empty answer.
+    assert client.get(
+        f"/api/experiments/{experiment_id}/conflicts", params={"run": run_id}
+    ).status_code == 404
+
+    # THE ASSERTION THAT WAS MISSING. The record scope reports it, flagged.
+    body = _listed(client, experiment_id)
+    orphans = body["resolutions_without_conflict"]
+    assert [o["resolution_id"] for o in orphans] == [resolution["resolution_id"]], orphans
+    assert orphans[0]["orphaned_run"] is True, orphans
+    assert orphans[0]["run_id"] == run_id, orphans
+
+    # And the row is genuinely still stored — reported, not resurrected for the read.
+    store = client_ws(client)
+    stored = store.load_experiment(experiment_id).draft[cr.DRAFT_KEY]
+    assert [row["resolution_id"] for row in stored] == [resolution["resolution_id"]]
 
 
 def test_a_stored_decision_this_build_cannot_read_is_counted_and_preserved(
@@ -838,11 +895,53 @@ def test_a_stored_decision_this_build_cannot_read_is_counted_and_preserved(
     body = _listed(client, experiment_id)
     assert body["unreadable_resolution_entries"] == 2
     assert _only(body)["resolution"] is None
-    # A later write preserves them verbatim, at the end.
+    # A later write preserves them verbatim AND IN PLACE.
+    #
+    # This assertion used to read `stored[-2:] == [...]`, i.e. it required them to be
+    # moved to the END — which was the behaviour, and was a defect: appending them
+    # unconditionally reordered the list on every write, so an identical
+    # re-submission on a document whose unreadable row sat first rewrote the document
+    # and advanced the revision. That is the double-click audit row `write_resolution`
+    # says its idempotence exists to prevent, and the invariant held only for the
+    # readable half. Inverted rather than deleted: position is now asserted.
     _resolved(client, experiment_id, address=ADDRESS, outcome=cr.OUTCOME_DEFERRED)
     stored = _stored(client, experiment_id)["draft"][cr.DRAFT_KEY]
-    assert stored[-2:] == [{"resolution_id": "x"}, "not even an object"]
+    assert stored[0] == {"resolution_id": "x"}, stored
+    assert stored[1] == "not even an object", stored
     assert _listed(client, experiment_id)["unreadable_resolution_entries"] == 2
+
+
+def test_an_identical_resubmission_does_not_move_the_revision_behind_an_unreadable_row(
+    client, experiment_id
+):
+    """The idempotence invariant, over the case that used to break it.
+
+    `write_resolution` promises that re-sending a byte-identical decision "changes
+    nothing". That held for readable rows and NOT for a document whose unreadable row
+    precedes them: the old tail-append reordered the list every write, so the ETag
+    advanced on a re-send. An independent review measured it as `.2` -> `.3`.
+    """
+    store = client_ws(client)
+    with store.record_lock(experiment_id):
+        exp = store.load_experiment(experiment_id)
+        exp.draft[cr.DRAFT_KEY] = ["an unreadable row that sits FIRST"]
+        exp.save_versioned()
+
+    body = {
+        "address": ADDRESS,
+        "outcome": cr.OUTCOME_RESOLVED,
+        "chosen_from": cr.CHOSEN_FROM_CANDIDATE,
+        "chosen_value": "LiFePO4",
+    }
+    _resolved(client, experiment_id, **body)
+    settled = _etag(client, experiment_id)
+
+    # Byte-identical re-send. A no-op must not produce an audit row.
+    _resolved(client, experiment_id, **body)
+    assert _etag(client, experiment_id) == settled, "an identical re-send moved the revision"
+
+    stored = _stored(client, experiment_id)["draft"][cr.DRAFT_KEY]
+    assert stored[0] == "an unreadable row that sits FIRST", stored
 
 
 # --- 5. preconditions and the race --------------------------------------------
@@ -1272,3 +1371,41 @@ def test_provenance_reports_a_decided_conflict_as_resolved_and_a_stale_one_as_co
     stale = entry_for(ADDRESS)
     assert stale["review_state"] == provenance.REVIEW_CONFLICT
     assert stale["resolution_state"] == cr.RESOLUTION_STALE
+
+
+def test_an_uncited_assertion_is_counted_separately_from_its_missing_citation(
+    client, experiment_id
+):
+    """`evidence_count` and `len(sources)` can differ, and the shape discloses it.
+
+    The count is every entry asserting the value; `evidence_classify.sources_for`
+    SKIPS an entry with no `source_type`, because there is nothing safe to name. A
+    reader who assumed the two numbers matched would conclude a citation had been
+    withheld. `uncited_evidence_count` states the difference.
+
+    The asymmetry is inherited from `evidence_classify` and is deliberately NOT fixed
+    there: moving a shared safety projection to improve one surface's arithmetic is
+    the wrong trade.
+    """
+    store = client_ws(client)
+    with store.record_lock(experiment_id):
+        exp = store.load_experiment(experiment_id)
+        entry = exp.draft["fields"][ADDRESS]
+        # A third assertion carrying an answer and NO source_type.
+        entry["evidence"] = [*entry["evidence"], {"answer": "LiCoO2"}]
+        exp.save_versioned()
+
+    candidates = {c["canonical"]: c for c in _only(_listed(client, experiment_id))["candidates"]}
+    uncited = [c for c in candidates.values() if c["value"] == "LiCoO2"]
+    assert len(uncited) == 1, candidates
+    candidate = uncited[0]
+    assert candidate["evidence_count"] == 1, candidate
+    assert candidate["sources"] == [], candidate
+    # THE DISCLOSURE. Without it the two figures above are irreconcilable.
+    assert candidate["uncited_evidence_count"] == 1, candidate
+
+    # ...and a candidate that IS cited reports zero uncited, so the field is not a
+    # constant.
+    cited = [c for c in candidates.values() if c["value"] != "LiCoO2"]
+    assert cited, candidates
+    assert all(c["uncited_evidence_count"] == 0 for c in cited), cited
