@@ -144,7 +144,7 @@ describe('S4 · summary-first edit of a confirmed field (P28.3)', () => {
 
     expect(
       await screen.findByText(
-        /This record changed elsewhere\. Nothing was applied — your input is kept\./,
+        /This record changed elsewhere\. Nothing was applied — what you typed is kept, including through Refresh\./,
       ),
     ).toBeInTheDocument();
     // no auto-merge: the editor is still mounted with the typed value preserved

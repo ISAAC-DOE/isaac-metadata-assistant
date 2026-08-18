@@ -513,7 +513,9 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
 
     // the honest conflict banner — nothing applied, input kept
     expect(
-      await findByText(/This record changed elsewhere\. Nothing was applied — your input is kept\./),
+      await findByText(
+        /This record changed elsewhere\. Nothing was applied — what you typed is kept, including through Refresh\./,
+      ),
     ).toBeInTheDocument();
     // the typed input is preserved (GuidedPrompt was not unmounted)
     expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
@@ -527,6 +529,20 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
     await findByText(NOTEBOOK_Q); // reloaded to a fresh LoadedCompletion
     const after = calls.filter((c) => c === 'GET /api/experiments/demo').length;
     expect(after).toBeGreaterThan(before);
+
+    /*
+     * AND THE INPUT SURVIVED THE REFRESH — the assertion this test was missing.
+     *
+     * It checked the field BEFORE the click and then only counted fetches, so the
+     * one thing the banner promises about the button beside it went unasserted. It
+     * was also false: `reload` sets `{status:'loading'}`, which unmounts
+     * `LoadedCompletion` and `GuidedPrompt` with it, so the field came back empty —
+     * after a banner that told the reader to press exactly that button.
+     *
+     * The staged text now lives in a ref on the parent, which the reload does not
+     * unmount, and is handed back through `initialValue`.
+     */
+    expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
   });
 
   it('export: a 412 shows the stale banner + Refresh and does NOT mark the record exported', async () => {

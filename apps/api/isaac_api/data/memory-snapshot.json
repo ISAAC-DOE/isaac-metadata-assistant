@@ -10340,7 +10340,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "5a7e5dc39797010a11a03bd4bad0ff5589284ed7cdd016d81dd92f3af1b15cba"
+        "sha256": "d61610a81b8250beefbafa01fd5c3fa84018dfc142f681084cda1ccb684d14d7"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "ca62f848f7e1d28f39d297f8cfde6d56a5b5cba1a31d88ff3563f69682ce44cd"
+        "sha256": "bbff974c0cfca80681c0a72496999f9b09d1b443806268de5f7d938e479d5d93"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "5c95024070bf688aa5af3326647123498bc6530362481f1236a4c6e3faa3703b"
+        "sha256": "aaf039a6fbefb1cc55ff041edfbc06b7d56d400f373ecd35ef8aa4c71ba55b9b"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "0b508d7ee00df3ca96eddf5bfef7e7db60ee1cb76fae4db3811275bc302ebef8"
+        "sha256": "2f80a4cddc6ed612411d635a7faa8b06be5a25c76658175bcab58e12798a46f7"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "f8a6b08f9d9440bea97d2ec9a67a558d3805838fa62c07fbcd0d1bcc6d7017c9"
+        "sha256": "3e2d8f80b71be93f5de17b6ea79dcd4b2db3bb5e2ba2d2b31bc1274d115a7d67"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "415c6eff2a5c784cbd5e39b769be7c96dcbd42cfa543923fed6dc9330e8d3554"
+    "served_manifest_fingerprint": "469af0dbc35c758825a832ed7d4096d3eaeb8f4f72e883cbfca86ebd08e92200"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -272,6 +272,15 @@ export interface AssistantAction {
 
 export interface AssistantMessage {
   text: string; // sentence case; never renders PASS/FAIL
+  /**
+   * Set by the session scrubber when it withheld this message's `text` from
+   * browser storage — because the text contained a credential, an absolute path,
+   * or a long hex digest. The text is genuinely gone (see
+   * `assistantSession.WITHHELD_TEXT_MARKER` for why it is dropped whole rather
+   * than partially redacted); this flag exists so the archived message renders as
+   * withheld instead of as an EMPTY bubble, which is what it did before.
+   */
+  textWithheld?: boolean;
   answeredFrom: AssistantSource;
   /**
    * P36V S-B — an OPTIONAL navigation action offered alongside this answer. It

@@ -348,7 +348,7 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
         // true, and still strong, statement is where it is written, how long it lives,
         // and what is stripped first — not that nothing is stored.
         label: 'Assistant Conversations',
-        text: 'Assistant conversations stay in the browser tab that created them, but they are not held only in memory: the transcript is written to sessionStorage in that tab, so it survives a page reload and is erased when the tab closes. It is never sent to a server, never logged, and never written to localStorage or IndexedDB. Only the most recent 40 messages are kept, and credentials, absolute file paths, long hex digests and record verdicts are stripped before anything is stored.',
+        text: 'Assistant conversations stay in the browser tab that created them, but they are not held only in memory: the transcript is written to sessionStorage in that tab, so it survives a page reload and is erased when the tab closes. It is never sent to a server, never logged, and never written to localStorage or IndexedDB. Only the most recent 40 messages are kept. Credentials, absolute file paths, long hex digests and record verdicts are removed before anything is stored — and "removed" means the whole message text is withheld, not that the offending fragment is snipped out of it: deciding where a file path ends cannot be done reliably, and a partial redaction that guesses wrong would leak. So a question or answer containing any of those is not stored at all, and the archived copy says so in place of the text. The answer you were given at the time is unaffected.',
       },
     },
     {
