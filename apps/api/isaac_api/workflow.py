@@ -123,3 +123,184 @@ def derive_workflow(
         "current_step": current_step,
         "record_rev": rev,
     }
+
+
+# ==============================================================================
+# THE SUBMISSION LIFECYCLE — a SECOND derivation, deliberately beside the first
+# ==============================================================================
+#
+# WHY IT IS NOT A SIXTH STEP OF `CANONICAL_ORDER`. The five steps above are one
+# ordered sequence through a single record's preparation, and every one of them is
+# a function of the record's own current signals. Submission is not: it is a
+# DECLARATION BY A PERSON, it lives in a different store, and — the part that
+# actually forces the split — it can be UNKNOWABLE. A deployment whose migrations
+# have not been applied cannot say whether a record was submitted, and there is no
+# honest value for a step state in that case. `blocked` would be false, `current`
+# would be false, and `completed` would be a lie. So the lifecycle is its own
+# object with its own explicit "known" bit, and `derive_workflow` above is
+# UNCHANGED — same signature, same five steps, same states, same callers.
+#
+# THE ONE RULE THIS FUNCTION EXISTS TO ENFORCE: **`submitted` IS NEVER DERIVED
+# FROM `exported`.** Export is a mechanical transform any caller can perform at any
+# time; submission is a person saying "this is finished, and I am the one saying
+# so". Treating an exported record as submitted would attribute a declaration
+# nobody made. The enforcement here is structural rather than a comment: this
+# function HAS NO `exported` PARAMETER, so no future edit inside it can reach for
+# one, and `test_revision_history` asserts the signature.
+
+#: The four lifecycle states, in the order a record passes through them.
+LIFECYCLE_ORDER: tuple[str, ...] = (
+    "draft",
+    "needs_review",
+    "ready_to_submit",
+    "submitted",
+)
+
+#: Title Case, canonical labels keyed by lifecycle state.
+LIFECYCLE_LABELS: dict[str, str] = {
+    "draft": "Draft",
+    "needs_review": "Needs Review",
+    "ready_to_submit": "Ready to Submit",
+    "submitted": "Submitted",
+}
+
+
+def derive_lifecycle(
+    *,
+    pending_count: int,
+    failing_unit_count: int,
+    submitted_known: bool,
+    submitted_for_current_content: bool | None,
+    submission_unknown_reason: str | None = None,
+) -> dict:
+    """Derive the submission lifecycle state. PURE — no I/O, no environment.
+
+    THE FOUR STATES, AND WHAT EACH ONE IS DERIVED FROM:
+
+    ``submitted``
+        A durable submitted revision exists **for the content signature of the record
+        as it is now**. Not "has ever been submitted": a record submitted and then
+        edited is no longer submitted *as it stands*, and saying otherwise would tell
+        a scientist their current draft is on record when it is not. Requires
+        ``submitted_known`` — see below.
+
+    ``ready_to_submit``
+        Every scientific hard blocker is resolved: no unanswered question
+        (``pending_count == 0``) and no export unit whose dry run refuses
+        (``failing_unit_count == 0``). Both numbers come from
+        ``submissions.blocker_report``, which is the ONE definition of what blocks a
+        submission; this function re-derives nothing and adds no fifth reason.
+
+    ``needs_review``
+        Every question has been answered and the record still does not pass
+        (``pending_count == 0`` and ``failing_unit_count > 0``). This is the state
+        where there is nothing left to *fill in* and something left to *look at*.
+
+    ``draft``
+        Anything else — which today means unanswered questions remain.
+
+    **WHAT `needs_review` DELIBERATELY IS NOT.** It is not "this record has
+    conflicting evidence". ``submissions.conflict_summary`` records conflicting
+    evidence and is documented as disclosed-never-gated, for a measured reason: a
+    scientist who answers a question, notices a typo and answers it again has
+    manufactured a conflict **no surface in this build can clear**. Labelling such a
+    record "Needs Review" would put it in a state it cannot leave, which is exactly
+    the trap that disclosure exists to avoid. Conflicts are reported beside the
+    lifecycle, not inside it.
+
+    **INFRASTRUCTURE NEVER DOWNGRADES SCIENTIFIC READINESS.** Whether this deployment
+    could actually record a submission — whether it has a database, whether it can
+    establish an attributable actor — is not an input to this function and must not
+    become one. A record that is scientifically ready reads ``ready_to_submit`` on a
+    deployment that can submit nothing at all; the reason it cannot is a separate,
+    separately-named fact that the caller attaches
+    (``routes._submission_deployment_block``). Merging the two would tell a scientist
+    their science is unfinished because an operator has not applied a migration.
+
+    ``submitted_known`` IS THE OTHER HALF OF THE SAME PRINCIPLE. When the history
+    cannot be read, ``submitted_for_current_content`` is ``None``, the state falls
+    back to the scientific derivation, and ``submission.known`` is ``False`` with a
+    reason. **It never falls back to "not submitted"**, because "we could not look"
+    and "we looked and found nothing" are different, and only one of them is
+    something this application observed.
+    """
+    blocked = pending_count > 0 or failing_unit_count > 0
+    reasons: list[dict] = []
+
+    if submitted_known and submitted_for_current_content:
+        state = "submitted"
+        reasons.append(
+            {
+                "code": "submitted_for_current_content",
+                "message": (
+                    "A submission is on record for exactly this content."
+                ),
+            }
+        )
+    elif not blocked:
+        state = "ready_to_submit"
+        reasons.append(
+            {
+                "code": "no_scientific_blockers",
+                "message": (
+                    "Every question is answered and every unit passes the export "
+                    "gate."
+                ),
+            }
+        )
+    elif pending_count == 0:
+        state = "needs_review"
+        reasons.append(
+            {
+                "code": "units_fail_the_export_gate",
+                "message": (
+                    f"Every question is answered and {failing_unit_count} unit"
+                    f"{'' if failing_unit_count == 1 else 's'} still do not pass "
+                    "the export gate."
+                ),
+            }
+        )
+    else:
+        state = "draft"
+        reasons.append(
+            {
+                "code": "questions_unanswered",
+                "message": (
+                    f"{pending_count} question{'' if pending_count == 1 else 's'} "
+                    "the system refused to guess are still unanswered."
+                ),
+            }
+        )
+
+    if not submitted_known:
+        # DISCLOSED ON EVERY STATE, not only on the ones a reader might doubt. A
+        # record reading `ready_to_submit` on a deployment that cannot see its own
+        # history might already be submitted; saying so is the whole point.
+        reasons.append(
+            {
+                "code": "submission_state_unknown",
+                "message": (
+                    "This deployment could not read the submission history, so "
+                    "whether this content has already been submitted is unknown "
+                    "rather than no."
+                ),
+            }
+        )
+
+    return {
+        "state": state,
+        "label": LIFECYCLE_LABELS[state],
+        "reasons": reasons,
+        "scientific_readiness": {
+            "blocked": blocked,
+            "pending_count": pending_count,
+            "failing_unit_count": failing_unit_count,
+        },
+        "submission": {
+            "known": submitted_known,
+            "submitted_for_current_content": (
+                bool(submitted_for_current_content) if submitted_known else None
+            ),
+            "unknown_reason": None if submitted_known else submission_unknown_reason,
+        },
+    }
