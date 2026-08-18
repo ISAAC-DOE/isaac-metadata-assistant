@@ -730,7 +730,11 @@ export function demoStepsToStages(steps: ApiDemoStep[]): RunnerStage[] {
     key: s.name,
     label: titleCase(s.name.replace(/_/g, ' ')),
     command: s.name,
-    state: s.ok ? 'done' : 'current',
+    // `failed`, NOT `current`. `current` was collapsed into `done` by StagedRunner
+    // and rendered with the success check mark, so a step the server reported as
+    // `ok: false` was presented as passing beside its own failure detail. The API
+    // gives exactly one signal here — `ok` — and it now survives to the render.
+    state: s.ok ? 'done' : 'failed',
     detail: s.detail,
   }));
 }
