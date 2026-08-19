@@ -1,4 +1,22 @@
 /*
+ * WHY THIS FILE USES `--text-muted` AND NOT `--text-tertiary`.
+ *
+ * CI caught a real regression on this panel's first CI run: `color-contrast` GREW by
+ * +2 nodes on the Evidence screen at desktop-1280x800 AND at 390px. The cause was
+ * `--text-tertiary` (#78838f), which is **3.86:1 on white — below the 4.5:1 AA
+ * threshold** — used at 11–12px for the small explanatory labels this panel is full of.
+ *
+ * This repository has already been here once. The a11y baseline notes record
+ * `.onramp-tagline` failing for exactly this reason, and the remedy applied then was
+ * the same one applied here: `--text-muted` (#5b6570), which measures **5.93:1**.
+ * Ratios computed, not assumed.
+ *
+ * THE BASELINE WAS NOT RAISED. The standing rule is that a baseline number is never
+ * moved because CI asked for it — a contrast failure is a defect in the colour, and
+ * raising the count would have admitted two new violations permanently. Do not
+ * reintroduce `--text-tertiary` on a small label here.
+ */
+/*
  * Conflicting Evidence panel.
  *
  * NO VERDICT HUE ANYWHERE IN THIS FILE. `--pass-*` and `--fail-*` are declared
@@ -42,7 +60,7 @@
 .conflicts-sub {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   line-height: 1.5;
   max-width: 68ch;
 }
@@ -82,7 +100,7 @@
 .conflicts-loading,
 .conflicts-empty {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   line-height: 1.55;
   max-width: 72ch;
 }
@@ -120,7 +138,7 @@
 }
 .conflicts-down-detail {
   margin: 6px 0 8px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .conflicts-list {
@@ -151,7 +169,7 @@
 }
 .conflict-scope {
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 /* The state chip. Its TEXT is the signal; the palette only reinforces it. */
@@ -179,7 +197,7 @@
   max-width: 78ch;
 }
 .conflict-explanation {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .conflict-choice {
@@ -197,7 +215,7 @@
 .conflict-choice-note {
   font-size: 11.5px;
   line-height: 1.5;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   max-width: 76ch;
 }
 
@@ -242,7 +260,7 @@
 .conflict-candidate-meta {
   grid-column: 2;
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   line-height: 1.5;
   max-width: 74ch;
 }
@@ -260,7 +278,7 @@
 .conflict-locator {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .conflict-edited {
@@ -367,7 +385,7 @@
   margin-top: 8px;
   font-size: 11.5px;
   line-height: 1.5;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   max-width: 76ch;
 }
 .conflict-history-title {
@@ -390,7 +408,7 @@
 }
 .conflict-history-at {
   font-family: var(--font-mono);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 @media (max-width: 640px) {
