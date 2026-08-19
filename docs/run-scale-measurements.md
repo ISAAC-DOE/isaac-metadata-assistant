@@ -1,5 +1,62 @@
 # High-run-count: the measured envelope, and what it rules out
 
+> ## RE-MEASURED 2026-08-19 — THE HEADLINE PER-RUN FIGURE IS 1.76× WHAT THIS DOCUMENT SAYS
+>
+> Everything below was measured on or before **2026-08-12**. Since then the run payload has grown:
+> asset references, unified provenance, unmapped notes, revision history, transcript capture, run
+> removal and conflict resolution all landed. The programme plan warned about exactly this — *"do not
+> reuse old Run-scale numbers as final proof"* — so the per-run payload was re-measured.
+>
+> | | This document | **Re-measured 2026-08-19** | Change |
+> |---|---|---|---|
+> | Unpaged payload per run | ≈7.47 KiB | **13.12 KiB** | **×1.76** |
+> | `limit=50` response | 374 KiB *(asserted, no reproduction path)* | **656 KiB** | ×1.75 |
+> | Implied unpaged at 1000 runs | 7.47 MiB | **≈12.8 MiB** | ×1.76 |
+>
+> **The per-run cost is exactly linear**, which is what makes the extrapolation safe to state: 328.1
+> KiB at 25 runs, 1312.2 KiB at 100, 3280.7 KiB at 250 — 13.12 KiB/run at all three, to two decimal
+> places. So the *shape* of the finding below is unchanged and its conclusion still holds: the cost is
+> in the DATA, not the rendering, and bounding the data is the answer. Only the constants moved.
+>
+> **Reproduce it — and note this path is more reproducible than the paging figures below**, which this
+> document already admits are asserted rather than harness output. This needs no browser and no
+> Playwright config:
+>
+> ```bash
+> PYTHONPATH=apps/api:src .venv/bin/python - <<'EOF'
+> import os, tempfile, copy
+> os.environ['ISAAC_UI_WORKSPACE'] = tempfile.mkdtemp()
+> from isaac_api.app import create_app
+> import isaac_api.workspace as ws
+> from fastapi.testclient import TestClient
+> c = TestClient(create_app(), raise_server_exceptions=False)
+> EID = '01SCALEPROBE00000000000001'
+> exp = ws.create_experiment('scale probe', {'kind': 'synthetic'},
+>                            copy.deepcopy(ws._full_draft()), id=EID)
+> draft = copy.deepcopy(exp.draft)
+> for n in (25, 100, 250):
+>     while len(exp.sorted_runs()) < n:
+>         exp.add_run(label=f'run {len(exp.sorted_runs())+1}', draft=copy.deepcopy(draft))
+>     exp.save_versioned()
+>     b = len(c.get(f'/api/experiments/{EID}/runs').content)
+>     print(f'{n:>4} runs  {b/1024:8.1f} KiB  {b/n/1024:6.2f} KiB/run')
+> print('limit=50:', len(c.get(f'/api/experiments/{EID}/runs',
+>                              params={'limit': 50}).content) / 1024, 'KiB')
+> EOF
+> ```
+>
+> **WHAT THIS RE-MEASUREMENT DOES NOT COVER, stated so the table is not over-read.** It measures the
+> API payload only — the thing this document identifies as where the cost lives. It does **not**
+> re-measure DOM node counts, initial browser load, long tasks, search/filter responsiveness or
+> Focus Run, all of which are below and all of which are now equally stale. Those need the browser
+> benchmark (`npm run bench:runs`, with `E2E_BENCH_COUNTS` for the 1000 row), which was not re-run.
+> **Do not quote the browser-side figures below as current.**
+>
+> **THE TESTED CEILING IS THEREFORE NOT RE-ESTABLISHED.** This document's ceiling claim rests on a
+> 1000-run browser run that has not been repeated since the payload grew by 76%. Treat the ceiling as
+> **unverified at the current data model** rather than as measured.
+
+
 **Status: measurement complete; it changed the plan.** Virtualization/windowing is the reflexive
 answer to "the run list is long". **These measurements rule it out** — rendering is not where the
 cost is — and point at bounding the *data* instead.
