@@ -1,0 +1,407 @@
+/*
+ * Conflicting Evidence panel.
+ *
+ * NO VERDICT HUE ANYWHERE IN THIS FILE. `--pass-*` and `--fail-*` are declared
+ * under "signal 1 — validation verdict (RESERVED, hard gate)" in styles/tokens.css,
+ * and this axis decides nothing about validity: a conflict blocks neither export
+ * nor submission, and a recorded decision is not a pass. `.dot-progress`'s comment
+ * in styles/base.css records what happens when that boundary is crossed — a
+ * workflow dot painted with `--pass-solid` claimed a PASS it had no authority to
+ * claim.
+ *
+ * So the two states use the palettes that already mean what is needed here:
+ *
+ *   DECIDED   → `--confirmed-*`, the WARM TAN "human motif" the field-evidence
+ *               chips already use for a human confirmation. A recorded decision is
+ *               exactly that: a person's, not the system's.
+ *   UNRESOLVED→ `--needsyou-*` (the amber "needs you" chip palette), which is
+ *               already this app's non-gating "a person has something to do here".
+ *
+ * COLOUR IS NEVER THE SIGNAL. Every state carries its own words in the chip AND a
+ * full sentence beneath it (`.conflict-standing`), so `absent`, `stale` and
+ * `deferred` read as unresolved with the stylesheet switched off.
+ *
+ * The panel matches `.csv-recon`'s 24px horizontal inset so the evidence-screen
+ * stack lines up (see the equality asserted in evidence-hierarchy.test.tsx between
+ * `.main-inset` and the panel inset).
+ */
+
+.conflicts {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.conflicts-head {
+  margin-bottom: 14px;
+}
+.conflicts-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.conflicts-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  max-width: 68ch;
+}
+
+.conflicts-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+.conflicts-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.conflicts-control-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-slate);
+}
+.conflicts-scope {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  max-width: 100%;
+}
+.conflicts-count {
+  font-size: 12px;
+  color: var(--text-slate);
+}
+
+.conflicts-loading,
+.conflicts-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+  max-width: 72ch;
+}
+
+.conflicts-disclosure {
+  margin: 8px 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-inner);
+  max-width: 78ch;
+}
+.conflicts-orphans {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+.conflicts-orphans li {
+  margin-top: 3px;
+}
+
+.conflicts-down {
+  margin: 8px 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-inner);
+  max-width: 78ch;
+}
+.conflicts-down-detail {
+  margin: 6px 0 8px;
+  color: var(--text-tertiary);
+}
+
+.conflicts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.conflict {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.conflict-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.conflict-address {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.conflict-scope {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* The state chip. Its TEXT is the signal; the palette only reinforces it. */
+.conflict-state {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--needsyou-border);
+  background: var(--needsyou-bg);
+  color: var(--needsyou-text);
+}
+.conflict-state[data-decided='yes'] {
+  border-color: var(--confirmed-border);
+  background: var(--confirmed-bg);
+  color: var(--confirmed-text);
+}
+
+.conflict-standing,
+.conflict-explanation {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 78ch;
+}
+.conflict-explanation {
+  color: var(--text-tertiary);
+}
+
+.conflict-choice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+.conflict-choice-legend {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  padding: 0 4px;
+}
+.conflict-choice-note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  max-width: 76ch;
+}
+
+.conflict-candidate {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 4px;
+  margin-top: 10px;
+}
+/*
+ * THE NATIVE RADIOS AND THE CONFIRM CHECKBOX, PAINTED EXPLICITLY.
+ *
+ * Left at `accent-color: auto` a native control paints itself in the VIEWER'S OS
+ * accent, which is crimson in a default Chromium — and `--fail-*` is reserved for
+ * the validation verdict, so an unresolved conflict's radios would render as a
+ * failure marker the design system never authorised, differently on every machine.
+ * `--action` for the reason `assets.css`, `runs.css` and `run-compare.css` each
+ * give: it is the app's neutral "you may act here" blue and carries no verdict.
+ * `native-control-accent.test.ts` requires every file rendering one to be covered.
+ */
+.conflict-candidate input[type='radio'],
+.conflict-confirm input[type='checkbox'] {
+  accent-color: var(--action);
+}
+
+.conflict-candidate input[type='radio'] {
+  grid-column: 1;
+  margin: 0;
+}
+.conflict-candidate-label {
+  grid-column: 2;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+.conflict-candidate-value {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.conflict-candidate-meta {
+  grid-column: 2;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  max-width: 74ch;
+}
+.conflict-sources {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.conflict-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.conflict-locator {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.conflict-edited {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.conflict-edited-input {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  max-width: 46ch;
+  width: 100%;
+}
+
+.conflict-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+.conflict-rationale {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  max-width: 62ch;
+  width: 100%;
+  resize: vertical;
+}
+
+.conflict-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  max-width: 74ch;
+}
+.conflict-confirm label {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.conflict-failure {
+  margin-top: 12px;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.55;
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--advisory-border);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+  max-width: 78ch;
+}
+.conflict-failure-code {
+  margin-top: 5px;
+  color: var(--text-secondary);
+}
+
+.conflict-submit {
+  margin-top: 12px;
+}
+
+.conflict-decision {
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--confirmed-border);
+  background: var(--confirmed-bg);
+  border-radius: var(--radius-inner);
+}
+.conflict-decision-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--confirmed-text);
+}
+.conflict-decision-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.conflict-decision-list dt {
+  font-weight: 600;
+  color: var(--text-slate);
+}
+.conflict-decision-list dd {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.conflict-decision-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  max-width: 76ch;
+}
+.conflict-history-title {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-slate);
+}
+.conflict-history {
+  margin: 5px 0 0;
+  padding-left: 18px;
+  list-style: decimal;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 78ch;
+}
+.conflict-history li {
+  margin-top: 3px;
+}
+.conflict-history-at {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 640px) {
+  .conflicts {
+    padding: 16px 14px;
+  }
+  .conflict-decision-list {
+    grid-template-columns: 1fr;
+    row-gap: 2px;
+  }
+  .conflict-decision-list dd {
+    margin-bottom: 6px;
+  }
+}

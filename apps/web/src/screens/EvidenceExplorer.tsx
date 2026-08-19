@@ -6,6 +6,7 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
 import { EvidenceClassificationPanel } from '../components/EvidenceClassificationPanel';
+import { ConflictResolutionPanel } from '../components/ConflictResolutionPanel';
 import { CsvReconcilePanel } from '../components/CsvReconcilePanel';
 import { SourcePreview } from '../components/SourcePreview';
 import { AssistantPanel } from '../components/AssistantPanel';
@@ -372,6 +373,20 @@ function LoadedEvidence({
         stale={classificationStale}
         onRefresh={onManualRefresh}
       />
+      {/*
+        DIRECTLY BELOW EVIDENCE SUPPORT, and that placement is the point.
+        `EvidenceClassificationPanel`'s guidance for `conflicting_evidence` tells a
+        reader to review the competing sources and record which one is right — an
+        instruction that had no control behind it anywhere in this build. This is
+        that control, one section below the sentence that sends a reader looking
+        for it.
+
+        NOT on Validate & Review, which was the other candidate. That surface's own
+        header states, and its tests pin, that "NOTHING HERE SUBMITS ANYTHING,
+        EXPORTS ANYTHING, OR REPAIRS ANYTHING — every control is a read"; mounting a
+        write there would falsify a documented invariant to save a screen.
+      */}
+      <ConflictResolutionPanel experimentId={id} />
       <CsvReconcilePanel
         experimentId={id}
         version={detail.version}
