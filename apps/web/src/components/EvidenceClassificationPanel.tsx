@@ -53,7 +53,24 @@ const CLASS_GUIDANCE: Record<EvidenceClass, { meaning: string; next: string }> =
   conflicting_evidence: {
     meaning:
       'Two or more evidence entries assert incompatible values. A person must decide which is correct.',
-    next: 'Review the conflicting sources and resolve them before export.',
+    /*
+     * TWO THINGS WERE WRONG WITH THE SENTENCE THIS REPLACES, and only one of them
+     * was the missing control.
+     *
+     * It read "Review the conflicting sources and resolve them before export."
+     * There was no surface in this build that could resolve anything — the backend
+     * shipped and no screen called it — so the instruction named an act a reader
+     * could not perform. That half is fixed by Conflicting Evidence below.
+     *
+     * The other half is that "before export" asserted a GATE THAT DOES NOT EXIST.
+     * `POST .../submit`'s own contract says evidence conflicts "are reported, not
+     * blocked on", because correcting an answer appends a second confirmation
+     * rather than replacing the first, so blocking "would refuse a record forever
+     * for the act of fixing a typo". Naming export here made a non-gating axis read
+     * as a gate on the one panel whose header says it "never decides whether this
+     * record can be exported".
+     */
+    next: 'Open Conflicting Evidence below: it shows every competing answer with its citations, and lets you record which one you stand behind. That decision does not change the field’s value, and a conflict blocks neither export nor submission.',
   },
   unknown: {
     meaning: 'There is no defensible value and no supporting evidence.',
