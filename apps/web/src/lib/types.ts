@@ -2081,6 +2081,195 @@ export interface ApiNoteReviewed {
 }
 
 /* --------------------------------------------------------------------------
+ * Evidence conflicts, and the ONE recorded human decision about each.
+ *
+ * `GET /experiments/{id}/conflicts` and `POST .../conflicts/resolve`. Every shape
+ * here is the server's, transcribed from `apps/api/isaac_api/conflict_resolution.py`
+ * and the two route handlers; nothing in this block is computed on this side.
+ *
+ * THE ONE THING A READER OF THESE TYPES MUST NOT INFER. A resolution is a record
+ * of WHICH competing answer a person stands behind. It is NOT the field's value,
+ * NOT an evidence entry, and recording one changes no scientific content — the
+ * backend states this in three places and serialises `is_field_value` and
+ * `is_evidence` on the wire so the guarantee survives the boundary. They are typed
+ * as the literal `false` below so no code on this side can branch on either being
+ * true.
+ * ------------------------------------------------------------------------ */
+
+/** `resolved` — a person chose. `deferred` — a person looked and declined to. */
+export type ApiResolutionOutcome = 'resolved' | 'deferred';
+
+/**
+ * Whether the chosen value was one of the recorded answers or a new one.
+ *
+ * The two are DIFFERENT CLAIMS and the backend refuses to collapse them: "I picked
+ * the second citation" and "all the citations are wrong and the value is this" are
+ * not the same statement, and a value nothing asserted cannot be labelled
+ * `candidate`.
+ */
+export type ApiResolutionChosenFrom = 'candidate' | 'edited';
+
+/**
+ * The four derived states. ONLY `current` clears a conflict.
+ *
+ * `stale` is a `resolved` decision made over a DIFFERENT set of competing answers —
+ * more competing evidence has arrived since — so the address is conflicting again
+ * and the superseded decision is kept and disclosed rather than deleted.
+ * `deferred` leaves the conflict standing by definition.
+ */
+export type ApiResolutionState = 'absent' | 'current' | 'stale' | 'deferred';
+
+/** The safe source projection: a type, and a locator when there is a safe one. */
+export interface ApiConflictSource {
+  source_type: string;
+  locator?: string;
+}
+
+/**
+ * One competing answer, WITH the citations that assert it.
+ *
+ * Grouped by value rather than listed per evidence entry, because the conflict
+ * rule counts DISTINCT answers: two citations asserting the same value are one
+ * candidate, and listing them twice would show a scientist a choice between
+ * identical options.
+ *
+ * `evidence_count` AND `sources.length` CAN DISAGREE, and that is disclosed rather
+ * than hidden. The safe projection skips an entry with no `source_type` — there is
+ * nothing safe to name — so a candidate can read `evidence_count: 1` with
+ * `sources: []`. `uncited_evidence_count` is exactly that difference, stated, so a
+ * reader never concludes a citation was withheld.
+ */
+export interface ApiConflictCandidate {
+  /** The stable text the conflict rule compares. Not for display. */
+  canonical: string;
+  /** The answer as it is stored. Send THIS back as `chosen_value` for a candidate. */
+  value: unknown;
+  evidence_count: number;
+  uncited_evidence_count: number;
+  sources: ApiConflictSource[];
+}
+
+/** One act in a decision's life. Appended, never rewritten. */
+export interface ApiResolutionTransition {
+  action: 'record' | 'revise';
+  at: string;
+  /** The outcome before this act. `null` only for the opening `record`. */
+  from_outcome: ApiResolutionOutcome | null;
+  to_outcome: ApiResolutionOutcome;
+  /** What a revision superseded, so no decision is lost. */
+  superseded_chosen_value: unknown;
+  /** The competing set that superseded value was chosen from. */
+  superseded_competing_digest: string | null;
+}
+
+/** One recorded decision, with its whole history and its DERIVED state. */
+export interface ApiConflictResolution {
+  resolution_id: string;
+  address: string;
+  run_id: string | null;
+  outcome: ApiResolutionOutcome;
+  /** `null` for `deferred`, which carries no choice at all. */
+  chosen_value: unknown;
+  chosen_from: ApiResolutionChosenFrom | null;
+  /** The competing answers AT THE MOMENT OF THE DECISION, canonicalised. */
+  competing_values: string[];
+  competing_digest: string;
+  rationale: string | null;
+  /** The canonical username when a trusted boundary established one, else `null`. */
+  subject: string | null;
+  trust_basis: string;
+  recorded_utc: string;
+  history: ApiResolutionTransition[];
+  /** Always `false`. Typed as the literal so nothing can branch on it being true. */
+  is_field_value: false;
+  /** Always `false`. A decision about citations is not itself a citation. */
+  is_evidence: false;
+  /** DERIVED on every read against the address's CURRENT competing set. */
+  state: ApiResolutionState;
+  stale: boolean;
+  attributed: boolean;
+}
+
+/**
+ * One conflicting address.
+ *
+ * AN ALREADY-DECIDED ADDRESS IS STILL LISTED. Nothing in this API removes an
+ * evidence entry, so the competing citations remain stored forever and the address
+ * goes on classifying as conflicting; hiding it would hide the decision along with
+ * the disagreement. `resolution_state` is what a reader branches on, never the
+ * absence of a row.
+ */
+export interface ApiConflict {
+  address: string;
+  /** `null` when the address belongs to the record's own fields. */
+  run_id: string | null;
+  candidates: ApiConflictCandidate[];
+  distinct_value_count: number;
+  evidence_count: number;
+  /** This entry's stored evidence was only PARTLY readable. */
+  unavailable: boolean;
+  /** The server's own deterministic sentence. It quotes no value. */
+  explanation: string;
+  resolution_state: ApiResolutionState;
+  resolved: boolean;
+  resolution_stale: boolean;
+  resolution: ApiConflictResolution | null;
+}
+
+/** A stored decision whose address this subject carries no conflict at. */
+export interface ApiResolutionWithoutConflict {
+  address: string;
+  run_id: string | null;
+  outcome: ApiResolutionOutcome;
+  resolution_id: string;
+  /** The run this decision belongs to has been removed from the record. */
+  orphaned_run: boolean;
+}
+
+export interface ApiConflictCounts {
+  conflicting_addresses: number;
+  resolved: number;
+  deferred: number;
+  stale: number;
+  /**
+   * Written out by the server rather than left to subtraction, because deriving it
+   * at three call sites is how three call sites come to disagree about whether
+   * `stale` counts as unresolved. IT DOES, and so does `deferred`.
+   */
+  unresolved: number;
+}
+
+/** `GET /experiments/{id}/conflicts` (optionally `?run=`). */
+export interface ApiConflictsResponse {
+  experiment_id: string;
+  /** The run this describes, or `null` for the record's own fields. */
+  run_id: string | null;
+  record_rev: number;
+  scope: string;
+  conflicts: ApiConflict[];
+  counts: ApiConflictCounts;
+  resolutions_without_conflict: ApiResolutionWithoutConflict[];
+  /**
+   * Stored decisions this build could not read. Preserved verbatim in the record
+   * and COUNTED rather than rendered, for the reason
+   * `ApiNotesResponse.unreadable_entries` is: saying what one contains would mean
+   * inventing it.
+   */
+  unreadable_resolution_entries: number;
+  /** THE SERVER'S OWN CLOSED VOCABULARIES, served rather than transcribed. */
+  outcomes: ApiResolutionOutcome[];
+  chosen_from_values: ApiResolutionChosenFrom[];
+  states: ApiResolutionState[];
+  /** The EXPERIMENT's version token — the `If-Match` a decision must carry. */
+  experiment_version: string;
+}
+
+export interface ApiConflictResolved {
+  resolution: ApiConflictResolution;
+  experiment_version: string;
+}
+
+/* --------------------------------------------------------------------------
  * Transcript capture.
  *
  * THE FOUR OUTCOMES ARE A CLOSED UNION AND ARE NOT INTERCHANGEABLE. A
