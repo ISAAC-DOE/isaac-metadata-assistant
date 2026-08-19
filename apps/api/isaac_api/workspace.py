@@ -635,6 +635,41 @@ def block_level(key: str) -> str:
     return LEVEL_UNCLASSIFIED
 
 
+#: The draft BLOCK each pending-blocker ``kind`` writes into. One map, so "is this
+#: question a Run's?" is answered by :func:`block_level` rather than by a second list
+#: that could drift from it. ``descriptor`` is the one whose kind and block differ.
+BLOCKER_KIND_BLOCK: dict[str, str] = {
+    "series": "series",
+    "qc": "qc",
+    "descriptor": "descriptors_outputs",
+    "asset": "assets",
+}
+
+
+def blocker_is_run_level(entry: object) -> bool:
+    """Does this pending entry belong to a Run rather than to the record itself?
+
+    FAIL-CLOSED: a kind :data:`BLOCKER_KIND_BLOCK` does not know is NOT run-level.
+    Getting that default the other way round would ask a scientist the same
+    record-level question once per run, which is worse than leaving a new question
+    where it already is.
+
+    Used for two things that must agree, which is why it is one function:
+
+    * seeding a new Run with the questions it actually owns
+      (``routes._seed_for_new_run``); and
+    * withholding the EXPERIMENT's own copies of those questions from
+      :meth:`Experiment.pending` once a run exists — because at that point the
+      experiment's ``series``/``qc``/``assets``/``descriptors_outputs`` are no longer
+      part of any exported record (``resolved_run_draft`` reads them off the RUN), so
+      asking them would be asking for an answer that reaches nothing.
+    """
+    if not isinstance(entry, dict):
+        return False
+    block = BLOCKER_KIND_BLOCK.get(entry.get("kind"))
+    return block is not None and block_level(block) == LEVEL_RUN
+
+
 def address_level(address: str) -> str:
     """Classify a namespaced draft address. Raises ``ValueError`` on a malformed one."""
     kind, name = parse_address(address)
@@ -3261,7 +3296,20 @@ class Experiment:
         own = list(self.draft.get("pending") or [])
         if not self.runs:
             return own
-        out = list(own)
+        # ONCE A RUN EXISTS, THE EXPERIMENT'S OWN RUN-LEVEL QUESTIONS ARE WITHHELD.
+        #
+        # A zero-run experiment is its own record. The moment a run exists, the record
+        # each unit exports is the RUN's, and `resolved_run_draft` reads `series`,
+        # `qc`, `assets` and `descriptors_outputs` off the run — so the experiment's
+        # copies of those questions can no longer be answered into anything that ships.
+        # Listing them anyway asks a scientist for a value that reaches no record,
+        # which is a dead end wearing the same chrome as a real question.
+        #
+        # This is a DERIVED view and withholds rather than deletes: the entries stay in
+        # the document, so removing the run restores them intact. Record-level
+        # questions are untouched, and a zero-run experiment's list is byte-identical
+        # to what it always was (the branch above returns before reaching here).
+        out = [entry for entry in own if not blocker_is_run_level(entry)]
         for run in self.sorted_runs():
             run_draft = run.draft if isinstance(run.draft, dict) else {}
             for item in run_draft.get("pending") or []:

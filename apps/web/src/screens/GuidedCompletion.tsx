@@ -72,7 +72,13 @@ export function GuidedCompletion() {
    * A ref rather than state, deliberately: this must not re-render on every
    * keystroke, and nothing reads it during render except as an initial value.
    */
-  const staged = useRef<Record<string, string>>({});
+  /* `unknown`, NOT `string`. It was `string`, and that made the promise above false
+     for exactly one blocker: a QC verdict's answer is `{status, evidence}`, so the
+     `onTextChange` channel could not carry it and a Refresh destroyed a verdict and a
+     paragraph of reasoning while the banner beside the button said it did not — on the
+     one question whose input is most expensive to retype. Widening the ref is the whole
+     fix; `initialValue` and `discardStaged` are keyed identically and need no change. */
+  const staged = useRef<Record<string, unknown>>({});
 
   /*
    * RESET ON A RECORD CHANGE, because a blocker id is not record-scoped.
@@ -206,7 +212,7 @@ function LoadedCompletion({
   reload: () => void;
   /** Staged answers keyed by blocker id, held by the parent so a `reload` — which
    *  unmounts this component — cannot destroy what the reader typed. */
-  staged: MutableRefObject<Record<string, string>>;
+  staged: MutableRefObject<Record<string, unknown>>;
 }) {
   const navigate = useNavigate();
   const [pending, setPending] = useState<ApiPendingItem[]>(initialPending);
@@ -679,11 +685,20 @@ function LoadedCompletion({
              Refresh mid-edit restores what the reader had rewritten rather than
              snapping back to the stored value. Namespaced `edit:` so an edit and a
              fresh answer to the same blocker cannot overwrite one another. */
+          /* `rawValue` is passed through for a STRUCTURED answer too now. It used to be
+             gated on `typeof === 'string'`, so a `qc` row's edit form opened with blank
+             radios and a blank note — contradicting this screen's own claim that an
+             edit is "prefilled with the current value". A series/descriptor value is
+             still not prefilled into a text box: it is confirmed via `initialStaged`. */
           initialValue={
             staged.current[`edit:${ans.id}`] ??
+            (ans.blocker.inputType === 'verdict' ? ans.rawValue : undefined) ??
             (typeof ans.rawValue === 'string' ? ans.rawValue : undefined)
           }
           onTextChange={(value) => {
+            staged.current[`edit:${ans.id}`] = value;
+          }}
+          onStagedChange={(value) => {
             staged.current[`edit:${ans.id}`] = value;
           }}
           initialStaged={ans.blocker.inputType === 'structured'}
@@ -867,6 +882,9 @@ function LoadedCompletion({
                the `staged` ref in the parent for why it lives there. */
             initialValue={staged.current[blocker.id]}
             onTextChange={(value) => {
+              staged.current[blocker.id] = value;
+            }}
+            onStagedChange={(value) => {
               staged.current[blocker.id] = value;
             }}
             onConfirm={(value) => confirmAnswer(blocker, value)}

@@ -125,17 +125,53 @@ SERVER_STAMPED_LEAF = "uploaded_by"
 
 
 def resolve_uploaded_by(identity: Any, scope: str | None) -> str | None:
-    """The subject this request may be attributed to, or ``None``.
+    """The subject this request may be attributed to IN AN OFFICIAL RECORD, or ``None``.
 
-    A one-line pass-through to :func:`isaac_api.identity.stamp_actor` — deliberately,
-    and not an abstraction for its own sake. ``stamp_actor`` is where the tutorial
-    rule (a worked-example session attributes nobody) and the trust-tier rule are
-    written down, and reaching past it to ``identity.human.subject`` is the exact
-    shape ``identity.py``'s own docstring warns about. Routing every caller through
-    one named function means a future rule added to ``stamp_actor`` reaches this path
-    without anybody having to remember that this path exists.
+    :func:`isaac_api.identity.stamp_actor` first — it is where the worked-example rule
+    and the trust-tier rule are written down, and reaching past it to
+    ``identity.human.subject`` is the exact shape ``identity.py``'s docstring warns
+    about. A rule added there reaches this path without anybody remembering this path
+    exists.
+
+    THEN ONE FURTHER GATE, AND IT IS NOT A SECOND COPY OF ANYTHING — it is a rule that
+    is true HERE and nowhere else. An independent review measured why. ``stamp_actor``
+    returns a subject for any ``EDGE_HUMAN`` identity, which includes one minted by
+    :class:`~isaac_api.identity.FixtureEdgeVerifier` from two environment variables.
+    Every OTHER consumer of that subject writes a row that also carries
+    ``trust_basis``, so a fixture-attributed row says so about itself — which is the
+    mitigation ``FixtureEdgeVerifier``'s own docstring stakes its existence on:
+    *"If this verifier is ever enabled somewhere it should not be, the resulting rows
+    say so about themselves."*
+
+    **An official ISAAC record has no such field.** The schema gives
+    ``attribution.uploaded_by`` one meaning — *"Authenticated identity that submitted
+    this record"* — and no place to qualify it. So a fixture name written there is
+    permanent, immutable, and indistinguishable from a real edge attribution, in a
+    document that outlives this application. Both this module and ``identity.py`` say
+    the rule out loud (*"there is no name this application may truthfully stamp"*,
+    *"the field appears only when somebody vouched for a name"*), and a verifier that
+    read an environment variable vouched for nobody.
+
+    Hence: only :data:`~isaac_api.identity.TRUST_BASIS_VERIFIED_EDGE_ASSERTION` may
+    reach a record. **No verifier in this build mints that basis**, so the practical
+    effect is that no shipped deployment stamps anything — which is the finished
+    behaviour this module already documented, now enforced rather than merely true by
+    accident of which verifiers exist.
+
+    The fixture path is NOT weakened elsewhere by this: it still satisfies
+    ``require_human_actor``, still attributes a submission row, and is still the way
+    the seam is exercised. It simply stops short of the one artifact that cannot carry
+    its own caveat.
     """
-    return identity_module.stamp_actor(identity, scope)
+    subject = identity_module.stamp_actor(identity, scope)
+    if subject is None:
+        return None
+    human = getattr(identity, "human", None)
+    if human is None:  # pragma: no cover - stamp_actor guarantees a human above
+        return None
+    if human.trust_basis != identity_module.TRUST_BASIS_VERIFIED_EDGE_ASSERTION:
+        return None
+    return subject
 
 
 def with_server_stamp(record: dict, subject: str | None) -> dict:
@@ -171,8 +207,10 @@ def with_server_stamp(record: dict, subject: str | None) -> dict:
 def without_server_stamp(record: dict) -> dict:
     """``record`` with the server-owned stamp removed — the shape ``transform`` emits.
 
-    PUBLIC, and used by exactly one caller: ``dependencies.artifact_state`` and its
-    fan-out sibling, applied to BOTH sides of the freshness comparison. It lives here
+    PUBLIC, and used by one MODULE: ``dependencies``, in ``artifact_state`` and in its
+    fan-out sibling, applied to BOTH sides of the freshness comparison. (An earlier
+    revision said "exactly one caller" and then named two, which is the kind of small
+    untruth this file is otherwise careful about.) It lives here
     because the field name it removes is defined here, and a second copy of that name
     in the freshness module would be free to drift away from what the write actually
     stamps.

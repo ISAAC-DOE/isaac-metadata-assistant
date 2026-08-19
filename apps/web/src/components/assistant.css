@@ -1669,7 +1669,11 @@ button.assistant-source-chip-nav:focus-visible {
    were chosen. The blocker's own text says no verdict is assumed, "not even 'valid'",
    and the control has to be able to say that. */
 .guided-verdict-set {
-  border: 1px solid var(--border-subtle, var(--cover-border));
+  /* `--cover-border` directly. An earlier version wrote
+     `var(--border-subtle, var(--cover-border))` and `--border-subtle` is defined
+     nowhere in the design system, so the fallback always won — and if that token
+     were later defined for something else this control would change silently. */
+  border: 1px solid var(--cover-border);
   border-radius: var(--radius-token);
   padding: 10px 12px;
   margin: 0 0 12px;

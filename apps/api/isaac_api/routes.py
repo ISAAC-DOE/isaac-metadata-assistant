@@ -2149,8 +2149,14 @@ def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: 
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
+    # `exp.pending()`, NOT `exp.draft` — see `serialize.pending_to_list`'s `entries`
+    # override. This route was run-blind while the detail response's `pending_count`
+    # was not, so the two disagreed the moment a record had a run.
     return serialize.pending_to_list(
-        exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+        exp.draft,
+        ws.load_demo_answers(),
+        example_scope=_example_scope(experiment_id),
+        entries=exp.pending(),
     )
 
 
@@ -2218,8 +2224,11 @@ def _answers_to_apply_shape(
     ``series``/``descriptor``/``edge``/``qc`` key on their kind name.
 
     ``qc`` WAS ABSENT FROM THIS LIST UNTIL 2026-08-19, and the omission was not cosmetic.
-    A ``qc`` blocker is raised for any measurement carrying a series, and it was the ONE
-    blocker no request could answer — so a record created through this application's own
+    A ``qc`` blocker is raised whenever the source supplied no QC verdict to read
+    (``extract.draft_builder``) — independently of whether a series is present; it is the
+    export REFUSAL that is series-conditional (``draft_validator``). Conflating the two,
+    as an earlier revision of this paragraph did, makes the blocker sound narrower than it
+    is. It was the ONE blocker no request could answer — so a record created through this application's own
     Create Experiment path could have every other question answered and still never
     export, refused by the draft validator with *"measurement has series but qc verdict
     has no evidence"*. The five canonical seeds hid it: their drafts are built offline
@@ -2264,17 +2273,26 @@ def _answers_to_apply_shape(
         if key in asset_uris:
             out["asset_sha256"][key] = value
         elif key == "qc":
-            # GUARDED AT THE FORWARD, unlike its neighbours, and the asymmetry is a
-            # measured fix rather than a style choice. `/edit` screens every forwarded
-            # key through `_correction_is_storable`, but `/answers` does not — it relies
-            # on the core leaving an unusable answer's blocker OPEN, which `apply_answers`
-            # does for a `status` outside the enum. It does NOT do it for the EVIDENCE
-            # note: its qc branch assigns any truthy `evidence` straight onto
+            # SCREENED ON THE `/answers` PATH ONLY, and the asymmetry is deliberate in
+            # both directions.
+            #
+            # WHY `/answers` SCREENS: it does not run `_correction_is_storable`; it
+            # relies on the core leaving an unusable answer's blocker OPEN, which
+            # `apply_answers` does for an off-enum `status`. It did NOT do that for the
+            # EVIDENCE note — the qc branch assigned any truthy `evidence` straight onto
             # `measurement.qc.evidence`, so `{"status": "valid", "evidence": {...}}`
-            # cleared the blocker and stored a dict where the schema declares a string —
-            # a 200 about a record official validation would later reject. Screening here
-            # makes both paths agree on what "storable" means, using the same predicate.
-            if is_qc_shaped(value):
+            # cleared the blocker and stored a dict where the schema declares a string.
+            # Screening here is what stops a 200 about a record official validation
+            # would later reject.
+            #
+            # WHY `/edit` DOES NOT: that path DOES screen, one layer down, and it needs
+            # the key to arrive in order to do so. Screening it away here made
+            # `_has_correction_target` answer False, so an unusable verdict came back as
+            # `unrecognized_field` — "this application does not know that field" — when
+            # the field is recognised and only the VALUE is unusable. That distinction
+            # is this route's own stated doctrine, and getting it wrong tells a
+            # scientist to look for a misspelling that is not there.
+            if edit_only or is_qc_shaped(value):
                 out[key] = value
         elif key in ("series", "descriptor", "descriptor_label", "edge"):
             out[key] = value
@@ -3713,6 +3731,84 @@ def list_runs(
     }
 
 
+def _seed_for_new_run(exp) -> dict:
+    """The draft a run being added to ``exp`` should START with.
+
+    ``workspace.new_run`` defaults a run's draft to ``{}`` and says why: *"the caller
+    that creates a run is the one that knows whether the blank-draft pending blockers
+    apply."* This is that caller, and the answer has two halves.
+
+    THE DEFECT THIS EXISTS TO CLOSE, measured over HTTP before it was written. A run
+    created with an empty draft carries no blockers, so ``Experiment.pending()`` — which
+    aggregates the experiment's own plus each run's own — counted zero, and the product
+    said so::
+
+        answer every question, no runs   -> pending 0 · status ready_to_export   (true)
+        add one run                      -> pending 0 · status in_review
+                                            workflow: complete_metadata COMPLETED,
+                                                      review_evidence  COMPLETED
+        POST /export                     -> ok: false · "'descriptors' is a required
+                                            property"
+
+    So the screen reported the metadata complete and the evidence reviewed, listed
+    nothing to do, and could not export — for a reason no surface named. Worse, the
+    answers the scientist had already given were **silently dropped from the record**:
+    ``series``, ``qc``, ``assets`` and ``descriptors_outputs`` are RUN-LEVEL blocks
+    (``workspace.RUN_LEVEL_BLOCKS``), so ``resolved_run_draft`` reads them off the RUN,
+    and the experiment's copies stopped being part of any exported record the moment a
+    run existed.
+
+    **THE FIRST RUN ADOPTS WHAT THE EXPERIMENT ALREADY HOLDS — values AND open
+    questions.** A zero-run experiment IS its own record (``record_id = exp.id``);
+    adding the first run moves the exported identity onto that run. If nothing carried
+    the content across, the act of adding a run would destroy evidenced scientific
+    values a person had entered, and would drop their unanswered questions with them.
+    The experiment's own pending list is carried rather than the template's, so a
+    per-file ``asset`` blocker — which the template has none of, because a blank record
+    names no files — survives too.
+
+    **THE SECOND RUN IS NOT SEEDED**, and that asymmetry is the no-guessing rule rather
+    than an inconsistency. Copying the experiment's series onto a second run would
+    assert that two runs measured the same spectrum, which is a scientific claim this
+    application has no evidence for — exactly the invention ``CLAUDE.md`` §5 forbids.
+    The first run's case carries no such claim: there was one measurement, and it is the
+    one the run now exports. A later run therefore starts with the run-level questions
+    from :func:`experiment_repository.blank_draft`, imported rather than re-spelled so a
+    fourth added there reaches a run without anybody remembering this function exists.
+
+    Nothing is REMOVED from the experiment. This function is pure and the caller writes
+    only the run. Leaving the experiment's copy in place keeps the change reversible —
+    removing the run does not take the values with it — and keeps this out of the
+    business of editing a document it was not asked to edit. The copy is inert:
+    ``resolved_run_draft`` never reads it once a run exists, and
+    ``Experiment.pending`` withholds the questions for the same reason.
+    """
+    if not exp.runs:
+        seed: dict = {}
+        exp_draft = exp.draft if isinstance(exp.draft, dict) else {}
+        for block in ws.RUN_LEVEL_BLOCKS:
+            if block in exp_draft:
+                seed[block] = copy.deepcopy(exp_draft[block])
+        seed["pending"] = copy.deepcopy(
+            [
+                entry
+                for entry in (exp_draft.get("pending") or [])
+                if ws.blocker_is_run_level(entry)
+            ]
+        )
+        return seed
+
+    from .experiment_repository import blank_draft  # noqa: PLC0415 - avoids a cycle
+
+    return {
+        "pending": [
+            copy.deepcopy(entry)
+            for entry in blank_draft()["pending"]
+            if ws.blocker_is_run_level(entry)
+        ]
+    }
+
+
 @router.post(
     "/experiments/{experiment_id}/runs",
     tags=[TAG_EXPERIMENTS],
@@ -3773,7 +3869,7 @@ def post_run(
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
             return precondition
-        run = exp.add_run(label=label)
+        run = exp.add_run(label=label, draft=_seed_for_new_run(exp))
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this run was not added
@@ -6679,7 +6775,7 @@ def post_asset_remove(
 # --- 8. export ----------------------------------------------------------------
 
 
-def _write_record(exp: Experiment, result, unit=None, *, uploaded_by=None) -> None:
+def _write_record(exp: Experiment, result, unit=None, *, uploaded_by=None) -> dict:
     """Write ONE unit's record + sidecar into the records dir and mark it exported.
 
     ``uploaded_by`` is the SERVER-OWNED attribution stamp, and it arrives here as an
@@ -6700,6 +6796,15 @@ def _write_record(exp: Experiment, result, unit=None, *, uploaded_by=None) -> No
     The filenames come from ``result.record["record_id"]``, which is what
     ``export_draft`` minted, NOT from the unit — so the file and the id inside it can
     never disagree.
+
+    ONE INVARIANT IS NARROWED BY THE STAMP, AND IT IS SAID HERE RATHER THAN LEFT TO BE
+    DISCOVERED. ``export_draft`` validated ``result.record``; this writes a DIFFERENT
+    document. "What is on disk passed official validation" is therefore no longer
+    literally true. No schema violation is reachable today — ``uploaded_by`` is an
+    unconstrained ``{"type": "string"}`` and ``identity.HumanActor`` refuses an empty or
+    non-string subject — and ``test_record_attribution`` validates the STAMPED bytes to
+    keep that checked rather than argued. A future stamp whose value is not a plain
+    string would have to re-validate here.
     """
     exp.records_dir.mkdir(parents=True, exist_ok=True)
     record_id = result.record["record_id"]
@@ -6712,6 +6817,11 @@ def _write_record(exp: Experiment, result, unit=None, *, uploaded_by=None) -> No
     written_record = record_attribution.with_server_stamp(result.record, uploaded_by)
     atomic_write_text(record_path, json.dumps(written_record, indent=2) + "\n")
     atomic_write_text(sidecar_path, json.dumps(result.sidecar, indent=2) + "\n")
+    # RETURNED so the response can report the bytes that reached the disk. Without it
+    # the export operation described `result.record` — the unstamped truth-core output —
+    # while `/artifacts`, read a moment later, reported the stamped document. An
+    # operation's own account of what it wrote must match what it wrote.
+    return written_record
 
 
 def _artifact_stem(name: str) -> str | None:
@@ -7011,6 +7121,11 @@ class _Materialisation:
     prune: dict | None
     #: Whether any artifact reached the disk during this pass.
     written: bool
+    #: The document ACTUALLY WRITTEN for each unit, keyed by ``unit.target_id`` — the
+    #: truth core's record plus the server-owned attribution stamp, which is what a
+    #: response must report rather than the unstamped `result.record`. Empty on every
+    #: path that wrote nothing.
+    written_records: dict = dataclasses.field(default_factory=dict)
 
 
 def _materialise_pending_units(
@@ -7048,8 +7163,11 @@ def _materialise_pending_units(
             prune=None,
             written=False,
         )
+    written_records: dict[str, dict] = {}
     for unit, unit_result in results:
-        _write_record(exp, unit_result, unit, uploaded_by=uploaded_by)
+        written_records[unit.target_id] = _write_record(
+            exp, unit_result, unit, uploaded_by=uploaded_by
+        )
     # export normally changes the authoritative state (record_id: None -> id), so
     # this bumps rev and stamps updated_utc, persisting the state atomically. On a
     # self-heal of an already-exported record `record_id` is ALREADY set, the
@@ -7059,6 +7177,7 @@ def _materialise_pending_units(
     changed, stale = _save_versioned(exp, if_match)
     if stale is not None:
         return _Materialisation(
+            written_records=written_records,
             results=results,
             failures=[],
             changed=False,
@@ -7095,6 +7214,7 @@ def _materialise_pending_units(
             keep.add(exp.record_id)
         prune = _prune_orphan_artifacts(exp, keep)
     return _Materialisation(
+        written_records=written_records,
         results=results,
         failures=[],
         changed=changed,
@@ -7455,7 +7575,11 @@ def post_export(
             return materialisation.stale
         changed = materialisation.changed
         result = results[0][1]
-        payload = serialize.export_result_to_dict(result)
+        # The document that reached the DISK, not the truth core's unstamped output.
+        # See `serialize.export_result_to_dict`'s `record` override for why.
+        payload = serialize.export_result_to_dict(
+            result, record=materialisation.written_records.get(results[0][0].target_id)
+        )
         if exp.runs:
             # Orphan pruning ran ONLY for a fan-out and ONLY after a successful state
             # save, so a run removed from the experiment cannot leave its record
@@ -7957,12 +8081,23 @@ def post_submit(
         changed = False
         # Resolved BEFORE materialisation because materialisation is what writes the
         # artifacts, and the server-owned `attribution.uploaded_by` stamp has to be in
-        # the bytes that reach the disk. It is the SAME `stamp_actor` call the durable
-        # write below makes, hoisted rather than duplicated — a record published by a
-        # submission and the submission row that records it must not be able to
-        # disagree about who did it. `record_attribution.resolve_uploaded_by` is a
-        # pass-through to `stamp_actor` precisely so that hoisting it cannot introduce
-        # a second, subtly different rule. `None` on every deployment shipped today.
+        # the bytes that reach the disk.
+        #
+        # THIS IS NOT THE SAME VALUE AS THE SUBMISSION ROW'S `subject` BELOW, and an
+        # earlier revision of this slice bound them to one name on the reasoning that
+        # "a record published by a submission and the row that records it must not be
+        # able to disagree about who did it." That reasoning is wrong, and binding them
+        # silently stripped the row's fixture attribution — caught by
+        # `test_submission.py::test_the_recorded_subject_is_labelled_test_fixture_...`.
+        #
+        # They differ because the two destinations can carry different amounts of truth.
+        # A submission row stores `trust_basis` beside the subject, so a fixture-
+        # attributed row SAYS SO ABOUT ITSELF — which is the mitigation
+        # `FixtureEdgeVerifier` stakes its existence on. An official ISAAC record has no
+        # such field: `attribution.uploaded_by` means "Authenticated identity that
+        # submitted this record" and cannot be qualified. So the row may name a subject
+        # the record may not, and `record_attribution.resolve_uploaded_by` is where that
+        # one extra gate lives. `None` on every deployment shipped today, both ways.
         submit_uploaded_by = record_attribution.resolve_uploaded_by(identity, scope)
         if pending_units:
             materialisation = _materialise_pending_units(
@@ -8013,9 +8148,12 @@ def post_submit(
         # identity contract warns about. `scope` is None on every path that reaches
         # here (the session refusal is far above), so this returns the subject
         # whenever the deployment can attribute one.
-        # The same value already stamped into any record this submission published,
-        # bound to one name so the artifact and the submission row cannot diverge.
-        subject = submit_uploaded_by
+        # `stamp_actor`, NOT `submit_uploaded_by` — see the note above the latter for
+        # why the row may name somebody the immutable record may not. This is the one
+        # place the worked-example rule and the tier rule are written down, and reaching
+        # past it would be the "a later slice writes uploaded_by=principal.subject"
+        # shape the identity contract warns about.
+        subject = identity_module.stamp_actor(identity, scope)
         trust_basis = (
             identity.human.trust_basis
             if subject is not None and identity.human is not None

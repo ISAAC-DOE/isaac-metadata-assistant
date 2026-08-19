@@ -157,11 +157,45 @@ def test_a_forged_header_resolves_nobody(monkeypatch):
     assert ra.resolve_uploaded_by(identity, None) is None
 
 
-def test_a_configured_fixture_verifier_resolves_its_configured_subject(monkeypatch):
+def test_a_configured_fixture_verifier_does_NOT_reach_an_official_record(monkeypatch):
+    """The fixture attributes a SUBMISSION ROW and never a RECORD, and that gap is the rule.
+
+    An independent review measured why. Every other consumer of `stamp_actor`'s subject
+    writes a row that also carries `trust_basis`, so a fixture-attributed row says so
+    about itself — the mitigation `FixtureEdgeVerifier`'s own docstring stakes its
+    existence on. An official ISAAC record has no such field: the schema gives
+    `attribution.uploaded_by` one meaning, "Authenticated identity that submitted this
+    record", and no way to qualify it. A fixture name written there is permanent,
+    immutable, and indistinguishable from a real edge attribution.
+
+    So `resolve_uploaded_by` gates on the BASIS, not only the tier.
+    """
     monkeypatch.setenv(identity_module.EDGE_TRUST_VERIFIER_ENV, identity_module.FIXTURE_VERIFIER)
     monkeypatch.setenv(identity_module.FIXTURE_ACTOR_SUBJECT_ENV, "sfaraday")
     identity = identity_module.resolve_identity_for_request(_TripwireRequest())
+    # `stamp_actor` DOES name them — the submission row is allowed to, and does.
+    assert identity_module.stamp_actor(identity, None) == "sfaraday"
+    # The record is not.
+    assert ra.resolve_uploaded_by(identity, None) is None
+
+
+def test_only_a_verified_edge_assertion_reaches_an_official_record():
+    """The positive case. No verifier in THIS BUILD mints this basis, which is the point.
+
+    Constructed directly rather than through a verifier, because the practical effect of
+    the gate is that no shipped deployment can stamp anything — the behaviour this module
+    documents, now enforced rather than true by accident of which verifiers exist.
+    """
+    actor = identity_module.HumanActor(
+        subject="sfaraday",
+        groups=frozenset(),
+        subject_kind=identity_module.SUBJECT_KIND_AUTHENTIK_USERNAME,
+        trust_basis=identity_module.TRUST_BASIS_VERIFIED_EDGE_ASSERTION,
+    )
+    identity = identity_module.RequestIdentity.for_human(actor)
     assert ra.resolve_uploaded_by(identity, None) == "sfaraday"
+    # Every rule `stamp_actor` owns still applies THROUGH this function.
+    assert ra.resolve_uploaded_by(identity, "tutorial-session-1") is None
 
 
 def test_a_worked_example_session_is_never_attributed(monkeypatch):
@@ -170,6 +204,7 @@ def test_a_worked_example_session_is_never_attributed(monkeypatch):
     monkeypatch.setenv(identity_module.FIXTURE_ACTOR_SUBJECT_ENV, "sfaraday")
     identity = identity_module.resolve_identity_for_request(_TripwireRequest())
     assert ra.resolve_uploaded_by(identity, "tutorial-session-1") is None
+    assert identity_module.stamp_actor(identity, "tutorial-session-1") is None
 
 
 def test_resolve_uploaded_by_is_stamp_actor_and_not_a_second_rule():
@@ -189,9 +224,14 @@ def test_resolve_uploaded_by_is_stamp_actor_and_not_a_second_rule():
     body = fn.body[1:] if isinstance(fn.body[0], ast.Expr) else fn.body
     code = "\n".join(ast.unparse(node) for node in body)
     assert "stamp_actor" in code
-    assert len(body) == 1, "resolve_uploaded_by grew logic of its own"
-    for forbidden in ("TrustTier", "human", "trust_basis", "if "):
+    # THE ONE EXTRA RULE THIS FUNCTION IS ALLOWED is the trust-basis gate, and it is
+    # allowed because it is true HERE and nowhere else: only this consumer writes into
+    # a document with no field to record the basis. Anything else — a tier test, a
+    # session test — would be a second copy of a rule `stamp_actor` already owns, and a
+    # rule added there would then stop reaching the field it exists to protect.
+    for forbidden in ("TrustTier", "TutorialScope", "scope ==", "EDGE_HUMAN"):
         assert forbidden not in code, f"{forbidden!r} is a second copy of a stamp_actor rule"
+    assert "TRUST_BASIS_VERIFIED_EDGE_ASSERTION" in code, "the basis gate was removed"
 
 
 # ---------------------------------------------------------------------------
@@ -218,23 +258,122 @@ def test_the_truth_core_still_emits_no_uploaded_by_and_still_refuses_a_draft():
 
 
 def test_no_module_outside_record_attribution_writes_the_field():
-    """The chokepoint is one module, checked mechanically rather than by convention."""
+    """The chokepoint is one module, checked by PARSING rather than by grep.
+
+    THE FIRST VERSION OF THIS TEST WAS A WEAK TEXT SCAN and an independent review said
+    so: it looked for `"uploaded_by"` in double quotes on a line containing `=` but not
+    `==`. It could not see `'uploaded_by'`, a `.update({...})`, a `setdefault`, or — most
+    pointedly — **the exact constant-indirection the sanctioned module itself uses**,
+    `block[SERVER_STAMPED_LEAF] = subject`. It also false-positived on `!=`. A guard
+    whose docstring claims "checked mechanically" has to be worth the claim.
+
+    This walks the AST of every backend module and looks for an ASSIGNMENT whose target
+    is a subscript resolving to the field — by literal, by either quote style, or through
+    `record_attribution.SERVER_STAMPED_LEAF`. It also flags the dict-literal and
+    `setdefault`/`update` spellings by scanning every string constant in an assignment's
+    value position.
+
+    What it still cannot see, stated rather than implied: a name computed at runtime
+    (`"uploaded" + "_by"`), or a write through `**kwargs`. Those are not realistic drift;
+    the realistic drift is somebody adding an obvious line, and this sees that.
+    """
+    import ast
     import pathlib
 
     root = pathlib.Path(__file__).resolve().parents[1] / "isaac_api"
-    offenders = []
-    for path in root.rglob("*.py"):
+    leaf = ra.SERVER_STAMPED_LEAF
+    offenders: list[str] = []
+
+    def names_the_leaf(node) -> bool:
+        if isinstance(node, ast.Constant) and node.value == leaf:
+            return True
+        # `SERVER_STAMPED_LEAF` / `record_attribution.SERVER_STAMPED_LEAF`
+        if isinstance(node, ast.Name) and node.id == "SERVER_STAMPED_LEAF":
+            return True
+        return isinstance(node, ast.Attribute) and node.attr == "SERVER_STAMPED_LEAF"
+
+    for path in sorted(root.rglob("*.py")):
         if path.name == "record_attribution.py":
             continue
-        text = path.read_text(encoding="utf-8")
-        for lineno, line in enumerate(text.splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith("#") or stripped.startswith("*"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            targets = []
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                targets = [node.target]
+            else:
                 continue
-            # An assignment to the leaf, in any subscript spelling.
-            if '"uploaded_by"' in line and "=" in line and "==" not in line:
-                offenders.append(f"{path.name}:{lineno}")
+            for target in targets:
+                if isinstance(target, ast.Subscript) and names_the_leaf(target.slice):
+                    offenders.append(f"{path.name}:{node.lineno}")
+            # `x = {"uploaded_by": ...}` and `d.update({"uploaded_by": ...})`
+            value = getattr(node, "value", None)
+            if isinstance(value, ast.Dict) and any(
+                k is not None and names_the_leaf(k) for k in value.keys
+            ):
+                offenders.append(f"{path.name}:{node.lineno}")
+
+    for path in sorted(root.rglob("*.py")):
+        if path.name == "record_attribution.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in ("setdefault", "update"):
+                continue
+            for arg in node.args:
+                if names_the_leaf(arg):
+                    offenders.append(f"{path.name}:{node.lineno}")
+                if isinstance(arg, ast.Dict) and any(
+                    k is not None and names_the_leaf(k) for k in arg.keys
+                ):
+                    offenders.append(f"{path.name}:{node.lineno}")
+
     assert offenders == [], f"uploaded_by written outside record_attribution: {offenders}"
+
+
+def test_the_chokepoint_guard_can_actually_see_a_violation(tmp_path):
+    """NEGATIVE CONTROL for the guard above — it must not be vacuous.
+
+    The previous version passed while being blind to the very spelling the sanctioned
+    module uses, so "the guard is green" meant almost nothing. This proves each spelling
+    it claims to catch is one it does catch.
+    """
+    import ast
+
+    leaf = ra.SERVER_STAMPED_LEAF
+    violations = [
+        f'record["attribution"]["{leaf}"] = subject',
+        f"record['attribution']['{leaf}'] = subject",
+        f'block[SERVER_STAMPED_LEAF] = subject',
+        f'record["attribution"] = {{"{leaf}": subject}}',
+        f'record.setdefault("attribution", {{}}).update({{"{leaf}": subject}})',
+    ]
+    for source in violations:
+        tree = ast.parse(source)
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Subscript):
+                        sl = target.slice
+                        if (isinstance(sl, ast.Constant) and sl.value == leaf) or (
+                            isinstance(sl, ast.Name) and sl.id == "SERVER_STAMPED_LEAF"
+                        ):
+                            found = True
+                if isinstance(node.value, ast.Dict) and any(
+                    isinstance(k, ast.Constant) and k.value == leaf for k in node.value.keys
+                ):
+                    found = True
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                for arg in node.args:
+                    if isinstance(arg, ast.Dict) and any(
+                        isinstance(k, ast.Constant) and k.value == leaf for k in arg.keys
+                    ):
+                        found = True
+        assert found, f"the guard is blind to: {source}"
 
 
 # ---------------------------------------------------------------------------
@@ -251,16 +390,41 @@ def client(tmp_path, monkeypatch):
     return tutorial_client(create_app())
 
 
+class _EdgeAssertionVerifier:
+    """A verifier that mints a VERIFIED EDGE ASSERTION, which no shipped verifier does.
+
+    Test-local and never registered in `identity._VERIFIERS`, so no deployment can
+    select it. It exists because the trust-basis gate means the shipped fixture
+    deliberately cannot stamp a record — so the only way to exercise the write path at
+    all is a verifier that claims what a real edge would. It reads nothing from the
+    request, exactly like both shipped verifiers.
+    """
+
+    verifier_id = "test_edge_assertion"
+
+    def __init__(self, subject="sfaraday"):
+        self._subject = subject
+
+    def verify(self, request):  # noqa: ARG002 - never read
+        return identity_module.Traversed(
+            assertion=identity_module.EdgeAssertion(
+                subject=self._subject,
+                groups=frozenset(),
+                verifier_id=self.verifier_id,
+                trust_basis=identity_module.TRUST_BASIS_VERIFIED_EDGE_ASSERTION,
+            )
+        )
+
+    def can_attribute(self) -> bool:
+        return True
+
+
 @pytest.fixture()
 def armed(monkeypatch):
-    """A deployment whose configured verifier attributes a subject.
-
-    This is the ONLY way to a non-`None` stamp in this build, and it reads the
-    PROCESS ENVIRONMENT rather than the request — which is exactly why a fixture can
-    arm it and an attacker's headers cannot.
-    """
-    monkeypatch.setenv(identity_module.EDGE_TRUST_VERIFIER_ENV, identity_module.FIXTURE_VERIFIER)
-    monkeypatch.setenv(identity_module.FIXTURE_ACTOR_SUBJECT_ENV, "sfaraday")
+    """A deployment whose boundary vouched for a subject — the only thing that stamps."""
+    monkeypatch.setattr(
+        identity_module, "edge_trust_verifier", lambda: _EdgeAssertionVerifier()
+    )
 
 
 def _etag(client, exp_id: str) -> str:
@@ -275,28 +439,15 @@ def _export(client, exp_id: str, headers: dict | None = None):
     return client.post(f"/api/experiments/{exp_id}/export", headers=sent)
 
 
-def _written_record(exp_id: str) -> dict:
-    """The bytes actually on disk — never the response body.
-
-    The response is the application describing what it did; the artifact is what a
-    downstream reader will actually see, and the two are only equal if the stamp
-    landed where this slice claims it lands.
-    """
-    exp = tutorial_ws().load_experiment(exp_id)
-    unit = exp.export_units()[0]
-    return json.loads(unit.record_path().read_text(encoding="utf-8"))
-
-
 def _ordinary_exportable(tmp_path) -> tuple:
     """A client with NO worked-example session, and an experiment ready to export.
 
     Two things make this necessary rather than fussy. First, `stamp_actor` refuses to
-    attribute anything inside a worked-example session, so the seeded scenarios can
-    only ever prove the NEGATIVE case (which they do, below). Second, an ordinary
-    experiment's pending questions carry no `demo_answer`, so the answers are
-    HARVESTED from a seed in a throwaway session and replayed against the ordinary
-    record — the same values, applied through the same public `/answers` contract a
-    scientist uses.
+    attribute anything inside a worked-example session, so the seeded scenarios can only
+    ever prove the NEGATIVE case (which they do, below). Second, an ordinary experiment's
+    pending questions carry no `demo_answer`, so the answers are HARVESTED from a seed in
+    a throwaway session and replayed against the ordinary record — the same values,
+    applied through the same public `/answers` contract a scientist uses.
     """
     from isaac_api.app import create_app
 
@@ -335,6 +486,13 @@ def _ordinary_exportable(tmp_path) -> tuple:
 
 
 def _ordinary_record(exp_id: str) -> dict:
+    """The bytes actually on disk — never the response body.
+
+    The response is the application describing what it did; the artifact is what a
+    downstream reader will actually see, and the two are only equal if the stamp landed
+    where this slice claims it lands. `test_the_export_response_reports_the_bytes_it_wrote`
+    is what asserts they are equal; everything else here reads the disk.
+    """
     exp = ws.load_experiment(exp_id)
     return json.loads(exp.export_units()[0].record_path().read_text(encoding="utf-8"))
 
@@ -348,23 +506,57 @@ def test_an_unarmed_export_writes_no_uploaded_by_key_at_all(tmp_path, monkeypatc
     assert "uploaded_by" not in _ordinary_record(exp_id).get("attribution", {})
 
 
-def test_an_armed_export_stamps_the_verifier_s_subject(tmp_path, monkeypatch):
-    """The positive case — the one path in this build that can produce a stamp."""
+def test_an_armed_export_stamps_the_verified_subject(tmp_path, monkeypatch, armed):
+    """The positive case — reachable only through a boundary that vouched for a name."""
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    monkeypatch.setenv(identity_module.EDGE_TRUST_VERIFIER_ENV, identity_module.FIXTURE_VERIFIER)
-    monkeypatch.setenv(identity_module.FIXTURE_ACTOR_SUBJECT_ENV, "sfaraday")
     plain, exp_id = _ordinary_exportable(tmp_path)
     assert _export(plain, exp_id).status_code == 200
     assert _ordinary_record(exp_id)["attribution"]["uploaded_by"] == "sfaraday"
 
 
-def test_an_armed_export_still_validates_against_the_official_schema(tmp_path, monkeypatch):
-    """A stamp that broke official validation would be a truth-path regression."""
-    from isaac_records.official import validate_official
+def test_the_shipped_fixture_verifier_exports_an_UNSTAMPED_record(tmp_path, monkeypatch):
+    """NEGATIVE CONTROL for the trust-basis gate, end to end over HTTP.
 
+    An operator CAN set both of these environment variables on the hosted pod — that is
+    the supported configuration path. Before the gate, every record exported afterwards
+    carried a name under a schema description reading "Authenticated identity that
+    submitted this record", permanently and immutably. Now it carries none.
+    """
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
     monkeypatch.setenv(identity_module.EDGE_TRUST_VERIFIER_ENV, identity_module.FIXTURE_VERIFIER)
     monkeypatch.setenv(identity_module.FIXTURE_ACTOR_SUBJECT_ENV, "sfaraday")
+    plain, exp_id = _ordinary_exportable(tmp_path)
+    assert _export(plain, exp_id).status_code == 200
+    assert "uploaded_by" not in _ordinary_record(exp_id).get("attribution", {})
+
+
+def test_the_export_response_reports_the_bytes_it_wrote(tmp_path, monkeypatch, armed):
+    """NEGATIVE CONTROL for an operation misdescribing its own write.
+
+    `_write_record` stamps a COPY, so the response used to serialize the truth core's
+    unstamped output while `/artifacts`, read a moment later, reported the stamped
+    document. An independent review measured the divergence. An operation's account of
+    what it wrote must match what it wrote.
+    """
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    plain, exp_id = _ordinary_exportable(tmp_path)
+    response = _export(plain, exp_id)
+    assert response.status_code == 200, response.text
+    assert response.json()["record"] == _ordinary_record(exp_id)
+
+
+def test_an_armed_export_still_validates_against_the_official_schema(tmp_path, monkeypatch, armed):
+    """A stamp that broke official validation would be a truth-path regression.
+
+    `export_draft` validates `result.record`; `_write_record` then writes a DIFFERENT
+    document. No schema violation is reachable today (`uploaded_by` is an unconstrained
+    string and `HumanActor` refuses an empty or non-string subject), but "what is on
+    disk passed official validation" stops being literally true, so this asserts it of
+    the bytes on disk rather than of what the core validated.
+    """
+    from isaac_records.official import validate_official
+
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
     plain, exp_id = _ordinary_exportable(tmp_path)
     assert _export(plain, exp_id).status_code == 200
     record = _ordinary_record(exp_id)
@@ -374,15 +566,13 @@ def test_an_armed_export_still_validates_against_the_official_schema(tmp_path, m
     assert ok, report
 
 
-def test_an_armed_export_reads_current_not_permanently_stale(tmp_path, monkeypatch):
+def test_an_armed_export_reads_current_not_permanently_stale(tmp_path, monkeypatch, armed):
     """NEGATIVE CONTROL for the freshness bug this slice had to avoid creating.
 
     Remove `without_server_stamp` from `dependencies` and this fails with `stale`,
     whose reason offers a destructive whole-workspace reset as the only remedy.
     """
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    monkeypatch.setenv(identity_module.EDGE_TRUST_VERIFIER_ENV, identity_module.FIXTURE_VERIFIER)
-    monkeypatch.setenv(identity_module.FIXTURE_ACTOR_SUBJECT_ENV, "sfaraday")
     plain, exp_id = _ordinary_exportable(tmp_path)
     assert _export(plain, exp_id).status_code == 200
     detail = plain.get(f"/api/experiments/{exp_id}")
@@ -455,3 +645,25 @@ def test_freshness_still_detects_a_real_change_to_a_stamped_record(tmp_path):
     drifted["record_type"] = "something-else"
     (tmp_path / "r.json").write_text(json.dumps(drifted), encoding="utf-8")
     assert artifact_state(_Exp())["state"] == "stale"
+
+
+def test_a_submission_row_may_name_somebody_the_record_may_not(monkeypatch):
+    """The two destinations carry different amounts of truth, and that is the design.
+
+    A REGRESSION TEST, because binding them to one value is exactly the mistake this
+    slice made and an existing suite caught: `subject` was set from
+    `resolve_uploaded_by`, which silently stripped the submission row's fixture
+    attribution.
+
+    * A submission row stores `trust_basis` beside the subject, so a fixture-attributed
+      row says so about itself — `FixtureEdgeVerifier`'s stated mitigation.
+    * An official record has no such field. `attribution.uploaded_by` means
+      "Authenticated identity that submitted this record" and cannot be qualified.
+
+    So under a fixture verifier: the row names somebody, the record does not.
+    """
+    monkeypatch.setenv(identity_module.EDGE_TRUST_VERIFIER_ENV, identity_module.FIXTURE_VERIFIER)
+    monkeypatch.setenv(identity_module.FIXTURE_ACTOR_SUBJECT_ENV, "sfaraday")
+    identity = identity_module.resolve_identity_for_request(_TripwireRequest())
+    assert identity_module.stamp_actor(identity, None) == "sfaraday"  # the ROW may
+    assert ra.resolve_uploaded_by(identity, None) is None  # the RECORD may not

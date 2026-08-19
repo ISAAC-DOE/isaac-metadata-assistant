@@ -92,6 +92,16 @@ export const QC_VERDICTS = ['valid', 'compromised', 'failed', 'pending'] as cons
 export type QcVerdict = (typeof QC_VERDICTS)[number];
 
 /**
+ * The exact shape `POST /answers` and `POST /edit` accept for a `qc` answer —
+ * `complete.is_qc_shaped`. A bare string is declined by the server and leaves the
+ * question open, which is the defect the verdict control exists to prevent.
+ */
+export interface QcAnswer {
+  status: QcVerdict;
+  evidence: string;
+}
+
+/**
  * The five explicit inferability states, mirroring
  * `apps/api/isaac_api/inferability.py`. A CONCRETE value may accompany
  * `supported_suggestion` and nothing else — the backend enforces that in

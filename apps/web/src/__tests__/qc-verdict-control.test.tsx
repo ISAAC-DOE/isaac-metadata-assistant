@@ -17,9 +17,16 @@
  *   1. NOTHING IS PRESELECTED. The blocker says "there is no default and none is
  *      assumed — not even 'valid'", and a control that arrives with a verdict chosen
  *      would assume one by doing nothing.
- *   2. THE VERDICT AND ITS REASONING TRAVEL TOGETHER, because the draft validator
- *      refuses a verdict with no provenance and would otherwise block the export one
- *      screen later, with nothing connecting the two.
+ *   2. THE VERDICT AND ITS REASONING TRAVEL TOGETHER — a PRODUCT decision stricter
+ *      than any backend rule, and this comment used to justify it with a rule that does
+ *      not exist ("the draft validator refuses a verdict with no provenance"). It does
+ *      not: `complete.apply_answers` writes the `block_evidence` confirmation
+ *      unconditionally, so a note-less verdict exports clean —
+ *      `test_qc_answerable.py::test_a_note_less_verdict_is_accepted_and_exports_...`
+ *      pins that. What IS true is that `portal_warnings.QC_NONVALID_WITHOUT_EVIDENCE`
+ *      fires (advisory, non-gating) for a non-`valid` verdict with no evidence, and
+ *      that a verdict recorded without reasoning is a scientific judgement with no
+ *      trail. That is the reason; the borrowed refusal was not.
  *   3. WHAT IS SUBMITTED IS THE SHAPE THE API ACCEPTS — a negative control on the
  *      exact regression that caused this, which no type checker catches because
  *      `onConfirm` takes `unknown`.
@@ -151,5 +158,67 @@ describe('the QC verdict blocker offers a control that can actually answer it', 
     renderPrompt({ id: 'beamline', kind: 'beamline', inputType: 'text', path: 'system.beamline' });
     expect(screen.getByPlaceholderText('type a value…')).toBeInTheDocument();
     expect(screen.queryAllByRole('radio')).toHaveLength(0);
+  });
+
+  it('reports every keystroke and selection upward so a Refresh cannot destroy them', () => {
+    // NEGATIVE CONTROL for a re-occurrence of a defect this project has fixed before:
+    // `GuidedCompletion` renders "What you typed is kept, including through Refresh"
+    // beside a Refresh button, and keeps staged input in a ref above the prompt. That
+    // channel carried only `text`, so a verdict and a paragraph of reasoning were
+    // silently discarded by the very button the sentence reassures the reader about.
+    const onStagedChange = vi.fn();
+    render(
+      <GuidedPrompt
+        blocker={QC_BLOCKER}
+        index={0}
+        total={1}
+        onConfirm={vi.fn()}
+        onDontKnow={vi.fn()}
+        onStagedChange={onStagedChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: 'failed' }));
+    expect(onStagedChange).toHaveBeenLastCalledWith({ status: 'failed', evidence: '' });
+
+    fireEvent.change(screen.getByLabelText(/how was it determined/i), {
+      target: { value: 'Sample degraded.' },
+    });
+    expect(onStagedChange).toHaveBeenLastCalledWith({
+      status: 'failed',
+      evidence: 'Sample degraded.',
+    });
+  });
+
+  it('reopens with the staged value it was given, rather than blank', () => {
+    // The other half of the same promise: the owner hands the survivor back through
+    // `initialValue`. It was typed `string`, so a verdict's object value could not
+    // travel and the edit form opened with blank radios and a blank note — contradicting
+    // the screen's own claim that an edit is "prefilled with the current value".
+    render(
+      <GuidedPrompt
+        blocker={QC_BLOCKER}
+        index={0}
+        total={1}
+        initialValue={{ status: 'compromised', evidence: 'Beam dropped during scan 3.' }}
+        onConfirm={vi.fn()}
+        onDontKnow={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('radio', { name: 'compromised' })).toBeChecked();
+    expect(screen.getByLabelText(/how was it determined/i)).toHaveValue(
+      'Beam dropped during scan 3.',
+    );
+  });
+
+  it('says that both halves are required, rather than only disabling the button', () => {
+    // A scientist who picks a verdict and stops otherwise sees a dead control with no
+    // explanation, and a screen-reader user gets less than that.
+    renderPrompt();
+    expect(screen.getByText(/Both the verdict and how you determined it are required/i))
+      .toBeInTheDocument();
+    const note = screen.getByLabelText(/how was it determined/i);
+    expect(note).toHaveAttribute('aria-required', 'true');
+    expect(note.getAttribute('aria-describedby')).toBeTruthy();
   });
 });

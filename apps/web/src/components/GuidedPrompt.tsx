@@ -5,7 +5,7 @@ import { LABELS } from '../lib/labels';
 import { answerValuePreview } from '../lib/adapt';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import { QC_VERDICTS } from '../lib/types';
-import type { PendingBlocker, QcVerdict } from '../lib/types';
+import type { PendingBlocker, QcAnswer, QcVerdict } from '../lib/types';
 
 interface GuidedPromptProps {
   blocker: PendingBlocker;
@@ -20,7 +20,7 @@ interface GuidedPromptProps {
    * blocker `initialStaged` pre-stages the demo value (nothing scientific is ever
    * typed by the assistant). Undefined ⇒ the normal blank propose→confirm flow.
    */
-  initialValue?: string;
+  initialValue?: unknown;
   initialStaged?: boolean;
   /** The confirm-button label; defaults to "Confirm" (edit mode passes "Save"). */
   confirmLabel?: string;
@@ -42,6 +42,14 @@ interface GuidedPromptProps {
    * through `initialValue`.
    */
   onTextChange?: (value: string) => void;
+  /**
+   * The structured sibling of {@link onTextChange}, for a blocker whose answer is not a
+   * string. Every keystroke and every selection is reported so the owner's surviving
+   * copy cannot drift from what is on screen — the property `onTextChange` exists for,
+   * and the one the verdict control shipped without, making the screen's "what you
+   * typed is kept, including through Refresh" false for exactly that blocker.
+   */
+  onStagedChange?: (value: unknown) => void;
 }
 
 /**
@@ -71,8 +79,12 @@ export function GuidedPrompt({
   dontKnowLabel = LABELS.actionDontKnow,
   hideBlankHint = false,
   onTextChange,
+  onStagedChange,
 }: GuidedPromptProps) {
-  const [text, setTextState] = useState(initialValue ?? ''); // pasted value for hash/text inputs
+  /* `initialValue` is `unknown` because a verdict blocker's answer is an object. The
+     text inputs take only the string form; anything else is not a pasted value and
+     must not be coerced into one (`String({})` would put "[object Object]" in the box). */
+  const [text, setTextState] = useState(typeof initialValue === 'string' ? initialValue : '');
   /* Every write goes through here so the caller's surviving copy cannot drift from
      what is on screen. A second setter would be one `setTextState` away from a
      half-preserved field, which is worse than none. */
@@ -86,19 +98,51 @@ export function GuidedPrompt({
      `verdict` starts EMPTY on purpose: the blocker's own text says there is no default
      and none is assumed, "not even 'valid'", and a preselected control would assume
      one by doing nothing. */
-  const [verdict, setVerdict] = useState<QcVerdict | ''>('');
-  const [verdictNote, setVerdictNote] = useState('');
+  const initialVerdict =
+    initialValue && typeof initialValue === 'object' ? (initialValue as QcAnswer) : undefined;
+  const [verdict, setVerdict] = useState<QcVerdict | ''>(initialVerdict?.status ?? '');
+  const [verdictNote, setVerdictNote] = useState(initialVerdict?.evidence ?? '');
+
+  /* EVERY WRITE GOES THROUGH HERE, for the same reason `setText` does — and it was
+     missing, which made this control the one place the screen's own promise was false.
+     `GuidedCompletion` holds staged input ABOVE the prompt precisely so a Refresh does
+     not destroy it, and renders "What you typed is kept, including through Refresh"
+     next to the Refresh button. That channel carried only `text`, so a verdict and a
+     paragraph of reasoning were silently discarded by the very button the sentence
+     reassures the reader about — on the one blocker whose input is most expensive to
+     retype. */
+  const reportStaged = (next: Partial<QcAnswer>) => {
+    const merged: QcAnswer = {
+      status: next.status ?? (verdict as QcVerdict),
+      evidence: next.evidence ?? verdictNote,
+    };
+    onStagedChange?.(merged);
+  };
 
   const demo = blocker.demo_answer;
   const structured = blocker.inputType === 'structured';
   const isVerdict = blocker.inputType === 'verdict';
 
-  /* BOTH halves are required, and that is a product decision this comment owes a
-     reason for. The draft validator refuses a verdict with no provenance — "qc verdict
-     has no evidence; confirm or supply provenance" — so a verdict submitted without a
-     note is accepted by the store and then blocks the export anyway, one screen later
-     and with nothing connecting the two. Requiring it here asks for the reasoning at
-     the moment the person has it. */
+  /* BOTH halves are required, and this comment used to justify that with a backend
+     behaviour that DOES NOT EXIST. The old text said "the draft validator refuses a
+     verdict with no provenance … so a verdict submitted without a note is accepted by
+     the store and then blocks the export anyway". Measured: it does not.
+     `complete.apply_answers` writes the `block_evidence["qc:status"]` confirmation
+     unconditionally, so `draft_validator`'s `_claim_covered` check is satisfied and a
+     note-less verdict exports clean.
+
+     The true reasons, both checkable:
+       - `portal_warnings.QC_NONVALID_WITHOUT_EVIDENCE` fires for `failed`,
+         `compromised` and `pending` without evidence. It is advisory and non-gating,
+         and it does NOT fire for `valid`.
+       - the schema's own `measurement.qc.evidence` is described as REQUIRED IN PRACTICE
+         when the status is not `valid`.
+
+     So requiring a note for EVERY verdict, `valid` included, is a PRODUCT DECISION
+     stricter than any backend rule — taken because the reasoning is worth most at the
+     moment the person has it, and because a verdict recorded without it is a scientific
+     judgement with no trail. Stating that plainly is the point; the previous version
+     borrowed authority from a refusal that never happens. */
   const canConfirm = structured
     ? staged && demo !== undefined
     : isVerdict
@@ -185,7 +229,10 @@ export function GuidedPrompt({
                       name={`qc-verdict-${blocker.id}`}
                       value={option}
                       checked={verdict === option}
-                      onChange={() => setVerdict(option)}
+                      onChange={() => {
+                        setVerdict(option);
+                        reportStaged({ status: option });
+                      }}
                     />
                     <span>{option}</span>
                   </label>
@@ -198,13 +245,22 @@ export function GuidedPrompt({
                 id={`qc-note-${blocker.id}`}
                 className="input guided-verdict-note"
                 value={verdictNote}
-                onChange={(e) => setVerdictNote(e.target.value)}
+                onChange={(e) => {
+                  setVerdictNote(e.target.value);
+                  reportStaged({ evidence: e.target.value });
+                }}
                 rows={3}
+                aria-required="true"
+                aria-describedby={`qc-hint-${blocker.id}`}
                 placeholder="what you checked, and what you saw…"
               />
-              <p className="guided-verdict-hint">
+              <p className="guided-verdict-hint" id={`qc-hint-${blocker.id}`}>
                 A verdict is a scientific judgement. Nothing is assumed for you — not even
-                &ldquo;valid&rdquo; — and the record stays incomplete until you make one.
+                &ldquo;valid&rdquo; — and the record stays incomplete until you make one.{' '}
+                {/* NAMES THE REASON THE BUTTON IS DEAD. Without it a scientist who picks a
+                    verdict and stops sees a disabled control with no explanation, and a
+                    screen-reader user gets less than that. */}
+                <strong>Both the verdict and how you determined it are required.</strong>
               </p>
               <div className="guided-input-row">
                 <button

@@ -143,12 +143,15 @@ def apply_answers(draft: dict, answers: dict) -> dict:
 
         if kind == "qc":
             qc_answer = answers.get("qc")
-            status = qc_answer.get("status") if isinstance(qc_answer, dict) else None
-            if status not in _QC_STATUSES:
-                # No answer OR an off-enum verdict -> NOT applied; stays pending. The
-                # system never invents a qc status (no default 'valid').
+            if not is_qc_shaped(qc_answer):
+                # No answer, an off-enum verdict, or a note of the wrong type -> NOT
+                # applied; stays pending. The system never invents a qc status (no
+                # default 'valid'). `is_qc_shaped` rather than an inline enum test so
+                # the route and this branch cannot disagree about what is storable, and
+                # so an unhashable verdict raises nothing here.
                 remaining_pending.append(entry)
                 continue
+            status = qc_answer["status"]
             qc = draft.setdefault("qc", {})
             qc["status"] = status
             evidence_note = qc_answer.get("evidence")
@@ -489,16 +492,45 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
                 }
             ]
 
-    # -- qc: overwrite the qc status (rejecting an off-enum verdict) --
+    # -- qc: overwrite the verdict AND the note it rests on, as one value --
+    #
+    # THE WHOLE PAIR, NOT THE STATUS ALONE. Two defects came from comparing and
+    # applying only `status`, and an independent review measured both end to end:
+    #
+    #   C1  Flipping `compromised` -> `valid` with no new note KEPT the old one, so an
+    #       exported official record read `{"status": "valid", "evidence": "Beam dropped
+    #       during scan 3; spectrum unusable."}`. Official validation passed, the
+    #       advisory tier was silent (`QC_NONVALID_WITHOUT_EVIDENCE` does not fire for
+    #       `valid`), and `block_evidence` gained a confirmation naming "valid" — so the
+    #       trail looked right while the record's own provenance contradicted its
+    #       verdict. That is `CLAUDE.md` §5 inverted: evidence present, and false.
+    #
+    #   I3  Correcting ONLY the note was declined here and reported by the route as
+    #       "the submitted value was identical; nothing was invalidated" — a claim about
+    #       a value that had in fact changed. A scientist had no way to correct the
+    #       reasoning behind a verdict, and was told they already had.
+    #
+    # So the comparison is over `{status, evidence}` and the write replaces both. An
+    # absent note REMOVES a stale one rather than inheriting it: a note that justified a
+    # different verdict is not provenance for this one, and dropping it correctly
+    # re-arms `portal_warnings.QC_NONVALID_WITHOUT_EVIDENCE`.
+    #
+    # `is_qc_shaped` rather than an inline enum test, for the reason that predicate
+    # exists: one definition of a storable verdict, shared with the route. It also makes
+    # this total — `status in _QC_STATUSES` raises `TypeError: unhashable` for a list or
+    # dict verdict, which a caller building the shape itself can still supply.
     qc_answer = answers.get("qc")
-    if isinstance(qc_answer, dict):
-        status = qc_answer.get("status")
-        if status in _QC_STATUSES and status != (draft.get("qc") or {}).get("status"):
+    if is_qc_shaped(qc_answer):
+        status = qc_answer["status"]
+        evidence_note = qc_answer.get("evidence") or None
+        current = draft.get("qc") or {}
+        if (status, evidence_note) != (current.get("status"), current.get("evidence") or None):
             qc = draft.setdefault("qc", {})
             qc["status"] = status
-            evidence_note = qc_answer.get("evidence")
             if evidence_note:
                 qc["evidence"] = evidence_note
+            else:
+                qc.pop("evidence", None)
             block_evidence = draft.setdefault("block_evidence", {})
             block_evidence.setdefault("qc:status", []).append(
                 _user_confirmation("Correct the QC status?", status, timestamp)

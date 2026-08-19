@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "0551133c1db5d6318e1ca96064e6fe8c75a2571af1c311d15df657e72726ac86"
+        "sha256": "d7d132ad8f2a1254e34c513c039ad3ec492f56de4b35bfe4a7229c11dd55795c"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "3d304ca1f38cd878e699658e96d65353ccd8b51c46ab161f33daddf1a2d67f80"
+        "sha256": "6a481615c59fd85c3c1049933444584fa74fcb663836cfe6027d068de0dd6e05"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "7c44c55be1e0d1ac2a97251a789f9ec91eecb55ba6de53645995b4e84523f0cf"
+        "sha256": "46ad0c6770d8a45d1b5701d851e62f6600f7991af1be62a21e59fc9ed629e7a3"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "8a58fd783673d48e2e4fa0a9b6e723f2ea507fd76c217e4ed04990fc9fd83fc0"
+        "sha256": "ff4f2038d6ebafbd57f5c9efdfe7999aad34fea467498d6cbd91174f494dd822"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "c00a7339de058b2ce25869d30fc973d255d3502389f463b3c413a5d1be5aaf30"
+        "sha256": "176803d2b4c3626fb7921e6e1d22e63a4ae1c3e6e70d4d48bc46ddf4f67097df"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "e60743252558ba505527a10fe8525a1587c5a50bda5e69e4c0331b05c11d2028"
+        "sha256": "a943660e3eadbd979dfd57d53b87b924b17baa264c6a6e3f9fe0fd854724871f"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10820,7 +10820,7 @@
       },
       {
         "path": "src/isaac_records/complete.py",
-        "sha256": "03c46a07538bf91399adb403422ed041b79fbf2ee0cfe21b67047d195d173db0"
+        "sha256": "963e96f051086f9809f9853eef6d6e223d7c4377e1f7a4d3414d99e82d366a35"
       },
       {
         "path": "src/isaac_records/draft_validator.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "b5221b271fc3926de5a99f9819a43656fe28085aa855a59c2a3bc49813e6a1e2"
+    "served_manifest_fingerprint": "1845432a97b7bd376fdc2b3be194fe3f069500805ab2cf2edca2f9d197235de8"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
