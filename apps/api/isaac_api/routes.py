@@ -30,6 +30,7 @@ from isaac_records.complete import (
     apply_answers,
     apply_corrections,
     is_descriptor_shaped,
+    is_qc_shaped,
     is_series_shaped,
     is_sha256_shaped,
 )
@@ -68,6 +69,7 @@ from . import sources
 from . import submission_store
 from . import submissions
 from . import transcript_capture as tc
+from . import record_attribution
 from .providers import config as provider_config
 from .providers import refusal as providers_refusal
 from .providers import transcription as providers_transcription
@@ -2192,6 +2194,8 @@ def _correction_is_storable(key: str, value) -> bool:
         return isinstance(value, str)
     if key == "edge":
         return isinstance(value, (str, int, float))
+    if key == "qc":
+        return is_qc_shaped(value)
     # Anything else in the shaped body is an asset sha256, keyed by URI.
     #
     # `isinstance(value, str)` WAS NOT ENOUGH, and a reviewer measured what it let
@@ -2210,8 +2214,19 @@ def _answers_to_apply_shape(
     """Translate UI answers (keyed by blocker id/about) into ``apply_answers`` input.
 
     Only values literally present are forwarded; blank/missing answers are dropped, so the
-    core never invents. Asset blockers key on their URI; ``series``/``descriptor``/``edge``
-    key on their kind name.
+    core never invents. Asset blockers key on their URI;
+    ``series``/``descriptor``/``edge``/``qc`` key on their kind name.
+
+    ``qc`` WAS ABSENT FROM THIS LIST UNTIL 2026-08-19, and the omission was not cosmetic.
+    A ``qc`` blocker is raised for any measurement carrying a series, and it was the ONE
+    blocker no request could answer — so a record created through this application's own
+    Create Experiment path could have every other question answered and still never
+    export, refused by the draft validator with *"measurement has series but qc verdict
+    has no evidence"*. The five canonical seeds hid it: their drafts are built offline
+    with ``qc`` already present. The core branch always existed and always validated the
+    enum (``complete.apply_answers`` / ``apply_corrections``); only the forward was
+    missing. See :func:`isaac_records.complete.is_qc_shaped` for why the storability rule
+    lives there rather than being restated here.
 
     ``edit_only`` NARROWS THE ASSET KEY SET TO ASSETS THAT ACTUALLY EXIST, and it exists
     because the union below was measured answering **200 about a write that could not
@@ -2248,6 +2263,19 @@ def _answers_to_apply_shape(
             continue
         if key in asset_uris:
             out["asset_sha256"][key] = value
+        elif key == "qc":
+            # GUARDED AT THE FORWARD, unlike its neighbours, and the asymmetry is a
+            # measured fix rather than a style choice. `/edit` screens every forwarded
+            # key through `_correction_is_storable`, but `/answers` does not — it relies
+            # on the core leaving an unusable answer's blocker OPEN, which `apply_answers`
+            # does for a `status` outside the enum. It does NOT do it for the EVIDENCE
+            # note: its qc branch assigns any truthy `evidence` straight onto
+            # `measurement.qc.evidence`, so `{"status": "valid", "evidence": {...}}`
+            # cleared the blocker and stored a dict where the schema declares a string —
+            # a 200 about a record official validation would later reject. Screening here
+            # makes both paths agree on what "storable" means, using the same predicate.
+            if is_qc_shaped(value):
+                out[key] = value
         elif key in ("series", "descriptor", "descriptor_label", "edge"):
             out[key] = value
         # Unknown keys are ignored — never invented into the draft.
@@ -2375,14 +2403,14 @@ def post_answers(
 def _has_correction_target(apply_shape: dict) -> bool:
     """True iff ``apply_shape`` names at least one recognized correction field.
 
-    An asset sha256 (keyed by a known uri), a series/descriptor/edge value. A bare
+    An asset sha256 (keyed by a known uri), a series/descriptor/edge/qc value. A bare
     ``descriptor_label`` (or only ``timestamp``/``asset_sha256:{}``) is NOT an
     actionable correction — an edit body that reduces to nothing recognized is
     rejected (422) rather than silently no-op'd, so an unknown field is never
     quietly swallowed.
     """
     return bool(apply_shape.get("asset_sha256")) or any(
-        k in apply_shape for k in ("series", "descriptor", "edge")
+        k in apply_shape for k in ("series", "descriptor", "edge", "qc")
     )
 
 
@@ -6651,8 +6679,17 @@ def post_asset_remove(
 # --- 8. export ----------------------------------------------------------------
 
 
-def _write_record(exp: Experiment, result, unit=None) -> None:
+def _write_record(exp: Experiment, result, unit=None, *, uploaded_by=None) -> None:
     """Write ONE unit's record + sidecar into the records dir and mark it exported.
+
+    ``uploaded_by`` is the SERVER-OWNED attribution stamp, and it arrives here as an
+    already-resolved subject rather than as an identity, so that the only thing this
+    function can do with it is write it. It is ``None`` on every deployment this build
+    ships — see :mod:`isaac_api.record_attribution` for why that is the finished
+    behaviour and not a gap. The stamp is applied to a COPY, after the truth core has
+    produced ``result.record`` and stripped the field: ``result.record`` itself is read
+    again by this function (for the record id) and by the caller, and must not gain a
+    field those readers did not ask for.
 
     ``unit`` is an :class:`~isaac_api.workspace.ExportUnit`. It defaults to ``None``
     for the pre-fan-out shape — one experiment, one record, ``exp.record_id`` — which
@@ -6672,7 +6709,8 @@ def _write_record(exp: Experiment, result, unit=None) -> None:
         exp.record_id = record_id
     record_path = exp.records_dir / f"{record_id}.json"
     sidecar_path = exp.records_dir / f"{record_id}.evidence.json"
-    atomic_write_text(record_path, json.dumps(result.record, indent=2) + "\n")
+    written_record = record_attribution.with_server_stamp(result.record, uploaded_by)
+    atomic_write_text(record_path, json.dumps(written_record, indent=2) + "\n")
     atomic_write_text(sidecar_path, json.dumps(result.sidecar, indent=2) + "\n")
 
 
@@ -6975,7 +7013,9 @@ class _Materialisation:
     written: bool
 
 
-def _materialise_pending_units(exp, pending_units, if_match, *, units) -> _Materialisation:
+def _materialise_pending_units(
+    exp, pending_units, if_match, *, units, uploaded_by=None
+) -> _Materialisation:
     """Validate every pending unit, then write every one of them. THE COMMIT BOUNDARY.
 
     PHASE 1 validates EVERY eligible unit and writes nothing — ``export_draft`` is a
@@ -7009,7 +7049,7 @@ def _materialise_pending_units(exp, pending_units, if_match, *, units) -> _Mater
             written=False,
         )
     for unit, unit_result in results:
-        _write_record(exp, unit_result, unit)
+        _write_record(exp, unit_result, unit, uploaded_by=uploaded_by)
     # export normally changes the authoritative state (record_id: None -> id), so
     # this bumps rev and stamps updated_utc, persisting the state atomically. On a
     # self-heal of an already-exported record `record_id` is ALREADY set, the
@@ -7203,6 +7243,7 @@ def _sibling_link_conflict(exp, units) -> JSONResponse | None:
     },
 )
 def post_export(
+    request: Request,
     scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     response: Response,
@@ -7359,8 +7400,19 @@ def post_export(
         # Extracted to `_materialise_pending_units` so `post_submit` publishes exactly
         # the records this route publishes, through exactly the same gate. The two
         # phases and what each guarantees are documented there.
+        # The server-owned `attribution.uploaded_by` stamp. NOT
+        # `require_human_actor`: unlike submission, exporting is a mechanical
+        # transform that has never required an actor, the schema does not mark the
+        # field required, and refusing an export because the deployment cannot name
+        # an uploader would remove a working capability in exchange for an optional
+        # field. Fail-open on availability, fail-closed on attribution — the export
+        # always proceeds and the field appears only when a verifier vouched for a
+        # name, which no deployment shipped today does.
         materialisation = _materialise_pending_units(
-            exp, pending_units, if_match, units=units
+            exp, pending_units, if_match, units=units,
+            uploaded_by=record_attribution.resolve_uploaded_by(
+                identity_module.resolve_identity_for_request(request), scope
+            ),
         )
         results = materialisation.results
         failures = materialisation.failures
@@ -7903,9 +7955,19 @@ def post_submit(
         pending_units = [unit for unit in units if not unit.materialised()]
         published: list[dict] = []
         changed = False
+        # Resolved BEFORE materialisation because materialisation is what writes the
+        # artifacts, and the server-owned `attribution.uploaded_by` stamp has to be in
+        # the bytes that reach the disk. It is the SAME `stamp_actor` call the durable
+        # write below makes, hoisted rather than duplicated — a record published by a
+        # submission and the submission row that records it must not be able to
+        # disagree about who did it. `record_attribution.resolve_uploaded_by` is a
+        # pass-through to `stamp_actor` precisely so that hoisting it cannot introduce
+        # a second, subtly different rule. `None` on every deployment shipped today.
+        submit_uploaded_by = record_attribution.resolve_uploaded_by(identity, scope)
         if pending_units:
             materialisation = _materialise_pending_units(
-                exp, pending_units, if_match, units=units
+                exp, pending_units, if_match, units=units,
+                uploaded_by=submit_uploaded_by,
             )
             if materialisation.failures:
                 # Reachable even though `blocker_report` just passed, and the gap is
@@ -7951,7 +8013,9 @@ def post_submit(
         # identity contract warns about. `scope` is None on every path that reaches
         # here (the session refusal is far above), so this returns the subject
         # whenever the deployment can attribute one.
-        subject = identity_module.stamp_actor(identity, scope)
+        # The same value already stamped into any record this submission published,
+        # bound to one name so the artifact and the submission row cannot diverge.
+        subject = submit_uploaded_by
         trust_basis = (
             identity.human.trust_basis
             if subject is not None and identity.human is not None

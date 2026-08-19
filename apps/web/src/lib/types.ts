@@ -72,7 +72,24 @@ export interface FieldGroupData {
 export type BlockerKind = 'asset' | 'series' | 'descriptor' | 'edge' | string;
 // hash → paste a sha256 (asset). structured → confirm a synthetic demo value the
 // user can't type (series/descriptor objects). text → a short free-text value.
-export type CompletionInputType = 'hash' | 'text' | 'structured';
+export type CompletionInputType = 'hash' | 'text' | 'structured' | 'verdict';
+
+/**
+ * The official `measurement.qc.status` enum, mirroring `complete._QC_STATUSES`.
+ *
+ * WRITTEN HERE RATHER THAN TYPED FREELY because a QC verdict is the one blocker the
+ * API refuses unless it arrives as `{status, evidence}` with `status` inside this set
+ * — `complete.is_qc_shaped`. A free-text field sent `"valid"` as a bare string, which
+ * the server declined, leaving the question open with nothing on screen to say why.
+ *
+ * The order is the schema's, not a ranking, and `valid` is FIRST but never
+ * preselected: the blocker's own text says "there is no default and none is assumed —
+ * not even 'valid'", and a preselected control would assume one on the scientist's
+ * behalf by doing nothing.
+ */
+export const QC_VERDICTS = ['valid', 'compromised', 'failed', 'pending'] as const;
+
+export type QcVerdict = (typeof QC_VERDICTS)[number];
 
 /**
  * The five explicit inferability states, mirroring

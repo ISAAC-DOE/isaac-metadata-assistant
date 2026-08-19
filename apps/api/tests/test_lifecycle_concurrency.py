@@ -1001,15 +1001,25 @@ def test_two_scientists_submitting_at_once_record_exactly_one_attributed_submiss
     see the previous test for why that is the case where the store is the only
     thing standing between one submission and two.
     """
-    verifier = _RoundRobinSubjectVerifier([ACTOR, OTHER_ACTOR])
-    monkeypatch.setattr(identity, "edge_trust_verifier", lambda: verifier)
-
     exp = _experiment_with_runs(ws, labels=("run A",), experiment_id=EXPERIMENT_ID)
     eid = exp.id
     export = submit_client.post(
         f"/api/experiments/{eid}/export", headers={"If-Match": _record_etag(submit_client, eid)}
     )
     assert export.status_code == 200, export.text
+
+    # THE VERIFIER IS INSTALLED HERE, AFTER THE SETUP EXPORT, and the ordering is
+    # load-bearing rather than tidy. `_RoundRobinSubjectVerifier` hands out one subject
+    # per `verify()` call and SATURATES at the last one — it is not a cycle. The export
+    # route now resolves an identity of its own (it stamps the server-owned
+    # `attribution.uploaded_by`), so installing the verifier first let the export consume
+    # `ACTOR` and left BOTH racing submissions holding `OTHER_ACTOR` — quietly turning a
+    # test about two people into a test about one, while still passing every assertion
+    # about counts. Installing it after the setup means the only two calls it ever serves
+    # are the two this test is about.
+    verifier = _RoundRobinSubjectVerifier([ACTOR, OTHER_ACTOR])
+    monkeypatch.setattr(identity, "edge_trust_verifier", lambda: verifier)
+
     token = _record_etag(submit_client, eid)
     rendezvous = _LockRendezvous(monkeypatch, eid)
 

@@ -599,10 +599,19 @@ def test_changed_fields_names_only_what_the_apply_shape_carried(client):
         -> 200 · changed_fields ["<uri>", "totally_made_up_field"]
         -> reason "Updated 2 field(s); no downstream steps reopened."
 
-    and `totally_made_up_field` appears nowhere in the stored draft. `qc` behaved the
-    same way and is worse, because it is a real field name: `apply_corrections` handles
-    it, `_answers_to_apply_shape` does not forward it, so it was reported as updated
-    while `draft["qc"]["status"]` never moved.
+    and `totally_made_up_field` appears nowhere in the stored draft.
+
+    **`qc` USED TO BE THE SECOND EXAMPLE HERE, and it no longer is — because the
+    defect it illustrated was fixed at the SOURCE rather than at the report.** The old
+    text read: *"`qc` behaved the same way and is worse, because it is a real field
+    name: `apply_corrections` handles it, `_answers_to_apply_shape` does not forward
+    it, so it was reported as updated while `draft["qc"]["status"]` never moved."*
+    That was true. The route now forwards `qc`, so it is reported as updated AND the
+    value moves. This test therefore asserts the STRONGER thing: `qc` appears in
+    `changed_fields` only alongside proof that the stored verdict really changed.
+    Deleting the `qc` case instead would have removed the only coverage of the field
+    that motivated the fix.
+
 
     This is the counter-argument to this whole slice being over-strict. The slice's
     premise is that answering 200 to a request that changed nothing is silent; a
@@ -629,14 +638,17 @@ def test_changed_fields_names_only_what_the_apply_shape_carried(client):
     assert res.status_code == 200, res.text
     inv = res.json()["invalidation"]
     assert inv["changed"] is True
-    assert inv["changed_fields"] == [uri], inv["changed_fields"]
-    assert "Updated 1 field(s)" in inv["reason"], inv["reason"]
+    assert inv["changed_fields"] == [uri, "qc"], inv["changed_fields"]
+    assert "Updated 2 field(s)" in inv["reason"], inv["reason"]
 
     after = tutorial_ws().load_experiment(rid).draft
     assert "totally_made_up_field" not in json.dumps(after)
     assert "invented" not in json.dumps(after)
-    # `qc` was reported as updated and never was; it must be reported neither way now.
-    assert (after.get("qc") or {}).get("status") == qc_before
+    # The ride-along key is still asserted about nowhere. `qc` is reported ONLY
+    # because the stored verdict really moved — the claim and the write are checked
+    # together, so a regression that reports it without storing it fails here.
+    assert (after.get("qc") or {}).get("status") == "failed"
+    assert qc_before != "failed", "fixture no longer exercises a CHANGE of verdict"
 
 
 def test_a_wellformed_asset_sha_still_applies_and_re_sending_it_is_a_no_op(client):

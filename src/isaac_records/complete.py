@@ -289,6 +289,54 @@ def is_sha256_shaped(value) -> bool:
     return isinstance(value, str) and bool(_SHA256_RE.fullmatch(value))
 
 
+def is_qc_shaped(value) -> bool:
+    """Can a QC answer be stored — a mapping naming a verdict from the official enum?
+
+    EXPORTED FOR THE SAME REASON THE OTHER THREE ARE: ``routes.py`` needs to know
+    whether a value the caller sent can actually be stored, and the rule for that must
+    have ONE definition. Both writers here — :func:`apply_answers`'s ``qc`` branch and
+    :func:`apply_corrections`' — already refuse a status outside :data:`_QC_STATUSES`;
+    without this predicate the route would have to restate that set, and a fifth
+    verdict added to the schema would then be accepted by the route and silently
+    declined by the core, which is the exact **200-having-changed-nothing** shape
+    :func:`is_sha256_shaped` was added to close.
+
+    WHY THIS PREDICATE EXISTS AT ALL, stated because it is a scope change. Until now
+    no route forwarded ``qc``, and this file's own docstring recorded that gap: *"no
+    ``POST /answers`` or ``POST /edit`` request can reach the ``qc`` branch below …
+    Adding it to the route would be a new accepted input on two mutation paths, with
+    an evidence-trail write, and belongs to a slice that can review that on its own
+    terms."* This is that slice. The consequence of the gap was not cosmetic — a
+    record created through the application could answer every other blocking question
+    and still never export, because a measurement carrying a series requires a QC
+    verdict and nothing could supply one.
+
+    ``evidence`` is NOT required here, and that is deliberate rather than lax. The
+    draft validator is what decides whether a verdict needs provenance, and it says so
+    in its own words ("qc verdict has no evidence; confirm or supply provenance"). A
+    predicate that demanded evidence would be a second, quieter copy of that rule, and
+    the two would be free to disagree. What this answers is only *"can this be
+    stored"*; whether the stored thing is enough to export stays with the validator.
+
+    An ``evidence`` of the wrong type IS refused, because the writers assign it
+    straight onto ``measurement.qc.evidence``, which the schema declares a string. A
+    dict there would be stored and then refused by official validation, one step too
+    late to tell the caller anything useful.
+    """
+    if not isinstance(value, dict):
+        return False
+    status = value.get("status")
+    # `isinstance` BEFORE the membership test, and not for tidiness: `[] in
+    # _QC_STATUSES` raises `TypeError: unhashable type`, and a set-membership test on
+    # attacker-shaped input is a 500 out of a predicate whose whole job is to answer
+    # yes or no. Found by this slice's own parametrised negative control, which passed
+    # a list and a dict as the verdict.
+    if not isinstance(status, str) or status not in _QC_STATUSES:
+        return False
+    evidence_note = value.get("evidence")
+    return evidence_note is None or isinstance(evidence_note, str)
+
+
 def is_descriptor_shaped(value) -> bool:
     """Can a descriptor correction be stored — a NON-EMPTY mapping?
 
@@ -319,18 +367,31 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
     Accepts the SAME ``apply_answers`` input shape: ``asset_sha256`` (``{uri: sha}``),
     ``series``, ``descriptor`` / ``descriptor_label``, ``edge``, ``qc``.
 
-    ONE OF THOSE IS NOT REACHABLE OVER HTTP, and this sentence used to hide it. The list
-    above was introduced as "the shape *produced by the route's*
-    ``_answers_to_apply_shape``" — but that function recognises only ``asset_sha256``,
+    ~~ONE OF THOSE IS NOT REACHABLE OVER HTTP~~ — **NO LONGER TRUE, and the old text is
+    struck rather than deleted because it recorded a real gap and named the slice that
+    would close it.** It read: *"that function recognises only ``asset_sha256``,
     ``series``, ``descriptor``, ``descriptor_label`` and ``edge``. It has never forwarded
     ``qc``, so no ``POST /answers`` or ``POST /edit`` request can reach the ``qc`` branch
-    below; a ``qc`` key in an edit body was dropped while being reported back in
-    ``invalidation.changed_fields`` as an updated field (fixed at the route). The branch
-    is kept — it is exercised directly by the completion path's own tests and by callers
-    that build the shape themselves — but it is documented here as function-level input,
-    NOT as a route-level capability. Adding it to the route would be a new accepted input
-    on two mutation paths, with an evidence-trail write, and belongs to a slice that can
-    review that on its own terms.
+    below … Adding it to the route would be a new accepted input on two mutation paths,
+    with an evidence-trail write, and belongs to a slice that can review that on its own
+    terms."*
+
+    **That slice has now run, and it closed a defect much larger than a missing key.**
+    Measured before the fix, on a record created through the application's own Create
+    Experiment path: every other blocking question could be answered over HTTP, and the
+    record still could not export — ``draft_report`` refused with *"measurement has
+    series but qc verdict has no evidence; confirm or supply provenance (no default
+    'valid')"*, and **no route existed that could supply one**. So a scientist could
+    create a record, complete it as far as the product allowed, and be permanently one
+    field short of Submit. The five canonical seeds did not reveal this because their
+    drafts are built by ``build_draft`` from a fixture sheet with ``qc`` already present,
+    never through the API.
+
+    ``qc`` is now forwarded by ``_answers_to_apply_shape`` on BOTH paths, guarded by
+    :func:`is_qc_shaped` so a value the core would decline is refused at the route
+    instead of absorbed into a 200 that changed nothing. Nothing in THIS file changed to
+    make that work: both branches already validated the enum and already refused to
+    invent a default. The gap was never in the truth core.
     """
     draft = copy.deepcopy(draft)
     answers = answers or {}

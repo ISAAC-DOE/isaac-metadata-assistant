@@ -4,7 +4,8 @@ import { Check, CircleHelp, MessageSquare } from './icons';
 import { LABELS } from '../lib/labels';
 import { answerValuePreview } from '../lib/adapt';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
-import type { PendingBlocker } from '../lib/types';
+import { QC_VERDICTS } from '../lib/types';
+import type { PendingBlocker, QcVerdict } from '../lib/types';
 
 interface GuidedPromptProps {
   blocker: PendingBlocker;
@@ -80,16 +81,36 @@ export function GuidedPrompt({
     onTextChange?.(value);
   };
   const [staged, setStaged] = useState(initialStaged); // structured: demo value accepted for confirm
+  /* A QC verdict is two inputs that only mean something together — the verdict and
+     the reasoning behind it — so they are staged together and submitted as one value.
+     `verdict` starts EMPTY on purpose: the blocker's own text says there is no default
+     and none is assumed, "not even 'valid'", and a preselected control would assume
+     one by doing nothing. */
+  const [verdict, setVerdict] = useState<QcVerdict | ''>('');
+  const [verdictNote, setVerdictNote] = useState('');
 
   const demo = blocker.demo_answer;
   const structured = blocker.inputType === 'structured';
+  const isVerdict = blocker.inputType === 'verdict';
 
+  /* BOTH halves are required, and that is a product decision this comment owes a
+     reason for. The draft validator refuses a verdict with no provenance — "qc verdict
+     has no evidence; confirm or supply provenance" — so a verdict submitted without a
+     note is accepted by the store and then blocks the export anyway, one screen later
+     and with nothing connecting the two. Requiring it here asks for the reasoning at
+     the moment the person has it. */
   const canConfirm = structured
     ? staged && demo !== undefined
-    : text.trim().length > 0;
+    : isVerdict
+      ? verdict !== '' && verdictNote.trim().length > 0
+      : text.trim().length > 0;
 
   const handleConfirm = () => {
     if (!canConfirm) return;
+    if (isVerdict) {
+      onConfirm({ status: verdict, evidence: verdictNote.trim() });
+      return;
+    }
     onConfirm(structured ? demo!.value : text.trim());
   };
 
@@ -151,7 +172,54 @@ export function GuidedPrompt({
       )}
 
       <div className="guided-field">
-        {structured ? (
+        {isVerdict ? (
+          <>
+            <div className="guided-field-label">{blocker.path}</div>
+            <div className="guided-verdict">
+              <fieldset className="guided-verdict-set">
+                <legend className="guided-verdict-legend">QC verdict</legend>
+                {QC_VERDICTS.map((option) => (
+                  <label key={option} className="guided-verdict-option">
+                    <input
+                      type="radio"
+                      name={`qc-verdict-${blocker.id}`}
+                      value={option}
+                      checked={verdict === option}
+                      onChange={() => setVerdict(option)}
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </fieldset>
+              <label className="guided-verdict-note-label" htmlFor={`qc-note-${blocker.id}`}>
+                How was it determined?
+              </label>
+              <textarea
+                id={`qc-note-${blocker.id}`}
+                className="input guided-verdict-note"
+                value={verdictNote}
+                onChange={(e) => setVerdictNote(e.target.value)}
+                rows={3}
+                placeholder="what you checked, and what you saw…"
+              />
+              <p className="guided-verdict-hint">
+                A verdict is a scientific judgement. Nothing is assumed for you — not even
+                &ldquo;valid&rdquo; — and the record stays incomplete until you make one.
+              </p>
+              <div className="guided-input-row">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  data-tutorial-anchor={TUTORIAL_ANCHORS.completionConfirm}
+                  onClick={handleConfirm}
+                  disabled={!canConfirm || submitting}
+                >
+                  {submitting ? 'Confirming…' : confirmLabel}
+                </button>
+              </div>
+            </div>
+          </>
+        ) : structured ? (
           <>
             <div className="guided-field-label">{blocker.path}</div>
             {demo ? (

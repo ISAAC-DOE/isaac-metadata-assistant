@@ -398,6 +398,13 @@ const KIND_CONTEXT_WITH_EXAMPLE: Record<string, string> = {
 function inputTypeForKind(kind: BlockerKind): CompletionInputType {
   if (kind === 'asset') return 'hash';
   if (kind === 'series' || kind === 'descriptor') return 'structured';
+  // A QC verdict is neither free text nor a confirmable example. It is a choice from a
+  // closed enum plus the reasoning behind it, and it is the ONE blocker the API will
+  // not accept as a string — `complete.is_qc_shaped` requires `{status, evidence}`.
+  // Before this existed the field rendered as free text, the server declined whatever
+  // was typed, and the question simply stayed open: a record created in this
+  // application could never be completed. See `apps/api/tests/test_qc_answerable.py`.
+  if (kind === 'qc') return 'verdict';
   return 'text';
 }
 
@@ -405,6 +412,7 @@ function pathTokenFor(item: ApiPendingItem): string {
   if (item.kind === 'asset') return item.about || item.id; // the asset uri
   if (item.kind === 'series') return 'measurement.series';
   if (item.kind === 'descriptor') return 'descriptors';
+  if (item.kind === 'qc') return 'measurement.qc.status';
   return item.about || item.id;
 }
 
@@ -562,6 +570,13 @@ export function answerValuePreview(kind: BlockerKind, value: unknown): string {
     const id = first?.series_id ?? 'series';
     const channels = Array.isArray(first?.channels) ? first.channels.length : 0;
     return `${id} · ${channels} channel${channels === 1 ? '' : 's'}`;
+  }
+  if (kind === 'qc' && value && typeof value === 'object') {
+    const q = value as { status?: unknown; evidence?: unknown };
+    // The verdict alone. The evidence note is the scientist's own prose and can be
+    // any length; truncating it into a one-line preview would misrepresent it, and
+    // the full note is shown on the evidence trail where it belongs.
+    return typeof q.status === 'string' ? q.status : 'structured value';
   }
   if (kind === 'descriptor' && value && typeof value === 'object') {
     const d = value as { value?: unknown; unit?: string; uncertainty?: { sigma?: unknown } };

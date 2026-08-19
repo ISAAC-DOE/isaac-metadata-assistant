@@ -1660,6 +1660,69 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .guided-staged .mono { font-size: 11.5px; color: var(--text-muted); }
 
+/* The QC verdict blocker: a closed choice plus the reasoning behind it.
+
+   A RADIO GROUP RATHER THAN A SELECT, deliberately. All four verdicts are visible
+   without opening anything, so a scientist sees that "compromised" and "failed" are
+   distinct options rather than discovering it inside a dropdown; and an unset radio
+   group has no value at all, whereas a <select> shows its first option as though it
+   were chosen. The blocker's own text says no verdict is assumed, "not even 'valid'",
+   and the control has to be able to say that. */
+.guided-verdict-set {
+  border: 1px solid var(--border-subtle, var(--cover-border));
+  border-radius: var(--radius-token);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  min-width: 0;
+}
+.guided-verdict-legend {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  padding: 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.guided-verdict-option {
+  /* Left at the default a native radio paints itself in the VIEWER'S OS accent, which
+     is a colour this app has never chosen and which carries no meaning here — the same
+     reason the checkboxes in graph.css, assets.css and run-compare.css set it. Pinned
+     by `native-control-accent.test.ts`, which caught this control shipping without it. */
+  accent-color: var(--action);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 14px;
+  padding: 4px 0;
+  /* 32px keeps the whole row a touch target at 390/320px rather than the radio
+     dot alone, which is ~13px and below every guideline. */
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.guided-verdict-note-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.guided-verdict-note {
+  width: 100%;
+  max-width: 100%;
+  /* `resize: vertical` only — a horizontally resizable textarea can be dragged wider
+     than its container and overflow the page at narrow widths. */
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.guided-verdict-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+  margin: 10px 0;
+}
+
 /* A message whose text the browser-transcript scrubber withheld. Muted and italic:
    it is an absence, not an error — nothing failed, and the live turn was answered
    normally. Only the archived copy is affected. Before this existed the message
