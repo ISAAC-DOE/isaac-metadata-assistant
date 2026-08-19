@@ -253,6 +253,37 @@ describe('nothing picks a winner', () => {
     // which puts the two-citation answer above the one-citation one.
     expect(values).toEqual(['LiFePO3', 'LiFePO4']);
   });
+
+  it('preserves it when the citation order RUNS THE OTHER WAY — the case that can fail', async () => {
+    /*
+     * THE TEST ABOVE CANNOT DETECT A RE-SORT, AND THIS ONE CAN.
+     *
+     * Its fixture happens to list the MORE-cited answer first, so sorting the
+     * candidates by citation count descending is a NO-OP on it. Measured: adding
+     * `[...candidates].sort((a,b) => b.evidence_count - a.evidence_count)` to the
+     * render left all 39 tests green. A test whose name promises that the server's
+     * order survives, and which passes whatever order the component chooses, is
+     * worse than no test — it reads as the guard for the no-winner invariant.
+     *
+     * So this fixture inverts the relationship: alphabetical order still puts
+     * `LiFePO3` first, but now it is the answer with FEWER citations. Any ordering
+     * derived from citation count — ascending or descending — moves something, and
+     * the assertion sees it. That is the whole point: candidate order must carry no
+     * ranking, and the only way to prove it is a fixture where a ranking would look
+     * different from the server's order.
+     */
+    stub(
+      oneConflict({
+        candidates: [conflictCandidate('LiFePO3', 1), conflictCandidate('LiFePO4', 5)],
+      }),
+    );
+    renderPanel();
+    const article = await row();
+    const values = within(article)
+      .getAllByText(/^LiFePO[34]$/)
+      .map((el) => el.textContent);
+    expect(values).toEqual(['LiFePO3', 'LiFePO4']);
+  });
 });
 
 // --- 4. choosing a candidate -------------------------------------------------
