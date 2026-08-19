@@ -217,6 +217,11 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   assets: 'the asset references',
   assistant: 'an assistant answer',
   audit: 'the evidence audit',
+  // The two conflict operations. "Conflicting evidence" is the product's word for
+  // this axis everywhere else on the Evidence screen (`ATTENTION_CLASSES` in
+  // ValidateReview, the Evidence Support chip); `conflicts` is the wire segment
+  // and never reaches a scientist.
+  conflicts: 'the conflicting evidence',
   draft: 'the draft fields',
   edit: 'a field edit',
   evidence: 'the evidence trail',

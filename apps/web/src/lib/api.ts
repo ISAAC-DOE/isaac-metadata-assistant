@@ -30,6 +30,10 @@ import type {
   ApiAssetWritten,
   ApiAuditResponse,
   AssistantQueryResponse,
+  ApiConflictResolved,
+  ApiConflictsResponse,
+  ApiResolutionChosenFrom,
+  ApiResolutionOutcome,
   ApiCsvPreview,
   ApiDraftResponse,
   ApiEvidenceClassification,
@@ -1351,6 +1355,117 @@ export const api = {
         : {}),
     });
     if (res.ok) return readJson<ApiNoteReviewed>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /*
+   * --- Evidence conflicts, and the one recorded decision about each ----------
+   *
+   * WHAT THESE TWO CALLS ARE FOR. `evidence_classify` flags an address the moment
+   * two distinct non-null answers are recorded against it, and NOTHING in this
+   * application removes an evidence entry — an answer and an edit each APPEND a
+   * user confirmation. So a scientist who answers a question, notices a typo and
+   * answers it again manufactured a finding that no surface could clear. The read
+   * is where the competing answers are finally visible; the write is where a
+   * person says which one they stand behind.
+   *
+   * THE WRITE CHANGES NO SCIENTIFIC VALUE, and no caller of this module may
+   * present it as though it does. It records WHICH recorded answer was chosen;
+   * writing that answer into the field is a different act with exactly one path
+   * (`submitAnswer` / `editField`, stored as user-confirmation evidence).
+   *
+   * NOTHING HERE PICKS A WINNER. `chosen_value` is always supplied by the caller
+   * from an explicit act; there is deliberately no `resolveAutomatically`, no
+   * "most-cited" helper, and no default outcome.
+   *
+   * ONE VALIDATOR, THE RECORD'S. A decision is stored inside the experiment's own
+   * document — one record-level list, run-scoped rows distinguished by their
+   * `run_id` — so a run-scoped decision takes the EXPERIMENT's version token, not
+   * the run's. Same trap `updateRun` records, in the opposite direction. The
+   * guard is on truthiness for `createRun`'s reason: an empty token must be sent
+   * as ABSENT (server 428) rather than as `If-Match: ""` (400).
+   *
+   * THE PATH LITERALS STAY WHOLE and the query is appended separately, exactly as
+   * `listNotes` and `listRuns` do — `backend-down-state.test.tsx` reads this
+   * module's source to derive its per-record sub-read inventory, and interpolating
+   * the query into the literal makes the scanner see `conflicts?…` as a
+   * sub-resource with no product word.
+   */
+
+  /**
+   * Every conflicting address on one subject, with the competing answers.
+   *
+   * `runId` NARROWS the subject to that run's OWN fields. It is deliberately not
+   * "the run's resolved draft": an inherited address's evidence lives at the
+   * record and is decided there, and describing it under both scopes would let one
+   * disagreement collect two decisions.
+   */
+  listConflicts(
+    experimentId: string,
+    query: { runId?: string } = {},
+  ): Promise<ApiConflictsResponse> {
+    const params = new URLSearchParams();
+    if (query.runId !== undefined) params.set('run', query.runId);
+    const path = `/experiments/${enc(experimentId)}/conflicts`;
+    const search = params.toString();
+    return getJson<ApiConflictsResponse>(search === '' ? path : `${path}?${search}`);
+  },
+
+  /**
+   * Record ONE decision about ONE conflicting address, or revise an earlier one.
+   *
+   * `chosenValue` FOR A CANDIDATE IS THE SERVER'S OWN `value`, sent back
+   * untouched. The server checks membership by canonicalising with the same
+   * function the conflict rule uses (`json.dumps(..., sort_keys=True,
+   * default=str)`), and reproducing that canonicalisation in TypeScript would be
+   * the second definition of "the same value" that the backend module's docstring
+   * warns produces a resolution which never clears anything — JS and Python
+   * already disagree on container separators and non-ASCII escaping. So nothing
+   * here canonicalises; the value makes a round trip instead.
+   *
+   * `deferred` CARRIES NEITHER `chosen_value` NOR `chosen_from`, and they are
+   * omitted rather than sent as `null`: the server refuses a deferred body that
+   * carries either, because "nobody chose" and "somebody chose and we filed it as
+   * undecided" are different facts.
+   *
+   * `rationale` IS SENT VERBATIM when it is not blank, and OMITTED when it is.
+   * Untrimmed, for the reason `captureNote` sends its text untrimmed — the
+   * server's "stored as supplied" has to be true of the string the scientist
+   * wrote. A blank is omitted rather than sent as `""`, which the server refuses
+   * precisely so an empty reason is never stored as though somebody wrote one.
+   */
+  async resolveConflict(
+    experimentId: string,
+    opts: {
+      experimentVersion: string;
+      address: string;
+      outcome: ApiResolutionOutcome;
+      runId?: string;
+      chosenValue?: unknown;
+      chosenFrom?: ApiResolutionChosenFrom;
+      rationale?: string;
+    },
+  ): Promise<ApiConflictResolved> {
+    const path = `/experiments/${enc(experimentId)}/conflicts/resolve`;
+    const body: Record<string, unknown> = {
+      confirmed_by_user: true,
+      address: opts.address,
+      outcome: opts.outcome,
+    };
+    if (opts.runId) body.run_id = opts.runId;
+    if (opts.outcome === 'resolved') {
+      body.chosen_value = opts.chosenValue;
+      body.chosen_from = opts.chosenFrom;
+    }
+    if ((opts.rationale ?? '').trim() !== '') body.rationale = opts.rationale;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiConflictResolved>(res, path);
     throw await mutationError(res, path);
   },
 

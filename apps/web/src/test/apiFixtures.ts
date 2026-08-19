@@ -461,6 +461,173 @@ export function notesPage(
   };
 }
 
+/* --------------------------------------------------------------------------
+ * Evidence conflicts.
+ *
+ * SHAPES CAPTURED FROM THE RUNNING BACKEND, not written from the type. A fixture
+ * script drove `GET /api/experiments/{id}/conflicts` and
+ * `POST .../conflicts/resolve` against a `tutorial_client(create_app())` holding
+ * one address with three evidence entries asserting two values, and every key,
+ * every ordering and every count below is what came back. Two of them are easy to
+ * get wrong by hand and are the reason this was measured rather than typed:
+ *
+ *   - `canonical` is the JSON TEXT of the answer (`"\"LiFePO4\""`), not the answer;
+ *   - the candidates come back ALPHABETICAL BY THAT TEXT, so `LiFePO3` — the value
+ *     with MORE citations and the one the field does not hold — is listed FIRST.
+ *     A fixture ordered by plausibility would have hidden the fact that the
+ *     server's order is not a ranking, which is a property the panel asserts.
+ * ------------------------------------------------------------------------ */
+
+export const CONFLICT_ADDRESS = 'sample.material.formula';
+
+export function conflictCandidate(
+  value: string,
+  evidenceCount: number,
+  over: Partial<Record<string, unknown>> = {},
+) {
+  return {
+    canonical: JSON.stringify(value),
+    value,
+    evidence_count: evidenceCount,
+    uncited_evidence_count: 0,
+    sources: Array.from({ length: evidenceCount }, () => ({
+      source_type: 'user_confirmation',
+    })),
+    ...over,
+  };
+}
+
+/** The server's own sentence, verbatim. It names counts and the rule, no value. */
+export const CONFLICT_EXPLANATION =
+  'This entry records 2 distinct non-null answers across 3 stored evidence entries, ' +
+  'so at most one of them can be right and nothing in this application chooses ' +
+  'between them. A conflict is always WITHIN one entry\u2019s own evidence list: it is ' +
+  'not a disagreement between two fields, and not a disagreement about where a value ' +
+  'came from \u2014 two citations that assert the same value are not in conflict however ' +
+  'different their sources.';
+
+export const CONFLICT_DIGEST =
+  '3ec0283145d0a1ca1ed73b78168a0c5f0f60168561c521857476815adbcd1837';
+
+/** A DIFFERENT digest — what a decision made over a different answer set carries. */
+export const CONFLICT_DIGEST_OLD =
+  '0000000000000000000000000000000000000000000000000000000000000001';
+
+export function conflictResolutionFixture(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    resolution_id: '01SYNTHRESOLUTION000000001',
+    address: CONFLICT_ADDRESS,
+    run_id: null,
+    outcome: 'resolved',
+    chosen_value: 'LiFePO4',
+    chosen_from: 'candidate',
+    competing_values: ['"LiFePO3"', '"LiFePO4"'],
+    competing_digest: CONFLICT_DIGEST,
+    rationale: null,
+    subject: null,
+    trust_basis: 'unattributed',
+    recorded_utc: '2026-08-18T23:34:33Z',
+    history: [
+      {
+        action: 'record',
+        at: '2026-08-18T23:34:33Z',
+        from_outcome: null,
+        to_outcome: 'resolved',
+        superseded_chosen_value: null,
+        superseded_competing_digest: null,
+      },
+    ],
+    is_field_value: false,
+    is_evidence: false,
+    state: 'current',
+    stale: false,
+    attributed: false,
+    ...over,
+  };
+}
+
+export function conflictFixture(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    address: CONFLICT_ADDRESS,
+    run_id: null,
+    candidates: [conflictCandidate('LiFePO3', 2), conflictCandidate('LiFePO4', 1)],
+    distinct_value_count: 2,
+    evidence_count: 3,
+    unavailable: false,
+    explanation: CONFLICT_EXPLANATION,
+    resolution_state: 'absent',
+    resolved: false,
+    resolution_stale: false,
+    resolution: null,
+    ...over,
+  };
+}
+
+/**
+ * A conflicts page. `counts` is DERIVED from the conflicts passed in, so a fixture
+ * cannot quietly state a total that disagrees with its own rows — which is the one
+ * way a test could pass while the panel showed two contradicting numbers.
+ */
+export function conflictsPage(
+  conflicts: ReturnType<typeof conflictFixture>[],
+  over: Partial<Record<string, unknown>> = {},
+) {
+  const by = (state: string) =>
+    conflicts.filter((c) => c.resolution_state === state).length;
+  return {
+    experiment_id: EXP_ID,
+    run_id: null,
+    record_rev: VERSION_FIELDS.rev,
+    scope: 'one_entry_evidence_answers',
+    conflicts,
+    counts: {
+      conflicting_addresses: conflicts.length,
+      resolved: by('current'),
+      deferred: by('deferred'),
+      stale: by('stale'),
+      unresolved: conflicts.length - by('current'),
+    },
+    resolutions_without_conflict: [],
+    unreadable_resolution_entries: 0,
+    outcomes: ['resolved', 'deferred'],
+    chosen_from_values: ['candidate', 'edited'],
+    states: ['absent', 'current', 'stale', 'deferred'],
+    experiment_version: VERSION_FIELDS.version,
+    ...over,
+  };
+}
+
+export const conflictsEmpty = conflictsPage([]);
+export const conflictsOne = conflictsPage([conflictFixture()]);
+
+/** The 412 body the write path answers with, verbatim from the backend. */
+export const conflictStaleWrite = {
+  status: 412,
+  body: {
+    error: 'stale_write',
+    experiment_id: EXP_ID,
+    expected_rev: 1,
+    current_rev: 2,
+    expected_version: '1.1',
+    current_version: '24cdbd3b7c38822f.2',
+  },
+};
+
+/** One of the fifteen typed refusals, verbatim from the backend. */
+export const conflictNotACandidate = {
+  status: 422,
+  body: {
+    error: 'chosen_value_not_a_candidate',
+    message:
+      '`chosen_from` says the value is one of the answers already recorded against ' +
+      'this address, and it is not one of them. A value nothing asserted is an ' +
+      '`edited` decision; labelling it `candidate` would attribute it to a citation ' +
+      'that does not carry it. Nothing was written.',
+    address: CONFLICT_ADDRESS,
+    candidate_count: 2,
+  },
+};
+
 export const notesEmpty = notesPage([]);
 
 export const notesOne = notesPage([noteFixture()]);
@@ -1468,6 +1635,12 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     // body for this key.
     [`GET ${base}/notes`]: { body: notesEmpty },
     [`GET ${base}/assets`]: { body: assetsEmpty },
+    // The Conflicting Evidence panel on the Evidence screen reads this on mount,
+    // with the same neutral default as `runs` and `notes` above: NO conflicts
+    // renders the heading and the honest empty state and nothing else, so no
+    // existing assertion elsewhere has to change. A test about conflicts supplies
+    // its own body for this key.
+    [`GET ${base}/conflicts`]: { body: conflictsEmpty },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
@@ -1982,6 +2155,13 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
     // P29.4 — the shared record-session owner's AgentContext pending input.
     [`GET ${base}/pending`]: { body: { pending: [] } },
     [`GET ${base}/artifacts`]: { body: { ...artifactsExported, record: { ...artifactsExported.record, record_id: id }, sidecar: { ...artifactsExported.sidecar, record_id: id } } },
+    // The Conflicting Evidence panel's two reads: the conflicts themselves, and the
+    // run list that draws its scope control. The runs read is deliberately not
+    // required — the panel discloses a failed one and carries on at record scope —
+    // but stubbing it keeps the evidence-screen fixtures describing a working app
+    // rather than a degraded one.
+    [`GET ${base}/conflicts`]: { body: conflictsEmpty },
+    [`GET ${base}/runs`]: { body: runsEmpty },
     [`GET ${base}/source-preview?source=mock_campaign.csv`]: { body: sourcePreviewCsv },
     [`GET ${base}/source-preview?source=raw_scan_listing.txt`]: { body: sourcePreviewListing },
     'GET /api/graph/status': { body: graphStatusUnavailable },

@@ -683,9 +683,9 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // where both branches wrote the SAME literal and git merged two additions
     // while recording one. Every number here was read out of this test's own
     // failure output after the merge.
-    expect(experimentPathLiterals.length).toBe(35);
+    expect(experimentPathLiterals.length).toBe(37);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(29);
+    expect(SUB_READ_SUFFIXES).toHaveLength(31);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -707,7 +707,19 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // about how easily it recurs. The run-removal merge then hit the SAME class a
     // third time in four separate counters — and 19 is where this one lands, because
     // run removal adds a suffix under `runs`, a first segment that already existed.
-    expect(SUB_READ_SEGMENTS).toHaveLength(19);
+    expect(SUB_READ_SEGMENTS).toHaveLength(20);
+    // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
+    // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
+    // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`
+    // at all, so it is the one suffix in this inventory that needs no substitution
+    // — and ONE segment, because `conflicts` is a first segment nothing else used
+    // and therefore needs its own product word in `SUB_RESOURCE_LABELS`. Every one of 37 / 31 / 20 was READ OUT OF THIS TEST'S
+    // OWN FAILURE OUTPUT, one at a time, after the client change — never computed
+    // by adding a delta to the previous literal, which is the failure the note
+    // above this line records happening three times in four counters.
+    expect(SUB_READ_SUFFIXES).toContain('conflicts');
+    expect(SUB_READ_SUFFIXES).toContain('conflicts/resolve');
+    expect(SUB_READ_SEGMENTS).toContain('conflicts');
     // The run REMOVAL write. It adds one literal and one suffix and moves NO
     // segment count: `runs` was already a first segment, so the product word this
     // panel uses for a failed read of it ("the measurement runs") already covers
