@@ -42,6 +42,21 @@ import { compose } from '../lib/assistantComposer';
 import type { ApiEvidenceEntry, ApiWorkflow, RecordBundle } from '../lib/types';
 
 /**
+ * How many pending questions the record screen's banner lists before it says how
+ * many more there are.
+ *
+ * TEN, and the number is a judgement rather than a measurement: it is enough to see
+ * what KIND of thing is being asked without the banner becoming the page. What IS
+ * measured is the cost of not having a bound — at 1000 runs this list was 3,002 items
+ * and ~15,000 of the screen's 16,134 DOM nodes, while every run card together was 50.
+ * See `docs/run-scale-measurements.md`.
+ *
+ * Exported so a test can assert the boundary rather than hard-coding a second copy of
+ * it, and so the overflow copy and the slice can never disagree about the same number.
+ */
+export const NEEDSYOU_VISIBLE = 10;
+
+/**
  * The draft-phase half of the status-bar readout, taken from the SERVER'S OWN
  * workflow derivation instead of from `pending.length === 0`. Called only where
  * `pending.length === 0` (see `LoadedWorkbench`), which is the ONLY thing the
@@ -509,12 +524,46 @@ function LoadedWorkbench({
             {/* D9/C2 — a NUMBERED list: each item shows the concise structured
              * label as the primary line (never the raw identifier) and its
              * technical locator exactly once as a demoted mono token. The
-             * pending data, questions, and ordering are unchanged. */}
+             * pending data, questions, and ordering are unchanged.
+             *
+             * ── BOUNDED, AND THE BOUND IS THE MOST EXPENSIVE THING ON THIS SCREEN
+             * ── AT SCALE. ────────────────────────────────────────────────────────
+             * This list was UNBOUNDED, and a scale benchmark measured what that
+             * costs: at 1000 runs the record screen held 16,134 DOM nodes, of which
+             * ~15,000 were this list — 3,002 items at five nodes each. The run cards
+             * were 50, capped by the Run browser's own paging; every other element on
+             * the page together was under 700. So the DOM cost of this screen was
+             * essentially THIS BANNER, and
+             * `docs/run-scale-measurements.md`'s headline conclusion — "the DOM is not
+             * the problem" — was true when it was measured (the run count WAS the card
+             * count, so this list was short) and stopped being true when runs began
+             * paging while this did not.
+             *
+             * A banner is the wrong place to render three thousand questions in any
+             * case: a reader cannot act on item 2,000 from here, and the control that
+             * takes them somewhere they can is the button below.
+             *
+             * THE COUNT IN THE TITLE IS STILL THE FULL COUNT, and the overflow line
+             * states the remainder explicitly. What must never happen is a truncated
+             * list that reads as complete — a scientist who counted eleven items and
+             * concluded eleven questions remain would be wrong by three thousand.
+             */}
             <ol className="needsyou-list">
-              {pending.map((p, i) => {
+              {pending.slice(0, NEEDSYOU_VISIBLE).map((p, i) => {
                 const summary = pendingSummary(p);
                 return (
-                  <li key={p.id}>
+                  /*
+                   * KEYED ON `blocker_key`, NOT `id`. A run-owned question's `id` is
+                   * its KIND — `series`, `qc`, `descriptor` — so a record with two
+                   * runs produced two `<li key="series">`, and a record with a
+                   * thousand produced a thousand. Duplicate keys are a React
+                   * reconciliation hazard and a console warning on the one screen a
+                   * scientist opens first. `blocker_key` is `<run_id>:<id>` for a
+                   * run-owned question and the bare `id` otherwise, which is exactly
+                   * the identity this needs — the same fix the completion screen
+                   * needed, in a place nobody had looked.
+                   */
+                  <li key={p.blocker_key ?? p.id}>
                     <span className="needsyou-num" aria-hidden="true">
                       {i + 1}
                     </span>
@@ -528,6 +577,16 @@ function LoadedWorkbench({
                 );
               })}
             </ol>
+            {pending.length > NEEDSYOU_VISIBLE && (
+              /* NOT `aria-hidden`, and not a "…". A screen-reader user who has just
+                 been told the count in the title needs to know this list is a
+                 prefix of it, in words. */
+              <p className="needsyou-more">
+                Showing the first {NEEDSYOU_VISIBLE} of {pending.length}.{' '}
+                {pending.length - NEEDSYOU_VISIBLE} more are waiting — open{' '}
+                {LABELS.actionReviewAnswer} to work through all of them.
+              </p>
+            )}
           </div>
           <button
             type="button"

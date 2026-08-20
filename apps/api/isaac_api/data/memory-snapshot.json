@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "54f971d0681dc93d0b009c4966516723e796ea696ae718c68efd2eaef34581ce"
+        "sha256": "3ccb427f4b143cd2bb74a2a3374e787c8733f34c8d680cca53e3c3c0ad60978f"
       },
       {
         "path": "AGENTS.md",
@@ -10360,7 +10360,7 @@
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
-        "sha256": "da7d76c593517bbb2da223e23e1b8748001628bd2514bbac80862df58230f62c"
+        "sha256": "b8be3a3e5f767fb521790afb7cca3a0ac61bde54359d51db30ec80027f91545b"
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "a8c8559cb400919af66c1ca11378c07ab6d68b050fb2e35fc22e2068a123e54b"
+        "sha256": "8bccddcfac2887597dc6da643b7b24ec27302077f0c8b37b57bce52eca465420"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "e6d2f382736e1b49ee9895ee3f2b8c16dbb6e555a80328faaf00ced5cea44db8"
+    "served_manifest_fingerprint": "352fc0aecd055cf529c9a93d5fcd2789cc3167ebfc2386df839998c5d977cf6a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

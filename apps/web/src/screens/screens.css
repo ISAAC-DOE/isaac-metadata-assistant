@@ -1178,6 +1178,14 @@
   flex-direction: column;
   gap: 6px;
 }
+/* The overflow line. Deliberately styled as PROSE rather than as a list item: it is a
+   statement about the list, not another entry in it, and a reader must not be able to
+   mistake "3,000 more are waiting" for the 3,000th question. */
+.needsyou-more {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
 .needsyou-list li {
   display: flex;
   align-items: baseline;
