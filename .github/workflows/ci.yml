@@ -504,7 +504,11 @@ jobs:
           # into the operator's database that no approved migration text describes.
           count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
           [ "$count" = "0" ] || { echo "::error::the application created isaac_runs itself"; exit 1; }
-          # Leave the table as the later steps expect to find it: empty.
+          # Leave the table as the later steps expect to find it: empty. NO projection
+          # delete is needed HERE and that is worth stating rather than copying the
+          # three-statement form around: this step runs with `0001` ONLY applied, so
+          # neither `isaac_runs` nor `isaac_run_projection` exists yet and a statement
+          # naming either would fail on an undefined relation.
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments"
           rm -rf /tmp/isaac-pg-0001-only
 
@@ -2144,6 +2148,16 @@ jobs:
           # table SET and the `records` digest rather than this application's rows.
           # A future step that needs them must run before this one.
           rid=$(cat /tmp/isaac-transition-experiment.txt)
+          # THE PROJECTION ROW FIRST, AND THIS IS WHERE `0005`'s FOREIGN KEY BITES.
+          # `isaac_run_projection` references `isaac_experiments` with NO `ON DELETE`,
+          # so once `0005` is applied every experiment this application saved carries a
+          # row that REFUSES the delete below. That is the constraint working — the
+          # alternative, `ON DELETE CASCADE`, is exactly what `0005` declines — and the
+          # cost is that every cleanup in this job now has three statements instead of
+          # two. This step is where CI found it: it failed with
+          # `violates foreign key constraint "isaac_run_projection_experiment_fk"`
+          # after the parity step above started creating claims.
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_run_projection WHERE experiment_id = '$rid'"
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_runs WHERE experiment_id = '$rid'"
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$rid'"
           rm -rf /tmp/isaac-pg-transition
