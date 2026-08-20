@@ -938,6 +938,64 @@ Q_DELETE_ABSENT_RUNS = (
 )
 
 
+# --- the completeness claim: STAGE 2a, and still nothing reads it -------------
+#
+# WHY A SECOND TABLE EXISTS AT ALL, and it is a measured ambiguity rather than a
+# design taste. `Q_EXPERIMENT_RUN_ROWS` returning zero rows means EITHER "this
+# experiment has no runs" OR "this experiment's runs were never projected", and
+# both are reachable — the second is the normal state of every experiment
+# persisted before the shadow write shipped, and of every experiment saved during
+# the window between a merge and the operator applying the migration by hand.
+# A reader that read zero rows as "no runs" would silently delete every run of
+# every pre-existing record the first time it was switched on, and report success.
+#
+# So the claim is RECORDED rather than inferred, and it is recorded WITH THE
+# VERSION IT WAS MADE AT, which is the part that makes staleness detectable
+# instead of assumed-absent. The full contract, including the four states every
+# future read must distinguish, is `docs/isaac-runs-stage-2-contract.md`.
+#
+# NOTHING READS THIS TABLE IN THIS BUILD. Stage 2b — moving a reader onto
+# `isaac_runs` — is a separate slice gated on the backfill having run.
+
+#: The projector this write path stamps. A CLOSED value set in the migration's own
+#: CHECK (`write-path` | `backfill`), so a typo here is refused by the database
+#: rather than stored.
+PROJECTOR_WRITE_PATH = "write-path"
+
+#: Insert or refresh the completeness claim for ONE experiment.
+#:
+#: THE CONFLICT ACTION IS UNCONDITIONAL, for exactly :data:`Q_UPSERT_RUN`'s reason:
+#: this statement is only ever reached after the experiment compare-and-swap has
+#: already been won, inside the same transaction, and it describes the winner's own
+#: rows. A predicate here could only refuse a claim the shared arbitration has
+#: already authorised, leaving the claim disagreeing with the rows committed beside
+#: it.
+#:
+#: THERE IS ONE CURRENT CLAIM PER EXPERIMENT AND NO HISTORY OF IT. `experiment_id`
+#: is the primary key, so this supersedes in place. A superseded completeness claim
+#: is not evidence of anything — it describes a row set that no longer exists.
+#:
+#: `projected_utc` is stamped `now()` on every accepted update so an operator
+#: reading the table by hand can see when the claim was last made. Nothing derives
+#: correctness from it; the version pair does that.
+Q_UPSERT_RUN_PROJECTION = (
+    "INSERT INTO isaac_run_projection"
+    " (experiment_id, experiment_rev, experiment_generation, run_count, projector)"
+    " VALUES (%s, %s, %s, %s, %s)"
+    " ON CONFLICT (experiment_id) DO UPDATE"
+    " SET experiment_rev = EXCLUDED.experiment_rev,"
+    " experiment_generation = EXCLUDED.experiment_generation,"
+    " run_count = EXCLUDED.run_count,"
+    " projector = EXCLUDED.projector,"
+    " projected_utc = now()"
+)
+
+#: The relation :data:`Q_UPSERT_RUN_PROJECTION` names, as a named constant for
+#: :data:`Q_PROJECTION_TABLE_PRESENT`'s parameter — same reasoning as
+#: :data:`RUN_TABLE`.
+PROJECTION_TABLE = "isaac_run_projection"
+
+
 # --- is the table even there yet? the deployment-order guard -------------------
 
 #: The relation the three statements above name. It is a NAMED CONSTANT because
@@ -1033,21 +1091,32 @@ Q_RUN_TABLE_PRESENT = "SELECT to_regclass(%s::text)"
 #: because nothing reads the table to notice. One probe per save while the table is
 #: genuinely absent is the price of not needing that restart, and it is paid only
 #: in a window that is meant to be short.
-_run_table_seen = False
+#:
+#: A SET RATHER THAN A BOOLEAN, because there are now two migrations whose tables a
+#: running pod may not have yet — ``0002_runs`` and ``0005_run_projection``. The
+#: reasoning above applies unchanged to each; what would NOT survive is a second
+#: copy of it beside a second boolean, so the mechanism is shared and the two
+#: callers name their own table.
+_tables_seen: set[str] = set()
 
 
 def run_table_seen() -> bool:
     """Whether this process has confirmed ``isaac_runs`` exists.
 
     An OBSERVATION for tests and reports. Nothing in the application branches on
-    it — :func:`_run_table_available` is what decides, and it decides against the
+    it — :func:`_table_available` is what decides, and it decides against the
     open transaction.
     """
-    return _run_table_seen
+    return RUN_TABLE in _tables_seen
+
+
+def projection_table_seen() -> bool:
+    """Whether this process has confirmed ``isaac_run_projection`` exists."""
+    return PROJECTION_TABLE in _tables_seen
 
 
 def forget_run_table_presence() -> None:
-    """Drop the cached "the table is there" observation. TWO REAL CALLERS.
+    """Drop EVERY cached "the table is there" observation. TWO REAL CALLERS.
 
     The tests, so one case cannot inherit another's cache — the same reason
     :func:`forget_storage_failure` exists and is cleared by an autouse fixture.
@@ -1059,13 +1128,22 @@ def forget_run_table_presence() -> None:
     swallowed — but the next one re-probes, finds the table gone, and skips the run
     writes, so saves recover after one failure instead of after a restart nobody
     is watching for.
+
+    IT CLEARS BOTH TABLES DESPITE ITS NAME, and that is deliberate rather than
+    sloppy. The one production caller reaches here because a server said
+    ``undefined_table`` and this code cannot tell WHICH relation the server meant
+    — the SQLSTATE carries no name this path reads. Clearing more than necessary
+    costs one extra probe on the next save; clearing less would leave a false
+    positive cached for the life of the pod, which is the failure this function
+    exists to prevent. The name is kept because it is the name every existing
+    caller and test uses, and renaming a safety hook is a worse trade than
+    documenting one.
     """
-    global _run_table_seen
-    _run_table_seen = False
+    _tables_seen.clear()
 
 
-def _run_table_available(cursor, policy) -> bool:
-    """Whether ``isaac_runs`` exists, asked at most once per process once it does.
+def _table_available(cursor, policy, table: str) -> bool:
+    """Whether ``table`` exists, asked at most once per process once it does.
 
     Uses the transaction ALREADY OPEN, so the answer is the one this transaction's
     own statements would get, from the same ``search_path``, at the same instant.
@@ -1077,14 +1155,13 @@ def _run_table_available(cursor, policy) -> bool:
     any other statement's would and :meth:`PostgresOrdinaryStore.persist` reports
     the outage it is. There is no ``except`` anywhere on this path.
     """
-    global _run_table_seen
-    if _run_table_seen:
+    if table in _tables_seen:
         return True
-    cursor.execute(policy.check(Q_RUN_TABLE_PRESENT), (RUN_TABLE,))
+    cursor.execute(policy.check(Q_RUN_TABLE_PRESENT), (table,))
     row = cursor.fetchone()
     if not row or row[0] is None:
         return False
-    _run_table_seen = True
+    _tables_seen.add(table)
     return True
 
 
@@ -1336,11 +1413,37 @@ class PostgresOrdinaryStore:
                     # A save that fails for a table NOTHING READS is the whole
                     # defect; see `Q_RUN_TABLE_PRESENT` for why this is a
                     # pre-check and not a `try`/`except`.
-                    if _run_table_available(cursor, policy):
+                    if _table_available(cursor, policy, RUN_TABLE):
                         try:
-                            self._write_run_rows(
+                            written = self._write_run_rows(
                                 cursor, policy, exp.id, desired, desired_ids
                             )
+                            # ── AND THE COMPLETENESS CLAIM, INSIDE THE SAME
+                            # ── TRANSACTION AS THE ROWS IT DESCRIBES. ───────────
+                            # There is deliberately no path that writes one
+                            # without the other: two statements in one transaction
+                            # cannot end up disagreeing about whether they
+                            # committed. It is also strictly inside the `accepted`
+                            # branch, for the same reason the run rows are — a
+                            # writer that LOST the compare-and-swap claiming
+                            # completeness would be claiming it for a document it
+                            # failed to write.
+                            #
+                            # `written` is MEASURED — the number of rows the
+                            # projection actually contains after this transaction —
+                            # not `len(desired)` as an intention. The contract
+                            # (`docs/isaac-runs-stage-2-contract.md` §2.2) requires
+                            # that, and they differ if `_write_run_rows` ever grows
+                            # a skip.
+                            #
+                            # The presence check is SEPARATE from the run table's
+                            # because rolling `0005` back while `0002` stays is a
+                            # reachable operator action; the migration ORDER
+                            # guarantees the converse cannot happen.
+                            if _table_available(cursor, policy, PROJECTION_TABLE):
+                                self._stamp_projection(
+                                    cursor, policy, exp, written
+                                )
                         except Exception as exc:  # noqa: BLE001 - re-raised below
                             # NOT A RECOVERY, AND NOT A CONTINUE. The transaction
                             # is already aborted and this save is already lost; the
@@ -1370,7 +1473,7 @@ class PostgresOrdinaryStore:
             raise DurableWriteConflict(stored, experiment_id=exp.id)
 
     @staticmethod
-    def _write_run_rows(cursor, policy, experiment_id: str, desired, desired_ids) -> None:
+    def _write_run_rows(cursor, policy, experiment_id: str, desired, desired_ids) -> int:
         """Make this experiment's ``isaac_runs`` rows equal ``desired``. DIFFED.
 
         NOT A SECOND WRITE PATH, and it is written so that it cannot become one: it
@@ -1382,7 +1485,7 @@ class PostgresOrdinaryStore:
         instantiates.
 
         IT ASSUMES THE TABLE EXISTS, DELIBERATELY. Its one caller has already
-        established that through :func:`_run_table_available`, so nothing here
+        established that through :func:`_table_available`, so nothing here
         tolerates an absent relation and nothing here should start to: a
         ``try``/``except`` in this method could not work anyway (an error aborts
         the transaction, so the experiment upsert would roll back with it), and a
@@ -1432,6 +1535,53 @@ class PostgresOrdinaryStore:
             cursor.execute(
                 policy.check(Q_DELETE_ABSENT_RUNS), (experiment_id, list(desired_ids))
             )
+        # THE MEASURED ROW COUNT, returned rather than recomputed by the caller.
+        # After this method the table holds exactly the desired set for this
+        # experiment: every desired row was upserted or found already equal, and
+        # everything outside the set was deleted. `len(desired_ids)` is that number
+        # BECAUSE of the two statements above, which is why it is returned from
+        # here — from the caller it would be an assumption about this method.
+        return len(desired_ids)
+
+    @staticmethod
+    def _stamp_projection(cursor, policy, exp: "ws.Experiment", run_count: int) -> None:
+        """Record that this experiment's ``isaac_runs`` rows are complete AT THIS
+        VERSION.
+
+        NOT A SECOND WRITE PATH, and written so it cannot become one: it takes an
+        already-open cursor and the policy of the transaction that owns it, so
+        there is no way to call it that does not go through :meth:`persist`'s
+        transaction — and therefore through :meth:`refuse_if_not_persistable`, the
+        ``accepted`` gate, and the run-row write whose result it describes.
+
+        WHY THE VERSION PAIR IS STAMPED AND NOT JUST A BOOLEAN. A bare "complete"
+        flag is indistinguishable from a stale one, so a reader would have to
+        ASSUME staleness absent. Recording the ``(rev, generation)`` the rows were
+        projected from makes staleness DETECTABLE: a later save that does not
+        maintain the rows advances the document past this value and the pair stops
+        matching. Both keys, not just ``rev``, for :data:`Q_UPSERT_EXPERIMENT`'s
+        reason — ``rev`` alone cannot see a record destroyed and rebuilt at rev 0.
+
+        THE VALUES COME FROM THE DOCUMENT BEING WRITTEN, not from a re-read.
+        ``exp.rev`` and ``exp.generation`` are the same fields
+        ``json.dumps(exp.to_state())`` just embedded in the row this transaction
+        upserted, so the claim describes the document that was committed rather
+        than whatever a second statement might have found.
+
+        TUTORIAL ISOLATION IS INHERITED BY CONSTRUCTION and must stay that way.
+        ``isaac_run_projection`` HAS NO ``session_id`` COLUMN AND CAN NEVER GAIN
+        ONE — ``ALTER`` is a forbidden verb in ``db_write._FORBIDDEN_KEYWORDS`` and
+        ``CREATE TABLE IF NOT EXISTS`` is a silent no-op against an existing table
+        — so a worked-example claim that ever reached this table would be
+        permanently unidentifiable and permanently uncleanable. The cost of that
+        leak is not "a cleanup script"; it is that no cleanup script could be
+        written. Hence: one writer, inside the one method the isolation guards
+        already protect.
+        """
+        cursor.execute(
+            policy.check(Q_UPSERT_RUN_PROJECTION),
+            (exp.id, exp.rev, exp.generation, run_count, PROJECTOR_WRITE_PATH),
+        )
 
     # -- restore ---------------------------------------------------------------
 

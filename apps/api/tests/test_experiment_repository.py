@@ -467,6 +467,18 @@ class FakeCursor:
             # table name as a PARAMETER because asking whether a relation exists is
             # the one thing that must work when it does not.
             raise UndefinedTable("relation \"isaac_runs\" does not exist")
+        if (
+            not self._connection.projection_table
+            and "isaac_run_projection" in sql.lower()
+        ):
+            # THE SAME PUNISHMENT FOR `0005`, and it must be a SEPARATE flag rather
+            # than reusing `run_table`. Rolling `0005` back while `0002` stays is a
+            # reachable operator action, and it is the case where the write path
+            # must keep maintaining the rows while making no completeness claim.
+            # Note the ORDER: this check is after the `isaac_runs` one, so with both
+            # tables absent the run statement is punished first — which is what a
+            # real server does, because it is the statement that is reached first.
+            raise UndefinedTable('relation "isaac_run_projection" does not exist')
         self.rowcount = -1
         if sql == dbw.Q_CURRENT_DATABASE:
             self._pending = [(self._connection.database,)]
@@ -494,9 +506,17 @@ class FakeCursor:
             # model it the same way: a row holding `None` for a name that does not
             # resolve, a row holding the name for one that does. A fake that raised
             # here would prove the opposite of what the probe is for.
-            self._pending = [
-                (repo.RUN_TABLE if self._connection.run_table else None,)
-            ]
+            # ANSWERED PER PARAMETER, because the application now probes TWO
+            # tables with this one statement. Answering `run_table` for both would
+            # make a `0005`-rolled-back deployment indistinguishable from a
+            # fully-migrated one, and the test that pins that behaviour would pass
+            # for the wrong reason.
+            asked = (params or (None,))[0]
+            present = {
+                repo.RUN_TABLE: self._connection.run_table,
+                repo.PROJECTION_TABLE: self._connection.projection_table,
+            }.get(asked, False)
+            self._pending = [(asked if present else None,)]
             self.rowcount = 1
         elif sql == repo.Q_EXPERIMENT_RUN_ROWS:
             # Column order MUST match the statement: run_id, ordinal, state, rev,
@@ -562,6 +582,7 @@ class FakeConnection:
         stored=None,
         runs=None,
         run_table=True,
+        projection_table=True,
     ) -> None:
         #: Whether migration `0002_runs` has been applied to this database.
         #:
@@ -573,6 +594,13 @@ class FakeConnection:
         #: absent to present happens under a running pod and is the case the
         #: negative half of the application's cache exists for.
         self.run_table = run_table
+        #: DEFAULTS TO `True` for `run_table`'s reason, and is a SECOND flag for a
+        #: reason of its own: the migration order guarantees `isaac_runs` exists
+        #: wherever `isaac_run_projection` does, but NOT the converse — an operator
+        #: can roll `0005` back and leave `0002` applied. That deployment must keep
+        #: maintaining the rows and stop claiming completeness, which is only
+        #: testable if the two can differ.
+        self.projection_table = projection_table
         self.database = dbw.EXPECTED_DATABASE if database is None else database
         self.rows = list(rows)
         self.applied = set(applied)
@@ -759,6 +787,12 @@ _WRITE_STATEMENTS = [
     repo.Q_UPSERT_EXPERIMENT,
     repo.Q_UPSERT_RUN,
     repo.Q_DELETE_ABSENT_RUNS,
+    # `0005_run_projection`. A WRITE, and the only statement in this application
+    # that names `isaac_run_projection` — there is no read of it anywhere, which is
+    # what makes "nothing reads the completeness claim in this build" a mechanical
+    # property rather than a promise. See
+    # `test_0005_is_written_by_the_write_path_and_read_by_nothing`.
+    repo.Q_UPSERT_RUN_PROJECTION,
 ]
 _ALL_STATEMENTS = _READ_STATEMENTS + _WRITE_STATEMENTS
 
@@ -802,6 +836,11 @@ def test_records_is_not_and_never_becomes_an_owned_table():
         "isaac_revision_changes",
         "isaac_submissions",
         "isaac_submission_runs",
+        # `isaac_run_projection` (`0005_run_projection`), added in the SAME change
+        # that creates it AND named in `CLAUDE.md` §15 in that same change — which
+        # is the correction the two comments above exist to record, applied rather
+        # than only described. One statement writes it and nothing reads it.
+        "isaac_run_projection",
     }
     # ...and it is additionally on the absolute denylist, which does not reason
     # about SQL grammar at all. Both guards are asserted, because the grammar one
@@ -1228,15 +1267,24 @@ def test_a_projection_failure_is_not_relabelled_as_a_database_outage():
 # is where a real engine answers those.
 
 
-def _probe_count(conn) -> int:
-    """How many times this connection was asked whether `isaac_runs` exists."""
-    return [sql for sql, _ in conn.statements].count(repo.Q_RUN_TABLE_PRESENT)
+def _probe_count(conn, table: str = repo.RUN_TABLE) -> int:
+    """How many times this connection was asked whether `table` exists.
+
+    PER TABLE, because one statement now probes two of them and a bare count
+    would conflate "asked twice about one table" with "asked once about each" —
+    the first is the cache failing, the second is the cache working.
+    """
+    return [
+        params
+        for sql, params in conn.statements
+        if sql == repo.Q_RUN_TABLE_PRESENT and (params or (None,))[0] == table
+    ].__len__()
 
 
 def test_a_save_writes_the_experiment_and_SKIPS_the_runs_when_0002_is_pending():
     """THE DEFECT, AS A TEST. Every claim in it was false before the guard.
 
-    MUTATION-CHECKED. Deleting the `if _run_table_available(...)` guard in
+    MUTATION-CHECKED. Deleting the `if _table_available(..., RUN_TABLE)` guard in
     `PostgresOrdinaryStore.persist` turns this RED: the fake raises
     `UndefinedTable` from `Q_EXPERIMENT_RUN_ROWS` exactly as the server does, the
     transaction rolls back, and `persist` raises `StorageUnavailable` — which is
@@ -1302,9 +1350,14 @@ def test_health_still_reports_durable_while_0002_is_pending(app, monkeypatch):
     assert _run_statements(conn) == []
 
 
-def test_the_normal_case_is_untouched_and_costs_exactly_one_extra_statement():
-    """THE OTHER DIRECTION. With the table present the write is what it was, and
-    the guard's whole cost on a migrated deployment is ONE catalog lookup, ONCE.
+def test_the_normal_case_is_untouched_and_the_guards_cost_one_lookup_each():
+    """THE OTHER DIRECTION. With both tables present the write is what it was, and
+    each guard's whole cost on a migrated deployment is ONE catalog lookup, ONCE.
+
+    THE NAME USED TO SAY "exactly one extra statement" AND THAT IS NOW FALSE:
+    `0005` adds a second probe and the completeness claim, so a migrated save
+    issues three statements this test was written before. Renamed rather than
+    left to read as a guarantee it no longer makes.
 
     The full statement sequence is asserted rather than only the run statements,
     because "unchanged" is a claim about the transaction as a whole.
@@ -1320,11 +1373,31 @@ def test_the_normal_case_is_untouched_and_costs_exactly_one_extra_statement():
         repo.Q_RUN_TABLE_PRESENT,
         repo.Q_EXPERIMENT_RUN_ROWS,
         repo.Q_UPSERT_RUN,
+        # `0005`: the second probe and the completeness claim. THE PROBE IS THE
+        # SAME STATEMENT with a different parameter, which is why the assertions
+        # below read the parameter rather than counting the text.
+        repo.Q_RUN_TABLE_PRESENT,
+        repo.Q_UPSERT_RUN_PROJECTION,
     ]
-    assert set(conn.runs) == {exp.runs[0].id}
-    # The probe is inside the accepted branch, so it is asked AFTER the
-    # compare-and-swap and never on behalf of a writer that lost.
+    # THE CLAIM COMES LAST, AFTER THE ROWS IT DESCRIBES. Not decoration: a claim
+    # written before the rows would be a claim about a row set that did not exist
+    # yet, and if a later statement in the transaction failed the claim would be
+    # rolled back with it — which is correct, and is why both must be in the one
+    # transaction rather than merely in the one method.
     order = [sql for sql, _ in conn.statements]
+    assert order.index(repo.Q_UPSERT_RUN) < order.index(repo.Q_UPSERT_RUN_PROJECTION)
+    stamps = [p for sql, p in conn.statements if sql == repo.Q_UPSERT_RUN_PROJECTION]
+    assert len(stamps) == 1
+    # (experiment_id, rev, generation, run_count, projector) — and `run_count` is
+    # the MEASURED 1, matching the single run this experiment has.
+    assert stamps[0][0] == exp.id
+    assert stamps[0][1] == exp.rev
+    assert stamps[0][2] == exp.generation
+    assert stamps[0][3] == 1
+    assert stamps[0][4] == repo.PROJECTOR_WRITE_PATH
+    assert set(conn.runs) == {exp.runs[0].id}
+    # The probes are inside the accepted branch, so they are asked AFTER the
+    # compare-and-swap and never on behalf of a writer that lost.
     assert order.index(repo.Q_UPSERT_EXPERIMENT) < order.index(repo.Q_RUN_TABLE_PRESENT)
 
 
@@ -2141,13 +2214,14 @@ _COMMITTED_MIGRATIONS = [
     "0002_runs",
     "0003_revisions",
     "0004_submissions",
+    "0005_run_projection",
 ]
 
 #: How many statements each contributes. A LITERAL rather than a measurement,
 #: deliberately: the point of the assertion is that a statement cannot be added to a
 #: committed migration file without a visible edit here, and a count read off the
 #: files themselves would assert nothing at all.
-_COMMITTED_STATEMENT_COUNTS = [3, 2, 6, 4]
+_COMMITTED_STATEMENT_COUNTS = [3, 2, 6, 4, 2]
 
 #: Every table the committed migrations create, in creation order.
 #:
@@ -2165,6 +2239,7 @@ _MIGRATION_TABLES = (
     "isaac_revision_changes",
     "isaac_submissions",
     "isaac_submission_runs",
+    "isaac_run_projection",
 )
 
 
@@ -2356,14 +2431,25 @@ def test_the_committed_migrations_regex_literal_is_not_read_as_a_dollar_quote():
     migrations = dbm.load_migrations()
     assert [m.version for m in migrations] == _COMMITTED_MIGRATIONS
     assert [len(m.statements) for m in migrations] == _COMMITTED_STATEMENT_COUNTS
-    # EVERY committed migration after the first carries the same `$` inside an id
-    # CHECK, and `0003_revisions` additionally carries `'^[0-9a-f]{64}$'` for the
-    # content signature — so the guard has to stay narrow for all of them, not only
-    # for the one this test was written against. Asserted over the whole set rather
-    # than over index 1, because a new migration is exactly when this would be
-    # forgotten.
-    for migration in migrations[1:]:
-        assert "$" in "\n".join(migration.statements), migration.version
+    # THE PROPERTY IS "A `$` IN A COMMITTED MIGRATION LOADS", NOT "EVERY MIGRATION
+    # HAS A `$`", and this assertion used to be the second. That was true when
+    # written — `0002`, `0003` and `0004` each carry a `$` inside an id-shape CHECK,
+    # and `0003` additionally carries `'^[0-9a-f]{64}$'` — and it went FALSE for
+    # `0005_run_projection`, which needs no such CHECK: its `experiment_id` is a
+    # FOREIGN KEY into a table whose own CHECK already constrains the shape, so
+    # repeating it would be duplicating a constraint rather than adding one.
+    #
+    # Requiring the `$` would therefore have pressured a redundant CHECK into a
+    # migration to satisfy a test, which is the tail wagging the schema. What the
+    # guard has to be narrow for is the migrations that DO carry one, and the
+    # non-vacuity assertion below is what stops this weakening into nothing: at
+    # least one committed migration must still exercise the case, or this test has
+    # stopped testing the guard and says so.
+    carrying = [m.version for m in migrations if "$" in "\n".join(m.statements)]
+    assert carrying, "no committed migration contains a `$` — this test is vacuous"
+    assert set(carrying) >= {"0002_runs", "0003_revisions", "0004_submissions"}
+    # And `load_migrations()` above did not raise, which IS the guard not refusing
+    # them — the loader runs `split_statements`, which is where the refusal lives.
 
 
 # =============================================================================
@@ -2676,6 +2762,219 @@ def test_0002_is_now_written_by_the_write_path_and_by_nothing_else():
     assert not any(
         table in repo.Q_RUN_TABLE_PRESENT for table in dbw.OWNED_TABLES
     ), repo.Q_RUN_TABLE_PRESENT
+
+
+# =============================================================================
+# 8D. migration 0005_run_projection — the completeness claim (STAGE 2a)
+# =============================================================================
+#
+# WHAT THESE PROVE AND WHAT THEY CANNOT, said before the cases as in 7b and 8A.
+# The fake models `to_regclass` per parameter and punishes a statement naming an
+# absent relation with the real SQLSTATE, so these prove WHICH STATEMENTS ARE
+# ISSUED, WITH WHICH PARAMETERS, IN WHICH ORDER, and what a caller sees. They do
+# NOT prove the SQL is valid PostgreSQL, that the CHECK on `projector` rejects an
+# unknown value, or that the foreign key refuses an orphan. CI's `postgres:18`
+# service is where a real engine answers those, and the `postgres-migration` job
+# exercises them.
+#
+# THE CONTRACT THESE ENFORCE is `docs/isaac-runs-stage-2-contract.md` §2.2. Each
+# invariant there has a case here, and the numbering is deliberate so a future
+# reader can tell whether one has lost its test.
+
+
+def test_0005_is_written_by_the_write_path_and_read_by_nothing():
+    """INVARIANT 5 — no read moves in Stage 2a.
+
+    The whole safety argument for shipping a table before its reader is that
+    nothing can be depending on it yet. That is a mechanical property and this is
+    where it is mechanical: exactly ONE statement in this application names
+    `isaac_run_projection`, it is in `_WRITE_STATEMENTS`, and no read names it.
+
+    Measured over the module-level constants, like its `0002` counterpart, so a
+    second statement cannot appear without appearing here.
+    """
+    naming = [sql for sql in _ALL_STATEMENTS if "isaac_run_projection" in sql.lower()]
+    assert naming == [repo.Q_UPSERT_RUN_PROJECTION], naming
+    for sql in _READ_STATEMENTS:
+        assert "isaac_run_projection" not in sql.lower(), sql
+    # NO UPDATE AND NO DELETE ANYWHERE, which is what makes the upsert the single
+    # writer. The rollback's DROP lives in a file `load_migrations` never loads.
+    for sql in _ALL_STATEMENTS:
+        lowered = sql.lower()
+        if "isaac_run_projection" in lowered:
+            assert lowered.startswith("insert into"), sql
+    # And the probe reaches it by PARAMETER, exactly as it reaches `isaac_runs` —
+    # pinned here so the projection table cannot become a second writer unnoticed.
+    assert repo.PROJECTION_TABLE == "isaac_run_projection"
+    assert repo.PROJECTION_TABLE not in repo.Q_RUN_TABLE_PRESENT
+
+
+def test_the_claim_and_the_rows_are_written_in_ONE_transaction_or_not_at_all():
+    """INVARIANT 1.
+
+    Two statements in one transaction cannot end up disagreeing about whether they
+    committed. This asserts they are in the same one — same connection, one commit,
+    no intervening commit — which is the only form of "consistent" available here:
+    there is no trigger (a dollar-quoted body is refused by
+    `db_migrate.split_statements`) and no CHECK can count rows in another table.
+    """
+    exp = _exp_with_runs("Run 1", "Run 2")
+    conn = _persist(exp)
+    assert conn.commits == 1 and conn.rollbacks == 0
+    sqls = [sql for sql, _ in conn.statements]
+    assert repo.Q_UPSERT_RUN in sqls
+    assert repo.Q_UPSERT_RUN_PROJECTION in sqls
+
+
+def test_the_claim_records_the_version_it_was_made_at_not_merely_that_it_was_made():
+    """INVARIANT 2, AND IT IS THE POINT OF THE WHOLE TABLE.
+
+    A bare "complete" flag is indistinguishable from a stale one, so a reader would
+    have to ASSUME staleness absent — which is the `rows exist -> use them` model
+    the contract rejects. Stamping the `(rev, generation)` the rows were projected
+    FROM makes staleness detectable instead.
+
+    Asserted as a PAIR because `rev` alone cannot see a record destroyed and
+    rebuilt at rev 0 — the same reason `Q_UPSERT_EXPERIMENT` compares both.
+    """
+    exp = _exp_with_runs("Run 1")
+    conn = _persist(exp)
+    stamp = [p for sql, p in conn.statements if sql == repo.Q_UPSERT_RUN_PROJECTION][0]
+    assert stamp[1] == exp.rev
+    assert stamp[2] == exp.generation
+    assert stamp[2], "an empty generation would make a rebuild invisible"
+    # THE STATEMENT ITSELF MUST CARRY BOTH KEYS INTO THE CONFLICT ACTION, or a
+    # second save would leave the first save's version pair in place while
+    # rewriting the count — a stamp that looks fresh and is not.
+    assert "experiment_rev = EXCLUDED.experiment_rev" in repo.Q_UPSERT_RUN_PROJECTION
+    assert (
+        "experiment_generation = EXCLUDED.experiment_generation"
+        in repo.Q_UPSERT_RUN_PROJECTION
+    )
+
+
+def test_a_writer_that_LOST_the_compare_and_swap_claims_nothing():
+    """INVARIANT 3, and it is the same `if accepted` gate the run rows are inside.
+
+    A loser that stamped would be claiming completeness for a document it failed to
+    write — asserting that the table matches a version the database rejected. It is
+    worse than the run-row case it mirrors: a wrong row set is wrong, a wrong CLAIM
+    is wrong AND authorises a reader to trust it.
+    """
+    exp = _exp_with_runs("Run 1")
+    conn = FakeConnection(refuse_upsert={exp.id}, stored={exp.id: exp.to_state()})
+    with pytest.raises(repo.DurableWriteConflict):
+        repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(exp)
+    assert [sql for sql, _ in conn.statements].count(repo.Q_UPSERT_RUN_PROJECTION) == 0
+    assert _probe_count(conn, repo.PROJECTION_TABLE) == 0
+
+
+def test_run_count_is_MEASURED_and_zero_runs_is_a_real_claim():
+    """INVARIANT 4, and the state `0002` alone could not express.
+
+    `run_count = 0` beside a matching version pair is a POSITIVE statement that
+    this experiment has no runs — which is the entire reason the table exists. Zero
+    rows in `isaac_runs` cannot say it: it means "no runs" OR "never projected",
+    and a reader that guessed the first would silently delete every run of every
+    pre-existing record.
+    """
+    for labels, expected in ((), 0), (("Run 1",), 1), (("Run 1", "Run 2"), 2):
+        repo.forget_run_table_presence()
+        exp = _exp_with_runs(*labels) if labels else _exp_with_runs()
+        conn = _persist(exp)
+        stamp = [
+            p for sql, p in conn.statements if sql == repo.Q_UPSERT_RUN_PROJECTION
+        ][0]
+        assert stamp[3] == expected, labels
+        assert stamp[3] == len(exp.sorted_runs()), labels
+
+
+def test_the_projector_is_the_write_path_and_the_value_is_one_the_CHECK_admits():
+    """The closed value set, asserted on both sides.
+
+    The migration CHECKs `projector IN ('write-path', 'backfill')`, so a typo here
+    is refused by the database rather than stored — but only if the constant and
+    the CHECK agree, and nothing in Python can see a CHECK. So both are read: the
+    constant this path sends, and the literal in the committed SQL.
+    """
+    exp = _exp_with_runs("Run 1")
+    conn = _persist(exp)
+    stamp = [p for sql, p in conn.statements if sql == repo.Q_UPSERT_RUN_PROJECTION][0]
+    assert stamp[4] == repo.PROJECTOR_WRITE_PATH == "write-path"
+    sql_text = (
+        Path(repo.__file__).parent
+        / "migrations"
+        / "0005_run_projection.sql"
+    ).read_text()
+    assert "projector IN ('write-path', 'backfill')" in sql_text
+
+
+def test_0005_ABSENT_leaves_the_run_rows_maintained_and_makes_no_claim():
+    """THE ROLLED-BACK-0005 DEPLOYMENT, which is a reachable operator action.
+
+    The migration ORDER guarantees `isaac_runs` exists wherever
+    `isaac_run_projection` does, but not the converse: an operator can roll `0005`
+    back and leave `0002` applied. That deployment must keep maintaining the rows —
+    they are what a later reader will need — and must make no completeness claim,
+    because it cannot.
+
+    THE SAVE MUST STILL SUCCEED. A save that fails for a table NOTHING READS is
+    the whole defect the `0002` guard exists to prevent, and adding a second table
+    must not reintroduce it one migration later.
+    """
+    exp = _exp_with_runs("Run 1", "Run 2")
+    conn = FakeConnection(projection_table=False)
+    repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(exp)
+
+    assert conn.commits == 1 and conn.rollbacks == 0
+    assert set(conn.runs) == {run.id for run in exp.sorted_runs()}
+    assert [sql for sql, _ in conn.statements].count(repo.Q_UPSERT_RUN_PROJECTION) == 0
+    assert repo.projection_table_seen() is False
+    # AND THE NEGATIVE IS NOT CACHED, for `0002`'s reason: the operator applies the
+    # migration by hand against a running pod and nothing restarts it.
+    conn.projection_table = True
+    conn.statements.clear()
+    exp.runs[0].label = "Run 1 renamed"
+    repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(exp)
+    assert [sql for sql, _ in conn.statements].count(repo.Q_UPSERT_RUN_PROJECTION) == 1
+    assert repo.projection_table_seen() is True
+
+
+def test_0002_ABSENT_makes_no_claim_either_even_though_0005_may_be_there():
+    """THE STAMP IS NESTED INSIDE THE RUN-ROW BRANCH, and this is why.
+
+    A claim written while the rows were NOT maintained would be false in the most
+    dangerous direction available: it would tell a reader the table is complete for
+    a version whose rows were never written. So the projection probe is not even
+    asked when `isaac_runs` is absent.
+    """
+    exp = _exp_with_runs("Run 1")
+    conn = FakeConnection(run_table=False)
+    repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(exp)
+    assert conn.commits == 1
+    assert conn.runs == {}
+    assert [sql for sql, _ in conn.statements].count(repo.Q_UPSERT_RUN_PROJECTION) == 0
+    assert _probe_count(conn, repo.PROJECTION_TABLE) == 0
+
+
+def test_each_table_is_probed_once_per_process_and_the_two_do_not_share_a_bit():
+    """The generalised cache, and the property a shared boolean would break.
+
+    One statement now probes two tables. A single cached bit would make the second
+    probe answer for the first — so a `0005`-rolled-back deployment would look
+    fully migrated after one save, and the stamp would be attempted against a
+    missing relation, aborting the transaction and taking the experiment write down
+    with it. The counts are read PER PARAMETER for exactly that reason.
+    """
+    repo.forget_run_table_presence()
+    conn = FakeConnection()
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    for label in ("Run 1", "Run 2", "Run 3"):
+        store.persist(_exp_with_runs(label))
+    assert _probe_count(conn, repo.RUN_TABLE) == 1
+    assert _probe_count(conn, repo.PROJECTION_TABLE) == 1
+    assert repo.run_table_seen() is True
+    assert repo.projection_table_seen() is True
 
 
 def test_the_app_serves_READS_identically_whether_or_not_0002_is_applied(

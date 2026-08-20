@@ -173,6 +173,22 @@ OWNED_TABLES: frozenset[str] = frozenset(
         "isaac_revision_changes",
         "isaac_submissions",
         "isaac_submission_runs",
+        # `isaac_run_projection` (0005). LISTED IN THE SAME CHANGE THAT CREATES IT,
+        # and NAMED IN `CLAUDE.md` §15 IN THAT SAME CHANGE — which is the whole
+        # point of the two corrections recorded above. `isaac_runs` and the five
+        # submission-lifecycle tables were both added here before any committed
+        # sentence named them; for the second of those it took an independent
+        # review to notice. Its authorization basis is §15's "minimum supporting
+        # persistence architecture that feature requires" clause PLUS the
+        # enumeration, not the clause alone, and the contract that says why the
+        # table has to exist at all is `docs/isaac-runs-stage-2-contract.md` §1.
+        #
+        # WHAT LISTING IT PERMITS, precisely: `0005`'s two CREATE statements, and
+        # the write path's `Q_UPSERT_RUN_PROJECTION`. Nothing reads it. There is no
+        # UPDATE and no DELETE naming it anywhere in this application — the upsert
+        # is the only writer, and the rollback's DROP lives in a file the runner
+        # never loads.
+        "isaac_run_projection",
     }
 )
 
