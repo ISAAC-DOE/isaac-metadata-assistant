@@ -262,7 +262,7 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     id: 'add-run',
     action: 'Add a run',
     detail:
-      'Add one measurement condition to a record. The first run carries across what the record already holds — its spectrum, conditions and times move onto the run, because that is where an exported record reads them from. Every run after that starts empty: nothing is copied from one run to another, because that would assert two runs measured the same thing. No value is ever invented.',
+      'Add one measurement condition to a record. The first run carries across most of what the record already holds — its spectrum, QC verdict, descriptors, asset hashes, conditions and acquisition times move onto the run, because that is where an exported record reads them from. The instrument and detector settings do NOT move, because whether two runs of one experiment may legitimately differ in them is an open scientific question, and copying them would answer it by accident; the cost is that they are dropped from a record exported per run. Every run after the first starts empty: nothing is copied from one run to another, because that would assert two runs measured the same thing. No value is ever invented.',
     tools: ['isaac_create_run'],
   },
   {
@@ -291,7 +291,7 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     id: 'write-draft',
     action: 'Write draft values',
     detail:
-      'Correct an answered record-level field, or fill in a run’s own five context and timing fields. Field paths only — the spectrum, the QC verdict and the descriptors are answers to questions rather than field paths, and are written through “Answer the open questions” below. An invented or misspelt field path is refused with nothing written. The confirmation each write records, though, is the agent’s assertion that you gave it — ISAAC cannot check whether you were ever asked, so grant this permission only to an agent you trust to ask you first.',
+      'Fill in a run’s own five context and timing fields, or correct a value already answered on the record. An invented or misspelt key is refused with nothing written, and correcting something still unanswered is refused too. The confirmation each write records, though, is the agent’s assertion that you gave it — ISAAC cannot check whether you were ever asked, so grant this permission only to an agent you trust to ask you first.',
     tools: ['isaac_update_draft'],
   },
   {
@@ -317,7 +317,7 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     id: 'answer-questions',
     action: 'Answer the open questions',
     detail:
-      'Give a record, or one of its runs, the answers it is blocked on — a reduced spectrum, a QC verdict, a descriptor, an asset hash — or overwrite one already answered, keeping the earlier confirmation beside the new one. The agent must name the run a question belongs to: ISAAC will not guess which run measured something, and an answer sent to the record when a run owns it is refused with nothing written. As above, the confirmation recorded is the agent’s assertion that you gave it, and here it stands behind scientific judgement rather than a setting.',
+      'Give a record, or one of its runs, the answers it is blocked on — a reduced spectrum, a QC verdict, a descriptor, an asset hash — or overwrite one already answered. The agent must name the run a question belongs to: ISAAC will not guess which run measured something, and an answer sent to the record when a run owns it is refused with nothing written. Overwriting keeps the earlier confirmation beside the new one for a QC verdict and an asset hash, and REPLACES it for a spectrum or a descriptor — so after a corrected spectrum the record holds no trace that a different one was ever confirmed. As above, the confirmation recorded is the agent’s assertion that you gave it, and here it stands behind scientific judgement rather than a setting.',
     tools: ['isaac_answer_questions'],
   },
   {

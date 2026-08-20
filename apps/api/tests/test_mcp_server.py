@@ -35,6 +35,7 @@ from isaac_api.mcp import (
     McpServer,
     Scope,
 )
+from isaac_api.mcp.tools import TOOLS
 from isaac_api.mcp.server import (
     INSUFFICIENT_SCOPE,
     INTERNAL_ERROR,
@@ -749,9 +750,20 @@ def test_answer_questions_answers_a_record_with_no_runs_at_the_record_level(writ
     assert "series" not in {q["id"] for q in questions(writer, PARTIAL_ID)}
 
 
-def test_answer_questions_corrects_a_run_value_and_keeps_the_earlier_confirmation(writer):
+def test_answer_questions_corrects_a_run_value_at_a_level_update_draft_cannot_reach(
+    writer,
+):
     """`correcting: true` at the run level — the operation `isaac_update_draft` cannot
-    reach, because PATCH takes only the five run-writable FIELD PATHS."""
+    reach, because PATCH takes only the five run-writable FIELD PATHS.
+
+    THIS TEST WAS NAMED `..._and_keeps_the_earlier_confirmation` AND ASSERTED NOTHING
+    OF THE KIND. An independent review found the name was the only carrier of the
+    claim — and measured the claim FALSE for `series`, which is the key this test
+    uses: `complete.py` ASSIGNS `block_evidence[f"series:{id}"] = [one entry]` rather
+    than appending, so the earlier confirmation is gone. Only `qc`, assets and `edge`
+    append. The name is corrected to what the test proves, and the real behaviour is
+    measured in its own test below.
+    """
     etag = etag_of(writer, PARTIAL_ID)
     payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
     run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
@@ -779,6 +791,163 @@ def test_answer_questions_corrects_a_run_value_and_keeps_the_earlier_confirmatio
     )
     assert corrected["operation"] == "correct_run_field"
     assert corrected["data"]["invalidation"]["changed"] is True
+
+
+def test_what_a_CORRECTION_does_to_THE_EARLIER_CONFIRMATION_is_per_field(writer):
+    """MEASURED, BOTH WAYS, because a tool description now states the difference.
+
+    A scientist granting `isaac:draft.write` is told a spectrum's earlier
+    confirmation is REPLACED and a QC verdict's is KEPT BESIDE the new one. That is
+    an audit-trail promise in two directions and neither half may be assumed: this
+    reads the stored draft after each correction and counts the entries.
+    """
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+
+    def correct(key, value):
+        run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
+        payload(
+            writer,
+            "isaac_answer_questions",
+            experiment_id=PARTIAL_ID,
+            run_id=run["id"],
+            if_match=f'"{run["version"]}"',
+            confirmed_by_user=True,
+            correcting=True,
+            answers={key: value},
+        )
+
+    # A `series_id` IS REQUIRED for the evidence entry to exist at all —
+    # `complete.py` skips a series without one — so this test uses its own value
+    # rather than `SPECTRUM`, which deliberately has none.
+    identified = [{"energy_eV": 8979.0, "mu": 0.11, "series_id": "s1"}]
+
+    def stored():
+        exp = ws.load_experiment(PARTIAL_ID, session_id=writer.binding.tutorial_session_id)
+        return exp.sorted_runs()[0].draft
+
+    # SERIES — answered, then corrected. The evidence list is REPLACED.
+    run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
+    payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=run["id"],
+        if_match=f'"{run["version"]}"',
+        confirmed_by_user=True,
+        answers={"series": identified},
+    )
+    keys = [k for k in stored().get("block_evidence", {}) if k.startswith("series:")]
+    assert len(keys) == 1, stored().get("block_evidence")
+    series_key = keys[0]
+    assert len(stored()["block_evidence"][series_key]) == 1
+    correct("series", identified[:1])
+    after = stored()["block_evidence"][series_key]
+    # ONE ENTRY, NOT TWO. The record retains no evidence that a different spectrum
+    # was ever confirmed, which is what the description now says out loud.
+    assert len(after) == 1, after
+
+    # QC — CORRECTED TWICE, not answered-then-corrected, and the reason is a
+    # measurement rather than a preference: on this seed `qc` arrives from the sheet
+    # already carrying a status, so it is NOT an open question on the run and the
+    # answer path drops it. Correcting a value the draft already holds is exactly the
+    # legitimate case, and it is `apply_corrections` — the writer that APPENDS — that
+    # this half is about.
+    assert stored()["qc"]["status"] == "valid"
+    correct("qc", {"status": "failed", "evidence": "second look: sample degraded"})
+    first_trail = stored()["block_evidence"]["qc:status"]
+    assert len(first_trail) == 1, first_trail
+    assert stored()["qc"]["status"] == "failed"
+    correct("qc", {"status": "valid", "evidence": "third look: the step is real"})
+    grown = stored()["block_evidence"]["qc:status"]
+    # THE EARLIER CONFIRMATION IS STILL THERE, beside the new one — the opposite of
+    # what `series` does, which is the whole point of stating the difference.
+    assert len(grown) > len(first_trail)
+    assert [e["answer"] for e in grown][: len(first_trail)] == [
+        e["answer"] for e in first_trail
+    ]
+    assert "valid" in [e["answer"] for e in grown]
+    # THREE, NOT TWO, and the extra entry is not noise: `_supersede_qc_evidence` also
+    # records that the previous NOTE was superseded. Asserted as growth-plus-prefix
+    # rather than as an exact count, because the exact count is a property of that
+    # helper and this test is about the trail surviving.
+    assert len(grown) == 3, grown
+
+    # AND THE DESCRIPTION SAYS BOTH, in the direction each actually goes. Read off the
+    # served tool rather than the source, because the description IS the contract a
+    # model reads.
+    described = TOOLS["isaac_answer_questions"].description
+    assert "keep the earlier confirmation BESIDE" in described
+    assert "REPLACE theirs" in described
+
+
+def test_correcting_an_unanswered_question_is_REFUSED_as_the_description_promises(
+    writer,
+):
+    """THE CLAIM THE DESCRIPTION MAKES, and it was false when the description first
+    made it.
+
+    An independent review measured `correcting: true` on an OPEN question returning
+    `200` with the value stored and the question still open — a success report about a
+    write that resolved nothing, while the contract sent to the model guaranteed a
+    refusal. The route now refuses it; this is the assertion that keeps the two
+    agreeing.
+    """
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        correcting=True,
+        answers={"series": SPECTRUM},
+    )
+    assert result["isError"] is True
+    body = result["structuredContent"]
+    assert body["status"] == 422
+    assert body["data"]["error"] == "not_yet_answered"
+    # AND THE QUESTION IS STILL OPEN, which is the half that made the old 200 a lie.
+    assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
+    assert "not_yet_answered" in TOOLS["isaac_answer_questions"].description
+
+
+def test_update_draft_record_level_takes_ANSWER_KEYS_and_refuses_a_field_path(writer):
+    """THE PRE-EXISTING FALSE SENTENCE, now measured in both directions.
+
+    `isaac_update_draft`'s description said "Every key in `fields` must be a real
+    official field path at the level you are writing". At the RECORD level that is
+    inverted: the branch posts to `/edit`, which takes blocking-question keys, and an
+    official field path is refused as `unrecognized_field`. An independent review
+    measured it; this pins the reality so the corrected description cannot drift back.
+    """
+    # A real official field path — REFUSED at the record level.
+    refused = call(
+        writer,
+        "isaac_update_draft",
+        experiment_id=ws.SEED_READY_ID,
+        if_match=etag_of(writer, ws.SEED_READY_ID),
+        confirmed_by_user=True,
+        fields={RUN_LEVEL_FIELD: 300.0},
+    )
+    assert refused["isError"] is True
+    assert refused["structuredContent"]["status"] == 422
+
+    # An ANSWER KEY — accepted. `SEED_READY_ID` has already answered its questions,
+    # so this is a genuine correction rather than the refused unanswered case.
+    accepted = payload(
+        writer,
+        "isaac_update_draft",
+        experiment_id=ws.SEED_READY_ID,
+        if_match=etag_of(writer, ws.SEED_READY_ID),
+        confirmed_by_user=True,
+        fields={"edge": "K"},
+    )
+    assert accepted["operation"] == "correct_record_field"
+
+    described = TOOLS["isaac_update_draft"].description
+    # The corrected sentence, and a NEGATIVE CONTROL against the false one returning.
+    assert "BLOCKING-QUESTION keys" in described
+    assert "Every key in `fields` must be a real official field path" not in described
 
 
 def test_answer_questions_passes_a_false_confirmation_through_and_is_refused(writer):

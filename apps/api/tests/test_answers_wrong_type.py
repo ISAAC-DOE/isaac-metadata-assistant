@@ -182,6 +182,33 @@ def _valid_series() -> list[dict]:
     return [{"energy_eV": 8979.0, "mu": 0.1, "series_id": "s1"}]
 
 
+def _valid_descriptor() -> dict:
+    return {"value": 8981.2, "unit": "eV", "uncertainty": {"sigma": 0.3}}
+
+
+def _answer_the_open_questions(client: TestClient) -> None:
+    """Confirm `series` and `descriptor` through `/answers`, which is the route for it.
+
+    THESE TESTS USED TO ESTABLISH THE CONFIRMED VALUE THROUGH `/edit`, and that was
+    exercising a defect rather than setting up a fixture. `PARTIAL` has both questions
+    OPEN, and `/edit` admitted them — storing the value and leaving the question open,
+    a `200` about a write that resolved nothing. `/edit` now refuses that with
+    `422 not_yet_answered`, so the setup has to use the route that actually answers a
+    question. The assertions below are unchanged and are about the same property; only
+    the way the "already confirmed" state is reached has moved to the honest path.
+    """
+    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{PARTIAL}/answers",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"series": _valid_series(), "descriptor": _valid_descriptor()},
+        },
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 200, res.text
+
+
 def _draft(client: TestClient) -> dict:
     """The draft as the STORE holds it, never as a response summarised it — the claim
     under test is about what was written, not about what was reported."""
@@ -198,6 +225,7 @@ def test_a_valid_structured_correction_is_accepted(client):
     investigation of this defect sent the wrong body shape, got 422 for everything
     including the valid case, and concluded the route was already safe. A negative result
     means nothing without this."""
+    _answer_the_open_questions(client)
     etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
     res = client.post(
         f"/api/experiments/{PARTIAL}/edit",
@@ -241,13 +269,7 @@ def test_a_valid_structured_correction_is_accepted(client):
     ],
 )
 def test_a_wrong_typed_correction_is_refused_and_destroys_nothing(client, key, value):
-    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
-    ok = client.post(
-        f"/api/experiments/{PARTIAL}/edit",
-        json={"confirmed_by_user": True, "answers": {"series": _valid_series()}},
-        headers={"If-Match": etag},
-    )
-    assert ok.status_code == 200, ok.text
+    _answer_the_open_questions(client)
     before = _draft(client)
 
     etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
@@ -715,3 +737,100 @@ def test_the_answers_path_is_deliberately_unchanged_by_the_sha_guard(client):
     assert res.status_code == 200, res.text
     assert uri in _pending_kinds(client, rid), "a malformed sha must leave the blocker open"
     assert _pending_kinds(client, rid) == before
+
+
+# ---------------------------------------------------------------------------
+# Correcting a question nobody has answered
+# ---------------------------------------------------------------------------
+#
+# THE DEFECT, MEASURED OVER MCP BY AN INDEPENDENT REVIEW BEFORE THIS EXISTED.
+# `/edit` admitted `series`, `descriptor` and `qc` unconditionally, while
+# `apply_corrections` deliberately never touches `pending`. So:
+#
+#     POST /edit {"series": [...]}   ->  200, changed_fields: ["series"]
+#     GET  /pending                  ->  "series" STILL OPEN
+#
+# The value was written with a fresh `user_confirmation` and the question the
+# scientist was looking at did not move — a 200 about a write that resolved nothing.
+# Worse, the MCP tool description GUARANTEED it could not happen ("correcting a field
+# nothing has answered is refused"), so a model was told the call had been declined
+# while it had in fact half-succeeded.
+#
+# These tests were also the reason the setup above had to change: every wrong-type
+# case reached its "already confirmed" state THROUGH THIS DEFECT.
+
+
+def test_correcting_a_question_nobody_has_answered_is_refused(client):
+    open_kinds = {
+        e["kind"] for e in client.get(f"/api/experiments/{PARTIAL}/pending").json()["pending"]
+    }
+    assert {"series", "descriptor"} <= open_kinds, open_kinds
+
+    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{PARTIAL}/edit",
+        json={"confirmed_by_user": True, "answers": {"series": _valid_series()}},
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 422, res.text
+    body = res.json()
+    # A TYPED REFUSAL NAMING THE STATE, not `unrecognized_field`. The field IS
+    # recognised; only its state is wrong, and telling a scientist otherwise sends
+    # them looking for a misspelling that is not there.
+    assert body["error"] == "not_yet_answered"
+    assert body["keys"] == ["series"]
+    assert "answers" in body["answer_at"]
+
+    # NOTHING WAS WRITTEN, and the question is exactly as open as it was.
+    assert _draft(client).get("series") in (None, [], {})
+    after = {
+        e["kind"] for e in client.get(f"/api/experiments/{PARTIAL}/pending").json()["pending"]
+    }
+    assert after == open_kinds
+
+
+def test_the_refusal_names_EVERY_offending_key_not_the_first(client):
+    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{PARTIAL}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"series": _valid_series(), "descriptor": _valid_descriptor()},
+        },
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 422, res.text
+    assert res.json()["keys"] == ["descriptor", "series"]
+
+
+def test_the_SAME_correction_is_accepted_once_the_question_is_answered(client):
+    """THE NEGATIVE CONTROL, and it is the load-bearing half.
+
+    A refusal that also refuses the legitimate case is not a fix. Byte-identical body,
+    byte-identical route — the only thing that changed is that the question has been
+    answered.
+    """
+    _answer_the_open_questions(client)
+    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{PARTIAL}/edit",
+        json={"confirmed_by_user": True, "answers": {"series": _valid_series()}},
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_edge_is_not_refused_because_it_is_never_an_open_QUESTION(client):
+    """`edge` corresponds to no blocker, so "unanswered" is not a state it can be in.
+
+    Named explicitly because a rule written over "keys that appear in `pending`" would
+    have swept it in by accident, and `edge` is answerable on the record BY DESIGN —
+    it lives in the implicit derivations every non-diverging run inherits.
+    """
+    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{PARTIAL}/edit",
+        json={"confirmed_by_user": True, "answers": {"edge": "K"}},
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 200, res.text

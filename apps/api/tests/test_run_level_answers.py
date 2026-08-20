@@ -210,7 +210,13 @@ def test_an_edge_answer_is_exempt_and_reaches_a_non_diverging_run(client):
     assert answered.status_code == 200, answered.text
 
     # AND IT REACHES THE RUN. This is the assertion v1 was missing entirely.
-    composed = ws.load_experiment(exp_id).export_units()[0].draft
+    units = ws.load_experiment(exp_id).export_units()
+    # THE UNIT IS THAT RUN'S, asserted rather than assumed from the index. `run_id`
+    # was an unused local here — a review found it — and reading it makes the next
+    # line a statement about the run the test created instead of about whatever
+    # `export_units()[0]` happens to be.
+    assert [u.run_id for u in units] == [run_id]
+    composed = units[0].draft
     edges = [e for e in (composed.get("implicit") or []) if e.get("about") == "edge"]
     assert edges and edges[0]["value"] == "K", composed.get("implicit")
 
@@ -763,3 +769,97 @@ def test_the_refusal_body_does_not_name_something_it_does_not_refuse(client):
         # And every key it DOES refuse is named.
         for owned in ("spectrum", "QC verdict", "descriptor", "asset hash"):
             assert owned in described, (path, owned)
+
+
+def test_the_200_ALSO_discloses_the_edge_limit_because_a_caller_never_sees_the_409(
+    client,
+):
+    """THE HALF THE FIRST FIX MISSED, and an independent review named it.
+
+    The `409` body is where the `edge` exemption was disclosed — and a caller whose
+    write SUCCEEDS never reads a `409`. So the one honest statement about the
+    exemption's cost lived only on the path that does not take it. Measured on a live
+    app before this was added: `200`, `changed_fields: ['edge']`, and the run's
+    composed `implicit` empty. That write reaches no exported record and the response
+    said nothing about it.
+
+    It is a DISCLOSURE, not a gate. Refusing `edge` was tried for one commit and was
+    worse: it made the key answerable by no route at all, and put two false sentences
+    in the refusal body. `changed_fields: ['edge']` is a true statement about the
+    record's own draft; what was missing was that it is not a claim about any run.
+
+    Asserted against the SERVED document, for the same reason as the test above.
+    """
+    served = client.get("/api/openapi").json()
+    described = served["paths"]["/api/experiments/{experiment_id}/answers"]["post"][
+        "responses"
+    ]["200"]["description"]
+    assert "edge" in described
+    # The CONDITION, not merely the word: an override withholds the derivations, and
+    # that is the sentence a caller needs in order to act on it.
+    assert "override" in described
+    assert "reaches no exported record" in described
+    # NEGATIVE CONTROL: it must not read as a refusal, which is the opposite claim and
+    # is what the 409 says. A copy edit that turned this into "is refused" would be a
+    # false statement about a 200 response.
+    assert "is refused" not in described
+
+
+#: A well-formed reduced spectrum. Synthetic and obviously so.
+_A_SERIES = [{"energy_eV": 8979.0, "mu": 0.1, "series_id": "s1"}]
+
+
+def test_a_LEGACY_run_holding_a_value_its_derived_questions_still_list_is_correctable(
+    client,
+):
+    """THE CASE THAT FORCED THE SECOND CONDITION, and it was found by a test going red.
+
+    A run created before `_seed_for_new_run` existed carries no `pending` key, so
+    `_apply_to_run` materialises one from `ws.run_questions` — which derives it from the
+    blank-draft template and therefore lists `qc` even for a run that already HOLDS a
+    verdict. "Is the question open" alone would refuse a legitimate correction of a real
+    stored value.
+    """
+    exp_id = client.post("/api/experiments", json={"title": "Legacy"}).json()["id"]
+    exp = ws.load_experiment(exp_id)
+    run = exp.add_run(label="Legacy run", draft={"qc": {"status": "valid"}})
+    exp.save()
+
+    etag = client.get(f"/api/experiments/{exp_id}/runs/{run.id}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{exp_id}/runs/{run.id}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"qc": {"status": "failed", "evidence": "Sample degraded."}},
+        },
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 200, res.text
+    assert ws.load_experiment(exp_id).get_run(run.id).draft["qc"]["status"] == "failed"
+
+
+def test_the_run_level_edit_refuses_it_too_and_asks_the_RUNS_questions(client):
+    """The run-level path shares `_apply_to_run`, and its pending list is the RUN's.
+
+    A fresh second run owes every run-level question and holds nothing, so correcting
+    one there is the same defect at the level where it matters most: a run IS an
+    official ISAAC record.
+    """
+    exp_id = client.post("/api/experiments", json={"title": "Two runs"}).json()["id"]
+    for label in ("R1", "R2"):
+        client.post(
+            f"/api/experiments/{exp_id}/runs",
+            json={"label": label},
+            headers={"If-Match": f'"{_version(client, exp_id)}"'},
+        )
+    second = ws.load_experiment(exp_id).sorted_runs()[1]
+
+    etag = client.get(f"/api/experiments/{exp_id}/runs/{second.id}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{exp_id}/runs/{second.id}/edit",
+        json={"confirmed_by_user": True, "answers": {"series": _A_SERIES}},
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 422, res.text
+    assert res.json()["error"] == "not_yet_answered"
+    assert ws.load_experiment(exp_id).get_run(second.id).draft.get("series") in (None, [])

@@ -447,11 +447,15 @@ describe('Connect Your Agent — the draft-write confirmation, whose claim it is
     }
   });
 
-  it('keeps the half that IS structural — an unknown field path writes nothing', () => {
-    // The refusal of an invented or misspelt path is enforced by the server, so
-    // it stays stated plainly. Weakening it while fixing the confirmation claim
-    // would trade one inaccuracy for another.
-    expect(writeRow!.detail).toMatch(/invented or misspelt field path is refused with nothing written/i);
+  it('keeps the half that IS structural — an unknown key writes nothing', () => {
+    /* The refusal of an invented or misspelt key is enforced by the server, so it
+       stays stated plainly. Weakening it while fixing the confirmation claim would
+       trade one inaccuracy for another.
+       "field path" BECAME "key", because the row no longer claims the two branches
+       take the same key space — the record-level branch takes blocking-question keys
+       and refuses an official field path. The structural property is unchanged: an
+       unrecognised key is refused and nothing is written. */
+    expect(writeRow!.detail).toMatch(/invented or misspelt key is refused with nothing written/i);
   });
 
   it('is what the backend says about itself, in the backend’s own words', () => {
@@ -723,12 +727,19 @@ describe('the write permission describes the reach it actually has', () => {
   it('routes the spectrum, verdict and descriptors to the answer capability, not the field one', () => {
     const write = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'write-draft');
     expect(write, 'the write capability row is gone; re-read this test').toBeDefined();
-    // Field paths are its subject, and it points at the row that does the rest.
-    expect(write!.detail).toMatch(/field paths only/i);
-    expect(write!.detail).toMatch(/answer the open questions/i);
-    // NEGATIVE CONTROL: the retired sentence must not survive anywhere, because it is
-    // now false and it is the exact sentence a careless revert would restore.
+    /* "FIELD PATHS ONLY" WAS ALSO FALSE, and an independent review measured it one
+       revision after this test was inverted the first time. `isaac_update_draft`'s
+       RECORD-level branch posts to `/edit`, which takes blocking-question keys — so it
+       writes exactly the spectrum and QC verdict that sentence said it could not, and
+       REFUSES the official field path that sentence said was all it took. Only its
+       RUN-level branch is field paths.
+       So the row no longer makes a claim about key spaces at all. It describes what a
+       scientist is granting, and both negative controls stay: neither the original
+       "cannot" sentence nor its replacement may return. */
+    expect(write!.detail).toMatch(/five context and timing fields/i);
+    expect(write!.detail).toMatch(/refused with nothing written/i);
     expect(write!.detail).not.toMatch(/cannot give a run its spectrum/i);
+    expect(write!.detail).not.toMatch(/field paths only/i);
 
     const answer = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'answer-questions');
     expect(answer, 'the answer capability row is gone; re-read this test').toBeDefined();
@@ -742,6 +753,15 @@ describe('the write permission describes the reach it actually has', () => {
     // authorises writing scientific judgement on the strength of a boolean the caller
     // sends and nothing verifies.
     expect(answer!.detail).toMatch(/assertion that you gave it/i);
+    /* WHAT A CORRECTION DOES TO THE AUDIT TRAIL, IN BOTH DIRECTIONS. This row said
+       "keeping the earlier confirmation beside the new one" flatly, and a review
+       measured it FALSE for a spectrum and a descriptor: `complete.py` ASSIGNS their
+       evidence list rather than appending, so the earlier confirmation is gone. A
+       scientist granting this permission on the strength of an audit-trail promise is
+       owed the exception. Backend-measured in
+       `test_mcp_server.py::test_what_a_CORRECTION_does_to_THE_EARLIER_CONFIRMATION_is_per_field`. */
+    expect(answer!.detail).toMatch(/keeps the earlier confirmation beside/i);
+    expect(answer!.detail).toMatch(/REPLACES it for a spectrum or a descriptor/);
 
     const scope = MCP_PERMISSIONS.find((p) => p.id === 'draft-write');
     expect(scope, 'the draft.write scope row is gone; re-read this test').toBeDefined();
@@ -766,7 +786,16 @@ describe('the write permission describes the reach it actually has', () => {
     expect(add, 'the add-run capability row is gone; re-read this test').toBeDefined();
     expect(add!.detail).not.toMatch(/starts empty — no value is copied/i);
     expect(add!.detail).toMatch(/first run carries across/i);
-    expect(add!.detail).toMatch(/every run after that starts empty/i);
+    expect(add!.detail).toMatch(/every run after the first starts empty/i);
     expect(add!.detail).toMatch(/no value is ever invented/i);
+    /* AND IT SAYS "MOST", NOT "WHAT THE RECORD HOLDS". A review found the umbrella
+       phrase overstated it in both directions: `_seed_for_new_run` deliberately does
+       NOT carry the six `system.configuration.*` fields (whether two runs may differ
+       in detector model is an open scientific question, and copying them would answer
+       it), and the earlier parenthetical named only three of the six things that DO
+       carry. Both are now stated, including the cost of the omission. */
+    expect(add!.detail).toMatch(/carries across most of what/i);
+    expect(add!.detail).toMatch(/do NOT move/);
+    expect(add!.detail).toMatch(/dropped from a record exported per run/i);
   });
 });

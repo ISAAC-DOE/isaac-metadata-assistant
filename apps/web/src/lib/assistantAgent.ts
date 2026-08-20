@@ -530,20 +530,18 @@ export async function confirmProposal(
     ? ctx.pending.find((p) => (p.blocker_key ?? p.id) === proposal.blockerKey)
     : ctx.pending.find((p) => p.id === proposal.field);
   const isPending = open !== undefined;
-  /* THE RUN THAT OWNS THIS QUESTION, taken from the pending entry rather than from the
-     proposal, because the pending list is the server's own statement of ownership. A
-     record-level question has none and the write goes where it always did. The run's own
-     `If-Match` is read immediately before the write for the same reason
-     `GuidedCompletion.tokenFor` reads it: the record's token there is a 412 the reader
-     would be told to resolve by refreshing something that was never stale. */
-  /* THE OWNING RUN, FOR BOTH PATHS. `open === undefined` is what SELECTS `editField`,
-     so reading the run from `open` alone left the EDIT path always record-routed — and
-     correcting an answered run-owned field through the assistant then 409'd on every
-     record with runs, into a branch whose copy says it cannot establish whether anything
-     reached the record while the server had just said "Nothing was written." An
-     independent review measured that. So a `blockerKey` that names a run is used even
-     when the question is no longer open: the key's own prefix IS the run id, which is
-     what makes it available on a path where the pending entry is gone by definition. */
+  /* THREE COMMENT BLOCKS USED TO STAND HERE AND TWO OF THEM WERE FALSE. An independent
+     review found them stacked on this one statement, each describing a mechanism a later
+     commit had replaced, and both are deleted rather than left as archaeology — a comment
+     asserting a mechanism the code does not have is worse than no comment, because it is
+     read as documentation.
+       * "taken from the pending entry RATHER THAN from the proposal" — false: the edit
+         path takes it from the proposal, which is the whole point of the block below.
+       * "the key's own prefix IS the run id" — described `runIdFromBlockerKey`, a parser
+         that was DELETED (a record-level asset key is a bare URI full of colons, so a
+         26-character `[0-9A-Z]` prefix was a hazard rather than a guarantee). `runId` is
+         carried explicitly now.
+     The one that was correct is kept, below, unchanged. */
   /* THE OWNING RUN, FOR BOTH PATHS. `open === undefined` is what SELECTS `editField`, so
      reading the run from `open` alone left the EDIT path always record-routed — and
      correcting an answered run-owned field then 409'd on every record with runs, into a

@@ -2475,7 +2475,16 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
     ),
     response_description=(
         "The refreshed blocking questions, status, revision metadata, workflow, "
-        "and the downstream invalidation, with the new `ETag`."
+        "and the downstream invalidation, with the new `ETag`.\n\n"
+        "ONE LIMIT THAT ONLY A `200` CAN CARRY, AND IT IS STATED HERE BECAUSE A "
+        "CALLER WHO SUCCEEDS NEVER READS THE `409`. On a record that has runs, "
+        "`edge` is answerable here and is deliberately not among the keys the "
+        "`409` refuses: it lives in the record's implicit derivations, which every "
+        "run holding the record's values inherits, so answering it here does reach "
+        "those runs. A run that has recorded ANY override — even one that changed "
+        "nothing — inherits none of them, so for that run this write reaches no "
+        "exported record. `changed_fields` reporting `edge` is a true statement "
+        "about the record's own draft and is not a claim about any run."
     ),
     responses={
         **_R_STORAGE_UNAVAILABLE,
@@ -2588,6 +2597,116 @@ def post_answers(
 
 
 # --- 7b. edit (correct an already-answered field) -----------------------------
+
+
+#: Which pending BLOCKER KIND an ``/edit`` answer key would be correcting. Assets are
+#: absent because :func:`_answers_to_apply_shape` already narrows them structurally on
+#: the ``edit_only`` path — ``asset_uris = stored_uris``, so an asset nothing has
+#: answered is dropped before it reaches the core. ``edge`` is absent because it
+#: corresponds to no blocker at all and is therefore never "unanswered".
+_CORRECTABLE_KEY_KINDS: dict[str, str] = {
+    "series": "series",
+    "descriptor": "descriptor",
+    "descriptor_label": "descriptor",
+    "qc": "qc",
+}
+
+#: Where in a draft the value each of those keys corrects actually LIVES. Consulted
+#: alongside the pending list, never instead of it — see
+#: :func:`_refuse_correcting_an_unanswered_key` for why both are needed.
+_CORRECTABLE_KEY_STORAGE: dict[str, str] = {
+    "series": "series",
+    "descriptor": "descriptors_outputs",
+    "descriptor_label": "descriptors_outputs",
+    "qc": "qc",
+}
+
+#: The refusal for correcting something nothing has answered yet.
+_R_NOT_YET_ANSWERED: dict = {
+    422: {
+        "description": (
+            "The body named a field that is still an OPEN question, so there is "
+            "nothing to correct and nothing was written. Answer it through "
+            "`/answers` instead — the body names every such key and the operation "
+            "that takes it."
+        )
+    },
+}
+
+
+def _refuse_correcting_an_unanswered_key(draft: dict, answers_by_id: dict):
+    """Refuse a CORRECTION of a key that is still an open question. ``None`` to proceed.
+
+    THE DEFECT THIS CLOSES, measured over MCP by an independent review before it was
+    written. ``/edit`` admitted ``series``, ``descriptor`` and ``qc`` unconditionally,
+    while ``apply_corrections`` deliberately never touches ``pending`` (its own
+    docstring says so). So correcting a question nobody had answered returned::
+
+        POST /edit {"series": [...]}   ->  200, changed_fields: ["series"]
+        GET  /pending                  ->  "series" STILL OPEN
+
+    The value was written into the draft, carrying a fresh ``user_confirmation``, and
+    the question the scientist was looking at did not move. That is a ``200`` about a
+    write that resolved nothing — the exact class the sibling refusals on this route
+    exist to close, reachable one key over. Export stayed gated by ``pending``, so no
+    invalid record could ship; what shipped was a false report.
+
+    IT IS A TYPED REFUSAL RATHER THAN A DROPPED KEY, and that distinction is this
+    route's own doctrine. Dropping the key would make :func:`_has_correction_target`
+    answer ``False`` and produce ``unrecognized_field`` — "this application does not
+    know that field" — when the field is recognised and only its STATE is wrong. That
+    is the same mistake the ``qc`` screening comment in
+    :func:`_answers_to_apply_shape` records having made once already: it sends a
+    scientist looking for a misspelling that is not there.
+
+    ASSETS AND ``edge`` ARE DELIBERATELY OUT OF SCOPE, each for its own reason. An
+    unanswered asset is already dropped structurally on the ``edit_only`` path, so it
+    never gets here. ``edge`` corresponds to no blocker, so "unanswered" is not a
+    state it can be in.
+
+    **BOTH CONDITIONS ARE REQUIRED, AND THE SECOND WAS FOUND BY A TEST GOING RED
+    RATHER THAN BY THINKING ABOUT IT.** "Is the question open" alone is WRONG for a
+    LEGACY RUN: a run created before ``_seed_for_new_run`` existed carries no
+    ``pending`` key, so ``_apply_to_run`` materialises one from
+    ``ws.run_questions`` — which derives it from the blank-draft template and
+    therefore lists ``qc`` even for a run that already HOLDS a verdict. Refusing
+    there would refuse a legitimate correction of a real stored value, and
+    ``test_editing_a_legacy_run_does_not_erase_its_questions_either`` said so
+    immediately.
+
+    So a key is refused only when it is BOTH listed as open AND absent from the
+    draft. That is structurally the same rule the asset path already applies
+    (``asset_uris = stored_uris``): what makes a correction legitimate is that there
+    is something stored to correct.
+    """
+    open_kinds = {
+        entry.get("kind")
+        for entry in (draft.get("pending") or [])
+        if isinstance(entry, dict)
+    }
+    offending = sorted(
+        key
+        for key, value in (answers_by_id or {}).items()
+        if value not in (None, "")
+        and _CORRECTABLE_KEY_KINDS.get(key) in open_kinds
+        and not draft.get(_CORRECTABLE_KEY_STORAGE.get(key, key))
+    )
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "not_yet_answered",
+            "keys": offending,
+            "answer_at": "POST /api/experiments/{experiment_id}/answers",
+            "message": (
+                "Each of these is still an open question, so there is no confirmed "
+                "value to correct. Correcting one would store the value and leave "
+                "the question open, which would report a change that resolved "
+                "nothing. Answer it instead. Nothing was written."
+            ),
+        },
+    )
 
 
 def _has_correction_target(apply_shape: dict) -> bool:
@@ -2758,6 +2877,13 @@ def post_edit(
             body.get("answers") or {}, exp.draft, timestamp, edit_only=True
         )
         refusal = _refuse_run_level_on_the_record(exp, apply_shape)
+        if refusal is not None:
+            return refusal
+        # BEFORE the correction-target check, because the two refusals say different
+        # things and this one is the more specific: "still open" rather than "not
+        # recognised". The order is what keeps a scientist from being sent to look
+        # for a misspelling in a field name that is spelled correctly.
+        refusal = _refuse_correcting_an_unanswered_key(exp.draft, body.get("answers") or {})
         if refusal is not None:
             return refusal
         if not _has_correction_target(apply_shape):
@@ -5207,6 +5333,16 @@ def _apply_to_run(
             body.get("answers") or {}, run_draft, timestamp, edit_only=correcting
         )
         if correcting:
+            # THE RUN'S OWN QUESTIONS, not the record's. `run_draft` is what
+            # `_answers_to_apply_shape` was just given, and it carries the
+            # materialised `pending` for this run — so "still open" is asked of the
+            # run that owns the value, which is the only level at which the question
+            # means anything once a record has runs.
+            refusal = _refuse_correcting_an_unanswered_key(
+                run_draft, body.get("answers") or {}
+            )
+            if refusal is not None:
+                return refusal
             if not _has_correction_target(apply_shape):
                 return JSONResponse(
                     status_code=422,

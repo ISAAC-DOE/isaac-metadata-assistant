@@ -145,18 +145,28 @@ even one slice is part of the record, not because it still describes the toolset
 `context.thermodynamics.atmosphere` and the two `timestamps.acquired_*`. Without one it
 calls `POST /api/experiments/{id}/edit`, the record-level correction route.
 
-The spectrum, the QC verdict, the descriptors, the asset hashes **and the absorption
-edge** are **not** among those five. They are run-owned, answered through `/answers` and
-`/edit` — and since 2026-08-19 the record-level route **refuses** them with
-`409 belongs_to_a_run` once the record has runs, because writing them there produced a
-value no exported record reads. The UI gained `POST .../runs/{run_id}/answers` and
-`.../edit` in the same change. **MCP did not.**
+The spectrum, the QC verdict, the descriptors and the asset hashes are **not** among
+those five. They are run-owned, answered through `/answers` and `/edit` — and since
+2026-08-19 the record-level route **refuses** them with `409 belongs_to_a_run` once the
+record has runs, because writing them there produced a value no exported record reads.
+The UI gained `POST .../runs/{run_id}/answers` and `.../edit` in the same change.
 
-`edge` is in that list for a reason worth stating: it lives in `implicit`, which is
-merged onto a run only while that run holds every one of the record's values, so a
-single override withholds it entirely. It was briefly exempted from the refusal on the
-belief that the merge was unconditional; an independent review measured a `200` with
-`changed_fields: ['edge']` against a run whose composed `implicit` was empty.
+**THE ABSORPTION EDGE IS NOT AMONG THE REFUSED KEYS, AND THIS PARAGRAPH SAID IT WAS.**
+An independent review found the claim still standing here after the code had gone the
+other way, so the correction is recorded rather than swapped in silently. `edge` lives in
+the record's `implicit` derivations, and `resolved_run_draft` merges those onto a run only
+while that run has recorded no override at all (`inherit=not
+_diverges_from_experiment(...)`) — so answering `edge` on the record DOES reach every
+non-diverging run, and refusing it would have made it answerable by no route while
+putting two false sentences in the refusal body. It was refused for one commit on the
+belief that the merge was unconditional, and the exemption was restored.
+
+**Both errors are recorded because they cut in opposite directions**, and a reader needs
+to know which one is current: a review measured a `200` with `changed_fields: ['edge']`
+against a run whose composed `implicit` was empty — that is real, is a write no exported
+record reads, and is **the accepted cost of the exemption**, not an argument that has been
+answered. It is disclosed on the `409` body and, since this review, in the `200`
+`response_description` too, because a caller who receives a 200 never sees a 409.
 
 ### 5A.1 CLOSED 2026-08-19 — and the gap was wider than 5A described
 
@@ -190,6 +200,7 @@ is not allowed to call.
 | give a Run its spectrum, verdict or descriptors | **no** | yes |
 | correct a value a Run already confirmed | **no** | yes |
 | correct a run-owned value on the record instead | no — `409 belongs_to_a_run` | **still no, deliberately** |
+| answer the absorption `edge` on the record | yes — it is NOT refused | yes; it reaches every non-diverging run, and reaches nothing on a diverged one |
 | check a Run, read its evidence | yes | yes |
 
 **THE LEVEL IS THE CALLER'S EXPLICIT CHOICE AND THE REFUSAL IS KEPT.** The obvious
@@ -208,6 +219,63 @@ it is a separate handler and inheriting the rule by proximity is not inheriting 
 Mutation-tested: hard-coding `True` fails that test; routing the run-level answer to the
 record fails three; ignoring `correcting` fails one.
 
+### 5A.2 THREE CLAIMS IN THE FIRST VERSION OF 5A.1 WERE FALSE. An independent review measured each.
+
+Recorded rather than swapped in, because two of them were **in the tool descriptions a
+model reads as its interface contract**, and one had been *pinned by a test* — the same
+failure mode as the `write-draft` copy this slice was fixing.
+
+**1. "`/edit` refuses a field nothing has answered yet" — it did not; it wrote it.**
+Measured over MCP: `correcting: true` on an OPEN `series` returned **200**, stored the
+value with a fresh `user_confirmation`, and left the question **open** —
+`apply_corrections` deliberately never touches `pending`. So the honest statement of the
+prior state is not "`/edit` refuses" but *"`/edit` wrote the value and left the question
+open, so the record still could not export"*: a success report about a write that
+resolved nothing, while the description guaranteed a refusal.
+
+**It is now true rather than reworded.** `routes._refuse_correcting_an_unanswered_key`
+returns `422 not_yet_answered`, naming every offending key and the operation that takes
+it, at both levels. A typed refusal rather than a dropped key, because dropping it would
+produce `unrecognized_field` — "this application does not know that field" — when the
+field is recognised and only its state is wrong. **Two conditions are required, and the
+second was found by a test going red:** a key is refused only when it is both listed as
+open AND absent from the draft, because a legacy run's materialised question list names
+`qc` even when the run already holds a verdict.
+
+**2. "The previous confirmation is kept beside the new one" — true for `qc`, assets and
+`edge`; FALSE for `series` and `descriptor`.** `complete.py` **assigns**
+`block_evidence[f"series:{id}"] = [one entry]` and rebuilds `descriptors_outputs`
+wholesale, so after correcting a spectrum the record retains no evidence that a different
+one was ever confirmed. The claim was strongest exactly where it was least true.
+Compounding it, the test named `..._and_keeps_the_earlier_confirmation` asserted **nothing
+about a confirmation** — the name was the only carrier of the claim. Both surfaces now
+state the difference in both directions, the test is renamed to what it proves, and the
+real behaviour is measured in
+`test_what_a_CORRECTION_does_to_THE_EARLIER_CONFIRMATION_is_per_field`.
+
+**3. "Field paths only" on the `write-draft` screen row — inverted.**
+`isaac_update_draft`'s **record-level** branch posts to `/edit`, which takes
+blocking-question keys: it writes exactly the spectrum and QC verdict the row said it
+could not, and **refuses** the official field path the row said was all it took. Only its
+**run**-level branch is field paths. `isaac_update_draft`'s own description carried the
+same false sentence and was **pre-existing** — not introduced by this slice, and the
+reason the new copy read plausibly. Both are corrected and both directions are now pinned
+by `test_update_draft_record_level_takes_ANSWER_KEYS_and_refuses_a_field_path`.
+
+Also corrected from the review, smaller but the same kind: the success result's own `etag`
+is the **record's** validator, so feeding it back into a second run-level call is a `412`
+(the description now says to use `data.run_version`); `blocker_key` is the bare `id` on a
+record with no runs; and `edge` is exempt from the `409`, which both new surfaces stated
+without qualification.
+
+**One thing the review flagged that is a DECISION rather than a defect, and is left open:**
+`isaac_list_questions` hands an agent the canonical seeds' `demo_answer`, and
+`isaac_answer_questions` will store it with `confirmed_by_user: true` — recording a
+`user_confirmation` for a value no user confirmed. `_example_scope` restricts it to
+`ws.CANONICAL_IDS`, the payload carries its own `label` and `provenance`, and the
+description says sending it back is asserting the scientist confirmed it. The records are
+synthetic. The guard is prose in a description, and that is stated rather than dressed up.
+
 **Still absent, and named rather than implied:** nothing in this pair exports, finalises
 or submits — `FORBIDDEN_TOOL_TOKENS` makes a tool named for it an `ImportError` — and
 `Connect Your Agent` still shows no connection, because §6's external decisions are
@@ -224,6 +292,10 @@ untouched by this change.
 | give a Run its spectrum, verdict or descriptors | **no** |
 | correct them on the record instead | **no — `409 belongs_to_a_run`** |
 | check a Run, read its evidence | yes |
+
+*(That middle row was also false for `edge` when it was written — see the correction
+above. It is kept as written, because this table is the historical record of what §5A
+said, and editing it would destroy the thing it is being kept for.)*
 
 **Why it was not closed in the same change.** Adding a run-level write to the tool surface
 is a new authorized write path for scientific values, and this project's rule is that

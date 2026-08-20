@@ -858,7 +858,15 @@ function LoadedCompletion({
       <Check size={14} strokeWidth={2.4} aria-hidden="true" />
       <div>
         <div className="edit-impact-reason">{editImpact.reason}</div>
-        {editImpact.artifact.state === 'stale' && (
+        {/* OPTIONAL-CHAINED, and the reason is not defensiveness. `artifact` is
+            declared required on `ApiInvalidation` and `dependencies.build_invalidation`
+            always returns it — but a bare `.state` on a server field is a whole-screen
+            crash if a deployment ever omits it, and the failure would land on the
+            reader mid-edit with their typed value on screen. An independent review
+            found this while writing a test whose fixture omitted `artifact`: the
+            product crashed on the fixture instead of the test failing on the product,
+            which is the wrong way round for a defect to surface. */}
+        {editImpact.artifact?.state === 'stale' && (
           <p className="edit-impact-note">
             The exported record is now out of date — records are immutable, so regenerate (or reset
             the workspace) to refresh it.
