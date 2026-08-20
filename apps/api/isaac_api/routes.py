@@ -419,11 +419,15 @@ _R_BELONGS_TO_A_RUN: dict = {
     409: {
         "description": (
             "This record has runs, and the answer names something a RUN owns — a "
-            "spectrum, a QC verdict, a descriptor, an asset hash, or the absorption "
-            "edge. Answering it here would write a value no exported record reads, so "
-            "nothing was written. The body names every run and the operation that can "
-            "take the answer: `POST /api/experiments/{experiment_id}/runs/{run_id}"
-            "/answers`."
+            "spectrum, a QC verdict, a descriptor, or an asset hash. Answering it here "
+            "would write a value no exported record reads, so nothing was written. The "
+            "body names every run and the operation that can take the answer: "
+            "`POST /api/experiments/{experiment_id}/runs/{run_id}/answers`.\n\n"
+            "The absorption edge is NOT among them. It lives in the record's implicit "
+            "derivations, which every run holding the record's values inherits, so "
+            "answering it on the record does reach those runs. A run that has recorded "
+            "any override does not receive it, and that is a limit of how derivations "
+            "are inherited rather than something this refusal can fix."
         )
     },
 }

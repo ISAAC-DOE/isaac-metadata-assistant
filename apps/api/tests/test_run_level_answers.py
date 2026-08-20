@@ -739,3 +739,27 @@ def test_editing_a_legacy_run_does_not_erase_its_questions_either(client):
     assert stored["qc"]["status"] == "failed"
     # The derived questions were materialised rather than replaced with an empty list.
     assert {e["kind"] for e in stored["pending"]} == {"series", "qc", "descriptor"}, stored["pending"]
+
+
+def test_the_refusal_body_does_not_name_something_it_does_not_refuse(client):
+    """NEGATIVE CONTROL for the refusal's own copy, which was wrong once already.
+
+    The `409` description listed "the absorption edge" among the things a run owns, and
+    then `edge` was exempted — leaving the published contract naming a key this refusal
+    does not touch. A refusal that misstates its own scope sends a caller to a route that
+    cannot help them, which is the failure mode the whole `belongs_to_a_run` body exists
+    to avoid.
+
+    Asserted against the SERVED document rather than the source string, because that is
+    what a client reads.
+    """
+    served = client.get("/api/openapi").json()
+    for path in (
+        "/api/experiments/{experiment_id}/answers",
+        "/api/experiments/{experiment_id}/edit",
+    ):
+        described = served["paths"][path]["post"]["responses"]["409"]["description"]
+        assert "NOT among them" in described, path
+        # And every key it DOES refuse is named.
+        for owned in ("spectrum", "QC verdict", "descriptor", "asset hash"):
+            assert owned in described, (path, owned)
