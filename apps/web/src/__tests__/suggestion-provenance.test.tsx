@@ -342,32 +342,36 @@ describe('the adapter does not manufacture values', () => {
     }
   });
 
-  it('does not invite the user to supply a value this screen cannot take', () => {
-    // REVIEW FINDING (second pass) on the fix for FINDING 2 above. The
-    // replacement copy over-claimed in the OTHER direction: "Leave it honestly
-    // missing unless you can supply it" tells the reader to supply something the
-    // screen offers no control for. For a structured blocker with NO example,
-    // `GuidedPrompt` renders the hint and stops — the input row and the Confirm
-    // button live inside `{demo && (…)}`.
+  it('offers exactly the control its copy says it offers', () => {
+    // THIS TEST WAS INVERTED, BY ITS OWN INSTRUCTION. It read
+    // "does not invite the user to supply a value this screen cannot take", and pinned
+    // the copy "this screen has no way to enter one" TOGETHER WITH the absence of any
+    // control — deliberately, saying: "If a future slice builds the structured input,
+    // this test fails and the copy must be revisited in the same change."
     //
-    // This asserts the copy AND the rendered UI together, in one test, on
-    // purpose: a claim pinned apart from the screen it describes is exactly how
-    // the two drifted. If a future slice builds the structured input, this test
-    // fails and the copy must be revisited in the same change.
+    // That slice is `StructuredValueEntry.tsx`, this test failed, and the copy was
+    // revisited in the same change. The pairing is what is preserved: the claim and the
+    // rendered screen are still asserted together, because a claim pinned apart from
+    // the screen it describes is exactly how the two drifted the first time.
     for (const kind of ['series', 'descriptor'] as const) {
       const b = pendingItemToBlocker({ id: kind, kind, question: 'q', demo_answer: null });
 
-      expect(b.context).not.toMatch(/unless you can supply it/i);
-      expect(b.context).toMatch(/no way to enter one/i);
+      // The half that has NOT changed and must not: the app never generates either.
       expect(b.context).toMatch(/never generate/);
+      // The dead-end claim is gone, because the dead end is gone.
+      expect(b.context).not.toMatch(/no way to enter one/i);
 
       const { view } = renderPrompt(b);
       // The claim is on screen …
       expect(view.getByText(b.context!)).toBeInTheDocument();
-      // … and so is the dead end it describes: no field, no confirm/use control.
-      expect(view.queryByRole('textbox')).toBeNull();
-      expect(view.queryByRole('button', { name: /confirm|use this/i })).toBeNull();
-      // The only action left is the honest one.
+      // … and so is the control it describes.
+      expect(view.queryAllByRole('textbox').length).toBeGreaterThan(0);
+      expect(view.getByRole('button', { name: /confirm|save/i })).toBeInTheDocument();
+      // Nothing is filled in: a blank form is not a suggested value.
+      for (const box of view.queryAllByRole('textbox')) {
+        expect(box).toHaveValue('');
+      }
+      // Leaving it missing is still offered, and is still the honest alternative.
       expect(view.getByRole('button', { name: /don.t know/i })).toBeInTheDocument();
       view.unmount();
     }

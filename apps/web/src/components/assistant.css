@@ -1660,6 +1660,80 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .guided-staged .mono { font-size: 11.5px; color: var(--text-muted); }
 
+/* Entering a structured value a record has no worked example for.
+
+   A GRID THAT COLLAPSES TO ONE COLUMN, because this is the densest form in the app and
+   it has to survive 320px. `minmax(0, 1fr)` rather than `1fr`: a grid item's default
+   `min-width: auto` is its CONTENT width, so a long placeholder or an unbroken token
+   would push the track wider than the container and scroll the page sideways. */
+.structured-entry {
+  margin-bottom: 12px;
+  min-width: 0;
+}
+.structured-entry-lead {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+.structured-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 10px 14px;
+  min-width: 0;
+}
+.structured-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.structured-label {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* The required marker. `abbr[title]` gives it an accessible name ("required") instead
+   of an asterisk a screen reader reads as punctuation or skips. */
+.structured-label abbr {
+  color: var(--text-secondary);
+  text-decoration: none;
+  cursor: help;
+}
+.structured-field .input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+}
+.structured-entry-json {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  /* Vertical only: a horizontally resizable textarea can be dragged past its container
+     and overflow the page at narrow widths. */
+  resize: vertical;
+  white-space: pre;
+  overflow-x: auto;
+}
+.structured-entry-note {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+  margin: 10px 0 0;
+}
+.structured-entry-error {
+  font-size: 12px;
+  /* `--fail-text`, the token the rest of the app uses for a refusal. An earlier
+     draft wrote `var(--danger, ...)` and `--danger` is defined nowhere, so the
+     fallback always won and a later definition would have changed this silently. */
+  color: var(--fail-text);
+  line-height: 1.55;
+  margin: 10px 0 0;
+  font-weight: 500;
+}
+
 /* The QC verdict blocker: a closed choice plus the reasoning behind it.
 
    A RADIO GROUP RATHER THAN A SELECT, deliberately. All four verdicts are visible

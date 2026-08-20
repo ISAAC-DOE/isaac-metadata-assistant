@@ -46,6 +46,46 @@ import re
 # its own reviewed slice.
 _SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
+#: WHAT A DESCRIPTOR OUTPUT GROUP SAYS ABOUT ITS OWN ORIGIN, when a PERSON supplied it.
+#:
+#: These two constants used to read ``"completion_demo"`` and
+#: ``{"agent": "isaac-complete-demo", "version": "0.1"}``, and they were written into
+#: every record this application completed — including a record a scientist created and
+#: filled in by hand. Measured on an ordinary record before this change::
+#:
+#:     "label": "completion_demo",
+#:     "generated_by": {"agent": "isaac-complete-demo", "version": "0.1"}
+#:
+#: The schema says ``generated_by`` is *"Tool/pipeline/person that generated these
+#: descriptors"*, so that record asserted a demo agent had generated the scientist's
+#: descriptor. It is fabricated provenance in an exported official record, which is the
+#: one place this project is least willing to have any.
+#:
+#: WHAT IS SAID INSTEAD, and why each part is true rather than merely nicer:
+#:
+#: * ``agent`` names THIS APPLICATION, which did assemble the output group. It does not
+#:   claim to have computed anything — ``notes`` says who did.
+#: * ``notes`` says a person supplied the value. That is checkable: this dict is only
+#:   ever written on a path that requires ``confirmed_by_user`` and writes a
+#:   ``user_confirmation`` evidence entry beside it.
+#: * ``version`` is OMITTED. It is optional in the schema, and ``"0.1"`` was the demo's
+#:   number; carrying a version this build cannot vouch for would be a smaller version
+#:   of the same defect.
+#: * ``author`` is OMITTED, and that is the honest gap rather than an oversight. It
+#:   would name the person, and this application cannot name anybody until a trusted
+#:   authentication boundary exists (E1) — see ``isaac_api.record_attribution``.
+#:
+#: ``label`` remains overridable by ``answers["descriptor_label"]``; only the DEFAULT
+#: changed. A caller that knows the real provenance still supplies it.
+DESCRIPTOR_OUTPUT_LABEL = "user_supplied"
+DESCRIPTOR_GENERATED_BY: dict = {
+    "agent": "isaac-metadata-assistant",
+    "notes": (
+        "Supplied and confirmed by a person through the assistant's completion flow. "
+        "No tool computed this value."
+    ),
+}
+
 # The official measurement.qc.status enum — a qc answer outside this set is rejected.
 _QC_STATUSES = {"valid", "compromised", "failed", "pending"}
 
@@ -182,9 +222,9 @@ def apply_answers(draft: dict, answers: dict) -> dict:
             ]
             draft["descriptors_outputs"] = [
                 {
-                    "label": answers.get("descriptor_label", "completion_demo"),
+                    "label": answers.get("descriptor_label", DESCRIPTOR_OUTPUT_LABEL),
                     "generated_utc": timestamp,
-                    "generated_by": {"agent": "isaac-complete-demo", "version": "0.1"},
+                    "generated_by": dict(DESCRIPTOR_GENERATED_BY),
                     "descriptors": [desc],
                 }
             ]
@@ -485,9 +525,9 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
             ]
             draft["descriptors_outputs"] = [
                 {
-                    "label": answers.get("descriptor_label", "completion_demo"),
+                    "label": answers.get("descriptor_label", DESCRIPTOR_OUTPUT_LABEL),
                     "generated_utc": timestamp,
-                    "generated_by": {"agent": "isaac-complete-demo", "version": "0.1"},
+                    "generated_by": dict(DESCRIPTOR_GENERATED_BY),
                     "descriptors": [desc],
                 }
             ]

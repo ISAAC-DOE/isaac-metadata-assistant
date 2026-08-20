@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "ff4f2038d6ebafbd57f5c9efdfe7999aad34fea467498d6cbd91174f494dd822"
+        "sha256": "e4546a99dbec828fdbf42775d1839f8f9f3bef053a598d0df078b014966cf489"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "4706de9e26fb08b60c2d6473cabeb0b8da98cc6c2ebd66574e2df7766308ca0e"
+        "sha256": "f43483db8ffd91fd297ff88dc5a030defe3d5815f713af6f1677a50a07b0adb6"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "176803d2b4c3626fb7921e6e1d22e63a4ae1c3e6e70d4d48bc46ddf4f67097df"
+        "sha256": "25f25b1273cc6acaeaed4976b7f98e7f9a0e4ef63f743678c8aaa7b8a98667cc"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10820,7 +10820,7 @@
       },
       {
         "path": "src/isaac_records/complete.py",
-        "sha256": "963e96f051086f9809f9853eef6d6e223d7c4377e1f7a4d3414d99e82d366a35"
+        "sha256": "92072ac9422a9594acaff31860ff1489220d766848f9e40e1ec45a72f8f4def5"
       },
       {
         "path": "src/isaac_records/draft_validator.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "1845432a97b7bd376fdc2b3be194fe3f069500805ab2cf2edca2f9d197235de8"
+    "served_manifest_fingerprint": "7e8fb404b32ae633d0b0b163040ebed4ed746ff712e76f6f0b8844bcd6df025f"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

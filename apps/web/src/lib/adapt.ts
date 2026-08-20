@@ -379,13 +379,24 @@ const KIND_LABEL: Record<string, string> = {
 // screen where the value CAN be entered: no such path was verified, and naming an
 // unverified one would repeat the defect at one remove. Building a structured
 // input is a feature, and out of scope for this slice.
+// THE "NO WAY TO ENTER ONE" CLAUSE IS GONE, and it is gone because it stopped being
+// true rather than because it read badly. The paragraph above ends "Building a
+// structured input is a feature, and out of scope for this slice"; that feature is now
+// built (`StructuredValueEntry.tsx`), so a record created in this application can be
+// completed here. `suggestion-provenance.test.tsx` predicted this exactly — "If a
+// future slice builds the structured input, this test fails and the copy must be
+// revisited in the same change" — and it did fail, which is why this is being read.
+//
+// What must NOT change is the half that is still true and still load-bearing: the
+// system will never GENERATE either value. A form is a place for a person to put what
+// they know; it is not the app knowing it.
 const KIND_CONTEXT: Record<string, string> = {
   asset:
     'An asset can only be cited once it carries a hash. Paste the sha256 — the system will never generate this value for you.',
   series:
-    'A structured reduced-spectrum value the system will never generate for you. No example is available for this record, and this screen has no way to enter one, so the field stays honestly missing here.',
+    'A structured reduced-spectrum value the system will never generate for you. No example is available for this record, so paste the reduction product’s series JSON — or leave it honestly missing.',
   descriptor:
-    'A structured scientific descriptor the system will never generate for you. No example is available for this record, and this screen has no way to enter one, so the field stays honestly missing here.',
+    'A structured scientific descriptor the system will never generate for you. No example is available for this record, so enter the descriptor you measured — or leave it honestly missing.',
 };
 
 const KIND_CONTEXT_WITH_EXAMPLE: Record<string, string> = {

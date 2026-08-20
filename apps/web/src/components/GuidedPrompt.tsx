@@ -5,6 +5,15 @@ import { LABELS } from '../lib/labels';
 import { answerValuePreview } from '../lib/adapt';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import { QC_VERDICTS } from '../lib/types';
+import {
+  DescriptorForm,
+  EMPTY_DESCRIPTOR,
+  SeriesEntry,
+  descriptorIsComplete,
+  descriptorPayload,
+  seriesParseError,
+  type DescriptorDraft,
+} from './StructuredValueEntry';
 import type { PendingBlocker, QcAnswer, QcVerdict } from '../lib/types';
 
 interface GuidedPromptProps {
@@ -103,6 +112,21 @@ export function GuidedPrompt({
   const [verdict, setVerdict] = useState<QcVerdict | ''>(initialVerdict?.status ?? '');
   const [verdictNote, setVerdictNote] = useState(initialVerdict?.evidence ?? '');
 
+  /* ENTERED structured values, for a record that has no worked example to confirm.
+     Held here beside `text` and `verdict` for the same reason they are: the owner's
+     surviving copy is fed back through `initialValue`, and every write is reported. */
+  const [descriptor, setDescriptor] = useState<DescriptorDraft>(
+    initialValue && typeof initialValue === 'object' && 'name' in (initialValue as object)
+      ? (initialValue as DescriptorDraft)
+      : EMPTY_DESCRIPTOR,
+  );
+  const [seriesText, setSeriesText] = useState(
+    /* A staged series survives as the RAW TEXT the reader typed, not as parsed JSON:
+       half-written JSON is still their work, and reparsing it to restore it would lose
+       exactly the state a Refresh most needs to preserve. */
+    typeof initialValue === 'string' && blocker.kind === 'series' ? initialValue : '',
+  );
+
   /* EVERY WRITE GOES THROUGH HERE, for the same reason `setText` does — and it was
      missing, which made this control the one place the screen's own promise was false.
      `GuidedCompletion` holds staged input ABOVE the prompt precisely so a Refresh does
@@ -143,7 +167,20 @@ export function GuidedPrompt({
      moment the person has it, and because a verdict recorded without it is a scientific
      judgement with no trail. Stating that plainly is the point; the previous version
      borrowed authority from a refusal that never happens. */
-  const canConfirm = structured
+  /* A structured blocker with NO example is answerable by ENTRY now. `demo` present
+     keeps the confirm-the-example flow untouched — a walkthrough record must not start
+     asking a reader to type a spectrum. */
+  const entering = structured && demo === undefined;
+  const entryKind = blocker.kind === 'series' ? 'series' : 'descriptor';
+  const entryReady = entering
+    ? entryKind === 'series'
+      ? seriesText.trim() !== '' && seriesParseError(seriesText) === null
+      : descriptorIsComplete(descriptor)
+    : false;
+
+  const canConfirm = entering
+    ? entryReady
+    : structured
     ? staged && demo !== undefined
     : isVerdict
       ? verdict !== '' && verdictNote.trim().length > 0
@@ -151,6 +188,12 @@ export function GuidedPrompt({
 
   const handleConfirm = () => {
     if (!canConfirm) return;
+    if (entering) {
+      onConfirm(
+        entryKind === 'series' ? JSON.parse(seriesText) : descriptorPayload(descriptor),
+      );
+      return;
+    }
     if (isVerdict) {
       onConfirm({ status: verdict, evidence: verdictNote.trim() });
       return;
@@ -291,10 +334,37 @@ export function GuidedPrompt({
                   leave it honestly missing — the assistant will not type it for you.
                 </p>
               )
+            ) : entryKind === 'series' ? (
+              <SeriesEntry
+                idPrefix={`entry-${blocker.id}`}
+                text={seriesText}
+                onChange={(next) => {
+                  setSeriesText(next);
+                  onStagedChange?.(next);
+                }}
+              />
             ) : (
-              <p className="guided-structured-hint">
-                No example value is available for this field — leave it honestly missing.
-              </p>
+              <DescriptorForm
+                idPrefix={`entry-${blocker.id}`}
+                value={descriptor}
+                onChange={(next) => {
+                  setDescriptor(next);
+                  onStagedChange?.(next);
+                }}
+              />
+            )}
+            {entering && (
+              <div className="guided-input-row">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  data-tutorial-anchor={TUTORIAL_ANCHORS.completionConfirm}
+                  onClick={handleConfirm}
+                  disabled={!canConfirm || submitting}
+                >
+                  {submitting ? 'Confirming…' : confirmLabel}
+                </button>
+              </div>
             )}
             {demo && (
               <div className="guided-input-row">

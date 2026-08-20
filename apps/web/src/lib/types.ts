@@ -102,6 +102,37 @@ export interface QcAnswer {
 }
 
 /**
+ * The official `descriptors[].kind` and `.source` enums, mirroring
+ * `schema/isaac_record_v1.json`. Both are REQUIRED by the schema and neither is
+ * preselected in the form: a descriptor is a scientific claim, and choosing its kind
+ * for the scientist would be the app asserting something about their measurement.
+ */
+export const DESCRIPTOR_KINDS = [
+  'absolute',
+  'differential',
+  'categorical',
+  'similarity',
+  'model',
+  'theoretical_metric',
+] as const;
+
+export const DESCRIPTOR_SOURCES = ['auto', 'manual', 'imported'] as const;
+
+/**
+ * Canonical spectroscopy descriptor class tokens, transcribed from
+ * `vocabulary/descriptor_class.json`.
+ *
+ * OFFERED AS SUGGESTIONS, NEVER ENFORCED — and the distinction is that file's own:
+ * "The official schema + portal validator remain authoritative; this file is an
+ * extraction/authoring aid only." The schema constrains `name` by PATTERN, not by an
+ * enumeration, so a name outside this list is perfectly valid and the control must
+ * accept it. Only the `spectroscopy` class is listed because the MVP scope is the
+ * XANES / characterization path; offering electrochemistry tokens would suggest a
+ * capability this build does not have.
+ */
+export const DESCRIPTOR_NAME_SUGGESTIONS = ["edge_position", "edge_shift", "inflection_point_energy", "oxidation_state", "white_line_energy", "white_line_intensity"] as const;
+
+/**
  * The five explicit inferability states, mirroring
  * `apps/api/isaac_api/inferability.py`. A CONCRETE value may accompany
  * `supported_suggestion` and nothing else — the backend enforces that in
