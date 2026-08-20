@@ -205,6 +205,18 @@ export interface PendingBlocker {
    */
   runId?: string;
   runLabel?: string;
+  /**
+   * The IDENTITY key, unique across owners — unlike {@link PendingBlocker.id}, which is
+   * the blocker KIND and is the key that goes in the `answers` body.
+   *
+   * Three runs each needing a spectrum produce three blockers whose `id`, `question`
+   * and `label` are byte-identical. Every piece of per-question state on the completion
+   * screen must therefore be keyed by THIS: staged input, the skipped set, React keys,
+   * and the "was this applied?" test. Keying by `id` was measured reporting an answer
+   * as NOT APPLIED because another run's identical entry was still in the list, and
+   * sharing one typed value across every run's question.
+   */
+  key: string;
   demo_answer?: DemoAnswer;
   // Why the app cannot determine this value itself. Always present from a
   // current backend; optional so pre-existing fixtures still typecheck.
@@ -768,6 +780,8 @@ export interface ApiPendingItem {
   // Present when a RUN owns this question. `null` for a record-level one.
   run_id?: string | null;
   run_label?: string | null;
+  // Unique across owners; `id` is not. See `PendingBlocker.key`.
+  blocker_key?: string;
 }
 
 export interface ApiPendingResponse {

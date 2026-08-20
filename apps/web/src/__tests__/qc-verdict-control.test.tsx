@@ -41,6 +41,7 @@ import type { PendingBlocker } from '../lib/types';
 
 const QC_BLOCKER: PendingBlocker = {
   id: 'qc',
+  key: 'qc',
   kind: 'qc',
   question:
     'What is the QC verdict for this measurement (valid/compromised/failed/pending) and how was it determined?',
@@ -220,5 +221,31 @@ describe('the QC verdict blocker offers a control that can actually answer it', 
     const note = screen.getByLabelText(/how was it determined/i);
     expect(note).toHaveAttribute('aria-required', 'true');
     expect(note.getAttribute('aria-describedby')).toBeTruthy();
+  });
+});
+
+describe('a question that belongs to a run says which run', () => {
+  it('renders the owning run, so identical cards are distinguishable', () => {
+    // CRITICAL REGRESSION TEST. Three runs each needing a QC verdict produce three
+    // blockers whose `id`, `question`, `label` and `path` are byte-identical. `runLabel`
+    // was carried through the adapter and read by NO component, so a scientist saw N
+    // identical cards with nothing to tell them apart — measured by an independent
+    // review.
+    render(
+      <GuidedPrompt
+        blocker={{ ...QC_BLOCKER, runId: '01RUNAAAAAAAAAAAAAAAAAAAA0', runLabel: '400 K' }}
+        index={0}
+        total={1}
+        onConfirm={vi.fn()}
+        onDontKnow={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('400 K')).toBeInTheDocument();
+  });
+
+  it('shows no owner for a record-level question', () => {
+    // NEGATIVE CONTROL: a record with no runs must look exactly as it did.
+    renderPrompt();
+    expect(screen.queryByText(/^Run$/)).toBeNull();
   });
 });

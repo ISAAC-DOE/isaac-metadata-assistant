@@ -164,8 +164,44 @@ export function GuidedCompletion() {
  * they ever disagree we do not KNOW the value landed, and this screen must not put a
  * "Confirmed by You" chip over a value it cannot support. Fail closed.
  */
-function answerWasApplied(resp: ApiAnswersResponse, blockerId: string): boolean {
-  const stillOpen = resp.pending.some((p) => p.id === blockerId);
+/**
+ * The server's own words for a refusal it explained, or `null`.
+ *
+ * TWO 409s SHIPPED WITHOUT THIS and an independent review measured what a scientist
+ * saw. `belongs_to_a_run` names the run, names the route that CAN take the answer, and
+ * says nothing was written — and it surfaced as *"That answer could not be applied
+ * (409). Nothing was changed — try again"*, whose advice is false because retrying
+ * always 409s. Preferring the server's `message` when it has one is the general fix:
+ * this application already writes careful refusal prose on the server, and discarding it
+ * to render a status code is throwing away the better sentence.
+ *
+ * Only a `message` the body actually carries is used, so a refusal with no explanation
+ * still falls back to the generic copy rather than to a blank.
+ */
+function serverExplanation(err: { status?: number; body?: unknown } | null): string | null {
+  /* SCOPED TO 409, and the scoping is a correction. The first version preferred the
+     server's `message` for ANY status that carried one, which overrode a deliberate
+     choice on 422: `edit-field.test.tsx` pins that a 422 with an unexpected error code
+     gets the GENERIC notice "claiming less", precisely so the screen does not assert a
+     specific cause the response may not support. That reasoning is right and is left
+     alone.
+     409 is different because it has no other copy at all: both of this application's
+     409s explain themselves in prose written for a reader, and the generic notice
+     replaced them with a status code and the false advice "try again". */
+  if (err?.status !== 409) return null;
+  const body = err?.body;
+  if (body === null || typeof body !== 'object') return null;
+  const message = (body as { message?: unknown }).message;
+  return typeof message === 'string' && message.trim() !== '' ? message : null;
+}
+
+function answerWasApplied(resp: ApiAnswersResponse, blockerKey: string): boolean {
+  /* KEYED ON `blocker_key`, NOT ON `id`, and this was a measured defect. `id` is the
+     blocker KIND, so three runs each needing a QC verdict produce three entries whose
+     `id` is `"qc"`. Answering run 2's verdict returned `changed: true` AND left run 3's
+     identical entry in the list, so this function answered FALSE and the screen told the
+     scientist their answer had not been applied — about an answer that had. */
+  const stillOpen = resp.pending.some((p) => (p.blocker_key ?? p.id) === blockerKey);
   return resp.invalidation.changed === true && !stillOpen;
 }
 
@@ -261,13 +297,19 @@ function LoadedCompletion({
 
   const total = answered.length + pending.length;
   const remaining = pending.length;
+  /* `pending` holds the RAW `ApiPendingItem`s, whose identity key is `blocker_key`.
+     The adapted `PendingBlocker` exposes the same value as `key`; both fall back to
+     `id`, which is correct for a record with no runs (the two are equal there) and
+     degrades to the pre-existing collision only where the server itself did not
+     distinguish the owners. */
+  const itemKey = (p: ApiPendingItem) => p.blocker_key ?? p.id;
   const currentItem = useMemo(
-    () => pending.find((p) => !skipped.has(p.id)),
+    () => pending.find((p) => !skipped.has(itemKey(p))),
     [pending, skipped],
   );
-  const skippedItems = pending.filter((p) => skipped.has(p.id));
+  const skippedItems = pending.filter((p) => skipped.has(itemKey(p)));
   const upcomingItems = pending.filter(
-    (p) => p.id !== currentItem?.id && !skipped.has(p.id),
+    (p) => itemKey(p) !== (currentItem ? itemKey(currentItem) : null) && !skipped.has(itemKey(p)),
   );
 
   /* THE TOKEN A WRITE NEEDS DEPENDS ON WHO OWNS THE QUESTION.
@@ -301,14 +343,14 @@ function LoadedCompletion({
         // and the fresh If-Match token are facts either way.
         setPending(resp.pending);
         setCurrentVersion(resp.version); // adopt the fresh token for the next submit
-        if (answerWasApplied(resp, blocker.id)) {
+        if (answerWasApplied(resp, blocker.key)) {
           // APPLIED, so the staged copy has done its job. Kept only until the record
           // holds the value: leaving it would re-offer a value the record already has
           // if this blocker ever returned to `pending` through a downstream
           // invalidation, which reads as an unsaved edit that is not one.
-          discardStaged(blocker.id);
+          discardStaged(blocker.key);
         }
-        if (!answerWasApplied(resp, blocker.id)) {
+        if (!answerWasApplied(resp, blocker.key)) {
           // The server did not report this value as applied, so this screen may not
           // show it as answered. No `answered` row (so no "Confirmed by You" chip
           // over a value the record does not hold), no counter movement — `total` is
@@ -317,13 +359,13 @@ function LoadedCompletion({
           // left it: open. The typed input survives, because `pending` still holds
           // this blocker so `GuidedPrompt`'s `key` is unchanged and it is not
           // remounted.
-          setAnswerNotApplied(blocker.id);
+          setAnswerNotApplied(blocker.key);
           return;
         }
         setSkipped((prev) => {
-          if (!prev.has(blocker.id)) return prev;
+          if (!prev.has(blocker.key)) return prev;
           const next = new Set(prev);
-          next.delete(blocker.id);
+          next.delete(blocker.key);
           return next;
         });
         setAnswered((prev) => [
@@ -399,7 +441,7 @@ function LoadedCompletion({
           // value the server last confirmed, the editor stays mounted with what was
           // typed (as on a 412), and no `editImpact` is rendered — its
           // `invalidation.reason` would name a cause the response cannot know.
-          setEditNotApplied(blocker.id);
+          setEditNotApplied(blocker.key);
           return;
         }
         setAnswered((prev) =>
@@ -412,13 +454,16 @@ function LoadedCompletion({
         setEditImpact(resp.invalidation);
         // The correction is stored, so the staged copy is spent. Same reason as the
         // answer path above.
-        discardStaged(`edit:${blocker.id}`);
+        discardStaged(`edit:${blocker.key}`);
         setEditingId(null);
       })
       .catch((err: ApiError) => setEditError(err))
       .finally(() => setEditSubmitting(false));
   };
 
+  /* `blockerId` here is the blocker's IDENTITY key, not its kind. Skipping is
+     per-question, and keying it by kind made skipping one run's spectrum skip every
+     run's — measured by an independent review. */
   const leaveMissing = (blockerId: string) => {
     // Declining to answer is an ABANDONMENT of whatever was typed. Without this the
     // value returns pre-filled under "Answer Now", one click from being confirmed.
@@ -663,8 +708,12 @@ function LoadedCompletion({
         </div>
       ) : (
         <div className="completion-submit-error" role="alert">
-          That correction could not be applied ({editError.status ?? 'error'}). Nothing was changed
-          — try again.
+          {serverExplanation(editError) ?? (
+            <>
+              That correction could not be applied ({editError.status ?? 'error'}). Nothing was
+              changed — try again.
+            </>
+          )}
         </div>
       )}
     </div>
@@ -893,7 +942,7 @@ function LoadedCompletion({
       {blocker && (
         <div style={{ marginTop: 10 }}>
           <GuidedPrompt
-            key={blocker.id}
+            key={blocker.key}
             blocker={blocker}
             index={Math.min(answered.length + skippedItems.length, total - 1)}
             total={total}
@@ -908,7 +957,7 @@ function LoadedCompletion({
               staged.current[blocker.id] = value;
             }}
             onConfirm={(value) => confirmAnswer(blocker, value)}
-            onDontKnow={() => leaveMissing(blocker.id)}
+            onDontKnow={() => leaveMissing(blocker.key)}
           />
         </div>
       )}
@@ -916,7 +965,7 @@ function LoadedCompletion({
       {answerNotAppliedNote}
 
       {upcomingItems.map((item, i) => (
-        <div className="upcoming-row" key={item.id}>
+        <div className="upcoming-row" key={itemKey(item)}>
           <span className="upcoming-num" aria-hidden="true">
             {answered.length + skippedItems.length + 2 + i}
           </span>
@@ -985,8 +1034,12 @@ function LoadedCompletion({
             </div>
           ) : (
             <div className="completion-submit-error" role="alert">
-              That answer could not be applied ({submitError.status ?? 'error'}). Nothing was
-              changed — try again.
+              {serverExplanation(submitError) ?? (
+                <>
+                  That answer could not be applied ({submitError.status ?? 'error'}). Nothing
+                  was changed — try again.
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1007,13 +1060,13 @@ function LoadedCompletion({
             Left Honestly Missing · This Visit, Not Saved
           </div>
           {skippedItems.map((item) => (
-            <div className="leftmissing-row" key={item.id}>
+            <div className="leftmissing-row" key={itemKey(item)}>
               <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
               <span className="leftmissing-q">{item.question}</span>
               <button
                 type="button"
                 className="leftmissing-answer"
-                onClick={() => answerLater(item.id)}
+                onClick={() => answerLater(itemKey(item))}
               >
                 Answer Now
               </button>

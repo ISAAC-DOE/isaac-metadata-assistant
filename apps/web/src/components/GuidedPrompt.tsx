@@ -218,6 +218,19 @@ export function GuidedPrompt({
         <span className="guided-path">{blocker.path}</span>
       </div>
 
+      {/* WHOSE QUESTION THIS IS. Without it, three runs each needing a spectrum render
+          three byte-identical cards — same question, same path, same label — and a
+          scientist has no way to tell which run they are answering. `runLabel` was
+          carried through the adapter and read by nothing until an independent review
+          measured the consequence. A record-level question has no run and shows
+          nothing extra, so a zero-run record is unchanged. */}
+      {blocker.runLabel && (
+        <p className="guided-owner">
+          <span className="guided-owner-label">Run</span>
+          {blocker.runLabel}
+        </p>
+      )}
+
       <h2 className="guided-question">{blocker.question}</h2>
       {blocker.context && <p className="guided-context">{blocker.context}</p>}
 

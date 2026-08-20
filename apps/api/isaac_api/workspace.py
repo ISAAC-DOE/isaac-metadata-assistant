@@ -670,6 +670,46 @@ def blocker_is_run_level(entry: object) -> bool:
     return block is not None and block_level(block) == LEVEL_RUN
 
 
+def _run_questions(run: "Run") -> list:
+    """The open blocking questions ONE run carries, legacy runs included.
+
+    ``run.draft["pending"]`` when the key is present — that list IS the answer state,
+    because ``apply_answers`` removes an entry when it is answered and writes the key
+    back every time.
+
+    **WHEN THE KEY IS ABSENT the run is given the run-level questions a seeded one
+    would have had**, and that branch exists for a state that lives in the DURABLE
+    STORE rather than in theory. ``new_run`` defaulted a run's draft to ``{}`` until
+    ``routes._seed_for_new_run`` shipped, and ``Experiment.to_state()`` serialises
+    runs — so every run created before that deploy is still an empty-drafted run in
+    PostgreSQL. Without this, such a run reports nothing pending while its export
+    refuses, which is the exact failure the seeding change was written to close.
+
+    THE ABSENT KEY IS THE ONLY SIGNAL, and it is a reliable one: a run that has
+    ANSWERED everything has ``pending: []`` — the key present and empty — and a run
+    seeded from a record that had already answered everything gets the same. So
+    "answered" and "never asked" are distinguishable, which is what stops this branch
+    from re-asking a question somebody already answered.
+
+    An independent review found the alternative — making
+    :meth:`Experiment.pending`'s withholding conditional on a run still carrying the
+    kind — to be worse in a way that reached a scientist: it un-withheld the record's
+    copy the moment a run answered the question, leaving three questions visible on
+    the record, refused by every route, and unanswerable. Fixing the gap on the RUN
+    side keeps each question owned by exactly one entity.
+    """
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    if "pending" in draft:
+        return list(draft.get("pending") or [])
+    from .experiment_repository import blank_draft  # noqa: PLC0415 - avoids a cycle
+
+    return [
+        copy.deepcopy(entry)
+        for entry in blank_draft()["pending"]
+        if blocker_is_run_level(entry)
+    ]
+
+
 def address_level(address: str) -> str:
     """Classify a namespaced draft address. Raises ``ValueError`` on a malformed one."""
     kind, name = parse_address(address)
@@ -3304,53 +3344,46 @@ class Experiment:
         own = list(self.draft.get("pending") or [])
         if not self.runs:
             return own
-        # ONCE A RUN OWNS A QUESTION, THE EXPERIMENT'S OWN COPY OF IT IS WITHHELD.
+        # ONCE A RUN EXISTS, THE RECORD'S OWN RUN-LEVEL QUESTIONS ARE WITHHELD.
         #
         # A zero-run experiment is its own record. The moment a run exists, the record
         # each unit exports is the RUN's, and `resolved_run_draft` reads `series`,
-        # `qc`, `assets` and `descriptors_outputs` off the run — so the experiment's
-        # copies of those questions can no longer be answered into anything that ships.
-        # Listing them anyway asks a scientist for a value that reaches no record,
-        # which is a dead end wearing the same chrome as a real question.
+        # `qc`, `assets` and `descriptors_outputs` off the run — so the record's copies
+        # of those questions can no longer be answered into anything that ships. And
+        # they cannot be answered at all: `routes._refuse_run_level_on_the_record`
+        # refuses them with `409 belongs_to_a_run`. Listing them would be a dead end
+        # wearing the chrome of a real question.
         #
-        # **WITHHELD ONLY WHEN SOME RUN ACTUALLY CARRIES THAT KIND**, and the condition
-        # is a fix rather than a refinement. The first version withheld unconditionally
-        # on `self.runs` being non-empty, and an independent review measured what that
-        # does to a run whose draft is EMPTY — which is precisely what `new_run`
-        # produced before `_seed_for_new_run` existed, and therefore what every run
-        # created before that deploy still is in the durable store::
+        # **THE CONDITION IS `self.runs`, NOT "some run still carries this kind", AND
+        # THE SECOND VERSION WAS A MEASURED DEFECT.** It was introduced to fix the
+        # opposite problem — a run with an EMPTY draft carries no blockers, so
+        # withholding unconditionally hid a question from both places — and it created a
+        # worse one, because it un-withheld the record's copy the instant a run ANSWERED
+        # the question. Measured over HTTP by an independent review, on the exact flow
+        # this feature exists to enable::
         #
-        #     pending_count: 0 · status: in_review
-        #     workflow: complete_metadata COMPLETED · review_evidence COMPLETED
-        #     POST /export -> ok: false
+        #     create -> POST /runs -> answer series+qc+descriptor ON THE RUN   (all 200)
+        #     GET /experiments/{id}  -> pending_count 3 · export BLOCKED
+        #     POST /export           -> 200 {"ok": true}      <- contradicts the workflow
+        #     POST /answers|/edit    -> 409 belongs_to_a_run   ("send them to the run")
+        #     POST /runs/{id}/answers-> 200, changed nothing, the entries stay
         #
-        # That is verbatim the failure the seeding change was written to close,
-        # reachable through existing persisted data. Requiring a run to have inherited
-        # the question before hiding the record's copy means a question is never
-        # withheld from BOTH.
+        # Three questions shown in both places and accepted in neither, with the record
+        # claiming export was blocked while export succeeded. The only escape was
+        # removing the run and re-answering on the record — discarding the run's science.
+        #
+        # THE LEGACY-EMPTY-RUN CASE IS FIXED ON THE RUN SIDE INSTEAD, by
+        # :meth:`_run_questions`, which is where it belongs: a run that was created
+        # before `_seed_for_new_run` existed is missing its questions, so it is given
+        # them, rather than the record keeping a copy nobody can answer.
         #
         # This is a DERIVED view and withholds rather than deletes: the entries stay in
-        # the document, so removing the run restores them intact. Record-level
-        # questions are untouched, and a zero-run experiment's list is byte-identical
-        # to what it always was (the branch above returns before reaching here).
-        owned_by_a_run = {
-            item.get("kind")
-            for run in self.runs
-            for item in ((run.draft if isinstance(run.draft, dict) else {}).get("pending") or [])
-            if isinstance(item, dict)
-        }
-        out = [
-            entry
-            for entry in own
-            if not (
-                blocker_is_run_level(entry)
-                and isinstance(entry, dict)
-                and entry.get("kind") in owned_by_a_run
-            )
-        ]
+        # the document, so removing every run restores them intact. Record-level
+        # questions are untouched, and a zero-run experiment's list is byte-identical to
+        # what it always was (the branch above returns before reaching here).
+        out = [entry for entry in own if not blocker_is_run_level(entry)]
         for run in self.sorted_runs():
-            run_draft = run.draft if isinstance(run.draft, dict) else {}
-            for item in run_draft.get("pending") or []:
+            for item in _run_questions(run):
                 if isinstance(item, dict):
                     out.append({**item, "run_id": run.id, "run_label": run.label})
                 else:

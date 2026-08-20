@@ -534,6 +534,11 @@ export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
     about: item.about ?? undefined,
     runId: item.run_id ?? undefined,
     runLabel: item.run_label ?? undefined,
+    // Falls back to `id` so a fixture or an older backend that omits it still yields a
+    // usable key — which is correct for a record with no runs, where the two are equal
+    // by construction, and degrades to the pre-existing collision only where the server
+    // itself did not distinguish the owners.
+    key: item.blocker_key ?? item.id,
     // The "confirm the example value" wording is used ONLY when an example value
     // actually arrived — see the note on KIND_CONTEXT_WITH_EXAMPLE.
     context:

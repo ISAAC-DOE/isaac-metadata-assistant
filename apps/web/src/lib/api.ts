@@ -718,7 +718,21 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
  */
 async function mutationError(res: Response, path: string): Promise<ApiError> {
   const err = httpError(res, path);
-  if (!err.htmlIntercept && (res.status === 412 || res.status === 400 || res.status === 422)) {
+  /* 409 IS READ NOW TOO, and it was not. Two refusals shipped without it and an
+     independent review measured what a scientist saw: `belongs_to_a_run` — whose body
+     names the run, names the route that CAN take the answer, and says nothing was
+     written — surfaced as "That answer could not be applied (409). Nothing was changed —
+     try again", which is false advice because retrying always 409s; and
+     `already_exported_without_runs` surfaced as the bare "Request failed (409)."
+
+     Reading the body is ADDITIVE in the same way the 422 case was: it only POPULATES
+     `err.body` where it was `undefined`, so no existing 409 branch changes behaviour —
+     `RunsSection`'s Remove flow, which writes its own 409 copy because that route has
+     exactly one 409, is unaffected. */
+  if (
+    !err.htmlIntercept &&
+    (res.status === 412 || res.status === 400 || res.status === 422 || res.status === 409)
+  ) {
     const body = await res.json().catch(() => undefined);
     return new ApiError(err.message, {
       status: res.status,

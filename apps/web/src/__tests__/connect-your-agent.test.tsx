@@ -702,3 +702,28 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     expect(MCP_CONNECT_COPY.statusLabel).toBe('Requires organization configuration');
   });
 });
+
+describe('the write permission states what it cannot reach', () => {
+  it('names the spectrum, the verdict and the descriptors as out of reach', () => {
+    // A scientist granting `isaac:draft.write` would reasonably expect an agent to be
+    // able to fill a record in. It cannot: `isaac_update_draft` reaches a run's five
+    // context/timing fields and the record-level correction route, and the run-level
+    // blocks — series, qc, descriptors, assets — have no MCP operation at all. On a
+    // record with runs the record-level route refuses them outright with
+    // `409 belongs_to_a_run`.
+    //
+    // The gap is real and is recorded in `docs/mcp-capability-audit.md` §5A rather than
+    // closed here, because a new authorized write path for scientific values gets its
+    // own reviewed slice. What must not happen in the meantime is the copy implying a
+    // completeness the toolset does not have.
+    const write = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'write-draft');
+    expect(write, 'the write capability row is gone; re-read this test').toBeDefined();
+    expect(write!.detail).toMatch(/cannot give a run its spectrum/i);
+    expect(write!.detail).toMatch(/QC verdict/i);
+    expect(write!.detail).toMatch(/descriptors/i);
+
+    const scope = MCP_PERMISSIONS.find((p) => p.id === 'draft-write');
+    expect(scope, 'the draft.write scope row is gone; re-read this test').toBeDefined();
+    expect(scope!.allows).toMatch(/does not reach a run.s spectrum/i);
+  });
+});

@@ -555,12 +555,15 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # has no `If-Match` to be malformed or omitted.
     ("/api/experiments", "post"): ["201", "401", "404", "409", "412", "422", "503"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422", "503"],
-    ("/api/experiments/{experiment_id}/answers", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    # 409: `belongs_to_a_run`. An independent review found all three of these routes
+    # emitting a live 409 that this table did not list — so the guard that exists to
+    # pin the contract was certifying one that omitted a status a client will see.
+    ("/api/experiments/{experiment_id}/answers", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/artifacts", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/assistant/query", "post"): ["200", "400", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/audit", "post"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/draft", "get"): ["200", "401", "404", "422", "503"],
-    ("/api/experiments/{experiment_id}/edit", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/experiments/{experiment_id}/edit", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/evidence", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/evidence-classification", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/export", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
@@ -633,7 +636,8 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # different validator. The two read operations and the check take none, because
     # they write nothing.
     ("/api/experiments/{experiment_id}/runs", "get"): ["200", "401", "404", "422", "503"],
-    ("/api/experiments/{experiment_id}/runs", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
+    # 409: `already_exported_without_runs`.
+    ("/api/experiments/{experiment_id}/runs", "post"): ["201", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}", "patch"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     # The two override operations carry THE RUN's `If-Match` exactly as the run PATCH

@@ -54,7 +54,10 @@ export type EvidenceView = {
 };
 
 /** One pending (not-yet-entered) field. */
-export type PendingItem = { id: string; label: string };
+/** `run_id` is present when a RUN owns the question — see `ConfirmApi`. Optional so an
+ *  older caller or a fixture that omits it still typechecks, which is correct: a record
+ *  with no runs has no run-owned questions. */
+export type PendingItem = { id: string; label: string; run_id?: string | null };
 
 /**
  * The authoritative context the agent reasons over. It is passed in by the
@@ -102,18 +105,30 @@ export type Proposal = {
 };
 
 /** The minimal mutation surface `confirmProposal` needs — satisfied by `api`
- *  in lib/api.ts. Both methods add `If-Match: "<version>"` from the version arg. */
+ *  in lib/api.ts. Both methods add `If-Match: "<version>"` from the version arg.
+ *
+ *  `runId` ROUTES A RUN-OWNED ANSWER TO THE RUN, and it was missing. A spectrum, a QC
+ *  verdict, a descriptor and an asset hash belong to the run that measured them, and
+ *  the record-level route refuses them with `409 belongs_to_a_run` once a record has
+ *  runs. So on any record with runs, Stage-Answer → Confirm for one of those fields hit
+ *  the record route and threw a 409 into the panel's generic branch — whose copy says it
+ *  CANNOT establish that nothing was written, while the server had just said "Nothing
+ *  was written." An independent review measured it reachable in the shipped worked
+ *  example. `getRun` is needed because a run write takes THE RUN's `If-Match`. */
 export interface ConfirmApi {
   submitAnswer(
     id: string,
     answersById: Record<string, unknown>,
     version?: string,
+    runId?: string,
   ): Promise<unknown>;
   editField(
     id: string,
     answersById: Record<string, unknown>,
     version?: string,
+    runId?: string,
   ): Promise<unknown>;
+  getRun?(experimentId: string, runId: string): Promise<{ run: { version: string } }>;
 }
 
 /** The exact honest message returned when the record state cannot be verified. */
@@ -457,12 +472,24 @@ export async function confirmProposal(
   }
 
   const answers: Record<string, unknown> = { [proposal.field]: proposal.value };
-  const isPending = ctx.pending.some((p) => p.id === proposal.field);
+  const open = ctx.pending.find((p) => p.id === proposal.field);
+  const isPending = open !== undefined;
+  /* THE RUN THAT OWNS THIS QUESTION, taken from the pending entry rather than from the
+     proposal, because the pending list is the server's own statement of ownership. A
+     record-level question has none and the write goes where it always did. The run's own
+     `If-Match` is read immediately before the write for the same reason
+     `GuidedCompletion.tokenFor` reads it: the record's token there is a 412 the reader
+     would be told to resolve by refreshing something that was never stale. */
+  const runId = open?.run_id ?? undefined;
+  let token = ctx.version;
+  if (runId && api.getRun) {
+    token = (await api.getRun(ctx.experimentId, runId)).run.version;
+  }
 
   try {
     const result = isPending
-      ? await api.submitAnswer(ctx.experimentId, answers, ctx.version)
-      : await api.editField(ctx.experimentId, answers, ctx.version);
+      ? await api.submitAnswer(ctx.experimentId, answers, token, runId)
+      : await api.editField(ctx.experimentId, answers, token, runId);
     return { status: 'ok', result };
   } catch (err) {
     if (statusOf(err) === 412) {

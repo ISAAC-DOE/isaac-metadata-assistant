@@ -33,10 +33,12 @@ import {
   seriesParseError,
   typedValue,
 } from '../components/StructuredValueEntry';
+import { pendingItemToBlocker } from '../lib/adapt';
 import type { PendingBlocker } from '../lib/types';
 
 const base = (kind: 'series' | 'descriptor'): PendingBlocker => ({
   id: kind,
+  key: kind,
   kind,
   question: kind === 'series' ? 'Provide the reduced spectrum.' : 'Provide a descriptor.',
   label: kind,
@@ -296,5 +298,51 @@ describe('accessibility of the entry controls', () => {
     fireEvent.blur(box);
     fireEvent.change(box, { target: { value: 'nope' } });
     expect(document.getElementById(describedBy as string)).toHaveAttribute('role', 'alert');
+  });
+});
+
+describe('per-question state is keyed by the unique key, not by the kind', () => {
+  it('two runs needing the same thing are two distinct questions', () => {
+    // CRITICAL REGRESSION TEST for a collision an independent review measured. `id` is
+    // the blocker KIND — three runs needing a spectrum all carry `id: "series"` — and the
+    // completion screen keyed staged input, the skipped set, its React keys and its
+    // "was this applied?" test off `id`. The consequences it measured: answering one
+    // run's verdict was reported as NOT APPLIED (another run's identical entry was still
+    // in the list), one typed value was shared by every run's question, and skipping one
+    // skipped all of them.
+    //
+    // `blocker_key` is the identity key and `id` stays the ANSWER key, because `id` is
+    // what goes in the request body. This asserts the adapter produces distinct keys for
+    // two runs and the SAME `id`, which is the pairing the fix depends on.
+    const first = pendingItemToBlocker({
+      id: 'series',
+      kind: 'series',
+      question: 'Provide the reduced spectrum.',
+      run_id: '01RUNAAAAAAAAAAAAAAAAAAAA0',
+      run_label: '300 K',
+      blocker_key: '01RUNAAAAAAAAAAAAAAAAAAAA0:series',
+    });
+    const second = pendingItemToBlocker({
+      id: 'series',
+      kind: 'series',
+      question: 'Provide the reduced spectrum.',
+      run_id: '01RUNBBBBBBBBBBBBBBBBBBBB0',
+      run_label: '400 K',
+      blocker_key: '01RUNBBBBBBBBBBBBBBBBBBBB0:series',
+    });
+
+    expect(first.id).toBe(second.id);
+    expect(first.key).not.toBe(second.key);
+    expect(first.runLabel).toBe('300 K');
+    expect(second.runLabel).toBe('400 K');
+  });
+
+  it('falls back to the id when the server sends no key', () => {
+    // Correct for a record with no runs — the two are equal there by construction — and
+    // it degrades to the pre-existing collision only where the server itself did not
+    // distinguish the owners.
+    const only = pendingItemToBlocker({ id: 'qc', kind: 'qc', question: 'q' });
+    expect(only.key).toBe('qc');
+    expect(only.runId).toBeUndefined();
   });
 });

@@ -1685,8 +1685,19 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // sentence gained `revise_resolution`'s own "and the same competing set" clause,
     // which its wire copy had dropped. Re-measured, not adjusted by the length of
     // the new text.
-    expect(total).toBe(81416);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(176);
+    // 81,416 -> 82,439 and 176 -> 180 paragraphs: `POST .../runs` had its description
+    // corrected. It claimed *"The new run starts empty: record-level values are never
+    // copied down into it"*, which stopped being true when the first run began adopting
+    // the record's per-run content — and the sentence was live in the PUBLISHED contract
+    // and in the committed wire fixture, so an independent review found the Endpoint
+    // Explorer rendering a false statement about what adding a run does. The replacement
+    // states the asymmetry (first run adopts, later runs do not, and why), the six
+    // unclassified fields neither carries, and the `409` refusal on an already-exported
+    // record. Net +1,023 characters and +4 paragraphs in ONE operation; no other
+    // description changed, and `test_contract_description_parity.py` proves that rather
+    // than leaving it asserted here.
+    expect(total).toBe(82439);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(180);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

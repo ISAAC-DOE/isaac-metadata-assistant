@@ -131,6 +131,53 @@ Read the boundary precisely, because "the transport exists" is easy to over-read
 
 ---
 
+## 5A. A CAPABILITY GAP OPENED ON 2026-08-19, and it is recorded rather than closed
+
+**An agent can create a Run and cannot give it any science.** That was true before too,
+and was invisible; it is now visible, and the reason is worth writing down.
+
+`isaac_update_draft` has two paths. With a `run_id` it calls
+`PATCH /api/experiments/{id}/runs/{run_id}`, which accepts exactly the **five**
+`RUN_WRITABLE_FIELD_PATHS` — `context.environment`, `context.temperature_K`,
+`context.thermodynamics.atmosphere` and the two `timestamps.acquired_*`. Without one it
+calls `POST /api/experiments/{id}/edit`, the record-level correction route.
+
+The spectrum, the QC verdict, the descriptors and the asset hashes are **not** among
+those five. They are run-level BLOCKS, answered through `/answers` and `/edit` — and
+since 2026-08-19 the record-level route **refuses** them with `409 belongs_to_a_run`
+once the record has runs, because writing them there produced a value no exported record
+reads. The UI gained `POST .../runs/{run_id}/answers` and `.../edit` in the same change.
+**MCP did not.**
+
+So today, through MCP:
+
+| Act | Possible? |
+|---|---|
+| create a Run | yes |
+| set a Run's five context/timestamp fields | yes |
+| give a Run its spectrum, verdict or descriptors | **no** |
+| correct them on the record instead | **no — `409 belongs_to_a_run`** |
+| check a Run, read its evidence | yes |
+
+**Why it is not closed in the same change.** Adding a run-level write to the tool surface
+is a new authorized write path for scientific values, and this project's rule is that
+each of those gets its own slice and its own independent review. It also inherits a
+question the existing tools already answer, and must answer the same way:
+`confirmed_by_user` is **passed through from the caller and never hard-coded**, because
+hard-coding it "would have been one line and would have recorded a user confirmation
+that no user gave" — the scientist's own Claude asserts it on the scientist's behalf, and
+the server has no way to tell the difference. Extending that to a spectrum is a larger
+claim than extending it to a temperature.
+
+**The refusal is informative rather than silent**, which is what makes leaving the gap
+acceptable for now: the `409` body names the run, names
+`POST /api/experiments/{experiment_id}/runs/{run_id}/answers`, and says nothing was
+written. An agent that reads it knows exactly what it cannot do and where the capability
+would live.
+
+**This is remaining work, not a decision.** It is named here so `Connect Your Agent`'s
+copy cannot drift into implying a completeness the toolset does not have.
+
 ## 6. Exact external actions
 
 | Action | Owner | Blocks | Status |

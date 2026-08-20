@@ -129,6 +129,22 @@ type FocusState =
   | { status: 'missing'; error: ApiError }
   | { status: 'fetched'; run: ApiRunView };
 
+/** The server's own words for a refusal it explained, or `null`.
+ *
+ *  Only a `message` the body actually carries is used, so a refusal with no explanation
+ *  still falls through to the existing copy rather than to a blank. `mutationError` now
+ *  reads a 409 body, which is what makes this reachable.
+ */
+function serverRefusalMessage(err: unknown): string | null {
+  // 409 only, for the reason `GuidedCompletion.serverExplanation` gives: every other
+  // status on this route already has copy chosen for it, and 409 had none.
+  if ((err as { status?: number } | null)?.status !== 409) return null;
+  const body = (err as { body?: unknown } | null)?.body;
+  if (body === null || typeof body !== 'object') return null;
+  const message = (body as { message?: unknown }).message;
+  return typeof message === 'string' && message.trim() !== '' ? message : null;
+}
+
 export function RunsSection({ experimentId }: { experimentId: string }) {
   return (
     <section className="runs-section" aria-labelledby="runs-heading">
@@ -679,6 +695,19 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
               'this can be your own edit elsewhere on this screen. Reload this section to pick up ' +
               'the current version, then add the run again.',
           );
+          return;
+        }
+        /* THE SERVER'S OWN SENTENCE WHEN IT WROTE ONE. `POST /runs` refuses with
+           `409 already_exported_without_runs` on a record already exported under its
+           own identity, and that body explains why: adding a run would move the
+           exported identity onto the run and publish a second official record with the
+           same science, and nothing withdraws the first. Before this, it surfaced as the
+           bare "Request failed (409)." — a click whose only outcome was an unexplained
+           refusal, which is precisely the residual this file names as a defect for
+           Remove. Measured by an independent review on the exported worked example. */
+        const explained = serverRefusalMessage(err);
+        if (explained !== null) {
+          setAddError(explained);
           return;
         }
         // A session that ended is named as such — the run was not created, and

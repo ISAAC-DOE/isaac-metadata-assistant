@@ -275,7 +275,7 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     id: 'write-draft',
     action: 'Write draft values',
     detail:
-      'Correct an answered record-level field, or fill in a run’s own fields. An invented or misspelt field path is refused with nothing written. The confirmation each write records, though, is the agent’s assertion that you gave it — ISAAC cannot check whether you were ever asked, so grant this permission only to an agent you trust to ask you first.',
+      'Correct an answered record-level field, or fill in a run’s own five context and timing fields. It cannot give a run its spectrum, its QC verdict or its descriptors — those belong to the run that measured them, and this toolset has no operation that writes them; on a record with runs it is refused outright, naming the run. An invented or misspelt field path is refused with nothing written. The confirmation each write records, though, is the agent’s assertion that you gave it — ISAAC cannot check whether you were ever asked, so grant this permission only to an agent you trust to ask you first.',
     tools: ['isaac_update_draft'],
   },
   {
@@ -370,7 +370,7 @@ export const MCP_PERMISSIONS: readonly McpPermission[] = [
     id: 'draft-write',
     name: 'isaac:draft.write',
     allows:
-      'Change draft content: add a run, correct an answered field, edit a run’s own fields.',
+      'Change draft content: add a run, correct an answered field, edit a run’s own five context and timing fields. It does not reach a run’s spectrum, verdict or descriptors.',
     refuses:
       'Finalizes nothing. It unlocks a fixed, reviewed list of operations and none of them mints an official record.',
   },

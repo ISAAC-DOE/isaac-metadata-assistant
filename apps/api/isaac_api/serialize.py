@@ -306,6 +306,27 @@ def pending_to_list(
                 # tell whose question it is answering.
                 "run_id": entry.get("run_id"),
                 "run_label": entry.get("run_label"),
+                # A KEY THAT IS UNIQUE ACROSS OWNERS, because `id` is NOT.
+                #
+                # `id` is the blocker KIND (or an asset URI) and it is the key a caller
+                # puts in the `answers` BODY, so it cannot be made unique without
+                # breaking the write contract. But three runs each needing a spectrum
+                # produce three entries whose `id`, `question` and `about` are
+                # byte-identical, and an independent review measured what a client does
+                # with that: the completion screen keys staged input, the skip set, its
+                # React keys and its "was this applied?" test off `id`, so answering one
+                # run's verdict was reported as NOT APPLIED (another run's identical
+                # entry was still in the list), one typed value was shared by every run's
+                # question, and skipping one skipped all of them.
+                #
+                # So: `id` stays the ANSWER key, `blocker_key` is the IDENTITY key. A
+                # record-level question's two values are equal, which keeps a zero-run
+                # record's payload semantically unchanged.
+                "blocker_key": (
+                    f"{entry.get('run_id')}:{blocker_id(entry)}"
+                    if entry.get("run_id")
+                    else blocker_id(entry)
+                ),
             }
         )
     return {"pending": pending}

@@ -175,6 +175,10 @@ function toPendingItems(pending: ApiPendingItem[] | undefined): PendingItem[] {
       (typeof p.about === 'string' && p.about.trim() !== '' && p.about) ||
       (typeof p.question === 'string' && p.question.trim() !== '' && p.question) ||
       p.id,
+    // CARRIED, because `confirmProposal` routes a run-owned answer to the run and reads
+    // ownership from here. Dropped, it sent every answer to the record route, which
+    // refuses a run-owned key with `409 belongs_to_a_run` once a record has runs.
+    run_id: p.run_id ?? null,
   }));
 }
 

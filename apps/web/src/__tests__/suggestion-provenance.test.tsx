@@ -46,6 +46,7 @@ function prov(
 function blocker(overrides: Partial<PendingBlocker> = {}): PendingBlocker {
   return {
     id: 'series',
+    key: 'series',
     kind: 'series',
     question: 'Provide the reduced spectrum.',
     label: 'Reduced Spectrum',

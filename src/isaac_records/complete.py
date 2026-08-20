@@ -110,7 +110,9 @@ def _user_confirmation(question, answer, timestamp) -> dict:
     }
 
 
-def _supersede_qc_evidence(draft: dict, displaced: str | None, timestamp: str) -> None:
+def _supersede_qc_evidence(
+    draft: dict, displaced: str | None, replacement: str | None, timestamp: str
+) -> None:
     """Record a QC note that a new verdict has displaced, before it is removed.
 
     **SUPERSEDE WITHOUT DELETING** is this project's established answer to exactly this
@@ -125,8 +127,16 @@ def _supersede_qc_evidence(draft: dict, displaced: str | None, timestamp: str) -
     An independent review found that gap in the fix for the defect above. So the note
     is written into the same ``qc:status`` trail it is leaving, marked as superseded and
     carrying no claim about the new verdict.
+
+    **THE COMPARISON LIVES HERE, NOT IN THE CALLERS, and that is a correction.** It was
+    in ``apply_corrections`` (``if displaced and displaced != evidence_note``) and NOT in
+    ``apply_answers``, which called this unconditionally — so an answer that re-sent the
+    SAME note appended an entry claiming the note had been displaced while it was still
+    the live value of ``measurement.qc.evidence``. An independent review measured it: a
+    fabricated provenance claim reaching the exported sidecar, on the writer the previous
+    fix had left alone. Two callers cannot disagree about a rule neither of them owns.
     """
-    if not displaced:
+    if not displaced or displaced == replacement:
         return
     trail = draft.setdefault("block_evidence", {}).setdefault("qc:status", [])
     trail.append(
@@ -232,7 +242,7 @@ def apply_answers(draft: dict, answers: dict) -> dict:
             # ever writes `qc` when it can read a status), which is why it was latent
             # rather than measured; nothing enforced that, and an asymmetry nobody can
             # see is the kind that outlives the reason for it.
-            _supersede_qc_evidence(draft, qc.get("evidence"), timestamp)
+            _supersede_qc_evidence(draft, qc.get("evidence"), evidence_note, timestamp)
             qc["status"] = status
             if evidence_note:
                 # Native measurement.qc.evidence is a free-text string field.
@@ -607,9 +617,7 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
         current = draft.get("qc") or {}
         if (status, evidence_note) != (current.get("status"), current.get("evidence") or None):
             qc = draft.setdefault("qc", {})
-            displaced = qc.get("evidence")
-            if displaced and displaced != evidence_note:
-                _supersede_qc_evidence(draft, displaced, timestamp)
+            _supersede_qc_evidence(draft, qc.get("evidence"), evidence_note, timestamp)
             qc["status"] = status
             if evidence_note:
                 qc["evidence"] = evidence_note

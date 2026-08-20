@@ -410,6 +410,36 @@ _TUTORIAL_HEADER_DESCRIPTION = (
     "session with `404` — it never falls back to the ordinary workspace."
 )
 
+#: The refusal for an answer that belongs to a Run, on the RECORD's answer/edit
+#: operations. Declared as its own constant because an undeclared status on a published
+#: contract is a contract that is wrong: an independent review found all three routes
+#: below emitting a live `409` that `EXPECTED_RESPONSE_CODES` did not list, so the guard
+#: that exists to pin the contract was certifying one that omitted it.
+_R_BELONGS_TO_A_RUN: dict = {
+    409: {
+        "description": (
+            "This record has runs, and the answer names something a RUN owns — a "
+            "spectrum, a QC verdict, a descriptor, an asset hash, or the absorption "
+            "edge. Answering it here would write a value no exported record reads, so "
+            "nothing was written. The body names every run and the operation that can "
+            "take the answer: `POST /api/experiments/{experiment_id}/runs/{run_id}"
+            "/answers`."
+        )
+    },
+}
+
+#: The refusal for adding a Run to a record already exported under its own identity.
+_R_ALREADY_EXPORTED_WITHOUT_RUNS: dict = {
+    409: {
+        "description": (
+            "This record has already been exported under its own identity. Adding a run "
+            "would move the exported identity onto the run and publish a second "
+            "official record with the same science, and no operation withdraws the "
+            "first, so nothing was written."
+        )
+    },
+}
+
 _R_TUTORIAL_SCOPE: dict = {
     404: {
         "description": (
@@ -2304,15 +2334,44 @@ def _answers_to_apply_shape(
 #: `workspace.block_level` rather than listed, so a block that changes level cannot
 #: leave a stale copy of the rule here.
 #:
-#: `edge` is deliberately ABSENT: it lives in `implicit`, which `resolved_run_draft`
-#: MERGES from the experiment into every run, so an edge answered on the record does
-#: reach the run's exported document. `timestamp` is bookkeeping, not an answer.
+#: ``edge`` IS INCLUDED, AND AN EARLIER VERSION EXEMPTED IT ON A FALSE PREMISE. That
+#: version said *"it lives in `implicit`, which `resolved_run_draft` MERGES from the
+#: experiment into every run, so an edge answered on the record does reach the run's
+#: exported document."* The merge is CONDITIONAL:
+#: ``_merge_implicit(..., inherit=not _diverges_from_experiment(resolutions))``, and
+#: ``_merge_implicit``'s own docstring says a run that diverges at ANY experiment-level
+#: address — including one that re-records a byte-identical value under a fresh
+#: confirmation — receives no inherited entry at all. An independent review measured it:
+#: one override on a run, then ``POST /edit {"edge": "L3"}`` answered **200** with
+#: ``changed_fields: ['edge']`` while the run's composed ``implicit`` was ``[]`` and the
+#: exported sidecar carried none — the exact 200-about-a-write-nobody-reads this refusal
+#: exists to stop, on the one key that had been exempted from it.
+#:
+#: It is refused whenever the record has runs, rather than only when some run diverges,
+#: because "does any run diverge" is a property of every run's override state at the
+#: moment of the write, and a rule a caller cannot predict is worse than one that is
+#: simply narrower. No UI path sends ``edge`` (no ``edge`` blocker exists —
+#: ``draft_builder`` emits a null ``implicit`` entry, never a pending one), so the cost
+#: is borne only by a direct API or MCP caller, who gets a refusal naming where the
+#: answer belongs.
+#:
+#: `timestamp` is bookkeeping, not an answer.
+#:
+#: ``edge`` maps to ``implicit`` rather than to a block in ``RUN_LEVEL_BLOCKS``, so its
+#: membership here is asserted directly instead of being derived from ``block_level``.
+#: That asymmetry is deliberate and is the reason this map exists at all rather than
+#: being replaced by a call to ``block_level``.
 _RUN_LEVEL_ANSWER_BLOCK = {
     "series": "series",
     "qc": "qc",
     "descriptor": "descriptors_outputs",
     "descriptor_label": "descriptors_outputs",
 }
+
+#: Answer keys that are run-owned but do NOT live in a top-level run-level block. See
+#: the note above: ``implicit`` is merged onto a run only while that run holds every one
+#: of the experiment's values.
+_RUN_LEVEL_ANSWER_KEYS_WITHOUT_A_BLOCK = ("edge",)
 
 
 def _run_level_keys_in(apply_shape: dict) -> list[str]:
@@ -2322,9 +2381,12 @@ def _run_level_keys_in(apply_shape: dict) -> list[str]:
     on the record after a run exists lands in a block ``resolved_run_draft`` never reads.
     """
     keys = sorted(
-        key
-        for key, block in _RUN_LEVEL_ANSWER_BLOCK.items()
-        if key in apply_shape and ws.block_level(block) == ws.LEVEL_RUN
+        [
+            key
+            for key, block in _RUN_LEVEL_ANSWER_BLOCK.items()
+            if key in apply_shape and ws.block_level(block) == ws.LEVEL_RUN
+        ]
+        + [key for key in _RUN_LEVEL_ANSWER_KEYS_WITHOUT_A_BLOCK if key in apply_shape]
     )
     if apply_shape.get("asset_sha256") and ws.block_level("assets") == ws.LEVEL_RUN:
         keys.extend(sorted(apply_shape["asset_sha256"]))
@@ -2408,6 +2470,7 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
+        **_R_BELONGS_TO_A_RUN,
     },
 )
 def post_answers(
@@ -2621,6 +2684,7 @@ def _fields_the_shape_carries(apply_shape: dict, submitted_fields: list[str]) ->
                 }
             },
         },
+        **_R_BELONGS_TO_A_RUN,
     },
 )
 def post_edit(
@@ -3897,8 +3961,12 @@ def _seed_for_new_run(exp) -> dict:
     THAT SENTENCE WAS MATERIALLY FALSE, and an independent review named it as the
     sentence that made a Critical defect invisible to a reader of this function.** The
     four run-level BLOCKS are indeed not read from the experiment once a run exists —
-    but ``resolved_run_draft`` MERGES the experiment's ``block_evidence`` and
-    ``implicit`` onto every run. So a correction written into ``exp.draft`` after a run
+    but ``resolved_run_draft`` merges the experiment's ``block_evidence`` onto every
+    run UNCONDITIONALLY, and its ``implicit`` onto every run that has not diverged
+    (``inherit=not _diverges_from_experiment(resolutions)``; one override, even a no-op
+    one, withholds all of it). *An earlier version of this correction said both were
+    merged "onto every run", which is the same imprecision in the other direction and
+    was found by the next review.* So a correction written into ``exp.draft`` after a run
     existed put its "Correct the QC status? → valid" confirmation into the record's
     SIDECAR while the verdict itself stayed behind, and the published record asserted a
     verdict its own evidence trail denied.
@@ -3975,9 +4043,24 @@ def _seed_for_new_run(exp) -> dict:
         "one official ISAAC record.\n\n"
         "Adding a run rewrites the record, so this requires the RECORD's current "
         "`ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is "
-        "`412` with nothing written. The new run starts empty: record-level values "
-        "are never copied down into it, and no scientific value is invented. Its "
-        "`label` may be supplied; when "
+        "`412` with nothing written.\n\n"
+        "THE FIRST RUN ADOPTS THE RECORD'S PER-RUN CONTENT; A LATER RUN DOES NOT. A "
+        "record with no runs is its own record, so adding the first moves the exported "
+        "identity onto that run — and the spectrum, the QC verdict, the descriptors, the "
+        "assets and the run-level context and timing values are read off the RUN at "
+        "export. Without carrying them across, adding a run would silently remove "
+        "everything already recorded from every record this one publishes. A SECOND run "
+        "receives none of it: copying one run's spectrum onto another would assert that "
+        "two runs measured the same thing, which nothing here evidences. Open questions "
+        "travel the same way, so nothing a person still owes is lost either.\n\n"
+        "Record-LEVEL values are still never copied down — they are inherited by "
+        "reference at read time — and no scientific value is invented anywhere. Six "
+        "`system.configuration.*` fields are carried by neither route because their "
+        "scope is an open scientific question.\n\n"
+        "This is refused with `409` on a record that has ALREADY been exported without "
+        "runs: adding one would publish a second official record with the same science, "
+        "and no operation withdraws the first.\n\n"
+        "Its `label` may be supplied; when "
         "it is omitted or blank the server assigns the next `Run N`, and a label "
         "that is not a string, or one JSON cannot represent (a lone surrogate), is "
         "rejected with `422` rather than coerced.\n\n"
@@ -3987,7 +4070,13 @@ def _seed_for_new_run(exp) -> dict:
         "The newly created run and the record's new revision, with the record's "
         "new `ETag`."
     ),
-    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
+        **_R_PRECONDITION,
+        **_R_ALREADY_EXPORTED_WITHOUT_RUNS,
+    },
 )
 def post_run(
     scope: TutorialScopeDep,
@@ -5130,8 +5219,29 @@ def _apply_to_run(
         else:
             run.draft = apply_answers(run_draft, apply_shape)
 
+        # THE SAME LOG THE RECORD PATH KEEPS, and it was missing. `answer_log` is what
+        # `workspace._at_risk_summary` counts to tell an operator how much confirmed work
+        # a destructive reset would discard — its docstring says "one entry is appended
+        # per submission that actually changed the authoritative draft". Without this, two
+        # confirmed RUN answers reported `confirmed_answers: 0`, so the disclosure a
+        # scientist reads before a reset under-counted their own work. Measured by an
+        # independent review. `run_id` is recorded because the entry is otherwise
+        # indistinguishable from a record-level one.
+        exp.answer_log.append(
+            {("edited" if correcting else "applied"): apply_shape, "run_id": run.id, "at": timestamp}
+        )
         changed, stale = _save_versioned(exp, if_match=None)
-        if stale is not None:  # pragma: no cover - if_match=None cannot go stale
+        if not changed:
+            # Byte-stable no-op: discard the speculative append, exactly as the record
+            # path does. `answer_log` is excluded from the rev signature, so leaving it
+            # would grow the log for a submission that changed nothing.
+            exp.answer_log.pop()
+        # NO PRAGMA. It read `# pragma: no cover - if_match=None cannot go stale`, and
+        # an independent review pointed out that the reasoning is wrong: this branch is
+        # reached from `DurableWriteConflict`, which the DATABASE's compare-and-swap
+        # predicate raises, entirely independently of `if_match`. It is reachable on the
+        # PostgreSQL deployment, and suppressing coverage of it hid that.
+        if stale is not None:
             return stale
         changed_fields = (
             _fields_the_shape_carries(apply_shape, submitted_fields) if changed else []

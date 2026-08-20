@@ -165,14 +165,42 @@ def test_a_record_with_no_runs_still_takes_every_answer(client):
     assert applied.json()["pending"] == []
 
 
-def test_an_edge_answer_is_NOT_refused_because_it_does_reach_the_run(client):
-    """The exception, and it is a real one rather than an oversight.
+def test_an_edge_answer_IS_refused_because_it_does_not_reliably_reach_the_run(client):
+    """THIS TEST IS INVERTED, and the version it replaces was vacuous as well as wrong.
 
-    `edge` lives in `implicit`, which `resolved_run_draft` MERGES from the record onto
-    every run — so an edge answered on the record does reach the run's exported
-    document. Refusing it would send a scientist to a route that cannot take it.
+    It read *"The exception, and it is a real one rather than an oversight. `edge` lives
+    in `implicit`, which `resolved_run_draft` MERGES from the record onto every run."*
+    The merge is CONDITIONAL —
+    `_merge_implicit(..., inherit=not _diverges_from_experiment(resolutions))` — and a run
+    that diverges at any experiment-level address, including one that re-records a
+    byte-identical value, receives no inherited entry at all. An independent review
+    measured `POST /edit {"edge": "L3"}` answering **200** with
+    `changed_fields: ['edge']` while the run's composed `implicit` was `[]` and the
+    exported sidecar carried none.
+
+    It was also vacuous: its fixture was a created record whose `implicit` is `[]`, so
+    `{"edge": "K"}` wrote nothing and the only assertion was `status_code == 200` — which
+    a route that had silently done nothing would also satisfy.
     """
     exp_id, _ = _finished_record_with_a_run(client, {"status": "valid", "evidence": "ok"})
+    refused = client.post(
+        f"/api/experiments/{exp_id}/answers",
+        json={"answers": {"edge": "K"}, "confirmed_by_user": True},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error"] == "belongs_to_a_run"
+    assert refused.json()["keys"] == ["edge"], refused.json()
+
+
+def test_a_record_with_no_runs_still_takes_an_edge_answer(client):
+    """NEGATIVE CONTROL for the refusal above: it is about runs, not about `edge`.
+
+    A zero-run record IS its own record, so its `implicit` is the one the export reads
+    and answering the edge there reaches it. Refusing unconditionally would remove a
+    working capability.
+    """
+    exp_id = client.post("/api/experiments", json={"title": "No runs"}).json()["id"]
     answered = client.post(
         f"/api/experiments/{exp_id}/answers",
         json={"answers": {"edge": "K"}, "confirmed_by_user": True},
@@ -333,3 +361,240 @@ def test_an_unknown_run_is_a_404_rather_than_a_silent_no_op(client):
         headers={"If-Match": '"whatever.1"'},
     )
     assert r.status_code == 404, r.text
+
+
+# ---------------------------------------------------------------------------
+# THE MUTATIONS THAT SURVIVED THE WHOLE SUITE
+# ---------------------------------------------------------------------------
+#
+# An independent review mutation-tested every shipped change and found four that no
+# test noticed. Each is closed below, and each names the mutation it fails on — a
+# regression test whose failure mode is unstated is one nobody can trust.
+
+
+def test_the_refusal_is_enforced_on_ANSWERS_and_not_only_on_EDIT(client):
+    """MUTATION M1: deleting the refusal from `POST /answers` failed nothing.
+
+    The whole suite passed with the guard removed from `/answers` while it stayed on
+    `/edit`, and the C1 defect returned verbatim — measured `200`,
+    `changed_fields: ['series','descriptor','qc']`, the record's draft holding the
+    verdict, and the run's composed draft carrying `qc: null`.
+
+    `/answers` is the path a scientist reaches first, so this is the half that matters.
+    """
+    exp_id, run_id = _finished_record_with_a_run(client, {"status": "valid", "evidence": "ok"})
+    before = json.dumps(ws.load_experiment(exp_id).to_state(), sort_keys=True)
+
+    refused = client.post(
+        f"/api/experiments/{exp_id}/answers",
+        json={
+            "answers": {
+                "series": SERIES,
+                "descriptor": DESCRIPTOR,
+                "qc": {"status": "failed", "evidence": "Should not land."},
+            },
+            "confirmed_by_user": True,
+        },
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error"] == "belongs_to_a_run"
+    assert refused.json()["keys"] == ["descriptor", "qc", "series"], refused.json()
+    # NOTHING WROTE — the whole document, not just the run.
+    assert json.dumps(ws.load_experiment(exp_id).to_state(), sort_keys=True) == before
+    assert ws.load_experiment(exp_id).get_run(run_id).draft["qc"]["status"] == "valid"
+
+
+def test_every_producer_of_a_pending_list_agrees_on_a_record_with_runs(client):
+    """MUTATION M5: reverting the record routes to draft-only pending failed nothing.
+
+    That is the fix whose own commit message named the consequence — the screen renders
+    "All blockers resolved" on an empty list, so a record whose detail said three
+    questions remained told the scientist they were finished. It shipped with no
+    coverage.
+
+    **AND IT IS NOW UNREACHABLE THROUGH THOSE TWO ROUTES, which is worth stating rather
+    than papering over with a test that proves something else.** Every key `/answers` and
+    `/edit` accept — `series`, `qc`, `descriptor`, `descriptor_label`, an asset hash,
+    `edge` — is run-owned, so on a record WITH runs both routes refuse everything with
+    `409 belongs_to_a_run`, and on a record WITHOUT runs `exp.pending()` and
+    `exp.draft["pending"]` are the same list. The `entries=` argument on those two is
+    therefore correct and currently inert: it stops being inert the moment a
+    record-level answer key exists again.
+
+    What IS reachable, and is what this pins, is that the THREE producers of a pending
+    list agree: the detail response's count, `GET /pending`, and a run write's response.
+    Disagreement between any two of them is the defect, whichever one is wrong.
+    """
+    exp_id = client.post("/api/experiments", json={"title": "Three producers"}).json()["id"]
+    run_id = client.post(
+        f"/api/experiments/{exp_id}/runs",
+        json={"label": "300 K"},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    ).json()["run"]["id"]
+
+    detail_count = client.get(f"/api/experiments/{exp_id}").json()["pending_count"]
+    listed = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"]
+    written = client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/answers",
+        json={"answers": {"qc": {"status": "valid", "evidence": "I0 stable."}}, "confirmed_by_user": True},
+        headers={"If-Match": _run_etag(client, exp_id, run_id)},
+    )
+    assert written.status_code == 200, written.text
+
+    after_detail = client.get(f"/api/experiments/{exp_id}").json()["pending_count"]
+    after_listed = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"]
+
+    assert detail_count == len(listed) == 3, (detail_count, len(listed))
+    assert after_detail == len(after_listed) == len(written.json()["pending"]) == 2, (
+        after_detail,
+        len(after_listed),
+        len(written.json()["pending"]),
+    )
+    # Every remaining question still belongs to the run, and says so.
+    assert all(q["run_id"] == run_id for q in after_listed), after_listed
+
+
+def test_a_run_write_reports_the_runs_new_version(client):
+    """MUTATION M4: dropping `run_version` from the response failed nothing.
+
+    A client that has just written a run needs its next `If-Match` without a second
+    read; without this it would send the record's token and get a 412 it could not
+    explain.
+    """
+    exp_id, run_id = _finished_record_with_a_run(client, {"status": "valid", "evidence": "ok"})
+    before = _run_etag(client, exp_id, run_id)
+    written = client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"qc": {"status": "failed", "evidence": "Sample degraded."}},
+        },
+        headers={"If-Match": before},
+    )
+    assert written.status_code == 200, written.text
+    assert "run_version" in written.json(), written.json().keys()
+    assert f'"{written.json()["run_version"]}"' == _run_etag(client, exp_id, run_id)
+    assert f'"{written.json()["run_version"]}"' != before
+
+
+def test_descriptor_label_alone_is_refused_on_a_record_with_runs(client):
+    """MUTATION M6: dropping `descriptor_label` from the run-owned key map failed nothing.
+
+    It writes into `descriptors_outputs`, which is a run-level block, so on a record
+    with runs it reaches nothing — exactly like `descriptor` itself.
+    """
+    exp_id, _ = _finished_record_with_a_run(client, {"status": "valid", "evidence": "ok"})
+    refused = client.post(
+        f"/api/experiments/{exp_id}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"descriptor": DESCRIPTOR, "descriptor_label": "relabelled"},
+        },
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["keys"] == ["descriptor", "descriptor_label"], refused.json()
+
+
+def test_a_run_answer_is_recorded_in_the_answer_log(client):
+    """The reset disclosure counts `answer_log`, and the run path was not appending.
+
+    `workspace._at_risk_summary` reports `confirmed_answers` from it, before a
+    DESTRUCTIVE reset. Measured by an independent review: two confirmed run answers
+    reported `confirmed_answers: 0`, so the disclosure under-counted a scientist's own
+    work on the one screen where that matters most.
+    """
+    exp_id, run_id = _finished_record_with_a_run(client, {"status": "valid", "evidence": "ok"})
+    before = len(ws.load_experiment(exp_id).answer_log)
+
+    client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"qc": {"status": "failed", "evidence": "Sample degraded."}},
+        },
+        headers={"If-Match": _run_etag(client, exp_id, run_id)},
+    )
+    log = ws.load_experiment(exp_id).answer_log
+    assert len(log) == before + 1, log
+    assert log[-1]["run_id"] == run_id, log[-1]
+    assert "edited" in log[-1], log[-1]
+
+
+def test_a_no_op_run_write_does_not_grow_the_answer_log(client):
+    """NEGATIVE CONTROL for the append: the record path pops a speculative entry on a
+    byte-stable no-op, and the run path must too — otherwise the reset disclosure
+    over-counts, which is the same defect in the other direction."""
+    exp_id, run_id = _finished_record_with_a_run(client, {"status": "valid", "evidence": "ok"})
+    before = len(ws.load_experiment(exp_id).answer_log)
+    client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"qc": {"status": "valid", "evidence": "ok"}},
+        },
+        headers={"If-Match": _run_etag(client, exp_id, run_id)},
+    )
+    # Unchanged, not empty: `_finished_record_with_a_run` answers on the RECORD before
+    # the run exists, so the log already holds that entry. Asserting emptiness would
+    # have measured the fixture rather than the no-op.
+    assert len(ws.load_experiment(exp_id).answer_log) == before, (
+        ws.load_experiment(exp_id).answer_log
+    )
+
+
+def test_answering_a_run_leaves_no_question_the_record_cannot_answer(client):
+    """CRITICAL REGRESSION TEST. The measured sequence, assertion by assertion.
+
+    An independent review measured this on the exact flow this feature exists to enable.
+    The withholding rule had been made conditional on some run still CARRYING the kind,
+    which un-withheld the record's copy the instant the run answered it::
+
+        create -> POST /runs -> answer series+qc+descriptor ON THE RUN   (all 200)
+        GET /experiments/{id}   -> pending_count 3 · export BLOCKED
+        POST /export            -> 200 {"ok": true}    <- contradicts the workflow
+        GET /pending            -> three entries, run_id null
+        POST /answers | /edit   -> 409 belongs_to_a_run ("send them to the run")
+        POST /runs/{id}/answers -> 200, changed nothing, the entries stay
+
+    Three questions shown in both places and accepted in neither, and a record claiming
+    export was blocked while export succeeded. The only escape was removing the run and
+    re-answering on the record — discarding the run's science.
+    """
+    exp_id = client.post("/api/experiments", json={"title": "Answer on the run"}).json()["id"]
+    run_id = client.post(
+        f"/api/experiments/{exp_id}/runs",
+        json={"label": "300 K"},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    ).json()["run"]["id"]
+
+    answered = client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/answers",
+        json={
+            "answers": {
+                "series": SERIES,
+                "descriptor": DESCRIPTOR,
+                "qc": {"status": "valid", "evidence": "I0 stable."},
+            },
+            "confirmed_by_user": True,
+        },
+        headers={"If-Match": _run_etag(client, exp_id, run_id)},
+    )
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["pending"] == [], answered.json()["pending"]
+
+    detail = client.get(f"/api/experiments/{exp_id}").json()
+    assert detail["pending_count"] == 0, detail["pending_count"]
+    assert client.get(f"/api/experiments/{exp_id}/pending").json()["pending"] == []
+
+    steps = {s["id"]: s["state"] for s in detail["workflow"]["ordered_steps"]}
+    exported = client.post(
+        f"/api/experiments/{exp_id}/export",
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert exported.json()["ok"] is True, exported.json()
+    # THE CONJUNCTION IS THE PROPERTY: no combination of "nothing pending" and a blocked
+    # export step may coexist with an export that succeeds.
+    assert steps["export"] != "blocked", steps
+    assert steps["complete_metadata"] == "completed", steps
