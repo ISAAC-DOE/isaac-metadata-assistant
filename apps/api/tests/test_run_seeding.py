@@ -449,3 +449,51 @@ def test_a_run_can_still_be_added_before_the_record_is_exported(app):
         headers={"If-Match": f'"{_version(client, exp_id)}"'},
     )
     assert added.status_code == 201, added.text
+
+
+def test_the_six_unclassified_fields_are_absent_from_a_multi_run_record(app):
+    """THE MEASURED COST of the open scope question, pinned so the packet cannot go stale.
+
+    `docs/run-scope-decision-packet.md` asks whether the six `system.configuration.*`
+    fields belong to a Run or to the Experiment, and has said since 2026-08-10 that
+    nothing is blocked on the answer. That was cheap to defer for a reason that no
+    longer holds: until 2026-08-19 no record with runs could be exported at all, so
+    there were no multi-run records for the six to be missing from.
+
+    Now there are. A record that carries all six, evidenced, publishes
+    `system.configuration: null` the moment it has a run — because an unclassified field
+    is inherited by neither level and `resolved_run_draft` reads run-level content off
+    the RUN. That is not a bug to fix here; guessing a level would answer a scientific
+    question by accident. It is a cost to state, and this is where it is stated so the
+    packet's claim is checked rather than remembered.
+
+    **If this test starts failing because the fields ARE present, the scope question has
+    been answered somewhere** — find where, and make sure a scientist answered it.
+    """
+    from conftest import client_ws
+
+    client = tutorial_client(app)
+    store = client_ws(client)
+    rid = ws.SEED_READY_ID
+
+    carried = sorted(
+        k for k in (store.load_experiment(rid).draft.get("fields") or {})
+        if k.startswith("system.configuration.")
+    )
+    assert len(carried) == 6, carried
+    assert all(ws.field_level(k) == ws.LEVEL_UNCLASSIFIED for k in carried), carried
+
+    _add_run(client, rid, "300 K")
+    exported = client.post(
+        f"/api/experiments/{rid}/export",
+        headers={"If-Match": f'"{_version(client, rid)}"'},
+    )
+    assert exported.json()["ok"] is True, exported.json()
+
+    record = json.loads(
+        store.load_experiment(rid).export_units()[0].record_path().read_text(encoding="utf-8")
+    )
+    assert record.get("system", {}).get("configuration") is None, (
+        "the six unclassified fields reached a multi-run record — the scope question "
+        "may have been answered by accident; see docs/run-scope-decision-packet.md"
+    )

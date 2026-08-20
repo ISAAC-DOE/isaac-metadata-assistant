@@ -2321,13 +2321,18 @@ def _run_level_keys_in(apply_shape: dict) -> list[str]:
     Asset hashes count, because ``assets`` is a run-level block: an asset sha answered
     on the record after a run exists lands in a block ``resolved_run_draft`` never reads.
     """
-    keys = [
+    keys = sorted(
         key
         for key, block in _RUN_LEVEL_ANSWER_BLOCK.items()
         if key in apply_shape and ws.block_level(block) == ws.LEVEL_RUN
-    ]
+    )
     if apply_shape.get("asset_sha256") and ws.block_level("assets") == ws.LEVEL_RUN:
         keys.extend(sorted(apply_shape["asset_sha256"]))
+    # SORTED, so the refusal body is stable. It was in `_RUN_LEVEL_ANSWER_BLOCK`'s
+    # declaration order, which is deterministic but arbitrary — a client comparing
+    # `keys` would have been comparing against a literal nobody chose. Asset URIs are
+    # appended after the named keys and sorted among themselves, so the two kinds stay
+    # visually separable in a message a person reads.
     return keys
 
 

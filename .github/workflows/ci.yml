@@ -829,13 +829,41 @@ jobs:
           # cost four statements instead of one.
           before = run_stamps(runs_rid)
           assert len(before) == 3, before
-          answered = client.post(
-              f"/api/experiments/{runs_rid}/answers",
-              json=payload,
+          # A RECORD-LEVEL WRITE. It used to be `POST /answers` carrying `series` and
+          # `descriptor`, and that stopped being a record-level write: those blocks are
+          # per-Run, so once a record has runs the route refuses them with
+          # `409 belongs_to_a_run` rather than writing a value no exported record reads.
+          # Capturing a note is a genuine record-level write that touches no run.
+          noted = client.post(
+              f"/api/experiments/{runs_rid}/notes",
+              json={
+                  "text": "CI: a record-level write that changes no run.",
+                  "source": "typed_note",
+              },
               headers={"If-Match": client.get(f"/api/experiments/{runs_rid}").headers["ETag"]},
           )
-          assert answered.status_code == 200, answered.text
+          assert noted.status_code == 201, noted.text
           assert run_stamps(runs_rid) == before, "an unchanged run row was rewritten"
+
+          # AND THE CONVERSE, which only became expressible when the run-level write
+          # routes shipped: a write to ONE run moves that run's row and no other.
+          target = run_ids[0]
+          run_etag = client.get(
+              f"/api/experiments/{runs_rid}/runs/{target}"
+          ).headers["ETag"]
+          run_answered = client.post(
+              f"/api/experiments/{runs_rid}/runs/{target}/answers",
+              json={
+                  "confirmed_by_user": True,
+                  "answers": {"qc": {"status": "valid", "evidence": "CI verdict."}},
+              },
+              headers={"If-Match": run_etag},
+          )
+          assert run_answered.status_code == 200, run_answered.text
+          after = run_stamps(runs_rid)
+          assert after[target] != before[target], "the written run's row did not move"
+          for other in run_ids[1:]:
+              assert after[other] == before[other], (other, "an untouched run row moved")
 
           # REMOVAL, AND THE EMPTY-ARRAY CASE. No route deletes a run, so this drives
           # the domain model directly — which is also the only way to reach
