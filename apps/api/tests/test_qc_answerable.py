@@ -668,3 +668,34 @@ def test_a_superseded_note_says_so_in_text_a_reader_sees(app):
         "Beam dropped in scan 3.",
         "valid",
     ], row["evidence"]
+
+
+def test_re_sending_an_identical_note_appends_no_superseded_entry(app):
+    """NEGATIVE CONTROL for the `displaced == replacement` guard, which was UNPINNED.
+
+    An independent review measured that reverting the guard left the whole backend suite
+    green (4825 passed). The existing test asserts a supersede entry IS present when the
+    note changes; nothing asserted it is ABSENT when the note does not. Without the
+    guard, re-sending the same note appends an entry claiming it had been displaced while
+    it is still the live value of `measurement.qc.evidence` — a fabricated provenance
+    claim, in the sidecar.
+
+    Asserted directly on the core, and on BOTH writers, because the guard lives in the
+    shared helper precisely so they cannot disagree.
+    """
+    from isaac_records.complete import apply_answers, apply_corrections
+
+    same = "I0 stable across all scans."
+    shape = {"timestamp": "2026-01-01T00:00:00Z", "qc": {"status": "valid", "evidence": same}}
+
+    answered = apply_answers(
+        {"qc": {"status": "failed", "evidence": same}, "pending": [{"kind": "qc", "question": "?"}]},
+        shape,
+    )
+    corrected = apply_corrections({"qc": {"status": "failed", "evidence": same}}, shape)
+
+    for name, out in (("apply_answers", answered), ("apply_corrections", corrected)):
+        assert out["qc"]["status"] == "valid", name
+        assert out["qc"]["evidence"] == same, name
+        superseded = [e for e in out["block_evidence"]["qc:status"] if e.get("superseded")]
+        assert superseded == [], (name, superseded)

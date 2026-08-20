@@ -2334,33 +2334,39 @@ def _answers_to_apply_shape(
 #: `workspace.block_level` rather than listed, so a block that changes level cannot
 #: leave a stale copy of the rule here.
 #:
-#: ``edge`` IS INCLUDED, AND AN EARLIER VERSION EXEMPTED IT ON A FALSE PREMISE. That
-#: version said *"it lives in `implicit`, which `resolved_run_draft` MERGES from the
-#: experiment into every run, so an edge answered on the record does reach the run's
-#: exported document."* The merge is CONDITIONAL:
-#: ``_merge_implicit(..., inherit=not _diverges_from_experiment(resolutions))``, and
-#: ``_merge_implicit``'s own docstring says a run that diverges at ANY experiment-level
-#: address — including one that re-records a byte-identical value under a fresh
-#: confirmation — receives no inherited entry at all. An independent review measured it:
-#: one override on a run, then ``POST /edit {"edge": "L3"}`` answered **200** with
-#: ``changed_fields: ['edge']`` while the run's composed ``implicit`` was ``[]`` and the
-#: exported sidecar carried none — the exact 200-about-a-write-nobody-reads this refusal
-#: exists to stop, on the one key that had been exempted from it.
+#: ``edge`` IS EXEMPT, AND THIS ENTRY HAS NOW BEEN WRONG IN BOTH DIRECTIONS. Both
+#: mistakes are recorded because the second was made while fixing the first.
 #:
-#: It is refused whenever the record has runs, rather than only when some run diverges,
-#: because "does any run diverge" is a property of every run's override state at the
-#: moment of the write, and a rule a caller cannot predict is worse than one that is
-#: simply narrower. No UI path sends ``edge`` (no ``edge`` blocker exists —
-#: ``draft_builder`` emits a null ``implicit`` entry, never a pending one), so the cost
-#: is borne only by a direct API or MCP caller, who gets a refusal naming where the
-#: answer belongs.
+#: **First version — exempt, on a false premise.** It said ``implicit`` is merged onto
+#: EVERY run, so an edge answered on the record always reaches it. That is not what
+#: ``resolved_run_draft`` does: ``inherit=not _diverges_from_experiment(resolutions)``,
+#: and one override — even a no-op one — withholds all of it. Measured: ``POST /edit
+#: {"edge": "L3"}`` answering **200** with ``changed_fields: ['edge']`` against a run
+#: whose composed ``implicit`` was ``[]``.
+#:
+#: **Second version — refused, which was WORSE.** Refusing it on the record made ``edge``
+#: answerable by NO route at all: the run-level route accepts the key and writes it into
+#: the RUN's ``implicit``, where nothing reads it either (measured: ``200``,
+#: ``changed: false``, the composed ``implicit`` still holding the record's value). And
+#: the refusal body then made two false claims about it — that there is an operation that
+#: can take the answer, and that answering on the record writes a value no exported
+#: record reads. For a non-diverging run the second is simply untrue: inheritance was
+#: ACTIVE in the measurement. Trading a 200-that-writes-nothing for a 409 pointing at a
+#: 200-that-writes-nothing is not a fix.
+#:
+#: **So it is exempt again, with the truth stated rather than a premise assumed.** An
+#: edge answered on the record reaches every run that holds the record's values, and
+#: does NOT reach a run that has diverged at any experiment-level address. That gap is a
+#: property of ``_merge_implicit`` — a derivation can outlive the value it was derived
+#: from, which is why that function withholds — and it is not something this refusal can
+#: close. Closing it means either making ``edge`` a run-level block or giving
+#: ``_merge_implicit`` a per-address rule, and both are their own slice.
+#:
+#: No UI path sends ``edge`` (no ``edge`` blocker exists — ``draft_builder`` emits a null
+#: ``implicit`` entry, never a pending one), so the exemption's cost falls only on a
+#: direct API or MCP caller, and it is a 200 that reaches the runs that can receive it.
 #:
 #: `timestamp` is bookkeeping, not an answer.
-#:
-#: ``edge`` maps to ``implicit`` rather than to a block in ``RUN_LEVEL_BLOCKS``, so its
-#: membership here is asserted directly instead of being derived from ``block_level``.
-#: That asymmetry is deliberate and is the reason this map exists at all rather than
-#: being replaced by a call to ``block_level``.
 _RUN_LEVEL_ANSWER_BLOCK = {
     "series": "series",
     "qc": "qc",
@@ -2368,10 +2374,12 @@ _RUN_LEVEL_ANSWER_BLOCK = {
     "descriptor_label": "descriptors_outputs",
 }
 
-#: Answer keys that are run-owned but do NOT live in a top-level run-level block. See
-#: the note above: ``implicit`` is merged onto a run only while that run holds every one
-#: of the experiment's values.
-_RUN_LEVEL_ANSWER_KEYS_WITHOUT_A_BLOCK = ("edge",)
+#: Answer keys that would be run-owned but live outside a top-level run-level block.
+#: EMPTY, and the long note above says why: the only candidate was ``edge``, and
+#: refusing it made it answerable by no route at all. The tuple is kept rather than
+#: deleted so a future key of that shape has somewhere to go, with the argument for
+#: why it belongs there written directly above it.
+_RUN_LEVEL_ANSWER_KEYS_WITHOUT_A_BLOCK: tuple[str, ...] = ()
 
 
 def _run_level_keys_in(apply_shape: dict) -> list[str]:

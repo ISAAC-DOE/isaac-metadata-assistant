@@ -3383,7 +3383,7 @@ class Experiment:
         # removing the run and re-answering on the record — discarding the run's science.
         #
         # THE LEGACY-EMPTY-RUN CASE IS FIXED ON THE RUN SIDE INSTEAD, by
-        # :meth:`_run_questions`, which is where it belongs: a run that was created
+        # :func:`run_questions`, which is where it belongs: a run that was created
         # before `_seed_for_new_run` existed is missing its questions, so it is given
         # them, rather than the record keeping a copy nobody can answer.
         #

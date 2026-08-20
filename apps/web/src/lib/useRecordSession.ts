@@ -179,6 +179,9 @@ function toPendingItems(pending: ApiPendingItem[] | undefined): PendingItem[] {
     // ownership from here. Dropped, it sent every answer to the record route, which
     // refuses a run-owned key with `409 belongs_to_a_run` once a record has runs.
     run_id: p.run_id ?? null,
+    // The identity key, so `confirmProposal` can find the RIGHT entry rather than the
+    // first of that kind — see `Proposal.blockerKey`.
+    blocker_key: p.blocker_key,
   }));
 }
 

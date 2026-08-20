@@ -107,6 +107,13 @@ export function GuidedPrompt({
      `verdict` starts EMPTY on purpose: the blocker's own text says there is no default
      and none is assumed, "not even 'valid'", and a preselected control would assume
      one by doing nothing. */
+  /* EVERY DOM ID AND THE RADIO GROUP NAME ARE BUILT FROM `blocker.key`, NOT `blocker.id`.
+     `id` is the blocker KIND, so two runs each owing a QC verdict rendered EIGHT radios
+     in ONE group named `qc-verdict-qc` — selecting a verdict for one run cleared the
+     other — and two textareas both carrying `id="qc-note-qc"`, so `<label htmlFor>`
+     resolved to whichever came first and `aria-describedby` was ambiguous. An
+     independent review measured all three, and a duplicate id is an axe violation as
+     well as a broken control. */
   const initialVerdict =
     initialValue && typeof initialValue === 'object' ? (initialValue as QcAnswer) : undefined;
   const [verdict, setVerdict] = useState<QcVerdict | ''>(initialVerdict?.status ?? '');
@@ -282,7 +289,7 @@ export function GuidedPrompt({
                   <label key={option} className="guided-verdict-option">
                     <input
                       type="radio"
-                      name={`qc-verdict-${blocker.id}`}
+                      name={`qc-verdict-${blocker.key}`}
                       value={option}
                       checked={verdict === option}
                       onChange={() => {
@@ -294,11 +301,11 @@ export function GuidedPrompt({
                   </label>
                 ))}
               </fieldset>
-              <label className="guided-verdict-note-label" htmlFor={`qc-note-${blocker.id}`}>
+              <label className="guided-verdict-note-label" htmlFor={`qc-note-${blocker.key}`}>
                 How was it determined?
               </label>
               <textarea
-                id={`qc-note-${blocker.id}`}
+                id={`qc-note-${blocker.key}`}
                 className="input guided-verdict-note"
                 value={verdictNote}
                 onChange={(e) => {
@@ -307,10 +314,10 @@ export function GuidedPrompt({
                 }}
                 rows={3}
                 aria-required="true"
-                aria-describedby={`qc-hint-${blocker.id}`}
+                aria-describedby={`qc-hint-${blocker.key}`}
                 placeholder="what you checked, and what you saw…"
               />
-              <p className="guided-verdict-hint" id={`qc-hint-${blocker.id}`}>
+              <p className="guided-verdict-hint" id={`qc-hint-${blocker.key}`}>
                 A verdict is a scientific judgement. Nothing is assumed for you — not even
                 &ldquo;valid&rdquo; — and the record stays incomplete until you make one.{' '}
                 {/* NAMES THE REASON THE BUTTON IS DEAD. Without it a scientist who picks a
@@ -349,7 +356,7 @@ export function GuidedPrompt({
               )
             ) : entryKind === 'series' ? (
               <SeriesEntry
-                idPrefix={`entry-${blocker.id}`}
+                idPrefix={`entry-${blocker.key}`}
                 text={seriesText}
                 onChange={(next) => {
                   setSeriesText(next);
@@ -358,7 +365,7 @@ export function GuidedPrompt({
               />
             ) : (
               <DescriptorForm
-                idPrefix={`entry-${blocker.id}`}
+                idPrefix={`entry-${blocker.key}`}
                 value={descriptor}
                 onChange={(next) => {
                   setDescriptor(next);

@@ -1253,11 +1253,14 @@ export const api = {
    * WHICH OF THOSE REACHES THE SCREEN IN THE SERVER'S OWN WORDS, precisely,
    * because an earlier version of this comment said "the screen renders the
    * server's own words" of BOTH and that is false of one of them:
-   * `mutationError` parses a body for **400, 412 and 422 only**. A 409 body is
-   * not parsed, so its copy is written by the CALLER — `RunsSection.tsx` says so
-   * at its own call site, in the opposite words to the sentence this replaces.
-   * A future second consumer that trusted the old wording would ship a blank
-   * message on the one refusal a scientist most needs explained.
+   * `mutationError` parses a body for **400, 409, 412 and 422**. ~~"A 409 body is
+   * not parsed, so its copy is written by the CALLER"~~ — that was true until
+   * 2026-08-19 and is struck rather than deleted, because the warning it carried
+   * still applies to this route: `removeRun`'s 409 copy IS written by the caller,
+   * deliberately, because that route has exactly one 409 and its own sentence is
+   * better than a generic one. What changed is that a 409 body is now AVAILABLE,
+   * so a route with several 409s can render the server's words instead of
+   * inventing copy — which is what `POST /answers` and `POST /runs` now do.
    */
   async removeRun(
     experimentId: string,

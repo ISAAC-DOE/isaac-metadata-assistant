@@ -57,7 +57,13 @@ export type EvidenceView = {
 /** `run_id` is present when a RUN owns the question — see `ConfirmApi`. Optional so an
  *  older caller or a fixture that omits it still typechecks, which is correct: a record
  *  with no runs has no run-owned questions. */
-export type PendingItem = { id: string; label: string; run_id?: string | null };
+export type PendingItem = {
+  id: string;
+  label: string;
+  run_id?: string | null;
+  /** Unique across owners; `id` is not. See `Proposal.blockerKey`. */
+  blocker_key?: string;
+};
 
 /**
  * The authoritative context the agent reasons over. It is passed in by the
@@ -95,6 +101,18 @@ export type Proposal = {
   id: string;
   experimentId: string;
   field: string;
+  /**
+   * The IDENTITY of the question this proposal answers, when the caller knows it.
+   *
+   * `field` is the blocker KIND, which is what goes in the request body — and is NOT
+   * unique. `confirmProposal` used to locate the owning run with
+   * `ctx.pending.find((p) => p.id === proposal.field)`, which returns the FIRST entry
+   * of that kind. An independent review measured the consequence with two runs each
+   * owing a spectrum: run 2's spectrum was written onto RUN 1, with run 1's `If-Match`,
+   * and reported as confirmed, while run 2's question stayed open. Before that routing
+   * existed the same click 409'd — nothing written, honestly refused.
+   */
+  blockerKey?: string;
   value: unknown;
   origin: string;
   classification?: string;
@@ -332,15 +350,42 @@ let proposalSeq = 0;
  * always `pending`; nothing is auto-confirmed. Any matching evidence
  * classification is copied VERBATIM for context (never strengthened).
  */
+/** The run id encoded in a `blocker_key`, or `undefined` for a record-level one.
+ *
+ * `serialize.pending_to_list` builds a run-owned key as `f"{run_id}:{id}"`, and a ULID
+ * contains no `:`, so the prefix before the FIRST colon is the run id whenever the key
+ * has one. An asset blocker's `id` is a URI and does contain colons, which is why this
+ * splits once from the left rather than parsing the whole string.
+ *
+ * IT IS A FALLBACK, not the primary path: `confirmProposal` prefers the `run_id` on the
+ * matching pending entry, and only reaches this when the question is already answered —
+ * the EDIT case, where there is no pending entry to read by construction.
+ */
+function runIdFromBlockerKey(key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  const colon = key.indexOf(':');
+  if (colon <= 0) return undefined;
+  const candidate = key.slice(0, colon);
+  // A ULID is 26 chars of Crockford base32. Anything else is not a run id, and this
+  // must never turn a record-level key into a run route.
+  return /^[0-9A-Z]{26}$/.test(candidate) ? candidate : undefined;
+}
+
 export function stageAnswer(
   ctx: AgentContext,
-  { field, value, origin }: { field: string; value: unknown; origin?: string },
+  {
+    field,
+    blockerKey,
+    value,
+    origin,
+  }: { field: string; blockerKey?: string; value: unknown; origin?: string },
 ): Proposal {
   const evidence = ctx.evidence.find((e) => e.field === field);
   return {
     id: `proposal-${field}-${ctx.recordRev}-${++proposalSeq}`,
     experimentId: ctx.experimentId,
     field,
+    ...(blockerKey ? { blockerKey } : {}),
     value, // the user's value, verbatim — never invented
     origin: origin ?? 'user',
     ...(evidence
@@ -363,6 +408,8 @@ export type ProposeSource = 'user' | 'candidate' | 'memory' | 'graph';
  *  user answer or an explicitly-selected conflict option) the value verbatim. */
 export interface ProposeInput {
   field: string;
+  /** The question's identity, unique across runs. See `Proposal.blockerKey`. */
+  blockerKey?: string;
   value?: unknown;
   source: ProposeSource;
 }
@@ -395,7 +442,7 @@ export interface ProposeInput {
  */
 export function proposeForField(
   ctx: AgentContext,
-  { field, value, source }: ProposeInput,
+  { field, blockerKey, value, source }: ProposeInput,
 ): Proposal | null {
   // A focused answer is always bound to ONE named field.
   if (!field) return null;
@@ -407,7 +454,7 @@ export function proposeForField(
     // classification at all — a user-typed value is never described by the
     // field's evidence classification, so strip any copied classification
     // unconditionally (defensive hardening from the P29.6 independent review).
-    const p = stageAnswer(ctx, { field, value, origin: 'user-provided' });
+    const p = stageAnswer(ctx, { field, blockerKey, value, origin: 'user-provided' });
     delete p.classification;
     return p;
   }
@@ -472,7 +519,13 @@ export async function confirmProposal(
   }
 
   const answers: Record<string, unknown> = { [proposal.field]: proposal.value };
-  const open = ctx.pending.find((p) => p.id === proposal.field);
+  /* MATCHED ON THE IDENTITY KEY WHEN THE PROPOSAL CARRIES ONE. `field` is the kind and
+     is not unique across runs; see `Proposal.blockerKey`. Falling back to `field` keeps a
+     caller that has no key working exactly as before, which is correct for a record with
+     no runs — there the two are equal. */
+  const open = proposal.blockerKey
+    ? ctx.pending.find((p) => (p.blocker_key ?? p.id) === proposal.blockerKey)
+    : ctx.pending.find((p) => p.id === proposal.field);
   const isPending = open !== undefined;
   /* THE RUN THAT OWNS THIS QUESTION, taken from the pending entry rather than from the
      proposal, because the pending list is the server's own statement of ownership. A
@@ -480,7 +533,15 @@ export async function confirmProposal(
      `If-Match` is read immediately before the write for the same reason
      `GuidedCompletion.tokenFor` reads it: the record's token there is a 412 the reader
      would be told to resolve by refreshing something that was never stale. */
-  const runId = open?.run_id ?? undefined;
+  /* THE OWNING RUN, FOR BOTH PATHS. `open === undefined` is what SELECTS `editField`,
+     so reading the run from `open` alone left the EDIT path always record-routed — and
+     correcting an answered run-owned field through the assistant then 409'd on every
+     record with runs, into a branch whose copy says it cannot establish whether anything
+     reached the record while the server had just said "Nothing was written." An
+     independent review measured that. So a `blockerKey` that names a run is used even
+     when the question is no longer open: the key's own prefix IS the run id, which is
+     what makes it available on a path where the pending entry is gone by definition. */
+  const runId = open?.run_id ?? runIdFromBlockerKey(proposal.blockerKey);
   let token = ctx.version;
   if (runId && api.getRun) {
     token = (await api.getRun(ctx.experimentId, runId)).run.version;

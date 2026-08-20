@@ -249,3 +249,65 @@ describe('a question that belongs to a run says which run', () => {
     expect(screen.queryByText(/^Run$/)).toBeNull();
   });
 });
+
+describe('two runs owing the same question are two independent controls', () => {
+  // CRITICAL REGRESSION TESTS. An independent review measured all three of these with
+  // two runs each owing a QC verdict, and each is a way one run's answer became
+  // another's. `key` is what separates them; `id` — the kind — does not.
+  const forRun = (runId: string, label: string) => ({
+    ...QC_BLOCKER,
+    key: `${runId}:qc`,
+    runId,
+    runLabel: label,
+  });
+
+  it('does not share one radio group across two runs', () => {
+    // Measured: 8 radios in ONE group named `qc-verdict-qc`, so selecting a verdict for
+    // one run cleared the other's.
+    render(
+      <>
+        <GuidedPrompt blocker={forRun('01RUNAAAAAAAAAAAAAAAAAAAA0', '300 K')} index={0} total={2}
+          onConfirm={vi.fn()} onDontKnow={vi.fn()} />
+        <GuidedPrompt blocker={forRun('01RUNBBBBBBBBBBBBBBBBBBBB0', '400 K')} index={1} total={2}
+          onConfirm={vi.fn()} onDontKnow={vi.fn()} />
+      </>,
+    );
+    const names = new Set(
+      screen.getAllByRole('radio').map((r) => (r as HTMLInputElement).name),
+    );
+    expect(names.size).toBe(2);
+  });
+
+  it('does not give two textareas the same DOM id', () => {
+    // Measured: two textareas both `id="qc-note-qc"`, so `<label htmlFor>` resolved to
+    // whichever came first and `aria-describedby` was ambiguous — an axe violation as
+    // well as a broken control.
+    render(
+      <>
+        <GuidedPrompt blocker={forRun('01RUNAAAAAAAAAAAAAAAAAAAA0', '300 K')} index={0} total={2}
+          onConfirm={vi.fn()} onDontKnow={vi.fn()} />
+        <GuidedPrompt blocker={forRun('01RUNBBBBBBBBBBBBBBBBBBBB0', '400 K')} index={1} total={2}
+          onConfirm={vi.fn()} onDontKnow={vi.fn()} />
+      </>,
+    );
+    const ids = screen.getAllByRole('textbox').map((t) => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((id) => id.length > 0)).toBe(true);
+  });
+
+  it('selecting a verdict for one run leaves the other unset', () => {
+    render(
+      <>
+        <GuidedPrompt blocker={forRun('01RUNAAAAAAAAAAAAAAAAAAAA0', '300 K')} index={0} total={2}
+          onConfirm={vi.fn()} onDontKnow={vi.fn()} />
+        <GuidedPrompt blocker={forRun('01RUNBBBBBBBBBBBBBBBBBBBB0', '400 K')} index={1} total={2}
+          onConfirm={vi.fn()} onDontKnow={vi.fn()} />
+      </>,
+    );
+    const valids = screen.getAllByRole('radio', { name: 'valid' });
+    expect(valids).toHaveLength(2);
+    fireEvent.click(valids[0]);
+    expect(valids[0]).toBeChecked();
+    expect(valids[1]).not.toBeChecked();
+  });
+});

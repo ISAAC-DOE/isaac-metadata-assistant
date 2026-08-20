@@ -165,32 +165,98 @@ def test_a_record_with_no_runs_still_takes_every_answer(client):
     assert applied.json()["pending"] == []
 
 
-def test_an_edge_answer_IS_refused_because_it_does_not_reliably_reach_the_run(client):
-    """THIS TEST IS INVERTED, and the version it replaces was vacuous as well as wrong.
+def test_an_edge_answer_is_exempt_and_reaches_a_non_diverging_run(client):
+    """THIS TEST HAS BEEN WRONG IN BOTH DIRECTIONS, and both are recorded here.
 
-    It read *"The exception, and it is a real one rather than an oversight. `edge` lives
-    in `implicit`, which `resolved_run_draft` MERGES from the record onto every run."*
-    The merge is CONDITIONAL —
-    `_merge_implicit(..., inherit=not _diverges_from_experiment(resolutions))` — and a run
-    that diverges at any experiment-level address, including one that re-records a
-    byte-identical value, receives no inherited entry at all. An independent review
-    measured `POST /edit {"edge": "L3"}` answering **200** with
-    `changed_fields: ['edge']` while the run's composed `implicit` was `[]` and the
-    exported sidecar carried none.
+    v1 asserted `edge` was NOT refused, justified by "`implicit` is merged onto every
+    run". False: `resolved_run_draft` passes
+    `inherit=not _diverges_from_experiment(resolutions)`, so one override withholds all
+    of it. The test was also vacuous — its record's `implicit` was `[]`, so the write did
+    nothing and the only assertion was `status_code == 200`.
 
-    It was also vacuous: its fixture was a created record whose `implicit` is `[]`, so
-    `{"edge": "K"}` wrote nothing and the only assertion was `status_code == 200` — which
-    a route that had silently done nothing would also satisfy.
+    v2 asserted `edge` WAS refused. Worse: refusing it on the record made `edge`
+    answerable by NO route, because the run-level route writes it into the RUN's
+    `implicit` where nothing reads it either. An independent review measured `200`,
+    `changed: false`, and the composed `implicit` still holding the record's value. The
+    refusal body also then claimed there was an operation that could take the answer, and
+    that answering on the record wrote a value no exported record reads — the second
+    being untrue for a non-diverging run, where inheritance is ACTIVE.
+
+    v3 — this one — asserts what is measurable and true: the answer is accepted on the
+    record, and it REACHES a run that holds the record's values. The record's `implicit`
+    is populated first so the write is not a no-op, which is what v1 failed to do.
     """
-    exp_id, _ = _finished_record_with_a_run(client, {"status": "valid", "evidence": "ok"})
-    refused = client.post(
+    exp_id = client.post("/api/experiments", json={"title": "Edge"}).json()["id"]
+    # Give the record a real `implicit` edge entry — `apply_answers` only writes `edge`
+    # onto an entry that exists, so without this the write is a silent no-op and the test
+    # measures nothing. This is the store, not a route: no route creates one.
+    exp = ws.load_experiment(exp_id)
+    exp.draft.setdefault("implicit", []).append(
+        {"about": "edge", "value": None, "evidence": [{"source_type": "derivation", "rule": "ci"}]}
+    )
+    exp.save()
+
+    run_id = client.post(
+        f"/api/experiments/{exp_id}/runs",
+        json={"label": "300 K"},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    ).json()["run"]["id"]
+
+    answered = client.post(
         f"/api/experiments/{exp_id}/answers",
         json={"answers": {"edge": "K"}, "confirmed_by_user": True},
         headers={"If-Match": f'"{_version(client, exp_id)}"'},
     )
-    assert refused.status_code == 409, refused.text
-    assert refused.json()["error"] == "belongs_to_a_run"
-    assert refused.json()["keys"] == ["edge"], refused.json()
+    assert answered.status_code == 200, answered.text
+
+    # AND IT REACHES THE RUN. This is the assertion v1 was missing entirely.
+    composed = ws.load_experiment(exp_id).export_units()[0].draft
+    edges = [e for e in (composed.get("implicit") or []) if e.get("about") == "edge"]
+    assert edges and edges[0]["value"] == "K", composed.get("implicit")
+
+
+def test_an_edge_answer_does_NOT_reach_a_run_that_has_diverged(client):
+    """The honest limit of the exemption, asserted rather than described.
+
+    `_merge_implicit` withholds every inherited entry from a run that diverges at ANY
+    experiment-level address, because a derivation can outlive the value it was derived
+    from. So the exemption is not "the edge always reaches every run" — it is "the edge
+    reaches every run that holds the record's values". Closing the gap means making
+    `edge` a run-level block or giving `_merge_implicit` a per-address rule, and both are
+    their own slice.
+    """
+    exp_id = client.post("/api/experiments", json={"title": "Edge, diverged"}).json()["id"]
+    exp = ws.load_experiment(exp_id)
+    exp.draft.setdefault("implicit", []).append(
+        {"about": "edge", "value": None, "evidence": [{"source_type": "derivation", "rule": "ci"}]}
+    )
+    exp.save()
+    run_id = client.post(
+        f"/api/experiments/{exp_id}/runs",
+        json={"label": "300 K"},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    ).json()["run"]["id"]
+    # Make the run diverge, through the route that exists for it.
+    overridden = client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/overrides",
+        json={
+            "confirmed_by_user": True,
+            "address": "block:tags",
+            "payload": ["ci-divergence"],
+        },
+        headers={"If-Match": _run_etag(client, exp_id, run_id)},
+    )
+    assert overridden.status_code in (200, 201), overridden.text
+
+    client.post(
+        f"/api/experiments/{exp_id}/answers",
+        json={"answers": {"edge": "K"}, "confirmed_by_user": True},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    composed = ws.load_experiment(exp_id).export_units()[0].draft
+    assert not [e for e in (composed.get("implicit") or []) if e.get("about") == "edge"], (
+        composed.get("implicit")
+    )
 
 
 def test_a_record_with_no_runs_still_takes_an_edge_answer(client):

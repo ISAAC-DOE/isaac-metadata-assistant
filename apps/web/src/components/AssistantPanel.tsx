@@ -231,6 +231,8 @@ interface AssistantPanelProps {
  */
 export interface StageFieldOption {
   id: string;
+  /** The question's identity, unique across runs. `id` is the kind and is not. */
+  key?: string;
   label: string;
   suggestedValue?: unknown;
   suggestedValueLabel?: string;
@@ -1047,6 +1049,7 @@ export function AssistantPanel({
     if (!agentContext || !canStage || !stageField) return;
     const staged = proposeForField(agentContext, {
       field: stageField.id,
+      blockerKey: stageField.key,
       value: stageField.suggestedValue,
       source: 'user',
     });

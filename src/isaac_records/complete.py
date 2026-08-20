@@ -238,10 +238,15 @@ def apply_answers(draft: dict, answers: dict) -> dict:
             # halves and this writer was left alone, so the two disagreed about the same
             # rule — `{"status": "valid"}` over a draft already carrying "Beam dropped
             # during scan 3" produced exactly the contradiction the other fix removed.
-            # Currently unreachable through any shipped producer (`draft_builder` only
-            # ever writes `qc` when it can read a status), which is why it was latent
-            # rather than measured; nothing enforced that, and an asymmetry nobody can
-            # see is the kind that outlives the reason for it.
+            # ~~"Currently unreachable through any shipped producer"~~ — **WRONG, and
+            # corrected rather than deleted because it was the reason this was called
+            # latent.** An independent review measured it reachable over HTTP: a legacy
+            # run (no `pending` key) whose draft already carries `qc.evidence` gets its
+            # questions MATERIALISED by `routes._apply_to_run`, which puts an open `qc`
+            # blocker beside an existing note — exactly the state `draft_builder` never
+            # produces. So the asymmetry this fixes was not hypothetical; it was one
+            # request away, and the guard now lives in the shared helper so the two
+            # writers cannot drift apart again.
             _supersede_qc_evidence(draft, qc.get("evidence"), evidence_note, timestamp)
             qc["status"] = status
             if evidence_note:

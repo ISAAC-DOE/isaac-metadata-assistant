@@ -371,7 +371,14 @@ function LoadedCompletion({
         setAnswered((prev) => [
           ...prev,
           {
-            id: blocker.id,
+            // THE ANSWERED ROW'S IDENTITY IS THE BLOCKER'S KEY, not its kind. It was
+            // `blocker.id`, and an independent review measured the consequence: with two
+            // runs owing the same thing, ONE Edit click opened TWO editors, `saveEdit`
+            // rewrote both rows' displayed value, React warned about duplicate keys, and
+            // both Edit buttons carried the same accessible name. Worse, `editNotApplied`
+            // is set with the KEY and read with this — so a correction the server refused
+            // was reported by NOTHING, which the parent commit did report.
+            id: blocker.key,
             label: blocker.label,
             storedValue: answerValuePreview(blocker.kind, value),
             rawValue: value,
@@ -446,7 +453,7 @@ function LoadedCompletion({
         }
         setAnswered((prev) =>
           prev.map((a) =>
-            a.id === blocker.id
+            a.id === blocker.key
               ? { ...a, storedValue: answerValuePreview(blocker.kind, value), rawValue: value }
               : a,
           ),
@@ -560,6 +567,9 @@ function LoadedCompletion({
   const stageField = currentBlocker
     ? {
         id: currentBlocker.id,
+        // The identity key, so the assistant's write reaches the run that OWNS this
+        // question rather than the first run owing one of the same kind.
+        key: currentBlocker.key,
         label: currentBlocker.about ?? currentBlocker.question ?? currentBlocker.id,
         suggestedValue: currentBlocker.demo_answer?.value,
         suggestedValueLabel: currentBlocker.demo_answer?.label,
@@ -949,12 +959,12 @@ function LoadedCompletion({
             submitting={submitting}
             /* Restored across a Refresh, and kept current on every keystroke. See
                the `staged` ref in the parent for why it lives there. */
-            initialValue={staged.current[blocker.id]}
+            initialValue={staged.current[blocker.key]}
             onTextChange={(value) => {
-              staged.current[blocker.id] = value;
+              staged.current[blocker.key] = value;
             }}
             onStagedChange={(value) => {
-              staged.current[blocker.id] = value;
+              staged.current[blocker.key] = value;
             }}
             onConfirm={(value) => confirmAnswer(blocker, value)}
             onDontKnow={() => leaveMissing(blocker.key)}
