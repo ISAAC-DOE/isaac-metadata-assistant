@@ -917,3 +917,72 @@ def test_the_capability_block_opens_no_connection_and_never_claims_availability(
     # cannot be known from configuration, and a key called `available` would be read
     # as saying it can.
     assert "available" not in block
+
+
+def test_the_operator_handoff_quotes_digests_that_match_the_committed_files():
+    """THE HANDOFF IS THE THING THAT ACTUALLY GETS SENT, so it gets the same guard.
+
+    `docs/dean-handoff-consolidated-2026-08-18.md` is the package a human forwards
+    to the database operator, and it carries the digest table the operator is told
+    to recompute — *"That check is the only evidence that the bytes applied are the
+    bytes approved."* Until now nothing checked the handoff's own copy of those
+    values, only each packet's.
+
+    That is exactly how the `0002` packet's forward digest went stale for the whole
+    life of a branch: the migration was corrected in place, the prose was updated,
+    and the digest was not. An operator following the packet's own instruction would
+    have computed a mismatch against the very file they were about to apply and had
+    to guess whether the document was stale or the file had been tampered with.
+
+    Driven off the document's own table rows rather than a hardcoded list, so adding
+    a migration to the handoff is covered without editing this test.
+    """
+    import hashlib
+    import re
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    doc = (root / "docs" / "dean-handoff-consolidated-2026-08-18.md").read_text(
+        encoding="utf-8"
+    )
+    quoted = set(re.findall(r"`([0-9a-f]{64})`", doc))
+    assert quoted, "the handoff quotes no digests at all — re-read this test"
+
+    on_disk = {}
+    for path in sorted((root / "apps/api/isaac_api/migrations").glob("*.sql")):
+        on_disk[hashlib.sha256(path.read_bytes()).hexdigest()] = path.name
+
+    unmatched = sorted(d for d in quoted if d not in on_disk)
+    assert not unmatched, (
+        "the handoff quotes SHA-256 values that no committed migration hashes to: "
+        f"{unmatched}. Recompute the table in "
+        "docs/dean-handoff-consolidated-2026-08-18.md in the SAME commit as the SQL "
+        "— an operator is told that check is the only evidence the bytes applied are "
+        "the bytes approved."
+    )
+
+
+def test_the_operator_handoff_does_not_read_as_if_0005_were_approved():
+    """A NEW MIGRATION FILE MUST NOT ACQUIRE AN APPROVAL BY PROXIMITY.
+
+    The handoff's §1 lists two migrations the owner HAS approved and that need an
+    operator window. `0005_run_projection` is not one of them. The specific failure
+    this guards is not a false sentence but a false IMPRESSION: a third migration
+    appearing in a document whose subject is "migrations awaiting an operator" reads
+    as a third thing waiting on the operator, and an operator who applied it would
+    have skipped the owner's review entirely.
+
+    So the document must say the word, in the section that names it, and must
+    instruct against applying it.
+    """
+    root = Path(sstore.__file__).resolve().parents[3]
+    doc = (root / "docs" / "dean-handoff-consolidated-2026-08-18.md").read_text(
+        encoding="utf-8"
+    )
+    flat = " ".join(doc.split())
+    assert "0005_run_projection" in flat
+    assert "NOT approved" in flat or "NOT APPROVED" in flat
+    assert "Do NOT apply `0005`" in flat
+    # AND THE HEADING MUST NOT PROMISE TWO WHILE LISTING THREE. "Two migrations,
+    # approved" was the original heading and became misleading the moment a third
+    # appeared in the file.
+    assert "## 1. Two migrations, approved and awaiting an operator" not in doc

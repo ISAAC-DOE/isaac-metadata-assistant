@@ -2957,6 +2957,50 @@ def test_0002_ABSENT_makes_no_claim_either_even_though_0005_may_be_there():
     assert _probe_count(conn, repo.PROJECTION_TABLE) == 0
 
 
+def test_the_CI_projection_step_uses_APIS_THAT_EXIST(tmp_path, monkeypatch):
+    """THE SEQUENCE THE `postgres-migration` PARITY STEP RUNS, WITHOUT POSTGRES.
+
+    WHY THIS EXISTS, and it is embarrassing rather than clever. That CI step's inline
+    Python failed TWICE on signature mistakes, each costing a full CI round:
+
+        store.create(...)        -> AttributeError  (the STORE has no `create`;
+                                    the repository does)
+        save_versioned(None)     -> TypeError       (it takes no argument)
+
+    Neither could be caught locally, because the step needs a real engine and nothing
+    in this suite exercised the sequence. The engine is needed for the ASSERTIONS —
+    reading the projection row back — and NOT for the calls, which work identically
+    against the filesystem fallback. So the calls are made here.
+
+    WHAT THIS PROVES: every method the step names exists and accepts what the step
+    passes it. WHAT IT DOES NOT: that a projection row is written or correct. That is
+    the real engine's answer and stays in CI. Keep the two in step — if the step's
+    Python changes, change this.
+    """
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("PGHOST", raising=False)
+
+    repository = repo.repository()
+    # The fallback, so `durable` is False here — which is why the step asserts it and
+    # this does not. Named rather than skipped, so the difference is deliberate.
+    assert repository.durable is False
+    exp = repository.create(title="projection parity", description=None)
+    for label in ("R1", "R2"):
+        exp.add_run(label=label)
+    exp.save_versioned()
+    assert len(exp.sorted_runs()) == 2
+    assert exp.rev >= 1
+    assert exp.generation
+
+    reloaded = ws.load_experiment(exp.id)
+    assert reloaded is not None
+    reloaded.add_run(label="R3")
+    reloaded.save_versioned()
+    # THE FIGURE THE STEP ASSERTS AGAINST THE SERVER (`run_count` = 3), computed the
+    # same way. If this moves, the step's literal is wrong too.
+    assert len(reloaded.sorted_runs()) == 3
+
+
 def test_each_table_is_probed_once_per_process_and_the_two_do_not_share_a_bit():
     """The generalised cache, and the property a shared boolean would break.
 

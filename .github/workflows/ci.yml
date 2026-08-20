@@ -1989,7 +1989,12 @@ jobs:
           exp = repository.create(title="projection parity", description=None)
           for label in ("R1", "R2"):
               exp.add_run(label=label)
-          exp.save_versioned(None)
+          # `save_versioned()` takes NO argument — the precondition is the route's
+          # job, not this method's. Two signature mistakes in one step, both found
+          # only here: `store.create(...)` and then `save_versioned(None)`. This
+          # code path needs a real engine, so no Python test exercises it, and CI is
+          # the only place either could have surfaced.
+          exp.save_versioned()
           print("experiment", exp.id, "rev", exp.rev, "runs", len(exp.sorted_runs()))
           with open("/tmp/projection-expected.txt", "w") as fh:
               fh.write(f"{exp.id}|{exp.rev}|{exp.generation}|{len(exp.sorted_runs())}\n")
@@ -2023,7 +2028,7 @@ jobs:
           eid = open("/tmp/projection-expected.txt").read().split("|")[0]
           exp = ws.load_experiment(eid)
           exp.add_run(label="R3")
-          exp.save_versioned(None)
+          exp.save_versioned()
           print("second save: rev", exp.rev, "runs", len(exp.sorted_runs()))
           PY
           count=$(psql -Atc "select count(*) from isaac_run_projection where experiment_id = '$eid'")
