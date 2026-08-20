@@ -10820,7 +10820,7 @@
       },
       {
         "path": "src/isaac_records/complete.py",
-        "sha256": "5b9291fc8b1b168d41c1b59207651f94c49cc91684223be9e014543559aafebe"
+        "sha256": "2cc4858ee67691ad6fd80ec38d9d63e7daa3ef7037b68bee52271c328f57151f"
       },
       {
         "path": "src/isaac_records/draft_validator.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "5ba03898dd4b05359fd8ece0e428a036e25fa1a8d8224df0320c9eae1365856a"
+    "served_manifest_fingerprint": "809aeb6277d80d2d5f05a2d5c644a549e0d7e40c6d1dcbcb5283a88dabfab183"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

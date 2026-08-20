@@ -610,3 +610,61 @@ def test_the_two_qc_writers_agree_about_replacing_the_whole_value(app):
         assert out["qc"]["status"] == "valid", name
         assert "evidence" not in out["qc"], (name, out["qc"])
         assert any(e.get("superseded") for e in out["block_evidence"]["qc:status"]), name
+
+
+def test_a_superseded_note_says_so_in_text_a_reader_sees(app):
+    """WHERE the preserved note goes, and WHAT a reader is shown — both measured.
+
+    A review raised the worry that a `superseded: true` entry would render as a fourth
+    ordinary user confirmation, since no frontend code reads that flag. Measured, the
+    worry is mitigated but not by the flag: the entry's `question` — which IS rendered —
+    reads *"Superseded QC evidence (the verdict it described was replaced)"*, so a reader
+    sees what it is without any surface having to interpret a boolean.
+
+    The endpoint's behaviour is worth pinning too, because it surprised this test's first
+    version: `GET /evidence` serves `block_evidence` only once the record is EXPORTED, at
+    which point it reads the written SIDECAR. Before export the trail is not served at
+    all. So "is the superseded note visible?" has two answers depending on lifecycle
+    stage, and both are asserted here.
+    """
+    client = TestClient(app)
+    exp_id = _new_record(client)
+    _answer(client, exp_id, _harvested_answers(app))
+    _answer(
+        client, exp_id, {"qc": {"status": "compromised", "evidence": "Beam dropped in scan 3."}}
+    )
+    client.post(
+        f"/api/experiments/{exp_id}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"qc": {"status": "valid", "evidence": "Re-reduced; I0 stable."}},
+        },
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert _export(client, exp_id).json()["ok"] is True
+
+    exp = ws.load_experiment(exp_id)
+    unit = exp.export_units()[0]
+
+    # The document keeps it.
+    assert "superseded" in json.dumps(exp.draft)
+    # The SIDECAR carries it — a downstream reader of the artifact pair sees the history.
+    assert "superseded" in unit.sidecar_path().read_text(encoding="utf-8")
+    # The RECORD does not. It is provenance, not a value.
+    assert "superseded" not in unit.record_path().read_text(encoding="utf-8")
+    # AND WHAT A READER IS SHOWN. Served only after export, read out of the sidecar.
+    served = client.get(f"/api/experiments/{exp_id}/evidence").json()
+    row = next(r for r in served["evidence"] if r["path"] == "qc:status")
+    marked = [e for e in row["evidence"] if e.get("superseded")]
+    assert len(marked) == 1, row["evidence"]
+    # The FLAG is not what does the work — no frontend code reads it. The QUESTION does,
+    # and it is rendered, so the entry cannot be mistaken for a live confirmation.
+    assert "Superseded" in marked[0]["question"], marked[0]
+    assert marked[0]["answer"] == "Beam dropped in scan 3."
+    # The three entries are all present and in order: the original verdict, the note it
+    # displaced, and the correction. Nothing was deleted to make room.
+    assert [e["answer"] for e in row["evidence"]] == [
+        "compromised",
+        "Beam dropped in scan 3.",
+        "valid",
+    ], row["evidence"]
