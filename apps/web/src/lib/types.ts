@@ -72,7 +72,65 @@ export interface FieldGroupData {
 export type BlockerKind = 'asset' | 'series' | 'descriptor' | 'edge' | string;
 // hash → paste a sha256 (asset). structured → confirm a synthetic demo value the
 // user can't type (series/descriptor objects). text → a short free-text value.
-export type CompletionInputType = 'hash' | 'text' | 'structured';
+export type CompletionInputType = 'hash' | 'text' | 'structured' | 'verdict';
+
+/**
+ * The official `measurement.qc.status` enum, mirroring `complete._QC_STATUSES`.
+ *
+ * WRITTEN HERE RATHER THAN TYPED FREELY because a QC verdict is the one blocker the
+ * API refuses unless it arrives as `{status, evidence}` with `status` inside this set
+ * — `complete.is_qc_shaped`. A free-text field sent `"valid"` as a bare string, which
+ * the server declined, leaving the question open with nothing on screen to say why.
+ *
+ * The order is the schema's, not a ranking, and `valid` is FIRST but never
+ * preselected: the blocker's own text says "there is no default and none is assumed —
+ * not even 'valid'", and a preselected control would assume one on the scientist's
+ * behalf by doing nothing.
+ */
+export const QC_VERDICTS = ['valid', 'compromised', 'failed', 'pending'] as const;
+
+export type QcVerdict = (typeof QC_VERDICTS)[number];
+
+/**
+ * The exact shape `POST /answers` and `POST /edit` accept for a `qc` answer —
+ * `complete.is_qc_shaped`. A bare string is declined by the server and leaves the
+ * question open, which is the defect the verdict control exists to prevent.
+ */
+export interface QcAnswer {
+  status: QcVerdict;
+  evidence: string;
+}
+
+/**
+ * The official `descriptors[].kind` and `.source` enums, mirroring
+ * `schema/isaac_record_v1.json`. Both are REQUIRED by the schema and neither is
+ * preselected in the form: a descriptor is a scientific claim, and choosing its kind
+ * for the scientist would be the app asserting something about their measurement.
+ */
+export const DESCRIPTOR_KINDS = [
+  'absolute',
+  'differential',
+  'categorical',
+  'similarity',
+  'model',
+  'theoretical_metric',
+] as const;
+
+export const DESCRIPTOR_SOURCES = ['auto', 'manual', 'imported'] as const;
+
+/**
+ * Canonical spectroscopy descriptor class tokens, transcribed from
+ * `vocabulary/descriptor_class.json`.
+ *
+ * OFFERED AS SUGGESTIONS, NEVER ENFORCED — and the distinction is that file's own:
+ * "The official schema + portal validator remain authoritative; this file is an
+ * extraction/authoring aid only." The schema constrains `name` by PATTERN, not by an
+ * enumeration, so a name outside this list is perfectly valid and the control must
+ * accept it. Only the `spectroscopy` class is listed because the MVP scope is the
+ * XANES / characterization path; offering electrochemistry tokens would suggest a
+ * capability this build does not have.
+ */
+export const DESCRIPTOR_NAME_SUGGESTIONS = ["edge_position", "edge_shift", "inflection_point_energy", "oxidation_state", "white_line_energy", "white_line_intensity"] as const;
 
 /**
  * The five explicit inferability states, mirroring
@@ -137,6 +195,28 @@ export interface PendingBlocker {
   about?: string;
   context?: string; // sentence-case context for the question card
   inputType: CompletionInputType;
+  /**
+   * The run that OWNS this question, when a run does.
+   *
+   * `GET /pending` tags every run-sourced entry, because once a record has runs each
+   * run is a record of its own and the record-level answer route refuses a run-owned
+   * key with `409 belongs_to_a_run`. The screen carries this through so a scientist
+   * answering a question never has to know which entity it belongs to.
+   */
+  runId?: string;
+  runLabel?: string;
+  /**
+   * The IDENTITY key, unique across owners — unlike {@link PendingBlocker.id}, which is
+   * the blocker KIND and is the key that goes in the `answers` body.
+   *
+   * Three runs each needing a spectrum produce three blockers whose `id`, `question`
+   * and `label` are byte-identical. Every piece of per-question state on the completion
+   * screen must therefore be keyed by THIS: staged input, the skipped set, React keys,
+   * and the "was this applied?" test. Keying by `id` was measured reporting an answer
+   * as NOT APPLIED because another run's identical entry was still in the list, and
+   * sharing one typed value across every run's question.
+   */
+  key: string;
   demo_answer?: DemoAnswer;
   // Why the app cannot determine this value itself. Always present from a
   // current backend; optional so pre-existing fixtures still typecheck.
@@ -697,6 +777,11 @@ export interface ApiPendingItem {
   // Example-scope records ONLY. `null`/absent on every ordinary record.
   demo_answer?: ApiDemoAnswer | null;
   inferability?: Inferability;
+  // Present when a RUN owns this question. `null` for a record-level one.
+  run_id?: string | null;
+  run_label?: string | null;
+  // Unique across owners; `id` is not. See `PendingBlocker.key`.
+  blocker_key?: string;
 }
 
 export interface ApiPendingResponse {

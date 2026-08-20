@@ -1,5 +1,64 @@
 # Which fields belong to a Run, and which to the Experiment — the six that need a scientist
 
+> ## RE-MEASURED 2026-08-19 — the question is the same, and it now has a MEASURED cost
+>
+> This packet has said since 2026-08-10 that **nothing in the programme is blocked** on the
+> answer, and that is still true in the sense it meant: no slice has been unable to proceed. But
+> the reason it was cheap to defer has changed, and saying so is what turns an abstract question
+> into one somebody can weigh.
+>
+> **Until 2026-08-19, no record with runs could be exported at all.** A run created through the
+> product started with an empty draft, so it had no spectrum, no QC verdict and no descriptors,
+> and `POST /export` refused it on `'descriptors' is a required property`. The scope question was
+> therefore unreachable: there were no multi-run records for the six fields to be missing from.
+>
+> That path now works end to end (PR #171). So here is the cost, measured today rather than
+> reasoned about:
+>
+> ```
+> the READY scenario carries all six, evidenced:
+>   system.configuration.detector_model, .monochromator_crystal, .n_scans,
+>   .proposal_id, .session_id, .spectrometer_geometry
+>
+> add one run, export:
+>   exported record  system.configuration -> null
+> ```
+>
+> **Six evidenced values, present in the record a scientist filled in, absent from every official
+> ISAAC record that record now publishes.** Not dropped by a bug — dropped because
+> `field_level()` returns `unclassified`, an unclassified field is inherited by neither the
+> experiment nor the run, and `resolved_run_draft` reads run-level content off the RUN. Guessing a
+> level would answer a scientific question by accident, in the direction that is hardest to undo,
+> so the run-adoption slice deliberately did **not** carry them across and says so in
+> `routes._seed_for_new_run`.
+>
+> **What each answer would cost, concretely:**
+>
+> | Answer | Consequence |
+> |---|---|
+> | **Run-level** | each run records its own detector/mono/geometry/n_scans/proposal/session; the values reach every exported record; two runs may legitimately differ |
+> | **Experiment-level** | one value per record, inherited by every run and overridable per run through the existing override machinery; the values reach every exported record |
+> | **Leave unclassified** | the six stay absent from every multi-run record, permanently, and a scientist who entered them sees them vanish when they add a run |
+>
+> The third row is the current state. It is defensible only for as long as nobody minds; it is not
+> neutral, and it was invisible while multi-run records could not be produced.
+>
+> Command, so the next reader re-measures rather than trusts this block:
+>
+> ```bash
+> PYTHONPATH=apps/api:src .venv/bin/python -c "
+> import isaac_api.workspace as ws
+> print([f for f in ws.EXTRACTOR_FIELD_MAP] if hasattr(ws,'EXTRACTOR_FIELD_MAP') else 'see routes.EXTRACTOR_FIELD_MAP')"
+> ```
+>
+> Both halves are pinned by test, so this block cannot go stale without something failing:
+> `test_the_six_unclassified_configuration_fields_are_deliberately_not_adopted` pins the
+> non-adoption, and `test_the_six_unclassified_fields_are_absent_from_a_multi_run_record` pins the
+> `system.configuration: null` reading itself — including the six fields being present and
+> evidenced on the record beforehand, so it cannot pass vacuously on a record that never had them.
+> If that second test ever fails because the fields ARE present, the scope question has been
+> answered somewhere; find where, and make sure a scientist answered it.
+
 > ## RE-MEASURED 2026-08-18 — one number in this packet went stale, and the QUESTION did not change
 >
 > Everything below was written on 2026-08-10. Re-measured today against `main`, and the only

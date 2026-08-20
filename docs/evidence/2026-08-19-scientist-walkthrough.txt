@@ -1,0 +1,43 @@
+ISAAC — the scientist walkthrough, MEASURED 2026-08-19
+=====================================================
+
+WHAT THIS IS. The transcript of `/tmp/walkthrough.py` run against the application over
+its own HTTP API, on an empty workspace, with every scientific value written out in the
+script rather than harvested from a fixture. It is committed because the claim it
+supports — "a scientist can create a record and finish it" — was FALSE on `main` at
+`b118ed6` and is the reason PR #171 exists.
+
+HOW TO REPRODUCE. The script is not committed (it is a probe, not a test); the same path
+is pinned by `apps/api/tests/test_scientist_can_finish_a_record.py` and
+`apps/api/tests/test_run_level_answers.py`, which is where a regression would be caught.
+This file is the human-readable form.
+
+WHAT IT DOES NOT SHOW.
+  * The BROWSER. Every step here is an API call. The UI controls that make steps 2, 5
+    and 10 answerable by a person (the QC verdict radios, the descriptor form, the
+    series paste) are covered by `apps/web/src/__tests__/qc-verdict-control.test.tsx`
+    and `structured-value-entry.test.tsx`, not by this.
+  * The HOSTED deployment. Nothing here was run against `/krish`, which sits behind an
+    Authentik edge this environment cannot authenticate to.
+  * A SUCCESSFUL submit. Step 12 is a refusal, and it is the honest one: submission
+    records an attributable declaration, and no trusted authentication boundary exists
+    (E1). With an identity verifier armed it reaches the second gate — durable storage —
+    and refuses there instead, because migrations 0003/0004 are not applied.
+
+Ids differ per run (they are freshly minted ULIDs). Everything else is deterministic.
+
+== A SCIENTIST'S WALKTHROUGH, MEASURED ==
+1. create                      -> 201  01M0EHAV3A0E2MWZXDMYS86DYR
+2. questions                   -> ['series', 'qc', 'descriptor']
+3. add run '300 K'             -> 201
+4. questions now belong to it  -> [('series', '300 K'), ('qc', '300 K'), ('descriptor', '300 K')]
+5. answer the run              -> 200  pending []
+6. same answer on the RECORD   -> 409 belongs_to_a_run  (names run 300 K)
+7. export                      -> 200  ok=True
+8. official schema             -> ok=True  record_id == run id: True
+   descriptors provenance      -> isaac-metadata-assistant
+   uploaded_by                 -> ABSENT (no trusted boundary)
+9. add a SECOND run            -> 201
+10. it has its OWN questions   -> [('series', '400 K'), ('qc', '400 K'), ('descriptor', '400 K')]
+11. export both                -> 200 ok=True  units=2
+12. submit                     -> 409 human_actor_required / no_verifier_configured

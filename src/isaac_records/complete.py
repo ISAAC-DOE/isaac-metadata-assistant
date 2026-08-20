@@ -46,6 +46,46 @@ import re
 # its own reviewed slice.
 _SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
+#: WHAT A DESCRIPTOR OUTPUT GROUP SAYS ABOUT ITS OWN ORIGIN, when a PERSON supplied it.
+#:
+#: These two constants used to read ``"completion_demo"`` and
+#: ``{"agent": "isaac-complete-demo", "version": "0.1"}``, and they were written into
+#: every record this application completed — including a record a scientist created and
+#: filled in by hand. Measured on an ordinary record before this change::
+#:
+#:     "label": "completion_demo",
+#:     "generated_by": {"agent": "isaac-complete-demo", "version": "0.1"}
+#:
+#: The schema says ``generated_by`` is *"Tool/pipeline/person that generated these
+#: descriptors"*, so that record asserted a demo agent had generated the scientist's
+#: descriptor. It is fabricated provenance in an exported official record, which is the
+#: one place this project is least willing to have any.
+#:
+#: WHAT IS SAID INSTEAD, and why each part is true rather than merely nicer:
+#:
+#: * ``agent`` names THIS APPLICATION, which did assemble the output group. It does not
+#:   claim to have computed anything — ``notes`` says who did.
+#: * ``notes`` says a person supplied the value. That is checkable: this dict is only
+#:   ever written on a path that requires ``confirmed_by_user`` and writes a
+#:   ``user_confirmation`` evidence entry beside it.
+#: * ``version`` is OMITTED. It is optional in the schema, and ``"0.1"`` was the demo's
+#:   number; carrying a version this build cannot vouch for would be a smaller version
+#:   of the same defect.
+#: * ``author`` is OMITTED, and that is the honest gap rather than an oversight. It
+#:   would name the person, and this application cannot name anybody until a trusted
+#:   authentication boundary exists (E1) — see ``isaac_api.record_attribution``.
+#:
+#: ``label`` remains overridable by ``answers["descriptor_label"]``; only the DEFAULT
+#: changed. A caller that knows the real provenance still supplies it.
+DESCRIPTOR_OUTPUT_LABEL = "user_supplied"
+DESCRIPTOR_GENERATED_BY: dict = {
+    "agent": "isaac-metadata-assistant",
+    "notes": (
+        "Supplied and confirmed by a person through the assistant's completion flow. "
+        "No tool computed this value."
+    ),
+}
+
 # The official measurement.qc.status enum — a qc answer outside this set is rejected.
 _QC_STATUSES = {"valid", "compromised", "failed", "pending"}
 
@@ -68,6 +108,46 @@ def _user_confirmation(question, answer, timestamp) -> dict:
         "answer": answer,
         "timestamp": timestamp,
     }
+
+
+def _supersede_qc_evidence(
+    draft: dict, displaced: str | None, replacement: str | None, timestamp: str
+) -> None:
+    """Record a QC note that a new verdict has displaced, before it is removed.
+
+    **SUPERSEDE WITHOUT DELETING** is this project's established answer to exactly this
+    situation — ``conflict_resolution`` decides between competing values without
+    removing either, and ``CLAUDE.md`` §15 records that as the rule. Removing a note
+    that justified a DIFFERENT verdict is correct (it is not provenance for this one,
+    and keeping it produced a record asserting a claim its own evidence denied), but
+    removing it *without trace* destroys a scientist's written reasoning permanently:
+    ``block_evidence`` would gain only a confirmation naming the new status, and
+    ``answer_log`` stores the submitted shape rather than the displaced one.
+
+    An independent review found that gap in the fix for the defect above. So the note
+    is written into the same ``qc:status`` trail it is leaving, marked as superseded and
+    carrying no claim about the new verdict.
+
+    **THE COMPARISON LIVES HERE, NOT IN THE CALLERS, and that is a correction.** It was
+    in ``apply_corrections`` (``if displaced and displaced != evidence_note``) and NOT in
+    ``apply_answers``, which called this unconditionally — so an answer that re-sent the
+    SAME note appended an entry claiming the note had been displaced while it was still
+    the live value of ``measurement.qc.evidence``. An independent review measured it: a
+    fabricated provenance claim reaching the exported sidecar, on the writer the previous
+    fix had left alone. Two callers cannot disagree about a rule neither of them owns.
+    """
+    if not displaced or displaced == replacement:
+        return
+    trail = draft.setdefault("block_evidence", {}).setdefault("qc:status", [])
+    trail.append(
+        {
+            "source_type": "user_confirmation",
+            "question": "Superseded QC evidence (the verdict it described was replaced)",
+            "answer": displaced,
+            "timestamp": timestamp,
+            "superseded": True,
+        }
+    )
 
 
 def apply_answers(draft: dict, answers: dict) -> dict:
@@ -143,18 +223,37 @@ def apply_answers(draft: dict, answers: dict) -> dict:
 
         if kind == "qc":
             qc_answer = answers.get("qc")
-            status = qc_answer.get("status") if isinstance(qc_answer, dict) else None
-            if status not in _QC_STATUSES:
-                # No answer OR an off-enum verdict -> NOT applied; stays pending. The
-                # system never invents a qc status (no default 'valid').
+            if not is_qc_shaped(qc_answer):
+                # No answer, an off-enum verdict, or a note of the wrong type -> NOT
+                # applied; stays pending. The system never invents a qc status (no
+                # default 'valid'). `is_qc_shaped` rather than an inline enum test so
+                # the route and this branch cannot disagree about what is storable, and
+                # so an unhashable verdict raises nothing here.
                 remaining_pending.append(entry)
                 continue
+            status = qc_answer["status"]
             qc = draft.setdefault("qc", {})
-            qc["status"] = status
             evidence_note = qc_answer.get("evidence")
+            # THE WHOLE PAIR HERE TOO. `apply_corrections` was fixed to replace both
+            # halves and this writer was left alone, so the two disagreed about the same
+            # rule — `{"status": "valid"}` over a draft already carrying "Beam dropped
+            # during scan 3" produced exactly the contradiction the other fix removed.
+            # ~~"Currently unreachable through any shipped producer"~~ — **WRONG, and
+            # corrected rather than deleted because it was the reason this was called
+            # latent.** An independent review measured it reachable over HTTP: a legacy
+            # run (no `pending` key) whose draft already carries `qc.evidence` gets its
+            # questions MATERIALISED by `routes._apply_to_run`, which puts an open `qc`
+            # blocker beside an existing note — exactly the state `draft_builder` never
+            # produces. So the asymmetry this fixes was not hypothetical; it was one
+            # request away, and the guard now lives in the shared helper so the two
+            # writers cannot drift apart again.
+            _supersede_qc_evidence(draft, qc.get("evidence"), evidence_note, timestamp)
+            qc["status"] = status
             if evidence_note:
                 # Native measurement.qc.evidence is a free-text string field.
                 qc["evidence"] = evidence_note
+            else:
+                qc.pop("evidence", None)
             block_evidence = draft.setdefault("block_evidence", {})
             block_evidence.setdefault("qc:status", []).append(
                 _user_confirmation(entry.get("question"), status, timestamp)
@@ -179,9 +278,9 @@ def apply_answers(draft: dict, answers: dict) -> dict:
             ]
             draft["descriptors_outputs"] = [
                 {
-                    "label": answers.get("descriptor_label", "completion_demo"),
+                    "label": answers.get("descriptor_label", DESCRIPTOR_OUTPUT_LABEL),
                     "generated_utc": timestamp,
-                    "generated_by": {"agent": "isaac-complete-demo", "version": "0.1"},
+                    "generated_by": dict(DESCRIPTOR_GENERATED_BY),
                     "descriptors": [desc],
                 }
             ]
@@ -289,6 +388,54 @@ def is_sha256_shaped(value) -> bool:
     return isinstance(value, str) and bool(_SHA256_RE.fullmatch(value))
 
 
+def is_qc_shaped(value) -> bool:
+    """Can a QC answer be stored — a mapping naming a verdict from the official enum?
+
+    EXPORTED FOR THE SAME REASON THE OTHER THREE ARE: ``routes.py`` needs to know
+    whether a value the caller sent can actually be stored, and the rule for that must
+    have ONE definition. Both writers here — :func:`apply_answers`'s ``qc`` branch and
+    :func:`apply_corrections`' — already refuse a status outside :data:`_QC_STATUSES`;
+    without this predicate the route would have to restate that set, and a fifth
+    verdict added to the schema would then be accepted by the route and silently
+    declined by the core, which is the exact **200-having-changed-nothing** shape
+    :func:`is_sha256_shaped` was added to close.
+
+    WHY THIS PREDICATE EXISTS AT ALL, stated because it is a scope change. Until now
+    no route forwarded ``qc``, and this file's own docstring recorded that gap: *"no
+    ``POST /answers`` or ``POST /edit`` request can reach the ``qc`` branch below …
+    Adding it to the route would be a new accepted input on two mutation paths, with
+    an evidence-trail write, and belongs to a slice that can review that on its own
+    terms."* This is that slice. The consequence of the gap was not cosmetic — a
+    record created through the application could answer every other blocking question
+    and still never export, because a measurement carrying a series requires a QC
+    verdict and nothing could supply one.
+
+    ``evidence`` is NOT required here, and that is deliberate rather than lax. The
+    draft validator is what decides whether a verdict needs provenance, and it says so
+    in its own words ("qc verdict has no evidence; confirm or supply provenance"). A
+    predicate that demanded evidence would be a second, quieter copy of that rule, and
+    the two would be free to disagree. What this answers is only *"can this be
+    stored"*; whether the stored thing is enough to export stays with the validator.
+
+    An ``evidence`` of the wrong type IS refused, because the writers assign it
+    straight onto ``measurement.qc.evidence``, which the schema declares a string. A
+    dict there would be stored and then refused by official validation, one step too
+    late to tell the caller anything useful.
+    """
+    if not isinstance(value, dict):
+        return False
+    status = value.get("status")
+    # `isinstance` BEFORE the membership test, and not for tidiness: `[] in
+    # _QC_STATUSES` raises `TypeError: unhashable type`, and a set-membership test on
+    # attacker-shaped input is a 500 out of a predicate whose whole job is to answer
+    # yes or no. Found by this slice's own parametrised negative control, which passed
+    # a list and a dict as the verdict.
+    if not isinstance(status, str) or status not in _QC_STATUSES:
+        return False
+    evidence_note = value.get("evidence")
+    return evidence_note is None or isinstance(evidence_note, str)
+
+
 def is_descriptor_shaped(value) -> bool:
     """Can a descriptor correction be stored — a NON-EMPTY mapping?
 
@@ -319,18 +466,31 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
     Accepts the SAME ``apply_answers`` input shape: ``asset_sha256`` (``{uri: sha}``),
     ``series``, ``descriptor`` / ``descriptor_label``, ``edge``, ``qc``.
 
-    ONE OF THOSE IS NOT REACHABLE OVER HTTP, and this sentence used to hide it. The list
-    above was introduced as "the shape *produced by the route's*
-    ``_answers_to_apply_shape``" — but that function recognises only ``asset_sha256``,
+    ~~ONE OF THOSE IS NOT REACHABLE OVER HTTP~~ — **NO LONGER TRUE, and the old text is
+    struck rather than deleted because it recorded a real gap and named the slice that
+    would close it.** It read: *"that function recognises only ``asset_sha256``,
     ``series``, ``descriptor``, ``descriptor_label`` and ``edge``. It has never forwarded
     ``qc``, so no ``POST /answers`` or ``POST /edit`` request can reach the ``qc`` branch
-    below; a ``qc`` key in an edit body was dropped while being reported back in
-    ``invalidation.changed_fields`` as an updated field (fixed at the route). The branch
-    is kept — it is exercised directly by the completion path's own tests and by callers
-    that build the shape themselves — but it is documented here as function-level input,
-    NOT as a route-level capability. Adding it to the route would be a new accepted input
-    on two mutation paths, with an evidence-trail write, and belongs to a slice that can
-    review that on its own terms.
+    below … Adding it to the route would be a new accepted input on two mutation paths,
+    with an evidence-trail write, and belongs to a slice that can review that on its own
+    terms."*
+
+    **That slice has now run, and it closed a defect much larger than a missing key.**
+    Measured before the fix, on a record created through the application's own Create
+    Experiment path: every other blocking question could be answered over HTTP, and the
+    record still could not export — ``draft_report`` refused with *"measurement has
+    series but qc verdict has no evidence; confirm or supply provenance (no default
+    'valid')"*, and **no route existed that could supply one**. So a scientist could
+    create a record, complete it as far as the product allowed, and be permanently one
+    field short of Submit. The five canonical seeds did not reveal this because their
+    drafts are built by ``build_draft`` from a fixture sheet with ``qc`` already present,
+    never through the API.
+
+    ``qc`` is now forwarded by ``_answers_to_apply_shape`` on BOTH paths, guarded by
+    :func:`is_qc_shaped` so a value the core would decline is refused at the route
+    instead of absorbed into a 200 that changed nothing. Nothing in THIS file changed to
+    make that work: both branches already validated the enum and already refused to
+    invent a default. The gap was never in the truth core.
     """
     draft = copy.deepcopy(draft)
     answers = answers or {}
@@ -421,23 +581,53 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
             ]
             draft["descriptors_outputs"] = [
                 {
-                    "label": answers.get("descriptor_label", "completion_demo"),
+                    "label": answers.get("descriptor_label", DESCRIPTOR_OUTPUT_LABEL),
                     "generated_utc": timestamp,
-                    "generated_by": {"agent": "isaac-complete-demo", "version": "0.1"},
+                    "generated_by": dict(DESCRIPTOR_GENERATED_BY),
                     "descriptors": [desc],
                 }
             ]
 
-    # -- qc: overwrite the qc status (rejecting an off-enum verdict) --
+    # -- qc: overwrite the verdict AND the note it rests on, as one value --
+    #
+    # THE WHOLE PAIR, NOT THE STATUS ALONE. Two defects came from comparing and
+    # applying only `status`, and an independent review measured both end to end:
+    #
+    #   C1  Flipping `compromised` -> `valid` with no new note KEPT the old one, so an
+    #       exported official record read `{"status": "valid", "evidence": "Beam dropped
+    #       during scan 3; spectrum unusable."}`. Official validation passed, the
+    #       advisory tier was silent (`QC_NONVALID_WITHOUT_EVIDENCE` does not fire for
+    #       `valid`), and `block_evidence` gained a confirmation naming "valid" — so the
+    #       trail looked right while the record's own provenance contradicted its
+    #       verdict. That is `CLAUDE.md` §5 inverted: evidence present, and false.
+    #
+    #   I3  Correcting ONLY the note was declined here and reported by the route as
+    #       "the submitted value was identical; nothing was invalidated" — a claim about
+    #       a value that had in fact changed. A scientist had no way to correct the
+    #       reasoning behind a verdict, and was told they already had.
+    #
+    # So the comparison is over `{status, evidence}` and the write replaces both. An
+    # absent note REMOVES a stale one rather than inheriting it: a note that justified a
+    # different verdict is not provenance for this one, and dropping it correctly
+    # re-arms `portal_warnings.QC_NONVALID_WITHOUT_EVIDENCE`.
+    #
+    # `is_qc_shaped` rather than an inline enum test, for the reason that predicate
+    # exists: one definition of a storable verdict, shared with the route. It also makes
+    # this total — `status in _QC_STATUSES` raises `TypeError: unhashable` for a list or
+    # dict verdict, which a caller building the shape itself can still supply.
     qc_answer = answers.get("qc")
-    if isinstance(qc_answer, dict):
-        status = qc_answer.get("status")
-        if status in _QC_STATUSES and status != (draft.get("qc") or {}).get("status"):
+    if is_qc_shaped(qc_answer):
+        status = qc_answer["status"]
+        evidence_note = qc_answer.get("evidence") or None
+        current = draft.get("qc") or {}
+        if (status, evidence_note) != (current.get("status"), current.get("evidence") or None):
             qc = draft.setdefault("qc", {})
+            _supersede_qc_evidence(draft, qc.get("evidence"), evidence_note, timestamp)
             qc["status"] = status
-            evidence_note = qc_answer.get("evidence")
             if evidence_note:
                 qc["evidence"] = evidence_note
+            else:
+                qc.pop("evidence", None)
             block_evidence = draft.setdefault("block_evidence", {})
             block_evidence.setdefault("qc:status", []).append(
                 _user_confirmation("Correct the QC status?", status, timestamp)

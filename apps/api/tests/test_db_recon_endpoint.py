@@ -1431,6 +1431,11 @@ def test_the_cli_wrapper_is_absent_from_the_container_image():
         "COPY scripts/check_graphify_freshness.py scripts/check_graphify_freshness.py"
     ], copied
     assert "COPY scripts/db_recon.py" not in dockerfile
+    # `db_backfill_runs.py` TOO, and for the same reason rather than a similar one:
+    # it drives `PostgresOrdinaryStore.persist` across every experiment in the
+    # database, so a route that could reach it would be a route that re-persisted the
+    # whole deployment. It is an operator artifact and belongs outside the image.
+    assert "COPY scripts/db_backfill_runs.py" not in dockerfile
     assert "COPY scripts/ " not in dockerfile and "COPY scripts/\n" not in dockerfile
 
 

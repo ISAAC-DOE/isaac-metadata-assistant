@@ -557,7 +557,7 @@ Current state:
     packet's STATUS block). **Hosted application remains NOT DONE and is not an agent's act.** A test
     that had been *requiring* the false literal *"No PostgreSQL has ever executed this file"* was
     corrected to pin the invariant instead — CI has executed both migrations against `postgres:18`.
-    **Constraint coverage is 27 of 46 declared**, now guarded by a test so the figure cannot re-inflate.
+    **Constraint coverage is 41 of 46 declared** (re-measured 2026-08-19, up from 27), guarded by a test so the figure can move only when the workflow does. Three of the remaining five are STRUCTURALLY unprovable in isolation — `isaac_submission_runs`' equality CHECKs subsume its shape CHECKs, so no row violates exactly one of them; they are proved refused with the blame ambiguous by design.
   - **Explicit conflict resolution exists** (`apps/api/isaac_api/conflict_resolution.py` + two
     operations). It closes a real defect this file had only described in prose: a scientist who fixed a
     typo owned a permanent conflict no surface could clear. Decisions **supersede without deleting**
@@ -581,6 +581,62 @@ Current state:
     projected"); actor stamping (authorized by Dean, blocked in practice — no trusted boundary
     exists, and the seam stays unset); the native assistant, MCP and voice product surfaces beyond
     their existing seams; and the scale/concurrency benchmarks.
+- **Session of 2026-08-19 — the product could not capture a record, and now can.** PR #171
+  (`819568e`, `42dee80`, `bed331b`, `bb2095c`). Read this before planning any further feature
+  work, because it changes what "substantially implemented" means for everything downstream.
+
+  **THE FINDING.** A record created through `POST /api/experiments` — the product's own Create
+  Experiment path — **could not be completed or exported, by any route.** Measured on `main` at
+  `b118ed6`, over HTTP:
+
+  | step | result |
+  |---|---|
+  | create, then answer every question the API accepts | `200`, `pending: ['qc']`, `status: needs_attention` |
+  | `POST /export` | `200 {"ok": false}` — *"measurement has series but qc verdict has no evidence"* |
+
+  Three independent causes, each fixed here:
+
+  1. **`qc` was not forwarded** by `_answers_to_apply_shape`. `complete.py` had always handled it
+     and had always validated the enum; only the route mapper omitted it, and `complete.py`'s own
+     docstring had recorded the gap and named the slice that would close it.
+  2. **`series` and `descriptor` were answerable only by CONFIRMING a worked example**, which a
+     created record does not have. The screen said "No example value is available for this field"
+     and rendered no control. `apps/web/src/components/StructuredValueEntry.tsx` is the fix.
+  3. **Adding a Run destroyed the answers.** Those four blocks are RUN-level, `new_run` defaulted a
+     run's draft to `{}`, so a completed record went to `pending 0 · complete_metadata: completed ·
+     review_evidence: completed` **and an export that refused**. The first run now adopts the
+     record's run-level content; a later run does not, because copying one run's spectrum onto
+     another asserts they measured the same thing.
+
+  **WHY 4,714 BACKEND AND 4,113 FRONTEND TESTS DID NOT CATCH ANY OF IT.** All five canonical
+  scenarios are built by `build_draft` from a fixture sheet **that already carries all three
+  values**, so every completion and export test in the suite began past the part that did not work.
+  `apps/api/tests/test_scientist_can_finish_a_record.py` exists to close that blind spot: it walks
+  create → answer → export with values written out rather than harvested, and a negative control
+  parses the file to prove it still borrows nothing. **Do not "simplify" it by reaching for a seed.**
+
+  **Two false claims in exported records, both fixed.** `descriptors.outputs[].generated_by` read
+  `{"agent": "isaac-complete-demo", "version": "0.1"}` with `label: "completion_demo"` — a demo
+  agent claiming authorship of a scientist's descriptor, in a document the schema says names the
+  "Tool/pipeline/person that generated these descriptors". And `apply_corrections` compared only
+  `qc.status`, so flipping `compromised → valid` kept the old note: a record asserting **valid**
+  with provenance saying the spectrum was **unusable**, which official validation and the advisory
+  tier both passed. Found by independent review, not by CI.
+
+  **`attribution.uploaded_by` is now server-stamped — and still absent everywhere.** The stamp is
+  applied at the ingestion boundary (`apps/api/isaac_api/record_attribution.py`), never in the truth
+  core, which is what `export._enforce_server_owned_invariant` anticipates. It requires
+  `trust_basis == verified_edge_assertion`, and **no verifier in this build mints that**, so no
+  shipped deployment stamps anything. The fixture verifier deliberately still attributes a
+  submission ROW (which carries `trust_basis` and so says what it is worth) and deliberately cannot
+  reach a RECORD (which has no field to qualify it). Do not collapse those two.
+
+  **Still not done, and named rather than implied:** the campaign-sheet fields (technique, facility,
+  sample, contributors) have no capture surface, so a record can be finished but not richly
+  described; `POST /ingestion/csv/preview` has no route that APPLIES a preview; the native assistant
+  and voice remain provider seams with no route invoking them; `isaac_runs` Stage 2, the Evidence
+  Graph / Compare Runs cross-feature work, the scale and concurrency benchmarks, and every hosted
+  QA are unchanged by this session.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
@@ -779,7 +835,8 @@ Out of scope unless explicitly approved:
   **What the lift covers:** app-owned tables for experiments and their normal application state
   (`isaac_experiments`, `isaac_schema_migrations`, — **added 2026-08-12** — `isaac_runs`, and —
   **added 2026-08-16** — the five submission-lifecycle tables `isaac_experiment_revisions`,
-  `isaac_run_revisions`, `isaac_revision_changes`, `isaac_submissions` and `isaac_submission_runs`);
+  `isaac_run_revisions`, `isaac_revision_changes`, `isaac_submissions` and `isaac_submission_runs`,
+  and — **added 2026-08-19** — `isaac_run_projection`);
   a swappable repository seam
   (`apps/api/isaac_api/experiment_repository.py`) with a filesystem fallback whenever `PGHOST` is
   unset; a separate write path (`db_write.py`) with parameterized SQL, explicit transactions and
@@ -795,6 +852,44 @@ Out of scope unless explicitly approved:
   quietly; the list is corrected here so the basis is committed rather than conversational. The
   general rule stands: **a slice that cannot cite a committed sentence permitting what it does has
   not established its authorization basis, and saying so is part of the slice.**
+
+  ***`isaac_run_projection` IS NAMED HERE — ONE COMMIT AFTER THE TABLE SHIPPED, and that is the whole
+  point of the two corrections below.*** Twice now a slice has added a table to
+  `db_write.OWNED_TABLES` that no committed sentence in this file named — `isaac_runs`, found and
+  reported by the implementing slice, and the five submission-lifecycle tables, found only by an
+  independent review. **The third time it is a SMALLER correction and still a correction — and the
+  slice published a claim that it was not.** `db_write.py`, the Stage-2 contract and the `0005`
+  packet all said "named in the same change that creates it"; an independent review measured that
+  false by one commit (the table shipped in `6dce6fd`, §15 was updated in `8f7c650`), and all four
+  artifacts now carry the correction in place. **`isaac_run_projection`
+  (`0005_run_projection`)** is the per-experiment completeness claim for `isaac_runs`: one row per
+  experiment recording the `(rev, generation)` its run rows were projected from, how many were
+  written, and which projector wrote it.
+
+  **Why it has to exist at all, measured rather than argued:** `SELECT ... FROM isaac_runs WHERE
+  experiment_id = %s` returning zero rows means EITHER "this experiment has no runs" OR "its runs
+  were never projected", and both are reachable — the second is the normal state of every experiment
+  persisted before the shadow write shipped, and of every save in the window between a merge and the
+  operator applying the migration. A read cutover that treated zero rows as "no runs" would silently
+  delete every run of every pre-existing record and report success. The contract is
+  [`docs/isaac-runs-stage-2-contract.md`](docs/isaac-runs-stage-2-contract.md); the operator packet
+  is [`docs/migration-approval-packet-0005.md`](docs/migration-approval-packet-0005.md).
+
+  **What listing it covers, precisely:** creating it by an owner-applied migration, and writing it
+  through the ONE statement `experiment_repository.Q_UPSERT_RUN_PROJECTION`, inside the same
+  transaction and the same accepted branch as the run rows it describes. It covers **no read** —
+  exactly one statement in the application names the table and nothing reads it, pinned by test —
+  and **no** hosted application of `0005`. **Making `isaac_runs` a read source (Stage 2b) is still a
+  separate decision and is gated on the backfill having RUN with every one of its
+  `UNREADABLE`/`refused`/`failed` counts at 0, AND on the operator's two completeness
+  queries (`docs/migration-approval-packet-0005.md` §8A) both returning 0. ~~"the backfill
+  having RUN and reported `never_projected: 0`"~~ — **corrected 2026-08-20: no script prints
+  that word and none can, because the backfill deliberately never reads
+  `isaac_run_projection`.** The gate is a query an operator runs, not a number a script
+  prints, and the strikethrough is kept so this reads as a corrected claim rather than a
+  drifting one;
+  removing `runs` from the experiment document is a third decision and is justified by no
+  measurement in this repository.**
 
   ***The five submission-lifecycle tables were added to `db_write.OWNED_TABLES` before this list
   named them — the same failure as `isaac_runs`, a second time, and recorded rather than quietly
@@ -832,7 +927,7 @@ Out of scope unless explicitly approved:
   `test_the_packets_do_not_claim_a_hosted_application` **required that literal to be present**. The
   sentence named its own expiry condition (*"until the `postgres-migration` job runs"*); that job has
   since run and passed on `main` at `fe374c0` (Actions run `32099627898`), applying `0001`–`0004`
-  forward against a `postgres:18` container, exercising **27 of the 46 declared constraints** against
+  forward against a `postgres:18` container, exercising **41 of the 46 declared constraints** (27 when that sentence was written) against
   input each should reject, and proving the rollback order. *An earlier revision of this bullet said
   "every constraint"; that was measured and corrected — 17 declared constraint names appear nowhere in
   the workflow, so they are declared and unexercised. The packets' §12B lists them by name. Nothing
@@ -918,7 +1013,7 @@ amended §2 for exactly what is and is not permitted.
 | **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. **Do not read this row as covering the 2026-08-07 lift**: that authorizes storing experiments THIS APPLICATION CREATES in its own new tables. It authorizes no repository over `records`, no record loading, and no upload write. |
 | **Create Experiment durable persistence** (`isaac_experiments`) | **authorized 2026-08-07**, narrowly — see the scope note above. Implementation and local/CI testing only; **applying the migration to the hosted database is the owner's act, not the agent's.** Dean applied `0001_experiments` to the hosted database on **2026-08-09** ([evidence](docs/evidence/hosted-0001-verification-2026-08-09.md)) — which changes nothing about gate **G2**, gate **G3**, or the prohibition on an agent connecting to that database. ~~which changes nothing about `0002` (still unapplied and unauthorized for hosted application)~~ — **superseded 2026-08-12, see the next row.** |
 | **`0002_runs`** (the `isaac_runs` table) | **APPLIED TO THE HOSTED DATABASE BY DEAN, 2026-08-12 00:30 UTC** ([evidence](docs/evidence/hosted-0002-verification-2026-08-12.md); packet [`docs/migration-approval-packet-0002.md`](docs/migration-approval-packet-0002.md), STATUS + §12C). Both SHA-256 digests Dean reported were **recomputed here and MATCH** the committed files, so the bytes applied are the bytes Krish approved on 2026-08-11. Verified from the hosted server: table, PK, FK, five CHECKs, the index, no `ON DELETE`/`CASCADE`, row count **0**, idempotent re-run, app health OK / `postgres` / `durable`. **Operator testimony, not a captured artifact** — no agent connected to that database. **NOT reported, and named as gaps:** the `records` and `isaac_experiments` before/after counts (packet postchecks 1 and 2) and the hosted engine build string. **The table existing is NOT permission to write it** — the run write path is a later, separately-reviewed slice, and `db_write.OWNED_TABLES` listing `isaac_runs` "grants nothing on its own". |
-| **`0003_revisions` + `0004_submissions`** (the five submission-lifecycle tables) | **APPROVED BY THE PROJECT OWNER 2026-08-17; NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.** Two different people's acts — see the paragraph above and each packet's STATUS block. They are ONE decision (`0004` declares a foreign key into a table `0003` creates) and must be applied together or not at all. Proven forward, rollback and wrong-order-refusal against a `postgres:18` container in CI; **27 of the 46 declared constraints** are exercised there. Applying them is the operator's act, and no agent may do it. |
+| **`0003_revisions` + `0004_submissions`** (the five submission-lifecycle tables) | **APPROVED BY THE PROJECT OWNER 2026-08-17; NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.** Two different people's acts — see the paragraph above and each packet's STATUS block. They are ONE decision (`0004` declares a foreign key into a table `0003` creates) and must be applied together or not at all. Proven forward, rollback and wrong-order-refusal against a `postgres:18` container in CI; **41 of the 46 declared constraints** are exercised there (27 until 2026-08-19; three of the remaining five cannot be blamed individually because the table's equality CHECKs subsume its shape CHECKs). Applying them is the operator's act, and no agent may do it. |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
 Two separate **questions**, which Dean's guide is explicit about not conflating: **writing** to this

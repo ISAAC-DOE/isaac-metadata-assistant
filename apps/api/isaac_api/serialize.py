@@ -52,8 +52,21 @@ def warnings_to_dict(report: PortalWarningReport) -> dict:
     }
 
 
-def export_result_to_dict(result: ExportResult) -> dict:
-    """Serialize an ExportResult (reports always; record/sidecar when produced)."""
+def export_result_to_dict(result: ExportResult, *, record: dict | None = None) -> dict:
+    """Serialize an ExportResult (reports always; record/sidecar when produced).
+
+    ``record`` OVERRIDES ``result.record`` in the output, and exists for exactly one
+    caller: the export path, which writes a document the truth core did not produce.
+    ``routes._write_record`` applies the server-owned ``attribution.uploaded_by`` stamp
+    to a copy before writing (see :mod:`isaac_api.record_attribution`), so without this
+    the operation that performs the write would report a document differing from the
+    bytes it just produced, while a later read of ``/artifacts`` reported the truth.
+    An independent review measured that divergence.
+
+    It is an override rather than the default because ``result.record`` is right for
+    every other caller — a dry run, a per-unit verdict, a validation report — none of
+    which writes anything and none of which should imply a stamp that was not applied.
+    """
     out: dict = {
         "ok": result.ok,
         "draft_report": draft_report_to_dict(result.draft_report),
@@ -63,7 +76,9 @@ def export_result_to_dict(result: ExportResult) -> dict:
             else None
         ),
     }
-    if result.record is not None:
+    if record is not None:
+        out["record"] = record
+    elif result.record is not None:
         out["record"] = result.record
     if result.sidecar is not None:
         out["sidecar"] = result.sidecar
@@ -225,7 +240,13 @@ def _blocker_about(entry: dict):
     return entry.get("uri") or entry.get("blocker")
 
 
-def pending_to_list(draft: dict, demo_answers: dict, *, example_scope: bool = False) -> dict:
+def pending_to_list(
+    draft: dict,
+    demo_answers: dict,
+    *,
+    example_scope: bool = False,
+    entries: list | None = None,
+) -> dict:
     """The open blocking questions, each with its explicit inferability decision.
 
     ``example_scope`` gates the walkthrough example answer (see
@@ -253,9 +274,21 @@ def pending_to_list(draft: dict, demo_answers: dict, *, example_scope: bool = Fa
     re-check, which only ever ran over ``item.inferability``. ``infer_all``
     remains available to a caller that has a use for it; serving it by default was
     speculative surface, so it is gone rather than guarded.
+
+    ENTRIES OVERRIDE ``draft["pending"]``, and exist because this function was
+    RUN-BLIND. ``Experiment.pending()`` aggregates the record's own questions and every
+    run's, and withholds the record's own run-level ones once a run exists — while this
+    read ``draft["pending"]`` directly. So ``GET /pending`` and the ``pending_count`` on
+    the detail response disagreed the moment a record had a run: the screen a scientist
+    answers questions on showed the record's questions, which by then were the ones that
+    could no longer be answered into anything that ships, and hid the run's, which were
+    the real ones.
+
+    The default is unchanged, so every caller that legitimately holds one draft — a dry
+    run, the assistant's context — behaves exactly as before.
     """
     pending = []
-    for entry in draft.get("pending") or []:
+    for entry in (draft.get("pending") if entries is None else entries) or []:
         demo = _demo_answer_for(entry, demo_answers, example_scope=example_scope)
         pending.append(
             {
@@ -267,6 +300,33 @@ def pending_to_list(draft: dict, demo_answers: dict, *, example_scope: bool = Fa
                 "inferability": inferability.blocker_inferability(
                     entry, example_available=demo is not None
                 ).to_dict(),
+                # Carried through when present. `Experiment.pending()` tags a
+                # run-sourced entry so a caller can address the question to the run
+                # that owns it; dropping the tag here would leave a client unable to
+                # tell whose question it is answering.
+                "run_id": entry.get("run_id"),
+                "run_label": entry.get("run_label"),
+                # A KEY THAT IS UNIQUE ACROSS OWNERS, because `id` is NOT.
+                #
+                # `id` is the blocker KIND (or an asset URI) and it is the key a caller
+                # puts in the `answers` BODY, so it cannot be made unique without
+                # breaking the write contract. But three runs each needing a spectrum
+                # produce three entries whose `id`, `question` and `about` are
+                # byte-identical, and an independent review measured what a client does
+                # with that: the completion screen keys staged input, the skip set, its
+                # React keys and its "was this applied?" test off `id`, so answering one
+                # run's verdict was reported as NOT APPLIED (another run's identical
+                # entry was still in the list), one typed value was shared by every run's
+                # question, and skipping one skipped all of them.
+                #
+                # So: `id` stays the ANSWER key, `blocker_key` is the IDENTITY key. A
+                # record-level question's two values are equal, which keeps a zero-run
+                # record's payload semantically unchanged.
+                "blocker_key": (
+                    f"{entry.get('run_id')}:{blocker_id(entry)}"
+                    if entry.get("run_id")
+                    else blocker_id(entry)
+                ),
             }
         )
     return {"pending": pending}

@@ -30,6 +30,7 @@ from isaac_records.complete import (
     apply_answers,
     apply_corrections,
     is_descriptor_shaped,
+    is_qc_shaped,
     is_series_shaped,
     is_sha256_shaped,
 )
@@ -68,6 +69,8 @@ from . import sources
 from . import submission_store
 from . import submissions
 from . import transcript_capture as tc
+from . import record_attribution
+from .providers import assistant as providers_assistant
 from .providers import config as provider_config
 from .providers import refusal as providers_refusal
 from .providers import transcription as providers_transcription
@@ -407,6 +410,40 @@ _TUTORIAL_HEADER_DESCRIPTION = (
     "A malformed id is rejected with `422`, and an id that names no existing "
     "session with `404` — it never falls back to the ordinary workspace."
 )
+
+#: The refusal for an answer that belongs to a Run, on the RECORD's answer/edit
+#: operations. Declared as its own constant because an undeclared status on a published
+#: contract is a contract that is wrong: an independent review found all three routes
+#: below emitting a live `409` that `EXPECTED_RESPONSE_CODES` did not list, so the guard
+#: that exists to pin the contract was certifying one that omitted it.
+_R_BELONGS_TO_A_RUN: dict = {
+    409: {
+        "description": (
+            "This record has runs, and the answer names something a RUN owns — a "
+            "spectrum, a QC verdict, a descriptor, or an asset hash. Answering it here "
+            "would write a value no exported record reads, so nothing was written. The "
+            "body names every run and the operation that can take the answer: "
+            "`POST /api/experiments/{experiment_id}/runs/{run_id}/answers`.\n\n"
+            "The absorption edge is NOT among them. It lives in the record's implicit "
+            "derivations, which every run holding the record's values inherits, so "
+            "answering it on the record does reach those runs. A run that has recorded "
+            "any override does not receive it, and that is a limit of how derivations "
+            "are inherited rather than something this refusal can fix."
+        )
+    },
+}
+
+#: The refusal for adding a Run to a record already exported under its own identity.
+_R_ALREADY_EXPORTED_WITHOUT_RUNS: dict = {
+    409: {
+        "description": (
+            "This record has already been exported under its own identity. Adding a run "
+            "would move the exported identity onto the run and publish a second "
+            "official record with the same science, and no operation withdraws the "
+            "first, so nothing was written."
+        )
+    },
+}
 
 _R_TUTORIAL_SCOPE: dict = {
     404: {
@@ -2147,8 +2184,14 @@ def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: 
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
+    # `exp.pending()`, NOT `exp.draft` — see `serialize.pending_to_list`'s `entries`
+    # override. This route was run-blind while the detail response's `pending_count`
+    # was not, so the two disagreed the moment a record had a run.
     return serialize.pending_to_list(
-        exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+        exp.draft,
+        ws.load_demo_answers(),
+        example_scope=_example_scope(experiment_id),
+        entries=exp.pending(),
     )
 
 
@@ -2192,6 +2235,8 @@ def _correction_is_storable(key: str, value) -> bool:
         return isinstance(value, str)
     if key == "edge":
         return isinstance(value, (str, int, float))
+    if key == "qc":
+        return is_qc_shaped(value)
     # Anything else in the shaped body is an asset sha256, keyed by URI.
     #
     # `isinstance(value, str)` WAS NOT ENOUGH, and a reviewer measured what it let
@@ -2210,8 +2255,22 @@ def _answers_to_apply_shape(
     """Translate UI answers (keyed by blocker id/about) into ``apply_answers`` input.
 
     Only values literally present are forwarded; blank/missing answers are dropped, so the
-    core never invents. Asset blockers key on their URI; ``series``/``descriptor``/``edge``
-    key on their kind name.
+    core never invents. Asset blockers key on their URI;
+    ``series``/``descriptor``/``edge``/``qc`` key on their kind name.
+
+    ``qc`` WAS ABSENT FROM THIS LIST UNTIL 2026-08-19, and the omission was not cosmetic.
+    A ``qc`` blocker is raised whenever the source supplied no QC verdict to read
+    (``extract.draft_builder``) — independently of whether a series is present; it is the
+    export REFUSAL that is series-conditional (``draft_validator``). Conflating the two,
+    as an earlier revision of this paragraph did, makes the blocker sound narrower than it
+    is. It was the ONE blocker no request could answer — so a record created through this application's own
+    Create Experiment path could have every other question answered and still never
+    export, refused by the draft validator with *"measurement has series but qc verdict
+    has no evidence"*. The five canonical seeds hid it: their drafts are built offline
+    with ``qc`` already present. The core branch always existed and always validated the
+    enum (``complete.apply_answers`` / ``apply_corrections``); only the forward was
+    missing. See :func:`isaac_records.complete.is_qc_shaped` for why the storability rule
+    lives there rather than being restated here.
 
     ``edit_only`` NARROWS THE ASSET KEY SET TO ASSETS THAT ACTUALLY EXIST, and it exists
     because the union below was measured answering **200 about a write that could not
@@ -2248,10 +2307,157 @@ def _answers_to_apply_shape(
             continue
         if key in asset_uris:
             out["asset_sha256"][key] = value
+        elif key == "qc":
+            # SCREENED ON THE `/answers` PATH ONLY, and the asymmetry is deliberate in
+            # both directions.
+            #
+            # WHY `/answers` SCREENS: it does not run `_correction_is_storable`; it
+            # relies on the core leaving an unusable answer's blocker OPEN, which
+            # `apply_answers` does for an off-enum `status`. It did NOT do that for the
+            # EVIDENCE note — the qc branch assigned any truthy `evidence` straight onto
+            # `measurement.qc.evidence`, so `{"status": "valid", "evidence": {...}}`
+            # cleared the blocker and stored a dict where the schema declares a string.
+            # Screening here is what stops a 200 about a record official validation
+            # would later reject.
+            #
+            # WHY `/edit` DOES NOT: that path DOES screen, one layer down, and it needs
+            # the key to arrive in order to do so. Screening it away here made
+            # `_has_correction_target` answer False, so an unusable verdict came back as
+            # `unrecognized_field` — "this application does not know that field" — when
+            # the field is recognised and only the VALUE is unusable. That distinction
+            # is this route's own stated doctrine, and getting it wrong tells a
+            # scientist to look for a misspelling that is not there.
+            if edit_only or is_qc_shaped(value):
+                out[key] = value
         elif key in ("series", "descriptor", "descriptor_label", "edge"):
             out[key] = value
         # Unknown keys are ignored — never invented into the draft.
     return out
+
+
+#: The shaped-answer keys whose value lands in a RUN-LEVEL draft block. Derived from
+#: `workspace.block_level` rather than listed, so a block that changes level cannot
+#: leave a stale copy of the rule here.
+#:
+#: ``edge`` IS EXEMPT, AND THIS ENTRY HAS NOW BEEN WRONG IN BOTH DIRECTIONS. Both
+#: mistakes are recorded because the second was made while fixing the first.
+#:
+#: **First version — exempt, on a false premise.** It said ``implicit`` is merged onto
+#: EVERY run, so an edge answered on the record always reaches it. That is not what
+#: ``resolved_run_draft`` does: ``inherit=not _diverges_from_experiment(resolutions)``,
+#: and one override — even a no-op one — withholds all of it. Measured: ``POST /edit
+#: {"edge": "L3"}`` answering **200** with ``changed_fields: ['edge']`` against a run
+#: whose composed ``implicit`` was ``[]``.
+#:
+#: **Second version — refused, which was WORSE.** Refusing it on the record made ``edge``
+#: answerable by NO route at all: the run-level route accepts the key and writes it into
+#: the RUN's ``implicit``, where nothing reads it either (measured: ``200``,
+#: ``changed: false``, the composed ``implicit`` still holding the record's value). And
+#: the refusal body then made two false claims about it — that there is an operation that
+#: can take the answer, and that answering on the record writes a value no exported
+#: record reads. For a non-diverging run the second is simply untrue: inheritance was
+#: ACTIVE in the measurement. Trading a 200-that-writes-nothing for a 409 pointing at a
+#: 200-that-writes-nothing is not a fix.
+#:
+#: **So it is exempt again, with the truth stated rather than a premise assumed.** An
+#: edge answered on the record reaches every run that holds the record's values, and
+#: does NOT reach a run that has diverged at any experiment-level address. That gap is a
+#: property of ``_merge_implicit`` — a derivation can outlive the value it was derived
+#: from, which is why that function withholds — and it is not something this refusal can
+#: close. Closing it means either making ``edge`` a run-level block or giving
+#: ``_merge_implicit`` a per-address rule, and both are their own slice.
+#:
+#: No UI path sends ``edge`` (no ``edge`` blocker exists — ``draft_builder`` emits a null
+#: ``implicit`` entry, never a pending one), so the exemption's cost falls only on a
+#: direct API or MCP caller, and it is a 200 that reaches the runs that can receive it.
+#:
+#: `timestamp` is bookkeeping, not an answer.
+_RUN_LEVEL_ANSWER_BLOCK = {
+    "series": "series",
+    "qc": "qc",
+    "descriptor": "descriptors_outputs",
+    "descriptor_label": "descriptors_outputs",
+}
+
+#: Answer keys that would be run-owned but live outside a top-level run-level block.
+#: EMPTY, and the long note above says why: the only candidate was ``edge``, and
+#: refusing it made it answerable by no route at all. The tuple is kept rather than
+#: deleted so a future key of that shape has somewhere to go, with the argument for
+#: why it belongs there written directly above it.
+_RUN_LEVEL_ANSWER_KEYS_WITHOUT_A_BLOCK: tuple[str, ...] = ()
+
+
+def _run_level_keys_in(apply_shape: dict) -> list[str]:
+    """The keys in this shaped body that a RUN owns rather than the record.
+
+    Asset hashes count, because ``assets`` is a run-level block: an asset sha answered
+    on the record after a run exists lands in a block ``resolved_run_draft`` never reads.
+    """
+    keys = sorted(
+        [
+            key
+            for key, block in _RUN_LEVEL_ANSWER_BLOCK.items()
+            if key in apply_shape and ws.block_level(block) == ws.LEVEL_RUN
+        ]
+        + [key for key in _RUN_LEVEL_ANSWER_KEYS_WITHOUT_A_BLOCK if key in apply_shape]
+    )
+    if apply_shape.get("asset_sha256") and ws.block_level("assets") == ws.LEVEL_RUN:
+        keys.extend(sorted(apply_shape["asset_sha256"]))
+    # SORTED, so the refusal body is stable. It was in `_RUN_LEVEL_ANSWER_BLOCK`'s
+    # declaration order, which is deterministic but arbitrary — a client comparing
+    # `keys` would have been comparing against a literal nobody chose. Asset URIs are
+    # appended after the named keys and sorted among themselves, so the two kinds stay
+    # visually separable in a message a person reads.
+    return keys
+
+
+def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | None:
+    """Refuse a run-owned answer sent to the RECORD, once the record has runs.
+
+    THE DEFECT THIS CLOSES, measured over HTTP by an independent review. ``series``,
+    ``qc``, ``assets`` and ``descriptors_outputs`` are run-level blocks, so
+    ``resolved_run_draft`` reads them off the RUN. Once a run exists, an answer written
+    into ``exp.draft`` reaches no exported record — and nothing said so::
+
+        qc = compromised + "Beam dropped during scan 3; spectrum unusable."
+        POST /runs                                        -> 201
+        POST /edit {"qc": {"status": "valid", ...}}        -> 200, status ready_to_export
+        POST /export                                      -> ok: true
+        ON DISK measurement.qc = {"status": "compromised", "evidence": "Beam dropped …"}
+
+    The correction was accepted, reported as applied, and published nothing; the record
+    kept a verdict its own sidecar then contradicted, and ``artifact.state`` read
+    ``current``. A 200 about a write that could not happen is the exact shape this route
+    already refuses for a pending asset uri; this is the same refusal, one entity up.
+
+    It names the run and the route that CAN take the answer, because refusing without
+    that would leave a multi-run record unfinishable — which is a different defect, not
+    a fix.
+    """
+    if not exp.runs:
+        return None
+    offending = _run_level_keys_in(apply_shape)
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "belongs_to_a_run",
+            "experiment_id": exp.id,
+            "keys": offending,
+            "runs": [
+                {"run_id": run.id, "run_label": run.label} for run in exp.sorted_runs()
+            ],
+            "answer_at": "POST /api/experiments/{experiment_id}/runs/{run_id}/answers",
+            "message": (
+                "This record has runs, and each run is a record of its own. A spectrum, "
+                "a QC verdict, a descriptor and an asset hash belong to the run that "
+                "measured them, so answering them here would write a value no exported "
+                "record reads. Send them to the run instead. Nothing was written."
+            ),
+        },
+    )
+
 
 
 @router.post(
@@ -2270,13 +2476,23 @@ def _answers_to_apply_shape(
     ),
     response_description=(
         "The refreshed blocking questions, status, revision metadata, workflow, "
-        "and the downstream invalidation, with the new `ETag`."
+        "and the downstream invalidation, with the new `ETag`.\n\n"
+        "ONE LIMIT THAT ONLY A `200` CAN CARRY, AND IT IS STATED HERE BECAUSE A "
+        "CALLER WHO SUCCEEDS NEVER READS THE `409`. On a record that has runs, "
+        "`edge` is answerable here and is deliberately not among the keys the "
+        "`409` refuses: it lives in the record's implicit derivations, which every "
+        "run holding the record's values inherits, so answering it here does reach "
+        "those runs. A run that has recorded ANY override — even one that changed "
+        "nothing — inherits none of them, so for that run this write reaches no "
+        "exported record. `changed_fields` reporting `edge` is a true statement "
+        "about the record's own draft and is not a claim about any run."
     ),
     responses={
         **_R_STORAGE_UNAVAILABLE,
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
+        **_R_BELONGS_TO_A_RUN,
     },
 )
 def post_answers(
@@ -2334,6 +2550,9 @@ def post_answers(
         ]
         timestamp = _now_iso()
         apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
+        refusal = _refuse_run_level_on_the_record(exp, apply_shape)
+        if refusal is not None:
+            return refusal
         exp.draft = apply_answers(exp.draft, apply_shape)
         # answer_log is EXCLUDED from the rev signature: log the submission only when it
         # actually changes the authoritative draft, so an identical re-entry is neither
@@ -2358,8 +2577,17 @@ def post_answers(
             pre_steps=pre_steps,
             post_exp=exp,
         )
+        # `exp.pending()`, NOT `exp.draft` — the SAME correction `GET /pending` needed.
+        # An independent review measured the consequence of missing these two: after a
+        # run existed, this response came back `pending: []` while the detail response
+        # said three questions remained, and `GuidedCompletion` renders "All blockers
+        # resolved" on an empty list. The screen a scientist answers questions on told
+        # them they were finished, about a record that could not export.
         result = serialize.pending_to_list(
-            exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+            exp.draft,
+            ws.load_demo_answers(),
+            example_scope=_example_scope(experiment_id),
+            entries=exp.pending(),
         )
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
@@ -2372,17 +2600,127 @@ def post_answers(
 # --- 7b. edit (correct an already-answered field) -----------------------------
 
 
+#: Which pending BLOCKER KIND an ``/edit`` answer key would be correcting. Assets are
+#: absent because :func:`_answers_to_apply_shape` already narrows them structurally on
+#: the ``edit_only`` path — ``asset_uris = stored_uris``, so an asset nothing has
+#: answered is dropped before it reaches the core. ``edge`` is absent because it
+#: corresponds to no blocker at all and is therefore never "unanswered".
+_CORRECTABLE_KEY_KINDS: dict[str, str] = {
+    "series": "series",
+    "descriptor": "descriptor",
+    "descriptor_label": "descriptor",
+    "qc": "qc",
+}
+
+#: Where in a draft the value each of those keys corrects actually LIVES. Consulted
+#: alongside the pending list, never instead of it — see
+#: :func:`_refuse_correcting_an_unanswered_key` for why both are needed.
+_CORRECTABLE_KEY_STORAGE: dict[str, str] = {
+    "series": "series",
+    "descriptor": "descriptors_outputs",
+    "descriptor_label": "descriptors_outputs",
+    "qc": "qc",
+}
+
+#: The refusal for correcting something nothing has answered yet.
+_R_NOT_YET_ANSWERED: dict = {
+    422: {
+        "description": (
+            "The body named a field that is still an OPEN question, so there is "
+            "nothing to correct and nothing was written. Answer it through "
+            "`/answers` instead — the body names every such key and the operation "
+            "that takes it."
+        )
+    },
+}
+
+
+def _refuse_correcting_an_unanswered_key(draft: dict, answers_by_id: dict):
+    """Refuse a CORRECTION of a key that is still an open question. ``None`` to proceed.
+
+    THE DEFECT THIS CLOSES, measured over MCP by an independent review before it was
+    written. ``/edit`` admitted ``series``, ``descriptor`` and ``qc`` unconditionally,
+    while ``apply_corrections`` deliberately never touches ``pending`` (its own
+    docstring says so). So correcting a question nobody had answered returned::
+
+        POST /edit {"series": [...]}   ->  200, changed_fields: ["series"]
+        GET  /pending                  ->  "series" STILL OPEN
+
+    The value was written into the draft, carrying a fresh ``user_confirmation``, and
+    the question the scientist was looking at did not move. That is a ``200`` about a
+    write that resolved nothing — the exact class the sibling refusals on this route
+    exist to close, reachable one key over. Export stayed gated by ``pending``, so no
+    invalid record could ship; what shipped was a false report.
+
+    IT IS A TYPED REFUSAL RATHER THAN A DROPPED KEY, and that distinction is this
+    route's own doctrine. Dropping the key would make :func:`_has_correction_target`
+    answer ``False`` and produce ``unrecognized_field`` — "this application does not
+    know that field" — when the field is recognised and only its STATE is wrong. That
+    is the same mistake the ``qc`` screening comment in
+    :func:`_answers_to_apply_shape` records having made once already: it sends a
+    scientist looking for a misspelling that is not there.
+
+    ASSETS AND ``edge`` ARE DELIBERATELY OUT OF SCOPE, each for its own reason. An
+    unanswered asset is already dropped structurally on the ``edit_only`` path, so it
+    never gets here. ``edge`` corresponds to no blocker, so "unanswered" is not a
+    state it can be in.
+
+    **BOTH CONDITIONS ARE REQUIRED, AND THE SECOND WAS FOUND BY A TEST GOING RED
+    RATHER THAN BY THINKING ABOUT IT.** "Is the question open" alone is WRONG for a
+    LEGACY RUN: a run created before ``_seed_for_new_run`` existed carries no
+    ``pending`` key, so ``_apply_to_run`` materialises one from
+    ``ws.run_questions`` — which derives it from the blank-draft template and
+    therefore lists ``qc`` even for a run that already HOLDS a verdict. Refusing
+    there would refuse a legitimate correction of a real stored value, and
+    ``test_editing_a_legacy_run_does_not_erase_its_questions_either`` said so
+    immediately.
+
+    So a key is refused only when it is BOTH listed as open AND absent from the
+    draft. That is structurally the same rule the asset path already applies
+    (``asset_uris = stored_uris``): what makes a correction legitimate is that there
+    is something stored to correct.
+    """
+    open_kinds = {
+        entry.get("kind")
+        for entry in (draft.get("pending") or [])
+        if isinstance(entry, dict)
+    }
+    offending = sorted(
+        key
+        for key, value in (answers_by_id or {}).items()
+        if value not in (None, "")
+        and _CORRECTABLE_KEY_KINDS.get(key) in open_kinds
+        and not draft.get(_CORRECTABLE_KEY_STORAGE.get(key, key))
+    )
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "not_yet_answered",
+            "keys": offending,
+            "answer_at": "POST /api/experiments/{experiment_id}/answers",
+            "message": (
+                "Each of these is still an open question, so there is no confirmed "
+                "value to correct. Correcting one would store the value and leave "
+                "the question open, which would report a change that resolved "
+                "nothing. Answer it instead. Nothing was written."
+            ),
+        },
+    )
+
+
 def _has_correction_target(apply_shape: dict) -> bool:
     """True iff ``apply_shape`` names at least one recognized correction field.
 
-    An asset sha256 (keyed by a known uri), a series/descriptor/edge value. A bare
+    An asset sha256 (keyed by a known uri), a series/descriptor/edge/qc value. A bare
     ``descriptor_label`` (or only ``timestamp``/``asset_sha256:{}``) is NOT an
     actionable correction — an edit body that reduces to nothing recognized is
     rejected (422) rather than silently no-op'd, so an unknown field is never
     quietly swallowed.
     """
     return bool(apply_shape.get("asset_sha256")) or any(
-        k in apply_shape for k in ("series", "descriptor", "edge")
+        k in apply_shape for k in ("series", "descriptor", "edge", "qc")
     )
 
 
@@ -2478,6 +2816,7 @@ def _fields_the_shape_carries(apply_shape: dict, submitted_fields: list[str]) ->
                 }
             },
         },
+        **_R_BELONGS_TO_A_RUN,
     },
 )
 def post_edit(
@@ -2538,6 +2877,16 @@ def post_edit(
         apply_shape = _answers_to_apply_shape(
             body.get("answers") or {}, exp.draft, timestamp, edit_only=True
         )
+        refusal = _refuse_run_level_on_the_record(exp, apply_shape)
+        if refusal is not None:
+            return refusal
+        # BEFORE the correction-target check, because the two refusals say different
+        # things and this one is the more specific: "still open" rather than "not
+        # recognised". The order is what keeps a scientist from being sent to look
+        # for a misspelling in a field name that is spelled correctly.
+        refusal = _refuse_correcting_an_unanswered_key(exp.draft, body.get("answers") or {})
+        if refusal is not None:
+            return refusal
         if not _has_correction_target(apply_shape):
             # No recognized field to correct — never invent one.
             return JSONResponse(
@@ -2620,8 +2969,17 @@ def post_edit(
             pre_steps=pre_steps,
             post_exp=exp,
         )
+        # `exp.pending()`, NOT `exp.draft` — the SAME correction `GET /pending` needed.
+        # An independent review measured the consequence of missing these two: after a
+        # run existed, this response came back `pending: []` while the detail response
+        # said three questions remained, and `GuidedCompletion` renders "All blockers
+        # resolved" on an empty list. The screen a scientist answers questions on told
+        # them they were finished, about a record that could not export.
         result = serialize.pending_to_list(
-            exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+            exp.draft,
+            ws.load_demo_answers(),
+            example_scope=_example_scope(experiment_id),
+            entries=exp.pending(),
         )
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
@@ -3685,6 +4043,134 @@ def list_runs(
     }
 
 
+def _seed_for_new_run(exp) -> dict:
+    """The draft a run being added to ``exp`` should START with.
+
+    ``workspace.new_run`` defaults a run's draft to ``{}`` and says why: *"the caller
+    that creates a run is the one that knows whether the blank-draft pending blockers
+    apply."* This is that caller, and the answer has two halves.
+
+    THE DEFECT THIS EXISTS TO CLOSE, measured over HTTP before it was written. A run
+    created with an empty draft carries no blockers, so ``Experiment.pending()`` — which
+    aggregates the experiment's own plus each run's own — counted zero, and the product
+    said so::
+
+        answer every question, no runs   -> pending 0 · status ready_to_export   (true)
+        add one run                      -> pending 0 · status in_review
+                                            workflow: complete_metadata COMPLETED,
+                                                      review_evidence  COMPLETED
+        POST /export                     -> ok: false · "'descriptors' is a required
+                                            property"
+
+    So the screen reported the metadata complete and the evidence reviewed, listed
+    nothing to do, and could not export — for a reason no surface named. Worse, the
+    answers the scientist had already given were **silently dropped from the record**:
+    ``series``, ``qc``, ``assets`` and ``descriptors_outputs`` are RUN-LEVEL blocks
+    (``workspace.RUN_LEVEL_BLOCKS``), so ``resolved_run_draft`` reads them off the RUN,
+    and the experiment's copies stopped being part of any exported record the moment a
+    run existed.
+
+    **THE FIRST RUN ADOPTS EVERY RUN-LEVEL ADDRESS THE EXPERIMENT HOLDS — the four
+    blocks, the run-level FIELDS, and the open questions.** (An earlier version of this
+    sentence said "values AND open questions" while copying only the blocks; the fields
+    were silently lost and the export still said `ok: true`. Naming the three kinds
+    explicitly is what stops that reading again.) A zero-run experiment IS its own record (``record_id = exp.id``);
+    adding the first run moves the exported identity onto that run. If nothing carried
+    the content across, the act of adding a run would destroy evidenced scientific
+    values a person had entered, and would drop their unanswered questions with them.
+    The experiment's own pending list is carried rather than the template's, so a
+    per-file ``asset`` blocker — which the template has none of, because a blank record
+    names no files — survives too.
+
+    **THE SECOND RUN IS NOT SEEDED**, and that asymmetry is the no-guessing rule rather
+    than an inconsistency. Copying the experiment's series onto a second run would
+    assert that two runs measured the same spectrum, which is a scientific claim this
+    application has no evidence for — exactly the invention ``CLAUDE.md`` §5 forbids.
+    The first run's case carries no such claim: there was one measurement, and it is the
+    one the run now exports. A later run therefore starts with the run-level questions
+    from :func:`experiment_repository.blank_draft`, imported rather than re-spelled so a
+    fourth added there reaches a run without anybody remembering this function exists.
+
+    Nothing is REMOVED from the experiment. This function is pure and the caller writes
+    only the run. Leaving the experiment's copy in place keeps the change reversible —
+    removing the run does not take the values with it — and keeps this out of the
+    business of editing a document it was not asked to edit.
+
+    **~~"The copy is inert: ``resolved_run_draft`` never reads it once a run exists."~~
+    THAT SENTENCE WAS MATERIALLY FALSE, and an independent review named it as the
+    sentence that made a Critical defect invisible to a reader of this function.** The
+    four run-level BLOCKS are indeed not read from the experiment once a run exists —
+    but ``resolved_run_draft`` merges the experiment's ``block_evidence`` onto every
+    run UNCONDITIONALLY, and its ``implicit`` onto every run that has not diverged
+    (``inherit=not _diverges_from_experiment(resolutions)``; one override, even a no-op
+    one, withholds all of it). *An earlier version of this correction said both were
+    merged "onto every run", which is the same imprecision in the other direction and
+    was found by the next review.* So a correction written into ``exp.draft`` after a run
+    existed put its "Correct the QC status? → valid" confirmation into the record's
+    SIDECAR while the verdict itself stayed behind, and the published record asserted a
+    verdict its own evidence trail denied.
+
+    The copy is **unreachable by the record's write routes, and partially readable at
+    export**. Both halves matter, which is why they are now written out. The write side
+    is closed by :func:`_refuse_run_level_on_the_record`; ``Experiment.pending``
+    withholds the questions, but only for a kind some run actually carries, so a
+    question is never hidden from both.
+    """
+    if not exp.runs:
+        seed: dict = {}
+        exp_draft = exp.draft if isinstance(exp.draft, dict) else {}
+        for block in ws.RUN_LEVEL_BLOCKS:
+            if block in exp_draft:
+                seed[block] = copy.deepcopy(exp_draft[block])
+        # THE FIELDS TOO, NOT ONLY THE BLOCKS — and this half was missing, which an
+        # independent review measured as the MORE dangerous of the two. The block half
+        # failed loudly at export (`'descriptors' is a required property`), which is how
+        # it was found; the field half returns `ok: true` and simply drops evidenced
+        # values. Measured on a fully-evidenced record, before and after `POST /runs`:
+        # `context.environment`, `context.temperature_K`,
+        # `context.thermodynamics.atmosphere` and both `timestamps.acquired_*` gone from
+        # the exported record, twelve sidecar evidence keys with them, export still ok.
+        #
+        # `field_level` is asked per key rather than iterating `RUN_LEVEL_FIELD_PATHS`,
+        # because `context` is a PREFIX there and the draft's keys are full paths.
+        exp_fields = exp_draft.get("fields")
+        if isinstance(exp_fields, dict):
+            carried = {
+                path: copy.deepcopy(envelope)
+                for path, envelope in exp_fields.items()
+                if isinstance(path, str) and ws.field_level(path) == ws.LEVEL_RUN
+            }
+            if carried:
+                seed["fields"] = carried
+        # THE SIX `system.configuration.*` FIELDS ARE DELIBERATELY NOT CARRIED. They are
+        # `unclassified` — neither experiment-level nor run-level — because whether two
+        # runs of one experiment may legitimately differ in detector model is a
+        # scientific question this repository has no answer to
+        # (`docs/run-scope-decision-packet.md`, open for Angel). Copying them onto a run
+        # would answer it by accident, in the direction that is harder to undo. The cost
+        # is stated rather than hidden: on the fan-out path they are dropped from the
+        # exported record, which is the pre-existing behaviour of every unclassified
+        # field and is not introduced here.
+        seed["pending"] = copy.deepcopy(
+            [
+                entry
+                for entry in (exp_draft.get("pending") or [])
+                if ws.blocker_is_run_level(entry)
+            ]
+        )
+        return seed
+
+    from .experiment_repository import blank_draft  # noqa: PLC0415 - avoids a cycle
+
+    return {
+        "pending": [
+            copy.deepcopy(entry)
+            for entry in blank_draft()["pending"]
+            if ws.blocker_is_run_level(entry)
+        ]
+    }
+
+
 @router.post(
     "/experiments/{experiment_id}/runs",
     tags=[TAG_EXPERIMENTS],
@@ -3696,9 +4182,24 @@ def list_runs(
         "one official ISAAC record.\n\n"
         "Adding a run rewrites the record, so this requires the RECORD's current "
         "`ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is "
-        "`412` with nothing written. The new run starts empty: record-level values "
-        "are never copied down into it, and no scientific value is invented. Its "
-        "`label` may be supplied; when "
+        "`412` with nothing written.\n\n"
+        "THE FIRST RUN ADOPTS THE RECORD'S PER-RUN CONTENT; A LATER RUN DOES NOT. A "
+        "record with no runs is its own record, so adding the first moves the exported "
+        "identity onto that run — and the spectrum, the QC verdict, the descriptors, the "
+        "assets and the run-level context and timing values are read off the RUN at "
+        "export. Without carrying them across, adding a run would silently remove "
+        "everything already recorded from every record this one publishes. A SECOND run "
+        "receives none of it: copying one run's spectrum onto another would assert that "
+        "two runs measured the same thing, which nothing here evidences. Open questions "
+        "travel the same way, so nothing a person still owes is lost either.\n\n"
+        "Record-LEVEL values are still never copied down — they are inherited by "
+        "reference at read time — and no scientific value is invented anywhere. Six "
+        "`system.configuration.*` fields are carried by neither route because their "
+        "scope is an open scientific question.\n\n"
+        "This is refused with `409` on a record that has ALREADY been exported without "
+        "runs: adding one would publish a second official record with the same science, "
+        "and no operation withdraws the first.\n\n"
+        "Its `label` may be supplied; when "
         "it is omitted or blank the server assigns the next `Run N`, and a label "
         "that is not a string, or one JSON cannot represent (a lone surrogate), is "
         "rejected with `422` rather than coerced.\n\n"
@@ -3708,7 +4209,13 @@ def list_runs(
         "The newly created run and the record's new revision, with the record's "
         "new `ETag`."
     ),
-    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
+        **_R_PRECONDITION,
+        **_R_ALREADY_EXPORTED_WITHOUT_RUNS,
+    },
 )
 def post_run(
     scope: TutorialScopeDep,
@@ -3745,7 +4252,38 @@ def post_run(
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
             return precondition
-        run = exp.add_run(label=label)
+        # ADDING A RUN TO AN ALREADY-EXPORTED ZERO-RUN RECORD IS REFUSED, and an
+        # independent review is why. A zero-run record exports under its OWN id; the
+        # first run moves the exported identity onto the run. Before adoption the
+        # second export refused (the run had no descriptors), so the question never
+        # arose. With adoption it succeeds, and the measured result was TWO official
+        # ISAAC records with different ids, identical science, no `links` relation
+        # between them, and nothing on any surface disclosing the duplication.
+        #
+        # The alternatives were considered and are worse. Pruning the earlier record
+        # deletes a published artifact — and `_materialise_pending_units`' keep-set
+        # protects `exp.id` unconditionally, deliberately, so that a legacy 1:1 artifact
+        # survives. Emitting a link between them invents a relation the records do not
+        # support. Refusing states the real constraint: the record has already been
+        # published under its own identity, and this application has no operation that
+        # unpublishes one.
+        if not exp.runs and exp.exported():
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "already_exported_without_runs",
+                    "experiment_id": exp.id,
+                    "record_id": exp.record_id,
+                    "message": (
+                        "This record has already been exported under its own identity. "
+                        "Adding a run would move the exported identity onto the run and "
+                        "publish a second official record with the same science, and "
+                        "there is no operation that withdraws the first. Nothing was "
+                        "written."
+                    ),
+                },
+            )
+        run = exp.add_run(label=label, draft=_seed_for_new_run(exp))
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this run was not added
@@ -4617,6 +5155,282 @@ def post_run_override_clear(
             return stale  # another writer won the race; this clear was not applied
         response.headers["ETag"] = f'"{run.version_token()}"'
         return {"run": _run_view(exp, run), "cleared": cleared}
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/answers",
+    tags=[TAG_EXPERIMENTS],
+    summary="Answer One Run's Blocking Questions",
+    description=(
+        "Applies caller-supplied answers to ONE RUN's open blocking questions and "
+        "returns the refreshed question list for the whole record, its status, the "
+        "record's new revision metadata, the derived workflow, and the downstream "
+        "invalidation.\n\n"
+        "WHY THIS EXISTS SEPARATELY FROM THE RECORD'S OWN `/answers`. A spectrum, a "
+        "QC verdict, a descriptor and an asset hash are per-RUN: each run is one "
+        "official ISAAC record, and the record's composed draft reads those blocks "
+        "off the run. Answering them on the record once runs exist would write a "
+        "value no exported record reads, so that route refuses them with `409 "
+        "belongs_to_a_run` and names this one.\n\n"
+        "`If-Match` is THE RUN's `ETag`, exactly as `GET .../runs/{run_id}` returned "
+        "it — not the record's. The two are different validators and the record's "
+        "will not match.\n\n"
+        "The keys are the same keys the record's `/answers` takes, and come from "
+        "`GET /api/experiments/{experiment_id}/pending`, where a run-owned question "
+        "carries the `run_id` it belongs to. An answer that names no open question "
+        "on THIS run is ignored rather than invented, exactly as on the record."
+    ),
+    response_description=(
+        "The record's refreshed blocking questions, status, revision metadata, "
+        "workflow and invalidation, with the RECORD's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_RUN_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
+def post_run_answers(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"answers\": {<key>: <value>}}`. Omitting "
+            "`confirmed_by_user: true` is rejected with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description="Required. THE RUN's current `ETag` — not the record's.",
+    ),
+):
+    return _apply_to_run(
+        scope=scope,
+        experiment_id=experiment_id,
+        run_id=run_id,
+        response=response,
+        body=body,
+        if_match=if_match,
+        correcting=False,
+    )
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/edit",
+    tags=[TAG_EXPERIMENTS],
+    summary="Correct One Run's Already-Answered Field",
+    description=(
+        "Overwrites a value ONE RUN has already confirmed, recording a fresh user "
+        "confirmation beside the previous one rather than replacing it. Same key set "
+        "and same refusals as the record's `/edit`; `If-Match` is THE RUN's `ETag`.\n\n"
+        "A body that names no editable field is `422` rather than a silent no-op, and "
+        "a recognised field carrying a value the store cannot keep is `422` "
+        "`invalid_field_value` — the value was the problem, not the field name."
+    ),
+    response_description=(
+        "The record's refreshed questions, status, revision metadata, workflow and "
+        "invalidation, with the RECORD's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_RUN_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
+def post_run_edit(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(..., description="`{\"confirmed_by_user\": true, \"answers\": {...}}`."),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description="Required. THE RUN's current `ETag` — not the record's.",
+    ),
+):
+    return _apply_to_run(
+        scope=scope,
+        experiment_id=experiment_id,
+        run_id=run_id,
+        response=response,
+        body=body,
+        if_match=if_match,
+        correcting=True,
+    )
+
+
+def _apply_to_run(
+    *, scope, experiment_id, run_id, response, body, if_match, correcting: bool
+):
+    """The shared body of the two run-level write routes.
+
+    ONE FUNCTION, because the two differ only in which core writer they call and in
+    what an unusable value means. Two copies of a lock/precondition/save sequence is
+    how a precondition ends up enforced on one path and not the other.
+
+    THE LOCK IS PER RECORD, not per run — runs live inside the record's document, so
+    two runs of one record serialise against each other, which is exactly what makes
+    their independent `If-Match` validators safe. That is the same rule `patch_run`
+    states and follows.
+
+    THE PRECONDITION IS THE RUN'S. A run carries its own version token, so a client
+    editing run B is not defeated by a concurrent write to run A — and a client
+    holding the RECORD's token cannot use it here, which is deliberate: it would let a
+    caller write a run it never read.
+    """
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)
+        run = exp.get_run(run_id)
+        if run is None:
+            return _run_not_found(experiment_id, run_id)
+        if body.get("confirmed_by_user") is not True:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "confirmation_required",
+                    "message": (
+                        "confirmed_by_user must be true to correct a field."
+                        if correcting
+                        else "confirmed_by_user must be true to apply answers."
+                    ),
+                },
+            )
+        precondition = _check_if_match(if_match, _RunPrecondition(run, exp.id))
+        if precondition is not None:
+            return precondition
+
+        pre_steps = _workflow_for(exp)["ordered_steps"]
+        submitted_fields = [
+            k for k, v in (body.get("answers") or {}).items() if v not in (None, "")
+        ]
+        timestamp = _now_iso()
+        run_draft = run.draft if isinstance(run.draft, dict) else {}
+        # MATERIALISE A LEGACY RUN'S QUESTIONS BEFORE WRITING. A run created before
+        # `_seed_for_new_run` existed has no `pending` key, and `apply_answers` iterates
+        # that key and then assigns it back unconditionally — so on such a draft it
+        # matched no branch, applied NOTHING, and wrote `[]`. Measured: answering that
+        # run's QC verdict returned 200 reporting `pending: []`, stored `qc: None`,
+        # erased the derived questions permanently, and left the record claiming nothing
+        # was pending while its export refused. A 200 that drops the answer and destroys
+        # the question is the worst outcome available.
+        #
+        # `ws.run_questions` is the SAME derivation `Experiment.pending()` reads, so what
+        # a scientist was shown is exactly what is now stored — this makes the derived
+        # list durable rather than inventing a second one.
+        if "pending" not in run_draft:
+            run_draft = {**run_draft, "pending": ws.run_questions(run)}
+        apply_shape = _answers_to_apply_shape(
+            body.get("answers") or {}, run_draft, timestamp, edit_only=correcting
+        )
+        if correcting:
+            # THE RUN'S OWN QUESTIONS, not the record's. `run_draft` is what
+            # `_answers_to_apply_shape` was just given, and it carries the
+            # materialised `pending` for this run — so "still open" is asked of the
+            # run that owns the value, which is the only level at which the question
+            # means anything once a record has runs.
+            refusal = _refuse_correcting_an_unanswered_key(
+                run_draft, body.get("answers") or {}
+            )
+            if refusal is not None:
+                return refusal
+            if not _has_correction_target(apply_shape):
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": "unrecognized_field",
+                        "message": "No editable field was recognized in the request.",
+                    },
+                )
+            wrong_typed = [
+                key
+                for key, value in apply_shape.items()
+                if key not in ("timestamp", "asset_sha256")
+                and not _correction_is_storable(key, value)
+            ] + [
+                uri
+                for uri, sha in (apply_shape.get("asset_sha256") or {}).items()
+                if not _correction_is_storable(uri, sha)
+            ]
+            if wrong_typed:
+                # The record route's refusal verbatim — same error, same keys, same
+                # deliberate silence about the cause. Two different messages for one
+                # condition is how a client ends up branching on prose.
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": "invalid_field_value",
+                        "key": wrong_typed[0],
+                        "keys": wrong_typed,
+                        "message": (
+                            "This correction is not a shape the record can store, so "
+                            "nothing was written. The stored value is unchanged."
+                        ),
+                    },
+                )
+            run.draft = apply_corrections(run_draft, apply_shape)
+        else:
+            run.draft = apply_answers(run_draft, apply_shape)
+
+        # THE SAME LOG THE RECORD PATH KEEPS, and it was missing. `answer_log` is what
+        # `workspace._at_risk_summary` counts to tell an operator how much confirmed work
+        # a destructive reset would discard — its docstring says "one entry is appended
+        # per submission that actually changed the authoritative draft". Without this, two
+        # confirmed RUN answers reported `confirmed_answers: 0`, so the disclosure a
+        # scientist reads before a reset under-counted their own work. Measured by an
+        # independent review. `run_id` is recorded because the entry is otherwise
+        # indistinguishable from a record-level one.
+        exp.answer_log.append(
+            {("edited" if correcting else "applied"): apply_shape, "run_id": run.id, "at": timestamp}
+        )
+        changed, stale = _save_versioned(exp, if_match=None)
+        if not changed:
+            # Byte-stable no-op: discard the speculative append, exactly as the record
+            # path does. `answer_log` is excluded from the rev signature, so leaving it
+            # would grow the log for a submission that changed nothing.
+            exp.answer_log.pop()
+        # NO PRAGMA. It read `# pragma: no cover - if_match=None cannot go stale`, and
+        # an independent review pointed out that the reasoning is wrong: this branch is
+        # reached from `DurableWriteConflict`, which the DATABASE's compare-and-swap
+        # predicate raises, entirely independently of `if_match`. It is reachable on the
+        # PostgreSQL deployment, and suppressing coverage of it hid that.
+        if stale is not None:
+            return stale
+        changed_fields = (
+            _fields_the_shape_carries(apply_shape, submitted_fields) if changed else []
+        )
+        invalidation = dependencies.build_invalidation(
+            changed=changed,
+            changed_fields=changed_fields,
+            pre_steps=pre_steps,
+            post_exp=exp,
+        )
+        # THE WHOLE RECORD's questions, not this run's. A scientist working through a
+        # multi-run record needs to know what is left overall, and every entry carries
+        # the `run_id` that owns it, so nothing is ambiguous about where each belongs.
+        result = serialize.pending_to_list(
+            exp.draft,
+            ws.load_demo_answers(),
+            example_scope=_example_scope(experiment_id),
+            entries=exp.pending(),
+        )
+        result["status"] = exp.status()
+        result.update(vc.version_fields(exp))
+        result["run_version"] = run.version_token()
+        result["workflow"] = _workflow_for(exp)
+        result["invalidation"] = invalidation
+        response.headers["ETag"] = exp.etag()
+        return result
 
 
 @router.post(
@@ -5749,6 +6563,177 @@ def post_transcription(
     return outcome.to_dict()
 
 
+#: The body keys the assistant seam accepts. A closed set for the same reason the
+#: transcript operation's is closed: a caller that sends `{"record_id": "..."}`
+#: expecting the server to fetch context must be told the key means nothing here,
+#: not answered with an answer built from context it did not send.
+_ASSISTANT_KEYS = frozenset({"question", "context"})
+
+#: The keys ONE context item may carry. `providers/assistant.ContextItem` requires
+#: all three and refuses a partial one at construction, which is where the rule
+#: lives; this set is what makes an UNKNOWN key a refusal rather than a silent drop.
+_ASSISTANT_CONTEXT_KEYS = frozenset({"key", "text", "origin"})
+
+
+@router.post(
+    "/assistant/ask",
+    tags=[TAG_ASSISTANT],
+    summary="Ask the Assistant Seam a Grounded Question",
+    description=(
+        "Asks the assistant seam a question, answerable ONLY from context the "
+        "request itself supplies. This operation fetches nothing: it cannot read a "
+        "record, a workspace, or a database, so \"what was sent to the provider\" "
+        "is exactly the `context` array in the request body and is visible to the "
+        "caller who wrote it.\n\n"
+        "AN ANSWER CITES ITS CONTEXT OR THERE IS NO ANSWER. Every answer carries "
+        "`grounded_in`, the context keys it used, and an uncited answer cannot be "
+        "constructed — `AssistantAnswer` raises. A question the supplied context "
+        "does not cover is REFUSED rather than answered from general knowledge, "
+        "which is the no-guessing rule applied to the assistant's own prose and not "
+        "only to the fields it might propose.\n\n"
+        "NOTHING HERE IS A VERDICT. `authoritative` is a constant `false`. This "
+        "operation decides nothing about validity, exportability or scientific "
+        "correctness, writes no field, advances no revision, and is absent from the "
+        "validation stack entirely — draft validation, official schema validation, "
+        "the portal warning tier, advisory review and a human are unchanged.\n\n"
+        "IN THIS BUILD NO ASSISTANT PROVIDER IS CONFIGURED, so every request that "
+        "REACHES the seam is answered `501` with a body naming exactly what is "
+        "missing and the document that records the decision. A malformed request "
+        "never reaches it and is `422`, as below. That is a statement about this deployment rather "
+        "than a fault or a wait: the missing items are institutional decisions. The "
+        "deterministic fake is deliberately unreachable through a booted "
+        "application, so no deployment can answer from it and no screen may show a "
+        "connected state.\n\n"
+        "A `422` here means the request is not askable — no question, a context item "
+        "missing its `key`, `text` or `origin`, or an unrecognised key — or that the "
+        "context supplied does not cover the question. Nothing is sent anywhere in "
+        "either case, and the two are distinguished by the `error` in the body.\n\n"
+        "The working, shipped way to ask this application a question is "
+        "`POST /api/assistant/memory/query`, which routes a bounded catalogue of "
+        "intents over committed deterministic sources and involves no provider at "
+        "all. It is unaffected by this seam's status."
+    ),
+    response_description=(
+        "The answer, the context keys it cites, and what produced it — with "
+        "`authoritative: false`."
+    ),
+    responses={
+        # NO EXPLICIT `422` ENTRY, and that is not an omission. Declaring one makes
+        # FastAPI skip generating its own, which silently strips the
+        # `HTTPValidationError` content ref every operation with a request body is
+        # required to carry — `test_operations_with_parameters_keep_the_validation_error_schema`
+        # caught exactly that here. The transcription seam has the same shape for the
+        # same reason. What a 422 MEANS on this operation is stated in the description
+        # instead, where a reader will actually see it.
+        **_R_UNAUTHORIZED,
+        501: {
+            "description": (
+                "No assistant provider is configured for this deployment. The body "
+                "names each missing item and the document that records the "
+                "decision, and nothing was answered or sent anywhere."
+            )
+        },
+    },
+)
+def post_assistant_ask(
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"question\": \"...\", \"context\": [{\"key\": \"...\", "
+            "\"text\": \"...\", \"origin\": \"...\"}]}`. `context` is the "
+            "ONLY material an answer may be built from, and `origin` is the "
+            "caller's own statement of where each item came from."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return _transcript_refusal(
+            "invalid_body", "The request body must be a JSON object."
+        )
+    unknown = sorted(set(body) - _ASSISTANT_KEYS)
+    if unknown:
+        # REFUSED, NOT IGNORED. A caller sending `record_id` is asking this
+        # operation to fetch something, and answering 200 while dropping the key
+        # would leave them believing the answer was grounded in a record nobody
+        # read.
+        return _transcript_refusal(
+            "unrecognized_field",
+            "This operation supplies no context of its own, so it accepts only "
+            "`question` and `context`. Nothing was sent anywhere.",
+            keys=unknown,
+        )
+    question = body.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return _transcript_refusal(
+            "invalid_field_value",
+            "`question` must be a non-empty string.",
+            key="question",
+        )
+    raw_context = body.get("context")
+    if raw_context is None:
+        raw_context = []
+    if not isinstance(raw_context, list):
+        return _transcript_refusal(
+            "invalid_field_value",
+            "`context` must be a list of items, each with `key`, `text` and "
+            "`origin`.",
+            key="context",
+        )
+    items: list[providers_assistant.ContextItem] = []
+    for index, entry in enumerate(raw_context):
+        if not isinstance(entry, dict):
+            return _transcript_refusal(
+                "invalid_field_value",
+                "Each context item must be an object.",
+                key=f"context[{index}]",
+            )
+        extra = sorted(set(entry) - _ASSISTANT_CONTEXT_KEYS)
+        if extra:
+            return _transcript_refusal(
+                "unrecognized_field",
+                "A context item carries exactly `key`, `text` and `origin`.",
+                key=f"context[{index}]",
+                keys=extra,
+            )
+        try:
+            items.append(
+                providers_assistant.ContextItem(
+                    key=entry.get("key"),  # type: ignore[arg-type]
+                    text=entry.get("text"),  # type: ignore[arg-type]
+                    origin=entry.get("origin"),  # type: ignore[arg-type]
+                )
+            )
+        except (ValueError, TypeError):
+            # `ContextItem.__post_init__` is where the rule lives — "unattributed
+            # context is how an answer loses its grounding" — so this branch
+            # RELAYS its refusal rather than re-implementing the check. A second
+            # copy of the rule here is a second thing to keep in step.
+            return _transcript_refusal(
+                "invalid_field_value",
+                "A context item must have a non-empty `key`, `text` and `origin`. "
+                "Unattributed context is refused rather than sent.",
+                key=f"context[{index}]",
+            )
+
+    provider = provider_config.resolve_assistant_provider()
+    outcome = provider.answer(
+        providers_assistant.AssistantRequest(
+            question=question, grounded_context=tuple(items)
+        )
+    )
+    if outcome.refused:
+        # THE SAME TWO-CODE SPLIT THE TRANSCRIPTION SEAM MAKES, and for the same
+        # reason: "this build does not do that" is a fact about the deployment and
+        # is `501`, while "the context you sent does not cover this" is a fact
+        # about the request and is `422`. A client that retried the first would be
+        # waiting for an institutional decision nobody has taken.
+        unconfigured = outcome.reason == providers_refusal.REASON_NO_PROVIDER_CONFIGURED
+        return JSONResponse(
+            status_code=501 if unconfigured else 422, content=outcome.to_dict()
+        )
+    return outcome.to_dict()
+
+
 @router.post(
     "/experiments/{experiment_id}/transcript",
     tags=[TAG_EXPERIMENTS],
@@ -6651,8 +7636,17 @@ def post_asset_remove(
 # --- 8. export ----------------------------------------------------------------
 
 
-def _write_record(exp: Experiment, result, unit=None) -> None:
+def _write_record(exp: Experiment, result, unit=None, *, uploaded_by=None) -> dict:
     """Write ONE unit's record + sidecar into the records dir and mark it exported.
+
+    ``uploaded_by`` is the SERVER-OWNED attribution stamp, and it arrives here as an
+    already-resolved subject rather than as an identity, so that the only thing this
+    function can do with it is write it. It is ``None`` on every deployment this build
+    ships — see :mod:`isaac_api.record_attribution` for why that is the finished
+    behaviour and not a gap. The stamp is applied to a COPY, after the truth core has
+    produced ``result.record`` and stripped the field: ``result.record`` itself is read
+    again by this function (for the record id) and by the caller, and must not gain a
+    field those readers did not ask for.
 
     ``unit`` is an :class:`~isaac_api.workspace.ExportUnit`. It defaults to ``None``
     for the pre-fan-out shape — one experiment, one record, ``exp.record_id`` — which
@@ -6663,6 +7657,15 @@ def _write_record(exp: Experiment, result, unit=None) -> None:
     The filenames come from ``result.record["record_id"]``, which is what
     ``export_draft`` minted, NOT from the unit — so the file and the id inside it can
     never disagree.
+
+    ONE INVARIANT IS NARROWED BY THE STAMP, AND IT IS SAID HERE RATHER THAN LEFT TO BE
+    DISCOVERED. ``export_draft`` validated ``result.record``; this writes a DIFFERENT
+    document. "What is on disk passed official validation" is therefore no longer
+    literally true. No schema violation is reachable today — ``uploaded_by`` is an
+    unconstrained ``{"type": "string"}`` and ``identity.HumanActor`` refuses an empty or
+    non-string subject — and ``test_record_attribution`` validates the STAMPED bytes to
+    keep that checked rather than argued. A future stamp whose value is not a plain
+    string would have to re-validate here.
     """
     exp.records_dir.mkdir(parents=True, exist_ok=True)
     record_id = result.record["record_id"]
@@ -6672,8 +7675,14 @@ def _write_record(exp: Experiment, result, unit=None) -> None:
         exp.record_id = record_id
     record_path = exp.records_dir / f"{record_id}.json"
     sidecar_path = exp.records_dir / f"{record_id}.evidence.json"
-    atomic_write_text(record_path, json.dumps(result.record, indent=2) + "\n")
+    written_record = record_attribution.with_server_stamp(result.record, uploaded_by)
+    atomic_write_text(record_path, json.dumps(written_record, indent=2) + "\n")
     atomic_write_text(sidecar_path, json.dumps(result.sidecar, indent=2) + "\n")
+    # RETURNED so the response can report the bytes that reached the disk. Without it
+    # the export operation described `result.record` — the unstamped truth-core output —
+    # while `/artifacts`, read a moment later, reported the stamped document. An
+    # operation's own account of what it wrote must match what it wrote.
+    return written_record
 
 
 def _artifact_stem(name: str) -> str | None:
@@ -6973,9 +7982,16 @@ class _Materialisation:
     prune: dict | None
     #: Whether any artifact reached the disk during this pass.
     written: bool
+    #: The document ACTUALLY WRITTEN for each unit, keyed by ``unit.target_id`` — the
+    #: truth core's record plus the server-owned attribution stamp, which is what a
+    #: response must report rather than the unstamped `result.record`. Empty on every
+    #: path that wrote nothing.
+    written_records: dict = dataclasses.field(default_factory=dict)
 
 
-def _materialise_pending_units(exp, pending_units, if_match, *, units) -> _Materialisation:
+def _materialise_pending_units(
+    exp, pending_units, if_match, *, units, uploaded_by=None
+) -> _Materialisation:
     """Validate every pending unit, then write every one of them. THE COMMIT BOUNDARY.
 
     PHASE 1 validates EVERY eligible unit and writes nothing — ``export_draft`` is a
@@ -7008,8 +8024,11 @@ def _materialise_pending_units(exp, pending_units, if_match, *, units) -> _Mater
             prune=None,
             written=False,
         )
+    written_records: dict[str, dict] = {}
     for unit, unit_result in results:
-        _write_record(exp, unit_result, unit)
+        written_records[unit.target_id] = _write_record(
+            exp, unit_result, unit, uploaded_by=uploaded_by
+        )
     # export normally changes the authoritative state (record_id: None -> id), so
     # this bumps rev and stamps updated_utc, persisting the state atomically. On a
     # self-heal of an already-exported record `record_id` is ALREADY set, the
@@ -7019,6 +8038,7 @@ def _materialise_pending_units(exp, pending_units, if_match, *, units) -> _Mater
     changed, stale = _save_versioned(exp, if_match)
     if stale is not None:
         return _Materialisation(
+            written_records=written_records,
             results=results,
             failures=[],
             changed=False,
@@ -7055,6 +8075,7 @@ def _materialise_pending_units(exp, pending_units, if_match, *, units) -> _Mater
             keep.add(exp.record_id)
         prune = _prune_orphan_artifacts(exp, keep)
     return _Materialisation(
+        written_records=written_records,
         results=results,
         failures=[],
         changed=changed,
@@ -7203,6 +8224,7 @@ def _sibling_link_conflict(exp, units) -> JSONResponse | None:
     },
 )
 def post_export(
+    request: Request,
     scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     response: Response,
@@ -7359,8 +8381,19 @@ def post_export(
         # Extracted to `_materialise_pending_units` so `post_submit` publishes exactly
         # the records this route publishes, through exactly the same gate. The two
         # phases and what each guarantees are documented there.
+        # The server-owned `attribution.uploaded_by` stamp. NOT
+        # `require_human_actor`: unlike submission, exporting is a mechanical
+        # transform that has never required an actor, the schema does not mark the
+        # field required, and refusing an export because the deployment cannot name
+        # an uploader would remove a working capability in exchange for an optional
+        # field. Fail-open on availability, fail-closed on attribution — the export
+        # always proceeds and the field appears only when a verifier vouched for a
+        # name, which no deployment shipped today does.
         materialisation = _materialise_pending_units(
-            exp, pending_units, if_match, units=units
+            exp, pending_units, if_match, units=units,
+            uploaded_by=record_attribution.resolve_uploaded_by(
+                identity_module.resolve_identity_for_request(request), scope
+            ),
         )
         results = materialisation.results
         failures = materialisation.failures
@@ -7403,7 +8436,11 @@ def post_export(
             return materialisation.stale
         changed = materialisation.changed
         result = results[0][1]
-        payload = serialize.export_result_to_dict(result)
+        # The document that reached the DISK, not the truth core's unstamped output.
+        # See `serialize.export_result_to_dict`'s `record` override for why.
+        payload = serialize.export_result_to_dict(
+            result, record=materialisation.written_records.get(results[0][0].target_id)
+        )
         if exp.runs:
             # Orphan pruning ran ONLY for a fan-out and ONLY after a successful state
             # save, so a run removed from the experiment cannot leave its record
@@ -7903,9 +8940,30 @@ def post_submit(
         pending_units = [unit for unit in units if not unit.materialised()]
         published: list[dict] = []
         changed = False
+        # Resolved BEFORE materialisation because materialisation is what writes the
+        # artifacts, and the server-owned `attribution.uploaded_by` stamp has to be in
+        # the bytes that reach the disk.
+        #
+        # THIS IS NOT THE SAME VALUE AS THE SUBMISSION ROW'S `subject` BELOW, and an
+        # earlier revision of this slice bound them to one name on the reasoning that
+        # "a record published by a submission and the row that records it must not be
+        # able to disagree about who did it." That reasoning is wrong, and binding them
+        # silently stripped the row's fixture attribution — caught by
+        # `test_submission.py::test_the_recorded_subject_is_labelled_test_fixture_...`.
+        #
+        # They differ because the two destinations can carry different amounts of truth.
+        # A submission row stores `trust_basis` beside the subject, so a fixture-
+        # attributed row SAYS SO ABOUT ITSELF — which is the mitigation
+        # `FixtureEdgeVerifier` stakes its existence on. An official ISAAC record has no
+        # such field: `attribution.uploaded_by` means "Authenticated identity that
+        # submitted this record" and cannot be qualified. So the row may name a subject
+        # the record may not, and `record_attribution.resolve_uploaded_by` is where that
+        # one extra gate lives. `None` on every deployment shipped today, both ways.
+        submit_uploaded_by = record_attribution.resolve_uploaded_by(identity, scope)
         if pending_units:
             materialisation = _materialise_pending_units(
-                exp, pending_units, if_match, units=units
+                exp, pending_units, if_match, units=units,
+                uploaded_by=submit_uploaded_by,
             )
             if materialisation.failures:
                 # Reachable even though `blocker_report` just passed, and the gap is
@@ -7951,6 +9009,11 @@ def post_submit(
         # identity contract warns about. `scope` is None on every path that reaches
         # here (the session refusal is far above), so this returns the subject
         # whenever the deployment can attribute one.
+        # `stamp_actor`, NOT `submit_uploaded_by` — see the note above the latter for
+        # why the row may name somebody the immutable record may not. This is the one
+        # place the worked-example rule and the tier rule are written down, and reaching
+        # past it would be the "a later slice writes uploaded_by=principal.subject"
+        # shape the identity contract warns about.
         subject = identity_module.stamp_actor(identity, scope)
         trust_basis = (
             identity.human.trust_basis

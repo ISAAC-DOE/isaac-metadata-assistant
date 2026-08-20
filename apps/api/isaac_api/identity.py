@@ -126,9 +126,16 @@ it.**
 
 WHAT THIS MODULE MUST NEVER GROW INTO
 =====================================
-  * No stamping of ``attribution.uploaded_by``. The truth core refuses a
-    draft-authored value for that field by design (commit ``bdff8f5``). Nothing
-    here supplies one and nothing here may be routed there.
+  * No stamping of ``attribution.uploaded_by`` **from a draft, or from anything
+    that arrived on a request**. ~~"Nothing here supplies one and nothing here may
+    be routed there."~~ **The struck half is no longer true and is kept visible
+    rather than rewritten**: :mod:`isaac_api.record_attribution` now routes
+    :func:`stamp_actor`'s return value to that field at the ingestion boundary,
+    which is what the schema specifies and what
+    ``export._enforce_server_owned_invariant`` explicitly anticipates. The truth
+    core is unchanged and still refuses every draft-authored spelling. See
+    :func:`stamp_actor`'s own "WHERE THE RETURN VALUE MAY NOT GO" for the full
+    correction.
   * No RBAC engine. Groups are carried and exactly one predicate consumes them
     (:meth:`HumanActor.is_admin`) — see the note on that method.
   * No UID↔username mapping. Decided 2026-08-12: usernames are not reassigned,
@@ -1107,10 +1114,34 @@ def stamp_actor(identity: RequestIdentity, scope: str | None) -> str | None:
 
     WHERE THE RETURN VALUE MAY NOT GO
     ---------------------------------
-    Not into ``attribution.uploaded_by`` via a draft. The truth core refuses a
+    Not into ``attribution.uploaded_by`` **via a draft**. The truth core refuses a
     draft-authored value for that field by design (commit ``bdff8f5``), and this
-    function is not a way around that refusal — stamping it would require a
-    change *in the truth core*, reviewed on its own terms.
+    function is not a way around that refusal.
+
+    **The sentence that followed — "stamping it would require a change *in the truth
+    core*, reviewed on its own terms" — is now WRONG, and is corrected rather than
+    deleted because a reader may have relied on it.** It read the refusal as being
+    about the *field*; the refusal is about the *source*. What the truth core forbids
+    is a value that came from draft content, and it says so itself, in the docstring
+    of the function that enforces it
+    (``src/isaac_records/export.py::_enforce_server_owned_invariant``): *"A future
+    stamped value … must be injected on the trusted server side at ingestion — never
+    read from draft content, and never plumbed through this function as a
+    caller-supplied argument."*
+
+    So a server-side stamp is what the schema specifies (``attribution.uploaded_by``:
+    *"Set by the server; any client value is overwritten"*) and what the truth core
+    anticipates — and it needs **no** truth-core change, which is why none was made.
+    :mod:`isaac_api.record_attribution` applies it at the ingestion boundary, to a
+    copy, after ``transform`` has finished and stripped the field. Every truth-core
+    refusal is intact and every test in ``tests/test_attribution_uploaded_by.py``
+    still passes unmodified.
+
+    What has NOT changed is the only thing that made the old sentence protective:
+    the value still comes from here, this function still returns ``None`` unless a
+    verifier attributed the request, and no verifier in this build reads a request.
+    On every deployment shipped today the stamp is therefore absent, and the field is
+    omitted rather than written empty.
 
     THE FIRST CALLER IS ``POST /api/experiments/{id}/submit``, and it passes the
     route's own resolved scope, so rule 1 is enforced on the one path that writes an

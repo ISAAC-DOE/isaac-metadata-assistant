@@ -3,6 +3,7 @@ import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import { RUN_COMMAND } from '../lib/api';
+import { NEEDSYOU_VISIBLE } from '../screens/RecordWorkbench';
 import {
   EXP_ID,
   bundleRoutes,
@@ -224,6 +225,107 @@ describe('S3 · Review Record (live bundle)', () => {
     // and it is never rendered as a primary label
     const primaries = [...container.querySelectorAll('.needsyou-q')].map((el) => el.textContent);
     expect(primaries).not.toContain('required_for_evidence_record');
+  });
+
+  /*
+   * THE BANNER IS BOUNDED, AND THE BOUND IS THE MOST EXPENSIVE THING ON THIS SCREEN
+   * AT SCALE.
+   *
+   * This list was UNBOUNDED and no test noticed, because every fixture in the suite
+   * has five pending items. A scale benchmark measured what that costs: at 1000 runs
+   * the record screen held 16,134 DOM nodes, ~15,000 of them this list (3,002 items ×
+   * five nodes). Every run card together was 50, capped by the Run browser's own
+   * paging. So `docs/run-scale-measurements.md`'s conclusion "the DOM is not the
+   * problem" was true when measured — the run count WAS the card count then — and
+   * stopped being true when runs began paging and this did not.
+   *
+   * TWO PROPERTIES, and the second is the one that makes truncation acceptable: the
+   * list is a prefix, and the screen SAYS SO with both numbers. A truncated list that
+   * read as complete would be worse than the slow one — a scientist counting eleven
+   * items and concluding eleven questions remain would be wrong by three thousand.
+   */
+  it('lists at most NEEDSYOU_VISIBLE pending items and states how many more there are', async () => {
+    const many = Array.from({ length: 64 }, (_, i) => ({
+      id: 'series',
+      blocker_key: `01RUN${String(i).padStart(21, '0')}:series`,
+      run_id: `01RUN${String(i).padStart(21, '0')}`,
+      run_label: `Run ${i + 1}`,
+      kind: 'series',
+      question: 'Provide the reduced spectrum.',
+      about: 'reduced_spectrum',
+      demo_answer: null,
+      inferability: {
+        field: 'reduced_spectrum',
+        state: 'needs_user_input' as const,
+        explanation: 'x',
+        value: null,
+        provenance: null,
+        detail: {},
+      },
+    }));
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      'GET /api/experiments/demo/pending': { body: { pending: many } },
+    });
+    const { container, findByText, getByText } = renderAt('/record/demo');
+
+    // THE TITLE CARRIES THE FULL COUNT. It is the one number a reader acts on.
+    await findByText('64 Fields Need Your Confirmation');
+
+    const list = container.querySelector('ol.needsyou-list')!;
+    expect(list.querySelectorAll('li')).toHaveLength(NEEDSYOU_VISIBLE);
+    // AND THE REMAINDER IS STATED IN WORDS, not as an ellipsis — a screen-reader user
+    // who has just heard "64" needs to be told this list is a prefix of it.
+    expect(getByText(/Showing the first 10 of 64/)).toBeInTheDocument();
+    expect(getByText(/54 more are waiting/)).toBeInTheDocument();
+  });
+
+  it('gives every listed pending item a DISTINCT React key, across runs', async () => {
+    /*
+     * A run-owned question's `id` is its KIND — `series`, `qc`, `descriptor` — so this
+     * list keyed on `p.id` produced N identical `<li key="series">` on a record with N
+     * runs. Duplicate keys are a React reconciliation hazard and a console error, on
+     * the first screen a scientist opens.
+     *
+     * ASSERTED THROUGH THE CONSOLE, because that is where React reports it and because
+     * a DOM assertion cannot see a key at all. `blocker_key` is the identity that
+     * exists for exactly this — the same fix the completion screen needed, in a place
+     * nobody had looked.
+     */
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    });
+    try {
+      const pending = ['01RUNAAAAAAAAAAAAAAAAAAAAA', '01RUNBBBBBBBBBBBBBBBBBBBBB'].map((rid) => ({
+        id: 'series',
+        blocker_key: `${rid}:series`,
+        run_id: rid,
+        run_label: rid,
+        kind: 'series',
+        question: 'Provide the reduced spectrum.',
+        about: 'reduced_spectrum',
+        demo_answer: null,
+        inferability: {
+          field: 'reduced_spectrum',
+          state: 'needs_user_input' as const,
+          explanation: 'x',
+          value: null,
+          provenance: null,
+          detail: {},
+        },
+      }));
+      stubFetchRoutes({
+        ...bundleRoutes('demo'),
+        'GET /api/experiments/demo/pending': { body: { pending } },
+      });
+      const { findByText } = renderAt('/record/demo');
+      await findByText('2 Fields Need Your Confirmation');
+      const duplicates = errors.filter((e) => /same key|duplicate key/i.test(e));
+      expect(duplicates, duplicates.join('\n')).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('shows live pending as Needs You and live draft fields; signals stay three labeled segments', async () => {

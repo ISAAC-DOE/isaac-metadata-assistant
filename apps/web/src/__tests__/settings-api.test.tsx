@@ -1087,14 +1087,22 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 66 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 69 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
     // correct for its own branch and wrong for the merge; neither was kept.
     // Re-measured on the merged tree by the paragraph rule transcribed into Python
     // over `create_app().openapi()`.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(66);
+    // 66 -> 68 operations, 79,892 -> 81,416 characters, 172 -> 176 paragraphs: the two
+    // RUN-LEVEL WRITE operations, `POST .../runs/{run_id}/answers` and `.../edit`.
+    // They exist because a spectrum, a QC verdict, a descriptor and an asset hash
+    // belong to the run that measured them: the record's own `/answers` now refuses
+    // them with `409 belongs_to_a_run` once runs exist, because before it did, the
+    // answer was accepted, reported as applied, and published nothing. Net +1,524
+    // characters across the two new operations; NO existing description changed, and
+    // `test_contract_description_parity.py` proves that rather than leaving it asserted
+    // here. Re-measured over the transcribed array by the same paragraph rule.
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1676,8 +1684,42 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // sentence gained `revise_resolution`'s own "and the same competing set" clause,
     // which its wire copy had dropped. Re-measured, not adjusted by the length of
     // the new text.
-    expect(total).toBe(79892);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(172);
+    // 81,416 -> 82,439 and 176 -> 180 paragraphs: `POST .../runs` had its description
+    // corrected. It claimed *"The new run starts empty: record-level values are never
+    // copied down into it"*, which stopped being true when the first run began adopting
+    // the record's per-run content — and the sentence was live in the PUBLISHED contract
+    // and in the committed wire fixture, so an independent review found the Endpoint
+    // Explorer rendering a false statement about what adding a run does. The replacement
+    // states the asymmetry (first run adopts, later runs do not, and why), the six
+    // unclassified fields neither carries, and the `409` refusal on an already-exported
+    // record. Net +1,023 characters and +4 paragraphs in ONE operation; no other
+    // description changed, and `test_contract_description_parity.py` proves that rather
+    // than leaving it asserted here.
+    // 82,439 -> 84,501 and 68 -> 69 operations, 180 -> 185 post-lead paragraphs: the
+    // backend now publishes `POST /api/assistant/ask`, the ASSISTANT SEAM's HTTP
+    // consumer. `providers/assistant.py` was a fully built, fully tested seam with no
+    // route at all, so "does this deployment have a native assistant?" was answerable
+    // only by reading Python. Net +2,062 characters and +5 paragraphs in ONE new
+    // operation; no existing description changed, and
+    // `test_contract_description_parity.py` proves that rather than leaving it
+    // asserted here.
+    //
+    // IT IS NOT `POST /api/assistant/memory/query`, and the Endpoint Explorer will
+    // now show both. That one is the shipped deterministic Q&A and involves no
+    // provider; this one answers `501` in every deployment, because
+    // `validate_provider_config_or_raise` refuses to boot an application that names
+    // the test double. Its own description says so in those terms, which is the
+    // reason the paragraph count moves by five rather than by one.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(69);
+    // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
+    // ONE operation and with the paragraph count unchanged. It read "so every request
+    // is answered `501`" while the paragraph two below it documented the `422` — a
+    // description contradicting itself, found by an independent review. It now reads
+    // "every request that REACHES the seam", because the four validation refusals run
+    // BEFORE the provider is resolved, so a malformed request is `422` in every
+    // deployment and never reaches the seam at all.
+    expect(total).toBe(84584);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(185);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

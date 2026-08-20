@@ -247,12 +247,26 @@ class DeterministicAssistantFake:
                 reason=REASON_OUTSIDE_GROUNDED_CONTEXT,
                 missing=("grounded context covering the question",),
                 message=(
+                    # NO CALLER DATA IS INTERPOLATED HERE, and that is a fix rather
+                    # than a style. This message used to list the context KEYS, which
+                    # a caller supplies — and `ProviderRefusal.__post_init__` refuses
+                    # a message containing any of `_FORBIDDEN_MESSAGE_SUBSTRINGS`
+                    # ("retry", "timeout", "connected", …). So a context item keyed
+                    # `retry_policy` raised `ValueError` out of a constructor,
+                    # which reaches an HTTP caller as a 500 from a route whose whole
+                    # subject is refusing honestly. An independent review found it by
+                    # shape; it is unreachable in a booted application, because
+                    # `validate_provider_config_or_raise` refuses to boot with this
+                    # double selected — but "unreachable today" is not the same as
+                    # "cannot happen", and the count says everything the list did.
                     "The supplied context does not cover this question, so it is "
-                    "not answered. The deterministic test double answers only "
-                    "from context it was given: "
+                    "not answered. The deterministic test double answers only from "
+                    "context it was given, and "
                     + (
-                        ", ".join(item.key for item in request.grounded_context)
-                        or "none was supplied"
+                        f"none of the {len(request.grounded_context)} item(s) "
+                        "supplied shares a word with the question"
+                        if request.grounded_context
+                        else "no context was supplied at all"
                     )
                     + "."
                 ),

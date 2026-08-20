@@ -683,9 +683,20 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // where both branches wrote the SAME literal and git merged two additions
     // while recording one. Every number here was read out of this test's own
     // failure output after the merge.
-    expect(experimentPathLiterals.length).toBe(37);
+    // 37 -> 39: the two RUN-LEVEL WRITE literals in `submitAnswer` and `editField`.
+    // Each of those two functions now carries a ternary — the run route when the
+    // question belongs to a run, the record route otherwise — because a spectrum, a QC
+    // verdict, a descriptor and an asset hash are per-Run, and the record-level route
+    // refuses them with `409 belongs_to_a_run` once runs exist. Two functions, one new
+    // literal each. Read out of this test's own failure output, not derived.
+    expect(experimentPathLiterals.length).toBe(39);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
-    expect(SUB_READ_SUFFIXES).toHaveLength(31);
+    // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
+    // suffixes. Both are WRITES rather than reads, and they appear here because this
+    // inventory is over every per-record path literal in `api.ts` — which is the point:
+    // a new sub-path that no down-state classification covers is exactly what this
+    // guard exists to surface.
+    expect(SUB_READ_SUFFIXES).toHaveLength(33);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an

@@ -387,11 +387,11 @@ jobs:
           # `isaac_experiments`, and `0004_submissions` declares one into
           # `isaac_experiment_revisions`, so each depends on something an earlier
           # one creates.
-          [ "$out" = "pending: 0001_experiments, 0002_runs, 0003_revisions, 0004_submissions" ] || {
+          [ "$out" = "pending: 0001_experiments, 0002_runs, 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
             echo "::error::unexpected plan: $out"; exit 1; }
           # A plan must apply NOTHING. The bookkeeping table may exist (the plan
           # creates it to read it); no application table may.
-          for t in isaac_experiments isaac_runs isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs; do
+          for t in isaac_experiments isaac_runs isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs isaac_run_projection; do
             count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
             [ "$count" = "0" ] || { echo "::error::--plan created $t"; exit 1; }
           done
@@ -423,8 +423,8 @@ jobs:
           assert applied == ["0001_experiments"], applied
           # Against the REAL committed set, everything after 0001 is pending.
           pending = db_migrate.pending_versions(os.environ)
-          assert pending == ["0002_runs", "0003_revisions", "0004_submissions"], pending
-          print("database migrated to 0001 only; 0002, 0003 and 0004 pending")
+          assert pending == ["0002_runs", "0003_revisions", "0004_submissions", "0005_run_projection"], pending
+          print("database migrated to 0001 only; 0002, 0003, 0004 and 0005 pending")
           PY
           count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
           [ "$count" = "0" ] || { echo "::error::isaac_runs exists but 0002 was not applied"; exit 1; }
@@ -504,7 +504,11 @@ jobs:
           # into the operator's database that no approved migration text describes.
           count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
           [ "$count" = "0" ] || { echo "::error::the application created isaac_runs itself"; exit 1; }
-          # Leave the table as the later steps expect to find it: empty.
+          # Leave the table as the later steps expect to find it: empty. NO projection
+          # delete is needed HERE and that is worth stating rather than copying the
+          # three-statement form around: this step runs with `0001` ONLY applied, so
+          # neither `isaac_runs` nor `isaac_run_projection` exists yet and a statement
+          # naming either would fail on an undefined relation.
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments"
           rm -rf /tmp/isaac-pg-0001-only
 
@@ -516,7 +520,7 @@ jobs:
           # 0001 is already recorded, so ONLY 0002 applies. That the bookkeeping
           # skips an applied version is the property being read here; the
           # both-at-once path is proven by the bookkeeping-deletion case below.
-          [ "$out" = "applied: 0002_runs, 0003_revisions, 0004_submissions" ] || {
+          [ "$out" = "applied: 0002_runs, 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
             echo "::error::unexpected apply result: $out"; exit 1; }
 
       # THE IDEMPOTENCE CLAIM, PROVEN RATHER THAN ASSERTED IN A COMMENT.
@@ -558,7 +562,9 @@ jobs:
           # THREE -> EIGHT: `0003_revisions` adds `isaac_experiment_revisions`,
           # `isaac_run_revisions` and `isaac_revision_changes`; `0004_submissions`
           # adds `isaac_submissions` and `isaac_submission_runs`.
-          [ "$added" = "isaac_experiment_revisions isaac_experiments isaac_revision_changes isaac_run_revisions isaac_runs isaac_schema_migrations isaac_submission_runs isaac_submissions" ] || {
+          # EIGHT -> NINE: `0005_run_projection` adds `isaac_run_projection`, the
+          # per-experiment completeness claim for `isaac_runs`.
+          [ "$added" = "isaac_experiment_revisions isaac_experiments isaac_revision_changes isaac_run_projection isaac_run_revisions isaac_runs isaac_schema_migrations isaac_submission_runs isaac_submissions" ] || {
             echo "::error::the migration created tables it should not have: '$added'"; exit 1; }
           [ -z "$removed" ] || { echo "::error::the migration REMOVED tables: '$removed'"; exit 1; }
           psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
@@ -569,7 +575,7 @@ jobs:
           # `isaac_schema_migrations` is as application-owned as the other two — it is
           # in `db_write.OWNED_TABLES` — so the tally was simply wrong, in the one line
           # a reviewer skims to conclude the guard passed.
-          echo "records: byte-identical; added exactly the eight application-owned tables"
+          echo "records: byte-identical; added exactly the nine application-owned tables"
 
       # The repository, end to end, against the real engine — the half the
       # in-process fake cannot cover.
@@ -829,13 +835,41 @@ jobs:
           # cost four statements instead of one.
           before = run_stamps(runs_rid)
           assert len(before) == 3, before
-          answered = client.post(
-              f"/api/experiments/{runs_rid}/answers",
-              json=payload,
+          # A RECORD-LEVEL WRITE. It used to be `POST /answers` carrying `series` and
+          # `descriptor`, and that stopped being a record-level write: those blocks are
+          # per-Run, so once a record has runs the route refuses them with
+          # `409 belongs_to_a_run` rather than writing a value no exported record reads.
+          # Capturing a note is a genuine record-level write that touches no run.
+          noted = client.post(
+              f"/api/experiments/{runs_rid}/notes",
+              json={
+                  "text": "CI: a record-level write that changes no run.",
+                  "source": "typed_note",
+              },
               headers={"If-Match": client.get(f"/api/experiments/{runs_rid}").headers["ETag"]},
           )
-          assert answered.status_code == 200, answered.text
+          assert noted.status_code == 201, noted.text
           assert run_stamps(runs_rid) == before, "an unchanged run row was rewritten"
+
+          # AND THE CONVERSE, which only became expressible when the run-level write
+          # routes shipped: a write to ONE run moves that run's row and no other.
+          target = run_ids[0]
+          run_etag = client.get(
+              f"/api/experiments/{runs_rid}/runs/{target}"
+          ).headers["ETag"]
+          run_answered = client.post(
+              f"/api/experiments/{runs_rid}/runs/{target}/answers",
+              json={
+                  "confirmed_by_user": True,
+                  "answers": {"qc": {"status": "valid", "evidence": "CI verdict."}},
+              },
+              headers={"If-Match": run_etag},
+          )
+          assert run_answered.status_code == 200, run_answered.text
+          after = run_stamps(runs_rid)
+          assert after[target] != before[target], "the written run's row did not move"
+          for other in run_ids[1:]:
+              assert after[other] == before[other], (other, "an untouched run row moved")
 
           # REMOVAL, AND THE EMPTY-ARRAY CASE. No route deletes a run, so this drives
           # the domain model directly — which is also the only way to reach
@@ -1618,6 +1652,148 @@ jobs:
             "INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id) VALUES ('01CISUBRUN000000000000AAD0', '$sub', '$parent', NULL, '$parent')" \
             "isaac_submission_runs_unit_unique"
 
+          # === THE SEVENTEEN THAT WERE DECLARED AND NEVER EXERCISED ================
+          #
+          # `docs/migration-approval-packet-0003.md` §12B lists them by name and the
+          # Dean handoff states the coverage honestly: 46 constraints declared, 27
+          # blamed here, 17 never named in this workflow at all. "Nothing suggests they
+          # are wrong" is true and is not evidence, and this is the operator's decision
+          # they were missing from.
+          #
+          # FOURTEEN ARE PROVED INDIVIDUALLY BELOW. THREE CANNOT BE, and that is a
+          # property of the schema rather than a gap in the testing — see the
+          # `isaac_submission_runs` block at the end, which states exactly why and
+          # proves what is provable.
+          #
+          # Every case differs from an ACCEPTED row in exactly one column, for the
+          # reason the block above gives: a row wrong in two ways may be blamed on
+          # either constraint, and the case would then pass while proving nothing about
+          # the one it names. Ids are 26 characters for the same reason.
+
+          # -- isaac_experiment_revisions: three ------------------------------------
+          refuse "a revision numbered zero" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, trust_basis) VALUES ('01CINOZERO0000000000000AA0', '$parent', 0, 0, 'ci', '{}', '$sig2', 'submission', 'unattributed')" \
+            "isaac_experiment_revisions_no_positive"
+          refuse "a revision of a negative experiment rev" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, trust_basis) VALUES ('01CINEGREV0000000000000AA0', '$parent', 9, -1, 'ci', '{}', '$sig2', 'submission', 'unattributed')" \
+            "isaac_experiment_revisions_rev_non_negative"
+          # A JSON ARRAY is valid `jsonb` and is not an object. `Experiment.to_state()`
+          # returns a mapping, so a non-object here means something upstream changed
+          # shape without anybody noticing.
+          refuse "a revision whose state is a JSON array" \
+            "INSERT INTO isaac_experiment_revisions (revision_id, experiment_id, revision_no, experiment_rev, generation, state, content_signature, reason, trust_basis) VALUES ('01CIARRSTATE000000000000A0', '$parent', 9, 0, 'ci', '[]', '$sig2', 'submission', 'unattributed')" \
+            "isaac_experiment_revisions_state_is_object"
+
+          # -- isaac_run_revisions: five --------------------------------------------
+          # `isaac_run_revisions_document_identity` CHECKs `state ->> 'id' = run_id`,
+          # so every case keeps that satisfied and the named constraint is the only
+          # thing left to blame. The state JSON is built into a shell variable rather
+          # than escaped inline: expansion happens after quote parsing, so the quotes
+          # inside it are literal and cannot terminate the surrounding string.
+          # NO further accepted row is inserted here: the block twenty lines above
+          # already proved this exact shape inserts, and a second one would only add a
+          # way for these cases to collide with it on `revision_run_unique`.
+          runid=01CIRUNDDDDDDDDDDDDDDDDDD0
+          runstate='{"id": "'"$runid"'"}'
+
+          refuse "a run revision whose id is not a ULID" \
+            "INSERT INTO isaac_run_revisions (run_revision_id, revision_id, run_id, ordinal, state, rev, generation) VALUES ('not-a-ulid', '$rev', '$runid', 0, '$runstate', 0, 'ci')" \
+            "isaac_run_revisions_id_shape"
+          # The state names the same non-ULID the column does, so `document_identity`
+          # is satisfied and only the shape CHECK can refuse this.
+          badrun=not-a-ulid
+          badrunstate='{"id": "'"$badrun"'"}'
+          refuse "a run revision naming a run that is not a ULID" \
+            "INSERT INTO isaac_run_revisions (run_revision_id, revision_id, run_id, ordinal, state, rev, generation) VALUES ('01CIRUNREVISION0000000AAB0', '$rev', '$badrun', 0, '$badrunstate', 0, 'ci')" \
+            "isaac_run_revisions_run_id_shape"
+          runb=01CIRUNBBBBBBBBBBBBBBBBBB0
+          runbstate='{"id": "'"$runb"'"}'
+          refuse "a run revision at a negative ordinal" \
+            "INSERT INTO isaac_run_revisions (run_revision_id, revision_id, run_id, ordinal, state, rev, generation) VALUES ('01CIRUNREVISION0000000AAC0', '$rev', '$runb', -1, '$runbstate', 0, 'ci')" \
+            "isaac_run_revisions_ordinal_non_negative"
+          refuse "a run revision at a negative rev" \
+            "INSERT INTO isaac_run_revisions (run_revision_id, revision_id, run_id, ordinal, state, rev, generation) VALUES ('01CIRUNREVISION0000000AAD0', '$rev', '$runb', 0, '$runbstate', -1, 'ci')" \
+            "isaac_run_revisions_rev_non_negative"
+          # `'[]'::jsonb ->> 'id'` is NULL, and `NULL = run_id` is NULL rather than
+          # false — a CHECK passes on NULL — so `document_identity` does not fire and
+          # the object CHECK is the only thing that can refuse this.
+          refuse "a run revision whose state is a JSON array" \
+            "INSERT INTO isaac_run_revisions (run_revision_id, revision_id, run_id, ordinal, state, rev, generation) VALUES ('01CIRUNREVISION0000000AAE0', '$rev', '$runb', 0, '[]', 0, 'ci')" \
+            "isaac_run_revisions_state_is_object"
+
+          # -- isaac_revision_changes: two ------------------------------------------
+          refuse "a change whose id is not a ULID" \
+            "INSERT INTO isaac_revision_changes (change_id, revision_id, unit_id, address, change_kind) VALUES ('not-a-ulid', '$rev', '$parent', 'sample.form', 'modified')" \
+            "isaac_revision_changes_id_shape"
+          refuse "a change naming a unit that is not a ULID" \
+            "INSERT INTO isaac_revision_changes (change_id, revision_id, unit_id, address, change_kind) VALUES ('01CICHANGE0000000000000AE0', '$rev', 'not-a-ulid', 'sample.form', 'modified')" \
+            "isaac_revision_changes_unit_id_shape"
+
+          # -- isaac_submissions: three ---------------------------------------------
+          refuse "a submission whose id is not a ULID" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, trust_basis) VALUES ('not-a-ulid', '$parent', '$rev2', '$sig2', 1, 'unattributed')" \
+            "isaac_submissions_id_shape"
+          refuse "a submission whose conflict summary is a JSON array" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, conflict_summary, trust_basis) VALUES ('01CISUBMISSION0000000000H0', '$parent', '$rev2', '$sig2', 1, '[]', 'unattributed')" \
+            "isaac_submissions_conflict_summary_is_object"
+          # `edge_header` is the basis the identity contract PERMANENTLY DISQUALIFIES,
+          # so this proves the closed set refuses exactly the value ISAAC must never
+          # record — not merely that it refuses an arbitrary bad string. `subject` is
+          # non-NULL so the attribution pairing is satisfied and cannot take the blame.
+          refuse "a submission claiming an unrecognised trust basis" \
+            "INSERT INTO isaac_submissions (submission_id, experiment_id, revision_id, content_signature, unit_count, subject, trust_basis) VALUES ('01CISUBMISSION0000000000I0', '$parent', '$rev2', '$sig2', 1, 'x', 'edge_header')" \
+            "isaac_submissions_trust_basis_known"
+
+          # -- isaac_submission_runs: ONE proved, THREE STRUCTURALLY UNPROVABLE ------
+          #
+          # THE THREE THAT CANNOT BE ISOLATED, and WHY — stated here rather than left
+          # as an unexplained gap in the packet, because the reason is a fact about the
+          # schema that an operator should know.
+          #
+          # This table carries two equality CHECKs: `record_id = unit_id`
+          # (`one_record_per_unit`) and `run_id IS NULL OR run_id = unit_id`
+          # (`run_matches_unit`). So a row that violates `unit_id_shape`,
+          # `record_id_shape` or `run_id_shape` ALWAYS violates something else at the
+          # same time, and PostgreSQL reports only the first constraint it happens to
+          # check:
+          #
+          #   * unit_id malformed, record_id equal to it  -> BOTH shape CHECKs fail
+          #   * unit_id malformed, record_id well-formed  -> the equality CHECK fails too
+          #   * run_id malformed                          -> `run_matches_unit` fails too
+          #
+          # There is no assignment of the three columns that violates exactly one of
+          # them. That is defence in depth rather than a defect — the equality CHECKs
+          # subsume the shape CHECKs — but it means "every constraint is individually
+          # blamed" is a claim this table cannot support, and saying so is the point.
+          #
+          # What IS proved: the rows are refused, and refused by a constraint on THIS
+          # table rather than by a typo. `refuse_by_the_table` greps for the shared
+          # prefix instead of a single name, and is deliberately a different helper so
+          # nobody mistakes it for the stronger check.
+          refuse_by_the_table() {
+            if psql -v ON_ERROR_STOP=1 -c "$2" > /tmp/refuse3.log 2>&1; then
+              echo "::error::ACCEPTED a statement that must be refused: $1"; exit 1
+            fi
+            if ! grep -qE 'isaac_submission_runs_(unit_id_shape|record_id_shape|run_id_shape|one_record_per_unit|run_matches_unit)' /tmp/refuse3.log; then
+              echo "::error::$1 was refused, but not by an isaac_submission_runs CHECK:"; cat /tmp/refuse3.log; exit 1
+            fi
+            echo "refused by an isaac_submission_runs CHECK (blame is ambiguous by design): $1"
+          }
+
+          # The one that IS isolable: the primary key's own shape, with every other
+          # column well-formed and both equalities satisfied.
+          unit=01CIUNITAAAAAAAAAAAAAAAAA0
+          refuse "a submission run whose id is not a ULID" \
+            "INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id) VALUES ('not-a-ulid', '$sub', '$unit', NULL, '$unit')" \
+            "isaac_submission_runs_id_shape"
+
+          refuse_by_the_table "a submission run whose unit and record ids are not ULIDs" \
+            "INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id) VALUES ('01CISUBRUN000000000000AAE0', '$sub', 'not-a-ulid', NULL, 'not-a-ulid')"
+          refuse_by_the_table "a submission run whose record id is not its unit and not a ULID" \
+            "INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id) VALUES ('01CISUBRUN000000000000AAF0', '$sub', '$unit', NULL, 'not-a-ulid')"
+          refuse_by_the_table "a submission run whose run id is not a ULID" \
+            "INSERT INTO isaac_submission_runs (submission_run_id, submission_id, unit_id, run_id, record_id) VALUES ('01CISUBRUN000000000000AAG0', '$sub', '$unit', 'not-a-ulid', '$unit')"
+
           # THE FOREIGN KEYS REFUSE A PARENT DELETE. No `ON DELETE` clause is written
           # anywhere in either migration, so no single statement can destroy a history
           # tree — the distinction between the shipped design and `ON DELETE CASCADE`.
@@ -1711,6 +1887,162 @@ jobs:
           left=$(psql -Atc "select count(*) from isaac_experiments where experiment_id in ('$parent', '$parent2')")
           [ "$left" = "0" ] || { echo "::error::this step left experiment rows behind"; exit 1; }
           echo "0003/0004 constraints: every one behaves as the approval packets describe"
+
+      # EVERY CONSTRAINT `0005_run_projection` DECLARES, EXERCISED — and the
+      # completeness claim the application writes, READ BACK from the real engine.
+      #
+      # `docs/migration-approval-packet-0005.md` claims a primary key, a foreign key
+      # to `isaac_experiments` with NO `ON DELETE`, two non-negative CHECKs, and a
+      # CLOSED value set on `projector`. The Python suite cannot check any of it: it
+      # has no PostgreSQL, so it can only assert the constraint TEXT is present. This
+      # asserts the constraints BEHAVE.
+      #
+      # It also does the one thing no in-process fake can: read back the row the
+      # application's own save wrote, and check the version pair against the document
+      # it was projected from. That is invariant 2 of the Stage-2 contract — the whole
+      # mechanism by which staleness is DETECTED rather than assumed absent — and
+      # until now it was only ever asserted against a fake cursor's parameter list.
+      - name: Prove every 0005 constraint rejects what it claims to reject
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-projection
+        run: |
+          set -euo pipefail
+
+          # Same `refuse` contract as the 0002 and 0003/0004 steps: the third argument
+          # NAMES the object PostgreSQL must blame, so "the statement failed" cannot be
+          # satisfied by a typo or a missing column.
+          refuse() {
+            if psql -v ON_ERROR_STOP=1 -c "$2" > /tmp/refuse5.log 2>&1; then
+              echo "::error::ACCEPTED a statement that must be refused: $1"; exit 1
+            fi
+            if ! grep -q -- "$3" /tmp/refuse5.log; then
+              echo "::error::$1 was refused, but not by '$3':"; cat /tmp/refuse5.log; exit 1
+            fi
+            echo "refused as designed by $3: $1"
+          }
+
+          parent=01CIPROJEXP0000000000000A0
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_experiments (experiment_id, state) VALUES ('$parent', '{\"id\": \"$parent\"}')"
+
+          # THE FOREIGN KEY. A claim about an experiment that does not exist is a claim
+          # about nothing, and it is refused by the database rather than by a writer.
+          refuse "a claim naming an experiment that does not exist" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('01CIPROJNOSUCH000000000AA0', 0, 'ci', 0, 'write-path')" \
+            "isaac_run_projection_experiment_fk"
+
+          # THE TWO NON-NEGATIVE CHECKS, each aimed so only one can take the blame.
+          refuse "a negative experiment_rev" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', -1, 'ci', 0, 'write-path')" \
+            "isaac_run_projection_rev_non_negative"
+          refuse "a negative run_count" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 0, 'ci', -1, 'write-path')" \
+            "isaac_run_projection_count_non_negative"
+
+          # THE CLOSED VALUE SET. An unrecognised projector is a bug, and a CHECK is
+          # the cheapest place to find it.
+          refuse "an unknown projector" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 0, 'ci', 0, 'someone-elses-script')" \
+            "isaac_run_projection_projector_known"
+
+          # NOT NULL ON `experiment_generation`, WITH NO DEFAULT. An empty generation
+          # is meaningless and a writer that omits it has a bug; the database says so
+          # rather than storing ''.
+          refuse "a claim with no generation at all" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, run_count, projector) VALUES ('$parent', 0, 0, 'write-path')" \
+            "experiment_generation"
+
+          # THE PRIMARY KEY: one CURRENT claim per experiment, no history.
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 0, 'ci', 0, 'write-path')"
+          refuse "a second claim for the same experiment" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 1, 'ci', 1, 'backfill')" \
+            "isaac_run_projection_pkey"
+
+          # NO `ON DELETE`. Deleting an experiment that still carries a claim is
+          # REFUSED, which is the reversible choice and the opposite of CASCADE.
+          refuse "deleting an experiment that still has a projection claim" \
+            "DELETE FROM isaac_experiments WHERE experiment_id = '$parent'" \
+            "isaac_run_projection_experiment_fk"
+
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_run_projection WHERE experiment_id = '$parent'"
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$parent'"
+          echo "0005 constraints: every one behaves as the approval packet describes"
+
+      # THE CLAIM THE APPLICATION ITSELF WRITES, READ BACK FROM THE REAL ENGINE.
+      - name: Prove the completeness claim matches the document it was projected from
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-projection-app
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sys
+          sys.path[:0] = ["apps/api", "src"]
+          import isaac_api.experiment_repository as repo
+          import isaac_api.workspace as ws
+
+          # THE DURABLE REPOSITORY, not the store. `PostgresOrdinaryStore` has
+          # `persist` and `hydrate` and no `create`; the repository that WRAPS it is
+          # what mints a record, and going through it is also what keeps this step
+          # exercising the same path a request takes rather than a shortcut. The first
+          # version called `store.create(...)` and failed with `AttributeError` in CI,
+          # which is the right place for that to surface: nothing in the Python suite
+          # exercises this code path, because it needs a real engine.
+          repository = repo.repository()
+          assert repository.durable, f"not durable: {repository.backend}"
+          exp = repository.create(title="projection parity", description=None)
+          for label in ("R1", "R2"):
+              exp.add_run(label=label)
+          # `save_versioned()` takes NO argument — the precondition is the route's
+          # job, not this method's. Two signature mistakes in one step, both found
+          # only here: `store.create(...)` and then `save_versioned(None)`. This
+          # code path needs a real engine, so no Python test exercises it, and CI is
+          # the only place either could have surfaced.
+          exp.save_versioned()
+          print("experiment", exp.id, "rev", exp.rev, "runs", len(exp.sorted_runs()))
+          with open("/tmp/projection-expected.txt", "w") as fh:
+              fh.write(f"{exp.id}|{exp.rev}|{exp.generation}|{len(exp.sorted_runs())}\n")
+          PY
+          expected=$(cat /tmp/projection-expected.txt)
+          eid=$(echo "$expected" | cut -d'|' -f1)
+          # THE ROW, AS THE SERVER HOLDS IT. `projector` is asserted as `write-path`
+          # because a `backfill` here would mean the application's own save had not
+          # made the claim — the failure mode that would leave a backfill looking
+          # necessary when it was not.
+          actual=$(psql -Atc "select experiment_id || '|' || experiment_rev || '|' || experiment_generation || '|' || run_count from isaac_run_projection where experiment_id = '$eid'")
+          echo "expected: $expected"
+          echo "actual:   $actual"
+          [ "$actual" = "$(echo "$expected" | tr -d '\n')" ] || {
+            echo "::error::the completeness claim does not match the document"; exit 1; }
+          projector=$(psql -Atc "select projector from isaac_run_projection where experiment_id = '$eid'")
+          [ "$projector" = "write-path" ] || {
+            echo "::error::unexpected projector: $projector"; exit 1; }
+          # AND IT AGREES WITH THE ROWS IT DESCRIBES. `run_count` is a
+          # writer-maintained projection that no CHECK constrains — 0005 says so
+          # itself — so this is the only place it is checked against reality.
+          rows=$(psql -Atc "select count(*) from isaac_runs where experiment_id = '$eid'")
+          claimed=$(echo "$expected" | cut -d'|' -f4)
+          [ "$rows" = "$claimed" ] || {
+            echo "::error::claim says $claimed runs, table holds $rows"; exit 1; }
+          # A SECOND SAVE SUPERSEDES IN PLACE: one row, a higher rev.
+          python - <<'PY'
+          import sys
+          sys.path[:0] = ["apps/api", "src"]
+          import isaac_api.workspace as ws
+          eid = open("/tmp/projection-expected.txt").read().split("|")[0]
+          exp = ws.load_experiment(eid)
+          exp.add_run(label="R3")
+          exp.save_versioned()
+          print("second save: rev", exp.rev, "runs", len(exp.sorted_runs()))
+          PY
+          count=$(psql -Atc "select count(*) from isaac_run_projection where experiment_id = '$eid'")
+          [ "$count" = "1" ] || { echo "::error::the claim was appended, not superseded"; exit 1; }
+          after=$(psql -Atc "select run_count from isaac_run_projection where experiment_id = '$eid'")
+          [ "$after" = "3" ] || { echo "::error::the claim did not follow the third run: $after"; exit 1; }
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_run_projection WHERE experiment_id = '$eid'"
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_runs WHERE experiment_id = '$eid'"
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$eid'"
+          echo "0005: the application's own claim matches the document AND the rows"
 
       # THE DEPLOYMENT-ORDER GUARD, AGAINST A REAL ENGINE AND IN ONE PROCESS.
       #
@@ -1816,6 +2148,16 @@ jobs:
           # table SET and the `records` digest rather than this application's rows.
           # A future step that needs them must run before this one.
           rid=$(cat /tmp/isaac-transition-experiment.txt)
+          # THE PROJECTION ROW FIRST, AND THIS IS WHERE `0005`'s FOREIGN KEY BITES.
+          # `isaac_run_projection` references `isaac_experiments` with NO `ON DELETE`,
+          # so once `0005` is applied every experiment this application saved carries a
+          # row that REFUSES the delete below. That is the constraint working — the
+          # alternative, `ON DELETE CASCADE`, is exactly what `0005` declines — and the
+          # cost is that every cleanup in this job now has three statements instead of
+          # two. This step is where CI found it: it failed with
+          # `violates foreign key constraint "isaac_run_projection_experiment_fk"`
+          # after the parity step above started creating claims.
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_run_projection WHERE experiment_id = '$rid'"
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_runs WHERE experiment_id = '$rid'"
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$rid'"
           rm -rf /tmp/isaac-pg-transition
@@ -1838,7 +2180,7 @@ jobs:
             exit 1
           fi
           cat /tmp/wrong-order.log
-          for t in isaac_experiments isaac_runs isaac_schema_migrations isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs; do
+          for t in isaac_experiments isaac_runs isaac_schema_migrations isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs isaac_run_projection; do
             c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
             [ "$c" = "1" ] || { echo "::error::$t was destroyed by the failed rollback attempt"; exit 1; }
           done
@@ -1864,8 +2206,22 @@ jobs:
       - name: Prove the documented rollbacks return the database to its prior state
         run: |
           set -euo pipefail
-          # THE DOCUMENTED ORDER IS 0004, 0003, 0002, 0001 — children before parents
-          # across files as well as within them.
+          # THE DOCUMENTED ORDER IS 0005, 0004, 0003, 0002, 0001 — children before
+          # parents across files as well as within them.
+          #
+          # `0005_run_projection` FIRST, and its dependency is worth stating because it
+          # is NOT the one the pattern suggests: `isaac_run_projection` references
+          # `isaac_experiments`, not `isaac_runs`. So it must precede 0001 and is
+          # INDEPENDENT of 0002 — rolling 0002 back while this table stands is legal,
+          # and leaves every claim in it describing rows that no longer exist. The
+          # four-state read model handles that as fallback, which is why the rollback
+          # file says so rather than forbidding it.
+          psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0005_run_projection.rollback.sql
+          gone=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_run_projection'")
+          [ "$gone" = "0" ] || { echo "::error::0005's rollback left isaac_run_projection behind"; exit 1; }
+          rows=$(psql -Atc "select count(*) from isaac_schema_migrations where version = '0005_run_projection'")
+          [ "$rows" = "0" ] || { echo "::error::0005's rollback left its bookkeeping row"; exit 1; }
+
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0004_submissions.rollback.sql
           for t in isaac_submissions isaac_submission_runs; do
             c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
@@ -1882,8 +2238,8 @@ jobs:
           rows=$(psql -Atc "select count(*) from isaac_schema_migrations where version = '0003_revisions'")
           [ "$rows" = "0" ] || { echo "::error::0003's rollback left its bookkeeping row"; exit 1; }
           plan=$(python scripts/db_migrate.py --plan)
-          [ "$plan" = "pending: 0003_revisions, 0004_submissions" ] || {
-            echo "::error::after the 0004+0003 rollback the plan is wrong: $plan"; exit 1; }
+          [ "$plan" = "pending: 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
+            echo "::error::after the 0005+0004+0003 rollback the plan is wrong: $plan"; exit 1; }
 
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0002_runs.rollback.sql
           gone=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
@@ -1895,7 +2251,7 @@ jobs:
           [ "$rows" = "0" ] || { echo "::error::0002's rollback left its bookkeeping row"; exit 1; }
           plan=$(python scripts/db_migrate.py --plan)
           echo "$plan"
-          [ "$plan" = "pending: 0002_runs, 0003_revisions, 0004_submissions" ] || {
+          [ "$plan" = "pending: 0002_runs, 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
             echo "::error::after the 0002 rollback the plan is wrong: $plan"; exit 1; }
 
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0001_experiments.rollback.sql

@@ -718,7 +718,21 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
  */
 async function mutationError(res: Response, path: string): Promise<ApiError> {
   const err = httpError(res, path);
-  if (!err.htmlIntercept && (res.status === 412 || res.status === 400 || res.status === 422)) {
+  /* 409 IS READ NOW TOO, and it was not. Two refusals shipped without it and an
+     independent review measured what a scientist saw: `belongs_to_a_run` — whose body
+     names the run, names the route that CAN take the answer, and says nothing was
+     written — surfaced as "That answer could not be applied (409). Nothing was changed —
+     try again", which is false advice because retrying always 409s; and
+     `already_exported_without_runs` surfaced as the bare "Request failed (409)."
+
+     Reading the body is ADDITIVE in the same way the 422 case was: it only POPULATES
+     `err.body` where it was `undefined`, so no existing 409 branch changes behaviour —
+     `RunsSection`'s Remove flow, which writes its own 409 copy because that route has
+     exactly one 409, is unaffected. */
+  if (
+    !err.htmlIntercept &&
+    (res.status === 412 || res.status === 400 || res.status === 422 || res.status === 409)
+  ) {
     const body = await res.json().catch(() => undefined);
     return new ApiError(err.message, {
       status: res.status,
@@ -978,12 +992,30 @@ export const api = {
   // stale write returns 412 (or a malformed token 400) — the body carrying
   // `current_version` is read and attached to the thrown ApiError so the screen
   // can show the conflict; other non-OK statuses keep the plain-error behavior.
+  /*
+   * `runId` ROUTES THE ANSWER TO THE RUN THAT OWNS THE QUESTION.
+   *
+   * A spectrum, a QC verdict, a descriptor and an asset hash are per-RUN: each run is
+   * one official ISAAC record, and the record's composed draft reads those blocks off
+   * the run. Once a record has runs, the record-level route REFUSES them with
+   * `409 belongs_to_a_run` — because before it did, the answer was accepted, reported
+   * as applied, and published nothing.
+   *
+   * The caller does not decide this: `GET /pending` tags every run-owned question with
+   * the `run_id` that owns it, and the screen passes that through. The `If-Match` token
+   * changes with the route — a run write takes THE RUN's version, and sending the
+   * record's is a 412 the reader would be told to fix by refreshing something that was
+   * never stale.
+   */
   async submitAnswer(
     id: string,
     answersById: Record<string, unknown>,
     version?: string,
+    runId?: string,
   ): Promise<ApiAnswersResponse> {
-    const path = `/experiments/${enc(id)}/answers`;
+    const path = runId
+      ? `/experiments/${enc(id)}/runs/${enc(runId)}/answers`
+      : `/experiments/${enc(id)}/answers`;
     const res = await request(path, {
       method: 'POST',
       body: JSON.stringify({ answers: answersById, confirmed_by_user: true }),
@@ -1005,8 +1037,13 @@ export const api = {
     id: string,
     answersById: Record<string, unknown>,
     version?: string,
+    runId?: string,
   ): Promise<ApiAnswersResponse> {
-    const path = `/experiments/${enc(id)}/edit`;
+    // Same routing rule as `submitAnswer` — see its comment for why the record refuses
+    // a run-owned key and which `If-Match` token each route takes.
+    const path = runId
+      ? `/experiments/${enc(id)}/runs/${enc(runId)}/edit`
+      : `/experiments/${enc(id)}/edit`;
     const res = await request(path, {
       method: 'POST',
       body: JSON.stringify({ answers: answersById, confirmed_by_user: true }),
@@ -1216,11 +1253,14 @@ export const api = {
    * WHICH OF THOSE REACHES THE SCREEN IN THE SERVER'S OWN WORDS, precisely,
    * because an earlier version of this comment said "the screen renders the
    * server's own words" of BOTH and that is false of one of them:
-   * `mutationError` parses a body for **400, 412 and 422 only**. A 409 body is
-   * not parsed, so its copy is written by the CALLER — `RunsSection.tsx` says so
-   * at its own call site, in the opposite words to the sentence this replaces.
-   * A future second consumer that trusted the old wording would ship a blank
-   * message on the one refusal a scientist most needs explained.
+   * `mutationError` parses a body for **400, 409, 412 and 422**. ~~"A 409 body is
+   * not parsed, so its copy is written by the CALLER"~~ — that was true until
+   * 2026-08-19 and is struck rather than deleted, because the warning it carried
+   * still applies to this route: `removeRun`'s 409 copy IS written by the caller,
+   * deliberately, because that route has exactly one 409 and its own sentence is
+   * better than a generic one. What changed is that a 409 body is now AVAILABLE,
+   * so a route with several 409s can render the server's words instead of
+   * inventing copy — which is what `POST /answers` and `POST /runs` now do.
    */
   async removeRun(
     experimentId: string,

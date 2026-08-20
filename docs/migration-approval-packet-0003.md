@@ -516,13 +516,59 @@ pending/applied plan at each step, ran the submission lifecycle end to end, and 
 order — including that `0003`'s rollback **fails** while `isaac_submissions` still references it, and
 that the failed attempt destroys nothing.
 
-**CONSTRAINT COVERAGE IS PARTIAL, AND AN EARLIER REVISION OF THIS SECTION SAID "EVERY".** Corrected
+### RE-MEASURED 2026-08-19 — coverage improved from 27 to 41 of 46
+
+**The seventeen that were declared and never exercised are now exercised, and the correction below
+is kept in place rather than deleted because it records how the number moved and why three of the
+seventeen still cannot be counted.**
+
+Measured with the same rule the guard test applies — a constraint is *blamed* only when it is the
+third argument of a `refuse()` call, which is the object PostgreSQL must be shown to blame:
+
+| | Then (2026-08-17) | **Now** |
+|---|---|---|
+| declared across the two forward files | 46 | **46** |
+| blamed by a `refuse()` call | 27 | **41** |
+| not blamed | 19 | **5** |
+
+**FOURTEEN of the seventeen are now proved individually.** Each new case differs from an accepted row
+in exactly one column, so the constraint it names is the only thing left to blame — which is the
+property that makes a `refuse()` call evidence rather than a formality.
+
+**THREE CANNOT BE PROVED INDIVIDUALLY, AND THAT IS A FACT ABOUT THE SCHEMA RATHER THAN A GAP IN THE
+TESTING.** `isaac_submission_runs` carries two equality CHECKs — `record_id = unit_id`
+(`one_record_per_unit`) and `run_id IS NULL OR run_id = unit_id` (`run_matches_unit`). So any row
+that violates `isaac_submission_runs_unit_id_shape`, `_record_id_shape` or `_run_id_shape` violates
+an equality CHECK at the same time:
+
+* `unit_id` malformed and `record_id` equal to it → **both** shape CHECKs fail;
+* `unit_id` malformed and `record_id` well-formed → the equality CHECK fails too;
+* `run_id` malformed → `run_matches_unit` fails too.
+
+There is no assignment of those three columns that violates exactly one of them, and PostgreSQL
+reports only the first constraint it happens to check. **This is defence in depth, not a defect** —
+the equality CHECKs subsume the shape CHECKs — but "every constraint is individually blamed" is a
+claim this table cannot support. The workflow proves those rows ARE refused, by a CHECK on that
+table, through a deliberately weaker helper (`refuse_by_the_table`) that greps the constraint-name
+prefix instead of a single name, so nobody can mistake it for the stronger check.
+
+**The remaining two are the pre-existing pair**: `isaac_revision_changes_revision_fk` and
+`isaac_submissions_experiment_fk` appear in the workflow for other reasons without any refusal being
+blamed on them.
+
+So the honest summary is: **41 of 46 individually blamed; 3 more proved refused with the blame
+ambiguous by construction; 2 named without being driven by a refusal.**
+
+---
+
+**THE ORIGINAL CORRECTION, KEPT: CONSTRAINT COVERAGE IS PARTIAL, AND AN EARLIER REVISION OF THIS
+SECTION SAID "EVERY".** Corrected
 after an independent review measured it; the measurement was then reproduced independently before this
 paragraph was written. The two forward files declare **46 named constraints**. CI's step *"Prove every
-0003 and 0004 constraint rejects what it claims to reject"* makes 31 `refuse()` calls blaming **27
+0003 and 0004 constraint rejects what it claims to reject"* then made 31 `refuse()` calls blaming **27
 distinct constraints**, and `refuse()`'s third argument is the object PostgreSQL must be shown to
 blame — so a constraint the workflow never names is a constraint that was never exercised. **17
-declared constraint names do not appear in `.github/workflows/ci.yml` at all:**
+declared constraint names did not appear in `.github/workflows/ci.yml` at all:**
 
 `isaac_experiment_revisions_no_positive`, `_rev_non_negative`, `_state_is_object`;
 `isaac_run_revisions_id_shape`, `_run_id_shape`, `_ordinal_non_negative`, `_rev_non_negative`,
@@ -530,7 +576,7 @@ declared constraint names do not appear in `.github/workflows/ci.yml` at all:**
 `isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`;
 `isaac_submission_runs_id_shape`, `_unit_id_shape`, `_run_id_shape`, `_record_id_shape`.
 
-*(46 − 27 = 19 unexercised, of which 17 are never named anywhere in the workflow and 2 are named
+*(46 − 27 = 19 unexercised, of which 17 were never named anywhere in the workflow and 2 are named
 elsewhere in it without being driven by a `refuse()` call.)*
 
 **Why this matters enough to correct rather than footnote.** The owner's approval in the STATUS block

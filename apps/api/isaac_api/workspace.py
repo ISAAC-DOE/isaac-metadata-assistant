@@ -635,6 +635,91 @@ def block_level(key: str) -> str:
     return LEVEL_UNCLASSIFIED
 
 
+#: The draft BLOCK each pending-blocker ``kind`` writes into. One map, so "is this
+#: question a Run's?" is answered by :func:`block_level` rather than by a second list
+#: that could drift from it. ``descriptor`` is the one whose kind and block differ.
+BLOCKER_KIND_BLOCK: dict[str, str] = {
+    "series": "series",
+    "qc": "qc",
+    "descriptor": "descriptors_outputs",
+    "asset": "assets",
+}
+
+
+def blocker_is_run_level(entry: object) -> bool:
+    """Does this pending entry belong to a Run rather than to the record itself?
+
+    FAIL-CLOSED: a kind :data:`BLOCKER_KIND_BLOCK` does not know is NOT run-level.
+    Getting that default the other way round would ask a scientist the same
+    record-level question once per run, which is worse than leaving a new question
+    where it already is.
+
+    Used for two things that must agree, which is why it is one function:
+
+    * seeding a new Run with the questions it actually owns
+      (``routes._seed_for_new_run``); and
+    * withholding the EXPERIMENT's own copies of those questions from
+      :meth:`Experiment.pending` once a run exists — because at that point the
+      experiment's ``series``/``qc``/``assets``/``descriptors_outputs`` are no longer
+      part of any exported record (``resolved_run_draft`` reads them off the RUN), so
+      asking them would be asking for an answer that reaches nothing.
+    """
+    if not isinstance(entry, dict):
+        return False
+    block = BLOCKER_KIND_BLOCK.get(entry.get("kind"))
+    return block is not None and block_level(block) == LEVEL_RUN
+
+
+def run_questions(run: "Run") -> list:
+    """The open blocking questions ONE run carries, legacy runs included.
+
+    ``run.draft["pending"]`` when the key is present — that list IS the answer state,
+    because ``apply_answers`` removes an entry when it is answered and writes the key
+    back every time.
+
+    **WHEN THE KEY IS ABSENT the run is given the run-level questions a seeded one
+    would have had**, and that branch exists for a state that lives in the DURABLE
+    STORE rather than in theory. ``new_run`` defaulted a run's draft to ``{}`` until
+    ``routes._seed_for_new_run`` shipped, and ``Experiment.to_state()`` serialises
+    runs — so every run created before that deploy is still an empty-drafted run in
+    PostgreSQL. Without this, such a run reports nothing pending while its export
+    refuses, which is the exact failure the seeding change was written to close.
+
+    THE ABSENT KEY IS THE ONLY SIGNAL, and it is a reliable one: a run that has
+    ANSWERED everything has ``pending: []`` — the key present and empty — and a run
+    seeded from a record that had already answered everything gets the same. So
+    "answered" and "never asked" are distinguishable, which is what stops this branch
+    from re-asking a question somebody already answered.
+
+    An independent review found the alternative — making
+    :meth:`Experiment.pending`'s withholding conditional on a run still carrying the
+    kind — to be worse in a way that reached a scientist: it un-withheld the record's
+    copy the moment a run answered the question, leaving three questions visible on
+    the record, refused by every route, and unanswerable. Fixing the gap on the RUN
+    side keeps each question owned by exactly one entity.
+
+    PUBLIC, because a WRITER needs it too, and finding that out was the next defect.
+    ``complete.apply_answers`` iterates ``draft["pending"]`` and then assigns
+    ``draft["pending"] = remaining_pending`` unconditionally — so on a draft with NO
+    such key it matched no branch, applied nothing, and wrote back ``[]``. Measured:
+    answering a legacy run's QC verdict returned **200** reporting ``pending: []``,
+    stored ``qc: None``, erased the derived questions permanently, and left the record
+    saying nothing was pending while its export refused. ``routes._apply_to_run``
+    therefore MATERIALISES this list into the run's draft before writing, which is why
+    it is not private.
+    """
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    if "pending" in draft:
+        return list(draft.get("pending") or [])
+    from .experiment_repository import blank_draft  # noqa: PLC0415 - avoids a cycle
+
+    return [
+        copy.deepcopy(entry)
+        for entry in blank_draft()["pending"]
+        if blocker_is_run_level(entry)
+    ]
+
+
 def address_level(address: str) -> str:
     """Classify a namespaced draft address. Raises ``ValueError`` on a malformed one."""
     kind, name = parse_address(address)
@@ -1470,6 +1555,7 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #   [caller] routes.py::get_evidence
 #   [caller] routes.py::post_audit
 #   [caller] routes.py::post_export
+#   [caller] routes.py::post_run
 #   [caller] routes.py::post_validate
 #   [caller] runtime_records.py::_project_one
 #   [caller] workspace.py::_plan_digest_row
@@ -1558,6 +1644,13 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #     dry-ran ``exp.draft`` and advised ``NO_LINKS`` / ``NO_MEASUREMENT_SERIES`` about
 #     a fan-out whose every record on disk carries a ``measurement`` block. FIXED
 #     (F5): per run, with ``runs[]`` and a deduplicated union at the top level.
+#   * ``routes.post_run`` reads ``exported()`` to REFUSE adding a run to a record
+#     already exported under its own identity. That is a fan-out question by nature:
+#     a zero-run record exports as itself, and the first run moves the exported
+#     identity onto the run — so without the refusal, adding one published a SECOND
+#     official record with the same science, a different id, and no relation between
+#     them. It reads the singular state precisely because the singular state is the
+#     thing it is asking about, and it names it in the refusal body.
 #   * ``routes.post_export`` itself: the 409 named one arbitrary run's record as
 #     though it were THE record (FIXED, C10), the prune could delete a record a
 #     surviving run or a surviving link still named (FIXED, C3/C4/C7), and it could
@@ -2469,11 +2562,25 @@ class Experiment:
         document, and ``rev`` is deliberately not bumped, because nothing new
         happened.
 
-        THIS IS THE ONLY CALL TO ``PostgresOrdinaryStore.persist`` IN THE
-        CODEBASE, which is why the adoption lives here and not in the route helper
-        that renders the 412. Not "it covers four call sites instead of three" —
-        it covers every caller by construction, and a caller added later inherits
-        it without knowing it exists.
+        THIS IS THE ONLY CALL TO ``PostgresOrdinaryStore.persist`` ON ANY PATH A
+        REQUEST CAN REACH, which is why the adoption lives here and not in the
+        route helper that renders the 412. Not "it covers four call sites instead
+        of three" — it covers every caller by construction, and a caller added
+        later inherits it without knowing it exists.
+
+        **THE SENTENCE ABOVE SAID "IN THE CODEBASE" AND THAT IS NO LONGER TRUE.**
+        ``scripts/db_backfill_runs.py`` calls ``persist`` directly, and it is
+        recorded here rather than left for a reader to discover, because a
+        maintainer relying on the stronger claim would conclude that no code path
+        can persist without adopting a winner locally.
+
+        The exception is deliberate and narrow. That script is an OPERATOR
+        artifact: it has never been executed, it is absent from the container image
+        (the Dockerfile COPY allowlist), and no route can reach it — so it is not a
+        path a request can take. It also must not adopt: adoption writes the
+        winner's document into the local workspace file, which is exactly right for
+        a client that is about to re-read, and meaningless for a batch that owns no
+        client. It counts the conflict and moves to the next experiment instead.
         """
         store = _ordinary_store(self.session_id)
         if store is not None:
@@ -3261,10 +3368,46 @@ class Experiment:
         own = list(self.draft.get("pending") or [])
         if not self.runs:
             return own
-        out = list(own)
+        # ONCE A RUN EXISTS, THE RECORD'S OWN RUN-LEVEL QUESTIONS ARE WITHHELD.
+        #
+        # A zero-run experiment is its own record. The moment a run exists, the record
+        # each unit exports is the RUN's, and `resolved_run_draft` reads `series`,
+        # `qc`, `assets` and `descriptors_outputs` off the run — so the record's copies
+        # of those questions can no longer be answered into anything that ships. And
+        # they cannot be answered at all: `routes._refuse_run_level_on_the_record`
+        # refuses them with `409 belongs_to_a_run`. Listing them would be a dead end
+        # wearing the chrome of a real question.
+        #
+        # **THE CONDITION IS `self.runs`, NOT "some run still carries this kind", AND
+        # THE SECOND VERSION WAS A MEASURED DEFECT.** It was introduced to fix the
+        # opposite problem — a run with an EMPTY draft carries no blockers, so
+        # withholding unconditionally hid a question from both places — and it created a
+        # worse one, because it un-withheld the record's copy the instant a run ANSWERED
+        # the question. Measured over HTTP by an independent review, on the exact flow
+        # this feature exists to enable::
+        #
+        #     create -> POST /runs -> answer series+qc+descriptor ON THE RUN   (all 200)
+        #     GET /experiments/{id}  -> pending_count 3 · export BLOCKED
+        #     POST /export           -> 200 {"ok": true}      <- contradicts the workflow
+        #     POST /answers|/edit    -> 409 belongs_to_a_run   ("send them to the run")
+        #     POST /runs/{id}/answers-> 200, changed nothing, the entries stay
+        #
+        # Three questions shown in both places and accepted in neither, with the record
+        # claiming export was blocked while export succeeded. The only escape was
+        # removing the run and re-answering on the record — discarding the run's science.
+        #
+        # THE LEGACY-EMPTY-RUN CASE IS FIXED ON THE RUN SIDE INSTEAD, by
+        # :func:`run_questions`, which is where it belongs: a run that was created
+        # before `_seed_for_new_run` existed is missing its questions, so it is given
+        # them, rather than the record keeping a copy nobody can answer.
+        #
+        # This is a DERIVED view and withholds rather than deletes: the entries stay in
+        # the document, so removing every run restores them intact. Record-level
+        # questions are untouched, and a zero-run experiment's list is byte-identical to
+        # what it always was (the branch above returns before reaching here).
+        out = [entry for entry in own if not blocker_is_run_level(entry)]
         for run in self.sorted_runs():
-            run_draft = run.draft if isinstance(run.draft, dict) else {}
-            for item in run_draft.get("pending") or []:
+            for item in run_questions(run):
                 if isinstance(item, dict):
                     out.append({**item, "run_id": run.id, "run_label": run.label})
                 else:

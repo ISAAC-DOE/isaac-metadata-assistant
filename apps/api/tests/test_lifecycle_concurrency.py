@@ -1001,15 +1001,25 @@ def test_two_scientists_submitting_at_once_record_exactly_one_attributed_submiss
     see the previous test for why that is the case where the store is the only
     thing standing between one submission and two.
     """
-    verifier = _RoundRobinSubjectVerifier([ACTOR, OTHER_ACTOR])
-    monkeypatch.setattr(identity, "edge_trust_verifier", lambda: verifier)
-
     exp = _experiment_with_runs(ws, labels=("run A",), experiment_id=EXPERIMENT_ID)
     eid = exp.id
     export = submit_client.post(
         f"/api/experiments/{eid}/export", headers={"If-Match": _record_etag(submit_client, eid)}
     )
     assert export.status_code == 200, export.text
+
+    # THE VERIFIER IS INSTALLED HERE, AFTER THE SETUP EXPORT, and the ordering is
+    # load-bearing rather than tidy. `_RoundRobinSubjectVerifier` hands out one subject
+    # per `verify()` call and SATURATES at the last one — it is not a cycle. The export
+    # route now resolves an identity of its own (it stamps the server-owned
+    # `attribution.uploaded_by`), so installing the verifier first let the export consume
+    # `ACTOR` and left BOTH racing submissions holding `OTHER_ACTOR` — quietly turning a
+    # test about two people into a test about one, while still passing every assertion
+    # about counts. Installing it after the setup means the only two calls it ever serves
+    # are the two this test is about.
+    verifier = _RoundRobinSubjectVerifier([ACTOR, OTHER_ACTOR])
+    monkeypatch.setattr(identity, "edge_trust_verifier", lambda: verifier)
+
     token = _record_etag(submit_client, eid)
     rendezvous = _LockRendezvous(monkeypatch, eid)
 
@@ -1560,3 +1570,266 @@ def test_a_decision_racing_an_edit_that_changes_the_competing_set(client, monkey
     )
     # The decision is still there in full — nothing deletes a recorded decision.
     assert entry["resolution"]["chosen_value"] == 300
+
+
+# =============================================================================
+# 7. The RUN-LEVEL ANSWER routes, which had no concurrency coverage at all
+# =============================================================================
+#
+# `POST .../runs/{run_id}/answers` and `.../edit` landed with unit tests and no race
+# coverage, and they are the two newest writers in the application — the ones that
+# let a scientist finish a multi-run record at all. They share `_apply_to_run`, whose
+# docstring makes two claims a single-threaded test cannot check:
+#
+#   * "THE LOCK IS PER RECORD, not per run — runs live inside the record's document,
+#     so two runs of one record serialise against each other, which is exactly what
+#     makes their independent `If-Match` validators safe."
+#   * "THE PRECONDITION IS THE RUN'S. A run carries its own version token, so a
+#     client editing run B is not defeated by a concurrent write to run A."
+#
+# Those two together are the whole safety argument for having per-run validators
+# inside one document, and until now nothing exercised them concurrently.
+#
+# EVERY ASSERTION BELOW IS AN EXACT CODE AND AN EXACT ERROR STRING. A `!= 200` or a
+# `>= 400` would pass for a malformed request, a missing header, a 500 out of the
+# truth core, or a refusal for an entirely different reason — which is how a
+# concurrency test ends up proving that the server dislikes something.
+
+#: A well-formed reduced spectrum, and a second one that differs observably.
+_SERIES_A = [{"energy_eV": 8979.0, "mu": 0.11, "series_id": "race-a"}]
+_SERIES_B = [{"energy_eV": 8999.0, "mu": 1.23, "series_id": "race-b"}]
+#: A third, for the answer-versus-correction race: a correction that re-sends the
+#: stored value is a no-op, and a no-op cannot lose a compare-and-swap.
+_SERIES_C = [{"energy_eV": 9009.0, "mu": 0.77, "series_id": "race-c"}]
+
+
+def _run_series_id(exp, run_id):
+    """The `series_id` a run's draft currently holds, or `None`."""
+    run = exp.get_run(run_id)
+    series = (run.draft or {}).get("series") or []
+    return series[0].get("series_id") if series else None
+
+
+def test_two_run_level_answers_with_one_token_leave_exactly_the_winner(client, monkeypatch):
+    """One run, one run `ETag`, two answers: 200 and 412 `stale_write`, and the
+    stored spectrum is the WINNER's.
+
+    THE DEFECT THIS WOULD CATCH is the one `_apply_to_run` was written to avoid: a
+    handler that resolved the run before taking the record's lock would let both
+    writers find their validator current, and the second answer would erase the
+    first — silently, because both clients were told 200.
+
+    Neither writer is named as the winner. The scheduler decides which reaches the
+    lock first; what is not ordering-dependent is that exactly one wins, that the
+    stored value is that one's, and that the loser's value is nowhere in the state.
+    """
+    store = client_ws(client)
+    exp = _experiment_with_runs(store, labels=("Run A",), run_draft={})
+    eid, rid = exp.id, exp.runs[0].id
+    token = _run_etag(client, eid, rid)
+    before = store.load_experiment(eid)
+    rendezvous = _LockRendezvous(monkeypatch, eid)
+
+    def answer(series):
+        return client.post(
+            f"/api/experiments/{eid}/runs/{rid}/answers",
+            json={"confirmed_by_user": True, "answers": {"series": series}},
+            headers={"If-Match": token},
+        )
+
+    responses = _race([lambda: answer(_SERIES_A), lambda: answer(_SERIES_B)])
+
+    _assert_raced(rendezvous, client.tutorial_session_id, eid)
+    codes = sorted(r.status_code for r in responses)
+    assert codes == [200, 412], (
+        f"exactly one answer may win the run's compare-and-swap, got {codes}: "
+        f"{_outcome(responses)}"
+    )
+    loser = next(r for r in responses if r.status_code == 412)
+    body = loser.json()
+    # THE EXACT REFUSAL, and it must name BOTH ids: a run's refusal that filed the
+    # run id under `experiment_id` would be a false statement in the one body a
+    # client reads when its write is refused.
+    assert body["error"] == "stale_write"
+    assert body["experiment_id"] == eid
+    assert body["run_id"] == rid
+
+    after = store.load_experiment(eid)
+    stored = _run_series_id(after, rid)
+    assert stored in {"race-a", "race-b"}, stored
+    # AND THE LOSER'S VALUE IS NOWHERE. Not "not the stored value" — nowhere in the
+    # persisted document, which is what catches a partial write.
+    lost = "race-b" if stored == "race-a" else "race-a"
+    assert lost not in _state_json(after), (
+        f"the loser's series id {lost!r} survived somewhere in the state"
+    )
+    # EXACTLY ONE revision, on the run and on the record.
+    assert after.get_run(rid).rev == before.get_run(rid).rev + 1
+    assert after.rev == before.rev + 1
+
+
+def test_answers_to_two_DIFFERENT_runs_both_land_and_neither_disturbs_the_other(
+    client, monkeypatch
+):
+    """The other half of the same design: a per-run validator means a client
+    answering run B is NOT defeated by a concurrent answer to run A.
+
+    Both must be 200 — a 412 here would mean the per-run validator was really a
+    per-record one, and a scientist working on their own run would be refused
+    because a colleague touched a different measurement.
+
+    A THIRD RUN IS PRESENT AND UNTOUCHED, and it is asserted byte-identical. Without
+    it, a handler that rewrote every run on every save would pass: both writes would
+    land, and nothing would notice the collateral damage.
+    """
+    store = client_ws(client)
+    exp = _experiment_with_runs(store, labels=("Run A", "Run B", "Run C"), run_draft={})
+    eid = exp.id
+    run_a, run_b, run_c = (r.id for r in exp.sorted_runs())
+    token_a = _run_etag(client, eid, run_a)
+    token_b = _run_etag(client, eid, run_b)
+    before = store.load_experiment(eid)
+    before_versions = _versions(before)
+    rendezvous = _LockRendezvous(monkeypatch, eid)
+
+    responses = _race([
+        lambda: client.post(
+            f"/api/experiments/{eid}/runs/{run_a}/answers",
+            json={"confirmed_by_user": True, "answers": {"series": _SERIES_A}},
+            headers={"If-Match": token_a},
+        ),
+        lambda: client.post(
+            f"/api/experiments/{eid}/runs/{run_b}/answers",
+            json={"confirmed_by_user": True, "answers": {"series": _SERIES_B}},
+            headers={"If-Match": token_b},
+        ),
+    ])
+
+    _assert_raced(rendezvous, client.tutorial_session_id, eid)
+    assert [r.status_code for r in responses] == [200, 200], _outcome(responses)
+
+    after = store.load_experiment(eid)
+    assert _run_series_id(after, run_a) == "race-a"
+    assert _run_series_id(after, run_b) == "race-b"
+    # RUN C IS UNTOUCHED, in its document AND in its version.
+    assert after.get_run(run_c).draft == before.get_run(run_c).draft
+    assert _versions(after)["runs"][run_c] == before_versions["runs"][run_c]
+    # TWO revisions on the record, one per accepted write — so the two writes
+    # serialised rather than one clobbering the other's revision.
+    assert after.rev == before.rev + 2
+
+
+def test_a_run_level_answer_racing_a_correction_of_the_same_field(client, monkeypatch):
+    """`/answers` and `/edit` share `_apply_to_run` and therefore share ONE lock.
+
+    They are different core writers — `apply_answers` and `apply_corrections` — and
+    a reader could reasonably assume they take different paths. They do not, and
+    that is what makes this safe: one wins the run's validator, the other is refused
+    `stale_write`, and the stored value belongs to the winner.
+
+    The correction is sent SECOND in the list and is not assumed to lose. Either may
+    win; what must not happen is both landing, or the refusal arriving as anything
+    other than the run's own typed 412.
+    """
+    store = client_ws(client)
+    exp = _experiment_with_runs(store, labels=("Run A",), run_draft={})
+    eid, rid = exp.id, exp.runs[0].id
+    # ANSWER IT FIRST, so a correction is legitimate: `/edit` refuses a key that is
+    # still an open question with `422 not_yet_answered`, and a 422 here would be a
+    # race test proving only that the fixture was wrong.
+    seeded = client.post(
+        f"/api/experiments/{eid}/runs/{rid}/answers",
+        json={"confirmed_by_user": True, "answers": {"series": _SERIES_A}},
+        headers={"If-Match": _run_etag(client, eid, rid)},
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    token = _run_etag(client, eid, rid)
+    before = store.load_experiment(eid)
+    rendezvous = _LockRendezvous(monkeypatch, eid)
+
+    responses = _race([
+        lambda: client.post(
+            f"/api/experiments/{eid}/runs/{rid}/answers",
+            json={"confirmed_by_user": True, "answers": {"series": _SERIES_B}},
+            headers={"If-Match": token},
+        ),
+        lambda: client.post(
+            f"/api/experiments/{eid}/runs/{rid}/edit",
+            # A THIRD, DISTINCT VALUE — and this is not cosmetic. The first version of
+            # this test sent `_SERIES_A`, which is what the fixture had just seeded, so
+            # the correction was a byte-identical no-op. A no-op does not advance the
+            # revision (the route's own description says so), so whichever request ran
+            # first left the other's validator CURRENT and both legitimately returned
+            # 200 — and the test failed asserting `[200, 412]` against behaviour that
+            # was correct. Measured, not reasoned: `[200, 200]`.
+            json={"confirmed_by_user": True, "answers": {"series": _SERIES_C}},
+            headers={"If-Match": token},
+        ),
+    ])
+
+    _assert_raced(rendezvous, client.tutorial_session_id, eid)
+    codes = sorted(r.status_code for r in responses)
+    assert codes == [200, 412], _outcome(responses)
+    assert next(r for r in responses if r.status_code == 412).json()["error"] == "stale_write"
+    after = store.load_experiment(eid)
+    assert after.get_run(rid).rev == before.get_run(rid).rev + 1
+
+
+def test_a_run_level_answer_racing_the_removal_of_that_run(client, monkeypatch):
+    """The run is gone, or the answer landed. Never both, and never a 500.
+
+    TWO LEGITIMATE OUTCOMES and the test branches rather than naming one:
+
+      * the removal wins — the answer is `404`, and the run is absent;
+      * the answer wins — it is `200`, and the removal is refused or the run is
+        absent afterwards.
+
+    What is asserted unconditionally is that the answer's failure, if it fails, is
+    the typed 404 for a missing run rather than a 500 out of the truth core writing
+    into a document that no longer holds that run.
+    """
+    store = client_ws(client)
+    exp = _experiment_with_runs(store, labels=("Run A", "Run B"), run_draft={})
+    eid = exp.id
+    rid = exp.sorted_runs()[0].id
+    keep = exp.sorted_runs()[1].id
+    token = _run_etag(client, eid, rid)
+    record_token = client.get(f"/api/experiments/{eid}").headers["ETag"]
+    rendezvous = _LockRendezvous(monkeypatch, eid)
+
+    responses = _race([
+        lambda: client.post(
+            f"/api/experiments/{eid}/runs/{rid}/answers",
+            json={"confirmed_by_user": True, "answers": {"series": _SERIES_A}},
+            headers={"If-Match": token},
+        ),
+        # `POST .../remove`, NOT `DELETE`. The first version of this test issued a
+        # DELETE, which no route declares — so it never reached the record lock and
+        # `_assert_raced` failed with `arrivals == 1`. That failure was the harness
+        # telling the truth: a race test where one racer 405s is not a race, and
+        # asserting only "the other run survived" would have passed while proving
+        # nothing. It also takes the RECORD's ETag, because removing a run rewrites
+        # the record.
+        lambda: client.post(
+            f"/api/experiments/{eid}/runs/{rid}/remove",
+            json={"confirmed_by_user": True},
+            headers={"If-Match": record_token},
+        ),
+    ])
+
+    _assert_raced(rendezvous, client.tutorial_session_id, eid)
+    answer, removal = responses
+    assert answer.status_code in {200, 404, 412}, _outcome(responses)
+    if answer.status_code == 404:
+        assert answer.json()["error"] in {"run_not_found", "not_found"}, answer.text
+    after = store.load_experiment(eid)
+    # THE OTHER RUN IS UNHARMED WHICHEVER WAY THE RACE WENT. That is the assertion
+    # a partial write would fail, and it holds under every legitimate ordering.
+    assert after.get_run(keep) is not None
+    if after.get_run(rid) is None:
+        # The removal won: the answer must not have left the spectrum behind under
+        # a run that no longer exists.
+        assert "race-a" not in _state_json(after), (
+            "the removed run's answer survived in the state"
+        )

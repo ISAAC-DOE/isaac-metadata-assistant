@@ -131,11 +131,11 @@
   "descriptors": {
     "outputs": [
       {
-        "label": "completion_demo",
+        "label": "user_supplied",
         "generated_utc": "2099-03-05T21:00:00Z",
         "generated_by": {
-          "agent": "isaac-complete-demo",
-          "version": "0.1"
+          "agent": "isaac-metadata-assistant",
+          "notes": "Supplied and confirmed by a person through the assistant's completion flow. No tool computed this value."
         },
         "descriptors": [
           {

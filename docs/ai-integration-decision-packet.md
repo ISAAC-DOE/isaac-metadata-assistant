@@ -292,6 +292,51 @@ deterministic intent catalog — **no LLM was added**"*). Verified here rather t
   DETERMINISTIC: there is NO external LLM, no freeform natural-language model, no generation — only
   a fixed registry of small pure functions"*.
 
+### UPDATED 2026-08-19 — the seam is now REACHABLE OVER HTTP, and no screen advertises it
+
+`POST /api/assistant/ask` exists. It is the assistant seam's HTTP consumer, and it was
+missing: `providers/assistant.py` was a fully built, fully tested seam with **no route at
+all**, so *"does this deployment have a native assistant?"* was answerable only by reading
+Python. That is the same gap `POST /api/transcription` closed for its own seam, and the new
+route is deliberately its twin — same two-status split, same refusal vocabulary, same
+decision reference.
+
+**It answers `501` in every deployment, and that is structural rather than a promise.**
+`validate_provider_config_or_raise` refuses to boot an application whose
+`ISAAC_ASSISTANT_PROVIDER` names the deterministic fake (DECISION **D6**), so no operator can
+turn one on and no screen can be shown a connected state. The 200 path is exercised only by
+a test that constructs the double directly, which is what the provider configuration
+module's own docstring prescribes.
+
+**What the route enforces, over the wire:**
+
+- an answer carries `grounded_in` — the context keys it used — and an uncited answer cannot
+  be constructed at all (`AssistantAnswer` raises);
+- `authoritative` is a constant `false`, and the route is absent from the validation stack;
+- the operation **fetches nothing**. It cannot read a record, a workspace or a database, so
+  *"what was sent to the provider"* is exactly the `context` array the caller wrote. An
+  unknown top-level key — `record_id` is the obvious one — is **refused**, not ignored,
+  because answering `200` while dropping it would leave a caller believing the answer was
+  grounded in a record nobody read;
+- an unknown key **inside** a context item is refused too. `verified: true` is the case worth
+  naming: it is the vocabulary of an evidence envelope, and a caller sending it would be
+  asserting a classification this seam has no power to make;
+- a question the supplied context does not cover is `422 outside_grounded_context`, never a
+  paragraph from general knowledge.
+
+**NO PRODUCT SCREEN CONSUMES IT, and that is a decision rather than an unfinished edge.**
+§9's rule is *"build nothing that implies any of it exists"*, and a panel reporting an
+assistant seam — even one reporting it as unconfigured — would put a model-backed assistant
+in front of a scientist as a thing that is nearly here. The Assistant panel goes on saying
+*"There is no language model"*, which is true of the shipped deterministic Q&A and stays
+true. `GET /api/providers/capabilities` reports the seam's status for a client that asks;
+`TranscriptCapturePanel` is the precedent for consuming that honestly if a surface is ever
+authorized.
+
+**Capability B still needs everything §3's "What capability B needs" lists, and none of it is
+code.** Building the capability and advertising it are different acts; the first is
+authorized by the project owner, the second is not.
+
 ### There is no model provider, no ASR client, and no outbound HTTP. Measured.
 
 Three independent commands, each reported with the exit code of `rg` itself (**not** of a pipeline,

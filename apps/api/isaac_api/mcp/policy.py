@@ -412,6 +412,66 @@ def _operations() -> tuple[Operation, ...]:
             summary="Correct an already-answered record-level draft field.",
             requires_if_match=True,
         ),
+        # THE FOUR OPERATIONS THAT ANSWER THE QUESTIONS ISAAC IS ASKING.
+        #
+        # Until these existed the tool surface could add a run and write its five
+        # `RUN_WRITABLE_FIELD_PATHS`, and could correct a record-level field that
+        # had ALREADY been answered — so an agent could not answer an OPEN blocking
+        # question at all, at either level. On a record created through ISAAC's own
+        # Create Experiment path that is every question it has: `/edit` refuses a
+        # field nothing has answered yet (`422`, no editable field), and the
+        # spectrum, QC verdict, descriptors and asset hashes are not among the five
+        # PATCH accepts. The gap was recorded in `docs/mcp-capability-audit.md`
+        # §5A before it was closed, rather than closed quietly.
+        #
+        # Two levels, because the levels are not interchangeable and the API says
+        # so: once a record has runs, its own `/answers` REFUSES a run-owned key
+        # with `409 belongs_to_a_run` rather than writing a value no exported
+        # record reads. Exposing only the record level would have handed an agent a
+        # refusal it could not act on.
+        # DISCOVERY, and it is not optional decoration. Without it the write
+        # operations below are unusable: the keys an answer is submitted under come
+        # from this route and nowhere else, and `get_experiment` does not carry
+        # them. Shipping the writes alone would have meant a tool whose description
+        # named an endpoint this server may not call.
+        Operation(
+            id="list_questions",
+            method="GET",
+            path_template="/api/experiments/{experiment_id}/pending",
+            scope=Scope.READ,
+            mutates=False,
+            summary=(
+                "The record's open blocking questions, each with the key an answer "
+                "is submitted under and the run that owns it."
+            ),
+        ),
+        Operation(
+            id="answer_record_question",
+            method="POST",
+            path_template="/api/experiments/{experiment_id}/answers",
+            scope=Scope.DRAFT_WRITE,
+            mutates=True,
+            summary="Answer a record's own open blocking questions.",
+            requires_if_match=True,
+        ),
+        Operation(
+            id="answer_run_question",
+            method="POST",
+            path_template="/api/experiments/{experiment_id}/runs/{run_id}/answers",
+            scope=Scope.DRAFT_WRITE,
+            mutates=True,
+            summary="Answer one run's open blocking questions.",
+            requires_if_match=True,
+        ),
+        Operation(
+            id="correct_run_field",
+            method="POST",
+            path_template="/api/experiments/{experiment_id}/runs/{run_id}/edit",
+            scope=Scope.DRAFT_WRITE,
+            mutates=True,
+            summary="Correct a value one run has already confirmed.",
+            requires_if_match=True,
+        ),
         Operation(
             id="check_run",
             method="POST",
@@ -485,7 +545,12 @@ PERMITTED_TOOL_NAMES = frozenset(
         "isaac_list_runs",
         "isaac_get_run",
         "isaac_create_run",
+        "isaac_list_questions",
         "isaac_update_draft",
+        # Answering an OPEN blocking question, at whichever level owns it. Added
+        # deliberately as a reviewed widening of this set, which is what the
+        # `forbidden_tool_reason` check exists to force.
+        "isaac_answer_questions",
         "isaac_check_run",
         "isaac_inspect_evidence",
     }

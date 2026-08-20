@@ -14,7 +14,12 @@ the time of sending. Re-print it before forwarding rather than trusting a copied
 
 ---
 
-## 1. Two migrations, approved and awaiting an operator
+## 1. Migrations awaiting an operator — TWO approved, and a THIRD that is NOT
+
+**Read the split before the table.** `0003` and `0004` are approved by the project owner and waiting
+only on an operator window. **`0005_run_projection` is NOT approved and is NOT part of this ask** —
+it is listed in §1A so it is not a surprise later, and it needs Krish's approval before it needs
+yours. Do not apply it.
 
 `0003_revisions` and `0004_submissions` are **ONE decision** — `0004` declares a foreign key into a
 table `0003` creates, so 0003-without-0004 leaves the application unable to record a submission and
@@ -62,10 +67,27 @@ lifecycle end to end, and proves the rollback order — including that `0003`'s 
 
 **Two limits, stated because they are the reason your step is separate:**
 
-1. **Constraint coverage is partial.** The two files declare **46** named constraints; CI's constraint
-   step blames **27** of them. 19 are declared and unexercised (17 never named in the workflow at
-   all). They are listed by name in `0003`'s packet §12B. Nothing suggests they are wrong — the
-   packets simply may not be cited as evidence that they behave.
+1. **Constraint coverage is partial — and better than when this package was first written.**
+   RE-MEASURED 2026-08-19: the two files declare **46** named constraints and CI's constraint step
+   now blames **41** of them, up from 27. The seventeen that were declared and never exercised are
+   now exercised, fourteen of them individually.
+
+   **Three of the seventeen cannot be blamed individually, and that is a property of the schema
+   rather than a gap in the testing.** `isaac_submission_runs` carries `record_id = unit_id` and
+   `run_id IS NULL OR run_id = unit_id`, so any row violating `unit_id_shape`, `record_id_shape` or
+   `run_id_shape` violates an equality CHECK at the same time, and PostgreSQL reports only the first
+   constraint it happens to check. There is no assignment of those three columns that violates
+   exactly one of them — defence in depth, not a defect. The workflow proves those rows ARE refused,
+   by a CHECK on that table, through a deliberately weaker helper so it cannot be mistaken for the
+   stronger claim.
+
+   The remaining two — `isaac_revision_changes_revision_fk` and `isaac_submissions_experiment_fk` —
+   appear in the workflow for other reasons without a refusal blamed on them.
+
+   So: **41 of 46 individually blamed; 3 more proved refused with the blame ambiguous by
+   construction; 2 named without a refusal.** `0003`'s packet §12B carries the accounting and the
+   reasoning. **None of this changes the bytes you would apply** — the four digests are unchanged
+   and re-verified below.
 2. **The container is empty**, with a two-row synthetic stand-in for `records`. *"Is this valid,
    idempotent SQL whose constraints behave"* is answered. *"Does it behave against the real data,
    roles and grants"* is **not**, and only applying it resolves that.
@@ -83,6 +105,49 @@ the commands are in `0003`'s packet.
 
 ---
 
+## 1A. `0005_run_projection` — NOT APPROVED, NOT AN ASK. Listed so it is not a surprise.
+
+| | `0005_run_projection` |
+|---|---|
+| **Owner approval** | **NOT APPROVED** (Krish has not reviewed the text) |
+| **Hosted application** | **NOT APPLIED, anywhere** |
+| **Forward SHA-256** | `ebff660fc51559cd4ab6ce66a7b1ec943de86f2362d37adde153f0c74c8ae7ee` |
+| **Rollback SHA-256** | `54a17432150525f75a6e94557a137029a3ce3fd41cea9debced361abda90e735` |
+| **Table created** | `isaac_run_projection` (one table, one index) |
+| **Packet** | [`docs/migration-approval-packet-0005.md`](migration-approval-packet-0005.md) |
+
+**What it is, in one paragraph.** `0002_runs`, which you applied on 2026-08-12, made `isaac_runs` a
+shadow of the experiment document — rows are maintained, and nothing reads them. A reader cannot be
+written against that alone, because `SELECT ... FROM isaac_runs WHERE experiment_id = %s` returning
+**zero rows** means *either* "this experiment has no runs" *or* "its runs were never projected", and
+both are reachable — the second is the normal state of every experiment saved before the shadow write
+shipped, and of every save in the window between a merge and your `--apply`. A reader that guessed the
+first would silently delete every run of every pre-existing record and report success. This table
+records the claim explicitly, with the document version it was made at, so staleness is *detected*
+rather than assumed absent.
+
+**Same shape as the other three.** Purely additive: `CREATE TABLE IF NOT EXISTS` and
+`CREATE INDEX IF NOT EXISTS`, nothing else. No `ALTER`, no `DROP`, no `TRUNCATE`, no DML, and **no
+`ON DELETE` clause**, so deleting an experiment that still carries a claim is refused by the database.
+It does not touch `records`, and a test reads the file off disk and asserts the identifier does not
+appear in any statement.
+
+**One rollback dependency that is NOT what the numbering suggests**, and it is the only thing here
+worth reading twice: `isaac_run_projection` references `isaac_experiments`, **not** `isaac_runs`. So
+it must be rolled back before `0001`, and it is **independent of `0002`** — rolling `0002` back while
+this table stands is legal and leaves every claim describing rows that no longer exist. The
+application handles that as a fallback to the document rather than as an error, which is why the
+rollback file documents it instead of forbidding it. CI proves the order and proves that the
+wrong order fails safely without dropping anything.
+
+**Nothing reads it in the shipped build.** Exactly one statement in the application names the table,
+it is a write, and a test measures that over the module-level statement set. Moving a reader onto
+`isaac_runs` is a separate decision, and it is gated on a backfill having run and reported zero
+unprojected experiments — a measurement, not a belief. The backfill script exists, has **never been
+executed anywhere**, and is deliberately absent from the container image.
+
+---
+
 ## 2. External configuration ISAAC cannot create for itself
 
 Each of these is **built and tested against a deterministic fake**, and each is inert until an
@@ -91,7 +156,7 @@ the dependency is visible in one place.
 
 | # | What is needed | Why ISAAC cannot supply it | State in the repository |
 |---|---|---|---|
-| **E1** | A **trusted authentication boundary** for API/service traffic — the portal precedent: trusted-edge headers for browser traffic, independent Bearer validation for service traffic | The Service is a plain ClusterIP with **no NetworkPolicy**, so an in-cluster pod can reach the app directly and forge forwarded identity headers. Header presence is therefore **not** proof of authentication. | The identity seam exists and **fails closed**: no actor is stamped anywhere, and `trust_basis` is `unattributed` on every row. Actor stamping is authorized by you and **blocked in practice** until this exists. |
+| **E1** | A **trusted authentication boundary** for API/service traffic — the portal precedent: trusted-edge headers for browser traffic, independent Bearer validation for service traffic | The Service is a plain ClusterIP with **no NetworkPolicy**, so an in-cluster pod can reach the app directly and forge forwarded identity headers. Header presence is therefore **not** proof of authentication. | **UPDATED 2026-08-19.** The seam is now complete on the application side and still **fails closed**: `attribution.uploaded_by` is server-stamped at the ingestion boundary, sourced only from a verifier, and requires `trust_basis == verified_edge_assertion` — which **no verifier in this build mints**, so no deployment stamps anything and `trust_basis` remains `unattributed` on every row. When this boundary exists, arming it is a verifier and a configuration value, not a product change. |
 | **E2** | **Hosted MCP reachability and auth** | Ingress and auth are yours | MCP transport and tools exist behind a **fail-closed gate**; no unauthenticated hosted route is exposed. |
 | **E3** | A **production model provider** — endpoint, credential, billing | Institutional | Provider abstraction + deterministic fake provider only. The UI states the assistant is unconfigured rather than implying one exists. |
 | **E4** | A **production transcription provider** | Institutional | Same shape: provider-ready, refuses at boot, no audio leaves the process. |
@@ -128,8 +193,63 @@ Also unanswered from earlier rounds and therefore exactly as open as before: **Q
 
 ## 5. If you only have five minutes
 
-1. Recompute the four digests in §1 and refuse on any mismatch.
-2. Apply `0003` and `0004` **together**, and report the `records` and `isaac_experiments` counts
+1. **Tell us the answer to G2 and G3.** They gate more product work than anything else in this
+   package, and neither asks you to touch infrastructure — both are decisions. This is first now
+   because the migrations have been waiting on an operator window since 2026-08-17 while these two
+   have been waiting on nobody.
+2. Recompute the four digests in §1 and refuse on any mismatch. **Re-verified 2026-08-19: all four
+   still MATCH the values Krish approved**, so the bytes are unchanged and the approval stands.
+3. Apply `0003` and `0004` **together**, and report the `records` and `isaac_experiments` counts
    before and after.
-3. Tell us the answer to **G2** and **G3** — those two gate more product work than anything else here.
-4. Everything in §2 can wait; nothing is broken while it does, and no surface claims otherwise.
+4. **Do NOT apply `0005`.** It appears in §1A only so it is not a surprise later. It has not been
+   approved by Krish, and owner approval comes before an operator window, never after.
+5. Everything in §2 can wait; nothing is broken while it does, and no surface claims otherwise.
+
+---
+
+## 6. What changed in the repository since this package was written
+
+**None of it is a request.** It is here because two items above are easier to weigh with it, and
+because a package that describes a repository should describe the current one.
+
+**The product could not capture a record, and now can.** A record created through the application's
+own Create Experiment path could not be completed or exported by ANY route — measured on `main` at
+`b118ed6`, not inferred. Three independent causes: a QC verdict no request could supply, a spectrum
+and a descriptor answerable only by confirming a worked example that a created record does not have,
+and a Run that silently discarded everything already answered. All three are fixed, and a test now
+walks create → answer → export with values written out rather than harvested from a fixture, because
+every other export test in the repository started from a fixture draft that already carried them —
+which is why a suite of thousands stayed green while the path did not work.
+
+**Why that matters to your two decisions.** The submission lifecycle `0003`/`0004` record is now
+reachable by a scientist rather than only by a fixture, so applying those migrations changes what a
+real person can finish rather than what a test can. And **G2** is no longer only about the 30
+production-derived records: the application now creates records of its own, so "may the hosted app
+display per-record content" has a second, cleaner answer available — app-created records are not
+production-derived and carry no visibility question at all.
+
+**Constraint coverage moved 27 → 41 of 46**, validated against a real `postgres:18` in CI. See §1.
+
+**A third migration now exists and is NOT in the ask.** `0005_run_projection` — see §1A. It is
+mentioned here as well as there because the one thing this package must never do is let a new
+migration file appear in the repository and read, by proximity to two approved ones, as a fourth
+thing waiting on you.
+
+**The MCP tool surface can now complete a record, and could not before.** An agent could add a Run
+and write its five context/timing fields, and could not answer any OPEN blocking question at either
+level — which on a record created through the application's own path is every question it has. Two
+tools were added (ten in the registry). This changes nothing about MCP reachability or
+authentication: **D1 and D2 remain deferred, no endpoint is exposed, and `Connect Your Agent` still
+shows no connection.**
+
+**The native-assistant seam is now reachable over HTTP and answers `501` in every deployment.** It
+was a fully built seam with no route, so "does this deployment have a native assistant?" was
+answerable only by reading Python. The application refuses to boot if an operator points it at the
+test double, so no deployment can answer from one, and **no product screen advertises the seam at
+all** — building the capability and advertising it are different acts. **D3/D4/D5 are untouched:
+there is no provider, no credential, no outbound call and no charge.**
+
+**E1 is unchanged in substance and complete in the application**: the identity seam now stamps
+`attribution.uploaded_by` at the ingestion boundary and refuses unless the trust basis is
+`verified_edge_assertion`, which no verifier in this build mints. Nothing is stamped anywhere. When
+the boundary exists, arming it is a verifier and a configuration value.

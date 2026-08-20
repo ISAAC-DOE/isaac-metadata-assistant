@@ -151,3 +151,98 @@ describe('P29.3 deterministic agent — proposal + confirmation safety', () => {
     expect(api.editField).not.toHaveBeenCalled();
   });
 });
+
+
+describe('a run-owned proposal reaches the run that OWNS it', () => {
+  const RUN_ONE = '01RUNAAAAAAAAAAAAAAAAAAAA0';
+  const RUN_TWO = '01RUNBBBBBBBBBBBBBBBBBBBB0';
+  const twoRuns: AgentContext = {
+    ...CTX,
+    pending: [
+      { id: 'series', label: 'series', run_id: RUN_ONE, blocker_key: `${RUN_ONE}:series` },
+      { id: 'series', label: 'series', run_id: RUN_TWO, blocker_key: `${RUN_TWO}:series` },
+    ],
+  };
+
+  it('CRITICAL: writes run TWO\'s value onto run TWO, not onto the first of that kind', async () => {
+    /* An independent review measured this writing run 2's spectrum onto RUN 1, with run
+       1's `If-Match`, and reporting `status: 'ok'` — while run 2's question stayed open.
+       The cause: `ctx.pending.find((p) => p.id === proposal.field)` and `field` is the
+       KIND, so `find` returned the FIRST entry. Before the routing existed the same click
+       409'd, which is a worse experience and a better outcome. */
+    const p = stageAnswer(twoRuns, {
+      field: 'series',
+      blockerKey: `${RUN_TWO}:series`,
+      runId: RUN_TWO,
+      value: 'run-two-spectrum',
+    });
+    const api = {
+      submitAnswer: vi.fn().mockResolvedValue({ version: 'genabc.6', pending: [] }),
+      editField: vi.fn(),
+      getRun: vi.fn().mockResolvedValue({ run: { version: 'run-two.3' } }),
+    };
+    const res = await confirmProposal(p, twoRuns, api as never);
+
+    expect(res.status).toBe('ok');
+    expect(api.getRun).toHaveBeenCalledWith(twoRuns.experimentId, RUN_TWO);
+    expect(api.submitAnswer).toHaveBeenCalledWith(
+      twoRuns.experimentId,
+      { series: 'run-two-spectrum' },
+      'run-two.3',
+      RUN_TWO,
+    );
+    expect(api.editField).not.toHaveBeenCalled();
+  });
+
+  it('routes the EDIT path to the run too, which it never did', async () => {
+    /* `open === undefined` is what SELECTS `editField`, so reading the run from the
+       matching pending entry alone left this path always record-routed — and correcting
+       an answered run-owned field then 409'd on every record with runs, into copy saying
+       it could not tell whether anything reached the record. `proposal.runId` is recorded
+       at STAGE time, when the pending entry still existed, so this path has it without
+       reconstructing anything from the key — an earlier version parsed the key's prefix,
+       which could have read a 26-uppercase-character asset URI as a run id. */
+    const answered: AgentContext = { ...CTX, pending: [] };
+    const p = stageAnswer(answered, {
+      field: 'qc',
+      blockerKey: `${RUN_ONE}:qc`,
+      runId: RUN_ONE,
+      value: { status: 'valid', evidence: 'Re-checked.' },
+    });
+    const api = {
+      submitAnswer: vi.fn(),
+      editField: vi.fn().mockResolvedValue({ version: 'genabc.6', pending: [] }),
+      getRun: vi.fn().mockResolvedValue({ run: { version: 'run-one.4' } }),
+    };
+    const res = await confirmProposal(p, answered, api as never);
+
+    expect(res.status).toBe('ok');
+    expect(api.getRun).toHaveBeenCalledWith(answered.experimentId, RUN_ONE);
+    expect(api.editField).toHaveBeenCalledWith(
+      answered.experimentId,
+      { qc: { status: 'valid', evidence: 'Re-checked.' } },
+      'run-one.4',
+      RUN_ONE,
+    );
+    expect(api.submitAnswer).not.toHaveBeenCalled();
+  });
+
+  it('NEGATIVE CONTROL: a record-level proposal is not routed to any run', async () => {
+    // No `runId` recorded means no run route, whatever the key looks like. This is what
+    // makes an asset URI shaped like a ULID harmless: nothing is parsed.
+    const p = stageAnswer(CTX, {
+      field: 'series',
+      blockerKey: 'SSRLARCHIVEBL152RUN000ABCD:notebook.ipynb',
+      value: 'x',
+    });
+    const api = {
+      submitAnswer: vi.fn().mockResolvedValue({ version: 'genabc.6', pending: [] }),
+      editField: vi.fn(),
+      getRun: vi.fn(),
+    };
+    await confirmProposal(p, CTX, api as never);
+    expect(api.getRun).not.toHaveBeenCalled();
+    const call = api.submitAnswer.mock.calls[0] ?? api.editField.mock.calls[0];
+    expect(call[3]).toBeUndefined(); // no runId
+  });
+});
