@@ -1,5 +1,81 @@
 # High-run-count: the measured envelope, and what it rules out
 
+> ## RE-MEASURED AGAIN, LATER ON 2026-08-19 — THE ×1.76 "GROWTH" LOOKS LIKE TWO DIFFERENT RUN SHAPES
+>
+> **Read this before the block below it.** That block reports the per-run payload growing from
+> ≈7.47 KiB to 13.12 KiB and attributes it to features landing since 2026-08-12. Measured three
+> ways today, the ×1.76 is better explained by the PROBE changing than by the payload growing —
+> and if that is right, the older figure was never superseded, it was measuring a different thing.
+>
+> | How the runs were created | KiB/run | What each run carries |
+> |---|---:|---|
+> | `add_run(draft=deepcopy(full_draft))` — the reproduction command below | **13.12** | its OWN copy of a 26-entry field map |
+> | `POST /api/experiments/{id}/runs` on the SAME full-field record | **7.48** | no own fields; the 26 arrive as `inherited` |
+> | `POST .../runs` on a record CREATED IN THE APP | **0.41** | no own fields, and almost nothing to inherit |
+>
+> Linear in every case (7.52 at 25 runs, 7.48 at 100; 0.42 at 25, 0.41 at 100 and 250).
+>
+> **Why the middle row matters.** `_run_view` serialises the run's own `fields` and its `inherited`
+> resolution — not its `series`, `qc` or `descriptors_outputs`. So a run that owns a field map pays
+> for it twice (once as its own copy, once resolved) and a run that inherits pays once. A
+> deep-copied draft is the first shape; every run the API creates is the second.
+>
+> **7.48 is within 0.01 KiB of the 7.47 this document reported for the older measurement.** That
+> coincidence, plus the mechanism above, is why the growth claim is doubted here. It is **not
+> proof**: the older probe is not recorded in this document, so what it did cannot be checked, and
+> the honest statement is that the two figures are consistent with measuring inherited-only and
+> own-fields runs respectively rather than with a 1.76× increase over time. Whoever wrote the block
+> below may have had a reason this reader cannot see.
+>
+> **What is NOT in doubt, and is the useful part.** Every figure is linear in run count, and the
+> cost is in the DATA rather than the rendering — which is the conclusion the body of this document
+> reaches and which none of this disturbs. The planning number depends on which shape you expect:
+>
+> * **0.41 KiB/run** is what the product produces TODAY for a record created in it, because the
+>   campaign-sheet fields (technique, facility, sample, contributors) still have **no capture
+>   surface**. At 1000 runs that is ≈400 KiB unpaged.
+> * **7.5 KiB/run** is what the same product will produce the moment those fields CAN be captured,
+>   because they become inherited content on every run. ≈7.3 MiB unpaged at 1000 runs.
+> * **13.1 KiB/run** is the worst case, reachable only if a run acquires its own copy of the field
+>   map. No API path does that today.
+>
+> So the envelope is conditional on a capability that does not exist yet, and a ×18 jump is waiting
+> behind it. That is worth knowing before anyone treats 0.41 as the answer.
+>
+> Read latency, same runs, same process (`TestClient`, so no network): 15 ms unpaged at 25 runs,
+> 52 ms at 100 for the 7.5 KiB/run shape; 3/5/10 ms at 25/100/250 for the 0.41 shape. Exporting 25
+> runs — 25 official records and 25 sidecars — took 0.3 s. **These are process-local timings and
+> are not a browser measurement**; the DOM, long-task and initial-load figures the body of this
+> document discusses are still not re-measured.
+>
+> Reproduce the middle and bottom rows:
+>
+> ```bash
+> PYTHONPATH=apps/api:src .venv/bin/python - <<'EOF'
+> import os, tempfile, copy, time
+> os.environ['ISAAC_UI_WORKSPACE'] = tempfile.mkdtemp()
+> from isaac_api.app import create_app
+> import isaac_api.workspace as ws
+> from fastapi.testclient import TestClient
+> c = TestClient(create_app(), raise_server_exceptions=False)
+> EID = '01SCALEAPIPATH000000000001'
+> exp = ws.create_experiment('full-field record', {'kind': 'synthetic'},
+>                            copy.deepcopy(ws._full_draft()), id=EID)
+> exp.save_versioned()
+> def v(): return c.get(f'/api/experiments/{EID}').json()['version']
+> for target in (25, 100):
+>     while len(ws.load_experiment(EID).sorted_runs()) < target:
+>         c.post(f'/api/experiments/{EID}/runs',
+>                json={'label': f'run {len(ws.load_experiment(EID).sorted_runs())+1}'},
+>                headers={'If-Match': f'"{v()}"'})
+>     b = len(c.get(f'/api/experiments/{EID}/runs').content)
+>     print(f'{target:>4} runs  {b/1024:8.1f} KiB  {b/target/1024:6.2f} KiB/run')
+> EOF
+> ```
+>
+> For the 0.41 row, create the record with `POST /api/experiments` instead and answer it through
+> `POST /answers` — the difference is entirely in how many fields the record carries.
+
 > ## RE-MEASURED 2026-08-19 — THE HEADLINE PER-RUN FIGURE IS 1.76× WHAT THIS DOCUMENT SAYS
 >
 > Everything below was measured on or before **2026-08-12**. Since then the run payload has grown:
