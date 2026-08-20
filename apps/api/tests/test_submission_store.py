@@ -388,7 +388,22 @@ def test_no_new_migration_or_rollback_names_the_production_table():
             assert not re.search(r"\brecords\b", stripped), name
 
 
-@pytest.mark.parametrize("version,packet", [("0003_revisions", "0003"), ("0004_submissions", "0004")])
+@pytest.mark.parametrize(
+    "version,packet",
+    [
+        ("0003_revisions", "0003"),
+        ("0004_submissions", "0004"),
+        # `0005_run_projection` is not a submission migration, and this test lives in
+        # the submission file. It is parametrised here rather than copied into
+        # `test_experiment_repository.py` for one reason: THIS is the version of the
+        # digest check that is driven by the version name rather than by a hardcoded
+        # table, so adding a row costs one line and a copy would cost a second
+        # implementation to keep correct. The alternative — a third near-identical
+        # digest test — is how the 0002 packet's digest drifted for the whole life of
+        # a branch while a test that looked like this one passed.
+        ("0005_run_projection", "0005"),
+    ],
+)
 def test_the_approval_packet_digests_match_the_committed_files(version, packet):
     """THE ONE CHECK THAT MAKES AN APPROVAL MEAN ANYTHING.
 
@@ -444,20 +459,60 @@ def test_the_packets_do_not_claim_a_hosted_application(version="0003"):
     claim, because that is the one a reader could mistake for standing permission.
     """
     root = Path(sstore.__file__).resolve().parents[3]
-    for packet in ("0003", "0004"):
+    # `0005` IS COVERED HERE TOO, and its STATUS wording is deliberately different:
+    # `0003`/`0004` are APPROVED-and-unapplied, while `0005` is NOT APPROVED. So the
+    # exact literal cannot be shared, and each packet is checked against the phrasing
+    # its own state requires. What is shared, and is the invariant, is that neither
+    # reads as applied and neither reads as a delegation.
+    for packet in ("0003", "0004", "0005"):
         doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
             encoding="utf-8"
         )
-        assert "NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE." in doc, packet
-        # The operator's act is outstanding, and the packet must say so in a form a
-        # reader cannot mistake for a delegation.
-        assert "no agent may run it" in doc, packet
+        if packet == "0005":
+            # WHITESPACE-NORMALISED, because a Markdown file wraps at 90 columns and
+            # a phrase that happens to straddle a line break is not a different
+            # phrase. The first version of this assertion failed for exactly that
+            # reason, and reflowing the document to satisfy a test would have been
+            # the tail wagging the dog.
+            flat = " ".join(doc.split())
+            assert "NOT APPLIED ANYWHERE" in flat, packet
+            assert "NOT APPROVED" in flat, packet
+            assert "no agent may do it" in flat, packet
+        else:
+            assert "NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE." in doc, packet
+            # The operator's act is outstanding, and the packet must say so in a form
+            # a reader cannot mistake for a delegation.
+            assert "no agent may run it" in doc, packet
         # And it must not have quietly acquired the opposite claim.
         for forbidden in (
             "APPLIED TO THE HOSTED DATABASE BY DEAN",
             "has been applied to the hosted database",
         ):
             assert forbidden not in doc, (packet, forbidden)
+
+
+def test_the_0005_packet_does_not_read_as_proven_against_real_data():
+    """`0005`'s OWN standing caveat, pinned separately because it is the load-bearing
+    one and it is the sentence a re-issue would most naturally tidy away.
+
+    CI proves the migration against an EMPTY `postgres:18` container with a two-row
+    synthetic stand-in for `records`. That is not "behaves against the real data, the
+    real roles and the real grants", and it is the entire reason the operator's step
+    exists as a separate act rather than as a formality after a green build.
+
+    Pinned as the invariant rather than the sentence: the packet must say the
+    container is empty AND must not claim the hosted database has been contacted.
+    """
+    root = Path(sstore.__file__).resolve().parents[3]
+    doc = (root / "docs" / "migration-approval-packet-0005.md").read_text(encoding="utf-8")
+    flat = " ".join(doc.split())
+    assert "the CI container is **empty**" in flat
+    assert "no agent has connected to the hosted database" in flat.lower()
+    for forbidden in (
+        "proven against the hosted database",
+        "verified against the real data",
+    ):
+        assert forbidden not in flat.lower(), forbidden
 
 
 def test_the_packets_do_not_still_carry_the_expired_ci_claim():

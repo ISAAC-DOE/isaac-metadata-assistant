@@ -1697,6 +1697,60 @@ class PostgresOrdinaryStore:
         return restored
 
 
+    def stored_experiments(self) -> list["ws.Experiment"]:
+        """Every ordinary experiment the DATABASE holds, hydrated. READ ONLY.
+
+        WHO THIS IS FOR, and it is one caller: ``scripts/db_backfill_runs.py``, the
+        operator-run projection backfill. It exists here rather than in that script
+        because this application's rule is that no SQL text lives outside a
+        module-level ``Q_*`` constant in this package — a backfill that wrote its own
+        ``SELECT`` would be the first exception, in the file least likely to be read
+        again.
+
+        IT IS NOT :meth:`hydrate`, and the difference is the point. ``hydrate`` writes
+        workspace files and SKIPS any record whose file already exists, so it answers
+        "what is missing locally". This answers "what does the database hold", which
+        is the only question a completeness backfill can be driven by: an experiment
+        whose workspace file is present is exactly the one ``hydrate`` would pass over
+        and whose runs may never have been projected.
+
+        THE SAME TWO REFUSALS ``hydrate`` APPLIES, for the same reasons. A row whose
+        id is not a well-formed record id, or is a canonical example id, is skipped —
+        neither is an ordinary experiment this scope may hold, and nothing this
+        application does can create either row. A row whose document does not
+        describe the record it is filed under is skipped too. Unlike ``hydrate`` this
+        does not RAISE on such a row, because a backfill that aborted on one
+        unprojectable row would leave every later experiment unprojected; the count
+        is reported by the caller instead.
+
+        NO SESSION SCOPE EXISTS HERE and none can. ``isaac_experiments`` has no
+        ``session_id`` column, and :meth:`refuse_if_not_persistable` is what keeps a
+        worked-example record out of it — so every row this returns is an ordinary
+        experiment by construction.
+        """
+        try:
+            with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
+                cursor.execute(policy.check(Q_ALL_EXPERIMENTS))
+                rows = cursor.fetchall() or []
+        except Exception as exc:  # noqa: BLE001 - classified exactly as `hydrate` does
+            if is_undefined_table(exc):
+                raise _not_provisioned(exc) from exc
+            raise _unavailable(exc, STORAGE_READ_FAILED_MESSAGE) from exc
+        _note_storage_success()
+        out: list["ws.Experiment"] = []
+        for row in rows:
+            rid = str(row[0] or "").strip()
+            if not ws.is_record_id(rid) or rid in ws.CANONICAL_IDS:
+                continue
+            state = row[1]
+            if isinstance(state, (str, bytes, bytearray)):
+                state = json.loads(state)
+            if not isinstance(state, dict) or state.get("id") != rid:
+                continue
+            out.append(ws.Experiment.from_state(state))
+        return out
+
+
 # --- repositories -------------------------------------------------------------
 
 

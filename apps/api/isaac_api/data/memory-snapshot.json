@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "de6594d6be6ff132b477bea5b35d9b07ba5bbe58790f1522bcc10a1b4447abcd"
+        "sha256": "690930b1d15893a152dfaa27b0b116b13f28cc9210be91d803d7ca27648a94f5"
       },
       {
         "path": "AGENTS.md",
@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "a1dacb91e111b235bb12277c63f7c67344c7056e4f6d65e587a0b3371b0609cd"
+        "sha256": "6c5c531e356106523014ca3cec3bc1ce096b38ca8ea3cc29d02b149c60d8d6b1"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "173b93e66524b2a7d76b537f1f2147ba6d5ee0c3f58fd9ed4de5e36252819027"
+    "served_manifest_fingerprint": "a80b5f24b1b140eec706ab2af941685b94ca8c7497ab7d9da390876ed103db53"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

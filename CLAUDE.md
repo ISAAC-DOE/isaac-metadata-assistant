@@ -835,7 +835,8 @@ Out of scope unless explicitly approved:
   **What the lift covers:** app-owned tables for experiments and their normal application state
   (`isaac_experiments`, `isaac_schema_migrations`, — **added 2026-08-12** — `isaac_runs`, and —
   **added 2026-08-16** — the five submission-lifecycle tables `isaac_experiment_revisions`,
-  `isaac_run_revisions`, `isaac_revision_changes`, `isaac_submissions` and `isaac_submission_runs`);
+  `isaac_run_revisions`, `isaac_revision_changes`, `isaac_submissions` and `isaac_submission_runs`,
+  and — **added 2026-08-19** — `isaac_run_projection`);
   a swappable repository seam
   (`apps/api/isaac_api/experiment_repository.py`) with a filesystem fallback whenever `PGHOST` is
   unset; a separate write path (`db_write.py`) with parameterized SQL, explicit transactions and
@@ -851,6 +852,33 @@ Out of scope unless explicitly approved:
   quietly; the list is corrected here so the basis is committed rather than conversational. The
   general rule stands: **a slice that cannot cite a committed sentence permitting what it does has
   not established its authorization basis, and saying so is part of the slice.**
+
+  ***`isaac_run_projection` IS NAMED HERE IN THE SAME CHANGE THAT CREATES IT, and that is the whole
+  point of the two corrections below.*** Twice now a slice has added a table to
+  `db_write.OWNED_TABLES` that no committed sentence in this file named — `isaac_runs`, found and
+  reported by the implementing slice, and the five submission-lifecycle tables, found only by an
+  independent review. The third time it is not a correction. **`isaac_run_projection`
+  (`0005_run_projection`)** is the per-experiment completeness claim for `isaac_runs`: one row per
+  experiment recording the `(rev, generation)` its run rows were projected from, how many were
+  written, and which projector wrote it.
+
+  **Why it has to exist at all, measured rather than argued:** `SELECT ... FROM isaac_runs WHERE
+  experiment_id = %s` returning zero rows means EITHER "this experiment has no runs" OR "its runs
+  were never projected", and both are reachable — the second is the normal state of every experiment
+  persisted before the shadow write shipped, and of every save in the window between a merge and the
+  operator applying the migration. A read cutover that treated zero rows as "no runs" would silently
+  delete every run of every pre-existing record and report success. The contract is
+  [`docs/isaac-runs-stage-2-contract.md`](docs/isaac-runs-stage-2-contract.md); the operator packet
+  is [`docs/migration-approval-packet-0005.md`](docs/migration-approval-packet-0005.md).
+
+  **What listing it covers, precisely:** creating it by an owner-applied migration, and writing it
+  through the ONE statement `experiment_repository.Q_UPSERT_RUN_PROJECTION`, inside the same
+  transaction and the same accepted branch as the run rows it describes. It covers **no read** —
+  exactly one statement in the application names the table and nothing reads it, pinned by test —
+  and **no** hosted application of `0005`. **Making `isaac_runs` a read source (Stage 2b) is still a
+  separate decision and is gated on the backfill having RUN and reported `never_projected: 0`;
+  removing `runs` from the experiment document is a third decision and is justified by no
+  measurement in this repository.**
 
   ***The five submission-lifecycle tables were added to `db_write.OWNED_TABLES` before this list
   named them — the same failure as `isaac_runs`, a second time, and recorded rather than quietly

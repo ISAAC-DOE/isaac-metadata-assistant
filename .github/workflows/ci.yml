@@ -387,11 +387,11 @@ jobs:
           # `isaac_experiments`, and `0004_submissions` declares one into
           # `isaac_experiment_revisions`, so each depends on something an earlier
           # one creates.
-          [ "$out" = "pending: 0001_experiments, 0002_runs, 0003_revisions, 0004_submissions" ] || {
+          [ "$out" = "pending: 0001_experiments, 0002_runs, 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
             echo "::error::unexpected plan: $out"; exit 1; }
           # A plan must apply NOTHING. The bookkeeping table may exist (the plan
           # creates it to read it); no application table may.
-          for t in isaac_experiments isaac_runs isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs; do
+          for t in isaac_experiments isaac_runs isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs isaac_run_projection; do
             count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
             [ "$count" = "0" ] || { echo "::error::--plan created $t"; exit 1; }
           done
@@ -423,8 +423,8 @@ jobs:
           assert applied == ["0001_experiments"], applied
           # Against the REAL committed set, everything after 0001 is pending.
           pending = db_migrate.pending_versions(os.environ)
-          assert pending == ["0002_runs", "0003_revisions", "0004_submissions"], pending
-          print("database migrated to 0001 only; 0002, 0003 and 0004 pending")
+          assert pending == ["0002_runs", "0003_revisions", "0004_submissions", "0005_run_projection"], pending
+          print("database migrated to 0001 only; 0002, 0003, 0004 and 0005 pending")
           PY
           count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
           [ "$count" = "0" ] || { echo "::error::isaac_runs exists but 0002 was not applied"; exit 1; }
@@ -516,7 +516,7 @@ jobs:
           # 0001 is already recorded, so ONLY 0002 applies. That the bookkeeping
           # skips an applied version is the property being read here; the
           # both-at-once path is proven by the bookkeeping-deletion case below.
-          [ "$out" = "applied: 0002_runs, 0003_revisions, 0004_submissions" ] || {
+          [ "$out" = "applied: 0002_runs, 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
             echo "::error::unexpected apply result: $out"; exit 1; }
 
       # THE IDEMPOTENCE CLAIM, PROVEN RATHER THAN ASSERTED IN A COMMENT.
@@ -558,7 +558,9 @@ jobs:
           # THREE -> EIGHT: `0003_revisions` adds `isaac_experiment_revisions`,
           # `isaac_run_revisions` and `isaac_revision_changes`; `0004_submissions`
           # adds `isaac_submissions` and `isaac_submission_runs`.
-          [ "$added" = "isaac_experiment_revisions isaac_experiments isaac_revision_changes isaac_run_revisions isaac_runs isaac_schema_migrations isaac_submission_runs isaac_submissions" ] || {
+          # EIGHT -> NINE: `0005_run_projection` adds `isaac_run_projection`, the
+          # per-experiment completeness claim for `isaac_runs`.
+          [ "$added" = "isaac_experiment_revisions isaac_experiments isaac_revision_changes isaac_run_projection isaac_run_revisions isaac_runs isaac_schema_migrations isaac_submission_runs isaac_submissions" ] || {
             echo "::error::the migration created tables it should not have: '$added'"; exit 1; }
           [ -z "$removed" ] || { echo "::error::the migration REMOVED tables: '$removed'"; exit 1; }
           psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
@@ -569,7 +571,7 @@ jobs:
           # `isaac_schema_migrations` is as application-owned as the other two — it is
           # in `db_write.OWNED_TABLES` — so the tally was simply wrong, in the one line
           # a reviewer skims to conclude the guard passed.
-          echo "records: byte-identical; added exactly the eight application-owned tables"
+          echo "records: byte-identical; added exactly the nine application-owned tables"
 
       # The repository, end to end, against the real engine — the half the
       # in-process fake cannot cover.
@@ -1882,6 +1884,150 @@ jobs:
           [ "$left" = "0" ] || { echo "::error::this step left experiment rows behind"; exit 1; }
           echo "0003/0004 constraints: every one behaves as the approval packets describe"
 
+      # EVERY CONSTRAINT `0005_run_projection` DECLARES, EXERCISED — and the
+      # completeness claim the application writes, READ BACK from the real engine.
+      #
+      # `docs/migration-approval-packet-0005.md` claims a primary key, a foreign key
+      # to `isaac_experiments` with NO `ON DELETE`, two non-negative CHECKs, and a
+      # CLOSED value set on `projector`. The Python suite cannot check any of it: it
+      # has no PostgreSQL, so it can only assert the constraint TEXT is present. This
+      # asserts the constraints BEHAVE.
+      #
+      # It also does the one thing no in-process fake can: read back the row the
+      # application's own save wrote, and check the version pair against the document
+      # it was projected from. That is invariant 2 of the Stage-2 contract — the whole
+      # mechanism by which staleness is DETECTED rather than assumed absent — and
+      # until now it was only ever asserted against a fake cursor's parameter list.
+      - name: Prove every 0005 constraint rejects what it claims to reject
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-projection
+        run: |
+          set -euo pipefail
+
+          # Same `refuse` contract as the 0002 and 0003/0004 steps: the third argument
+          # NAMES the object PostgreSQL must blame, so "the statement failed" cannot be
+          # satisfied by a typo or a missing column.
+          refuse() {
+            if psql -v ON_ERROR_STOP=1 -c "$2" > /tmp/refuse5.log 2>&1; then
+              echo "::error::ACCEPTED a statement that must be refused: $1"; exit 1
+            fi
+            if ! grep -q -- "$3" /tmp/refuse5.log; then
+              echo "::error::$1 was refused, but not by '$3':"; cat /tmp/refuse5.log; exit 1
+            fi
+            echo "refused as designed by $3: $1"
+          }
+
+          parent=01CIPROJEXP0000000000000A0
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_experiments (experiment_id, state) VALUES ('$parent', '{\"id\": \"$parent\"}')"
+
+          # THE FOREIGN KEY. A claim about an experiment that does not exist is a claim
+          # about nothing, and it is refused by the database rather than by a writer.
+          refuse "a claim naming an experiment that does not exist" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('01CIPROJNOSUCH000000000AA0', 0, 'ci', 0, 'write-path')" \
+            "isaac_run_projection_experiment_fk"
+
+          # THE TWO NON-NEGATIVE CHECKS, each aimed so only one can take the blame.
+          refuse "a negative experiment_rev" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', -1, 'ci', 0, 'write-path')" \
+            "isaac_run_projection_rev_non_negative"
+          refuse "a negative run_count" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 0, 'ci', -1, 'write-path')" \
+            "isaac_run_projection_count_non_negative"
+
+          # THE CLOSED VALUE SET. An unrecognised projector is a bug, and a CHECK is
+          # the cheapest place to find it.
+          refuse "an unknown projector" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 0, 'ci', 0, 'someone-elses-script')" \
+            "isaac_run_projection_projector_known"
+
+          # NOT NULL ON `experiment_generation`, WITH NO DEFAULT. An empty generation
+          # is meaningless and a writer that omits it has a bug; the database says so
+          # rather than storing ''.
+          refuse "a claim with no generation at all" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, run_count, projector) VALUES ('$parent', 0, 0, 'write-path')" \
+            "experiment_generation"
+
+          # THE PRIMARY KEY: one CURRENT claim per experiment, no history.
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 0, 'ci', 0, 'write-path')"
+          refuse "a second claim for the same experiment" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 1, 'ci', 1, 'backfill')" \
+            "isaac_run_projection_pkey"
+
+          # NO `ON DELETE`. Deleting an experiment that still carries a claim is
+          # REFUSED, which is the reversible choice and the opposite of CASCADE.
+          refuse "deleting an experiment that still has a projection claim" \
+            "DELETE FROM isaac_experiments WHERE experiment_id = '$parent'" \
+            "isaac_run_projection_experiment_fk"
+
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_run_projection WHERE experiment_id = '$parent'"
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$parent'"
+          echo "0005 constraints: every one behaves as the approval packet describes"
+
+      # THE CLAIM THE APPLICATION ITSELF WRITES, READ BACK FROM THE REAL ENGINE.
+      - name: Prove the completeness claim matches the document it was projected from
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-projection-app
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sys
+          sys.path[:0] = ["apps/api", "src"]
+          import isaac_api.experiment_repository as repo
+          import isaac_api.workspace as ws
+
+          store = repo.ordinary_store()
+          assert store is not None, "no durable store in a job that has PGHOST"
+          exp = store.create(title="projection parity", description=None)
+          for label in ("R1", "R2"):
+              exp.add_run(label=label)
+          exp.save_versioned(None)
+          print("experiment", exp.id, "rev", exp.rev, "runs", len(exp.sorted_runs()))
+          with open("/tmp/projection-expected.txt", "w") as fh:
+              fh.write(f"{exp.id}|{exp.rev}|{exp.generation}|{len(exp.sorted_runs())}\n")
+          PY
+          expected=$(cat /tmp/projection-expected.txt)
+          eid=$(echo "$expected" | cut -d'|' -f1)
+          # THE ROW, AS THE SERVER HOLDS IT. `projector` is asserted as `write-path`
+          # because a `backfill` here would mean the application's own save had not
+          # made the claim — the failure mode that would leave a backfill looking
+          # necessary when it was not.
+          actual=$(psql -Atc "select experiment_id || '|' || experiment_rev || '|' || experiment_generation || '|' || run_count from isaac_run_projection where experiment_id = '$eid'")
+          echo "expected: $expected"
+          echo "actual:   $actual"
+          [ "$actual" = "$(echo "$expected" | tr -d '\n')" ] || {
+            echo "::error::the completeness claim does not match the document"; exit 1; }
+          projector=$(psql -Atc "select projector from isaac_run_projection where experiment_id = '$eid'")
+          [ "$projector" = "write-path" ] || {
+            echo "::error::unexpected projector: $projector"; exit 1; }
+          # AND IT AGREES WITH THE ROWS IT DESCRIBES. `run_count` is a
+          # writer-maintained projection that no CHECK constrains — 0005 says so
+          # itself — so this is the only place it is checked against reality.
+          rows=$(psql -Atc "select count(*) from isaac_runs where experiment_id = '$eid'")
+          claimed=$(echo "$expected" | cut -d'|' -f4)
+          [ "$rows" = "$claimed" ] || {
+            echo "::error::claim says $claimed runs, table holds $rows"; exit 1; }
+          # A SECOND SAVE SUPERSEDES IN PLACE: one row, a higher rev.
+          python - <<'PY'
+          import sys
+          sys.path[:0] = ["apps/api", "src"]
+          import isaac_api.workspace as ws
+          eid = open("/tmp/projection-expected.txt").read().split("|")[0]
+          exp = ws.load_experiment(eid)
+          exp.add_run(label="R3")
+          exp.save_versioned(None)
+          print("second save: rev", exp.rev, "runs", len(exp.sorted_runs()))
+          PY
+          count=$(psql -Atc "select count(*) from isaac_run_projection where experiment_id = '$eid'")
+          [ "$count" = "1" ] || { echo "::error::the claim was appended, not superseded"; exit 1; }
+          after=$(psql -Atc "select run_count from isaac_run_projection where experiment_id = '$eid'")
+          [ "$after" = "3" ] || { echo "::error::the claim did not follow the third run: $after"; exit 1; }
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_run_projection WHERE experiment_id = '$eid'"
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_runs WHERE experiment_id = '$eid'"
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$eid'"
+          echo "0005: the application's own claim matches the document AND the rows"
+
       # THE DEPLOYMENT-ORDER GUARD, AGAINST A REAL ENGINE AND IN ONE PROCESS.
       #
       # WHY IT IS HERE AND NOT ONLY IN `test_experiment_repository.py`. The unit
@@ -2008,7 +2154,7 @@ jobs:
             exit 1
           fi
           cat /tmp/wrong-order.log
-          for t in isaac_experiments isaac_runs isaac_schema_migrations isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs; do
+          for t in isaac_experiments isaac_runs isaac_schema_migrations isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs isaac_run_projection; do
             c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
             [ "$c" = "1" ] || { echo "::error::$t was destroyed by the failed rollback attempt"; exit 1; }
           done
@@ -2034,8 +2180,22 @@ jobs:
       - name: Prove the documented rollbacks return the database to its prior state
         run: |
           set -euo pipefail
-          # THE DOCUMENTED ORDER IS 0004, 0003, 0002, 0001 — children before parents
-          # across files as well as within them.
+          # THE DOCUMENTED ORDER IS 0005, 0004, 0003, 0002, 0001 — children before
+          # parents across files as well as within them.
+          #
+          # `0005_run_projection` FIRST, and its dependency is worth stating because it
+          # is NOT the one the pattern suggests: `isaac_run_projection` references
+          # `isaac_experiments`, not `isaac_runs`. So it must precede 0001 and is
+          # INDEPENDENT of 0002 — rolling 0002 back while this table stands is legal,
+          # and leaves every claim in it describing rows that no longer exist. The
+          # four-state read model handles that as fallback, which is why the rollback
+          # file says so rather than forbidding it.
+          psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0005_run_projection.rollback.sql
+          gone=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_run_projection'")
+          [ "$gone" = "0" ] || { echo "::error::0005's rollback left isaac_run_projection behind"; exit 1; }
+          rows=$(psql -Atc "select count(*) from isaac_schema_migrations where version = '0005_run_projection'")
+          [ "$rows" = "0" ] || { echo "::error::0005's rollback left its bookkeeping row"; exit 1; }
+
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0004_submissions.rollback.sql
           for t in isaac_submissions isaac_submission_runs; do
             c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
@@ -2052,8 +2212,8 @@ jobs:
           rows=$(psql -Atc "select count(*) from isaac_schema_migrations where version = '0003_revisions'")
           [ "$rows" = "0" ] || { echo "::error::0003's rollback left its bookkeeping row"; exit 1; }
           plan=$(python scripts/db_migrate.py --plan)
-          [ "$plan" = "pending: 0003_revisions, 0004_submissions" ] || {
-            echo "::error::after the 0004+0003 rollback the plan is wrong: $plan"; exit 1; }
+          [ "$plan" = "pending: 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
+            echo "::error::after the 0005+0004+0003 rollback the plan is wrong: $plan"; exit 1; }
 
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0002_runs.rollback.sql
           gone=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_runs'")
@@ -2065,7 +2225,7 @@ jobs:
           [ "$rows" = "0" ] || { echo "::error::0002's rollback left its bookkeeping row"; exit 1; }
           plan=$(python scripts/db_migrate.py --plan)
           echo "$plan"
-          [ "$plan" = "pending: 0002_runs, 0003_revisions, 0004_submissions" ] || {
+          [ "$plan" = "pending: 0002_runs, 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
             echo "::error::after the 0002 rollback the plan is wrong: $plan"; exit 1; }
 
           psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0001_experiments.rollback.sql
