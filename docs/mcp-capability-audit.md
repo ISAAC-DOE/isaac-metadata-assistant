@@ -109,7 +109,7 @@ migration, or anything that changes governance.
 
 ### Status update — the transport is now built, and D1/D2 are untouched by that
 
-A **Streamable HTTP transport** ships in `apps/api/isaac_api/mcp/transport.py`, so the eight tools
+A **Streamable HTTP transport** ships in `apps/api/isaac_api/mcp/transport.py`, so the tools
 are genuinely runnable by a real MCP client — **when, and only when,
 `ISAAC_MCP_DEPLOYMENT=local-loopback` is set**. Operator guide, the full
 configuration-state table, and the exact contract Dean would have to supply for either D2 shape:
@@ -131,10 +131,13 @@ Read the boundary precisely, because "the transport exists" is easy to over-read
 
 ---
 
-## 5A. A CAPABILITY GAP OPENED ON 2026-08-19, and it is recorded rather than closed
+## 5A. A CAPABILITY GAP OPENED ON 2026-08-19, was recorded, and was CLOSED the same day
 
 **An agent can create a Run and cannot give it any science.** That was true before too,
-and was invisible; it is now visible, and the reason is worth writing down.
+and was invisible; it became visible on 2026-08-19, and the reason is worth writing down.
+**It is now closed — see §5A.1, which also records that the gap was WIDER than this
+section said.** The original text is kept because the reasoning for leaving it open for
+even one slice is part of the record, not because it still describes the toolset.
 
 `isaac_update_draft` has two paths. With a `run_id` it calls
 `PATCH /api/experiments/{id}/runs/{run_id}`, which accepts exactly the **five**
@@ -155,7 +158,64 @@ single override withholds it entirely. It was briefly exempted from the refusal 
 belief that the merge was unconditional; an independent review measured a `200` with
 `changed_fields: ['edge']` against a run whose composed `implicit` was empty.
 
-So today, through MCP:
+### 5A.1 CLOSED 2026-08-19 — and the gap was wider than 5A described
+
+**The measurement that widened it.** 5A said an agent could not give a Run its science.
+It could not answer an **open blocking question at either level**: `OPERATIONS` held no
+`/answers` entry at all, and `/edit` refuses a field nothing has answered yet. On a
+record created through ISAAC's own Create Experiment path that is every question the
+record has — so the honest statement of the old state is not "runs are unreachable" but
+**"an agent could not complete any record"**.
+
+**A second thing was missing and 5A did not notice it: discovery.** The answer keys are
+not field paths and not guessable — `series`, `qc`, `descriptor`, a per-file asset URI,
+plus the `run_id` that owns each once a record has runs. `isaac_get_experiment` carries a
+pending *count*, not the questions; `isaac_check_run` carries one run's. Shipping the
+writes alone would have produced a tool whose description named an endpoint this server
+is not allowed to call.
+
+**Two tools, ten in the registry, four new operations:**
+
+| Tool | Scope | Operations |
+|---|---|---|
+| `isaac_list_questions` | `READ` | `list_questions` |
+| `isaac_answer_questions` | `DRAFT_WRITE` | `answer_record_question`, `answer_run_question`, `correct_record_field`, `correct_run_field` |
+
+| Act | Before | Now |
+|---|---|---|
+| create a Run | yes | yes |
+| set a Run's five context/timestamp fields | yes | yes |
+| see what a record is waiting for | **no** | yes |
+| answer an open record-level question | **no** | yes |
+| give a Run its spectrum, verdict or descriptors | **no** | yes |
+| correct a value a Run already confirmed | **no** | yes |
+| correct a run-owned value on the record instead | no — `409 belongs_to_a_run` | **still no, deliberately** |
+| check a Run, read its evidence | yes | yes |
+
+**THE LEVEL IS THE CALLER'S EXPLICIT CHOICE AND THE REFUSAL IS KEPT.** The obvious
+shortcut was to infer it from the key — see `series`, find the runs, pick one. That is
+this server deciding which run measured a spectrum, which is a scientific fact about the
+record and not a fact about the string `"series"`; and it would silently redirect a
+request, so a caller holding the record's ETag would get a `412` from a route it never
+asked for. So the record-level call still goes to the record and is still refused with
+`409 belongs_to_a_run`, and the refusal reaches the caller intact, naming every run and
+the operation that can take the answer. A test asserts exactly that, including that
+nothing was written.
+
+**What 5A got right and is preserved.** `confirmed_by_user` is **passed through from the
+caller and never hard-coded** on the new handler too — asserted by its own test, because
+it is a separate handler and inheriting the rule by proximity is not inheriting it.
+Mutation-tested: hard-coding `True` fails that test; routing the run-level answer to the
+record fails three; ignoring `correcting` fails one.
+
+**Still absent, and named rather than implied:** nothing in this pair exports, finalises
+or submits — `FORBIDDEN_TOOL_TOKENS` makes a tool named for it an `ImportError` — and
+`Connect Your Agent` still shows no connection, because §6's external decisions are
+untouched by this change.
+
+---
+
+**The original 5A state, kept for the record:**
 
 | Act | Possible? |
 |---|---|
@@ -165,7 +225,7 @@ So today, through MCP:
 | correct them on the record instead | **no — `409 belongs_to_a_run`** |
 | check a Run, read its evidence | yes |
 
-**Why it is not closed in the same change.** Adding a run-level write to the tool surface
+**Why it was not closed in the same change.** Adding a run-level write to the tool surface
 is a new authorized write path for scientific values, and this project's rule is that
 each of those gets its own slice and its own independent review. It also inherits a
 question the existing tools already answer, and must answer the same way:
@@ -175,14 +235,11 @@ that no user gave" — the scientist's own Claude asserts it on the scientist's 
 the server has no way to tell the difference. Extending that to a spectrum is a larger
 claim than extending it to a temperature.
 
-**The refusal is informative rather than silent**, which is what makes leaving the gap
-acceptable for now: the `409` body names the run, names
+**The refusal was informative rather than silent**, which is what made leaving the gap
+acceptable at the time: the `409` body names the run, names
 `POST /api/experiments/{experiment_id}/runs/{run_id}/answers`, and says nothing was
 written. An agent that reads it knows exactly what it cannot do and where the capability
 would live.
-
-**This is remaining work, not a decision.** It is named here so `Connect Your Agent`'s
-copy cannot drift into implying a completeness the toolset does not have.
 
 ## 6. Exact external actions
 

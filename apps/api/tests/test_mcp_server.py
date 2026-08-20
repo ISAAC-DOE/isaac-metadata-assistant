@@ -213,7 +213,16 @@ def test_tools_list_is_filtered_by_the_callers_scopes(reader, writer):
     assert "isaac_create_run" not in read_only
     assert "isaac_update_draft" not in read_only
     assert {"isaac_create_run", "isaac_update_draft"} <= both
-    assert len(both) == 8
+    # A tool that answers a blocking question WRITES, so it must be absent from a
+    # read-only caller's list. Named explicitly rather than left to the count: a
+    # count catches a tool that vanished, not one that leaked into the wrong scope.
+    assert "isaac_answer_questions" not in read_only
+    assert "isaac_answer_questions" in both
+    # ...and the DISCOVERY half is read-only, so it is present in both. Asserted
+    # rather than inferred: the pair is only useful if exactly one of them writes.
+    assert "isaac_list_questions" in read_only
+    assert "isaac_list_questions" in both
+    assert len(both) == 10
 
 
 def test_every_descriptor_states_the_scope_a_call_will_cost(writer):
@@ -590,6 +599,241 @@ def test_update_draft_is_denied_to_a_read_only_caller(reader, writer):
     # That is strictly the stronger claim — an empty comparison would also pass on
     # a run whose values had been wiped by the refused call.
     assert refreshed["fields"] == before_fields
+
+
+# ==========================================================================
+# 6A. isaac_list_questions + isaac_answer_questions
+#
+# THE CAPABILITY THIS PAIR CLOSES, recorded in `docs/mcp-capability-audit.md` §5A
+# before it was closed. Until they existed an agent could add a run and write its
+# five `RUN_WRITABLE_FIELD_PATHS`, and could correct a record-level field that had
+# ALREADY been answered — so it could not answer an OPEN question at either level.
+# On a record created through ISAAC's own Create Experiment path that is every
+# question the record has, and the spectrum, QC verdict, descriptors and asset
+# hashes are not among the five PATCH takes.
+# ==========================================================================
+
+#: The seed with open `series` and `descriptor` questions and nothing else.
+PARTIAL_ID = "01SYNTHXANESSEED0000000002"
+#: A reduced spectrum shaped as the store keeps it. Synthetic, and obviously so.
+SPECTRUM = [{"energy_eV": 8979.0, "mu": 0.11}, {"energy_eV": 8999.0, "mu": 1.23}]
+
+
+def questions(server: McpServer, experiment_id: str) -> list[dict]:
+    return payload(server, "isaac_list_questions", experiment_id=experiment_id)["data"][
+        "pending"
+    ]
+
+
+def test_list_questions_carries_the_answer_key_and_the_owning_run(writer):
+    """The discovery half, and the two things about its output that matter.
+
+    The answer key is `id` and it is NOT a field path; and once a record has runs
+    the same `id` appears once per run with different `run_id`s, because they are
+    questions about different measurements. An agent that could not see the second
+    fact would answer two runs' spectra into one.
+    """
+    before = questions(writer, PARTIAL_ID)
+    assert {q["id"] for q in before} == {"series", "descriptor"}
+    assert all(q.get("run_id") is None for q in before)
+    assert all(q["blocker_key"] == q["id"] for q in before)
+
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+    payload(
+        writer,
+        "isaac_create_run",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        label="R2",
+    )
+
+    after = questions(writer, PARTIAL_ID)
+    series = [q for q in after if q["id"] == "series"]
+    assert len(series) == 2, [q["blocker_key"] for q in after]
+    assert {q["run_label"] for q in series} == {"R1", "R2"}
+    # DIFFERENT questions, and the key says so while the answer key does not.
+    assert len({q["blocker_key"] for q in series}) == 2
+    assert {q["blocker_key"] for q in series} == {
+        f"{q['run_id']}:series" for q in series
+    }
+
+
+def test_answer_questions_gives_a_run_its_spectrum_and_leaves_the_other_run_alone(writer):
+    """THE CASE THE AUDIT NAMED AS IMPOSSIBLE, walked end to end over MCP.
+
+    Two runs, one spectrum. The second run must not receive it: asserting that two
+    runs measured the same spectrum is a scientific claim this application has no
+    evidence for, so the write is scoped to the run named and nothing propagates.
+    """
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+    payload(
+        writer,
+        "isaac_create_run",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        label="R2",
+    )
+    runs = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"]
+    first, second = runs[0], runs[1]
+
+    body = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=first["id"],
+        if_match=f'"{first["version"]}"',
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert body["operation"] == "answer_run_question"
+
+    remaining = {q["blocker_key"] for q in questions(writer, PARTIAL_ID)}
+    assert f"{first['id']}:series" not in remaining
+    assert f"{second['id']}:series" in remaining
+
+    # And the run the answer named is the one that would export it.
+    checked = payload(
+        writer, "isaac_check_run", experiment_id=PARTIAL_ID, run_id=first["id"]
+    )["data"]
+    assert "series" not in {b["id"] for b in checked["blockers"]}
+
+
+def test_answering_a_run_owned_question_on_the_record_surfaces_the_refusal_intact(writer):
+    """THE REFUSAL IS THE PRODUCT, and this layer must not paper over it.
+
+    The obvious shortcut was to infer the level from the key — see `series`, find
+    the runs, pick one. That decides which run measured a spectrum, which is a
+    scientific fact about the record and not a fact about the string `"series"`.
+    So the record-level call goes to the record, is refused, and the refusal
+    reaches the caller naming every run and the operation that can take the
+    answer. Nothing is written.
+    """
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert result["isError"] is True
+    refusal = result["structuredContent"]
+    assert refusal["operation"] == "answer_record_question"
+    assert refusal["status"] == 409
+    body = refusal["data"]
+    assert body["error"] == "belongs_to_a_run"
+    assert body["keys"] == ["series"]
+    assert [r["run_label"] for r in body["runs"]] == ["R1"]
+    assert "runs/{run_id}/answers" in body["answer_at"]
+    # NOTHING WRITTEN — the question is still open, on the run.
+    assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
+
+
+def test_answer_questions_answers_a_record_with_no_runs_at_the_record_level(writer):
+    """The zero-run case, which is the one a freshly created record is in."""
+    body = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert body["operation"] == "answer_record_question"
+    assert body["data"]["invalidation"]["changed"] is True
+    assert "series" not in {q["id"] for q in questions(writer, PARTIAL_ID)}
+
+
+def test_answer_questions_corrects_a_run_value_and_keeps_the_earlier_confirmation(writer):
+    """`correcting: true` at the run level — the operation `isaac_update_draft` cannot
+    reach, because PATCH takes only the five run-writable FIELD PATHS."""
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+    run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
+    payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=run["id"],
+        if_match=f'"{run["version"]}"',
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    fresh = payload(
+        writer, "isaac_get_run", experiment_id=PARTIAL_ID, run_id=run["id"]
+    )["data"]["run"]
+    corrected = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=run["id"],
+        if_match=f'"{fresh["version"]}"',
+        confirmed_by_user=True,
+        correcting=True,
+        answers={"series": SPECTRUM[:1]},
+    )
+    assert corrected["operation"] == "correct_run_field"
+    assert corrected["data"]["invalidation"]["changed"] is True
+
+
+def test_answer_questions_passes_a_false_confirmation_through_and_is_refused(writer):
+    """Same rule as `isaac_update_draft`, asserted separately because it is a
+    separate handler: hard-coding `True` would record a confirmation no user gave,
+    for values whose only support IS that confirmation."""
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=False,
+        answers={"series": SPECTRUM},
+    )
+    assert result["isError"] is True
+    assert result["structuredContent"]["error"] == "confirmation_required"
+    assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
+
+
+def test_answer_questions_needs_the_runs_etag_not_the_records(writer):
+    """The two validators are different and the wrong one is a 412, not a write."""
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+    run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=run["id"],
+        if_match=etag_of(writer, PARTIAL_ID),  # the RECORD's — wrong on purpose
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert result["isError"] is True
+    assert result["structuredContent"]["status"] == 412
+    assert f"{run['id']}:series" in {
+        q["blocker_key"] for q in questions(writer, PARTIAL_ID)
+    }
+
+
+def test_answer_questions_is_denied_to_a_read_only_caller(reader, writer):
+    denied(
+        reader,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
+
+
+def test_list_questions_is_denied_to_a_write_only_caller(write_only):
+    """The discovery tool is READ, and the write scope does not imply it."""
+    denied(write_only, "isaac_list_questions", experiment_id=PARTIAL_ID)
 
 
 # ==========================================================================

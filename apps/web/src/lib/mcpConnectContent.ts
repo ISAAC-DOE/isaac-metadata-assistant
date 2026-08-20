@@ -205,8 +205,8 @@ export interface McpCapability {
    *
    * It exists so the page cannot silently under-describe the interface. The
    * tool set is defined in `apps/api/isaac_api/mcp/policy.py`
-   * (`PERMITTED_TOOL_NAMES`), and a slice that adds a ninth tool there would
-   * otherwise leave this tab quietly describing eight — a scientist reading a
+   * (`PERMITTED_TOOL_NAMES`), and a slice that adds a tool there would
+   * otherwise leave this tab quietly describing the set as it was — a scientist reading a
    * complete-looking list that has become incomplete. `connect-your-agent.test.tsx`
    * reads that file and requires these names to cover it exactly, so adding a
    * tool fails here until somebody writes down what it lets an agent do.
@@ -225,7 +225,7 @@ export interface McpCapability {
  *
  * Deliberately phrased as the scientist's own work rather than as operation
  * names: this tab is the place where a machine interface is described to a
- * person, and an eight-row list of identifiers would describe it to a machine.
+ * person, and a bare list of operation identifiers would describe it to a machine.
  */
 export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
   {
@@ -243,10 +243,26 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     tools: ['isaac_list_runs', 'isaac_get_run'],
   },
   {
+    /*
+     * "IT STARTS EMPTY" WAS TRUE AND STOPPED BEING TRUE, and the correction is
+     * the interesting part. `routes._seed_for_new_run` now gives the FIRST run of
+     * a record the run-level values the record already holds, because a run's
+     * spectrum, verdict, descriptors, asset hashes, conditions and acquisition
+     * times are read OFF THE RUN — so a first run that started empty silently
+     * deleted every evidenced value from the record it exports, and the export
+     * still said `ok: true`.
+     *
+     * A LATER run does start empty, and that asymmetry is the no-guessing rule
+     * rather than an inconsistency: copying one run's spectrum onto a second
+     * asserts they measured the same thing, which is a scientific claim this
+     * application has no evidence for. Both halves are stated, because "it starts
+     * empty" and "it inherits everything" are each half-false and a scientist
+     * reading either one alone would be misled about what Add Run just did.
+     */
     id: 'add-run',
     action: 'Add a run',
     detail:
-      'Add one measurement condition to a record. It starts empty — no value is copied into it and none is invented.',
+      'Add one measurement condition to a record. The first run carries across what the record already holds — its spectrum, conditions and times move onto the run, because that is where an exported record reads them from. Every run after that starts empty: nothing is copied from one run to another, because that would assert two runs measured the same thing. No value is ever invented.',
     tools: ['isaac_create_run'],
   },
   {
@@ -275,8 +291,34 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     id: 'write-draft',
     action: 'Write draft values',
     detail:
-      'Correct an answered record-level field, or fill in a run’s own five context and timing fields. It cannot give a run its spectrum, its QC verdict or its descriptors — those belong to the run that measured them, and this toolset has no operation that writes them; on a record with runs it is refused outright, naming the run. An invented or misspelt field path is refused with nothing written. The confirmation each write records, though, is the agent’s assertion that you gave it — ISAAC cannot check whether you were ever asked, so grant this permission only to an agent you trust to ask you first.',
+      'Correct an answered record-level field, or fill in a run’s own five context and timing fields. Field paths only — the spectrum, the QC verdict and the descriptors are answers to questions rather than field paths, and are written through “Answer the open questions” below. An invented or misspelt field path is refused with nothing written. The confirmation each write records, though, is the agent’s assertion that you gave it — ISAAC cannot check whether you were ever asked, so grant this permission only to an agent you trust to ask you first.',
     tools: ['isaac_update_draft'],
+  },
+  {
+    id: 'list-questions',
+    action: 'See what a record is waiting for',
+    detail:
+      'Read the open questions blocking a record — what each one asks, the key an answer goes under, and which run owns it. Reads only; writes nothing.',
+    tools: ['isaac_list_questions'],
+  },
+  {
+    /*
+     * THE SAME CONFIRMATION CAVEAT AS `write-draft`, RESTATED RATHER THAN
+     * CROSS-REFERENCED. This row authorises writing a spectrum and a QC verdict —
+     * scientific judgement, not a temperature — on the strength of a
+     * `confirmed_by_user` boolean the CALLER sends and nothing verifies. A reader
+     * who skims one row must not be able to grant this one while having read the
+     * caveat only on the other.
+     *
+     * AND THE LEVEL IS NOT INFERRED, which the copy says because it is the
+     * scientist's protection: ISAAC does not decide which run measured something.
+     * An answer sent to the record when a run owns it is refused, not redirected.
+     */
+    id: 'answer-questions',
+    action: 'Answer the open questions',
+    detail:
+      'Give a record, or one of its runs, the answers it is blocked on — a reduced spectrum, a QC verdict, a descriptor, an asset hash — or overwrite one already answered, keeping the earlier confirmation beside the new one. The agent must name the run a question belongs to: ISAAC will not guess which run measured something, and an answer sent to the record when a run owns it is refused with nothing written. As above, the confirmation recorded is the agent’s assertion that you gave it, and here it stands behind scientific judgement rather than a setting.',
+    tools: ['isaac_answer_questions'],
   },
   {
     id: 'check-run',
@@ -370,7 +412,7 @@ export const MCP_PERMISSIONS: readonly McpPermission[] = [
     id: 'draft-write',
     name: 'isaac:draft.write',
     allows:
-      'Change draft content: add a run, correct an answered field, edit a run’s own five context and timing fields. It does not reach a run’s spectrum, verdict or descriptors.',
+      'Change draft content: add a run, answer or re-answer the questions a record or one of its runs is blocked on — including a run’s spectrum, QC verdict and descriptors — correct an answered field, and edit a run’s own five context and timing fields. It does not export, submit or finalise anything.',
     refuses:
       'Finalizes nothing. It unlocks a fixed, reviewed list of operations and none of them mints an official record.',
   },

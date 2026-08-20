@@ -33,7 +33,7 @@ The module map, in the order a reader should take them:
 ``policy``      the closed sets — scopes, operations, permitted tool names
 ``deployment``  who may call, and the unconfigured default that says nobody
 ``client``      the only path to ISAAC, hard-bound to the operation allowlist
-``tools``       the eight tools and their schemas
+``tools``       the tools and their schemas
 ``server``      JSON-RPC framing and the authorization checks around each call
 ``transport``   the HTTP endpoint, the loopback guard, and the mount decision
 """

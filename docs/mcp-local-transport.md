@@ -1,6 +1,6 @@
 # Running ISAAC's MCP server locally
 
-ISAAC ships an MCP tool server — eight least-privilege tools over ISAAC's own HTTP
+ISAAC ships an MCP tool server — ten least-privilege tools over ISAAC's own HTTP
 API — and, since this slice, a **Streamable HTTP transport** that a real MCP client
 can speak to. It is off by default, and "off" means *there is no route*, not a route
 that refuses.
@@ -191,7 +191,7 @@ parity cases, and four negative controls that disable one guard each and assert 
 behaviour changes.
 
 `apps/api/tests/test_mcp_boundaries.py` — what must never be reachable.
-`apps/api/tests/test_mcp_server.py` — the eight tools, in process.
+`apps/api/tests/test_mcp_server.py` — every registered tool, in process.
 
 **None of them reads real data, touches a database, or sends anything off this
 machine.** *This line previously said "None of them opens a socket", which was

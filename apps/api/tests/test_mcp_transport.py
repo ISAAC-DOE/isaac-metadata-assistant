@@ -388,7 +388,7 @@ def test_an_unrecognised_value_still_reaches_the_package_rather_than_being_judge
 # 2. A real JSON-RPC session over the mounted transport
 # ==========================================================================
 
-def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_eight(
+def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_registry(
     workspace,
 ):
     """initialize -> initialized notification -> tools/list -> tools/call.
@@ -426,7 +426,7 @@ def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_eight(
 
     listed = {tool["name"] for tool in result_of(client, "tools/list")["tools"]}
     assert listed == set(PERMITTED_TOOL_NAMES)
-    assert len(listed) == 8
+    assert len(listed) == 10
 
     body = structured(client, "isaac_list_experiments")
     assert body["status"] == 200
@@ -900,7 +900,7 @@ def test_the_read_grant_is_the_default_and_the_write_tools_are_absent(workspace)
     listed = {tool["name"] for tool in result_of(client, "tools/list")["tools"]}
     assert "isaac_create_run" not in listed
     assert "isaac_update_draft" not in listed
-    assert len(listed) == 6
+    assert len(listed) == 7
 
 
 def test_a_read_only_caller_is_refused_a_write_tool_with_403(workspace):

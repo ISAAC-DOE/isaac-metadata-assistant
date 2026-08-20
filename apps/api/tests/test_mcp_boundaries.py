@@ -101,7 +101,7 @@ def rpc(server, method, params=None, *, credential=None):
 
 def test_the_registry_is_exactly_the_permitted_set_in_both_directions():
     assert registered_tool_names() == PERMITTED_TOOL_NAMES
-    assert len(PERMITTED_TOOL_NAMES) == 8
+    assert len(PERMITTED_TOOL_NAMES) == 10
 
 
 def test_no_forbidden_capability_is_registered_under_any_name():

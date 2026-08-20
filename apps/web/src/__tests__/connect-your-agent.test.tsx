@@ -703,27 +703,70 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
   });
 });
 
-describe('the write permission states what it cannot reach', () => {
-  it('names the spectrum, the verdict and the descriptors as out of reach', () => {
-    // A scientist granting `isaac:draft.write` would reasonably expect an agent to be
-    // able to fill a record in. It cannot: `isaac_update_draft` reaches a run's five
-    // context/timing fields and the record-level correction route, and the run-level
-    // blocks — series, qc, descriptors, assets — have no MCP operation at all. On a
-    // record with runs the record-level route refuses them outright with
-    // `409 belongs_to_a_run`.
-    //
-    // The gap is real and is recorded in `docs/mcp-capability-audit.md` §5A rather than
-    // closed here, because a new authorized write path for scientific values gets its
-    // own reviewed slice. What must not happen in the meantime is the copy implying a
-    // completeness the toolset does not have.
+describe('the write permission describes the reach it actually has', () => {
+  /*
+   * THIS TEST WAS INVERTED, NOT DELETED, and the inversion is the record.
+   *
+   * It used to REQUIRE the copy to say `cannot give a run its spectrum`, and it was
+   * right to: `isaac_update_draft` reached a run's five context/timing fields and the
+   * record-level correction route, and the run-level blocks — series, qc, descriptors,
+   * assets — had no MCP operation at all. The gap was recorded in
+   * `docs/mcp-capability-audit.md` §5A rather than closed, so the copy had to say so.
+   *
+   * §5A.1 closed it: `isaac_list_questions` and `isaac_answer_questions` reach exactly
+   * those blocks, at the level that owns them. A test still requiring the "cannot"
+   * sentence would have been requiring the product to keep a FALSE claim on a screen
+   * whose whole job is to describe a permission truthfully — with the test reading as
+   * evidence of honesty. So it now pins the two properties that survive the change and
+   * are what a scientist is actually deciding on.
+   */
+  it('routes the spectrum, verdict and descriptors to the answer capability, not the field one', () => {
     const write = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'write-draft');
     expect(write, 'the write capability row is gone; re-read this test').toBeDefined();
-    expect(write!.detail).toMatch(/cannot give a run its spectrum/i);
-    expect(write!.detail).toMatch(/QC verdict/i);
-    expect(write!.detail).toMatch(/descriptors/i);
+    // Field paths are its subject, and it points at the row that does the rest.
+    expect(write!.detail).toMatch(/field paths only/i);
+    expect(write!.detail).toMatch(/answer the open questions/i);
+    // NEGATIVE CONTROL: the retired sentence must not survive anywhere, because it is
+    // now false and it is the exact sentence a careless revert would restore.
+    expect(write!.detail).not.toMatch(/cannot give a run its spectrum/i);
+
+    const answer = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'answer-questions');
+    expect(answer, 'the answer capability row is gone; re-read this test').toBeDefined();
+    expect(answer!.detail).toMatch(/QC verdict/i);
+    expect(answer!.detail).toMatch(/descriptor/i);
+    // THE LEVEL IS NOT GUESSED, and this is the scientist's protection rather than a
+    // detail: ISAAC does not decide which run measured something.
+    expect(answer!.detail).toMatch(/will not guess which run measured something/i);
+    expect(answer!.detail).toMatch(/refused with nothing written/i);
+    // AND THE CONFIRMATION CAVEAT IS RESTATED HERE, not left one row away. This row
+    // authorises writing scientific judgement on the strength of a boolean the caller
+    // sends and nothing verifies.
+    expect(answer!.detail).toMatch(/assertion that you gave it/i);
 
     const scope = MCP_PERMISSIONS.find((p) => p.id === 'draft-write');
     expect(scope, 'the draft.write scope row is gone; re-read this test').toBeDefined();
-    expect(scope!.allows).toMatch(/does not reach a run.s spectrum/i);
+    expect(scope!.allows).not.toMatch(/does not reach a run.s spectrum/i);
+    expect(scope!.allows).toMatch(/does not export, submit or finalise/i);
+  });
+
+  it('does not claim a new run starts empty, because the first one does not', () => {
+    /*
+     * A SEPARATE HONESTY DEFECT, found while closing §5A and not caused by it. This
+     * row read "It starts empty — no value is copied into it and none is invented",
+     * which was true when it was written and stopped being true when
+     * `routes._seed_for_new_run` began carrying the record's run-level values onto the
+     * FIRST run — a change made because a first run that started empty silently
+     * deleted evidenced values from the record it exports.
+     *
+     * Both halves are required. "It inherits everything" is as false as "it starts
+     * empty": a LATER run does start empty, because copying one run's spectrum onto
+     * another asserts they measured the same thing.
+     */
+    const add = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'add-run');
+    expect(add, 'the add-run capability row is gone; re-read this test').toBeDefined();
+    expect(add!.detail).not.toMatch(/starts empty — no value is copied/i);
+    expect(add!.detail).toMatch(/first run carries across/i);
+    expect(add!.detail).toMatch(/every run after that starts empty/i);
+    expect(add!.detail).toMatch(/no value is ever invented/i);
   });
 });
