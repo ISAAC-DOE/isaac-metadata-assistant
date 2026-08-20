@@ -3886,9 +3886,23 @@ def _seed_for_new_run(exp) -> dict:
     Nothing is REMOVED from the experiment. This function is pure and the caller writes
     only the run. Leaving the experiment's copy in place keeps the change reversible —
     removing the run does not take the values with it — and keeps this out of the
-    business of editing a document it was not asked to edit. The copy is inert:
-    ``resolved_run_draft`` never reads it once a run exists, and
-    ``Experiment.pending`` withholds the questions for the same reason.
+    business of editing a document it was not asked to edit.
+
+    **~~"The copy is inert: ``resolved_run_draft`` never reads it once a run exists."~~
+    THAT SENTENCE WAS MATERIALLY FALSE, and an independent review named it as the
+    sentence that made a Critical defect invisible to a reader of this function.** The
+    four run-level BLOCKS are indeed not read from the experiment once a run exists —
+    but ``resolved_run_draft`` MERGES the experiment's ``block_evidence`` and
+    ``implicit`` onto every run. So a correction written into ``exp.draft`` after a run
+    existed put its "Correct the QC status? → valid" confirmation into the record's
+    SIDECAR while the verdict itself stayed behind, and the published record asserted a
+    verdict its own evidence trail denied.
+
+    The copy is **unreachable by the record's write routes, and partially readable at
+    export**. Both halves matter, which is why they are now written out. The write side
+    is closed by :func:`_refuse_run_level_on_the_record`; ``Experiment.pending``
+    withholds the questions, but only for a kind some run actually carries, so a
+    question is never hidden from both.
     """
     if not exp.runs:
         seed: dict = {}
@@ -4005,6 +4019,37 @@ def post_run(
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
             return precondition
+        # ADDING A RUN TO AN ALREADY-EXPORTED ZERO-RUN RECORD IS REFUSED, and an
+        # independent review is why. A zero-run record exports under its OWN id; the
+        # first run moves the exported identity onto the run. Before adoption the
+        # second export refused (the run had no descriptors), so the question never
+        # arose. With adoption it succeeds, and the measured result was TWO official
+        # ISAAC records with different ids, identical science, no `links` relation
+        # between them, and nothing on any surface disclosing the duplication.
+        #
+        # The alternatives were considered and are worse. Pruning the earlier record
+        # deletes a published artifact — and `_materialise_pending_units`' keep-set
+        # protects `exp.id` unconditionally, deliberately, so that a legacy 1:1 artifact
+        # survives. Emitting a link between them invents a relation the records do not
+        # support. Refusing states the real constraint: the record has already been
+        # published under its own identity, and this application has no operation that
+        # unpublishes one.
+        if not exp.runs and exp.exported():
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "already_exported_without_runs",
+                    "experiment_id": exp.id,
+                    "record_id": exp.record_id,
+                    "message": (
+                        "This record has already been exported under its own identity. "
+                        "Adding a run would move the exported identity onto the run and "
+                        "publish a second official record with the same science, and "
+                        "there is no operation that withdraws the first. Nothing was "
+                        "written."
+                    ),
+                },
+            )
         run = exp.add_run(label=label, draft=_seed_for_new_run(exp))
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:

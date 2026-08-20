@@ -333,9 +333,16 @@ def test_a_recorded_verdict_can_be_corrected_afterwards(app):
     draft = ws.load_experiment(exp_id).draft
     assert draft["qc"]["status"] == "compromised"
     assert draft["qc"]["evidence"] == "Re-checked: I0 drifted."
-    # BOTH readings survive. A correction is a new judgement, not the erasure of the
-    # old one — the trail is what lets a reviewer see that the verdict changed.
-    assert len(draft["block_evidence"]["qc:status"]) == 2
+    # THREE entries, not two: the first confirmation, the DISPLACED note recorded as
+    # superseded, and the new confirmation. A correction is a new judgement, not the
+    # erasure of the old one — and the note that justified the old verdict is removed
+    # from `measurement.qc.evidence` (it is not provenance for this verdict) while being
+    # preserved in the trail (it is a scientist's written reasoning).
+    trail = draft["block_evidence"]["qc:status"]
+    assert len(trail) == 3, trail
+    superseded = [e for e in trail if e.get("superseded")]
+    assert len(superseded) == 1, trail
+    assert superseded[0]["answer"] == "First reading."
 
 
 def test_an_edit_naming_only_an_unusable_verdict_is_refused_rather_than_absorbed(app):
@@ -362,7 +369,12 @@ def test_an_edit_naming_only_an_unusable_verdict_is_refused_rather_than_absorbed
     # recognised, and this particular value cannot be stored.
     body = res.json()
     assert body["error"] == "invalid_field_value", body
-    assert body.get("fields") == ["qc"] or "qc" in json.dumps(body), body
+    # `key`/`keys` — the route's own field names. An earlier version wrote
+    # `body.get("fields") == ["qc"] or "qc" in json.dumps(body)`, whose first disjunct
+    # was DEAD (there is no `fields` key) so the check degraded to a substring scan of
+    # the whole body, which "qc" appears in for several unrelated reasons.
+    assert body["key"] == "qc", body
+    assert body["keys"] == ["qc"], body
     assert ws.load_experiment(exp_id).draft["qc"]["status"] == "valid"
 
 
@@ -534,3 +546,67 @@ def test_a_note_less_verdict_is_accepted_and_exports_which_is_why_the_UI_is_stri
     assert finished.json()["status"] == "ready_to_export"
     assert _export(client, exp_id).json()["ok"] is True
     assert "evidence" not in ws.load_experiment(exp_id).draft["qc"]
+
+
+def test_a_displaced_note_is_preserved_as_superseded_rather_than_destroyed(app):
+    """REGRESSION TEST for finding I4 — a permanent, unrecoverable delete.
+
+    Removing a note that justified a DIFFERENT verdict is correct. Removing it without
+    trace destroys a scientist's written reasoning: `block_evidence` would gain only a
+    confirmation naming the new status, and `answer_log` stores the submitted shape
+    rather than the displaced one.
+
+    This project's established answer to exactly this situation is SUPERSEDE WITHOUT
+    DELETING — `conflict_resolution` decides between competing values without removing
+    either.
+    """
+    client = TestClient(app)
+    exp_id = _new_record(client)
+    _answer(client, exp_id, _harvested_answers(app))
+    _answer(
+        client,
+        exp_id,
+        {"qc": {"status": "compromised", "evidence": "Beam dropped during scan 3."}},
+    )
+    client.post(
+        f"/api/experiments/{exp_id}/edit",
+        json={"confirmed_by_user": True, "answers": {"qc": {"status": "valid"}}},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+
+    draft = ws.load_experiment(exp_id).draft
+    # Gone from the VALUE — it is not provenance for this verdict.
+    assert "evidence" not in draft["qc"], draft["qc"]
+    # Kept in the TRAIL — it is a person's reasoning, and it happened.
+    trail = draft["block_evidence"]["qc:status"]
+    displaced = [e for e in trail if e.get("superseded")]
+    assert len(displaced) == 1, trail
+    assert displaced[0]["answer"] == "Beam dropped during scan 3."
+    assert "Superseded" in displaced[0]["question"]
+    # And the superseding entry makes NO claim about the old note.
+    assert all("Beam dropped" not in str(e.get("question", "")) for e in trail if not e.get("superseded"))
+
+
+def test_the_two_qc_writers_agree_about_replacing_the_whole_value(app):
+    """NEGATIVE CONTROL for finding I5 — the asymmetry nobody could see.
+
+    `apply_corrections` was fixed to replace both halves; `apply_answers` was left
+    alone, so `{"status": "valid"}` over a draft already carrying a contradicting note
+    kept the note. It is unreachable through any shipped producer today, which is why it
+    was latent rather than measured — and an asymmetry nobody can see is the kind that
+    outlives the reason for it. Asserted directly on the core.
+    """
+    from isaac_records.complete import apply_answers, apply_corrections
+
+    stale = "Beam dropped during scan 3; spectrum unusable."
+    shape = {"timestamp": "2026-01-01T00:00:00Z", "qc": {"status": "valid"}}
+
+    answered = apply_answers(
+        {"qc": {"evidence": stale}, "pending": [{"kind": "qc", "question": "?"}]}, shape
+    )
+    corrected = apply_corrections({"qc": {"status": "failed", "evidence": stale}}, shape)
+
+    for name, out in (("apply_answers", answered), ("apply_corrections", corrected)):
+        assert out["qc"]["status"] == "valid", name
+        assert "evidence" not in out["qc"], (name, out["qc"])
+        assert any(e.get("superseded") for e in out["block_evidence"]["qc:status"]), name

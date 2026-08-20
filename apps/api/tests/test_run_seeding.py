@@ -317,10 +317,10 @@ def test_adding_a_run_loses_no_run_level_field_from_the_exported_record(app):
     measured five fields and twelve sidecar evidence keys gone from a record that still
     exported clean.
 
-    It uses the READY scenario because that is a record whose run-level fields are
-    already evidenced end to end, and it compares the exported record BEFORE and AFTER
-    a run is added — the only framing that catches a silent loss, since asserting the
-    after-state alone would pass on a record that never had the values.
+    It compares the record's OWN run-level fields against the record the RUN would
+    export, which is a purer measurement than exporting twice: it needs no prior export
+    (which the record would now refuse a run after), and it fails on the loss itself
+    rather than on a downstream symptom.
     """
     from conftest import client_ws
 
@@ -328,28 +328,31 @@ def test_adding_a_run_loses_no_run_level_field_from_the_exported_record(app):
     store = client_ws(client)
     rid = ws.SEED_READY_ID
 
-    client.post(
-        f"/api/experiments/{rid}/export",
-        headers={"If-Match": f'"{_version(client, rid)}"'},
-    )
-    before = json.loads(
-        store.load_experiment(rid).export_units()[0].record_path().read_text(encoding="utf-8")
-    )
-    assert before["context"]["temperature_K"] == 298, before.get("context")
-    assert before["timestamps"]["acquired_start_utc"], before.get("timestamps")
+    before = {
+        path: envelope
+        for path, envelope in (store.load_experiment(rid).draft.get("fields") or {}).items()
+        if ws.field_level(path) == ws.LEVEL_RUN
+    }
+    assert before, "the fixture no longer carries evidenced run-level fields"
 
     _add_run(client, rid, "300 K")
-    client.post(
+    exported = client.post(
         f"/api/experiments/{rid}/export",
         headers={"If-Match": f'"{_version(client, rid)}"'},
     )
-    after = json.loads(
+    assert exported.json()["ok"] is True, exported.json()
+    record = json.loads(
         store.load_experiment(rid).export_units()[0].record_path().read_text(encoding="utf-8")
     )
 
-    assert after["context"] == before["context"], (before["context"], after.get("context"))
-    for key in ("acquired_start_utc", "acquired_end_utc"):
-        assert after["timestamps"][key] == before["timestamps"][key], key
+    for path, envelope in before.items():
+        node = record
+        for segment in path.split("."):
+            assert isinstance(node, dict) and segment in node, (
+                f"{path} was lost when the run was added"
+            )
+            node = node[segment]
+        assert node == envelope["value"], (path, node, envelope["value"])
 
 
 def test_the_six_unclassified_configuration_fields_are_deliberately_not_adopted(app):
@@ -401,3 +404,48 @@ def test_a_run_created_before_seeding_existed_does_not_report_a_finished_record(
     assert steps["complete_metadata"] != "completed", steps
     listed = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"]
     assert {q["id"] for q in listed} == {"series", "qc", "descriptor"}, listed
+
+
+def test_a_run_cannot_be_added_to_a_record_already_exported_without_runs(app):
+    """REGRESSION TEST for a duplicate publication adoption made reachable.
+
+    A zero-run record exports under its OWN id; the first run moves the exported
+    identity onto the run. Before adoption the second export refused (the run had no
+    descriptors), so this never arose. With adoption it succeeded, and an independent
+    review measured the result: TWO official ISAAC records, different ids, identical
+    science, no `links` relation, and nothing on any surface disclosing it.
+
+    Pruning the earlier record would delete a published artifact — and the export
+    keep-set protects `exp.id` unconditionally and deliberately. Emitting a link would
+    invent a relation. Refusing states the real constraint: this application has no
+    operation that withdraws a published record.
+    """
+    client, exp_id = _completed_record(app)
+    exported = client.post(
+        f"/api/experiments/{exp_id}/export",
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert exported.json()["ok"] is True
+
+    refused = client.post(
+        f"/api/experiments/{exp_id}/runs",
+        json={"label": "300 K"},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert refused.status_code == 409, refused.text
+    body = refused.json()
+    assert body["error"] == "already_exported_without_runs"
+    assert body["record_id"] == ws.load_experiment(exp_id).record_id
+    assert "Nothing was written." in body["message"]
+    assert ws.load_experiment(exp_id).runs == []
+
+
+def test_a_run_can_still_be_added_before_the_record_is_exported(app):
+    """NEGATIVE CONTROL for over-refusal. The refusal is about publication, not runs."""
+    client, exp_id = _completed_record(app)
+    added = client.post(
+        f"/api/experiments/{exp_id}/runs",
+        json={"label": "300 K"},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert added.status_code == 201, added.text

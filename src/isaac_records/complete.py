@@ -110,6 +110,36 @@ def _user_confirmation(question, answer, timestamp) -> dict:
     }
 
 
+def _supersede_qc_evidence(draft: dict, displaced: str | None, timestamp: str) -> None:
+    """Record a QC note that a new verdict has displaced, before it is removed.
+
+    **SUPERSEDE WITHOUT DELETING** is this project's established answer to exactly this
+    situation — ``conflict_resolution`` decides between competing values without
+    removing either, and ``CLAUDE.md`` §15 records that as the rule. Removing a note
+    that justified a DIFFERENT verdict is correct (it is not provenance for this one,
+    and keeping it produced a record asserting a claim its own evidence denied), but
+    removing it *without trace* destroys a scientist's written reasoning permanently:
+    ``block_evidence`` would gain only a confirmation naming the new status, and
+    ``answer_log`` stores the submitted shape rather than the displaced one.
+
+    An independent review found that gap in the fix for the defect above. So the note
+    is written into the same ``qc:status`` trail it is leaving, marked as superseded and
+    carrying no claim about the new verdict.
+    """
+    if not displaced:
+        return
+    trail = draft.setdefault("block_evidence", {}).setdefault("qc:status", [])
+    trail.append(
+        {
+            "source_type": "user_confirmation",
+            "question": "Superseded QC evidence (the verdict it described was replaced)",
+            "answer": displaced,
+            "timestamp": timestamp,
+            "superseded": True,
+        }
+    )
+
+
 def apply_answers(draft: dict, answers: dict) -> dict:
     """Return a NEW completed draft with ``answers`` applied to ``draft['pending']``.
 
@@ -193,11 +223,22 @@ def apply_answers(draft: dict, answers: dict) -> dict:
                 continue
             status = qc_answer["status"]
             qc = draft.setdefault("qc", {})
-            qc["status"] = status
             evidence_note = qc_answer.get("evidence")
+            # THE WHOLE PAIR HERE TOO. `apply_corrections` was fixed to replace both
+            # halves and this writer was left alone, so the two disagreed about the same
+            # rule — `{"status": "valid"}` over a draft already carrying "Beam dropped
+            # during scan 3" produced exactly the contradiction the other fix removed.
+            # Currently unreachable through any shipped producer (`draft_builder` only
+            # ever writes `qc` when it can read a status), which is why it was latent
+            # rather than measured; nothing enforced that, and an asymmetry nobody can
+            # see is the kind that outlives the reason for it.
+            _supersede_qc_evidence(draft, qc.get("evidence"), timestamp)
+            qc["status"] = status
             if evidence_note:
                 # Native measurement.qc.evidence is a free-text string field.
                 qc["evidence"] = evidence_note
+            else:
+                qc.pop("evidence", None)
             block_evidence = draft.setdefault("block_evidence", {})
             block_evidence.setdefault("qc:status", []).append(
                 _user_confirmation(entry.get("question"), status, timestamp)
@@ -566,6 +607,9 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
         current = draft.get("qc") or {}
         if (status, evidence_note) != (current.get("status"), current.get("evidence") or None):
             qc = draft.setdefault("qc", {})
+            displaced = qc.get("evidence")
+            if displaced and displaced != evidence_note:
+                _supersede_qc_evidence(draft, displaced, timestamp)
             qc["status"] = status
             if evidence_note:
                 qc["evidence"] = evidence_note

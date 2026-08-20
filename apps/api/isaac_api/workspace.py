@@ -1505,6 +1505,7 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #   [caller] routes.py::get_evidence
 #   [caller] routes.py::post_audit
 #   [caller] routes.py::post_export
+#   [caller] routes.py::post_run
 #   [caller] routes.py::post_validate
 #   [caller] runtime_records.py::_project_one
 #   [caller] workspace.py::_plan_digest_row
@@ -1593,6 +1594,13 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #     dry-ran ``exp.draft`` and advised ``NO_LINKS`` / ``NO_MEASUREMENT_SERIES`` about
 #     a fan-out whose every record on disk carries a ``measurement`` block. FIXED
 #     (F5): per run, with ``runs[]`` and a deduplicated union at the top level.
+#   * ``routes.post_run`` reads ``exported()`` to REFUSE adding a run to a record
+#     already exported under its own identity. That is a fan-out question by nature:
+#     a zero-run record exports as itself, and the first run moves the exported
+#     identity onto the run — so without the refusal, adding one published a SECOND
+#     official record with the same science, a different id, and no relation between
+#     them. It reads the singular state precisely because the singular state is the
+#     thing it is asking about, and it names it in the refusal body.
 #   * ``routes.post_export`` itself: the 409 named one arbitrary run's record as
 #     though it were THE record (FIXED, C10), the prune could delete a record a
 #     surviving run or a surviving link still named (FIXED, C3/C4/C7), and it could
