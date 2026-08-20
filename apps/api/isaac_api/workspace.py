@@ -2562,11 +2562,25 @@ class Experiment:
         document, and ``rev`` is deliberately not bumped, because nothing new
         happened.
 
-        THIS IS THE ONLY CALL TO ``PostgresOrdinaryStore.persist`` IN THE
-        CODEBASE, which is why the adoption lives here and not in the route helper
-        that renders the 412. Not "it covers four call sites instead of three" —
-        it covers every caller by construction, and a caller added later inherits
-        it without knowing it exists.
+        THIS IS THE ONLY CALL TO ``PostgresOrdinaryStore.persist`` ON ANY PATH A
+        REQUEST CAN REACH, which is why the adoption lives here and not in the
+        route helper that renders the 412. Not "it covers four call sites instead
+        of three" — it covers every caller by construction, and a caller added
+        later inherits it without knowing it exists.
+
+        **THE SENTENCE ABOVE SAID "IN THE CODEBASE" AND THAT IS NO LONGER TRUE.**
+        ``scripts/db_backfill_runs.py`` calls ``persist`` directly, and it is
+        recorded here rather than left for a reader to discover, because a
+        maintainer relying on the stronger claim would conclude that no code path
+        can persist without adopting a winner locally.
+
+        The exception is deliberate and narrow. That script is an OPERATOR
+        artifact: it has never been executed, it is absent from the container image
+        (the Dockerfile COPY allowlist), and no route can reach it — so it is not a
+        path a request can take. It also must not adopt: adoption writes the
+        winner's document into the local workspace file, which is exactly right for
+        a client that is about to re-read, and meaningless for a batch that owns no
+        client. It counts the conflict and moves to the next experiment instead.
         """
         store = _ordinary_store(self.session_id)
         if store is not None:

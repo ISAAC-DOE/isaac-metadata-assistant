@@ -354,7 +354,14 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # the record's own `/answers` now refuses them with `409 belongs_to_a_run` once runs
     # exist, and refusing without somewhere to send the answer would leave a multi-run
     # record unfinishable.
-    assert checked == 68, f"expected 68 documented operations, found {checked}"
+    #
+    # 68 -> 69: `POST /api/assistant/ask`, the assistant SEAM operation. It answers
+    # `501` in every deployment — the deterministic fake is deliberately unreachable
+    # through a booted application — and it exists so that "is there a native
+    # assistant?" is answered by the server rather than by a string compiled into
+    # the browser bundle. It is not `POST /api/assistant/memory/query`, which is the
+    # shipped deterministic Q&A and involves no provider.
+    assert checked == 69, f"expected 69 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -689,6 +696,12 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # codes: a caller who retried the first would be waiting for a decision nobody
     # has made.
     ("/api/transcription", "post"): ["200", "401", "422", "501"],
+    # THE ASSISTANT SEAM, and its codes are deliberately the transcription seam's.
+    # 501 = no provider is configured in this deployment, which is an institutional
+    # decision and not a wait; 422 = the request is not askable, or the context it
+    # supplied does not cover the question. Collapsing the two would tell a client
+    # to retry something nobody has decided to build.
+    ("/api/assistant/ask", "post"): ["200", "401", "422", "501"],
     # 409 = a reconnaissance scan is already running; nothing is connected to.
     ("/api/runtime/database/recon", "get"): ["200", "401", "409"],
     ("/api/schema", "get"): ["200", "401"],

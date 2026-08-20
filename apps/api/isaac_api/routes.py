@@ -70,6 +70,7 @@ from . import submission_store
 from . import submissions
 from . import transcript_capture as tc
 from . import record_attribution
+from .providers import assistant as providers_assistant
 from .providers import config as provider_config
 from .providers import refusal as providers_refusal
 from .providers import transcription as providers_transcription
@@ -6555,6 +6556,176 @@ def post_transcription(
         # is `501`; "you sent nothing to work on" is a fact about the request and
         # is `422`. A client that retried the first would be waiting for something
         # nobody has decided to build.
+        unconfigured = outcome.reason == providers_refusal.REASON_NO_PROVIDER_CONFIGURED
+        return JSONResponse(
+            status_code=501 if unconfigured else 422, content=outcome.to_dict()
+        )
+    return outcome.to_dict()
+
+
+#: The body keys the assistant seam accepts. A closed set for the same reason the
+#: transcript operation's is closed: a caller that sends `{"record_id": "..."}`
+#: expecting the server to fetch context must be told the key means nothing here,
+#: not answered with an answer built from context it did not send.
+_ASSISTANT_KEYS = frozenset({"question", "context"})
+
+#: The keys ONE context item may carry. `providers/assistant.ContextItem` requires
+#: all three and refuses a partial one at construction, which is where the rule
+#: lives; this set is what makes an UNKNOWN key a refusal rather than a silent drop.
+_ASSISTANT_CONTEXT_KEYS = frozenset({"key", "text", "origin"})
+
+
+@router.post(
+    "/assistant/ask",
+    tags=[TAG_ASSISTANT],
+    summary="Ask the Assistant Seam a Grounded Question",
+    description=(
+        "Asks the assistant seam a question, answerable ONLY from context the "
+        "request itself supplies. This operation fetches nothing: it cannot read a "
+        "record, a workspace, or a database, so \"what was sent to the provider\" "
+        "is exactly the `context` array in the request body and is visible to the "
+        "caller who wrote it.\n\n"
+        "AN ANSWER CITES ITS CONTEXT OR THERE IS NO ANSWER. Every answer carries "
+        "`grounded_in`, the context keys it used, and an uncited answer cannot be "
+        "constructed — `AssistantAnswer` raises. A question the supplied context "
+        "does not cover is REFUSED rather than answered from general knowledge, "
+        "which is the no-guessing rule applied to the assistant's own prose and not "
+        "only to the fields it might propose.\n\n"
+        "NOTHING HERE IS A VERDICT. `authoritative` is a constant `false`. This "
+        "operation decides nothing about validity, exportability or scientific "
+        "correctness, writes no field, advances no revision, and is absent from the "
+        "validation stack entirely — draft validation, official schema validation, "
+        "the portal warning tier, advisory review and a human are unchanged.\n\n"
+        "IN THIS BUILD NO ASSISTANT PROVIDER IS CONFIGURED, so every request is "
+        "answered `501` with a body naming exactly what is missing and the document "
+        "that records the decision. That is a statement about this deployment rather "
+        "than a fault or a wait: the missing items are institutional decisions. The "
+        "deterministic fake is deliberately unreachable through a booted "
+        "application, so no deployment can answer from it and no screen may show a "
+        "connected state.\n\n"
+        "A `422` here means the request is not askable — no question, a context item "
+        "missing its `key`, `text` or `origin`, or an unrecognised key — or that the "
+        "context supplied does not cover the question. Nothing is sent anywhere in "
+        "either case, and the two are distinguished by the `error` in the body.\n\n"
+        "The working, shipped way to ask this application a question is "
+        "`POST /api/assistant/memory/query`, which routes a bounded catalogue of "
+        "intents over committed deterministic sources and involves no provider at "
+        "all. It is unaffected by this seam's status."
+    ),
+    response_description=(
+        "The answer, the context keys it cites, and what produced it — with "
+        "`authoritative: false`."
+    ),
+    responses={
+        # NO EXPLICIT `422` ENTRY, and that is not an omission. Declaring one makes
+        # FastAPI skip generating its own, which silently strips the
+        # `HTTPValidationError` content ref every operation with a request body is
+        # required to carry — `test_operations_with_parameters_keep_the_validation_error_schema`
+        # caught exactly that here. The transcription seam has the same shape for the
+        # same reason. What a 422 MEANS on this operation is stated in the description
+        # instead, where a reader will actually see it.
+        **_R_UNAUTHORIZED,
+        501: {
+            "description": (
+                "No assistant provider is configured for this deployment. The body "
+                "names each missing item and the document that records the "
+                "decision, and nothing was answered or sent anywhere."
+            )
+        },
+    },
+)
+def post_assistant_ask(
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"question\": \"...\", \"context\": [{\"key\": \"...\", "
+            "\"text\": \"...\", \"origin\": \"...\"}]}`. `context` is the "
+            "ONLY material an answer may be built from, and `origin` is the "
+            "caller's own statement of where each item came from."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return _transcript_refusal(
+            "invalid_body", "The request body must be a JSON object."
+        )
+    unknown = sorted(set(body) - _ASSISTANT_KEYS)
+    if unknown:
+        # REFUSED, NOT IGNORED. A caller sending `record_id` is asking this
+        # operation to fetch something, and answering 200 while dropping the key
+        # would leave them believing the answer was grounded in a record nobody
+        # read.
+        return _transcript_refusal(
+            "unrecognized_field",
+            "This operation supplies no context of its own, so it accepts only "
+            "`question` and `context`. Nothing was sent anywhere.",
+            keys=unknown,
+        )
+    question = body.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return _transcript_refusal(
+            "invalid_field_value",
+            "`question` must be a non-empty string.",
+            key="question",
+        )
+    raw_context = body.get("context")
+    if raw_context is None:
+        raw_context = []
+    if not isinstance(raw_context, list):
+        return _transcript_refusal(
+            "invalid_field_value",
+            "`context` must be a list of items, each with `key`, `text` and "
+            "`origin`.",
+            key="context",
+        )
+    items: list[providers_assistant.ContextItem] = []
+    for index, entry in enumerate(raw_context):
+        if not isinstance(entry, dict):
+            return _transcript_refusal(
+                "invalid_field_value",
+                "Each context item must be an object.",
+                key=f"context[{index}]",
+            )
+        extra = sorted(set(entry) - _ASSISTANT_CONTEXT_KEYS)
+        if extra:
+            return _transcript_refusal(
+                "unrecognized_field",
+                "A context item carries exactly `key`, `text` and `origin`.",
+                key=f"context[{index}]",
+                keys=extra,
+            )
+        try:
+            items.append(
+                providers_assistant.ContextItem(
+                    key=entry.get("key"),  # type: ignore[arg-type]
+                    text=entry.get("text"),  # type: ignore[arg-type]
+                    origin=entry.get("origin"),  # type: ignore[arg-type]
+                )
+            )
+        except (ValueError, TypeError):
+            # `ContextItem.__post_init__` is where the rule lives — "unattributed
+            # context is how an answer loses its grounding" — so this branch
+            # RELAYS its refusal rather than re-implementing the check. A second
+            # copy of the rule here is a second thing to keep in step.
+            return _transcript_refusal(
+                "invalid_field_value",
+                "A context item must have a non-empty `key`, `text` and `origin`. "
+                "Unattributed context is refused rather than sent.",
+                key=f"context[{index}]",
+            )
+
+    provider = provider_config.resolve_assistant_provider()
+    outcome = provider.answer(
+        providers_assistant.AssistantRequest(
+            question=question, grounded_context=tuple(items)
+        )
+    )
+    if outcome.refused:
+        # THE SAME TWO-CODE SPLIT THE TRANSCRIPTION SEAM MAKES, and for the same
+        # reason: "this build does not do that" is a fact about the deployment and
+        # is `501`, while "the context you sent does not cover this" is a fact
+        # about the request and is `422`. A client that retried the first would be
+        # waiting for an institutional decision nobody has taken.
         unconfigured = outcome.reason == providers_refusal.REASON_NO_PROVIDER_CONFIGURED
         return JSONResponse(
             status_code=501 if unconfigured else 422, content=outcome.to_dict()

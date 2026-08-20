@@ -1977,9 +1977,16 @@ jobs:
           import isaac_api.experiment_repository as repo
           import isaac_api.workspace as ws
 
-          store = repo.ordinary_store()
-          assert store is not None, "no durable store in a job that has PGHOST"
-          exp = store.create(title="projection parity", description=None)
+          # THE DURABLE REPOSITORY, not the store. `PostgresOrdinaryStore` has
+          # `persist` and `hydrate` and no `create`; the repository that WRAPS it is
+          # what mints a record, and going through it is also what keeps this step
+          # exercising the same path a request takes rather than a shortcut. The first
+          # version called `store.create(...)` and failed with `AttributeError` in CI,
+          # which is the right place for that to surface: nothing in the Python suite
+          # exercises this code path, because it needs a real engine.
+          repository = repo.repository()
+          assert repository.durable, f"not durable: {repository.backend}"
+          exp = repository.create(title="projection parity", description=None)
           for label in ("R1", "R2"):
               exp.add_run(label=label)
           exp.save_versioned(None)

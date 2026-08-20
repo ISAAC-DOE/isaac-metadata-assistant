@@ -1567,8 +1567,36 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // width-320 COLLAPSES to a scalar 57: darwin was already 57 and linux has
       // converged on it, so the pair no longer marks a measured difference and
       // the guard would reject it. width-390 stays a pair, darwin 59 unmeasured.
-      'settings-explorer@width-320': { darwin: 57, linux: 56 },
-      'settings-explorer@width-390': 59,
+      //
+      // ── ASSISTANT SEAM OPERATION, 2026-08-19. linux 320: 56 -> 57 (+1).
+      // ── linux 390: 59 -> 57 (-2), so the scalar SPLITS.
+      //
+      // TRANSCRIBED FROM CI job 96326516774, read off its own GREW/IMPROVED
+      // messages, and never from a macOS run — the file header's rule.
+      //
+      // ONE CAUSE, TWO DIRECTIONS, and the opposite signs are the reason this is
+      // not a regression and not a fix. The Endpoint Explorer renders every
+      // operation the live contract exposes, and this branch adds one:
+      // `POST /api/assistant/ask`. `.api-browser-list` is a CLIPPED SCROLL
+      // CONTAINER, and axe scans only what is visible — so a taller list pushes
+      // rows OUT of the scanned rectangle as often as it adds them. At 320px the
+      // new row's own failing node lands inside the rectangle (+1); at 390px, where
+      // each row is shorter, adding it displaces two failing nodes past the clip
+      // (-2). The block above `settings-explorer@desktop-1280x800` predicted
+      // exactly this — "ANY FUTURE SLICE THAT ADDS ROUTES WILL MOVE THIS SURFACE
+      // TOO", and "these figures are expected to FALL".
+      //
+      // The -2 is recorded rather than left, and the suite is why: an IMPROVED
+      // message is a FAILURE here, deliberately, because a stale high number
+      // re-admits the defect it was meant to catch. No colour changed, no token
+      // was darkened, and #78838f / #9aa4af remain the documented shortfall.
+      //
+      // width-390 SPLITS because darwin's 59 is carried forward UNMEASURED. It has
+      // very probably moved too — the clipping mechanism is platform-independent —
+      // but a fresh number nobody measured cannot be caught, while a stale one that
+      // says where it came from can be corrected by the next darwin run.
+      'settings-explorer@width-320': 57,
+      'settings-explorer@width-390': { darwin: 59, linux: 57 },
       'settings-privacy@width-320': 8,
       'settings-privacy@width-390': 8,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -2520,7 +2548,21 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // change (a local run measures the same 61 on `main`), so there is nothing to add or
   // subtract on that side. Per this file's standing rule, the number is corrected from
   // the CI output and the assertion is not loosened.
-  linux: 2806,
+  // ── ASSISTANT SEAM OPERATION, 2026-08-19: linux 2806 -> 2805. darwin does NOT
+  // ── move, because both cells that changed are linux-only readings.
+  //
+  // ARITHMETIC, so a reviewer can check it without a run. Two cells, opposite
+  // signs, one cause — the Endpoint Explorer's clipped scroll container gaining a
+  // row for `POST /api/assistant/ask`:
+  //
+  //   settings-explorer@width-320   56 -> 57   (+1)
+  //   settings-explorer@width-390   59 -> 57   (-2)
+  //                                       net  = -1   (2806 -> 2805)
+  //
+  // TRANSCRIBED from CI job 96326516774's GREW/IMPROVED messages. The darwin
+  // column is untouched: `width-320` was already 57 there and `width-390`'s 59 is
+  // carried forward unmeasured, which the per-key note beside it states.
+  linux: 2805,
 };
 
 /**

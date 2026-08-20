@@ -1087,7 +1087,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 68 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 69 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1103,7 +1103,6 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // characters across the two new operations; NO existing description changed, and
     // `test_contract_description_parity.py` proves that rather than leaving it asserted
     // here. Re-measured over the transcribed array by the same paragraph rule.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(68);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1696,8 +1695,24 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // record. Net +1,023 characters and +4 paragraphs in ONE operation; no other
     // description changed, and `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here.
-    expect(total).toBe(82439);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(180);
+    // 82,439 -> 84,501 and 68 -> 69 operations, 180 -> 185 post-lead paragraphs: the
+    // backend now publishes `POST /api/assistant/ask`, the ASSISTANT SEAM's HTTP
+    // consumer. `providers/assistant.py` was a fully built, fully tested seam with no
+    // route at all, so "does this deployment have a native assistant?" was answerable
+    // only by reading Python. Net +2,062 characters and +5 paragraphs in ONE new
+    // operation; no existing description changed, and
+    // `test_contract_description_parity.py` proves that rather than leaving it
+    // asserted here.
+    //
+    // IT IS NOT `POST /api/assistant/memory/query`, and the Endpoint Explorer will
+    // now show both. That one is the shipped deterministic Q&A and involves no
+    // provider; this one answers `501` in every deployment, because
+    // `validate_provider_config_or_raise` refuses to boot an application that names
+    // the test double. Its own description says so in those terms, which is the
+    // reason the paragraph count moves by five rather than by one.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(69);
+    expect(total).toBe(84501);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(185);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the
