@@ -3296,7 +3296,7 @@ class Experiment:
         own = list(self.draft.get("pending") or [])
         if not self.runs:
             return own
-        # ONCE A RUN EXISTS, THE EXPERIMENT'S OWN RUN-LEVEL QUESTIONS ARE WITHHELD.
+        # ONCE A RUN OWNS A QUESTION, THE EXPERIMENT'S OWN COPY OF IT IS WITHHELD.
         #
         # A zero-run experiment is its own record. The moment a run exists, the record
         # each unit exports is the RUN's, and `resolved_run_draft` reads `series`,
@@ -3305,11 +3305,41 @@ class Experiment:
         # Listing them anyway asks a scientist for a value that reaches no record,
         # which is a dead end wearing the same chrome as a real question.
         #
+        # **WITHHELD ONLY WHEN SOME RUN ACTUALLY CARRIES THAT KIND**, and the condition
+        # is a fix rather than a refinement. The first version withheld unconditionally
+        # on `self.runs` being non-empty, and an independent review measured what that
+        # does to a run whose draft is EMPTY — which is precisely what `new_run`
+        # produced before `_seed_for_new_run` existed, and therefore what every run
+        # created before that deploy still is in the durable store::
+        #
+        #     pending_count: 0 · status: in_review
+        #     workflow: complete_metadata COMPLETED · review_evidence COMPLETED
+        #     POST /export -> ok: false
+        #
+        # That is verbatim the failure the seeding change was written to close,
+        # reachable through existing persisted data. Requiring a run to have inherited
+        # the question before hiding the record's copy means a question is never
+        # withheld from BOTH.
+        #
         # This is a DERIVED view and withholds rather than deletes: the entries stay in
         # the document, so removing the run restores them intact. Record-level
         # questions are untouched, and a zero-run experiment's list is byte-identical
         # to what it always was (the branch above returns before reaching here).
-        out = [entry for entry in own if not blocker_is_run_level(entry)]
+        owned_by_a_run = {
+            item.get("kind")
+            for run in self.runs
+            for item in ((run.draft if isinstance(run.draft, dict) else {}).get("pending") or [])
+            if isinstance(item, dict)
+        }
+        out = [
+            entry
+            for entry in own
+            if not (
+                blocker_is_run_level(entry)
+                and isinstance(entry, dict)
+                and entry.get("kind") in owned_by_a_run
+            )
+        ]
         for run in self.sorted_runs():
             run_draft = run.draft if isinstance(run.draft, dict) else {}
             for item in run_draft.get("pending") or []:

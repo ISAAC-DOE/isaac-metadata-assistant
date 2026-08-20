@@ -270,12 +270,32 @@ function LoadedCompletion({
     (p) => p.id !== currentItem?.id && !skipped.has(p.id),
   );
 
+  /* THE TOKEN A WRITE NEEDS DEPENDS ON WHO OWNS THE QUESTION.
+   *
+   * A record-level answer takes the RECORD's version, which this screen already holds.
+   * A run-owned one goes to the run's route and takes THE RUN's version, which this
+   * screen does not — so it is read immediately before the write. That is one extra
+   * round trip on the questions that need it, and the alternative (caching a run
+   * version alongside the record's) is a second staleness to keep in step for no gain:
+   * `GET /pending` does not report run versions, so there is nothing to keep it fresh
+   * from.
+   *
+   * Sending the record's token to a run route is not a silent bug — it is a 412 — but
+   * it is a 412 the reader would be told to resolve by refreshing something that was
+   * never stale, which is why the tokens are resolved here rather than at the caller.
+   */
+  const tokenFor = async (blocker: PendingBlocker): Promise<string | undefined> => {
+    if (!blocker.runId) return currentVersion;
+    const { run } = await api.getRun(id, blocker.runId);
+    return run.version;
+  };
+
   const confirmAnswer = (blocker: PendingBlocker, value: unknown) => {
     setSubmitting(true);
     setSubmitError(null);
     setAnswerNotApplied(null);
-    api
-      .submitAnswer(id, { [blocker.id]: value }, currentVersion)
+    tokenFor(blocker)
+      .then((token) => api.submitAnswer(id, { [blocker.id]: value }, token, blocker.runId))
       .then((resp) => {
         // Server-reported state first, unconditionally: the recomputed question list
         // and the fresh If-Match token are facts either way.
@@ -369,8 +389,8 @@ function LoadedCompletion({
     setEditSubmitting(true);
     setEditError(null);
     setEditNotApplied(null);
-    api
-      .editField(id, { [blocker.id]: value }, currentVersion)
+    tokenFor(blocker)
+      .then((token) => api.editField(id, { [blocker.id]: value }, token, blocker.runId))
       .then((resp) => {
         setCurrentVersion(resp.version);
         setPending(resp.pending);

@@ -236,21 +236,66 @@ def test_the_route_does_not_carry_its_own_copy_of_the_verdict_enum(app):
     accepted here and declined by the core — a 200 that changed nothing, which is the
     exact defect `is_sha256_shaped` was added to close for a different key.
     """
+    import ast
+
     import isaac_api.routes as routes
 
-    source = pathlib.Path(routes.__file__).read_text(encoding="utf-8")
-    # ONLY `compromised` is scanned, and the other three are named here rather than
+    # THE SCAN IS OVER CODE, NOT TEXT, and that is a correction. The first version
+    # grepped the raw file, and then a docstring that QUOTED a measured defect —
+    # `{"status": "compromised", "evidence": "Beam dropped …"}` — tripped it. Describing
+    # the enum is not carrying a copy of it, and a guard that cannot tell the difference
+    # trains people to weaken the guard.
+    #
+    # ONLY `compromised` is checked, and the other three are named here rather than
     # looped over so the omission is a stated choice: `valid`, `failed` and `pending` are
-    # ordinary English words that appear throughout this file in prose and in unrelated
-    # identifiers (`pending`, `pending_count`, `draft_ok`), so their presence proves
-    # nothing. `compromised` appears nowhere else, which makes it the one reliable
-    # tripwire for the enum having been copied.
-    assert '"compromised"' not in source, (
+    # ordinary words that appear throughout this file in unrelated identifiers, so their
+    # presence proves nothing. `compromised` appears nowhere else in the module's CODE,
+    # which makes it the one reliable tripwire for the enum having been copied.
+    tree = ast.parse(pathlib.Path(routes.__file__).read_text(encoding="utf-8"))
+
+    class _DropDocstrings(ast.NodeTransformer):
+        """Remove the leading string Expr of every module/class/function.
+
+        A `NodeTransformer` rather than mutating during `ast.walk`: `walk` queues a
+        node's children when it POPS the node, so stripping a docstring inside the loop
+        happens after that docstring is already queued. The first version did exactly
+        that and kept failing, which is a good reminder that a guard has to be tested
+        against the thing it is supposed to permit as well as the thing it forbids.
+        """
+
+        def _strip(self, node):
+            self.generic_visit(node)
+            if node.body and isinstance(node.body[0], ast.Expr):
+                if isinstance(node.body[0].value, ast.Constant) and isinstance(
+                    node.body[0].value.value, str
+                ):
+                    node.body = node.body[1:] or [ast.Pass()]
+            return node
+
+        visit_Module = _strip
+        visit_FunctionDef = _strip
+        visit_AsyncFunctionDef = _strip
+        visit_ClassDef = _strip
+
+    stripped = _DropDocstrings().visit(tree)
+    literals = [
+        n.value
+        for n in ast.walk(stripped)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ]
+    assert "compromised" not in literals, (
         "routes.py spells a verdict itself instead of deferring to is_qc_shaped"
     )
     from isaac_records.complete import is_qc_shaped
 
-    assert "is_qc_shaped" in source, "the route stopped using the shared predicate"
+    # The positive half: the route must still REACH the shared predicate. A module that
+    # merely stopped mentioning the enum could have stopped validating altogether.
+    called = {
+        node.func.id
+        for node in ast.walk(stripped)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "is_qc_shaped" in called, "the route stopped calling the shared predicate"
     assert is_qc_shaped({"status": "compromised"}) is True
 
 

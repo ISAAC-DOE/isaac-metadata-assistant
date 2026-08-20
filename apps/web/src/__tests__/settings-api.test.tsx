@@ -1087,14 +1087,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 66 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 68 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
     // correct for its own branch and wrong for the merge; neither was kept.
     // Re-measured on the merged tree by the paragraph rule transcribed into Python
     // over `create_app().openapi()`.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(66);
+    // 66 -> 68 operations, 79,892 -> 81,416 characters, 172 -> 176 paragraphs: the two
+    // RUN-LEVEL WRITE operations, `POST .../runs/{run_id}/answers` and `.../edit`.
+    // They exist because a spectrum, a QC verdict, a descriptor and an asset hash
+    // belong to the run that measured them: the record's own `/answers` now refuses
+    // them with `409 belongs_to_a_run` once runs exist, because before it did, the
+    // answer was accepted, reported as applied, and published nothing. Net +1,524
+    // characters across the two new operations; NO existing description changed, and
+    // `test_contract_description_parity.py` proves that rather than leaving it asserted
+    // here. Re-measured over the transcribed array by the same paragraph rule.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(68);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1676,8 +1685,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // sentence gained `revise_resolution`'s own "and the same competing set" clause,
     // which its wire copy had dropped. Re-measured, not adjusted by the length of
     // the new text.
-    expect(total).toBe(79892);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(172);
+    expect(total).toBe(81416);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(176);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

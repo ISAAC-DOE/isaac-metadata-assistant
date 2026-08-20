@@ -618,10 +618,28 @@ def blank_draft() -> dict:
 
     **What is knowingly NOT asked.** Everything the campaign sheet would have
     supplied — technique, facility, sample, energy window, contributors — has no
-    capture surface in this build, so a new experiment cannot yet be completed to
-    the point of export. That is a real limit of the product, not of this
-    function, and inventing a pending entry for a question nothing can answer
-    would make the Guided Completion screen list dead ends.
+    capture surface in this build. Inventing a pending entry for a question nothing
+    can answer would make the Guided Completion screen list dead ends.
+
+    ~~"so a new experiment cannot yet be completed to the point of export. That is a
+    real limit of the product, not of this function."~~ **NO LONGER TRUE, and struck
+    rather than deleted because it was an accurate and useful warning for as long as it
+    stood.** A new experiment CAN now be completed and exported: the three blockers
+    above are the ones that actually gate an evidence record, and all three are now
+    answerable through the product.
+
+    * ``qc`` — ``_answers_to_apply_shape`` did not forward it, so no request could
+      supply a verdict. It does now, and the UI has a verdict control.
+    * ``series`` and ``descriptor`` — answerable only by CONFIRMING a worked-example
+      value, which a created record does not have. ``StructuredValueEntry.tsx`` is
+      where a person supplies them.
+
+    ``apps/api/tests/test_scientist_can_finish_a_record.py`` walks create -> answer ->
+    export with values written out rather than harvested, so this paragraph cannot go
+    stale again without a test failing.
+
+    The unlisted fields above remain uncapturable, and that is still a real limit —
+    just not one that stops a record from being finished.
     """
     from isaac_records.extract.draft_builder import _META  # noqa: PLC0415
 

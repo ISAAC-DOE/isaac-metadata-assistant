@@ -2300,6 +2300,86 @@ def _answers_to_apply_shape(
     return out
 
 
+#: The shaped-answer keys whose value lands in a RUN-LEVEL draft block. Derived from
+#: `workspace.block_level` rather than listed, so a block that changes level cannot
+#: leave a stale copy of the rule here.
+#:
+#: `edge` is deliberately ABSENT: it lives in `implicit`, which `resolved_run_draft`
+#: MERGES from the experiment into every run, so an edge answered on the record does
+#: reach the run's exported document. `timestamp` is bookkeeping, not an answer.
+_RUN_LEVEL_ANSWER_BLOCK = {
+    "series": "series",
+    "qc": "qc",
+    "descriptor": "descriptors_outputs",
+    "descriptor_label": "descriptors_outputs",
+}
+
+
+def _run_level_keys_in(apply_shape: dict) -> list[str]:
+    """The keys in this shaped body that a RUN owns rather than the record.
+
+    Asset hashes count, because ``assets`` is a run-level block: an asset sha answered
+    on the record after a run exists lands in a block ``resolved_run_draft`` never reads.
+    """
+    keys = [
+        key
+        for key, block in _RUN_LEVEL_ANSWER_BLOCK.items()
+        if key in apply_shape and ws.block_level(block) == ws.LEVEL_RUN
+    ]
+    if apply_shape.get("asset_sha256") and ws.block_level("assets") == ws.LEVEL_RUN:
+        keys.extend(sorted(apply_shape["asset_sha256"]))
+    return keys
+
+
+def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | None:
+    """Refuse a run-owned answer sent to the RECORD, once the record has runs.
+
+    THE DEFECT THIS CLOSES, measured over HTTP by an independent review. ``series``,
+    ``qc``, ``assets`` and ``descriptors_outputs`` are run-level blocks, so
+    ``resolved_run_draft`` reads them off the RUN. Once a run exists, an answer written
+    into ``exp.draft`` reaches no exported record — and nothing said so::
+
+        qc = compromised + "Beam dropped during scan 3; spectrum unusable."
+        POST /runs                                        -> 201
+        POST /edit {"qc": {"status": "valid", ...}}        -> 200, status ready_to_export
+        POST /export                                      -> ok: true
+        ON DISK measurement.qc = {"status": "compromised", "evidence": "Beam dropped …"}
+
+    The correction was accepted, reported as applied, and published nothing; the record
+    kept a verdict its own sidecar then contradicted, and ``artifact.state`` read
+    ``current``. A 200 about a write that could not happen is the exact shape this route
+    already refuses for a pending asset uri; this is the same refusal, one entity up.
+
+    It names the run and the route that CAN take the answer, because refusing without
+    that would leave a multi-run record unfinishable — which is a different defect, not
+    a fix.
+    """
+    if not exp.runs:
+        return None
+    offending = _run_level_keys_in(apply_shape)
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "belongs_to_a_run",
+            "experiment_id": exp.id,
+            "keys": offending,
+            "runs": [
+                {"run_id": run.id, "run_label": run.label} for run in exp.sorted_runs()
+            ],
+            "answer_at": "POST /api/experiments/{experiment_id}/runs/{run_id}/answers",
+            "message": (
+                "This record has runs, and each run is a record of its own. A spectrum, "
+                "a QC verdict, a descriptor and an asset hash belong to the run that "
+                "measured them, so answering them here would write a value no exported "
+                "record reads. Send them to the run instead. Nothing was written."
+            ),
+        },
+    )
+
+
+
 @router.post(
     "/experiments/{experiment_id}/answers",
     tags=[TAG_DRAFTS],
@@ -2380,6 +2460,9 @@ def post_answers(
         ]
         timestamp = _now_iso()
         apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
+        refusal = _refuse_run_level_on_the_record(exp, apply_shape)
+        if refusal is not None:
+            return refusal
         exp.draft = apply_answers(exp.draft, apply_shape)
         # answer_log is EXCLUDED from the rev signature: log the submission only when it
         # actually changes the authoritative draft, so an identical re-entry is neither
@@ -2404,8 +2487,17 @@ def post_answers(
             pre_steps=pre_steps,
             post_exp=exp,
         )
+        # `exp.pending()`, NOT `exp.draft` — the SAME correction `GET /pending` needed.
+        # An independent review measured the consequence of missing these two: after a
+        # run existed, this response came back `pending: []` while the detail response
+        # said three questions remained, and `GuidedCompletion` renders "All blockers
+        # resolved" on an empty list. The screen a scientist answers questions on told
+        # them they were finished, about a record that could not export.
         result = serialize.pending_to_list(
-            exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+            exp.draft,
+            ws.load_demo_answers(),
+            example_scope=_example_scope(experiment_id),
+            entries=exp.pending(),
         )
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
@@ -2584,6 +2676,9 @@ def post_edit(
         apply_shape = _answers_to_apply_shape(
             body.get("answers") or {}, exp.draft, timestamp, edit_only=True
         )
+        refusal = _refuse_run_level_on_the_record(exp, apply_shape)
+        if refusal is not None:
+            return refusal
         if not _has_correction_target(apply_shape):
             # No recognized field to correct — never invent one.
             return JSONResponse(
@@ -2666,8 +2761,17 @@ def post_edit(
             pre_steps=pre_steps,
             post_exp=exp,
         )
+        # `exp.pending()`, NOT `exp.draft` — the SAME correction `GET /pending` needed.
+        # An independent review measured the consequence of missing these two: after a
+        # run existed, this response came back `pending: []` while the detail response
+        # said three questions remained, and `GuidedCompletion` renders "All blockers
+        # resolved" on an empty list. The screen a scientist answers questions on told
+        # them they were finished, about a record that could not export.
         result = serialize.pending_to_list(
-            exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+            exp.draft,
+            ws.load_demo_answers(),
+            example_scope=_example_scope(experiment_id),
+            entries=exp.pending(),
         )
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
@@ -3758,8 +3862,11 @@ def _seed_for_new_run(exp) -> dict:
     and the experiment's copies stopped being part of any exported record the moment a
     run existed.
 
-    **THE FIRST RUN ADOPTS WHAT THE EXPERIMENT ALREADY HOLDS — values AND open
-    questions.** A zero-run experiment IS its own record (``record_id = exp.id``);
+    **THE FIRST RUN ADOPTS EVERY RUN-LEVEL ADDRESS THE EXPERIMENT HOLDS — the four
+    blocks, the run-level FIELDS, and the open questions.** (An earlier version of this
+    sentence said "values AND open questions" while copying only the blocks; the fields
+    were silently lost and the export still said `ok: true`. Naming the three kinds
+    explicitly is what stops that reading again.) A zero-run experiment IS its own record (``record_id = exp.id``);
     adding the first run moves the exported identity onto that run. If nothing carried
     the content across, the act of adding a run would destroy evidenced scientific
     values a person had entered, and would drop their unanswered questions with them.
@@ -3789,6 +3896,35 @@ def _seed_for_new_run(exp) -> dict:
         for block in ws.RUN_LEVEL_BLOCKS:
             if block in exp_draft:
                 seed[block] = copy.deepcopy(exp_draft[block])
+        # THE FIELDS TOO, NOT ONLY THE BLOCKS — and this half was missing, which an
+        # independent review measured as the MORE dangerous of the two. The block half
+        # failed loudly at export (`'descriptors' is a required property`), which is how
+        # it was found; the field half returns `ok: true` and simply drops evidenced
+        # values. Measured on a fully-evidenced record, before and after `POST /runs`:
+        # `context.environment`, `context.temperature_K`,
+        # `context.thermodynamics.atmosphere` and both `timestamps.acquired_*` gone from
+        # the exported record, twelve sidecar evidence keys with them, export still ok.
+        #
+        # `field_level` is asked per key rather than iterating `RUN_LEVEL_FIELD_PATHS`,
+        # because `context` is a PREFIX there and the draft's keys are full paths.
+        exp_fields = exp_draft.get("fields")
+        if isinstance(exp_fields, dict):
+            carried = {
+                path: copy.deepcopy(envelope)
+                for path, envelope in exp_fields.items()
+                if isinstance(path, str) and ws.field_level(path) == ws.LEVEL_RUN
+            }
+            if carried:
+                seed["fields"] = carried
+        # THE SIX `system.configuration.*` FIELDS ARE DELIBERATELY NOT CARRIED. They are
+        # `unclassified` — neither experiment-level nor run-level — because whether two
+        # runs of one experiment may legitimately differ in detector model is a
+        # scientific question this repository has no answer to
+        # (`docs/run-scope-decision-packet.md`, open for Angel). Copying them onto a run
+        # would answer it by accident, in the direction that is harder to undo. The cost
+        # is stated rather than hidden: on the fan-out path they are dropped from the
+        # exported record, which is the pre-existing behaviour of every unclassified
+        # field and is not introduced here.
         seed["pending"] = copy.deepcopy(
             [
                 entry
@@ -4741,6 +4877,237 @@ def post_run_override_clear(
             return stale  # another writer won the race; this clear was not applied
         response.headers["ETag"] = f'"{run.version_token()}"'
         return {"run": _run_view(exp, run), "cleared": cleared}
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/answers",
+    tags=[TAG_EXPERIMENTS],
+    summary="Answer One Run's Blocking Questions",
+    description=(
+        "Applies caller-supplied answers to ONE RUN's open blocking questions and "
+        "returns the refreshed question list for the whole record, its status, the "
+        "record's new revision metadata, the derived workflow, and the downstream "
+        "invalidation.\n\n"
+        "WHY THIS EXISTS SEPARATELY FROM THE RECORD'S OWN `/answers`. A spectrum, a "
+        "QC verdict, a descriptor and an asset hash are per-RUN: each run is one "
+        "official ISAAC record, and the record's composed draft reads those blocks "
+        "off the run. Answering them on the record once runs exist would write a "
+        "value no exported record reads, so that route refuses them with `409 "
+        "belongs_to_a_run` and names this one.\n\n"
+        "`If-Match` is THE RUN's `ETag`, exactly as `GET .../runs/{run_id}` returned "
+        "it — not the record's. The two are different validators and the record's "
+        "will not match.\n\n"
+        "The keys are the same keys the record's `/answers` takes, and come from "
+        "`GET /api/experiments/{experiment_id}/pending`, where a run-owned question "
+        "carries the `run_id` it belongs to. An answer that names no open question "
+        "on THIS run is ignored rather than invented, exactly as on the record."
+    ),
+    response_description=(
+        "The record's refreshed blocking questions, status, revision metadata, "
+        "workflow and invalidation, with the RECORD's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_RUN_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
+def post_run_answers(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"answers\": {<key>: <value>}}`. Omitting "
+            "`confirmed_by_user: true` is rejected with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description="Required. THE RUN's current `ETag` — not the record's.",
+    ),
+):
+    return _apply_to_run(
+        scope=scope,
+        experiment_id=experiment_id,
+        run_id=run_id,
+        response=response,
+        body=body,
+        if_match=if_match,
+        correcting=False,
+    )
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/edit",
+    tags=[TAG_EXPERIMENTS],
+    summary="Correct One Run's Already-Answered Field",
+    description=(
+        "Overwrites a value ONE RUN has already confirmed, recording a fresh user "
+        "confirmation beside the previous one rather than replacing it. Same key set "
+        "and same refusals as the record's `/edit`; `If-Match` is THE RUN's `ETag`.\n\n"
+        "A body that names no editable field is `422` rather than a silent no-op, and "
+        "a recognised field carrying a value the store cannot keep is `422` "
+        "`invalid_field_value` — the value was the problem, not the field name."
+    ),
+    response_description=(
+        "The record's refreshed questions, status, revision metadata, workflow and "
+        "invalidation, with the RECORD's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_RUN_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
+def post_run_edit(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(..., description="`{\"confirmed_by_user\": true, \"answers\": {...}}`."),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description="Required. THE RUN's current `ETag` — not the record's.",
+    ),
+):
+    return _apply_to_run(
+        scope=scope,
+        experiment_id=experiment_id,
+        run_id=run_id,
+        response=response,
+        body=body,
+        if_match=if_match,
+        correcting=True,
+    )
+
+
+def _apply_to_run(
+    *, scope, experiment_id, run_id, response, body, if_match, correcting: bool
+):
+    """The shared body of the two run-level write routes.
+
+    ONE FUNCTION, because the two differ only in which core writer they call and in
+    what an unusable value means. Two copies of a lock/precondition/save sequence is
+    how a precondition ends up enforced on one path and not the other.
+
+    THE LOCK IS PER RECORD, not per run — runs live inside the record's document, so
+    two runs of one record serialise against each other, which is exactly what makes
+    their independent `If-Match` validators safe. That is the same rule `patch_run`
+    states and follows.
+
+    THE PRECONDITION IS THE RUN'S. A run carries its own version token, so a client
+    editing run B is not defeated by a concurrent write to run A — and a client
+    holding the RECORD's token cannot use it here, which is deliberate: it would let a
+    caller write a run it never read.
+    """
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)
+        run = exp.get_run(run_id)
+        if run is None:
+            return _run_not_found(experiment_id, run_id)
+        if body.get("confirmed_by_user") is not True:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "confirmation_required",
+                    "message": (
+                        "confirmed_by_user must be true to correct a field."
+                        if correcting
+                        else "confirmed_by_user must be true to apply answers."
+                    ),
+                },
+            )
+        precondition = _check_if_match(if_match, _RunPrecondition(run, exp.id))
+        if precondition is not None:
+            return precondition
+
+        pre_steps = _workflow_for(exp)["ordered_steps"]
+        submitted_fields = [
+            k for k, v in (body.get("answers") or {}).items() if v not in (None, "")
+        ]
+        timestamp = _now_iso()
+        run_draft = run.draft if isinstance(run.draft, dict) else {}
+        apply_shape = _answers_to_apply_shape(
+            body.get("answers") or {}, run_draft, timestamp, edit_only=correcting
+        )
+        if correcting:
+            if not _has_correction_target(apply_shape):
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": "unrecognized_field",
+                        "message": "No editable field was recognized in the request.",
+                    },
+                )
+            wrong_typed = [
+                key
+                for key, value in apply_shape.items()
+                if key not in ("timestamp", "asset_sha256")
+                and not _correction_is_storable(key, value)
+            ] + [
+                uri
+                for uri, sha in (apply_shape.get("asset_sha256") or {}).items()
+                if not _correction_is_storable(uri, sha)
+            ]
+            if wrong_typed:
+                # The record route's refusal verbatim — same error, same keys, same
+                # deliberate silence about the cause. Two different messages for one
+                # condition is how a client ends up branching on prose.
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": "invalid_field_value",
+                        "key": wrong_typed[0],
+                        "keys": wrong_typed,
+                        "message": (
+                            "This correction is not a shape the record can store, so "
+                            "nothing was written. The stored value is unchanged."
+                        ),
+                    },
+                )
+            run.draft = apply_corrections(run_draft, apply_shape)
+        else:
+            run.draft = apply_answers(run_draft, apply_shape)
+
+        changed, stale = _save_versioned(exp, if_match=None)
+        if stale is not None:  # pragma: no cover - if_match=None cannot go stale
+            return stale
+        changed_fields = (
+            _fields_the_shape_carries(apply_shape, submitted_fields) if changed else []
+        )
+        invalidation = dependencies.build_invalidation(
+            changed=changed,
+            changed_fields=changed_fields,
+            pre_steps=pre_steps,
+            post_exp=exp,
+        )
+        # THE WHOLE RECORD's questions, not this run's. A scientist working through a
+        # multi-run record needs to know what is left overall, and every entry carries
+        # the `run_id` that owns it, so nothing is ambiguous about where each belongs.
+        result = serialize.pending_to_list(
+            exp.draft,
+            ws.load_demo_answers(),
+            example_scope=_example_scope(experiment_id),
+            entries=exp.pending(),
+        )
+        result["status"] = exp.status()
+        result.update(vc.version_fields(exp))
+        result["run_version"] = run.version_token()
+        result["workflow"] = _workflow_for(exp)
+        result["invalidation"] = invalidation
+        response.headers["ETag"] = exp.etag()
+        return result
 
 
 @router.post(

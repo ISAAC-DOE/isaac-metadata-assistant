@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "aa15e78f1ef5455b187d0d9164aa3872f9d1a344211b0dff7074bf56bb438dd3"
+        "sha256": "f0e859892b3489591642eb5391e7d2b70c91bfe754d47073f2c3dbbc298a8a9f"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "d7d132ad8f2a1254e34c513c039ad3ec492f56de4b35bfe4a7229c11dd55795c"
+        "sha256": "48c9de54c6b8d175eeb7c615ea721dd80f448d1c5db0807854ba1d459603c923"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "46ad0c6770d8a45d1b5701d851e62f6600f7991af1be62a21e59fc9ed629e7a3"
+        "sha256": "0007553ea4dc8b6d2f48d172ecd1f5b3c0302e5bbd4269ad868e9258e4589118"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10500,11 +10500,11 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "f43483db8ffd91fd297ff88dc5a030defe3d5815f713af6f1677a50a07b0adb6"
+        "sha256": "36b21e63b26168cf4db8e68f856b6ae9ff503071407d0cc4710c0c51169d51e1"
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "71c9ac47103f02f526bfb0ef1692575821a77708f7ca6b8c23ceee1a5555e72a"
+        "sha256": "7bf1e588d7bc1dd1f0c666b52d1983889e3bf4dfe9595e4835bdc74a4d8d9c4b"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "25f25b1273cc6acaeaed4976b7f98e7f9a0e4ef63f743678c8aaa7b8a98667cc"
+        "sha256": "5a111da6f14bf16ed825e740005f8ad97d1ffcf9f029265a9667b9c47dbec62f"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "a943660e3eadbd979dfd57d53b87b924b17baa264c6a6e3f9fe0fd854724871f"
+        "sha256": "5257ca6e8fda26434241df41e607ef9a318289a4555c46f4dba1ab0f676bb5eb"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "341c26c14e4fede0e704f0f0217aa438de3a9916b36a31e621a68447b08ca2ff"
+        "sha256": "6364db7b1069b72b744fd1ab33394b61591773c61f98a1b50f35f18462013ceb"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10692,11 +10692,11 @@
       },
       {
         "path": "docs/samples/01JQZ0SYNTHXANESDEMO000000.evidence.json",
-        "sha256": "dd01263c53c8569b50269c607ac1fb3caae39a9b586895b32bef7c5ac5881e3e"
+        "sha256": "afb409aa07c6a2bab743c8b21430576fc9ce6867b845bde0ac3eb3af0827b731"
       },
       {
         "path": "docs/samples/01JQZ0SYNTHXANESDEMO000000.json",
-        "sha256": "23fc6e1f5b834e6e76c07b6180e02a7134b1195c43159e03ed3984c181090fd9"
+        "sha256": "b220c99642a07dab6ea2f631cace2289fe272c158e69aae7656e44573442abcc"
       },
       {
         "path": "docs/samples/README.md",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "7e8fb404b32ae633d0b0b163040ebed4ed746ff712e76f6f0b8844bcd6df025f"
+    "served_manifest_fingerprint": "e65e3aaedd9dc6ff2dbd0eb76295b2d0cd6a42b0bc8ee40a6ccc2fdd076e8719"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

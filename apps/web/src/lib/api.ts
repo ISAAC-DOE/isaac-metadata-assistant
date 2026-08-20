@@ -978,12 +978,30 @@ export const api = {
   // stale write returns 412 (or a malformed token 400) — the body carrying
   // `current_version` is read and attached to the thrown ApiError so the screen
   // can show the conflict; other non-OK statuses keep the plain-error behavior.
+  /*
+   * `runId` ROUTES THE ANSWER TO THE RUN THAT OWNS THE QUESTION.
+   *
+   * A spectrum, a QC verdict, a descriptor and an asset hash are per-RUN: each run is
+   * one official ISAAC record, and the record's composed draft reads those blocks off
+   * the run. Once a record has runs, the record-level route REFUSES them with
+   * `409 belongs_to_a_run` — because before it did, the answer was accepted, reported
+   * as applied, and published nothing.
+   *
+   * The caller does not decide this: `GET /pending` tags every run-owned question with
+   * the `run_id` that owns it, and the screen passes that through. The `If-Match` token
+   * changes with the route — a run write takes THE RUN's version, and sending the
+   * record's is a 412 the reader would be told to fix by refreshing something that was
+   * never stale.
+   */
   async submitAnswer(
     id: string,
     answersById: Record<string, unknown>,
     version?: string,
+    runId?: string,
   ): Promise<ApiAnswersResponse> {
-    const path = `/experiments/${enc(id)}/answers`;
+    const path = runId
+      ? `/experiments/${enc(id)}/runs/${enc(runId)}/answers`
+      : `/experiments/${enc(id)}/answers`;
     const res = await request(path, {
       method: 'POST',
       body: JSON.stringify({ answers: answersById, confirmed_by_user: true }),
@@ -1005,8 +1023,13 @@ export const api = {
     id: string,
     answersById: Record<string, unknown>,
     version?: string,
+    runId?: string,
   ): Promise<ApiAnswersResponse> {
-    const path = `/experiments/${enc(id)}/edit`;
+    // Same routing rule as `submitAnswer` — see its comment for why the record refuses
+    // a run-owned key and which `If-Match` token each route takes.
+    const path = runId
+      ? `/experiments/${enc(id)}/runs/${enc(runId)}/edit`
+      : `/experiments/${enc(id)}/edit`;
     const res = await request(path, {
       method: 'POST',
       body: JSON.stringify({ answers: answersById, confirmed_by_user: true }),

@@ -391,7 +391,21 @@ def test_get_run_is_denied_without_the_read_scope(write_only, writer):
 # 5. isaac_create_run
 # ==========================================================================
 
-def test_create_run_adds_one_empty_run_and_advances_the_record(writer):
+def test_create_run_adopts_the_records_run_level_science_and_advances_it(writer):
+    """THE FIRST RUN IS NOT EMPTY ANY MORE, and the old claim is quoted because it was
+    a deliberate assertion rather than an accident.
+
+    It read: *"# EMPTY. No record-level value is copied down into a new run."* — and
+    `assert run["fields"] == {}`. That was true, and it was the defect: `series`, `qc`,
+    `assets`, `descriptors_outputs` and the run-level `context.*` / `timestamps.*`
+    fields are read off the RUN at export, so a run that copied nothing meant adding one
+    silently removed every evidenced value from the record it exports.
+
+    What has NOT changed, and is asserted below, is the half the old comment was really
+    protecting: no EXPERIMENT-level value is copied down. `attribution` is inherited by
+    reference at read time, not duplicated onto the run, and a SECOND run copies nothing
+    at all. See `apps/api/tests/test_run_seeding.py` for both halves.
+    """
     experiment_id = a_record(writer)
     before = etag_of(writer, experiment_id)
     body = payload(
@@ -404,8 +418,13 @@ def test_create_run_adds_one_empty_run_and_advances_the_record(writer):
     assert body["status"] == 201
     run = body["data"]["run"]
     assert run["label"] == "Cu K-edge, 300 K"
-    # EMPTY. No record-level value is copied down into a new run.
-    assert run["fields"] == {}
+
+    adopted = set(run["fields"])
+    assert adopted, "the first run adopted nothing, so the record's science is lost"
+    for path in adopted:
+        assert ws.field_level(path) == ws.LEVEL_RUN, (
+            f"{path} is not run-level and must not be copied onto a run"
+        )
     assert etag_of(writer, experiment_id) != before
 
 
@@ -496,6 +515,7 @@ def test_update_draft_passes_a_false_confirmation_through_and_is_refused(writer)
     """
     experiment_id = a_record(writer)
     run = new_run(writer, experiment_id)
+    before_fields = dict(run["fields"])
     result = call(
         writer,
         "isaac_update_draft",
@@ -510,7 +530,12 @@ def test_update_draft_passes_a_false_confirmation_through_and_is_refused(writer)
     refreshed = payload(
         writer, "isaac_get_run", experiment_id=experiment_id, run_id=run["id"]
     )["data"]["run"]
-    assert refreshed["fields"] == {}
+    # UNCHANGED, not empty. This asserted `== {}` and passed only because a new
+    # run started empty; the first run now adopts the record's run-level science,
+    # so "nothing was written" has to be measured against what was there BEFORE.
+    # That is strictly the stronger claim — an empty comparison would also pass on
+    # a run whose values had been wiped by the refused call.
+    assert refreshed["fields"] == before_fields
 
 
 def test_update_draft_refuses_a_field_path_that_is_not_run_level(writer):
@@ -546,6 +571,7 @@ def test_update_draft_refuses_a_label_without_a_run_before_calling_anything(writ
 def test_update_draft_is_denied_to_a_read_only_caller(reader, writer):
     experiment_id = a_record(writer)
     run = new_run(writer, experiment_id)
+    before_fields = dict(run["fields"])
     denied(
         reader,
         "isaac_update_draft",
@@ -558,7 +584,12 @@ def test_update_draft_is_denied_to_a_read_only_caller(reader, writer):
     refreshed = payload(
         reader, "isaac_get_run", experiment_id=experiment_id, run_id=run["id"]
     )["data"]["run"]
-    assert refreshed["fields"] == {}
+    # UNCHANGED, not empty. This asserted `== {}` and passed only because a new
+    # run started empty; the first run now adopts the record's run-level science,
+    # so "nothing was written" has to be measured against what was there BEFORE.
+    # That is strictly the stronger claim — an empty comparison would also pass on
+    # a run whose values had been wiped by the refused call.
+    assert refreshed["fields"] == before_fields
 
 
 # ==========================================================================

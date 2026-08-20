@@ -532,6 +532,8 @@ export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
     label: KIND_LABEL[item.kind] ?? titleCase(String(item.kind)),
     path: pathTokenFor(item),
     about: item.about ?? undefined,
+    runId: item.run_id ?? undefined,
+    runLabel: item.run_label ?? undefined,
     // The "confirm the example value" wording is used ONLY when an example value
     // actually arrived — see the note on KIND_CONTEXT_WITH_EXAMPLE.
     context:

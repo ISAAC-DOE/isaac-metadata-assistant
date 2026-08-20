@@ -195,6 +195,16 @@ export interface PendingBlocker {
   about?: string;
   context?: string; // sentence-case context for the question card
   inputType: CompletionInputType;
+  /**
+   * The run that OWNS this question, when a run does.
+   *
+   * `GET /pending` tags every run-sourced entry, because once a record has runs each
+   * run is a record of its own and the record-level answer route refuses a run-owned
+   * key with `409 belongs_to_a_run`. The screen carries this through so a scientist
+   * answering a question never has to know which entity it belongs to.
+   */
+  runId?: string;
+  runLabel?: string;
   demo_answer?: DemoAnswer;
   // Why the app cannot determine this value itself. Always present from a
   // current backend; optional so pre-existing fixtures still typecheck.
@@ -755,6 +765,9 @@ export interface ApiPendingItem {
   // Example-scope records ONLY. `null`/absent on every ordinary record.
   demo_answer?: ApiDemoAnswer | null;
   inferability?: Inferability;
+  // Present when a RUN owns this question. `null` for a record-level one.
+  run_id?: string | null;
+  run_label?: string | null;
 }
 
 export interface ApiPendingResponse {

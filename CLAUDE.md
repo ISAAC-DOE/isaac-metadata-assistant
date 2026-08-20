@@ -581,6 +581,62 @@ Current state:
     projected"); actor stamping (authorized by Dean, blocked in practice — no trusted boundary
     exists, and the seam stays unset); the native assistant, MCP and voice product surfaces beyond
     their existing seams; and the scale/concurrency benchmarks.
+- **Session of 2026-08-19 — the product could not capture a record, and now can.** PR #171
+  (`819568e`, `42dee80`, `bed331b`, `bb2095c`). Read this before planning any further feature
+  work, because it changes what "substantially implemented" means for everything downstream.
+
+  **THE FINDING.** A record created through `POST /api/experiments` — the product's own Create
+  Experiment path — **could not be completed or exported, by any route.** Measured on `main` at
+  `b118ed6`, over HTTP:
+
+  | step | result |
+  |---|---|
+  | create, then answer every question the API accepts | `200`, `pending: ['qc']`, `status: needs_attention` |
+  | `POST /export` | `200 {"ok": false}` — *"measurement has series but qc verdict has no evidence"* |
+
+  Three independent causes, each fixed here:
+
+  1. **`qc` was not forwarded** by `_answers_to_apply_shape`. `complete.py` had always handled it
+     and had always validated the enum; only the route mapper omitted it, and `complete.py`'s own
+     docstring had recorded the gap and named the slice that would close it.
+  2. **`series` and `descriptor` were answerable only by CONFIRMING a worked example**, which a
+     created record does not have. The screen said "No example value is available for this field"
+     and rendered no control. `apps/web/src/components/StructuredValueEntry.tsx` is the fix.
+  3. **Adding a Run destroyed the answers.** Those four blocks are RUN-level, `new_run` defaulted a
+     run's draft to `{}`, so a completed record went to `pending 0 · complete_metadata: completed ·
+     review_evidence: completed` **and an export that refused**. The first run now adopts the
+     record's run-level content; a later run does not, because copying one run's spectrum onto
+     another asserts they measured the same thing.
+
+  **WHY 4,714 BACKEND AND 4,113 FRONTEND TESTS DID NOT CATCH ANY OF IT.** All five canonical
+  scenarios are built by `build_draft` from a fixture sheet **that already carries all three
+  values**, so every completion and export test in the suite began past the part that did not work.
+  `apps/api/tests/test_scientist_can_finish_a_record.py` exists to close that blind spot: it walks
+  create → answer → export with values written out rather than harvested, and a negative control
+  parses the file to prove it still borrows nothing. **Do not "simplify" it by reaching for a seed.**
+
+  **Two false claims in exported records, both fixed.** `descriptors.outputs[].generated_by` read
+  `{"agent": "isaac-complete-demo", "version": "0.1"}` with `label: "completion_demo"` — a demo
+  agent claiming authorship of a scientist's descriptor, in a document the schema says names the
+  "Tool/pipeline/person that generated these descriptors". And `apply_corrections` compared only
+  `qc.status`, so flipping `compromised → valid` kept the old note: a record asserting **valid**
+  with provenance saying the spectrum was **unusable**, which official validation and the advisory
+  tier both passed. Found by independent review, not by CI.
+
+  **`attribution.uploaded_by` is now server-stamped — and still absent everywhere.** The stamp is
+  applied at the ingestion boundary (`apps/api/isaac_api/record_attribution.py`), never in the truth
+  core, which is what `export._enforce_server_owned_invariant` anticipates. It requires
+  `trust_basis == verified_edge_assertion`, and **no verifier in this build mints that**, so no
+  shipped deployment stamps anything. The fixture verifier deliberately still attributes a
+  submission ROW (which carries `trust_basis` and so says what it is worth) and deliberately cannot
+  reach a RECORD (which has no field to qualify it). Do not collapse those two.
+
+  **Still not done, and named rather than implied:** the campaign-sheet fields (technique, facility,
+  sample, contributors) have no capture surface, so a record can be finished but not richly
+  described; `POST /ingestion/csv/preview` has no route that APPLIES a preview; the native assistant
+  and voice remain provider seams with no route invoking them; `isaac_runs` Stage 2, the Evidence
+  Graph / Compare Runs cross-feature work, the scale and concurrency benchmarks, and every hosted
+  QA are unchanged by this session.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 

@@ -347,7 +347,14 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # Both sides of this merge conflict carried a number that was correct for its own
     # branch and wrong for the merge. Neither was kept. `create_app().openapi()` is
     # the authority and was re-run on the merged tree.
-    assert checked == 66, f"expected 66 documented operations, found {checked}"
+    #
+    # 66 -> 68: the two RUN-LEVEL WRITE operations,
+    # `POST .../runs/{run_id}/answers` and `.../edit`. They exist because a spectrum, a
+    # QC verdict, a descriptor and an asset hash belong to the run that measured them —
+    # the record's own `/answers` now refuses them with `409 belongs_to_a_run` once runs
+    # exist, and refusing without somewhere to send the answer would leave a multi-run
+    # record unfinishable.
+    assert checked == 68, f"expected 68 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -635,6 +642,16 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # nothing is written.
     ("/api/experiments/{experiment_id}/runs/{run_id}/overrides", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/runs/{run_id}/overrides/clear", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    # The two RUN-LEVEL WRITE operations. Same code set as the record's `/answers` and
+    # `/edit`, because they are the same operation on a different entity — including the
+    # `412` that a RUN's own `If-Match` produces, which is what keeps a client editing
+    # run B from being defeated by a concurrent write to run A.
+    ("/api/experiments/{experiment_id}/runs/{run_id}/answers", "post"): [
+        "200", "400", "401", "404", "412", "422", "428", "503",
+    ],
+    ("/api/experiments/{experiment_id}/runs/{run_id}/edit", "post"): [
+        "200", "400", "401", "404", "412", "422", "428", "503",
+    ],
     ("/api/experiments/{experiment_id}/runs/{run_id}/check", "post"): ["200", "401", "404", "422", "503"],
     # Removing a run REWRITES THE RECORD — a run lives inside the record's document
     # — so this carries the RECORD's `If-Match` and the whole 400/412/428 set with

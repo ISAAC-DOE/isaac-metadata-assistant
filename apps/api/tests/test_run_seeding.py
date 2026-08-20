@@ -300,3 +300,104 @@ def test_the_canonical_scenarios_still_report_what_they_always_did(app):
     seeded = tutorial_client(app)
     listing = seeded.get("/api/experiments").json()["experiments"]
     assert sorted(e["pending_count"] for e in listing) == [0, 0, 0, 2, 5]
+
+
+# ---------------------------------------------------------------------------
+# ADOPTION IS COMPLETE — the review found it was not
+# ---------------------------------------------------------------------------
+
+
+def test_adding_a_run_loses_no_run_level_field_from_the_exported_record(app):
+    """REGRESSION TEST for the more dangerous half of the data loss.
+
+    Adoption first copied only the four run-level BLOCKS. The block half failed LOUDLY
+    at export (`'descriptors' is a required property`), which is how it was found. The
+    FIELD half — `context.*` and both `timestamps.acquired_*` — returned `ok: true` and
+    simply dropped evidenced values, which is strictly worse. An independent review
+    measured five fields and twelve sidecar evidence keys gone from a record that still
+    exported clean.
+
+    It uses the READY scenario because that is a record whose run-level fields are
+    already evidenced end to end, and it compares the exported record BEFORE and AFTER
+    a run is added — the only framing that catches a silent loss, since asserting the
+    after-state alone would pass on a record that never had the values.
+    """
+    from conftest import client_ws
+
+    client = tutorial_client(app)
+    store = client_ws(client)
+    rid = ws.SEED_READY_ID
+
+    client.post(
+        f"/api/experiments/{rid}/export",
+        headers={"If-Match": f'"{_version(client, rid)}"'},
+    )
+    before = json.loads(
+        store.load_experiment(rid).export_units()[0].record_path().read_text(encoding="utf-8")
+    )
+    assert before["context"]["temperature_K"] == 298, before.get("context")
+    assert before["timestamps"]["acquired_start_utc"], before.get("timestamps")
+
+    _add_run(client, rid, "300 K")
+    client.post(
+        f"/api/experiments/{rid}/export",
+        headers={"If-Match": f'"{_version(client, rid)}"'},
+    )
+    after = json.loads(
+        store.load_experiment(rid).export_units()[0].record_path().read_text(encoding="utf-8")
+    )
+
+    assert after["context"] == before["context"], (before["context"], after.get("context"))
+    for key in ("acquired_start_utc", "acquired_end_utc"):
+        assert after["timestamps"][key] == before["timestamps"][key], key
+
+
+def test_the_six_unclassified_configuration_fields_are_deliberately_not_adopted(app):
+    """The other side of the same rule, asserted so the omission is a decision.
+
+    `system.configuration.*` is `unclassified` — neither experiment-level nor run-level —
+    because whether two runs may differ in detector model is a scientific question this
+    repository has no answer to (`docs/run-scope-decision-packet.md`, open for Angel).
+    Copying them onto a run would answer it by accident.
+    """
+    client, exp_id = _completed_record(app)
+    exp = ws.load_experiment(exp_id)
+    exp.draft.setdefault("fields", {})["system.configuration.detector_model"] = {
+        "value": "Vortex ME4",
+        "status": "verified",
+        "evidence": [{"source_type": "user_confirmation", "answer": "Vortex ME4"}],
+    }
+    exp.save()
+
+    run_id = _add_run(client, exp_id, "300 K")
+    run = ws.load_experiment(exp_id).get_run(run_id)
+    assert "system.configuration.detector_model" not in (run.draft.get("fields") or {})
+    assert ws.field_level("system.configuration.detector_model") == ws.LEVEL_UNCLASSIFIED
+
+
+def test_a_run_created_before_seeding_existed_does_not_report_a_finished_record(app):
+    """REGRESSION TEST for a state that lives in the DURABLE STORE, not just in theory.
+
+    `new_run` defaulted a run's draft to `{}` before `_seed_for_new_run` existed, and
+    `Experiment.to_state()` serialises runs — so every run created before that deploy is
+    still an empty-drafted run in Postgres. The first version of the `pending()`
+    withholding hid the record's own questions whenever ANY run existed, which put those
+    records into exactly the state the seeding change was written to close:
+
+        pending_count 0 · complete_metadata COMPLETED · export ok: false
+
+    Withholding now requires a run to actually carry a question of that kind, so a
+    question is never hidden from both.
+    """
+    client = TestClient(app)
+    exp_id = client.post("/api/experiments", json={"title": "Legacy"}).json()["id"]
+    exp = ws.load_experiment(exp_id)
+    exp.add_run(label="Legacy run", draft={})  # exactly what pre-seeding runs look like
+    exp.save()
+
+    detail = _detail(client, exp_id)
+    assert detail["pending_count"] == 3, detail["pending_count"]
+    steps = {s["id"]: s["state"] for s in detail["workflow"]["ordered_steps"]}
+    assert steps["complete_metadata"] != "completed", steps
+    listed = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"]
+    assert {q["id"] for q in listed} == {"series", "qc", "descriptor"}, listed
