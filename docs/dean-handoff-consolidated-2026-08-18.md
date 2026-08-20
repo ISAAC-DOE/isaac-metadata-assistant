@@ -145,8 +145,42 @@ Also unanswered from earlier rounds and therefore exactly as open as before: **Q
 
 ## 5. If you only have five minutes
 
-1. Recompute the four digests in §1 and refuse on any mismatch.
-2. Apply `0003` and `0004` **together**, and report the `records` and `isaac_experiments` counts
+1. **Tell us the answer to G2 and G3.** They gate more product work than anything else in this
+   package, and neither asks you to touch infrastructure — both are decisions. This is first now
+   because the migrations have been waiting on an operator window since 2026-08-17 while these two
+   have been waiting on nobody.
+2. Recompute the four digests in §1 and refuse on any mismatch. **Re-verified 2026-08-19: all four
+   still MATCH the values Krish approved**, so the bytes are unchanged and the approval stands.
+3. Apply `0003` and `0004` **together**, and report the `records` and `isaac_experiments` counts
    before and after.
-3. Tell us the answer to **G2** and **G3** — those two gate more product work than anything else here.
 4. Everything in §2 can wait; nothing is broken while it does, and no surface claims otherwise.
+
+---
+
+## 6. What changed in the repository since this package was written
+
+**None of it is a request.** It is here because two items above are easier to weigh with it, and
+because a package that describes a repository should describe the current one.
+
+**The product could not capture a record, and now can.** A record created through the application's
+own Create Experiment path could not be completed or exported by ANY route — measured on `main` at
+`b118ed6`, not inferred. Three independent causes: a QC verdict no request could supply, a spectrum
+and a descriptor answerable only by confirming a worked example that a created record does not have,
+and a Run that silently discarded everything already answered. All three are fixed, and a test now
+walks create → answer → export with values written out rather than harvested from a fixture, because
+every other export test in the repository started from a fixture draft that already carried them —
+which is why a suite of thousands stayed green while the path did not work.
+
+**Why that matters to your two decisions.** The submission lifecycle `0003`/`0004` record is now
+reachable by a scientist rather than only by a fixture, so applying those migrations changes what a
+real person can finish rather than what a test can. And **G2** is no longer only about the 30
+production-derived records: the application now creates records of its own, so "may the hosted app
+display per-record content" has a second, cleaner answer available — app-created records are not
+production-derived and carry no visibility question at all.
+
+**Constraint coverage moved 27 → 41 of 46**, validated against a real `postgres:18` in CI. See §1.
+
+**E1 is unchanged in substance and complete in the application**: the identity seam now stamps
+`attribution.uploaded_by` at the ingestion boundary and refuses unless the trust basis is
+`verified_edge_assertion`, which no verifier in this build mints. Nothing is stamped anywhere. When
+the boundary exists, arming it is a verifier and a configuration value.
