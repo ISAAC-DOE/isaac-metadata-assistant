@@ -142,12 +142,18 @@ and was invisible; it is now visible, and the reason is worth writing down.
 `context.thermodynamics.atmosphere` and the two `timestamps.acquired_*`. Without one it
 calls `POST /api/experiments/{id}/edit`, the record-level correction route.
 
-The spectrum, the QC verdict, the descriptors and the asset hashes are **not** among
-those five. They are run-level BLOCKS, answered through `/answers` and `/edit` — and
-since 2026-08-19 the record-level route **refuses** them with `409 belongs_to_a_run`
-once the record has runs, because writing them there produced a value no exported record
-reads. The UI gained `POST .../runs/{run_id}/answers` and `.../edit` in the same change.
-**MCP did not.**
+The spectrum, the QC verdict, the descriptors, the asset hashes **and the absorption
+edge** are **not** among those five. They are run-owned, answered through `/answers` and
+`/edit` — and since 2026-08-19 the record-level route **refuses** them with
+`409 belongs_to_a_run` once the record has runs, because writing them there produced a
+value no exported record reads. The UI gained `POST .../runs/{run_id}/answers` and
+`.../edit` in the same change. **MCP did not.**
+
+`edge` is in that list for a reason worth stating: it lives in `implicit`, which is
+merged onto a run only while that run holds every one of the record's values, so a
+single override withholds it entirely. It was briefly exempted from the refusal on the
+belief that the merge was unconditional; an independent review measured a `200` with
+`changed_fields: ['edge']` against a run whose composed `implicit` was empty.
 
 So today, through MCP:
 
