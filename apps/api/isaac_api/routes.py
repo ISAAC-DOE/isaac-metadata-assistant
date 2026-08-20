@@ -5177,6 +5177,20 @@ def _apply_to_run(
         ]
         timestamp = _now_iso()
         run_draft = run.draft if isinstance(run.draft, dict) else {}
+        # MATERIALISE A LEGACY RUN'S QUESTIONS BEFORE WRITING. A run created before
+        # `_seed_for_new_run` existed has no `pending` key, and `apply_answers` iterates
+        # that key and then assigns it back unconditionally — so on such a draft it
+        # matched no branch, applied NOTHING, and wrote `[]`. Measured: answering that
+        # run's QC verdict returned 200 reporting `pending: []`, stored `qc: None`,
+        # erased the derived questions permanently, and left the record claiming nothing
+        # was pending while its export refused. A 200 that drops the answer and destroys
+        # the question is the worst outcome available.
+        #
+        # `ws.run_questions` is the SAME derivation `Experiment.pending()` reads, so what
+        # a scientist was shown is exactly what is now stored — this makes the derived
+        # list durable rather than inventing a second one.
+        if "pending" not in run_draft:
+            run_draft = {**run_draft, "pending": ws.run_questions(run)}
         apply_shape = _answers_to_apply_shape(
             body.get("answers") or {}, run_draft, timestamp, edit_only=correcting
         )

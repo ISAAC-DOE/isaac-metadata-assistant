@@ -598,3 +598,78 @@ def test_answering_a_run_leaves_no_question_the_record_cannot_answer(client):
     # export step may coexist with an export that succeeds.
     assert steps["export"] != "blocked", steps
     assert steps["complete_metadata"] == "completed", steps
+
+
+def test_answering_a_legacy_run_stores_the_answer_and_keeps_its_other_questions(client):
+    """CRITICAL REGRESSION TEST. A 200 that dropped the answer AND erased the questions.
+
+    A run created before `_seed_for_new_run` existed has no `pending` KEY — and every
+    such run is still in the durable store, because `Experiment.to_state()` serialises
+    runs. `complete.apply_answers` iterates that key and then assigns it back
+    unconditionally, so on such a draft it matched no branch, applied nothing, and wrote
+    `[]`. Measured before the fix::
+
+        answer the legacy run's QC verdict -> 200, reported pending: []
+        stored qc                          -> None            (the answer was dropped)
+        run's pending key                  -> []              (the questions are gone)
+        GET /pending, detail pending_count -> 0
+        POST /export                       -> ok: false
+
+    A 200 that drops the answer, destroys the question, and leaves the record claiming
+    completeness while the export refuses is the worst outcome available — and it is
+    reachable on existing production data, not only in theory.
+
+    `routes._apply_to_run` now materialises the DERIVED questions into the run's draft
+    before writing, using the same `ws.run_questions` the read path uses, so what a
+    scientist was shown is exactly what is stored.
+    """
+    exp_id = client.post("/api/experiments", json={"title": "Legacy"}).json()["id"]
+    exp = ws.load_experiment(exp_id)
+    run = exp.add_run(label="Legacy run", draft={})  # exactly what pre-seeding runs are
+    exp.save()
+    run_id = run.id
+    assert "pending" not in ws.load_experiment(exp_id).get_run(run_id).draft
+
+    shown = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"]
+    assert {q["id"] for q in shown} == {"series", "qc", "descriptor"}, shown
+
+    answered = client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/answers",
+        json={
+            "answers": {"qc": {"status": "valid", "evidence": "I0 stable."}},
+            "confirmed_by_user": True,
+        },
+        headers={"If-Match": _run_etag(client, exp_id, run_id)},
+    )
+    assert answered.status_code == 200, answered.text
+
+    stored = ws.load_experiment(exp_id).get_run(run_id).draft
+    # THE ANSWER LANDED.
+    assert stored["qc"] == {"status": "valid", "evidence": "I0 stable."}, stored.get("qc")
+    # THE OTHER TWO SURVIVED — the answered one is gone, the unanswered ones are not.
+    assert {e["kind"] for e in stored["pending"]} == {"series", "descriptor"}, stored["pending"]
+    assert {q["id"] for q in answered.json()["pending"]} == {"series", "descriptor"}
+    assert client.get(f"/api/experiments/{exp_id}").json()["pending_count"] == 2
+
+
+def test_editing_a_legacy_run_does_not_erase_its_questions_either(client):
+    """The same materialisation on the correction path, which shares `_apply_to_run`."""
+    exp_id = client.post("/api/experiments", json={"title": "Legacy"}).json()["id"]
+    exp = ws.load_experiment(exp_id)
+    run = exp.add_run(label="Legacy run", draft={"qc": {"status": "valid"}})
+    exp.save()
+    run_id = run.id
+
+    corrected = client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"qc": {"status": "failed", "evidence": "Sample degraded."}},
+        },
+        headers={"If-Match": _run_etag(client, exp_id, run_id)},
+    )
+    assert corrected.status_code == 200, corrected.text
+    stored = ws.load_experiment(exp_id).get_run(run_id).draft
+    assert stored["qc"]["status"] == "failed"
+    # The derived questions were materialised rather than replaced with an empty list.
+    assert {e["kind"] for e in stored["pending"]} == {"series", "qc", "descriptor"}, stored["pending"]

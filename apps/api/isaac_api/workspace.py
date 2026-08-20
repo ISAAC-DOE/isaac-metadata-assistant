@@ -670,7 +670,7 @@ def blocker_is_run_level(entry: object) -> bool:
     return block is not None and block_level(block) == LEVEL_RUN
 
 
-def _run_questions(run: "Run") -> list:
+def run_questions(run: "Run") -> list:
     """The open blocking questions ONE run carries, legacy runs included.
 
     ``run.draft["pending"]`` when the key is present — that list IS the answer state,
@@ -697,6 +697,16 @@ def _run_questions(run: "Run") -> list:
     copy the moment a run answered the question, leaving three questions visible on
     the record, refused by every route, and unanswerable. Fixing the gap on the RUN
     side keeps each question owned by exactly one entity.
+
+    PUBLIC, because a WRITER needs it too, and finding that out was the next defect.
+    ``complete.apply_answers`` iterates ``draft["pending"]`` and then assigns
+    ``draft["pending"] = remaining_pending`` unconditionally — so on a draft with NO
+    such key it matched no branch, applied nothing, and wrote back ``[]``. Measured:
+    answering a legacy run's QC verdict returned **200** reporting ``pending: []``,
+    stored ``qc: None``, erased the derived questions permanently, and left the record
+    saying nothing was pending while its export refused. ``routes._apply_to_run``
+    therefore MATERIALISES this list into the run's draft before writing, which is why
+    it is not private.
     """
     draft = run.draft if isinstance(run.draft, dict) else {}
     if "pending" in draft:
@@ -3383,7 +3393,7 @@ class Experiment:
         # what it always was (the branch above returns before reaching here).
         out = [entry for entry in own if not blocker_is_run_level(entry)]
         for run in self.sorted_runs():
-            for item in _run_questions(run):
+            for item in run_questions(run):
                 if isinstance(item, dict):
                     out.append({**item, "run_id": run.id, "run_label": run.label})
                 else:
