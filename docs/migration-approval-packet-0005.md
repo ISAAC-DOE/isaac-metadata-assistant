@@ -322,16 +322,34 @@ comparison and the supersede-in-place check ever ran. An independent review foun
 asserting proof for a step that had never executed — which is the failure mode a packet
 exists to prevent, appearing in the packet itself.
 
-Two things follow, and neither is "it works now". The signature is fixed, and a local test
-now makes the same API calls without Postgres so a third signature mistake cannot reach CI.
-And this row stays BELOW the proven list until a green `postgres-migration` run on this
-branch has executed it:
+The signature is fixed, and a local test now makes the same API calls without Postgres so a
+third signature mistake cannot reach CI.
 
-- **PENDING, NOT PROVEN:** the claim the application's own save writes, read back from the
-  server and compared against the document it was projected from — the version pair, the
-  projector, and `run_count` against an actual `count(*)` of `isaac_runs`, plus a second save
-  superseding in place rather than appending. **Do not treat this row as evidence until a CI
-  run has executed the step.**
+**AND IT HAS NOW EXECUTED — job `96347581006`, on `a350af6`.** The row below is therefore
+promoted from "pending" to proven, and the paragraph above is kept because a claim that was
+once asserted without evidence should not be able to quietly become a claim that always had
+it. The output, quoted rather than summarised:
+
+```
+experiment 01M0F0SBM5SY12W8Y6A0FHYVNW rev 1 runs 2
+expected: 01M0F0SBM5SY12W8Y6A0FHYVNW|1|757a8e31c4e1ce17|2
+actual:   01M0F0SBM5SY12W8Y6A0FHYVNW|1|757a8e31c4e1ce17|2
+second save: rev 2 runs 3
+0005: the application's own claim matches the document AND the rows
+```
+
+- **PROVEN:** the claim the application's own save writes, read back from the server and
+  compared against the document it was projected from — the version pair (`rev` and
+  `generation`), the projector, and `run_count` against an actual `count(*)` of `isaac_runs`.
+  Plus a second save superseding in place rather than appending: one row, `run_count` 3.
+
+**A separate consequence of `0005` also surfaced in CI and is worth an operator knowing**, because
+it is the foreign key doing exactly what §3 says it does. A cleanup step that deleted an
+experiment failed with `violates foreign key constraint "isaac_run_projection_experiment_fk"`
+— once this migration is applied, **an experiment carrying a projection claim cannot be
+deleted until the claim is deleted first.** That is the design (the alternative,
+`ON DELETE CASCADE`, is declined in §3), and it means any operational script that removes
+experiments needs one more statement.
 
 **NOT proven, and this is the whole reason the operator's step is separate:** the CI
 container is **empty**, with a two-row synthetic stand-in for `records`. So *"behaves
