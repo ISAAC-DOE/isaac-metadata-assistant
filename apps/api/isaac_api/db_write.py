@@ -173,9 +173,17 @@ OWNED_TABLES: frozenset[str] = frozenset(
         "isaac_revision_changes",
         "isaac_submissions",
         "isaac_submission_runs",
-        # `isaac_run_projection` (0005). LISTED IN THE SAME CHANGE THAT CREATES IT,
-        # and NAMED IN `CLAUDE.md` §15 IN THAT SAME CHANGE — which is the whole
-        # point of the two corrections recorded above. `isaac_runs` and the five
+        # `isaac_run_projection` (0005). LISTED IN THE SAME CHANGE THAT CREATES IT.
+        #
+        # ~~"and NAMED IN `CLAUDE.md` §15 IN THAT SAME CHANGE — which is the whole
+        # point of the two corrections recorded above."~~ **THAT HALF WAS FALSE BY ONE
+        # COMMIT, and an independent review measured it.** The table shipped in
+        # `6dce6fd`, which does not touch `CLAUDE.md`; §15 was updated in `8f7c650`.
+        # So the enumeration was corrected AFTER the write existed for the third time
+        # running — a smaller gap than the two below, and not the thing that was
+        # claimed. Struck through rather than deleted, because the point of those two
+        # corrections is that a claim like this is checkable, and quietly replacing a
+        # checked-false claim is the failure they exist to record. `isaac_runs` and the five
         # submission-lifecycle tables were both added here before any committed
         # sentence named them; for the second of those it took an independent
         # review to notice. Its authorization basis is §15's "minimum supporting

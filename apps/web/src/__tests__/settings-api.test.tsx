@@ -1711,7 +1711,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // the test double. Its own description says so in those terms, which is the
     // reason the paragraph count moves by five rather than by one.
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(69);
-    expect(total).toBe(84501);
+    // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
+    // ONE operation and with the paragraph count unchanged. It read "so every request
+    // is answered `501`" while the paragraph two below it documented the `422` — a
+    // description contradicting itself, found by an independent review. It now reads
+    // "every request that REACHES the seam", because the four validation refusals run
+    // BEFORE the provider is resolved, so a malformed request is `422` in every
+    // deployment and never reaches the seam at all.
+    expect(total).toBe(84584);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(185);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the

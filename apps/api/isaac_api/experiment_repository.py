@@ -1697,8 +1697,9 @@ class PostgresOrdinaryStore:
         return restored
 
 
-    def stored_experiments(self) -> list["ws.Experiment"]:
-        """Every ordinary experiment the DATABASE holds, hydrated. READ ONLY.
+    def stored_experiments(self) -> tuple[list["ws.Experiment"], int]:
+        """Every ordinary experiment the DATABASE holds, hydrated, and how many it
+        could not read. READ ONLY.
 
         WHO THIS IS FOR, and it is one caller: ``scripts/db_backfill_runs.py``, the
         operator-run projection backfill. It exists here rather than in that script
@@ -1714,19 +1715,49 @@ class PostgresOrdinaryStore:
         whose workspace file is present is exactly the one ``hydrate`` would pass over
         and whose runs may never have been projected.
 
-        THE SAME TWO REFUSALS ``hydrate`` APPLIES, for the same reasons. A row whose
-        id is not a well-formed record id, or is a canonical example id, is skipped —
-        neither is an ordinary experiment this scope may hold, and nothing this
-        application does can create either row. A row whose document does not
-        describe the record it is filed under is skipped too. Unlike ``hydrate`` this
-        does not RAISE on such a row, because a backfill that aborted on one
-        unprojectable row would leave every later experiment unprojected; the count
-        is reported by the caller instead.
+        THREE REFUSALS, AND THE THIRD WAS MISSING. A row whose id is not a
+        well-formed record id, or is a canonical example id, is skipped — neither is
+        an ordinary experiment this scope may hold, and nothing this application does
+        can create either row. A row whose document does not describe the record it is
+        filed under is skipped too. **And a row whose document cannot be HYDRATED is
+        skipped**, which the first version of this method did not do while its
+        docstring claimed it did.
+
+        THAT OMISSION WAS MEASURED BY AN INDEPENDENT REVIEW, and it mattered because
+        the docstring's reasoning was right and its claim was wrong.
+        :meth:`ws.Experiment.from_state` uses hard subscripts — ``state["title"]``,
+        ``state["created_utc"]`` — and ``int(state.get("rev") or 0)``, so
+        ``{"id": "<a valid rid>"}`` raises ``KeyError`` and ``{"rev": "nope"}`` raises
+        ``ValueError``. One such row aborted the whole enumeration, and every
+        experiment after it went unprojected — verbatim the outcome the docstring said
+        this method avoids.
+
+        The rows are not hypothetical: they are exactly what an out-of-band
+        ``INSERT`` produces, and this repository's own CI creates one
+        (``INSERT INTO isaac_experiments (experiment_id, state) VALUES ('$parent',
+        '{"id": "$parent"}')``). Out-of-band rows are the whole reason the earlier two
+        guards exist.
+
+        ALSO CORRECTED: this said "THE SAME TWO REFUSALS ``hydrate`` APPLIES".
+        ``hydrate`` never calls ``from_state`` at all — it writes the document
+        straight to disk — so this method has a raising surface ``hydrate`` does not,
+        and describing them as the same set hid exactly the gap above.
+
+        SKIPS ARE COUNTED AND RETURNED, never swallowed. The caller reports them, so a
+        pass that could not read part of the table says so rather than looking
+        complete — the same rule ``hydrate``'s own ``HydrationSkippedRows`` follows,
+        without the raise, because here every remaining row is still projectable.
 
         NO SESSION SCOPE EXISTS HERE and none can. ``isaac_experiments`` has no
         ``session_id`` column, and :meth:`refuse_if_not_persistable` is what keeps a
         worked-example record out of it — so every row this returns is an ordinary
         experiment by construction.
+
+        IT OPENS A ``write_transaction`` FOR A READ, and that is worth stating rather
+        than leaving to inference. There is one transaction helper in this write path
+        and it is where the statement policy and the per-transaction timeouts live, so
+        a read that avoided it would be a read with no policy and no timeout. It
+        issues exactly one ``SELECT``; the transaction commits empty.
         """
         try:
             with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
@@ -1738,17 +1769,28 @@ class PostgresOrdinaryStore:
             raise _unavailable(exc, STORAGE_READ_FAILED_MESSAGE) from exc
         _note_storage_success()
         out: list["ws.Experiment"] = []
+        unreadable = 0
         for row in rows:
             rid = str(row[0] or "").strip()
             if not ws.is_record_id(rid) or rid in ws.CANONICAL_IDS:
                 continue
             state = row[1]
-            if isinstance(state, (str, bytes, bytearray)):
-                state = json.loads(state)
-            if not isinstance(state, dict) or state.get("id") != rid:
-                continue
-            out.append(ws.Experiment.from_state(state))
-        return out
+            try:
+                if isinstance(state, (str, bytes, bytearray)):
+                    state = json.loads(state)
+                if not isinstance(state, dict) or state.get("id") != rid:
+                    unreadable += 1
+                    continue
+                out.append(ws.Experiment.from_state(state))
+            except Exception:  # noqa: BLE001 - any unhydratable document, uniformly
+                # DELIBERATELY BROAD, and the breadth is the point. `from_state`'s
+                # failure modes are its own business and they change; what must not
+                # change is that ONE bad row costs that row and not the pass. The
+                # exception is not logged with the document, because the document is
+                # what may carry scientific content — the count is what a report can
+                # honestly carry.
+                unreadable += 1
+        return out, unreadable
 
 
 # --- repositories -------------------------------------------------------------

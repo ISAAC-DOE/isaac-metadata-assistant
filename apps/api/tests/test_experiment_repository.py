@@ -837,9 +837,10 @@ def test_records_is_not_and_never_becomes_an_owned_table():
         "isaac_submissions",
         "isaac_submission_runs",
         # `isaac_run_projection` (`0005_run_projection`), added in the SAME change
-        # that creates it AND named in `CLAUDE.md` §15 in that same change — which
-        # is the correction the two comments above exist to record, applied rather
-        # than only described. One statement writes it and nothing reads it.
+        # that creates it. Named in `CLAUDE.md` §15 ONE COMMIT LATER — the slice
+        # claimed "in that same change" and an independent review measured it false,
+        # so the correction is recorded in all four artifacts rather than the claim
+        # softened. One statement writes it and nothing reads it.
         "isaac_run_projection",
     }
     # ...and it is additionally on the absolute denylist, which does not reason
@@ -2869,7 +2870,7 @@ def test_a_writer_that_LOST_the_compare_and_swap_claims_nothing():
     assert _probe_count(conn, repo.PROJECTION_TABLE) == 0
 
 
-def test_run_count_is_MEASURED_and_zero_runs_is_a_real_claim():
+def test_run_count_agrees_with_the_rows_and_zero_runs_is_a_real_claim():
     """INVARIANT 4, and the state `0002` alone could not express.
 
     `run_count = 0` beside a matching version pair is a POSITIVE statement that
@@ -2877,6 +2878,24 @@ def test_run_count_is_MEASURED_and_zero_runs_is_a_real_claim():
     rows in `isaac_runs` cannot say it: it means "no runs" OR "never projected",
     and a reader that guessed the first would silently delete every run of every
     pre-existing record.
+
+    THIS TEST WAS NAMED `..._is_MEASURED_...` AND ASSERTED A TAUTOLOGY, and an
+    independent review measured both halves of that. The old line was
+    `assert stamp[3] == len(exp.sorted_runs())` — while the invariant it cited said
+    `run_count` is *"not the length of `sorted_runs()`"*. So the test pinned exactly
+    the equality the contract denied, and the contract's claim was itself false:
+    `_write_run_rows` returns `len(desired_ids)`, and `desired_ids` is derived from
+    `sorted_runs()`, so the two are identical by construction. Relocating an
+    expression into the callee is not a measurement.
+
+    WHAT IS ASSERTED NOW: the claim agrees with the ROWS THE FAKE ACTUALLY HOLDS,
+    which is a different set from `sorted_runs()` — the fake records what
+    `Q_UPSERT_RUN` and `Q_DELETE_ABSENT_RUNS` did to it. That is the property a
+    reader depends on, and it is the strongest form available in-process. The real
+    comparison against `count(*)` on a live engine is in CI's projection-parity step,
+    where it belongs.
+
+    MUTATION-CHECKED: returning a constant from `_write_run_rows` fails this.
     """
     for labels, expected in ((), 0), (("Run 1",), 1), (("Run 1", "Run 2"), 2):
         repo.forget_run_table_presence()
@@ -2886,7 +2905,114 @@ def test_run_count_is_MEASURED_and_zero_runs_is_a_real_claim():
             p for sql, p in conn.statements if sql == repo.Q_UPSERT_RUN_PROJECTION
         ][0]
         assert stamp[3] == expected, labels
-        assert stamp[3] == len(exp.sorted_runs()), labels
+        # THE ROWS, not the intention. `conn.runs` is what the fake's own upsert and
+        # delete handling left behind for this experiment.
+        assert stamp[3] == len(conn.runs), (labels, conn.runs)
+
+
+# --- stored_experiments() and the backfill it exists for -----------------------
+#
+# `stored_experiments` HAD ZERO TESTS when it shipped, which an independent review
+# found and which is how its raising surface went unnoticed: the docstring said it
+# does not raise on an unhydratable row, and it did. These are the tests it should
+# have had.
+
+
+def _experiment_rows(*states) -> "FakeConnection":
+    """A connection whose `Q_ALL_EXPERIMENTS` returns exactly these documents."""
+    return FakeConnection(rows=[(s.get("id"), json.dumps(s)) for s in states])
+
+
+def _a_real_state(rid: str) -> dict:
+    exp = _exp_with_runs("Run 1")
+    state = exp.to_state()
+    state["id"] = rid
+    for run in state.get("runs") or []:
+        run["experiment_id"] = rid
+    return state
+
+
+def test_stored_experiments_skips_a_row_it_cannot_hydrate_and_COUNTS_it():
+    """THE DEFECT, AS A TEST. Every claim in it was false before the fix.
+
+    `ws.Experiment.from_state` uses hard subscripts — `state["title"]`,
+    `state["created_utc"]` — and `int(state.get("rev") or 0)`. So
+    `{"id": "<a valid rid>"}` raises `KeyError` and a non-numeric `rev` raises
+    `ValueError`, and ONE such row aborted the whole enumeration: every experiment
+    after it went unprojected, which is verbatim the outcome the docstring claimed
+    this method avoids.
+
+    The row is not hypothetical. It is exactly what an out-of-band `INSERT`
+    produces, and this repository's own CI creates one:
+    `INSERT INTO isaac_experiments (experiment_id, state) VALUES ('$parent',
+    '{"id": "$parent"}')`.
+
+    THE ORDER MATTERS AND IS THE POINT: the bad row comes FIRST, so a method that
+    raises returns nothing at all rather than a short list.
+    """
+    good = _a_real_state("01AAAAAAAAAAAAAAAAAAAAAAAA")
+    conn = _experiment_rows(
+        {"id": "01BBBBBBBBBBBBBBBBBBBBBBBB"},  # no title, no created_utc
+        good,
+    )
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    experiments, unreadable = store.stored_experiments()
+    assert [e.id for e in experiments] == ["01AAAAAAAAAAAAAAAAAAAAAAAA"]
+    assert unreadable == 1
+
+
+def test_stored_experiments_counts_a_wrong_typed_rev_as_unreadable_too():
+    """The other reachable raise, and a different exception type — which is why the
+    guard is deliberately broad rather than a tuple of the two seen so far."""
+    bad = _a_real_state("01CCCCCCCCCCCCCCCCCCCCCCCC")
+    bad["rev"] = "nope"
+    conn = _experiment_rows(bad, _a_real_state("01DDDDDDDDDDDDDDDDDDDDDDDD"))
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    experiments, unreadable = store.stored_experiments()
+    assert [e.id for e in experiments] == ["01DDDDDDDDDDDDDDDDDDDDDDDD"]
+    assert unreadable == 1
+
+
+def test_stored_experiments_refuses_a_canonical_id_and_a_non_record_id_SILENTLY():
+    """THE ASYMMETRY IS DELIBERATE: these two are refusals, not unreadable rows.
+
+    Neither shape is an ordinary experiment this scope may hold, and nothing this
+    application does can create either row — so counting them as "could not read"
+    would report a problem where there is none, and would make a clean pass look
+    incomplete. An unhydratable row IS a problem and is counted.
+    """
+    canonical = _a_real_state(sorted(ws.CANONICAL_IDS)[0])
+    conn = _experiment_rows(
+        canonical,
+        {"id": "not-a-record-id", "title": "x", "created_utc": "2099-01-01T00:00:00Z"},
+        _a_real_state("01EEEEEEEEEEEEEEEEEEEEEEEE"),
+    )
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    experiments, unreadable = store.stored_experiments()
+    assert [e.id for e in experiments] == ["01EEEEEEEEEEEEEEEEEEEEEEEE"]
+    assert unreadable == 0
+
+
+def test_stored_experiments_ISSUES_ONE_SELECT_AND_NO_WRITE():
+    """READ ONLY, asserted over the statements rather than trusted from the name.
+
+    It opens a `write_transaction` — there is one transaction helper and it is where
+    the statement policy and the timeouts live — so "read only" has to be a property
+    of what it ISSUES, not of which helper it used.
+    """
+    conn = _experiment_rows(_a_real_state("01FFFFFFFFFFFFFFFFFFFFFFFF"))
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    store.stored_experiments()
+    issued = [sql for sql, _ in conn.statements]
+    assert issued == [
+        dbw.Q_SET_STATEMENT_TIMEOUT,
+        dbw.Q_SET_LOCK_TIMEOUT,
+        dbw.Q_CURRENT_DATABASE,
+        repo.Q_ALL_EXPERIMENTS,
+    ]
+    assert conn.runs == {}
+    # The transaction commits, empty. Stated rather than left to inference.
+    assert conn.commits == 1 and conn.rollbacks == 0
 
 
 def test_the_projector_is_the_write_path_and_the_value_is_one_the_CHECK_admits():

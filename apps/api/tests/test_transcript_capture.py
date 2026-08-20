@@ -1185,6 +1185,44 @@ def test_an_unknown_key_INSIDE_a_context_item_is_refused_too(client):
     # asserting a classification this seam has no power to make.
 
 
+def test_a_context_key_that_would_trip_the_refusal_guard_is_not_a_500(client, monkeypatch):
+    """A REFUSAL ROUTE MUST NOT 500, and this one could — by shape.
+
+    `ProviderRefusal.__post_init__` refuses a message containing any of
+    `_FORBIDDEN_MESSAGE_SUBSTRINGS` ("retry", "timeout", "connected", …), which exists
+    so a refusal can never imply a provider is coming back. The deterministic double
+    built its out-of-context message by LISTING THE CONTEXT KEYS — and those are
+    caller data. So a context item keyed `retry_policy` raised `ValueError` out of a
+    constructor, and an HTTP caller saw a 500 from the one route whose entire subject
+    is refusing honestly. An independent review found it by reading the shape.
+
+    Unreachable in a booted application — `validate_provider_config_or_raise` refuses
+    to boot with the double selected — but "unreachable today" is not "cannot happen",
+    and the message says everything the list did by reporting the COUNT instead.
+    """
+    _fake_assistant(monkeypatch)
+    result = client.post(
+        ASK,
+        json={
+            "question": "what is the absorbing element?",
+            "context": [
+                {
+                    "key": "retry_policy",
+                    "text": "timeout after 30s, then connected again",
+                    "origin": "a caller who chose these words",
+                }
+            ],
+        },
+    )
+    # A TYPED 422, not a 500.
+    assert result.status_code == 422, result.text
+    body = result.json()
+    assert body["reason"] == "outside_grounded_context"
+    # AND THE CALLER'S OWN WORDS ARE NOT ECHOED BACK into the refusal.
+    assert "retry_policy" not in body["message"]
+    assert "1 item(s)" in body["message"]
+
+
 def test_the_assistant_seam_declares_no_multipart_form_either(client):
     import isaac_api.app as app_module
 

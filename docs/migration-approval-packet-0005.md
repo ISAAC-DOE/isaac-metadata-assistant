@@ -106,7 +106,10 @@ constraint was a free choice when it was also forced.
 - **No read moves.** Exactly ONE statement in the application names this table
   (`experiment_repository.Q_UPSERT_RUN_PROJECTION`) and nothing reads it — pinned by
   `test_0005_is_written_by_the_write_path_and_read_by_nothing`, measured over the
-  module-level constants rather than asserted.
+  module-level constants rather than asserted. **That includes the backfill**, which
+  computes its own report from the experiment documents and never reads the claim table;
+  the Stage-2b completeness question is therefore answered by an SQL query an operator
+  runs (§8A), not by the script.
 - **No backfill runs.** `scripts/db_backfill_runs.py` exists, has **never been executed
   anywhere**, and is deliberately absent from the container image (the Dockerfile COPY
   allowlist ships one file out of `scripts/`; a test asserts this one is not it).
@@ -126,6 +129,10 @@ constraint was a free choice when it was also forced.
 #    `isaac_experiments`, which `0001` creates.
 psql -Atc "select version from isaac_schema_migrations order by version"
 #    EXPECT: 0001_experiments, 0002_runs, 0003_revisions, 0004_submissions
+#
+#    IF 0003 AND 0004 ARE ABSENT, STOP AND READ SECTION 6. They are owner-approved
+#    and, as of this writing, NOT applied to the hosted database — and `--apply` has
+#    no per-version option, so it would apply all three at once.
 
 # 2. The table does not already exist.
 psql -Atc "select count(*) from information_schema.tables
@@ -134,7 +141,13 @@ psql -Atc "select count(*) from information_schema.tables
 
 # 3. The runner agrees, and applies nothing while saying so.
 python scripts/db_migrate.py --plan
-#    EXPECT: pending: 0005_run_projection
+#    EXPECT (once 0003/0004 are applied): pending: 0005_run_projection
+#    EXPECT (if they are not):            pending: 0003_revisions, 0004_submissions, 0005_run_projection
+#
+#    This is the SAME check as precheck 1, read from the runner instead of from the
+#    table. Both are listed because they fail differently: precheck 1 catches a
+#    bookkeeping row that exists without its table, and this catches a migration
+#    file the runner cannot see.
 
 # 4. Baseline counts, so the postchecks can be a comparison rather than an assertion.
 psql -Atc "select count(*) from records"
@@ -150,11 +163,31 @@ skipped before.** `0002`'s operator report omitted exactly these, and the omissi
 recorded in that packet as a gap. A count you did not take before cannot be compared
 after.
 
-## 6. The exact command
+## 6. The exact command — and it applies EVERY pending migration, not just this one
+
+**READ THIS BEFORE RUNNING IT.** `db_migrate` has `--plan` and `--apply` and **no
+`--only <version>`**. `--apply` applies every pending migration in lexical order. As of this
+writing `0003_revisions` and `0004_submissions` are owner-approved and **not applied to the
+hosted database**, so against the real hosted database this one command would apply **three**
+migrations, two of which have their own packets and their own operator step.
+
+That is not a hidden hazard — precheck 1 is what catches it, and it is why the precheck comes
+first. Two acceptable sequences, and no third:
+
+1. **Apply `0003` and `0004` first**, from their own packets; confirm precheck 1 reads
+   `0001, 0002, 0003, 0004`; then run the command below and expect exactly
+   `applied: 0005_run_projection`.
+2. **Apply all three together, deliberately**, having read all three packets, and expect
+   `applied: 0003_revisions, 0004_submissions, 0005_run_projection`. Report the postchecks for
+   all three.
+
+What is NOT acceptable is running the command because this packet said to and discovering
+afterwards that three migrations landed.
 
 ```bash
 python scripts/db_migrate.py --apply
-#    EXPECT: applied: 0005_run_projection
+#    EXPECT (once 0003/0004 are applied): applied: 0005_run_projection
+#    EXPECT (if they are not):            applied: 0003_revisions, 0004_submissions, 0005_run_projection
 ```
 
 One transaction. The runner issues `CREATE TABLE IF NOT EXISTS isaac_schema_migrations`
@@ -168,8 +201,14 @@ the two statements above, then records the version.
 psql -c "\d+ isaac_run_projection"
 psql -Atc "select conname, pg_get_constraintdef(oid) from pg_constraint
            where conrelid = 'isaac_run_projection'::regclass order by conname"
-#    EXPECT four named constraints plus the primary key, and NO occurrence of
-#    'ON DELETE' or 'CASCADE' anywhere in the output.
+#    EXPECT the four NAMED constraints and the primary key to be PRESENT, and NO
+#    occurrence of 'ON DELETE' or 'CASCADE' anywhere in the output.
+#
+#    DO NOT CHECK THE ROW COUNT. Some engines catalogue NOT NULL as pg_constraint
+#    rows and some do not, so the total is engine-dependent and a count would fail
+#    for a reason that has nothing to do with this migration. Check for each name:
+#    isaac_run_projection_experiment_fk, _rev_non_negative, _count_non_negative,
+#    _projector_known.
 
 # Empty. This migration moves no data.
 psql -Atc "select count(*) from isaac_run_projection"     # EXPECT: 0
@@ -211,6 +250,52 @@ consults the table. **Dump first anyway** if a later build has a reader:
 psql -c "\copy (SELECT * FROM isaac_run_projection) TO 'run-projection.csv' CSV HEADER"
 ```
 
+## 8A. The Stage-2b completeness gate — a query YOU run, not a number a script prints
+
+**Four committed documents once described this gate as "the backfill reported
+`never_projected: 0`". No script prints that, and none can:** the backfill deliberately
+never reads `isaac_run_projection`, because a read would make it the table's first reader
+and that is the Stage-2b decision the gate exists to *precede*. An independent review
+measured the gap. The gate is these two queries.
+
+**Run them AFTER `python scripts/db_backfill_runs.py --apply` has reported
+`experiments UNREADABLE: 0`, `refused: 0` and `failed: 0`.** Any non-zero there means some
+experiment was not projected, and the queries below would then be describing an incomplete
+pass rather than a complete one.
+
+```sql
+-- 1. NEVER PROJECTED. Must be 0.
+SELECT count(*) FROM isaac_experiments e
+ WHERE NOT EXISTS (SELECT 1 FROM isaac_run_projection p
+                    WHERE p.experiment_id = e.experiment_id);
+
+-- 2. STALE — a claim exists but names a different document version. Must be 0.
+SELECT count(*) FROM isaac_experiments e
+  JOIN isaac_run_projection p ON p.experiment_id = e.experiment_id
+ WHERE p.experiment_rev        <> COALESCE((e.state ->> 'rev')::bigint, 0)
+    OR p.experiment_generation <> COALESCE(e.state ->> 'generation', '');
+```
+
+**Both must be 0, and 0 for query 1 is the answer that could not be given before this
+migration existed** — an experiment with genuinely no runs and an experiment never
+projected both looked like zero rows in `isaac_runs`.
+
+**A third query is worth running and is NOT a gate**, because it can be legitimately
+non-zero on a live deployment: it reports claims made by the write path versus the
+backfill. If every row says `backfill`, no scientist has saved anything since the backfill
+ran, which is information rather than a fault.
+
+```sql
+SELECT projector, count(*) FROM isaac_run_projection GROUP BY projector;
+```
+
+**What zero on both does NOT establish:** that the ROWS are right. It establishes that a
+claim exists for every experiment and that each claim names the current document. The rows
+are what the claim is about, and the claim is written in the same transaction as the rows
+— which is the invariant, not a measurement. A reader built on this should still fall back
+to the document on any mismatch; the contract's §2.1 four-state table is what it must
+implement.
+
 ## 9. Evidence, and what remains unproven — read this before approving
 
 **Proven, against a real `postgres:18` service container in CI**
@@ -226,11 +311,27 @@ psql -c "\copy (SELECT * FROM isaac_run_projection) TO 'run-projection.csv' CSV 
   the closed `projector` value set, `experiment_generation`'s NOT NULL, the primary key,
   and the parent-delete refusal;
 - the rollback, in the documented order, restoring the pre-migration table set;
-- the wrong-order rollback failing safely and dropping nothing;
-- **the claim the application's own save writes, read back from the server** and compared
-  against the document it was projected from — the version pair, the projector, and
-  `run_count` against an actual `count(*)` of `isaac_runs`. Plus a second save superseding
-  in place rather than appending.
+- the wrong-order rollback failing safely and dropping nothing.
+
+**ONE ITEM WAS LISTED HERE AS PROVEN AND HAD NEVER EXECUTED. Recorded rather than quietly
+re-listed once it did.** This section claimed *"the claim the application's own save writes,
+read back from the server"* was proven in CI. It was not: the step that does it called
+`exp.save_versioned(None)`, and that method takes no argument, so the job died on a
+`TypeError` before the read-back, the projector assertion, the `run_count`-versus-`count(*)`
+comparison and the supersede-in-place check ever ran. An independent review found the packet
+asserting proof for a step that had never executed — which is the failure mode a packet
+exists to prevent, appearing in the packet itself.
+
+Two things follow, and neither is "it works now". The signature is fixed, and a local test
+now makes the same API calls without Postgres so a third signature mistake cannot reach CI.
+And this row stays BELOW the proven list until a green `postgres-migration` run on this
+branch has executed it:
+
+- **PENDING, NOT PROVEN:** the claim the application's own save writes, read back from the
+  server and compared against the document it was projected from — the version pair, the
+  projector, and `run_count` against an actual `count(*)` of `isaac_runs`, plus a second save
+  superseding in place rather than appending. **Do not treat this row as evidence until a CI
+  run has executed the step.**
 
 **NOT proven, and this is the whole reason the operator's step is separate:** the CI
 container is **empty**, with a two-row synthetic stand-in for `records`. So *"behaves

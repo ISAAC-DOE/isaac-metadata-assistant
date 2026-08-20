@@ -853,11 +853,15 @@ Out of scope unless explicitly approved:
   general rule stands: **a slice that cannot cite a committed sentence permitting what it does has
   not established its authorization basis, and saying so is part of the slice.**
 
-  ***`isaac_run_projection` IS NAMED HERE IN THE SAME CHANGE THAT CREATES IT, and that is the whole
+  ***`isaac_run_projection` IS NAMED HERE — ONE COMMIT AFTER THE TABLE SHIPPED, and that is the whole
   point of the two corrections below.*** Twice now a slice has added a table to
   `db_write.OWNED_TABLES` that no committed sentence in this file named — `isaac_runs`, found and
   reported by the implementing slice, and the five submission-lifecycle tables, found only by an
-  independent review. The third time it is not a correction. **`isaac_run_projection`
+  independent review. **The third time it is a SMALLER correction and still a correction — and the
+  slice published a claim that it was not.** `db_write.py`, the Stage-2 contract and the `0005`
+  packet all said "named in the same change that creates it"; an independent review measured that
+  false by one commit (the table shipped in `6dce6fd`, §15 was updated in `8f7c650`), and all four
+  artifacts now carry the correction in place. **`isaac_run_projection`
   (`0005_run_projection`)** is the per-experiment completeness claim for `isaac_runs`: one row per
   experiment recording the `(rev, generation)` its run rows were projected from, how many were
   written, and which projector wrote it.
@@ -876,7 +880,14 @@ Out of scope unless explicitly approved:
   transaction and the same accepted branch as the run rows it describes. It covers **no read** —
   exactly one statement in the application names the table and nothing reads it, pinned by test —
   and **no** hosted application of `0005`. **Making `isaac_runs` a read source (Stage 2b) is still a
-  separate decision and is gated on the backfill having RUN and reported `never_projected: 0`;
+  separate decision and is gated on the backfill having RUN with every one of its
+  `UNREADABLE`/`refused`/`failed` counts at 0, AND on the operator's two completeness
+  queries (`docs/migration-approval-packet-0005.md` §8A) both returning 0. ~~"the backfill
+  having RUN and reported `never_projected: 0`"~~ — **corrected 2026-08-20: no script prints
+  that word and none can, because the backfill deliberately never reads
+  `isaac_run_projection`.** The gate is a query an operator runs, not a number a script
+  prints, and the strikethrough is kept so this reads as a corrected claim rather than a
+  drifting one;
   removing `runs` from the experiment document is a third decision and is justified by no
   measurement in this repository.**
 
