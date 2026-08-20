@@ -173,6 +173,7 @@ describe('a run-owned proposal reaches the run that OWNS it', () => {
     const p = stageAnswer(twoRuns, {
       field: 'series',
       blockerKey: `${RUN_TWO}:series`,
+      runId: RUN_TWO,
       value: 'run-two-spectrum',
     });
     const api = {
@@ -197,12 +198,15 @@ describe('a run-owned proposal reaches the run that OWNS it', () => {
     /* `open === undefined` is what SELECTS `editField`, so reading the run from the
        matching pending entry alone left this path always record-routed — and correcting
        an answered run-owned field then 409'd on every record with runs, into copy saying
-       it could not tell whether anything reached the record. The run id is recovered from
-       the key's own prefix, which is available precisely because the question is gone. */
+       it could not tell whether anything reached the record. `proposal.runId` is recorded
+       at STAGE time, when the pending entry still existed, so this path has it without
+       reconstructing anything from the key — an earlier version parsed the key's prefix,
+       which could have read a 26-uppercase-character asset URI as a run id. */
     const answered: AgentContext = { ...CTX, pending: [] };
     const p = stageAnswer(answered, {
       field: 'qc',
       blockerKey: `${RUN_ONE}:qc`,
+      runId: RUN_ONE,
       value: { status: 'valid', evidence: 'Re-checked.' },
     });
     const api = {
@@ -224,9 +228,13 @@ describe('a run-owned proposal reaches the run that OWNS it', () => {
   });
 
   it('NEGATIVE CONTROL: a record-level proposal is not routed to any run', async () => {
-    // A key with no ULID prefix must never become a run route. This is what stops the
-    // fallback from turning a record-level question into a run write.
-    const p = stageAnswer(CTX, { field: 'series', blockerKey: 'series', value: 'x' });
+    // No `runId` recorded means no run route, whatever the key looks like. This is what
+    // makes an asset URI shaped like a ULID harmless: nothing is parsed.
+    const p = stageAnswer(CTX, {
+      field: 'series',
+      blockerKey: 'SSRLARCHIVEBL152RUN000ABCD:notebook.ipynb',
+      value: 'x',
+    });
     const api = {
       submitAnswer: vi.fn().mockResolvedValue({ version: 'genabc.6', pending: [] }),
       editField: vi.fn(),

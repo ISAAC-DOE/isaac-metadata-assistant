@@ -570,6 +570,7 @@ function LoadedCompletion({
         // The identity key, so the assistant's write reaches the run that OWNS this
         // question rather than the first run owing one of the same kind.
         key: currentBlocker.key,
+        runId: currentBlocker.runId,
         label: currentBlocker.about ?? currentBlocker.question ?? currentBlocker.id,
         suggestedValue: currentBlocker.demo_answer?.value,
         suggestedValueLabel: currentBlocker.demo_answer?.label,

@@ -113,6 +113,20 @@ export type Proposal = {
    * existed the same click 409'd — nothing written, honestly refused.
    */
   blockerKey?: string;
+  /**
+   * The run that owns the question, when one does — carried EXPLICITLY rather than
+   * parsed back out of `blockerKey`.
+   *
+   * An earlier version recovered it from the key's prefix (`f"{run_id}:{id}"`, split at
+   * the first colon, accepted if it matched a 26-char ULID shape). That works for the
+   * questions every run owes, whose `id` is a kind — but an ASSET blocker's `id` is a
+   * URI, and a record-level asset key is the bare URI. A URI whose text before the first
+   * colon happened to be 26 characters of `[0-9A-Z]` would have been read as a run id
+   * and routed a record-level answer at a run that does not exist. Remote, and entirely
+   * avoidable: the owning run is known at STAGE time, so it is recorded rather than
+   * reconstructed.
+   */
+  runId?: string;
   value: unknown;
   origin: string;
   classification?: string;
@@ -350,35 +364,21 @@ let proposalSeq = 0;
  * always `pending`; nothing is auto-confirmed. Any matching evidence
  * classification is copied VERBATIM for context (never strengthened).
  */
-/** The run id encoded in a `blocker_key`, or `undefined` for a record-level one.
- *
- * `serialize.pending_to_list` builds a run-owned key as `f"{run_id}:{id}"`, and a ULID
- * contains no `:`, so the prefix before the FIRST colon is the run id whenever the key
- * has one. An asset blocker's `id` is a URI and does contain colons, which is why this
- * splits once from the left rather than parsing the whole string.
- *
- * IT IS A FALLBACK, not the primary path: `confirmProposal` prefers the `run_id` on the
- * matching pending entry, and only reaches this when the question is already answered —
- * the EDIT case, where there is no pending entry to read by construction.
- */
-function runIdFromBlockerKey(key: string | undefined): string | undefined {
-  if (!key) return undefined;
-  const colon = key.indexOf(':');
-  if (colon <= 0) return undefined;
-  const candidate = key.slice(0, colon);
-  // A ULID is 26 chars of Crockford base32. Anything else is not a run id, and this
-  // must never turn a record-level key into a run route.
-  return /^[0-9A-Z]{26}$/.test(candidate) ? candidate : undefined;
-}
-
 export function stageAnswer(
   ctx: AgentContext,
   {
     field,
     blockerKey,
+    runId,
     value,
     origin,
-  }: { field: string; blockerKey?: string; value: unknown; origin?: string },
+  }: {
+    field: string;
+    blockerKey?: string;
+    runId?: string;
+    value: unknown;
+    origin?: string;
+  },
 ): Proposal {
   const evidence = ctx.evidence.find((e) => e.field === field);
   return {
@@ -386,6 +386,7 @@ export function stageAnswer(
     experimentId: ctx.experimentId,
     field,
     ...(blockerKey ? { blockerKey } : {}),
+    ...(runId ? { runId } : {}),
     value, // the user's value, verbatim — never invented
     origin: origin ?? 'user',
     ...(evidence
@@ -410,6 +411,8 @@ export interface ProposeInput {
   field: string;
   /** The question's identity, unique across runs. See `Proposal.blockerKey`. */
   blockerKey?: string;
+  /** The run that owns the question, when one does. See `Proposal.runId`. */
+  runId?: string;
   value?: unknown;
   source: ProposeSource;
 }
@@ -442,7 +445,7 @@ export interface ProposeInput {
  */
 export function proposeForField(
   ctx: AgentContext,
-  { field, blockerKey, value, source }: ProposeInput,
+  { field, blockerKey, runId, value, source }: ProposeInput,
 ): Proposal | null {
   // A focused answer is always bound to ONE named field.
   if (!field) return null;
@@ -454,7 +457,7 @@ export function proposeForField(
     // classification at all — a user-typed value is never described by the
     // field's evidence classification, so strip any copied classification
     // unconditionally (defensive hardening from the P29.6 independent review).
-    const p = stageAnswer(ctx, { field, blockerKey, value, origin: 'user-provided' });
+    const p = stageAnswer(ctx, { field, blockerKey, runId, value, origin: 'user-provided' });
     delete p.classification;
     return p;
   }
@@ -541,7 +544,15 @@ export async function confirmProposal(
      independent review measured that. So a `blockerKey` that names a run is used even
      when the question is no longer open: the key's own prefix IS the run id, which is
      what makes it available on a path where the pending entry is gone by definition. */
-  const runId = open?.run_id ?? runIdFromBlockerKey(proposal.blockerKey);
+  /* THE OWNING RUN, FOR BOTH PATHS. `open === undefined` is what SELECTS `editField`, so
+     reading the run from `open` alone left the EDIT path always record-routed — and
+     correcting an answered run-owned field then 409'd on every record with runs, into a
+     branch whose copy says it cannot establish whether anything reached the record while
+     the server had just said "Nothing was written."
+     `proposal.runId` is recorded at STAGE time, when the pending entry still exists, so
+     the edit path has it without reconstructing anything. The live entry is preferred
+     when there is one, because a run could have been renamed or removed since. */
+  const runId = open?.run_id ?? proposal.runId;
   let token = ctx.version;
   if (runId && api.getRun) {
     token = (await api.getRun(ctx.experimentId, runId)).run.version;

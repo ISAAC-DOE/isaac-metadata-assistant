@@ -233,6 +233,8 @@ export interface StageFieldOption {
   id: string;
   /** The question's identity, unique across runs. `id` is the kind and is not. */
   key?: string;
+  /** The run that owns it, when one does. */
+  runId?: string;
   label: string;
   suggestedValue?: unknown;
   suggestedValueLabel?: string;
@@ -1050,6 +1052,7 @@ export function AssistantPanel({
     const staged = proposeForField(agentContext, {
       field: stageField.id,
       blockerKey: stageField.key,
+      runId: stageField.runId,
       value: stageField.suggestedValue,
       source: 'user',
     });
