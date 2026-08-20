@@ -964,9 +964,24 @@ describe('Focus Run', () => {
     await waitFor(() => expect(renderedIds()).toHaveLength(50));
 
     // Reach a list state worth preserving: a search and a second page.
+    //
+    // THE BASELINE IS TAKEN AFTER THE DEBOUNCED FETCH HAS LANDED, and that is a flake
+    // fix rather than a flourish. `RUN_SEARCH_DEBOUNCE_MS` is 300, and the unfiltered
+    // page is ALSO 50 rows — so `waitFor(renderedIds()).toHaveLength(50)` can be
+    // satisfied by the list that was already on screen, before the search request is
+    // issued at all. `callsBefore` was then captured too early, the debounced fetch
+    // landed between it and the final `expect(calls.length).toBe(callsBefore)`, and the
+    // assertion failed with `expected 2 to be 1`. Measured on CI, where the machine is
+    // slow enough for the two events to separate; it passes locally every time.
+    //
+    // Waiting for the call COUNT to move first makes the baseline mean what the final
+    // assertion needs it to mean: the number of reads before focusing, with nothing
+    // still in flight.
+    const callsBeforeTyping = calls.length;
     await act(async () => {
       fireEvent.change(screen.getByLabelText('Search runs'), { target: { value: 'RUN0' } });
     });
+    await waitFor(() => expect(calls.length).toBeGreaterThan(callsBeforeTyping));
     await waitFor(() => expect(renderedIds()).toHaveLength(50));
     const listBefore = renderedIds();
     const callsBefore = calls.length;
