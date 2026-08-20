@@ -62,10 +62,27 @@ lifecycle end to end, and proves the rollback order — including that `0003`'s 
 
 **Two limits, stated because they are the reason your step is separate:**
 
-1. **Constraint coverage is partial.** The two files declare **46** named constraints; CI's constraint
-   step blames **27** of them. 19 are declared and unexercised (17 never named in the workflow at
-   all). They are listed by name in `0003`'s packet §12B. Nothing suggests they are wrong — the
-   packets simply may not be cited as evidence that they behave.
+1. **Constraint coverage is partial — and better than when this package was first written.**
+   RE-MEASURED 2026-08-19: the two files declare **46** named constraints and CI's constraint step
+   now blames **41** of them, up from 27. The seventeen that were declared and never exercised are
+   now exercised, fourteen of them individually.
+
+   **Three of the seventeen cannot be blamed individually, and that is a property of the schema
+   rather than a gap in the testing.** `isaac_submission_runs` carries `record_id = unit_id` and
+   `run_id IS NULL OR run_id = unit_id`, so any row violating `unit_id_shape`, `record_id_shape` or
+   `run_id_shape` violates an equality CHECK at the same time, and PostgreSQL reports only the first
+   constraint it happens to check. There is no assignment of those three columns that violates
+   exactly one of them — defence in depth, not a defect. The workflow proves those rows ARE refused,
+   by a CHECK on that table, through a deliberately weaker helper so it cannot be mistaken for the
+   stronger claim.
+
+   The remaining two — `isaac_revision_changes_revision_fk` and `isaac_submissions_experiment_fk` —
+   appear in the workflow for other reasons without a refusal blamed on them.
+
+   So: **41 of 46 individually blamed; 3 more proved refused with the blame ambiguous by
+   construction; 2 named without a refusal.** `0003`'s packet §12B carries the accounting and the
+   reasoning. **None of this changes the bytes you would apply** — the four digests are unchanged
+   and re-verified below.
 2. **The container is empty**, with a two-row synthetic stand-in for `records`. *"Is this valid,
    idempotent SQL whose constraints behave"* is answered. *"Does it behave against the real data,
    roles and grants"* is **not**, and only applying it resolves that.
@@ -91,7 +108,7 @@ the dependency is visible in one place.
 
 | # | What is needed | Why ISAAC cannot supply it | State in the repository |
 |---|---|---|---|
-| **E1** | A **trusted authentication boundary** for API/service traffic — the portal precedent: trusted-edge headers for browser traffic, independent Bearer validation for service traffic | The Service is a plain ClusterIP with **no NetworkPolicy**, so an in-cluster pod can reach the app directly and forge forwarded identity headers. Header presence is therefore **not** proof of authentication. | The identity seam exists and **fails closed**: no actor is stamped anywhere, and `trust_basis` is `unattributed` on every row. Actor stamping is authorized by you and **blocked in practice** until this exists. |
+| **E1** | A **trusted authentication boundary** for API/service traffic — the portal precedent: trusted-edge headers for browser traffic, independent Bearer validation for service traffic | The Service is a plain ClusterIP with **no NetworkPolicy**, so an in-cluster pod can reach the app directly and forge forwarded identity headers. Header presence is therefore **not** proof of authentication. | **UPDATED 2026-08-19.** The seam is now complete on the application side and still **fails closed**: `attribution.uploaded_by` is server-stamped at the ingestion boundary, sourced only from a verifier, and requires `trust_basis == verified_edge_assertion` — which **no verifier in this build mints**, so no deployment stamps anything and `trust_basis` remains `unattributed` on every row. When this boundary exists, arming it is a verifier and a configuration value, not a product change. |
 | **E2** | **Hosted MCP reachability and auth** | Ingress and auth are yours | MCP transport and tools exist behind a **fail-closed gate**; no unauthenticated hosted route is exposed. |
 | **E3** | A **production model provider** — endpoint, credential, billing | Institutional | Provider abstraction + deterministic fake provider only. The UI states the assistant is unconfigured rather than implying one exists. |
 | **E4** | A **production transcription provider** | Institutional | Same shape: provider-ready, refuses at boot, no audio leaves the process. |

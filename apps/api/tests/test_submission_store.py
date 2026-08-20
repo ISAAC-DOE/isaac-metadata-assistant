@@ -546,9 +546,24 @@ def test_the_packets_do_not_overstate_CI_constraint_coverage():
         f"the two migrations now declare {len(declared)} constraints, not 46. "
         f"Re-measure and update both packets' §12A/§12B and CLAUDE.md."
     )
-    assert len(blamed) == 27, (
+    # 27 -> 41. The seventeen constraints the packets listed as declared-and-never-
+    # exercised are now exercised, fourteen of them individually. THREE ARE NOT, AND
+    # CANNOT BE: `isaac_submission_runs` carries `record_id = unit_id` and
+    # `run_id IS NULL OR run_id = unit_id`, so a row violating `unit_id_shape`,
+    # `record_id_shape` or `run_id_shape` ALWAYS violates an equality CHECK at the same
+    # time, and PostgreSQL reports only the first constraint it happens to check. There
+    # is no assignment of those three columns that violates exactly one of them. That is
+    # defence in depth rather than a defect — the equality CHECKs subsume the shape
+    # CHECKs — and the workflow proves those rows are refused by a CHECK on that table
+    # through a deliberately weaker helper (`refuse_by_the_table`) so nobody mistakes it
+    # for the individual blame this counter measures.
+    #
+    # The other two are the pre-existing pair this guard's own comment names:
+    # `isaac_revision_changes_revision_fk` and `isaac_submissions_experiment_fk` appear
+    # in the workflow for other reasons with no refusal blamed on them.
+    assert len(blamed) == 41, (
         f"CI's constraint step now blames {len(blamed)} of the {len(declared)} declared "
-        f"constraints, not 27. Update both packets' §12A/§12B and CLAUDE.md to the "
+        f"constraints, not 41. Update both packets' §12A/§12B and CLAUDE.md to the "
         f"measured number — upward if coverage improved, and do not leave a stale "
         f"limitation sitting in a document a reader trusts."
     )
@@ -557,7 +572,7 @@ def test_the_packets_do_not_overstate_CI_constraint_coverage():
         doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
             encoding="utf-8"
         )
-        assert "27" in doc and "46" in doc, packet
+        assert "41" in doc and "46" in doc, packet
         # And the packets must not have re-acquired the overstatement.
         assert "exercised every constraint these five tables declare" not in doc, packet
 
