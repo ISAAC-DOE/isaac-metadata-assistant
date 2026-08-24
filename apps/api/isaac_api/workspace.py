@@ -670,6 +670,64 @@ def blocker_is_run_level(entry: object) -> bool:
     return block is not None and block_level(block) == LEVEL_RUN
 
 
+#: The run-level blank-draft template, derived ONCE per process, as
+#: ``(entries, json_payload_or_None)``. Built lazily by :func:`_run_level_template`
+#: because ``experiment_repository`` imports this module, so it cannot be imported at
+#: module scope.
+_RUN_LEVEL_TEMPLATE: "tuple[list, str | None] | None" = None
+
+
+def _run_level_template() -> "tuple[list, str | None]":
+    """The blank-draft entries a legacy run is given, derived ONCE.
+
+    IT WAS DERIVED PER RUN, and on a read path that runs per request. ``blank_draft()``
+    builds a fresh document out of literals every call; :func:`run_questions` called it
+    once per run and then deep-copied every entry it kept, so a 1000-run record cost
+    1000 blank-draft builds and 3000 ``copy.deepcopy`` calls per ``pending()`` — four
+    times per record-detail request. The build itself was the smaller half (``cProfile``
+    ``tottime`` 0.007 s of 0.359 s, ~2%); the copying was 86%. Both are removed here,
+    the first by caching and the second by :func:`run_question_count` not copying at all.
+
+    **THE SECOND ELEMENT IS A DEEP-COPY FAST PATH, AND ITS SAFETY IS PROVED RATHER
+    THAN ASSUMED.** The copy in :func:`run_questions` is not decoration:
+    ``routes._apply_to_run`` MATERIALISES the returned list into a run's draft and
+    writes it, and ``complete.apply_answers`` then mutates that list — so a caller
+    that received the template's own objects would corrupt the template for every
+    later run and every later request. ``json.loads`` of a pre-serialised payload
+    yields a completely fresh tree that shares nothing with anything, which is the
+    same guarantee ``copy.deepcopy`` gives, at 2.19 us against 7.07 us per call
+    (measured over the 3-entry template, best of 5 x 20 000).
+
+    Sound only if the round-trip is LOSSLESS for this data, which is a real
+    precondition and not a formality: a tuple would come back a list, a non-string key
+    a string. ``blank_draft()``'s ``pending`` is JSON literals and the whole draft is
+    persisted as JSON, so it round-trips — but that is checked HERE, once, rather than
+    trusted, and the payload is discarded (``None``) if it ever stops being true, which
+    falls back to ``copy.deepcopy`` with no behaviour change. ``TypeError``/``ValueError``
+    are caught for the same reason: a template carrying something unserialisable must
+    degrade to the slow path, never raise on a read.
+
+    CACHED FOR THE PROCESS. ``blank_draft()`` is a pure function of module literals, so
+    there is nothing for a later call to observe differently; a test that wanted to
+    monkeypatch it would have to reset this global, and none does.
+    """
+    global _RUN_LEVEL_TEMPLATE
+    cached = _RUN_LEVEL_TEMPLATE
+    if cached is None:
+        from .experiment_repository import blank_draft  # noqa: PLC0415 - avoids a cycle
+
+        entries = [e for e in blank_draft()["pending"] if blocker_is_run_level(e)]
+        payload: str | None
+        try:
+            payload = json.dumps(entries)
+            if json.loads(payload) != entries:
+                payload = None
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            payload = None
+        cached = _RUN_LEVEL_TEMPLATE = (entries, payload)
+    return cached
+
+
 def run_questions(run: "Run") -> list:
     """The open blocking questions ONE run carries, legacy runs included.
 
@@ -711,13 +769,56 @@ def run_questions(run: "Run") -> list:
     draft = run.draft if isinstance(run.draft, dict) else {}
     if "pending" in draft:
         return list(draft.get("pending") or [])
-    from .experiment_repository import blank_draft  # noqa: PLC0415 - avoids a cycle
+    entries, payload = _run_level_template()
+    if payload is not None:
+        # A FRESH TREE, SHARING NOTHING — see :func:`_run_level_template` for why a
+        # JSON round-trip is a sound deep copy here and for the equality check that
+        # proves it before this branch is ever taken.
+        return json.loads(payload)
+    return [copy.deepcopy(entry) for entry in entries]
 
-    return [
-        copy.deepcopy(entry)
-        for entry in blank_draft()["pending"]
-        if blocker_is_run_level(entry)
-    ]
+
+def run_question_count(run: "Run") -> int:
+    """``len(run_questions(run))``, WITHOUT BUILDING THE LIST.
+
+    It exists because the whole list was being built to read its length, and that
+    was measured rather than suspected. ``Experiment.pending_count`` was
+    ``len(self.pending())``, and the record-detail route derives ``pending_count``,
+    ``status``, ``export_ready`` and the workflow from it — so ONE ``GET
+    /api/experiments/{id}`` on a 1000-run record entered :func:`run_questions` 4000
+    times (``cProfile`` ``ncalls``) to produce four integers, and 86% of that time
+    was ``copy.deepcopy`` (``cumtime`` 0.308 s of :func:`run_questions`' own 0.359 s,
+    over ten ``pending_count()`` calls on a 1000-legacy-run record). Measured before/after, 1000 legacy runs,
+    ``pending_count()`` **8.18 ms -> 0.09 ms**. THE HARNESS IS COMMITTED so the number
+    is re-measurable rather than quoted from a lost session::
+
+        ISAAC_PERF_BENCH=1 .venv/bin/pytest -q -s -k benchmark \\
+          apps/api/tests/test_pending_count_is_not_materialised.py
+
+    It is opt-in and asserts nothing about time — a wall-clock assertion in the normal
+    suite is flaky under CPU contention, which this repository has already been bitten
+    by (``CLAUDE.md`` §7).
+
+    THE TWO BRANCHES MIRROR :func:`run_questions` EXACTLY, INCLUDING ITS BEHAVIOUR ON
+    A MALFORMED DOCUMENT. ``run_questions`` returns ``list(draft["pending"] or [])``,
+    so a persisted ``pending`` that is not a list still yields *some* length (a dict
+    yields its key count) and a non-iterable still raises ``TypeError`` — this counts
+    the same way rather than special-casing the malformed case into a different
+    answer. A derived count that disagrees with the derived list on a broken document
+    would be a second source of truth for exactly the input least able to survive
+    one.
+
+    The invariant ``Experiment.pending_count() == len(Experiment.pending())`` is what
+    makes this safe to have at all, and it is PINNED — see
+    ``apps/api/tests/test_pending_count_is_not_materialised.py``, which asserts it for
+    zero-run, seeded, legacy, mixed, answered, partly-answered and malformed
+    workloads. Nothing here may be "optimised" in a way that breaks it.
+    """
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    if "pending" in draft:
+        raw = draft.get("pending") or []
+        return len(raw) if isinstance(raw, list) else len(list(raw))
+    return len(_run_level_template()[0])
 
 
 def address_level(address: str) -> str:
@@ -3364,6 +3465,11 @@ class Experiment:
         to what it always was. A non-dict entry (a malformed persisted document) is
         passed through as-is rather than wrapped — this is a derived view, not a
         place to start repairing documents.
+
+        **IF YOU CHANGE WHAT THIS RETURNS, CHANGE :meth:`pending_count` IN THE SAME
+        EDIT.** It answers ``len()`` of this list without building it, because the
+        record-detail route wanted only the integer and four times per request; the two
+        derivations are deliberately parallel and the equality is pinned by test.
         """
         own = list(self.draft.get("pending") or [])
         if not self.runs:
@@ -3415,7 +3521,58 @@ class Experiment:
         return out
 
     def pending_count(self) -> int:
-        return len(self.pending())
+        """``len(self.pending())`` WITHOUT MATERIALISING THE LIST.
+
+        THIS WAS LITERALLY ``len(self.pending())``, AND THAT IS A MEASURED
+        PERFORMANCE DEFECT ON THE PRODUCT'S HOTTEST READ, not a stylistic one.
+        :meth:`pending` builds one dict per question per run — ``{**item, "run_id":
+        ..., "run_label": ...}`` — and, for a run whose draft predates
+        ``routes._seed_for_new_run``, first deep-copies the blank-draft template to get
+        that item at all. The record-detail route reads FOUR integers out of this
+        derivation per request (``_summary``'s ``pending_count``, ``_workflow_for``,
+        ``status()`` and ``export_ready()``), so on a 1000-run record one ``GET
+        /api/experiments/{id}`` entered :func:`run_questions` 4000 times and
+        constructed ~12 000 dictionaries, every one of them discarded. The response is
+        1464 bytes at any run count, so the work was invisible in the payload and
+        visible only in latency — flat bytes, linear time.
+
+        Measured in-process, best of 5, 1000 runs, by the committed opt-in harness
+        (``ISAAC_PERF_BENCH=1``; see :func:`run_question_count`)::
+
+            before   seeded  0.717 ms   legacy  8.183 ms
+            after    seeded  0.086 ms   legacy  0.089 ms
+
+        The legacy path collapses to the seeded one because the count of a legacy
+        run's questions is a property of the TEMPLATE, not of the run: it is the same
+        constant for every such run, so there is nothing per-run to build.
+
+        **THE BINDING INVARIANT IS ``pending_count() == len(pending())``**, for every
+        workload — zero-run, seeded, legacy, mixed, answered, partly answered, and
+        malformed (a non-dict entry, which :meth:`pending` deliberately passes through
+        as-is and this therefore counts as one). It is pinned by
+        ``apps/api/tests/test_pending_count_is_not_materialised.py``, together with a
+        structural guard that fails if the materialisation returns. Two counts derived
+        by two routes are a drift hazard by construction, so the derivations are kept
+        line-for-line parallel with :meth:`pending`:
+
+        * the zero-run early return mirrors ``list(self.draft.get("pending") or [])``;
+        * the withholding filter is the SAME ``blocker_is_run_level`` predicate over the
+          SAME ``own`` list — the withholding rule is not re-expressed here, so it
+          cannot be re-broken here;
+        * each run contributes ``run_question_count(run)``, which mirrors
+          :func:`run_questions` branch for branch.
+
+        ``self.runs`` rather than :meth:`sorted_runs`, because a sum is
+        order-independent and the sort is pure overhead for a count. That is the one
+        place this deliberately does NOT mirror :meth:`pending`, and it is safe for a
+        reason that is a property of addition rather than of this code.
+        """
+        own = self.draft.get("pending") or []
+        if not self.runs:
+            return len(own) if isinstance(own, list) else len(list(own))
+        return sum(1 for entry in own if not blocker_is_run_level(entry)) + sum(
+            run_question_count(run) for run in self.runs
+        )
 
     def evidenced_field_count(self) -> int:
         """Draft fields that carry a non-null value AND at least one evidence entry."""
