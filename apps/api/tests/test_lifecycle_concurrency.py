@@ -1731,51 +1731,66 @@ def test_a_run_level_answer_racing_a_correction_of_the_same_field(client, monkey
     reader could reasonably assume they contend. On the SAME field they cannot, and
     that is the whole point of this test.
 
-    WHY `[200, 412]` IS NOT AN INVARIANT HERE, AND WAS ASSERTED AS ONE
-    =================================================================
+    WHY THE ANSWER'S CODE IS `{412, 422}` AND NOT A SINGLE VALUE
+    ============================================================
 
-    The first version of this test asserted `codes == [200, 412]` and was FLAKY:
-    measured 2 failures in 24 consecutive runs of this test alone
-    (`.venv/bin/pytest ...::test_a_run_level_answer_racing_a_correction_of_the_same_field
-    -q -p no:randomly`, 24 iterations), every failure reading `[200, 200]`.
+    THE PREMISE OF THIS TEST CHANGED UNDER IT, IN THIS BRANCH, AND THE HISTORY IS
+    KEPT BECAUSE THE INTERMEDIATE STATE IS THE INTERESTING ONE.
 
-    The outcome DOES depend on which thread wins the lock — but both outcomes are
-    correct behaviour, so what was wrong was neither the application nor the
-    rendezvous but the assertion, and the reason is structural:
+    Version 1 asserted `codes == [200, 412]` and was FLAKY — 2 failures in 24
+    consecutive runs, every failure reading `[200, 200]`. Version 2 diagnosed that
+    correctly for the code as it then stood and relaxed the assertion to
+    `{200, 412}`, on this reasoning:
 
-    **`/answers` CANNOT lose this compare-and-swap, because on an already-answered
-    field it is not a write at all.** A compare-and-set is only defeated by a write
-    that CHANGES the document — `_save_versioned` persists and advances `rev` only
-    when the authoritative signature moved. And this route's own contract says an
-    answer naming no OPEN question "is ignored rather than invented". The fixture
-    below must answer `series` first (otherwise `/edit` is refused `422
-    not_yet_answered`), which closes that question — so the racing `/answers` names
-    no open question and is, by design, a no-op.
+    > `/answers` CANNOT lose this compare-and-swap, because on an already-answered
+    > field it is not a write at all. The fixture must answer `series` first
+    > (otherwise `/edit` is refused `422 not_yet_answered`), which closes that
+    > question — so the racing `/answers` names no open question and is, by design,
+    > a no-op.
 
-    Measured sequentially, with no threads involved at all: seed `series` = A, then
-    `POST /answers {"series": B}` returns **200**, leaves the stored `series_id` at
-    `race-a`, leaves the run's `rev` at 2, leaves the run's ETag CURRENT, and puts
-    `race-b` nowhere in the persisted state. A subsequent `/edit` holding that same
-    token is therefore legitimately **200**.
+    **THAT NO-OP WAS THE DEFECT, AND THIS BRANCH REMOVED IT.** The same session that
+    wrote the paragraph above also measured what the no-op cost: `/answers` accepted
+    a value for a CLOSED question, discarded it, and answered `200` with
+    `"No change — the submitted value was identical"` over a value that was neither
+    identical nor ever stored. `_refuse_answering_an_already_answered_key` now
+    refuses it `422 already_answered` and names the correcting operation.
 
-    So the two orderings the scheduler may choose are:
+    So version 2's assertion was correct about the application it was written
+    against and became wrong one commit later — measured 10 failures in 40 runs of
+    this test alone, every failure reading `answer = 422 already_answered`. That is
+    not flakiness in the test harness; it is the rendezvous faithfully reporting
+    that one of the two legal orderings now has a different, better outcome.
+
+    THE TWO ORDERINGS THE SCHEDULER MAY CHOOSE, as the code now stands:
 
       * **the correction acquires the lock first** — it writes C, the run's `rev`
-        advances, and the answer's token is stale: `[412, 200]` with `stale_write`;
-      * **the answer acquires the lock first** — it applies nothing and moves
-        nothing, so the correction's token is still current: `[200, 200]`.
+        advances, and the answer's token is stale: the answer is `412 stale_write`.
+        The precondition is checked BEFORE the already-answered probe, deliberately:
+        a caller holding a stale token has not seen the state the other refusal
+        would be describing, so "re-read first" is the more fundamental answer.
+      * **the answer acquires the lock first** — its token is current, so it reaches
+        the probe and is `422 already_answered`, having written nothing.
 
-    Both are correct behaviour. The earlier assertion pinned the first, which the
-    rendezvous does not and must not decide — this file's own bar is that "where a
-    race can legitimately go either way … the test asserts the invariant that holds
-    in BOTH orderings".
+    Both are correct, neither is the rendezvous's to decide, and this file's bar is
+    that "where a race can legitimately go either way … the test asserts the
+    invariant that holds in BOTH orderings".
 
-    (The comment on `_SERIES_C` recorded HALF of this. With `_SERIES_A` on the
-    correction, BOTH racers were no-ops and the test failed on every run; giving the
-    correction a third distinct value fixed the correction's no-op and left the
-    answer's, which turned a failure on every run into an intermittent one — worse,
-    because an intermittent failure gets re-run rather than diagnosed. The value was
-    never the cause on the `/answers` side.)
+    **THE TEST IS STRICTLY STRONGER THAN IT WAS.** Under version 2 the answer could
+    return `200`, and `200` is the code a genuine lost update would also return —
+    the only thing separating them was the state assertion at the end. Now every
+    legal outcome for the answer is an EXPLICIT REFUSAL with a typed error, so a
+    `200` from that racer fails immediately and on either ordering, rather than
+    being caught downstream if at all.
+
+    (The comment on `_SERIES_C` recorded half of version 1's diagnosis. With
+    `_SERIES_A` on the correction, BOTH racers were no-ops and the test failed on
+    every run; giving the correction a third distinct value fixed the correction's
+    no-op and left the answer's, turning a failure on every run into an intermittent
+    one — worse, because an intermittent failure gets re-run rather than diagnosed.
+    The value was never the cause on the `/answers` side. Its distinctness is now
+    load-bearing for a second reason: `already_answered` fires only where the
+    submitted value DIFFERS from the confirmed one, so `_SERIES_B` must not be
+    `_SERIES_A` or the answer would legitimately be a `200` no-op again.)
 
     WHAT THE APPLICATION DOES GUARANTEE, and what is asserted unconditionally below
     ==============================================================================
@@ -1831,12 +1846,28 @@ def test_a_run_level_answer_racing_a_correction_of_the_same_field(client, monkey
     # THE CORRECTION ALWAYS LANDS. Whichever thread took the lock first, the answer
     # could not have invalidated its token, because the answer could not write.
     assert correction.status_code == 200, _outcome(responses)
-    # The answer either found the token still current (it ran first, and applied
-    # nothing) or found it stale (the correction ran first). Nothing else is legal —
-    # in particular not a 422, which would mean the fixture never answered the field.
-    assert answer.status_code in {200, 412}, _outcome(responses)
+    # The answer either found the token stale (the correction ran first) or found it
+    # current and was refused for naming a question that is already closed (it ran
+    # first). Nothing else is legal — in particular NOT a 200, which is what this
+    # racer returned before `already_answered` existed and is also what a genuine
+    # lost update would return. The exact error is asserted in both branches: a bare
+    # code would pass for a stale token refused for some other reason, or for a 422
+    # meaning the fixture never answered the field at all.
+    assert answer.status_code in {412, 422}, _outcome(responses)
     if answer.status_code == 412:
         assert answer.json()["error"] == "stale_write", answer.text
+    else:
+        body = answer.json()
+        assert body["error"] == "already_answered", answer.text
+        # It must send the caller to the operation that CAN take this value, with
+        # the ids beside it — the property `_refuse_answering_an_already_answered_key`
+        # exists to guarantee, checked here on the one path a race can reach it.
+        assert body["keys"] == ["series"], answer.text
+        # The MODULE CONSTANT, not a copy of the literal: this pins that the
+        # refusal names the same operation the contract does, which is the
+        # whole reason `routes` made these constants rather than inlining URLs.
+        assert body["answer_at"] == routes._EDIT_OPERATION_RUN, answer.text
+        assert body["experiment_id"] == eid and body["run_id"] == rid, answer.text
 
     after = store.load_experiment(eid)
     # ONE effective write, whichever ordering happened.
