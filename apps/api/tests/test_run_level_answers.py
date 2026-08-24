@@ -271,14 +271,64 @@ def test_a_record_with_no_runs_still_takes_an_edge_answer(client):
     A zero-run record IS its own record, so its `implicit` is the one the export reads
     and answering the edge there reaches it. Refusing unconditionally would remove a
     working capability.
+
+    **THIS TEST PINNED A DEFECT AND WAS INVERTED RATHER THAN DELETED, 2026-08-24.** Its
+    first version created a record through `POST /api/experiments` and asserted `200` —
+    and the `200` was the defect an independent security review measured. A created
+    record has NO `implicit` block, `complete.apply_answers` writes `edge` only INTO an
+    existing entry, so nothing was stored and the response said `changed: false` with the
+    reason *"the submitted value was identical; nothing was invalidated"* — false twice
+    over. The test was asserting a status code while the property in its own docstring
+    ("answering the edge there reaches it") was untrue of the record it built.
+
+    The property is now MEASURED rather than assumed: the record is given a real edge
+    derivation, exactly as the two tests above give one, and the assertion is that the
+    value lands in the composed draft. The no-derivation case is the next test.
     """
     exp_id = client.post("/api/experiments", json={"title": "No runs"}).json()["id"]
+    exp = ws.load_experiment(exp_id)
+    exp.draft.setdefault("implicit", []).append(
+        {"about": "edge", "value": None, "evidence": [{"source_type": "derivation", "rule": "ci"}]}
+    )
+    exp.save()
+
     answered = client.post(
         f"/api/experiments/{exp_id}/answers",
         json={"answers": {"edge": "K"}, "confirmed_by_user": True},
         headers={"If-Match": f'"{_version(client, exp_id)}"'},
     )
     assert answered.status_code == 200, answered.text
+    composed = ws.load_experiment(exp_id).export_units()[0].draft
+    edges = [e for e in (composed.get("implicit") or []) if e.get("about") == "edge"]
+    assert edges and edges[0]["value"] == "K", composed.get("implicit")
+
+
+def test_an_edge_answer_with_no_derivation_to_confirm_is_refused_not_absorbed(client):
+    """THE HALF THE TEST ABOVE USED TO HIDE.
+
+    A record created through this application's own Create Experiment path has no
+    `implicit` block, so there is nothing for an `edge` answer to be written into — and
+    the route used to answer `200` claiming the submitted value was identical. It is now
+    `422 no_derivation_to_confirm`, and the refusal is CONDITIONAL on there being nothing
+    to write into, which is what distinguishes it from the unconditional refusal
+    `_RUN_LEVEL_ANSWER_BLOCK`'s note records as having been tried and been worse.
+    """
+    exp_id = client.post("/api/experiments", json={"title": "No derivation"}).json()["id"]
+    refused = client.post(
+        f"/api/experiments/{exp_id}/answers",
+        json={"answers": {"edge": "K"}, "confirmed_by_user": True},
+        headers={"If-Match": f'"{_version(client, exp_id)}"'},
+    )
+    assert refused.status_code == 422, refused.text
+    body = refused.json()
+    assert body["error"] == "no_derivation_to_confirm"
+    assert body["experiment_id"] == exp_id
+    assert body["keys"] == ["edge"]
+    # IT NAMES NO ALTERNATIVE OPERATION, deliberately: there is none, and the previous
+    # refusal's worst property was pointing at one that would also have refused.
+    assert "answer_at" not in body and "edit_at" not in body
+    # AND NOTHING WAS WRITTEN.
+    assert not (ws.load_experiment(exp_id).draft.get("implicit") or [])
 
 
 # ---------------------------------------------------------------------------

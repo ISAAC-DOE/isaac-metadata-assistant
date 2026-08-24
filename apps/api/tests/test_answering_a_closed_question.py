@@ -277,10 +277,49 @@ def test_edge_is_still_answerable_on_a_record_that_has_runs(client):
     documentation promises it: it lives in the record's implicit derivations, which
     every non-diverging run inherits. It corresponds to no blocker, so "closed" is
     not a state it can be in — and a probe over the writer's key set (rather than
-    over `_CORRECTABLE_KEY_KINDS`) would have refused it."""
+    over `_CORRECTABLE_KEY_KINDS`) would have refused it.
+
+    **INVERTED, NOT DELETED, 2026-08-24.** This test asserted `200` on a record built by
+    `POST /api/experiments`, which has no `implicit` block at all — so it was pinning the
+    status code of a write that could not happen. `complete.apply_answers` writes `edge`
+    only INTO an existing `implicit[]` entry, and the response carried the same
+    "identical; nothing was invalidated" reason this whole file exists to remove, for the
+    one key the file did not cover. The record is now given a real edge derivation, so
+    the property the docstring claims — that `edge` survives the closed-question probe —
+    is measured against a record where answering it does something.
+    """
     exp_id, _ = _run_with_answers(client)
+    exp = ws.load_experiment(exp_id)
+    exp.draft.setdefault("implicit", []).append(
+        {"about": "edge", "value": None, "evidence": [{"source_type": "derivation", "rule": "ci"}]}
+    )
+    exp.save()
     applied = _answer(client, exp_id, {"edge": "K"})
     assert applied.status_code == 200, applied.text
+    stored = ws.load_experiment(exp_id).draft.get("implicit") or []
+    assert [e["value"] for e in stored if e.get("about") == "edge"] == ["K"], stored
+
+
+def test_edge_with_no_derivation_gets_the_SIXTH_false_identical_claim_removed(client):
+    """THE KEY THIS FILE MISSED, and it is the same defect in the same sentence.
+
+    The five combinations in the module docstring were fixed by `already_answered`, which
+    is a statement about the QUESTION's state. `edge` has no question, so that refusal
+    could never see it — and on a record with no `implicit` block the answer was dropped
+    and reported as `changed: false`, reason *"the submitted value was identical; nothing
+    was invalidated"*. Neither half was true.
+
+    It is `422 no_derivation_to_confirm` rather than `already_answered` because nothing
+    was ever answered: the record holds no edge derivation to confirm. See
+    `routes._refuse_edge_with_nothing_to_confirm` for why refusing is the right choice
+    against the no-guessing rule and against what the official record can carry.
+    """
+    exp_id, _ = _run_with_answers(client)
+    refused = _answer(client, exp_id, {"edge": "K"})
+    assert refused.status_code == 422, refused.text
+    body = refused.json()
+    assert body["error"] == "no_derivation_to_confirm"
+    assert "identical" not in body["message"]
 
 
 def test_a_bare_descriptor_label_is_not_refused_and_names_no_edit_route(client):

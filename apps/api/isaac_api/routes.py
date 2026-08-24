@@ -2257,6 +2257,33 @@ def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: 
 # --- 7. answers ---------------------------------------------------------------
 
 
+def _value_fits_the_store(value) -> bool:
+    """Bounded size, bounded depth, renderable — the half of storability that has
+    nothing to do with WHICH field is being written.
+
+    ONE DEFINITION, TWO CALLERS, AND THAT IS THE WHOLE POINT OF IT EXISTING. It is the
+    first line of :func:`_correction_is_storable` (the ``/edit`` screen) and the whole of
+    :func:`_refuse_unstorable_answer` (the ``/answers`` screen). Extracting it is
+    deliberate rather than tidy: this module's own history says a guard "existing two
+    thousand lines away is not a defence", and a second copy of `8 MiB` is how the two
+    ingresses end up disagreeing about how big a spectrum may be.
+
+    IT IS DELIBERATELY NOT THE SHAPE PREDICATES. ``/edit`` also asks
+    ``is_series_shaped``/``is_descriptor_shaped``/``is_qc_shaped``/``is_sha256_shaped``,
+    and ``/answers`` MUST NOT: on the answering path a wrong-TYPED value leaves the
+    blocker OPEN, so the response already tells the caller the question was not answered,
+    and that behaviour is pinned by ``test_answers_wrong_type.py`` and by a browser spec.
+    Size, depth and renderability have no such fallback — an 8 MiB ``qc.evidence`` is
+    perfectly well-shaped, so nothing downstream declines it and it goes to disk.
+
+    THE BOUND IS ``_MAX_CORRECTION_BYTES`` (8 MiB) ON BOTH PATHS, not the run path's
+    64 KiB. A reduced spectrum is legitimately large, and the two ingresses accept the
+    same values, so the same number is the only defensible one: a smaller bound here
+    would refuse on ``/answers`` what ``/edit`` accepts for the same field.
+    """
+    return _is_storable_value(value, max_bytes=_MAX_CORRECTION_BYTES)
+
+
 def _correction_is_storable(key: str, value) -> bool:
     """Can ``apply_corrections`` store this value, AND can the app survive doing so?
 
@@ -2283,7 +2310,7 @@ def _correction_is_storable(key: str, value) -> bool:
     legitimately large. 8 MiB bounds a pathological payload without putting a scientific
     limit on real data, and it is a bound on ONE corrected value rather than on the record.
     """
-    if not _is_storable_value(value, max_bytes=_MAX_CORRECTION_BYTES):
+    if not _value_fits_the_store(value):
         return False
     if key == "series":
         return is_series_shaped(value)
@@ -2306,6 +2333,176 @@ def _correction_is_storable(key: str, value) -> bool:
     # than of type. `is_sha256_shaped` is imported rather than restated for the same
     # reason the other two predicates are.
     return is_sha256_shaped(value)
+
+
+def _edge_derivations_in(draft: dict) -> list:
+    """The ``implicit[]`` entries an ``edge`` answer can be written onto.
+
+    THE PREDICATE IS ``complete.apply_answers``'s OWN, restated as a question this
+    module can ask BEFORE calling it: both the answering and the correcting writer loop
+    ``draft["implicit"]`` looking for ``imp.get("about") == "edge"``, and write only into
+    an entry they find. There is no branch that creates one.
+    """
+    return [
+        entry
+        for entry in (draft.get("implicit") or [])
+        if isinstance(entry, dict) and entry.get("about") == "edge"
+    ]
+
+
+def _refuse_edge_with_nothing_to_confirm(
+    draft: dict, apply_shape: dict, identifiers: dict
+) -> JSONResponse | None:
+    """``422`` for an ``edge`` answer this draft has no derivation to attach it to.
+
+    THE DEFECT, measured by an independent security review on 2026-08-24 against a record
+    created through ``POST /api/experiments``::
+
+        POST /answers {"edge": "L3"}
+          -> 200
+             invalidation.changed   false
+             invalidation.reason    "No change — the submitted value was identical;
+                                     nothing was invalidated."
+             draft["implicit"]      still absent
+
+    That reason is false twice over — the value was neither identical nor ever stored —
+    which is the EXACT defect this branch fixed for ``series``, ``qc``, ``descriptor`` and
+    a pending asset hash, and left live for ``edge``. The cause is structural rather than
+    accidental: ``complete.apply_answers`` writes ``edge`` only INTO an existing
+    ``implicit[]`` entry whose ``about`` is ``"edge"``, and a created record has no
+    ``implicit`` block at all — ``draft_builder`` is what emits that entry, and no route
+    creates one.
+
+    ── WHY REFUSING RATHER THAN MAKING IT LAND, argued against the two things the
+    ── project says such a decision has to be argued against. ─────────────────────────
+    **The no-guessing rule (CLAUDE.md §5).** ``implicit[]`` is the EXTRACTOR's block: an
+    entry there asserts that a derivation was made from a source and could not be
+    confirmed. A record created through Create Experiment has no source document and no
+    derivation, so a route that synthesised the entry in order to have somewhere to put
+    the answer would be manufacturing the derivation the block claims to record. The
+    run-level tests already state the invariant from the other side — "no route creates
+    one".
+
+    **What the exported record can carry.** CLAUDE.md §5 puts the absorbing element and
+    the edge on the implicit/sidecar path *"unless the official schema provides a native
+    field"*, and it does not: there is no official path for an edge, so even a landed
+    answer reaches the evidence sidecar and never the official record. Refusing therefore
+    costs the caller nothing the schema was going to carry, while a 200 costs them a
+    false statement about their own record.
+
+    **And the alternative is a truth-core change.** Making ``apply_answers`` create the
+    entry is an edit to ``src/isaac_records/complete.py``, which CLAUDE.md §13 protects
+    and which would change what every caller of the core gets — the CLI and the exporter
+    included — to close a defect that exists at one ingress.
+
+    ── THIS IS NOT THE REFUSAL THAT WAS ALREADY TRIED AND WAS WORSE. ──────────────────
+    ``_RUN_LEVEL_ANSWER_BLOCK``'s note records a previous version that refused ``edge`` on
+    the record UNCONDITIONALLY, which made it answerable by no route at all and pointed
+    the caller at an operation that would also have refused. This one is conditional on
+    the one fact that decides whether a write can happen — *is there an entry to write
+    into?* — so a record whose draft carries an edge derivation keeps taking the answer
+    exactly as before, and it names NO alternative operation, because there is none and
+    saying otherwise is how that version misled.
+
+    WHAT IT DOES NOT CLAIM: it does not say the record is wrong, and it does not say the
+    edge is unknowable. It says this draft holds no edge derivation for the answer to
+    confirm, and that nothing was written — both of which are checkable by the caller in
+    the response to a plain read.
+    """
+    if "edge" not in apply_shape or _edge_derivations_in(draft):
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "no_derivation_to_confirm",
+            **identifiers,
+            "key": "edge",
+            "keys": ["edge"],
+            "message": (
+                "This record carries no absorption-edge derivation, so there is "
+                "nothing here for an `edge` answer to confirm and nothing was "
+                "written. An edge is recorded as a confirmation of a value this "
+                "application derived from a source document; it is not a field a "
+                "record can be given from nothing. The official ISAAC record has no "
+                "edge field, so no exported record is missing a value because of this."
+            ),
+        },
+    )
+
+
+def _refuse_unstorable_answer(apply_shape: dict) -> JSONResponse | None:
+    """``422 invalid_field_value`` for an ANSWER the store cannot keep, or ``None``.
+
+    THE DEFECT THIS CLOSES: ``/answers`` APPLIED NO SIZE AND NO DEPTH BOUND WHILE
+    ``/edit`` APPLIED BOTH, so the answering path — the one a scientist and an MCP agent
+    actually use to fill a record in — was the least-guarded write ingress in the
+    application. Measured by an independent security review on 2026-08-24, over HTTP,
+    against a record created through this application's own Create Experiment path:
+
+    * a 20 MiB ``qc.evidence`` was ``200`` and PERSISTED on ``POST /answers`` (the
+      workspace file grew to ~42 MB — roughly 2x amplification through ``block_evidence``
+      and ``answer_log``), and ``422 invalid_field_value`` on ``POST /edit``. Same value,
+      same field, same record, two answers.
+    * a 700-deep ``descriptor`` drove ``RecursionError`` out of
+      ``isaac_records.complete``'s ``copy.deepcopy`` as a bare ``HTTP 500`` from the truth
+      core; depth 400 was accepted and stored. ``/edit`` returned the typed ``422``.
+
+    There is no global body-size middleware in this application, so neither had any other
+    backstop. The ``qc`` half is this branch's own doing: ``qc`` was not forwarded at all
+    on ``main`` (see :func:`_answers_to_apply_shape`), so adding the forward added the
+    ingress — and gave it the weaker screen of the two.
+
+    WHY A ROUTE-LEVEL SCREEN RATHER THAN A GUARD IN THE TRUTH CORE. ``src/isaac_records``
+    is the protected path (CLAUDE.md §13) and a depth guard there would change what
+    ``apply_answers`` does for every caller, including the CLI and the exporter. The
+    condition is an INGRESS condition — "this application cannot survive storing and
+    re-rendering this" — and every other instance of it in this module is enforced at the
+    route. CLAUDE.md §15 already records this exact shape ("a wrong-typed structured
+    answer used to return HTTP 500 from the truth core") as something a typed 422 should
+    close, and this is the same close, at the same layer.
+
+    WHAT IT DELIBERATELY DOES NOT DO: it does not apply the SHAPE predicates
+    :func:`_correction_is_storable` applies. A wrong-TYPED answer must keep taking the
+    module's existing "not applied -> the blocker stays open" path, which is what
+    ``test_answers_wrong_type.py`` pins and what the record ``/edit`` route's own comment
+    calls out as the reason it did not extend its screen here. Only the three conditions
+    with no such fallback are checked — see :func:`_value_fits_the_store`.
+
+    THE ERROR CODE IS ``/edit``'s, and that is a decision rather than convenience: it is
+    the same condition on the same field set, and a client that already branches on
+    ``invalid_field_value`` should not need a second code to learn that a value it sent
+    is too big. The MESSAGE differs, because ``/edit``'s says "The stored value is
+    unchanged" — true there, and false here, where the field may never have held a value
+    at all. It says instead that the question is still open, which is what the caller
+    needs to know and is exactly what the refusal guarantees.
+    """
+    offending = [
+        key
+        for key, value in apply_shape.items()
+        if key not in ("timestamp", "asset_sha256") and not _value_fits_the_store(value)
+    ] + [
+        uri
+        for uri, sha in (apply_shape.get("asset_sha256") or {}).items()
+        if not _value_fits_the_store(sha)
+    ]
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "invalid_field_value",
+            "key": offending[0],
+            "keys": offending,
+            # NAMES NO CAUSE, for the reason the `/edit` refusal's own comment gives at
+            # length: a sentence naming a cause was measured being served verbatim about
+            # a key it did not describe. `key`/`keys` say WHICH value was refused;
+            # nothing here is entitled to say why.
+            "message": (
+                "This answer is not a shape the record can store, so nothing was "
+                "written and the question is still open."
+            ),
+        },
+    )
 
 
 def _answers_to_apply_shape(
@@ -2430,6 +2627,25 @@ def _answers_to_apply_shape(
 #: ``implicit`` entry, never a pending one), so the exemption's cost falls only on a
 #: direct API or MCP caller, and it is a 200 that reaches the runs that can receive it.
 #:
+#: **THIRD CORRECTION, 2026-08-24: "an edge answered on the record reaches every run that
+#: holds the record's values" IS TRUE ONLY OF A RECORD THAT HAS AN EDGE DERIVATION, and
+#: the sentence above asserted it of every record.** An independent security review
+#: measured the gap it left. ``complete.apply_answers`` and ``complete.apply_corrections``
+#: both write ``edge`` only INTO an existing ``implicit[]`` entry whose ``about`` is
+#: ``"edge"``; ``draft_builder`` is what emits that entry, and a record created through
+#: ``POST /api/experiments`` has no ``implicit`` block at all. So on a created record the
+#: answer reached NO run, because it was never stored — and the response said ``changed:
+#: false`` with the reason *"the submitted value was identical; nothing was invalidated"*,
+#: a claim that is false twice over and is the exact defect this branch fixed for
+#: ``series``, ``qc``, ``descriptor`` and a pending asset uri.
+#:
+#: The exemption STANDS — it was right about the record that motivated it, and refusing
+#: unconditionally was already tried and was worse. What is added is a screen on the one
+#: fact that decides whether the write can happen at all:
+#: :func:`_refuse_edge_with_nothing_to_confirm`, applied on all four write paths. A
+#: record whose draft carries an edge derivation is unaffected; a record with nothing to
+#: write into is told so instead of being told its value was identical.
+#:
 #: `timestamp` is bookkeeping, not an answer.
 _RUN_LEVEL_ANSWER_BLOCK = {
     "series": "series",
@@ -2501,12 +2717,43 @@ _EDIT_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/edit"
 #: ``test_operations_with_parameters_keep_the_validation_error_schema`` pins for every
 #: operation with a parameter or a body. That framework shape stays reachable on both
 #: answers operations (a request body that is not a JSON object), so it travels here.
+#:
+#: ``invalid_field_value`` IS NAMED HERE FOR THE SAME REASON ``already_answered`` WAS:
+#: the operation performs it and the published contract did not describe it. It was
+#: added to both answers operations on 2026-08-24, when an independent security review
+#: measured that ``/answers`` applied no size and no depth bound while ``/edit`` applied
+#: both — see :func:`_refuse_unstorable_answer`. Adding the behaviour without adding the
+#: sentence would repeat exactly the gap :data:`_R_CORRECTION_REFUSED` was written to
+#: close, where "the record's ``422`` enumerated three refusals while the route performed
+#: four".
 _R_ALREADY_ANSWERED: dict = {
     422: {
         "description": (
             "Either the request body failed framework validation (the "
             "`HTTPValidationError` shape below), or `confirmed_by_user` was not "
-            "`true` (`confirmation_required`), or `already_answered`.\n\n"
+            "`true` (`confirmation_required`), or `no_derivation_to_confirm`, or "
+            "`invalid_field_value`, or `already_answered`.\n\n"
+            "`no_derivation_to_confirm` — the body named `edge`, and this record "
+            "carries no absorption-edge derivation for the answer to confirm. An edge "
+            "is recorded as a confirmation of a value this application derived from a "
+            "source document, and no operation creates that derivation, so there was "
+            "nothing to write into and nothing was written. The body is "
+            "`{error, experiment_id, key, keys, message}`, plus `run_id` on the "
+            "run-level operation. It deliberately names no alternative operation, "
+            "because there is none. The official ISAAC record has no edge field, so no "
+            "exported record is missing a value because of this refusal.\n\n"
+            "`invalid_field_value` — a recognised key carried a value this "
+            "application cannot store and re-render: too large, nested too deeply, or "
+            "not renderable as JSON (`NaN`, `Infinity`, a lone surrogate). Nothing was "
+            "written and the question is still open. The body is "
+            "`{error, key, keys, message}`, where `keys` names EVERY offending key and "
+            "`message` deliberately states no cause. It is the same code the correction "
+            "operations serve for the same condition, deliberately: a client that "
+            "already branches on `invalid_field_value` should not need a second code to "
+            "learn that a value it sent is too big. A wrong-TYPED value is NOT this "
+            "refusal — it is dropped by the core and its question is reported still "
+            "open in the `200`, which is the behaviour this operation has always "
+            "had.\n\n"
             "`already_answered` \u2014 the body named a field whose question is already "
             "CLOSED and supplied a value DIFFERENT from the confirmed one, which this "
             "operation would have discarded. Nothing was written, the stored value is "
@@ -2684,7 +2931,29 @@ def post_answers(
         ]
         timestamp = _now_iso()
         apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
+        # FIRST OF THE THREE REFUSALS, AND THE ORDER IS ARGUED RATHER THAN INHERITED.
+        # `belongs_to_a_run` below sends a run-owned key to the run's own operation, which
+        # is the more useful answer for a value that could be stored SOMEWHERE. This one
+        # is for a value that can be stored NOWHERE — too big, too deep, or unrenderable
+        # at any level — so answering `409 go to the run` first would send a compliant
+        # client on a round trip that ends in this same `422`. It is also the cheapest of
+        # the three and the only one that must run before anything WALKS the value:
+        # `apply_answers` deep-copies it, which is where the measured `RecursionError`
+        # came from.
+        refusal = _refuse_unstorable_answer(apply_shape)
+        if refusal is not None:
+            return refusal
         refusal = _refuse_run_level_on_the_record(exp, apply_shape)
+        if refusal is not None:
+            return refusal
+        # `edge` IS EXEMPT FROM THE REFUSAL ABOVE AND IS SCREENED BY THIS ONE INSTEAD.
+        # The exemption is correct — an edge answered on the record reaches every run
+        # that holds the record's values — but it was the only key with no screen at
+        # all, so an edge answer against a draft holding no edge derivation was a 200
+        # about a write that could not happen.
+        refusal = _refuse_edge_with_nothing_to_confirm(
+            exp.draft, apply_shape, {"experiment_id": exp.id}
+        )
         if refusal is not None:
             return refusal
         # AFTER the run-level refusal, and the order is the honest one rather than an
@@ -2848,7 +3117,11 @@ _R_CORRECTION_REFUSED: dict = {
             "including an asset whose hash is still an open question, which belongs "
             "to the answers operation), `invalid_field_value` (a recognised field "
             "carried a value the record cannot store; `key` and `keys` name the "
-            "offending field(s), and `message` deliberately states no cause), or "
+            "offending field(s), and `message` deliberately states no cause), "
+            "`no_derivation_to_confirm` (the body named `edge` and this record carries "
+            "no absorption-edge derivation for it to confirm — see the answers "
+            "operation for the full description; it is the same refusal, because it is "
+            "the same structural fact about the draft), or "
             "`not_yet_answered`, described next. Nothing is written on any of "
             "them.\n\n" + _R_NOT_YET_ANSWERED[422]["description"]
         ),
@@ -3315,6 +3588,18 @@ def post_edit(
                     "message": "No editable field was recognized in the request.",
                 },
             )
+        # THE SAME `edge` SCREEN THE ANSWERING PATH APPLIES, and this route needed it for
+        # the same reason. `edge` is in `_has_correction_target`'s key set, so a bare
+        # `{"edge": ...}` gets past that check; it is absent from `_CORRECTABLE_KEY_KINDS`
+        # (it corresponds to no blocker, so "unanswered" is not a state it can be in), so
+        # `_refuse_correcting_an_unanswered_key` does not see it either. Between the two
+        # it reached `apply_corrections`, which writes only into an `implicit[]` entry
+        # that exists — and answered 200 having stored nothing.
+        refusal = _refuse_edge_with_nothing_to_confirm(
+            exp.draft, apply_shape, {"experiment_id": exp.id}
+        )
+        if refusal is not None:
+            return refusal
         # A STRUCTURED CORRECTION OF THE WRONG TYPE IS REFUSED HERE, not absorbed.
         #
         # `apply_corrections` now REFUSES to apply a malformed `series` or `descriptor`
@@ -5766,6 +6051,17 @@ def _apply_to_run(
         apply_shape = _answers_to_apply_shape(
             body.get("answers") or {}, run_draft, timestamp, edit_only=correcting
         )
+        # BEFORE THE BRANCH, because the condition is the same on both sides of it: the
+        # answering writer and the correcting writer BOTH write `edge` only into an
+        # existing `implicit[]` entry, so a run draft with no such entry produces a 200
+        # about a write that could not happen either way. Asked of `run_draft`, which is
+        # the draft these two writers are given — including a legacy run's materialised
+        # `pending`, which the lines above have already merged in.
+        refusal = _refuse_edge_with_nothing_to_confirm(
+            run_draft, apply_shape, {"experiment_id": exp.id, "run_id": run.id}
+        )
+        if refusal is not None:
+            return refusal
         if correcting:
             # THE RUN'S OWN QUESTIONS, not the record's. `run_draft` is what
             # `_answers_to_apply_shape` was just given, and it carries the
@@ -5822,6 +6118,23 @@ def _apply_to_run(
                 )
             run.draft = apply_corrections(run_draft, apply_shape)
         else:
+            # THE SAME SIZE/DEPTH/RENDERABILITY SCREEN THE RECORD's `/answers` APPLIES,
+            # from the same function. This branch is the run-level ANSWERING path and it
+            # had no value-side screen at all, while the `correcting` branch three lines
+            # up has had one since the correction routes were hardened — so a value
+            # `/edit` refused with a typed `422` was accepted and written here. Two
+            # ingresses for one condition need one screen, or they drift; that is the
+            # argument for `_refuse_unstorable_answer` being a function rather than a
+            # second inline comprehension.
+            #
+            # BEFORE `_refuse_answering_an_already_answered_key`, because that refusal is
+            # about the QUESTION's state and this one is about whether the value can exist
+            # in the store at all. A caller told "already answered" about a value that
+            # could never have been stored has been told the less useful of two true
+            # things.
+            refusal = _refuse_unstorable_answer(apply_shape)
+            if refusal is not None:
+                return refusal
             # THE MIRROR OF THE REFUSAL DIRECTLY ABOVE, on the answering side, and asked
             # of `run_draft` for the same reason the correcting branch asks it of
             # `run_draft`: the run owns the value, so "already answered" only means
