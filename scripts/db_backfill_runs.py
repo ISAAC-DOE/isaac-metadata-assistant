@@ -28,6 +28,19 @@ usable" is not a statement anybody can make about the deployment.
 So this walks ``isaac_experiments``, re-persists each experiment through the SAME
 code path the write uses, and stamps ``projector: 'backfill'``.
 
+**THAT LAST CLAUSE WAS FALSE UNTIL 2026-08-24, AND IT IS CORRECTED IN PLACE RATHER
+THAN QUIETLY REWORDED.** An independent review measured it: ``persist`` reached
+``_stamp_projection``, which hard-coded ``PROJECTOR_WRITE_PATH`` at the ONE call site
+of ``Q_UPSERT_RUN_PROJECTION``, so every row this script wrote claimed the ordinary
+application write path had produced it. ``grep -rn "'backfill'"`` over
+``apps/api/isaac_api/``, ``scripts/`` and ``src/`` returned exactly one hit — this
+docstring, asserting the behaviour. The value was declared by ``0005``'s CHECK,
+indexed first by ``0005``'s index, and grouped on by the packet's own Stage-2b query,
+and it could never appear in the table. The fix is a keyword argument threaded
+through ``persist`` (default ``write-path``, so no ordinary save changed), and
+``apps/api/tests/test_db_backfill_runs.py`` now asserts the PARAMETER TUPLE this
+script causes rather than trusting this paragraph.
+
 WHAT IT DOES NOT DO, and each of these is a decision
 ----------------------------------------------------
 * **It does not touch** ``records``. The write path's statement policy refuses any
@@ -203,7 +216,16 @@ def main(argv: list[str] | None = None) -> int:
             # carries the tutorial refusal, the accepted gate, the run-row diff and
             # the completeness stamp; a second projector would be a second thing to
             # keep correct.
-            store.persist(exp)
+            #
+            # `projector=` IS THE ONLY THING THIS CALL SAYS THAT AN ORDINARY SAVE DOES
+            # NOT, and it is the whole of the fix for the false claim corrected in this
+            # file's docstring. It is a keyword argument rather than a second write
+            # path deliberately: `_stamp_projection`'s own docstring forbids a second
+            # writer, because `isaac_run_projection` has no `session_id` column and can
+            # never gain one, so a worked-example claim that ever reached that table
+            # would be permanently uncleanable. Passing a label keeps every one of the
+            # guards this call inherits.
+            store.persist(exp, projector=repo.PROJECTOR_BACKFILL)
         except repo.DurableWriteConflict:
             # Another writer holds a newer document. Its own save projected its own
             # rows, so this experiment is not left behind — it is simply not ours to

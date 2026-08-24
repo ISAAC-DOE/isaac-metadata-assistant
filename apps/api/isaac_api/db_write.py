@@ -465,6 +465,39 @@ def connect_psycopg2(env: Mapping[str, str]) -> Any:
     try:
         return psycopg2.connect(
             host=env["PGHOST"],
+            # ── `hostaddr=None` IS EXPLICIT, AND IT IS NOT REDUNDANT. ─────────────────
+            # libpq fills EVERY connection parameter this call leaves unspecified from
+            # the corresponding `PG*` environment variable, and `PGHOSTADDR` is one of
+            # them. When both are set, `hostaddr` is the address libpq actually
+            # CONNECTS to and `host` is used only for TLS certificate and GSSAPI name
+            # verification — so passing `host=` and saying nothing about `hostaddr`
+            # means the string this application reasoned about is not necessarily the
+            # machine it reached.
+            #
+            # WHAT THAT DEFEATED, measured by an independent security review on
+            # 2026-08-24. `apps/api/tests/test_run_row_parity.py` — a suite that
+            # WRITES — decides "this is a local throwaway engine" from the `PGHOST`
+            # STRING alone (`_is_loopback_target`). With `PGHOST=localhost`,
+            # `PGHOSTADDR=<a hosted address>` and `PGDATABASE=metadata_assistant`,
+            # every gate in that suite passes — including `write_transaction`'s own
+            # `current_database()` re-check, which asks the server it is talking to and
+            # so agrees with itself — and the writes land wherever `hostaddr` points.
+            # Passing `None` explicitly makes libpq ignore `PGHOSTADDR` entirely, so
+            # `host` is once again both the name that is verified and the target that
+            # is reached.
+            #
+            # THIS WAS CODE-VERIFIED, NOT EXECUTED. psycopg2 is not installed in this
+            # interpreter (see `test_db_provider`'s absent-driver test), and no agent
+            # may connect to the SLAC database, so the claim above rests on libpq's
+            # documented parameter precedence and on reading this call — not on a
+            # connection anybody opened. The test beside it asserts the KEYWORD is
+            # passed and is `None`, which is the part that is checkable here.
+            #
+            # IT IS DEFENCE IN DEPTH AND THE OPT-IN IS STILL THE REAL GATE.
+            # `ISAAC_RUN_REAL_ENGINE_PARITY` is what stops that suite connecting at
+            # all; this closes a hole in a check that was already the second line, and
+            # it should not be described as making the environment safe.
+            hostaddr=None,
             port=env.get("PGPORT", "5432"),
             dbname=EXPECTED_DATABASE,  # never the env value: the gate already pinned it
             user=env["PGUSER"],

@@ -957,10 +957,41 @@ Q_DELETE_ABSENT_RUNS = (
 # NOTHING READS THIS TABLE IN THIS BUILD. Stage 2b — moving a reader onto
 # `isaac_runs` — is a separate slice gated on the backfill having run.
 
-#: The projector this write path stamps. A CLOSED value set in the migration's own
-#: CHECK (`write-path` | `backfill`), so a typo here is refused by the database
-#: rather than stored.
+#: The projector the ORDINARY application write path stamps. A CLOSED value set in the
+#: migration's own CHECK (`write-path` | `backfill`), so a typo here is refused by the
+#: database rather than stored.
 PROJECTOR_WRITE_PATH = "write-path"
+
+#: The projector the OPERATOR BACKFILL stamps — ``scripts/db_backfill_runs.py``, and
+#: nothing else.
+#:
+#: IT DID NOT EXIST, AND EVERY BACKFILLED ROW CLAIMED THE OTHER PRODUCER. An independent
+#: review measured it: :data:`Q_UPSERT_RUN_PROJECTION` has exactly one call site
+#: (:meth:`PostgresOrdinaryStore._stamp_projection`), that site hard-coded
+#: :data:`PROJECTOR_WRITE_PATH`, and the backfill reaches it through the same
+#: :meth:`PostgresOrdinaryStore.persist` every save uses — so a pass over a
+#: never-projected table wrote rows saying they came from the write path. The string
+#: ``'backfill'`` appeared in exactly one place in the repository, and it was the
+#: backfill's own docstring asserting a behaviour the code did not have
+#: (``grep -rn "'backfill'" apps/api/isaac_api/ scripts/ src/ --include='*.py'``).
+#:
+#: WHY THAT IS A DEFECT AND NOT A COSMETIC LABEL. `0005_run_projection.sql` gives
+#: ``projector`` a two-value CHECK and an index that LEADS on it, and
+#: ``docs/migration-approval-packet-0005.md`` §8A tells the operator to group the
+#: completeness query by it. Both were built to let the operator distinguish "these rows
+#: were maintained incidentally by ordinary saves" from "these rows were established by
+#: the pass I just ran" — which is the whole question the Stage-2b gate asks. A column
+#: whose second value can never appear cannot answer it, and the operator would have read
+#: a table with no ``backfill`` rows in it as evidence the backfill had not run.
+#:
+#: IT IS A PARAMETER RATHER THAN A SECOND WRITER, and that is the load-bearing part.
+#: ``_stamp_projection``'s own docstring forbids a second write path — the projection
+#: table has no ``session_id`` column and can never gain one, so a worked-example claim
+#: that reached it would be permanently uncleanable — so the backfill must keep going
+#: through :meth:`persist`, inheriting ``refuse_if_not_persistable``, the ``accepted``
+#: gate and the run-row diff. Threading the label through is the change that leaves all
+#: of that intact.
+PROJECTOR_BACKFILL = "backfill"
 
 #: Insert or refresh the completeness claim for ONE experiment.
 #:
@@ -1302,8 +1333,26 @@ class PostgresOrdinaryStore:
 
     # -- write-through ---------------------------------------------------------
 
-    def persist(self, exp: "ws.Experiment") -> None:
+    def persist(
+        self, exp: "ws.Experiment", *, projector: str = PROJECTOR_WRITE_PATH
+    ) -> None:
         """COMPARE-AND-SWAP one ordinary-scope experiment's authoritative state.
+
+        ``projector`` NAMES WHO IS DOING THE PROJECTING, and it is the ONE value in
+        the completeness claim that this method cannot derive from ``exp``. It
+        defaults to :data:`PROJECTOR_WRITE_PATH`, so every existing caller —
+        ``ws.Experiment.save`` and every test — keeps the exact behaviour it had;
+        the only caller that passes anything else is
+        ``scripts/db_backfill_runs.py``, which passes :data:`PROJECTOR_BACKFILL`.
+        See :data:`PROJECTOR_BACKFILL` for what was measured wrong and why a
+        keyword argument is the right shape rather than a second write path.
+
+        IT IS DELIBERATELY NOT VALIDATED HERE. The closed value set lives in
+        ``0005_run_projection``'s own CHECK, so a value that is neither of the two
+        is refused by the database rather than stored — and a second copy of the
+        enumeration in this module is a second thing that can drift away from the
+        migration. The two constants above exist so no caller has to type a
+        literal.
 
         RAISES :class:`StorageUnavailable` if the database is not REACHABLE, and
         deliberately does NOT fall back to the filesystem. The caller
@@ -1442,7 +1491,7 @@ class PostgresOrdinaryStore:
                             # guarantees the converse cannot happen.
                             if _table_available(cursor, policy, PROJECTION_TABLE):
                                 self._stamp_projection(
-                                    cursor, policy, exp, written
+                                    cursor, policy, exp, written, projector
                                 )
                         except Exception as exc:  # noqa: BLE001 - re-raised below
                             # NOT A RECOVERY, AND NOT A CONTINUE. The transaction
@@ -1544,7 +1593,9 @@ class PostgresOrdinaryStore:
         return len(desired_ids)
 
     @staticmethod
-    def _stamp_projection(cursor, policy, exp: "ws.Experiment", run_count: int) -> None:
+    def _stamp_projection(
+        cursor, policy, exp: "ws.Experiment", run_count: int, projector: str
+    ) -> None:
         """Record that this experiment's ``isaac_runs`` rows are complete AT THIS
         VERSION.
 
@@ -1577,10 +1628,19 @@ class PostgresOrdinaryStore:
         leak is not "a cleanup script"; it is that no cleanup script could be
         written. Hence: one writer, inside the one method the isolation guards
         already protect.
+
+        THE PROJECTOR IS PASSED IN, NOT ASSUMED, and the previous version assumed it.
+        It hard-coded :data:`PROJECTOR_WRITE_PATH` at this one call site, which is the
+        only place :data:`Q_UPSERT_RUN_PROJECTION` is ever executed — so the operator
+        backfill, which reaches here through :meth:`persist` exactly as an ordinary save
+        does, stamped every row it wrote with the producer it was not. See
+        :data:`PROJECTOR_BACKFILL` for the measurement and for why the Stage-2b gate
+        query in ``docs/migration-approval-packet-0005.md`` §8A could not be answered
+        while that was true.
         """
         cursor.execute(
             policy.check(Q_UPSERT_RUN_PROJECTION),
-            (exp.id, exp.rev, exp.generation, run_count, PROJECTOR_WRITE_PATH),
+            (exp.id, exp.rev, exp.generation, run_count, projector),
         )
 
     # -- restore ---------------------------------------------------------------

@@ -138,6 +138,29 @@ Every experiment persisted before Stage 1 is **NEVER PROJECTED**. `scripts/db_ba
 walks `isaac_experiments`, projects each experiment's runs through the *same* code path the write
 uses, and stamps `projector: 'backfill'`.
 
+***THAT LAST CLAUSE WAS FALSE WHEN IT WAS COMMITTED, and it is corrected in place rather than
+quietly reworded, because the sentence reads identically before and after and only a measurement
+tells them apart.*** An independent security review measured it on 2026-08-24: the *only* call site
+of `Q_UPSERT_RUN_PROJECTION` — `PostgresOrdinaryStore._stamp_projection` — hard-coded
+`PROJECTOR_WRITE_PATH`, and the backfill reaches it through the same `persist()` an ordinary save
+uses, so every row the backfill wrote claimed the higher-trust producer it had not earned. The
+string `'backfill'` existed in exactly one place in the Python tree, and it was the script's own
+docstring asserting this behaviour.
+
+**Why that mattered rather than being a cosmetic label.** §2's row shape declares `projector` a
+closed two-value set, `0005_run_projection.sql` gives it a CHECK *and* an index that leads on it,
+and `docs/migration-approval-packet-0005.md` §8A tells the operator to group the completeness query
+by it. All three exist so the operator can tell "these rows were maintained incidentally by ordinary
+saves" from "these rows were established by the pass I just ran" — which is the question the
+Stage-2b gate below actually asks. A column whose second value can never appear cannot answer it,
+and a table with no `backfill` rows would have read as evidence the backfill had never run.
+
+**The fix is a keyword argument threaded through `persist` (`projector=`, defaulting to
+`write-path`), not a second writer** — invariant 5 and `_stamp_projection`'s own docstring forbid a
+second write path, because `isaac_run_projection` has no `session_id` column and can never gain one.
+`apps/api/tests/test_db_backfill_runs.py` now asserts the parameter tuple each caller causes, so this
+paragraph can no longer be the only thing that says which projector is stamped.
+
 It is **idempotent** (a re-run re-projects and re-stamps to the same values), **additive** (it
 issues no `DELETE` except the write path's own `Q_DELETE_ABSENT_RUNS`, which removes rows the
 document no longer names), and it **never names `records`** — the statement policy refuses that by

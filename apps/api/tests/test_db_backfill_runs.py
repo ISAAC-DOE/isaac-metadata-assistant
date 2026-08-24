@@ -271,3 +271,115 @@ def test_it_names_records_in_no_statement_it_causes(backfill, monkeypatch):
     for sql, _ in conn.statements:
         assert "records" not in sql.lower().split(), sql
     assert "records" not in dbw.OWNED_TABLES
+
+
+# ---------------------------------------------------------------------------
+# which projector the rows claim
+# ---------------------------------------------------------------------------
+
+def _projection_params(conn) -> list[tuple]:
+    """Every parameter tuple bound to ``Q_UPSERT_RUN_PROJECTION`` in ``conn``.
+
+    THE PARAMETER TUPLE, NOT THE PROSE. The defect below was a docstring asserting a
+    behaviour the code did not have, so a test that read a docstring — or a constant, or
+    a printed line — would have agreed with the defect. The only artifact that cannot
+    lie about what the database receives is the ``(sql, params)`` pair the write path
+    bound, which is what ``FakeConnection.statements`` records.
+    """
+    return [p for sql, p in conn.statements if sql == repo.Q_UPSERT_RUN_PROJECTION]
+
+
+def test_the_backfill_stamps_the_backfill_projector_and_not_the_write_path(
+    backfill, monkeypatch
+):
+    """THE DEFECT: EVERY BACKFILLED ROW CLAIMED THE PRODUCER IT WAS NOT.
+
+    Measured by an independent security review on 2026-08-24. This script's docstring
+    said it "stamps ``projector: 'backfill'``". It did not, and could not:
+    ``Q_UPSERT_RUN_PROJECTION`` has exactly ONE call site in the application
+    (``PostgresOrdinaryStore._stamp_projection``), that site hard-coded
+    ``PROJECTOR_WRITE_PATH``, and this script reaches it through the same ``persist()``
+    an ordinary save uses. ``grep -rn "'backfill'" apps/api/isaac_api/ scripts/ src/
+    --include='*.py'`` returned exactly one hit — the false docstring.
+
+    WHY IT IS A DEFECT RATHER THAN A LABEL. ``0005_run_projection.sql`` gives
+    ``projector`` a two-value CHECK *and* an index that leads on it, and
+    ``docs/migration-approval-packet-0005.md`` §8A tells the operator to group the
+    Stage-2b completeness query by it — all three so the operator can tell rows
+    maintained incidentally by ordinary saves from rows established by the pass just
+    run. A column whose second value can never appear cannot answer that, and a table
+    holding no ``backfill`` rows would have read as evidence the backfill never ran.
+
+    BEFORE THIS FIX this assertion failed with ``'write-path' != 'backfill'``; the one
+    line that decides it is ``store.persist(exp, projector=repo.PROJECTOR_BACKFILL)``.
+    """
+    conn = _rows(
+        _state("01PPPPPPPPPPPPPPPPPPPPPPPP", "R1"),
+        _state("01QQQQQQQQQQQQQQQQQQQQQQQQ", "R1", "R2"),
+    )
+    _install(monkeypatch, conn)
+    assert backfill.main(["--apply"]) == 0
+    stamps = _projection_params(conn)
+    assert len(stamps) == 2, stamps
+    # THE WHOLE TUPLE, in the statement's own column order — `(experiment_id,
+    # experiment_rev, experiment_generation, run_count, projector)`. Asserting only
+    # `[4]` would leave a future change free to reorder the binding and still pass,
+    # and `run_count` is the other value the Stage-2b query reads.
+    assert [s[0] for s in stamps] == [
+        "01PPPPPPPPPPPPPPPPPPPPPPPP",
+        "01QQQQQQQQQQQQQQQQQQQQQQQQ",
+    ]
+    assert [s[3] for s in stamps] == [1, 2]
+    assert [s[4] for s in stamps] == ["backfill", "backfill"]
+    assert repo.PROJECTOR_BACKFILL == "backfill"
+
+
+def test_the_ordinary_write_path_is_UNCHANGED_and_still_stamps_write_path(monkeypatch, tmp_path):
+    """THE NEGATIVE CONTROL FOR THE FIX ABOVE, and it is the half that makes the
+    keyword argument safe.
+
+    ``projector`` defaults to ``PROJECTOR_WRITE_PATH``, so an ordinary save — the only
+    other caller of ``persist`` in the application — keeps stamping exactly what it
+    stamped before. If the default were ever flipped, or the argument made required and
+    threaded from the wrong place, every ordinary save would start claiming to be a
+    backfill and the Stage-2b query would be wrong in the opposite direction.
+
+    This drives ``persist`` directly rather than through the script, because the script
+    is the one caller that must NOT produce this value.
+    """
+    exp = _exp_with_runs("R1")
+    conn = FakeConnection()
+    repo.PostgresOrdinaryStore(_env(), connect=_connector(conn)).persist(exp)
+    stamps = _projection_params(conn)
+    assert [s[4] for s in stamps] == ["write-path"]
+    assert repo.PROJECTOR_WRITE_PATH == "write-path"
+
+
+def test_both_projector_values_are_the_ones_the_migration_CHECK_admits(backfill):
+    """NEITHER CONSTANT CAN DRIFT AWAY FROM THE COLUMN'S CLOSED VALUE SET.
+
+    Nothing in Python can see a CHECK constraint, so the committed SQL is read as text.
+    A value outside the set would be refused by PostgreSQL at write time — which is the
+    right failure, but it would be discovered by an operator mid-pass rather than here.
+    """
+    sql_text = (
+        Path(repo.__file__).parent / "migrations" / "0005_run_projection.sql"
+    ).read_text()
+    assert "projector IN ('write-path', 'backfill')" in sql_text
+    for value in (repo.PROJECTOR_WRITE_PATH, repo.PROJECTOR_BACKFILL):
+        assert f"'{value}'" in sql_text
+
+
+def test_the_docstring_no_longer_asserts_a_behaviour_nothing_measures(backfill):
+    """THE PROSE IS PINNED ONLY AS A CORRECTION, never as the evidence.
+
+    The claim "stamps ``projector: 'backfill'``" is still in the docstring — it is now
+    TRUE — but the paragraph that records it having been false must survive, because the
+    corrected sentence reads identically to the defective one and only a measurement
+    tells them apart. This repository's established remedy is to correct in place and
+    keep the correction visible; deleting it would make the next reader believe the
+    claim had always held.
+    """
+    doc = backfill.__doc__ or ""
+    assert "stamps ``projector: 'backfill'``" in doc
+    assert "WAS FALSE UNTIL" in doc

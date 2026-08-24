@@ -21,6 +21,22 @@ DRAFT content only, and every one requires the ``If-Match`` precondition the API
 already enforces — so an agent working from a stale read loses the race rather
 than the scientist losing an edit.
 
+**THAT SECOND HALF WAS FALSE FOR ONE HEADER VALUE, and it is recorded here rather
+than only fixed, because the sentence reads identically before and after.** An
+independent security review measured it on 2026-08-24: an agent holding a STALE
+etag gets ``412 stale_write``, and the identical call with ``if_match: "*"``
+returned ``200`` and silently overwrote a scientist's already-confirmed
+``measurement.series`` correction with no conflict recorded. ``policy._validated``
+refuses to import an operation that mutates without ``requires_if_match``, but that
+guard can only see that a header is REQUIRED, not what it says — so the strongest
+statement in this file rested on a check that a single character walked past.
+``client._render_headers`` now refuses the wildcard, in the existing
+``invalid_if_match`` family, and each of the three tools that declare ``if_match``
+says so in its own argument description. **The HTTP API's acceptance of ``If-Match:
+*`` is deliberate, documented in ``routes._check_if_match``, and UNCHANGED** — the
+refusal belongs to this layer because this layer is the one making the stronger
+promise, to a caller that is a language model rather than a person.
+
 Nothing here finalises. There is no export tool, no delete tool, no migration
 tool and no governance tool; ``policy.py`` explains why that is four structures
 rather than four omissions.
@@ -688,7 +704,10 @@ def _tools() -> tuple[Tool, ...]:
                         "maxLength": 256,
                         "description": (
                             "The RECORD's current ETag, exactly as isaac_get_experiment "
-                            "returned it."
+                            "returned it. It must be a validator a read returned: `*` "
+                            "is refused, because it would apply this write whatever the "
+                            "record now says and overwrite a change made since your "
+                            "last read without reporting a conflict."
                         ),
                     },
                     "label": {
@@ -757,7 +776,10 @@ def _tools() -> tuple[Tool, ...]:
                         "maxLength": 256,
                         "description": (
                             "Required. THE RUN's ETag when `run_id` is given, the "
-                            "RECORD's ETag when it is not."
+                            "RECORD's ETag when it is not. It must be a validator a "
+                            "read returned: `*` is refused, because it would apply this "
+                            "write whatever the record now says and overwrite a change "
+                            "made since your last read without reporting a conflict."
                         ),
                     },
                     "confirmed_by_user": {
@@ -899,7 +921,10 @@ def _tools() -> tuple[Tool, ...]:
                         "maxLength": 256,
                         "description": (
                             "Required. THE RUN's ETag when `run_id` is given, the "
-                            "RECORD's ETag when it is not."
+                            "RECORD's ETag when it is not. It must be a validator a "
+                            "read returned: `*` is refused, because it would apply this "
+                            "write whatever the record now says and overwrite a change "
+                            "made since your last read without reporting a conflict."
                         ),
                     },
                     "confirmed_by_user": {

@@ -254,6 +254,51 @@ class AsgiApiClient:
                     "if_match must not contain line breaks.",
                     data={"operation_id": operation.id},
                 )
+            # ── THE WILDCARD IS REFUSED HERE, AND THE HTTP API'S ACCEPTANCE OF IT IS
+            # ── DELIBERATE AND UNCHANGED. ────────────────────────────────────────────
+            # `If-Match: *` means "I have no validator; apply this iff the resource
+            # exists" (RFC 9110). `routes._check_if_match` implements exactly that and
+            # returns `None` for it, which is correct for an HTTP client that genuinely
+            # has no validator and is documented in that function's own docstring. This
+            # refusal does NOT change it and must not be read as a reason to.
+            #
+            # THIS LAYER MAKES A STRONGER PROMISE THAN HTTP DOES, and the promise was
+            # measurably false. `policy._validated` REFUSES TO IMPORT if any mutating
+            # operation lacks `requires_if_match` — "a lost update is not an acceptable
+            # default" — and this module's `tools.py` states the resulting property to
+            # the reader: "every write ... requires the If-Match precondition the API
+            # already enforces — so an agent working from a stale read loses the race
+            # rather than the scientist losing an edit." An independent security review
+            # measured the hole on 2026-08-24: an agent holding a STALE ETag gets `412
+            # stale_write`, and the identical call with `*` returns `200` and silently
+            # overwrites an already-confirmed `measurement.series` correction, with no
+            # conflict recorded anywhere. The import-time guard was satisfied by the
+            # header being PRESENT; it cannot see what the header says.
+            #
+            # WHY IT MATTERS MORE HERE THAN OVER PLAIN HTTP. `*` is the canonical idiom
+            # for "I have no validator", which is precisely the state a confused model
+            # is in — and `if_match` is published to that model as an unconstrained
+            # `{"type": "string", "minLength": 1, "maxLength": 256}`. A single character
+            # is a shorter path out of a retry loop than re-reading the record, and the
+            # agent is not the person whose edit is destroyed.
+            #
+            # ONLY THE BARE `*` IS TESTED, because only the bare `*` reaches the
+            # wildcard branch: `routes._check_if_match` compares the STRIPPED header to
+            # `"*"` exactly, and any list form (`"*,"`, `'*, "x.1"'`) falls through to
+            # `_STRONG_TAG_RE` — `\A"[^"\\]+"\Z` — which `*` cannot match, so the HTTP
+            # API already answers `400 malformed`. Refusing a wider shape here would be
+            # guarding against something the server does not accept.
+            if if_match.strip() == "*":
+                raise ApiRefusal(
+                    "invalid_if_match",
+                    "if_match must be a validator a read returned — the `etag` from "
+                    "isaac_get_experiment or isaac_get_run. `*` means \"apply this "
+                    "whatever the record now says\", which would overwrite a change "
+                    "made since your last read without reporting a conflict. This "
+                    "server does not make blind writes on an agent's behalf: read the "
+                    "record again and send the etag it returns.",
+                    data={"operation_id": operation.id},
+                )
             headers["if-match"] = if_match
         if self.tutorial_session_id is not None:
             headers["x-isaac-tutorial-session"] = self.tutorial_session_id
