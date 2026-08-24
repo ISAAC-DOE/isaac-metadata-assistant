@@ -77,9 +77,25 @@ function contentFor(step: string, pendingCount: number): BannerContent | null {
         tone: 'attention',
         Icon: CircleAlert,
         heading: 'Not ready to export yet',
+        // NAMES NO SOURCE, AND THAT IS THE FIX. This body used to read "this record
+        // doesn't pass the official ISAAC schema check yet", and that claim is not
+        // derivable from the state that puts a record in this step. Traced:
+        // `review_export_readiness` <- `derive_workflow(ready=...)` <-
+        // `Experiment.export_ready()` <- `_all_units_pass_dry_run()` <- `export_draft`,
+        // and `export_draft` refuses on THREE gates — the no-guessing draft validator,
+        // ISAAC's own anchored-pattern exactness gate, and the official schema. It
+        // returns `official_report=None` for the first two, so a record can land here
+        // having never been shown to the official validator at all.
+        //
+        // CLAUDE.md §1 makes the schema upstream-owned and §12 records that a surface
+        // shipped this exact conflation once already ("FAIL — Invalid against official
+        // ISAAC schema v1.05 — 0 errors" above `schema_ok: true`). This banner renders
+        // on four record screens, so it was the widest instance. It now says what is
+        // true of all three gates and sends the scientist to the screen that separates
+        // them, which is the same resolution `ValidateReview` and `RunFindings` reached.
         body:
-          "All values are confirmed, but this record doesn't pass the official ISAAC schema " +
-          "check yet. Review export readiness to see what's left.",
+          'All values are confirmed, but this record does not pass the export checks ' +
+          "yet. Review export readiness to see what's left.",
         actionLabel: 'Review Export Readiness',
       };
     case 'export':

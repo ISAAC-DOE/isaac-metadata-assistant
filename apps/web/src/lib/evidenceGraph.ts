@@ -1360,11 +1360,60 @@ export function buildEvidenceGraph(
 export const UNDESCRIBABLE_FINDING =
   'The server reported a finding this build cannot describe.';
 
+/**
+ * The three finding channels of `POST …/runs/{id}/check`, in render order.
+ *
+ * IT CARRIES NO LABEL FOR THE `official` CHANNEL, AND THAT IS THE FIX. It used to
+ * be `{ key: 'official', label: 'Official schema check' }` — a CONSTANT, with no
+ * `dry_run` branch anywhere — so every element of `check.official.errors` became a
+ * graph node, a `Reported by` line and an edge label attributing it to the official
+ * ISAAC schema. On a dry run that attribution is unsupported: `_validate_unit`
+ * returns `export_draft`'s result, and `export.py` returns `official_report=None`
+ * on two paths BEFORE `validate_official` is called — a failed no-guessing report
+ * (`export.py:305`) and a failed anchored-pattern EXACTNESS gate, whose findings it
+ * folds into `draft_report` (`export.py:339-343`) — after which `_validate_unit`
+ * falls back to `draft_report.errors` and `post_run_check` stamps
+ * `official["schema"] = "ISAAC v1.05"` over them. Measured over HTTP on a run whose
+ * descriptor name carries a trailing newline, `official.errors[0].message` was the
+ * exactness gate's own text, `draft.errors` was empty, and this module labelled the
+ * node "Official schema check".
+ *
+ * `CLAUDE.md` §12: "the gate is ISAAC's, not upstream's — §1 makes the schema not
+ * ours to speak for, so no surface may report an exactness refusal as an
+ * official-schema error." A graph node is such a surface, and it was the ONE
+ * consumer of this payload with no `dry_run` branch at all — `ValidateReview` and
+ * (since this change) `RunCard` both had one.
+ *
+ * The list keeps its keys, its order and its two sound labels; the official label
+ * is derived where the node is actually built, by `findingOriginLabel`.
+ */
 const FINDING_ORIGINS = [
-  { key: 'blocker', label: 'Blocker' },
-  { key: 'draft', label: 'Draft check' },
-  { key: 'official', label: 'Official schema check' },
+  { key: 'blocker' },
+  { key: 'draft' },
+  { key: 'official' },
 ] as const;
+
+/**
+ * What a finding of one channel is CALLED — the official channel's answer depends
+ * on `dry_run`, which is why this is a function and not a table entry.
+ *
+ * The rule is `ValidateReview`'s (`ValidateReview.tsx:86-105`), and the wording is
+ * its wording: name the official ISAAC schema as the source ONLY where `dry_run ===
+ * false`, and otherwise say that the source is not named. An ABSENT flag names
+ * neither the source nor the document, because an absent flag is evidence of
+ * neither. The `blocker` and `draft` labels are unchanged: those two channels have
+ * one producer each and never carried a claim about the schema.
+ */
+function findingOriginLabel(
+  key: (typeof FINDING_ORIGINS)[number]['key'],
+  dryRun: boolean | undefined,
+): string {
+  if (key === 'blocker') return 'Blocker';
+  if (key === 'draft') return 'Draft check';
+  if (dryRun === false) return 'Official schema check';
+  if (dryRun === true) return 'Candidate-record check — source not named';
+  return 'Check finding — source not named';
+}
 
 /**
  * Emit one `validation_finding` node per finding of a run's check, attached to the
@@ -1388,6 +1437,10 @@ function addFindings(
   };
 
   for (const origin of FINDING_ORIGINS) {
+    // Derived per channel, from the SAME response the findings came from, so a
+    // dry-run finding can never be attributed to the official schema. See
+    // `findingOriginLabel`.
+    const originLabel = findingOriginLabel(origin.key, check.official?.dry_run);
     lists[origin.key].forEach((finding, index) => {
       // `runFindingText` returns null for an element carrying no describable
       // text. A null is RENDERED as the honest sentence, never dropped — the
@@ -1399,7 +1452,7 @@ function addFindings(
           ? finding.path
           : null;
       const detail: EvidenceGraphDetailLine[] = [
-        { term: 'Reported by', value: origin.label },
+        { term: 'Reported by', value: originLabel },
         { term: 'Finding', value: text },
         { term: 'Run', value: run.label || `Run ${run.ordinal}` },
         { term: 'Run version checked', value: check.checked_run_version },
@@ -1442,8 +1495,8 @@ function addFindings(
         target: id,
         kind: 'validated_by',
         producer: EDGE_PRODUCERS.validated_by[0],
-        why: `${origin.label} on ${run.label || `Run ${run.ordinal}`} (run version ${check.checked_run_version}): ${text}${path ? ` — reported at ${path}` : ''}`,
-        label: origin.label,
+        why: `${originLabel} on ${run.label || `Run ${run.ordinal}`} (run version ${check.checked_run_version}): ${text}${path ? ` — reported at ${path}` : ''}`,
+        label: originLabel,
         containment: true,
       });
     });

@@ -49,10 +49,44 @@ export const CAPTURE_COPY = {
   panelHeading: 'Transcript capture',
   start: 'Start a capture',
   close: 'Close capture',
+  /*
+   * IT USED TO OFFER "dictate" AS AN EQUAL THIRD OPTION, and it is the one string
+   * in this module that broke the module's own rule at the top of the file.
+   *
+   * The old sentence read: "Type, paste, or dictate notes about a run, then
+   * finalize them. Nothing is read while you are still writing, and no value is
+   * written until you accept one." It sits in the panel HEADER
+   * (`TranscriptCapturePanel.tsx:500`), which renders BEFORE the panel is opened —
+   * so the promise of dictation was on screen while the seam status that qualifies
+   * it, and the refusal body that explains it, were both still inside the collapsed
+   * body.
+   *
+   * AND DICTATION CANNOT WORK IN A SHIPPED DEPLOYMENT. `POST /api/transcription`
+   * answers `501` with `reason: no_provider_configured`, and that is not a
+   * misconfiguration to be corrected: `providers/config.py::_selected` resolves
+   * unset, empty and unrecognised values all to `unconfigured`, while
+   * `validate_provider_config_or_raise` REFUSES to boot an app whose seam is set to
+   * `deterministic-fake` (DECISION D6). So the only implementation a running
+   * application can hold is the unconfigured one. `ai-integration-decision-packet.md`
+   * §9 — "build nothing that implies any of it exists" — binds per `CLAUDE.md` §15,
+   * and an unqualified "dictate" implied exactly that.
+   *
+   * WHAT IS SAID INSTEAD, and why it does not break the rule it is fixing: typing
+   * and pasting are named as the working path because this client does that work
+   * itself; recording is named because this client does that too (`MediaRecorder`,
+   * audio held in the tab); and turning audio into text is named as needing a
+   * provider WITHOUT asserting whether this deployment has one. That last part is
+   * still the server's to say, and the panel still says it from
+   * `GET /api/providers/capabilities`. The recorder is deliberately NOT gated or
+   * removed — a provider-ready recording UX may exist, provided the copy around it
+   * is true.
+   */
   panelIntro:
-    'Type, paste, or dictate notes about a run, then finalize them. Nothing is ' +
-    'read while you are still writing, and no value is written until you accept ' +
-    'one.',
+    'Type or paste notes about a run, then finalize them. You can also record ' +
+    'audio here, but turning a recording into text needs a transcription ' +
+    'provider — the panel reports what this deployment has before you rely on ' +
+    'it. Nothing is read while you are still writing, and no value is written ' +
+    'until you accept one.',
 
   guidanceHeading: 'Before you start',
   guidanceDismiss: 'Got it',

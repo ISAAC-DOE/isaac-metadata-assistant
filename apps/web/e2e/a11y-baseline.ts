@@ -1166,7 +1166,37 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // A/B-measured as already 64 on `b7792c1`.
       // UNMAPPED NOTES (PR #146), 2026-08-16: linux 63 -> 64, same cause as the
       // desktop/laptop cells above. darwin 65 carried forward unmeasured.
-      'settings-explorer@tablet-768x1024': { darwin: 65, linux: 66 },
+      /* ASSISTANT SEAM OPERATION, 2026-08-20. linux 66 -> 65, COLLAPSING to a
+         scalar: darwin was already 65 and linux has converged on it, so the pair no
+         longer marks a measured difference and the well-formedness guard rejects one
+         whose halves are equal. The scalar is two measurements agreeing.
+
+         SAME TRIGGER as `@width-320`/`@width-390` in the block below: the Endpoint
+         Explorer lists every operation the live contract exposes, and this branch adds
+         `POST /api/assistant/ask`.
+
+         THE MECHANISM IS INFERRED AND IS PROBABLY WRONG — recorded as a question
+         rather than deleted, because the NUMBERS are measured and the EXPLANATION is
+         not. An earlier revision of this note asserted: "`.api-browser-list` is a
+         CLIPPED SCROLL CONTAINER — axe scans only what is visible, so a taller list
+         pushes failing nodes OUT as often as it adds them." The container really is
+         clipped (`max-height: 520px; overflow-y: auto`, 320px narrow — `screens.css`).
+         But every rule here is `color-contrast`, and axe-core does not viewport-cull
+         it: children of an `overflow-y: auto` box all have layout boxes, so a row
+         scrolled out of view is still scanned. Under that model adding one operation
+         row should ADD contrast violations, not remove one or two.
+
+         So the direction is unexplained. What is asserted is only what was observed:
+         these counts went DOWN on linux after this branch added one operation. Do NOT
+         quote the clipping story as the cause, and do not treat the decrease as an
+         accessibility improvement — no violation was fixed by this branch, and if the
+         cause is that nodes stopped being scanned, the lower number is MASKING and the
+         aggregate now under-counts real defects. Resolving it needs an axe run on the
+         linux face with per-node output, which this environment cannot produce.
+         Transcribed from CI job 96347581055's IMPROVED messages, never from a macOS
+         run. An IMPROVED message is a FAILURE in this suite on purpose: a stale high
+         number re-admits the defect it was meant to catch. */
+      'settings-explorer@tablet-768x1024': 65,
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1229,7 +1259,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       //
       // zoom-200 COLLAPSES to a scalar 59: darwin was already 59 and linux has
       // converged on it, and the guard rejects a pair with equal halves.
-      'settings-explorer@mobile-375x812': { darwin: 56, linux: 58 },
+      // ASSISTANT SEAM OPERATION, 2026-08-20: linux 58 -> 56, collapsing to a
+      // scalar for the reason given at `settings-explorer@tablet-768x1024` above.
+      'settings-explorer@mobile-375x812': 56,
       /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
          FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
          same change moved linux DOWN one and darwin not at all.
@@ -1251,7 +1283,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          here as a measured finding for its own slice, not silently absorbed into this
          one. Do not "fix" this line by copying the linux number across — the two
          columns were measured separately and disagree in both value and direction. */
-      'settings-explorer@zoom-200': { darwin: 59, linux: 60 },
+      // ASSISTANT SEAM OPERATION, 2026-08-20: linux 60 -> 59, collapsing to a
+      // scalar for the reason given at `settings-explorer@tablet-768x1024` above.
+      // The 200%-zoom projection reflows to a narrow width, so it moves with the
+      // narrow cells rather than with the desktop ones.
+      'settings-explorer@zoom-200': 59,
       'settings-privacy@desktop-1280x800': 9,
       'settings-privacy@laptop-1024x768': 9,
       'settings-privacy@tablet-768x1024': 9,
@@ -2562,7 +2598,23 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // TRANSCRIBED from CI job 96326516774's GREW/IMPROVED messages. The darwin
   // column is untouched: `width-320` was already 57 there and `width-390`'s 59 is
   // carried forward unmeasured, which the per-key note beside it states.
-  linux: 2805,
+  //
+  // ── ASSISTANT SEAM OPERATION, SECOND PASS, 2026-08-20: linux 2805 -> 2801. ──
+  //
+  // The FIRST pass moved only the two narrow cells, because those were the two the
+  // suite happened to report before it stopped. Three more `settings-explorer` cells
+  // moved on the next run — one cause, four cells in total, and the lesson is that
+  // an Endpoint Explorer change touches every projection that clips the list, not
+  // only the ones a partial run named.
+  //
+  //   settings-explorer@mobile-375x812   58 -> 56   (-2)
+  //   settings-explorer@tablet-768x1024  66 -> 65   (-1)
+  //   settings-explorer@zoom-200         60 -> 59   (-1)
+  //                                             net  = -4   (2805 -> 2801)
+  //
+  // TRANSCRIBED from CI job 96347581055's IMPROVED messages. All three COLLAPSE to
+  // scalars — darwin already held the lower number in each — so darwin does not move.
+  linux: 2801,
 };
 
 /**

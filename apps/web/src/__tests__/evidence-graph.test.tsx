@@ -474,6 +474,123 @@ describe('evidence graph · derivation from stored state', () => {
     // A run with no check fetched contributes no findings — and that is stated.
     expect(graph.notes.map((n) => n.kind)).toContain('checks_on_demand');
   });
+
+  /*
+   * WHOSE FINDING A GRAPH NODE SAYS IT IS.
+   *
+   * `FINDING_ORIGINS` carried a CONSTANT `label: 'Official schema check'` for the
+   * `official` channel with no `dry_run` branch anywhere, so every element of
+   * `check.official.errors` became a node whose `Reported by` line, and whose
+   * incoming `validated_by` edge label and `why`, attributed it to the official
+   * ISAAC schema. On a dry run that attribution is unsupported: `_validate_unit`
+   * returns `export_draft`'s result, and `export.py` returns
+   * `official_report=None` before `validate_official` is called on two paths —
+   * a failed no-guessing report (`export.py:305`) and a failed anchored-pattern
+   * EXACTNESS gate, folded into `draft_report` (`:339-343`). `CLAUDE.md` §12: no
+   * surface may report an exactness refusal as an official-schema error, and a
+   * graph node is such a surface. There was no test here at all before, which is
+   * how this module ended up the ONE consumer of the payload with no branch.
+   */
+  const officialFinding = (official: Record<string, unknown>) => {
+    const graph = buildOk({
+      checks: {
+        [RUN_A]: checkFixture({
+          blockers: [],
+          // `as unknown as` deliberately: the fixtures below include `schema`,
+          // which `post_run_check` DOES send and `ApiRunCheckVerdict` does not
+          // declare — the reason no surface has ever rendered the label.
+          official: official as unknown as ApiRunCheckResponse['official'],
+        }),
+      },
+    });
+    const node = graph.nodes.find((n) => n.kind === 'validation_finding');
+    if (!node) throw new Error('no validation_finding node was produced');
+    const edge = graph.edges.find((e) => e.target === node.id);
+    if (!edge) throw new Error('the finding node has no incoming edge');
+    return { node, edge };
+  };
+
+  it('an EXACTNESS finding on a dry run is NOT labelled an official-schema check', () => {
+    const message =
+      "value is accepted by the schema pattern '^[A-Za-z0-9_.-]+$' only because " +
+      "Python's '$' also matches before a trailing newline";
+    const { node, edge } = officialFinding({
+      ok: false,
+      dry_run: true,
+      schema: 'ISAAC v1.05',
+      errors: [{ path: 'descriptors.outputs.0.name', message }],
+    });
+    const reportedBy = node.detail.find((d) => d.term === 'Reported by');
+    expect(reportedBy?.value).toBe('Candidate-record check — source not named');
+    expect(edge.label).toBe('Candidate-record check — source not named');
+    // Every string the node and its edge carry, checked at once — the attribution
+    // must not survive anywhere, including in `why`.
+    const all = [
+      ...node.detail.map((d) => `${d.term}: ${d.value}`),
+      node.label,
+      edge.label ?? '',
+      edge.why,
+    ].join(' | ');
+    expect(all).not.toContain('Official schema');
+    expect(all).not.toContain('ISAAC v1.05');
+    // The finding's own text is still carried verbatim. Withholding the
+    // attribution must never withhold the finding.
+    expect(all).toContain(message);
+    // And the `Dry run` line that already existed is still there beside it.
+    expect(node.detail.find((d) => d.term === 'Dry run')?.value).toBe(
+      'yes — a candidate record was checked',
+    );
+  });
+
+  it('names the official schema only when the server said dry_run: false', () => {
+    const { node, edge } = officialFinding({
+      ok: false,
+      dry_run: false,
+      errors: [{ path: 'timestamps', message: "'acquired_start_utc' is required" }],
+    });
+    // The one branch where the label is EARNED: `_validate_unit` validated the
+    // record already written, through `validate_official` and nothing else.
+    expect(node.detail.find((d) => d.term === 'Reported by')?.value).toBe(
+      'Official schema check',
+    );
+    expect(edge.label).toBe('Official schema check');
+  });
+
+  it('claims neither source nor document when dry_run is absent', () => {
+    const { node, edge } = officialFinding({
+      ok: false,
+      errors: [{ path: '$', message: 'boom' }],
+    });
+    expect(node.detail.find((d) => d.term === 'Reported by')?.value).toBe(
+      'Check finding — source not named',
+    );
+    expect(edge.label).toBe('Check finding — source not named');
+    expect(node.detail.find((d) => d.term === 'Dry run')?.value).toBe(
+      'the server did not say',
+    );
+  });
+
+  it('the blocker and draft channels keep their own labels, unaffected by dry_run', () => {
+    // The fix must not spread: those two channels have one producer each and never
+    // carried a claim about the schema, so their labels are unchanged in every
+    // `dry_run` state.
+    for (const dryRun of [true, false, undefined]) {
+      const graph = buildOk({
+        checks: {
+          [RUN_A]: checkFixture({
+            blockers: ['This run has no measurement series recorded.'],
+            draft: { ok: false, errors: [{ path: 'context.temperature_K', message: 'no evidence' }] },
+            official: { ok: true, dry_run: dryRun, errors: [] },
+          }),
+        },
+      });
+      const labels = graph.nodes
+        .filter((n) => n.kind === 'validation_finding')
+        .map((n) => n.detail.find((d) => d.term === 'Reported by')?.value);
+      expect(labels).toContain('Blocker');
+      expect(labels).toContain('Draft check');
+    }
+  });
 });
 
 // ===========================================================================

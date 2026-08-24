@@ -32,7 +32,7 @@ import { MemoryRouter } from 'react-router-dom';
 import axe from 'axe-core';
 
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
-import { CAPTURE_GUIDANCE_SENTENCE } from '../lib/transcriptCaptureContent';
+import { CAPTURE_COPY, CAPTURE_GUIDANCE_SENTENCE } from '../lib/transcriptCaptureContent';
 import {
   CAPTURE_GUIDANCE_KEY,
   isCaptureGuidanceSeen,
@@ -561,6 +561,47 @@ describe('voice capture', () => {
     await renderPanel();
     await screen.findByText(/This browser does not offer audio recording/);
     expect(await screen.findByLabelText('Transcript')).toBeInTheDocument();
+  });
+
+  it('the header does NOT offer dictation as a third equal option', async () => {
+    /*
+     * THE COPY THIS PINS USED TO OVERCLAIM. `panelIntro` read "Type, paste, or
+     * dictate notes about a run, then finalize them." — dictation offered
+     * unqualified, in the panel HEADER, which renders BEFORE the panel is opened
+     * and therefore before the seam status and the refusal body that would explain
+     * it. `POST /api/transcription` answers `501` `no_provider_configured` in every
+     * shipped deployment, and not by accident: `providers/config.py::_selected`
+     * resolves unset, empty and unrecognised values all to `unconfigured`, and
+     * `validate_provider_config_or_raise` REFUSES TO BOOT an app whose seam is set
+     * to `deterministic-fake` (DECISION D6) — so the unconfigured implementation is
+     * the only one a running application can hold.
+     * `ai-integration-decision-packet.md` §9, "build nothing that implies any of it
+     * exists", binds per `CLAUDE.md` §15.
+     *
+     * WHAT THIS TEST MUST NOT BECOME: a requirement that the recorder is gone. The
+     * Record / Request a transcript / Discard controls are a deliberate product
+     * decision and stay. Only the promise around them is corrected, and the
+     * assertions below check the copy — not the controls.
+     */
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('or dictate');
+    expect(text).not.toMatch(/Type, paste, or dictate/);
+    // It still says what DOES work, and says the audio path depends on something
+    // this bundle cannot assert the presence of.
+    expect(CAPTURE_COPY.panelIntro).toContain('Type or paste notes');
+    expect(CAPTURE_COPY.panelIntro).toContain('needs a transcription');
+    /*
+     * AND IT STILL DOES NOT STATE A STATUS, which is the rule at the top of
+     * `transcriptCaptureContent.ts`: every claim about what the deployment CAN do
+     * comes from the server. A hardcoded "not configured" here would be a claim
+     * about a deployment this bundle has never met — so fixing an overclaim must
+     * not introduce the opposite one.
+     */
+    for (const banned of ['not configured', 'unavailable', 'cannot transcribe', 'disabled']) {
+      expect(CAPTURE_COPY.panelIntro.toLowerCase()).not.toContain(banned);
+    }
   });
 
   it('no request this panel makes carries audio', async () => {

@@ -1849,16 +1849,148 @@ describe('Check Run names WHICH document it read (review finding)', () => {
     expect(card.textContent).not.toContain('(dry run)');
   });
 
-  it('says "(dry run)" only when the server says so', async () => {
+  it('does NOT name the official schema on a dry run — INVERTED, it used to require that', async () => {
+    /*
+     * THIS TEST USED TO ASSERT THE DEFECT. It was called 'says "(dry run)" only
+     * when the server says so' and its whole body was
+     * `expect(card.textContent).toContain('Official schema (dry run)')` — so the
+     * suite REQUIRED the card to attribute a dry-run finding to the official ISAAC
+     * schema. It is inverted in place rather than deleted, because the sentence it
+     * used to protect ("only when the server says so") was about the wrong axis:
+     * the server does say `dry_run: true`, and the card was right to distinguish
+     * that from `false`. What it was wrong about is that on a dry run there is no
+     * schema verdict to name at all.
+     *
+     * `_validate_unit`'s dry-run branch returns `export_draft`'s result, and
+     * `export.py` returns `official_report=None` before `validate_official` is
+     * called on TWO paths — a failed no-guessing report (`export.py:305`) and a
+     * failed anchored-pattern exactness gate, whose findings it folds into
+     * `draft_report` (`:339-343`) — after which `_validate_unit` falls back to
+     * `draft_report.errors` and `post_run_check` stamps `official["schema"] =
+     * "ISAAC v1.05"` over them. `CLAUDE.md` §12: no surface may report an exactness
+     * refusal as an official-schema error.
+     */
     const card = await check({ ok: false, dry_run: true, errors: [{ message: 'boom' }] });
-    expect(card.textContent).toContain('Official schema (dry run)');
+    expect(card.textContent).toContain('Findings on this candidate record — source not named');
+    // The finding itself is still shown — withholding the attribution must not
+    // withhold the finding.
+    expect(card.textContent).toContain('boom');
+    expect(card.textContent).not.toContain('Official schema');
   });
 
-  it('claims neither when the flag is absent — an absent flag is not evidence', async () => {
+  it('claims neither the source nor the document when the flag is absent — INVERTED', async () => {
+    /*
+     * THIS TEST USED TO REQUIRE HALF OF THE DEFECT. It asserted
+     * `toContain('Official schema')` for a verdict carrying NO `dry_run` flag —
+     * correctly refusing to guess which DOCUMENT was read, while still naming the
+     * official schema as the SOURCE. Those are two independent claims and the
+     * absent flag is evidence for neither: an absent flag may be a dry run, and a
+     * dry run's findings may be ISAAC's own. Only `dry_run === false` earns the
+     * schema's name.
+     */
     const card = await check({ ok: false, errors: [{ message: 'boom' }] });
-    expect(card.textContent).toContain('Official schema');
+    expect(card.textContent).toContain('Findings — neither the source nor the document named');
+    expect(card.textContent).toContain('boom');
+    expect(card.textContent).not.toContain('Official schema');
     expect(card.textContent).not.toContain('(dry run)');
     expect(card.textContent).not.toContain('already written');
+  });
+
+  it('an EXACTNESS finding on a dry run is not called a schema error anywhere on the card', async () => {
+    /*
+     * THE CASE THAT MOTIVATED ALL OF THE ABOVE, with the wire exactly as measured
+     * over HTTP on a run whose descriptor name carries a trailing newline: an empty
+     * `draft` block beside an `official` block carrying the ISAAC exactness gate's
+     * own message and the `schema: "ISAAC v1.05"` stamp `post_run_check` applies
+     * unconditionally.
+     *
+     * The card must render the message verbatim and must not describe it as the
+     * official schema's verdict, must not print the schema label, and must not
+     * print the version. `SCHEMA_LABEL` is deliberately included in the fixture so
+     * this test fails if a future slice starts rendering it.
+     */
+    const message =
+      "value is accepted by the schema pattern '^[A-Za-z0-9_.-]+$' only because " +
+      "Python's '$' also matches before a trailing newline";
+    const card = await check({
+      ok: false,
+      dry_run: true,
+      schema: 'ISAAC v1.05',
+      errors: [{ path: 'descriptors.outputs.0.name', message }],
+    });
+    expect(card.textContent).toContain(message);
+    expect(card.textContent).toContain('Findings on this candidate record — source not named');
+    expect(card.textContent).not.toContain('Official schema');
+    expect(card.textContent).not.toContain('ISAAC v1.05');
+    // Not "invalid against", not "schema error" — no phrasing that attributes it.
+    expect(card.textContent ?? '').not.toMatch(/schema error|invalid against/i);
+  });
+
+  it('a dry-run PASS may name the official schema, and names ISAAC’s gate too', async () => {
+    /*
+     * THE ASYMMETRY THIS SUITE HAS TO PIN, or the fixes above read as "never name
+     * the schema". `post_run_check` computes `ok` as `draft.ok and official.ok`,
+     * and `official.ok` on a dry run is `export_draft(...).ok`, which is `True` at
+     * exactly one return (`export.py:350`) reached only after `validate_official`
+     * has run AND passed — with `check_exactness` (`:339`) passed before it. So a
+     * dry-run PASS is unreachable unless all three gates said yes, and the clean
+     * sentence may name all three. A dry-run FAILURE is reachable with
+     * `validate_official` never having run, which is why the heading above may name
+     * nothing.
+     */
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`POST ${BASE}/runs/RUNAAA/check`]: {
+        body: {
+          ok: true,
+          draft: { ok: true, errors: [], warnings: [] },
+          official: { ok: true, dry_run: true, errors: [] },
+          blockers: [],
+          checked_run_version: 'ra.0',
+        },
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    await act(async () => {
+      fireEvent.click(within(cardFor('RUNAAA')).getByRole('button', { name: 'Check Run' }));
+    });
+    const card = cardFor('RUNAAA');
+    expect(card.textContent).toContain('exactness gate');
+    expect(card.textContent).toContain('official ISAAC schema');
+    expect(card.textContent).toContain('candidate record assembled from this run');
+    // And it does not claim anything was filed.
+    expect(card.textContent).not.toContain('already written');
+  });
+
+  it('a MATERIALISED pass says the record already written, and claims no exactness gate', async () => {
+    /*
+     * The other half of the same asymmetry, and the reason the clean sentence is
+     * branched rather than shared: `_validate_unit` calls `validate_official` alone
+     * on a materialised unit — `check_exactness` lives inside `export_draft` and
+     * never runs — so a sentence naming ISAAC's gate would be false here while
+     * being true on the dry-run branch above.
+     */
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`POST ${BASE}/runs/RUNAAA/check`]: {
+        body: {
+          ok: true,
+          draft: { ok: true, errors: [], warnings: [] },
+          official: { ok: true, dry_run: false, errors: [] },
+          blockers: [],
+          checked_run_version: 'ra.0',
+        },
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    await act(async () => {
+      fireEvent.click(within(cardFor('RUNAAA')).getByRole('button', { name: 'Check Run' }));
+    });
+    const card = cardFor('RUNAAA');
+    expect(card.textContent).toContain('the record already written for this run');
+    expect(card.textContent).not.toContain('exactness gate');
   });
 
   it('reports a NON-VERDICT as "Could Not Be Checked", not as a schema failure', async () => {
