@@ -148,8 +148,16 @@ transcription provider does not approve a model provider, and the reverse is als
 
 ### What exists today
 
-**Nothing. Measured.** There is no MCP server, no JSON-RPC handling, and no MCP dependency anywhere
-in the application or the truth core. Established by:
+~~**Nothing. Measured.** There is no MCP server, no JSON-RPC handling, and no MCP dependency anywhere
+in the application or the truth core.~~ **SUPERSEDED 2026-08-24 — an MCP implementation SHIPS.** Re-running
+this section's own command, `rg --text -i -e 'mcp' -e 'jsonrpc' -e 'model context protocol' apps/api
+apps/web/src src scripts pyproject.toml apps/web/package.json | wc -l` → **487** (it recorded exit 1 /
+zero matches). The registry holds **10** tools — `PYTHONPATH=apps/api:src .venv/bin/python -c "from
+isaac_api.mcp.tools import TOOLS; print(len(TOOLS))"` → `10`, of which **7 read and 3 write** — behind
+**13** policy operations, with `Settings → Connect Your Agent` as its surface. What remains true, and is
+the part worth keeping: **no hosted MCP endpoint exists** — `POST /api/mcp` returns **404** in the
+default environment and the loopback binding is off by default — so **no scientist's agent can connect
+to the deployment.** Struck rather than rewritten, because it was true when taken. Established by:
 
 ```
 rg --text -n -i -e 'mcp' -e 'jsonrpc' -e 'model context protocol' \
@@ -160,6 +168,8 @@ rg --text -n -i -e 'mcp' -e 'jsonrpc' -e 'model context protocol' \
 The only MCP artifact in the repository is the audit document itself
 (`find . -iname '*mcp*'` → `./docs/mcp-capability-audit.md`, one result). **So capability A is
 specified and audited, but wholly unimplemented.**
+
+> **SUPERSEDED 2026-08-24: capability A is IMPLEMENTED** (10 tools, 13 operations, a Connect Your Agent surface) **and UNREACHABLE** (no hosted endpoint; `POST /api/mcp` → 404 by default). Those are different claims and only the second still holds.
 
 ### What is buildable without any external answer
 
@@ -361,7 +371,10 @@ rg --text -n -e 'httpx' -e 'requests\.post' -e 'requests\.get' -e 'aiohttp' -e '
 rg --text -n -i 'MediaRecorder|SpeechRecognition|webkitSpeech|getUserMedia|AudioContext|
    navigator\.mediaDevices' -g '!node_modules' -g '!.git' .
 → 2 hits, BOTH prose in docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md
-  (:407 and :420). Zero in any source file.
+  (:407 and :420). ~~Zero in any source file.~~ **RE-MEASURED 2026-08-24: NOT zero.** The same command now
+  reports **42** hits — `MediaRecorder` and `getUserMedia` both ship in
+  `apps/web/src/components/TranscriptCapturePanel.tsx`. No audio leaves the browser and no ASR client
+  exists; see the D6 supersession in the capture spec.
 ```
 
 **One precision that a bare "no HTTP client" would get wrong.** `httpx>=0.27` **is** a declared
@@ -493,14 +506,25 @@ this is the one place where **the code contradicts the spec; the code wins**:
 > the truth core (`src/isaac_records/models.py`), which `CLAUDE.md` §13 protects, and it would
 > require the report §13 mandates.
 
-### DECISION D6 — the honest v1 that is already agreed
+### DECISION D6 (CAPTURE) — the honest v1 that is already agreed
 
-`…-capture-data-contract.md:429-439` (DECISION D6 — *"the honest v1 is transcript-only,
-provider-abstracted, audio never persisted"*):
+> **NAMING WARNING, added 2026-08-24.** This document uses **"D6" for two unrelated decisions**: this
+> one, the capture/recorder decision restated from the capture spec, and **§5's `### D6 — Approved
+> egress`**, which is a Dean-owned data-governance question. They are not versions of each other.
+> Cite this one as **D6 (capture)** and that one as **D6 (egress)**.
+
+~~`…-capture-data-contract.md:429-439`~~ — **CITATION CORRECTED 2026-08-24: the canonical D6 is at
+`docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md:1003-1013`.** `:429-439` is a
+different passage; this document restated D6 against the wrong line range from the start. (DECISION D6
+— *"the honest v1 is transcript-only, provider-abstracted, audio never persisted"*):
 
 - Audio is captured in the browser and **never leaves it except to a configured, approved
-  transcription provider**. **With no provider configured, the recorder is not offered at all — not
-  offered-and-broken.**
+  transcription provider**. ~~**With no provider configured, the recorder is not offered at all — not
+  offered-and-broken.**~~ **SUPERSEDED 2026-08-24 by an explicit product decision of the project
+  owner** — the recorder ships and is offered; every safety property D6 argued for is enforced in
+  code, and the departure from "not offered at all" is recorded, with its one-line fix, at the D6
+  supersession in the capture spec. **This restatement is not the decision record — do not amend D6
+  here.**
 - The **transcript** is JSON text, so it can be persisted in the existing `state` jsonb with **no
   new storage of any kind**. Retention choice therefore applies to the transcript, which is real,
   and **not** to raw audio, which has nowhere to go.
@@ -508,7 +532,10 @@ provider-abstracted, audio never persisted"*):
   seams. Default implementation for all three: **unconfigured, surfaced truthfully.** A
   deterministic fake provider exists for tests only and is never reachable in production.
 
-**None of D6 is implemented** (§3's measurement 3: zero audio APIs in any source file).
+~~**None of D6 is implemented** (§3's measurement 3: zero audio APIs in any source file).~~
+**SUPERSEDED 2026-08-24:** D6's transcript path and its recorder BOTH ship (`TranscriptCapturePanel`,
+mounted at `RecordWorkbench.tsx:687`); the provider seams are still unconfigured and answer `501`. The
+parenthetical measurement is stale — re-measured **42** hits, not zero.
 
 ### 4.1 The browser `SpeechRecognition` risk — a RISK, not an established fact
 
@@ -534,7 +561,9 @@ implementations expose, and what is retained. That is a **vendor-documentation a
 access**, of the same kind and rigour as the one already performed for MCP
 (`docs/mcp-capability-audit.md`, which records its date, its sources, and per-finding confidence).
 Until such an audit exists and is committed, **`SpeechRecognition` is neither approved nor
-excluded**, and the honest product state is D6's: no provider configured, so no recorder offered.
+excluded**, and the honest product state is ~~D6's: no provider configured, so no recorder offered~~
+**2026-08-24: no provider configured, and a recorder IS offered** — a knowingly recorded departure from D6's
+"not offered at all", documented at the D6 supersession in the capture spec.
 
 ---
 
@@ -639,7 +668,9 @@ and the capture spec's §9 gate table does not name them individually.
 - **Why it is unavoidable:** Claude Code, Claude.ai and the Messages API all connect **from the
   client side**. An endpoint reachable only inside SLAC's network cannot be added as a connector at
   all (`docs/mcp-capability-audit.md:59-62`).
-- **Today without it:** nothing. No MCP server exists (measured, §2), and no scientist can connect.
+- **Today without it:** ~~nothing. No MCP server exists (measured, §2)~~ — **CORRECTED 2026-08-24: an MCP
+  server exists** (10 tools, 13 operations) — **and no scientist can connect**, which is the half that
+  still holds and the half this row is actually about: there is no hosted endpoint.
 - **With it:** a scientist can *attempt* a connection — **necessary but not sufficient**; D2 is
   still required.
 - **Risk / cost:** exposing an application path to the public internet, on infrastructure this
@@ -759,7 +790,9 @@ and the capture spec's §9 gate table does not name them individually.
   capability — not an error page.
 - **Until answered, ISAAC displays:** the deterministic assistant, with no cost or quota surface.
 
-### D6 — Approved egress: what data may leave SLAC, and to whom
+### D6 (EGRESS) — Approved egress: what data may leave SLAC, and to whom
+
+> **Not to be confused with §4's `DECISION D6 (CAPTURE)`.** Same label, unrelated decision, different owner.
 
 - **Owner:** Dean / Angel, plus whoever owns SLAC data governance for this class of content.
   **Listed separately from D3/D4/D5 deliberately** — approving a credential is not approving an
@@ -787,7 +820,9 @@ and the capture spec's §9 gate table does not name them individually.
 - **Risk / cost:** this is the highest-consequence row in the table. An over-broad answer is
   effectively an unbounded data-export authorization.
 - **Until answered, ISAAC displays:** the current true claim that nothing is sent to a model
-  provider (`settingsContent.ts:587`), and offers no recorder and no model-backed feature.
+  provider (`settingsContent.ts:587`), and ~~offers no recorder and~~ offers no model-backed feature.
+  **CORRECTED 2026-08-24: a recorder IS offered** (see the D6 supersession); the no-model-backed-feature half
+  is unchanged and still measured.
 
 ### D7 — Retention: what the provider retains
 
@@ -842,9 +877,14 @@ and the capture spec's §9 gate table does not name them individually.
   approved. If one is named, D6, D7 and D8 must be answered **for that provider**, and the
   `SpeechRecognition` question in §4.1 must be settled by a vendor-documentation audit before that
   API is either used or ruled out.
-- **Today without it:** no recorder, no ASR client, no audio capture anywhere (measured, §3
+- **Today without it:** ~~no recorder, no ASR client, no audio capture anywhere (measured, §3
   measurement 3 — the two hits in the whole tree are prose in the spec). **Per DECISION D6 the
-  recorder is not offered at all — not offered-and-broken.**
+  recorder is not offered at all — not offered-and-broken.**~~ **CORRECTED 2026-08-24.** There IS a recorder
+  and there IS audio capture (`MediaRecorder`, `getUserMedia`); re-measured **42** hits, not two.
+  **No ASR client still holds**, and no audio leaves the browser — the wire carries a blob COUNT
+  (`held-in-tab:<n>`), never a `Blob`. The recorder is offered and its transcription button returns
+  `501`, i.e. precisely the "offered-and-broken" state D6 forbade; that departure is recorded, with
+  the one-line fix named, at the D6 supersession in the capture spec.
 - **With it:** transcript-only voice capture becomes buildable: audio captured in the browser, sent
   only to that provider, never persisted by ISAAC; the transcript stored as JSON text in the
   existing `state` jsonb with **no new storage**.
@@ -854,7 +894,9 @@ and the capture spec's §9 gate table does not name them individually.
   cited as evidence: an eighth `source_type` breaks **three** total maps and **two** enumerations
   (§4, Blocker 3), and touching `src/isaac_records/models.py` triggers `CLAUDE.md` §13's truth-path
   reporting obligation.
-- **Until answered, ISAAC displays:** no recorder and no microphone affordance at all.
+- **Until answered, ISAAC displays:** ~~no recorder and no microphone affordance at all.~~
+  **CORRECTED 2026-08-24: it displays both**, plus a truthful "no transcription provider is configured"
+  disclosure ABOVE the controls. See the D6 supersession.
 
 ---
 
@@ -951,10 +993,10 @@ of capability B, not a nicety.
 | User-facing disclosure that there is no language model | **IMPLEMENTED** | measured — `settingsContent.ts:580`, `:587`, `:546` |
 | `POST /api/uploads` refuses unconditionally; no form parsing possible | **IMPLEMENTED** | measured — `routes.py` `# --- 15. uploads (always blocked) ---`, `def uploads():` with no parameters; `pyproject.toml:23` has no `python-multipart` |
 | No browser-side secret; `VITE_API_KEY` seam removed and inverse pinned | **IMPLEMENTED** | measured — `api.ts:104`; `__tests__/api.test.ts:168-169` |
-| MCP server | **NOT IMPLEMENTED** — specified + audited only | measured — `rg … 'mcp'` over `apps/api apps/web/src src scripts pyproject.toml apps/web/package.json` → exit 1 |
+| MCP server | ~~**NOT IMPLEMENTED** — specified + audited only~~ → **IMPLEMENTED 2026-08-24**: 10 tools, 7 read / 3 write, behind 13 policy operations. **Still NO HOSTED ENDPOINT** (`POST /api/mcp` → 404 by default), so no scientist's agent can connect; D1/D2 remain deferred | measured — ~~`rg … 'mcp'` → exit 1~~; the same `rg` now → **487 matches**; `len(TOOLS)` → **10** |
 | `Requires organization configuration` display state | ~~**NOT IMPLEMENTED** — specified only~~ → **IMPLEMENTED 2026-08-16** as Settings → Connect Your Agent (`?tab=mcp`). It reports a state and offers no action; D1/D2 are still deferred and there is still no endpoint | measured — ~~`rg …` → exit 1~~; the same `rg` now → **exit 0, 9 files**. See §6.1's supersession note |
 | Native model-backed assistant | **NOT IMPLEMENTED.** A **production provider** remains out of scope by project rule and is **DEFERRED by Dean** (2026-08-12). **Implementation against a deterministic fake provider is authorized by the project owner** — see the head-of-document block; that authorization covers code, the provider abstraction and tests, and covers no real endpoint, credential or outbound call | measured (no provider, no outbound call site) + `CLAUDE.md:695-698` + owner decision 2026-08-12 |
-| Voice capture / recorder / ASR | **NOT IMPLEMENTED** — DECISION D6 specified only | measured — zero audio APIs in any source file |
+| Voice capture / recorder / ASR | ~~**NOT IMPLEMENTED** — DECISION D6 specified only~~ → **RECORDER IMPLEMENTED 2026-08-24** (`TranscriptCapturePanel`); **ASR still NOT implemented** — no client, no provider, `POST /api/transcription` → `501`. Manual transcript works with no ASR (`200`) | measured — ~~zero audio APIs in any source file~~; re-measured **42** hits in **1** source file |
 | Audio `source_type` | **NOT IMPLEMENTED**, and a **truth-core change** if pursued | measured — `models.py:29-37` (7, closed); 3 total maps + 2 enumerations |
 | Transcript persistence in `state` jsonb | **SPECIFIED, needs no migration** | from-doc — `…-capture-data-contract.md:471-473` (`from_state` is legacy-tolerant; adding optional keys needs no migration) |
 | MCP connector actually working end-to-end | **BLOCKED** on D1 + D2 | from-doc — `docs/mcp-capability-audit.md` §3, §6 |
@@ -974,11 +1016,11 @@ is quoted it is **`rg`'s own**, not a pipeline's.
 
 | # | Claim | Command / citation |
 |---|---|---|
-| **M1** | No audio-capture API exists in any source file | `rg --text -n -i 'MediaRecorder\|SpeechRecognition\|webkitSpeech\|getUserMedia\|AudioContext\|navigator\.mediaDevices' -g '!node_modules' -g '!.git' .` → 2 hits, both prose in the capture spec |
+| **M1** | ~~No audio-capture API exists in any source file~~ → **FALSE as of 2026-08-24** | ~~→ 2 hits, both prose in the capture spec~~; re-measured **42** hits — `MediaRecorder` + `getUserMedia` in `apps/web/src/components/TranscriptCapturePanel.tsx`. Command unchanged: `rg --text -n -i 'MediaRecorder\|SpeechRecognition\|webkitSpeech\|getUserMedia\|AudioContext\|navigator\.mediaDevices' -g '!node_modules' -g '!.git' .` |
 | **M2** | No model or ASR SDK; one prose false positive | the vendor-token sweep in §3; the only non-doc hit is `apps/web/src/styles/tokens.css:111` (`depth is a whisper`) |
 | **M3** | No outbound HTTP call site in the runtime backend or truth core | `rg --text -n -e 'httpx' -e 'requests\.post' -e 'requests\.get' -e 'aiohttp' -e 'urllib\.request' apps/api/isaac_api src/isaac_records` → **exit 1** |
 | **M4** | `httpx` is a declared dependency with no call site | `pyproject.toml:23`; only occurrence is a comment, `apps/api/tests/test_deploy_config.py:117` |
-| **M5** | No MCP implementation anywhere | `rg --text -n -i -e 'mcp' -e 'jsonrpc' -e 'model context protocol' apps/api apps/web/src src scripts pyproject.toml apps/web/package.json` → **exit 1**; `find . -iname '*mcp*'` → only `docs/mcp-capability-audit.md` |
+| **M5** | ~~No MCP implementation anywhere~~ → **FALSE as of 2026-08-24**; the surviving true claim is *no hosted MCP ENDPOINT* | ~~→ **exit 1**; `find` → only `docs/mcp-capability-audit.md`~~; same command re-measured → **487 matches**, exit 0. `POST /api/mcp` → **404** in the default environment |
 | **M6** | `python-multipart` is not a dependency | `pyproject.toml:23` |
 | **M7** | `POST /api/uploads` is a no-parameter unconditional 403 | `apps/api/isaac_api/routes.py`, marker `# --- 15. uploads (always blocked) ---`, handler `def uploads():` |
 | **M8** | `SOURCE_TYPES` is closed at seven, none audio | `src/isaac_records/models.py:29-37`; mirrored `apps/web/src/lib/types.ts:17-24` |

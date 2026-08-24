@@ -915,7 +915,7 @@ many" requirement without any byte store at all.
 | Durable raw-file storage | **None.** `POST /api/uploads` is an unconditional 403 taking no parameters (`routes.py:3151-3157`); `python-multipart` is not a dependency (`pyproject.toml:23`), so FastAPI *cannot* parse a form; there is no `write_bytes`/`wb` call anywhere in `apps/api/` or `src/` | byte store (PVC or S3) in Dean-owned `isaac-k8`, **plus** lifting "upload writes — NOT authorized" (`CLAUDE.md:775`), plus content validation that does not exist |
 | Workspace durability | `ISAAC_UI_WORKSPACE`, asserted `emptyDir` by in-repo docs — **but the manifest is not in this repo** and zero `emptyDir`/`persistentVolumeClaim` tokens exist in any in-repo YAML. Unverifiable here | Dean |
 | Exported artifacts in the DB | Not persisted; only `state` jsonb is (`experiment_repository.py:37-44`) | later slice |
-| Audio / voice / ASR | **Nothing.** No `MediaRecorder`, no `SpeechRecognition`, no ASR client, no audio `source_type` | see §6 |
+| Audio / voice / ASR | ~~**Nothing.** No `MediaRecorder`, no `SpeechRecognition`, no ASR client, no audio `source_type`~~ **STALE — re-measured 2026-08-24.** `MediaRecorder` and `getUserMedia` both ship in `TranscriptCapturePanel.tsx`; there is still no ASR CLIENT and still no audio `source_type`, and no audio leaves the browser. See the D6 supersession | see §6 and the D6 supersession |
 
 #### CORRECTION 2026-08-10 — the uploads citation drifted; the BEHAVIOUR is unchanged
 
@@ -1003,8 +1003,54 @@ it.
 ### DECISION D6 — the honest v1 is transcript-only, provider-abstracted, audio never persisted
 
 - Audio is captured in the browser and **never leaves it except to a configured, approved
-  transcription provider**. With no provider configured, the recorder is not offered at all — not
-  offered-and-broken.
+  transcription provider**. ~~With no provider configured, the recorder is not offered at all — not
+  offered-and-broken.~~
+
+  > **SUPERSEDED 2026-08-24 BY AN EXPLICIT PRODUCT DECISION OF THE PROJECT OWNER. The struck
+  > sentence is kept because it was the decision taken, and because the build knowingly departs
+  > from it.**
+  >
+  > **What the code does.** `TranscriptCapturePanel` ships and is mounted ungated at
+  > `apps/web/src/screens/RecordWorkbench.tsx:687`. It calls `navigator.mediaDevices.getUserMedia`
+  > and `new MediaRecorder(stream)`. Its Record / Stop / Request-a-transcript / Discard controls are
+  > gated on `voice !== 'held'` — a BROWSER-CAPABILITY check — and on nothing else. There is no
+  > `transcription.configured` branch in the file. So in every shipped deployment a scientist can
+  > record real audio, press "Request a transcript", and receive `501 no_provider_configured`.
+  > **That is literally the "offered-and-broken" state this sentence was written to forbid**, and
+  > naming it plainly is the point of this note.
+  >
+  > **Why it is nevertheless the accepted product direction.** The owner's direction is that a
+  > provider-ready recording UX MAY exist provided production stays truthful, that manual transcript
+  > must work with no ASR at all, and that the recorder must not be deleted merely to preserve this
+  > sentence. Every safety property D6 actually argued for is enforced in code, verified by reading
+  > the code rather than the docs:
+  >
+  > * **No audio leaves the browser.** `requestTranscription` sends `audioRef:
+  >   "held-in-tab:<n>"` where `<n>` is `chunksRef.current.length` — a blob COUNT. No `Blob`,
+  >   `FormData`, or object URL is serialised anywhere; the wire carries only
+  >   `audio_ref`/`manual_transcript`/`language`, and the backend reads no file and declares no
+  >   multipart.
+  > * **No raw audio is persisted.** `_retention_disclosure` reports `raw_audio.stored: false`,
+  >   `POST /api/uploads` is an unconditional 403, and the chunks live only in `chunksRef`, dropped
+  >   on discard, on panel close and on unmount.
+  > * **No fabricated transcript can appear.** `providers/config.py` refuses to BOOT with
+  >   `deterministic-fake`, citing this very decision; and the fake itself refuses an `audio_ref`
+  >   with no manual transcript rather than inventing words for audio it cannot hear.
+  > * **Manual transcript works with no provider.** `POST /api/experiments/{id}/transcript` returns
+  >   `200` and never consults `provider_config`.
+  > * **No unbacked `Connected` claim.** `PRODUCTION_CONFIGURED` is set to `True` by no class in
+  >   the package, and the UI renders the server's own string rather than a client-side default.
+  >
+  > **What was corrected in the code rather than in the prose:** the panel's intro offered "dictate"
+  > unqualified, which `ai-integration-decision-packet.md` §9 ("build nothing that implies any of it
+  > exists") forbids, and §9 is binding per `CLAUDE.md` §15. That copy is fixed; the controls are not
+  > gated.
+  >
+  > **The residual departure, stated so no future session has to rediscover it:** a scientist can
+  > still reach a `501` by pressing a button. The mitigation is disclosure, not prevention — the
+  > seam's status renders ABOVE the controls, before any recording starts. If that trade is ever
+  > judged wrong, the one-line fix is to add `transcription.configured` to the `disabled` predicate
+  > on the Record and Request-a-transcript controls; nothing else has to change.
 - The **transcript** is JSON text, so it *can* be persisted in the existing `state` jsonb with no
   new storage of any kind. Retention choice therefore applies to the transcript, which is real,
   and not to raw audio, which has nowhere to go.

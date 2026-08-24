@@ -579,8 +579,12 @@ Current state:
   - **Not done, and named rather than implied:** `isaac_runs` Stage 2 (its blocker is measured — no
     completeness marker and no backfill, so a read cutover cannot distinguish "zero runs" from "never
     projected"); actor stamping (authorized by Dean, blocked in practice — no trusted boundary
-    exists, and the seam stays unset); the native assistant, MCP and voice product surfaces beyond
-    their existing seams; and the scale/concurrency benchmarks.
+    exists, and the seam stays unset); ~~the native assistant, MCP and voice product surfaces beyond
+    their existing seams~~ — **narrowed 2026-08-24: true of the ASSISTANT only.** `TranscriptCapturePanel`
+    had already shipped in `72e2206` (2026-08-17) and so was a product surface on the day this was
+    written, and `Settings → Connect Your Agent` is MCP's; the accurate claim is that no product
+    screen advertises the assistant seam. Left struck rather than edited because the three were never
+    in the same state and pairing them is the error worth remembering; and the scale/concurrency benchmarks.
 - **Session of 2026-08-19 — the product could not capture a record, and now can.** PR #171
   (`819568e`, `42dee80`, `bed331b`, `bb2095c`). Read this before planning any further feature
   work, because it changes what "substantially implemented" means for everything downstream.
@@ -633,8 +637,23 @@ Current state:
 
   **Still not done, and named rather than implied:** the campaign-sheet fields (technique, facility,
   sample, contributors) have no capture surface, so a record can be finished but not richly
-  described; `POST /ingestion/csv/preview` has no route that APPLIES a preview; the native assistant
-  and voice remain provider seams with no route invoking them; `isaac_runs` Stage 2, the Evidence
+  described; `POST /ingestion/csv/preview` has no route that APPLIES a preview; ~~the native
+  assistant and voice remain provider seams with no route invoking them~~ — **CORRECTED 2026-08-24,
+  and this clause was FALSE WHEN IT WAS COMMITTED, which is why it is struck rather than edited.**
+  Both seams have a reachable route. `POST /api/assistant/ask` shipped in `51435e7`, whose own
+  subject line reads *"the assistant seam becomes reachable"*, and `git merge-base --is-ancestor
+  51435e7 32fe7a3` confirms that commit was already in history when this paragraph was written.
+  `POST /api/transcription` shipped earlier still, in `72e2206` (2026-08-17). Both answer **`501`
+  `no_provider_configured`** in every deployment, `POST /api/experiments/{id}/transcript` answers
+  **`200`** with no provider involved at all, and `/api/assistant/ask` is one of the **69** operations
+  `test_about_and_openapi.py` pins. So the sentence was not describing a gap; it was describing
+  absent *routes* that existed. **The true residue, which is what the clause was reaching for and
+  what still holds: no product screen advertises the assistant seam** — deliberately, per
+  `docs/ai-integration-decision-packet.md` §9. Voice is the opposite case and must not be folded back
+  in with it: `TranscriptCapturePanel` is a **shipped** voice surface, mounted ungated at
+  `apps/web/src/screens/RecordWorkbench.tsx:687`, so any future sentence pairing "assistant and
+  voice" as equally unsurfaced is wrong about the second half. See also the D6 supersession, which is
+  the decision record this contradicted; `isaac_runs` Stage 2, the Evidence
   Graph / Compare Runs cross-feature work, the scale and concurrency benchmarks, and every hosted
   QA are unchanged by this session.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
