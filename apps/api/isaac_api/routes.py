@@ -382,8 +382,17 @@ _R_PRECONDITION: dict = {
     },
     428: {
         "description": (
-            "`If-Match` was omitted. Every write requires the record's current "
-            "`ETag`, so a blind overwrite is not possible."
+            "`If-Match` was omitted. Every write requires the header, so a write "
+            "that never read the record is refused by default.\n\n"
+            "ONE EXCEPTION, AND IT IS AN EXCEPTION TO THE STRONGEST FORM OF THAT "
+            "SENTENCE. `If-Match: *` is accepted, and it means what RFC 9110 says "
+            "it means — *if the resource exists* — so it does NOT compare "
+            "revisions. A caller sending it can overwrite a record, or a run, that "
+            "it has never read, and the write succeeds. That is deliberate and "
+            "tested; it is stated here because this description previously read "
+            "\"a blind overwrite is not possible\", which `*` makes false. If you "
+            "want the concurrency guarantee, send the validator a read returned, "
+            "never `*`."
         )
     },
 }
@@ -850,6 +859,59 @@ def _if_none_match_hit(if_none_match: str | None, exp) -> bool:
 
 
 # --- summary / detail serialization -------------------------------------------
+
+
+def _export_step_detail(result) -> str:
+    """The ``export_draft`` pipeline step's `detail`, WITHOUT claiming a verdict nobody rendered.
+
+    THE DEFECT THIS CLOSES. The line was::
+
+        f"official schema valid: {result.official_report.ok if result.official_report else False}"
+
+    ``ExportResult.official_report`` is ``None`` on exactly two paths that return BEFORE
+    ``validate_official`` is ever called (``isaac_records/export.py``): the no-guessing
+    draft failure, and ISAAC's anchored-pattern EXACTNESS gate, whose findings are folded
+    into ``draft_report`` on the way out. On both of them the ternary's ``else`` branch
+    rendered **"official schema valid: False"** — a verdict attributed to a document that
+    never examined the record.
+
+    That is not a wording nit here. ``CLAUDE.md`` §1 makes the vendored schema
+    upstream-owned, and §12 states the rule directly: *"the gate is ISAAC's, not
+    upstream's ... no surface may report an exactness refusal as an official-schema
+    error."* §12 also records that a surface shipped exactly this conflation once already
+    (``VerdictCard``, "Invalid against official ISAAC schema v1.05 — 0 errors" above
+    ``schema_ok: true``). This was the same claim in the SERVER's own words, which is why
+    no frontend fix could reach it: ``StagedRunner`` renders ``detail`` verbatim, and its
+    own docstring quotes this exact string as the text a failing step shows.
+
+    THE VOCABULARY IS NOT NEW. Three surfaces already faced the same missing
+    discriminator on the analogous per-run payload and settled it the same way — name the
+    official ISAAC schema ONLY where the verdict came from ``validate_official``, and
+    otherwise report the finding count without naming a source
+    (``ValidateReview.tsx``'s *"findings on this candidate record — source not named"``,
+    ``RunFindings.tsx``'s ``fail`` clause reading "did not pass" rather than "failed the
+    official ISAAC schema"). This is that wording, server-side. Inventing a fourth
+    phrasing for one more instance of one condition is how a client ends up branching on
+    prose.
+
+    THE DISCRIMINATOR IS ``official_report is not None`` — the same one those surfaces
+    use — and NOT ``result.ok``. A present report that says ``False`` is a real official
+    schema verdict and keeps the original sentence verbatim, including its Python-cased
+    ``False``, which ``StagedRunner``'s docstring and the frontend fixtures quote.
+
+    The refused-early branch does NOT try to say WHICH gate refused, and that is
+    deliberate rather than lazy: ``export.py`` folds exactness findings into
+    ``draft_report`` alongside the no-guessing ones and the ``record_id`` check, so the
+    wire this function reads carries no discriminator between them. Naming one would be
+    guessing which — the same defect, one level finer.
+    """
+    if result.official_report is not None:
+        return f"official schema valid: {result.official_report.ok}"
+    n = len(result.draft_report.errors)
+    return (
+        f"refused before official validation — {n} finding"
+        f"{'' if n == 1 else 's'} on the candidate record; source not named"
+    )
 
 
 def _summary(exp: Experiment) -> dict:
@@ -1488,10 +1550,7 @@ def demo_run(
             steps.append(
                 {
                     "name": "export_draft",
-                    "detail": (
-                        f"official schema valid: "
-                        f"{result.official_report.ok if result.official_report else False}"
-                    ),
+                    "detail": _export_step_detail(result),
                     "ok": result.ok,
                 }
             )
@@ -2411,6 +2470,74 @@ def _run_level_keys_in(apply_shape: dict) -> list[str]:
     return keys
 
 
+#: The operation that ANSWERS an open blocking question, one entry per LEVEL. They are
+#: TEMPLATES rather than interpolated URLs, and the concrete ids travel beside them in
+#: their own response keys — the convention every operation pointer in this module
+#: already follows (``ordinary_scope_required``'s ``operation``,
+#: ``tutorial_scope_forbidden``'s, and this file's own ``belongs_to_a_run``).
+#:
+#: THEY ARE CONSTANTS BECAUSE THE SAME TWO STRINGS ARE NOW CITED BY TWO DIFFERENT
+#: REFUSALS, and one of them was measured pointing at the wrong level. ``belongs_to_a_run``
+#: sends a run-owned key from the record to the run; ``not_yet_answered`` sends an
+#: unanswered key to whichever level raised it. A caller that follows either one must land
+#: somewhere that accepts the request, so the two must name the same operations by the same
+#: text — two copies of a URL is how one of them ends up stale.
+_ANSWERS_OPERATION_RECORD = "POST /api/experiments/{experiment_id}/answers"
+_ANSWERS_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/answers"
+
+#: The operation that CORRECTS an already-answered field, one entry per LEVEL — the
+#: exact counterparts of the two above, and constants for the same reason: two copies
+#: of a URL is how one of them ends up stale. They are what ``already_answered``'s
+#: ``answer_at`` names, which is the mirror image of what ``not_yet_answered`` names.
+_EDIT_OPERATION_RECORD = "POST /api/experiments/{experiment_id}/edit"
+_EDIT_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/edit"
+
+#: The ``422`` BOTH answers operations serve for an answer that would REPLACE a
+#: confirmed value.
+#:
+#: THE SCHEMA REF IS PART OF THE CONSTANT for the reason :data:`_R_NOT_YET_ANSWERED`
+#: states: FastAPI skips generating its own ``422`` the moment a route declares one,
+#: silently stripping the ``HTTPValidationError`` ref that
+#: ``test_operations_with_parameters_keep_the_validation_error_schema`` pins for every
+#: operation with a parameter or a body. That framework shape stays reachable on both
+#: answers operations (a request body that is not a JSON object), so it travels here.
+_R_ALREADY_ANSWERED: dict = {
+    422: {
+        "description": (
+            "Either the request body failed framework validation (the "
+            "`HTTPValidationError` shape below), or `confirmed_by_user` was not "
+            "`true` (`confirmation_required`), or `already_answered`.\n\n"
+            "`already_answered` \u2014 the body named a field whose question is already "
+            "CLOSED and supplied a value DIFFERENT from the confirmed one, which this "
+            "operation would have discarded. Nothing was written, the stored value is "
+            "unchanged, and the revision did not move. The body is "
+            "`{error, experiment_id, keys, answer_at, message}`, plus `run_id` on the "
+            "run-level operation, and `keys` names EVERY offending key rather than the "
+            "first.\n\n"
+            "**RESUBMITTING THE IDENTICAL VALUE IS STILL A SUCCESS** and is deliberately "
+            "not this refusal: a client may retry a request it is unsure landed, and "
+            "gets `200` with `changed: false` and an unmoved revision, exactly as "
+            "before. The refusal fires only where the two values differ, which is the "
+            "only case in which anything the caller sent was lost.\n\n"
+            "`answer_at` NAMES THE CORRECTION OPERATION AT THE LEVEL THIS REFUSAL WAS "
+            "RAISED AT \u2014 the record's edit operation for a refusal on the record, "
+            "the RUN's for a refusal on a run. It is a template, and "
+            "`experiment_id`/`run_id` carry the concrete ids, exactly as "
+            "`not_yet_answered` and `belongs_to_a_run` do. It is always present here "
+            "and is provably actionable rather than plausibly so \u2014 see the "
+            "refusal's own notes for why `/edit` cannot refuse what this redirects."
+        ),
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+            }
+        },
+    },
+}
+
+
+
+
 def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | None:
     """Refuse a run-owned answer sent to the RECORD, once the record has runs.
 
@@ -2448,7 +2575,7 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
             "runs": [
                 {"run_id": run.id, "run_label": run.label} for run in exp.sorted_runs()
             ],
-            "answer_at": "POST /api/experiments/{experiment_id}/runs/{run_id}/answers",
+            "answer_at": _ANSWERS_OPERATION_RUN,
             "message": (
                 "This record has runs, and each run is a record of its own. A spectrum, "
                 "a QC verdict, a descriptor and an asset hash belong to the run that "
@@ -2493,6 +2620,12 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
         **_R_BELONGS_TO_A_RUN,
+        # DECLARED, because it was not. This operation already performed
+        # `confirmation_required` and now performs `already_answered`, and neither was
+        # described in the published contract — the same gap `_R_NOT_YET_ANSWERED`
+        # records for its own refusal, which "reached no generated OpenAPI document,
+        # and therefore no machine client that reads the contract before calling it."
+        **_R_ALREADY_ANSWERED,
     },
 )
 def post_answers(
@@ -2504,8 +2637,9 @@ def post_answers(
         description=(
             "`{\"confirmed_by_user\": true, \"answers\": {<key>: <value>}}`. The "
             "keys come from `GET /api/experiments/{experiment_id}/pending`. "
-            "Omitting `confirmed_by_user: true` is rejected with `422`, and a key "
-            "that names no open question is ignored rather than invented."
+            "Omitting `confirmed_by_user: true` is rejected with `422`, an "
+            "UNRECOGNISED key is ignored rather than invented, and a recognised key "
+            "whose question is already closed is refused with `422 already_answered`."
         ),
     ),
     if_match: str | None = Header(
@@ -2551,6 +2685,22 @@ def post_answers(
         timestamp = _now_iso()
         apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
         refusal = _refuse_run_level_on_the_record(exp, apply_shape)
+        if refusal is not None:
+            return refusal
+        # AFTER the run-level refusal, and the order is the honest one rather than an
+        # arbitrary one. On a record that HAS runs, `series`/`qc`/`descriptor`/an asset
+        # sha belong to the run, and `belongs_to_a_run` names the run's own answers
+        # operation — a strictly more useful answer than "already answered here", where
+        # "here" is a level that no longer owns the value. So this refusal is reachable
+        # only on a record with no runs, which is exactly the record whose own `/edit`
+        # accepts the correction it names.
+        refusal = _refuse_answering_an_already_answered_key(
+            exp.draft,
+            body.get("answers") or {},
+            timestamp,
+            edit_at=_EDIT_OPERATION_RECORD,
+            identifiers={"experiment_id": exp.id},
+        )
         if refusal is not None:
             return refusal
         exp.draft = apply_answers(exp.draft, apply_shape)
@@ -2623,19 +2773,253 @@ _CORRECTABLE_KEY_STORAGE: dict[str, str] = {
 }
 
 #: The refusal for correcting something nothing has answered yet.
+#:
+#: IT WAS DEAD FOR ITS WHOLE LIFE, and that is the reason the two constants below exist
+#: rather than one. ``grep -n _R_NOT_YET_ANSWERED apps/api/isaac_api/routes.py`` returned
+#: exactly ONE line — this definition — so the body :func:`_refuse_correcting_an_unanswered_key`
+#: emits reached no ``responses={...}``, no generated OpenAPI document, and therefore no
+#: machine client that reads the contract before calling it. Both correction operations
+#: DID declare a ``422``; the record's enumerated three domain refusals and omitted this
+#: one, and the run's carried only the framework's "Validation Error". So a caller could
+#: read the published contract, receive ``error: not_yet_answered``, and find it described
+#: nowhere.
+#:
+#: THE SCHEMA REF IS PART OF THE CONSTANT ON PURPOSE. FastAPI skips generating its own
+#: ``422`` entry the moment a route declares one, which silently strips the
+#: ``HTTPValidationError`` content ref that
+#: ``test_operations_with_parameters_keep_the_validation_error_schema`` pins for every
+#: operation with a parameter or a body. That framework shape is genuinely reachable on
+#: both correction operations (a request body that is not a JSON object), so it is carried
+#: here rather than left to whichever route happens to remember it. No JSON ``example`` of
+#: the domain body is attached beside it, because an example that does not validate against
+#: its own declared schema would be a second wrong answer rather than a fix.
 _R_NOT_YET_ANSWERED: dict = {
     422: {
         "description": (
-            "The body named a field that is still an OPEN question, so there is "
-            "nothing to correct and nothing was written. Answer it through "
-            "`/answers` instead — the body names every such key and the operation "
-            "that takes it."
-        )
+            "`not_yet_answered` — the body named a field that is still an OPEN "
+            "question, so there was nothing to correct and nothing was written. The "
+            "body is `{error, experiment_id, keys, message}`, plus `run_id` on the "
+            "run-level operation, and `keys` names EVERY offending key rather than "
+            "the first.\n\n"
+            "`answer_at` NAMES THE OPERATION THAT CAN ACTUALLY TAKE THE ANSWER AT THE "
+            "LEVEL THIS REFUSAL WAS RAISED AT — the record's answers operation for a "
+            "refusal on the record, the RUN's for a refusal on a run. It is a template, "
+            "and `experiment_id`/`run_id` carry the concrete ids, exactly as the "
+            "`belongs_to_a_run` `409` does. It is **absent rather than wrong** when no "
+            "operation can resolve the condition: a record that has runs no longer owns "
+            "a spectrum, a QC verdict, a descriptor or an asset hash, so no operation on "
+            "the record can answer one, and `message` says so instead. A client may "
+            "therefore follow `answer_at` when it is present and must not assume it is."
+        ),
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+            }
+        },
+    },
+}
+
+#: The COMPLETE ``422`` that BOTH correction operations serve, built by merging the
+#: refusal above into the three it shares with its sibling.
+#:
+#: ONE CONSTANT FOR TWO ROUTES, because the two refuse exactly the same four domain
+#: conditions — ``confirmation_required``, ``not_yet_answered``, ``unrecognized_field``
+#: and ``invalid_field_value`` — and this module already states the reason in
+#: :func:`_apply_to_run`, where the ``invalid_field_value`` body is copied verbatim
+#: from the record path: *"Two different messages for one condition is how a client
+#: ends up branching on prose."* The same hazard applies to the two DESCRIPTIONS of
+#: one condition, and it had already happened: the record's ``422`` enumerated three
+#: refusals while the route performed four.
+#:
+#: The merge is ``**_R_NOT_YET_ANSWERED[422]`` rather than a second copy of the schema
+#: ref, so the ref cannot be present on one of the two and missing on the other.
+_R_CORRECTION_REFUSED: dict = {
+    422: {
+        **_R_NOT_YET_ANSWERED[422],
+        "description": (
+            "Either the request body failed framework validation (the "
+            "`HTTPValidationError` shape below), or the correction was refused by "
+            "this operation before anything was written, as an object whose `error` "
+            "names WHICH refusal it is and whose remaining keys depend on that — "
+            "`key` appears on `invalid_field_value` only, and `experiment_id` on "
+            "`not_yet_answered` only. `error` is then "
+            "`confirmation_required` (`confirmed_by_user` was not `true`), "
+            "`unrecognized_field` (no already-answered editable field was named — "
+            "including an asset whose hash is still an open question, which belongs "
+            "to the answers operation), `invalid_field_value` (a recognised field "
+            "carried a value the record cannot store; `key` and `keys` name the "
+            "offending field(s), and `message` deliberately states no cause), or "
+            "`not_yet_answered`, described next. Nothing is written on any of "
+            "them.\n\n" + _R_NOT_YET_ANSWERED[422]["description"]
+        ),
     },
 }
 
 
-def _refuse_correcting_an_unanswered_key(draft: dict, answers_by_id: dict):
+def _refuse_answering_an_already_answered_key(
+    draft: dict,
+    answers_by_id: dict,
+    timestamp: str,
+    *,
+    edit_at: str,
+    identifiers: dict,
+):
+    """Refuse an ANSWER that would REPLACE a confirmed value. ``None`` to proceed.
+
+    THE MIRROR OF :func:`_refuse_correcting_an_unanswered_key`, and the half that was
+    missing. That one closes ``/edit`` against a question nobody has answered; this one
+    closes ``/answers`` against a question somebody already has. The two routes divide
+    the work \u2014 ``/answers`` answers OPEN questions, ``/edit`` corrects
+    ALREADY-ANSWERED ones \u2014 and until now only one side of the division was enforced.
+
+    THE DEFECT THIS CLOSES, measured over HTTP on a record created through
+    ``POST /api/experiments``, with a stored ``series_id`` of ``race-a`` and ``race-b``
+    submitted::
+
+        POST /runs/{run_id}/answers {"series": <race-b>}
+          -> 200
+             invalidation.changed        false
+             invalidation.rev            unmoved
+             invalidation.reason         "No change \u2014 the submitted value was
+                                          identical; nothing was invalidated."
+             stored series_id AFTER      race-a
+
+    The value was neither identical nor ever stored. That is the same sentence, and the
+    same two false claims, that :func:`_answers_to_apply_shape`'s docstring already
+    records for the ASSET key on the CORRECTION route \u2014 *"false twice over, because
+    the value was neither identical nor ever stored"* \u2014 left live on the opposite
+    route. It was measured on FIVE key/level combinations, not the one it was reported
+    on: ``series``, ``qc`` and ``descriptor`` on ``/runs/{run_id}/answers``, ``series``
+    on the record's ``/answers``, and a stored asset uri re-answered with a DIFFERENT
+    sha256 on the record's ``/answers``.
+
+    WHY THE ANSWER IS ALWAYS DISCARDED, structurally rather than by luck.
+    :func:`~isaac_records.complete.apply_answers` iterates ``draft["pending"]`` and
+    writes only inside a branch it entered from a pending entry. A closed question has no
+    entry, so no branch is entered and no value is written \u2014 for every kind,
+    including assets, whose materialised entry is removed from ``pending`` when it
+    resolves. The route then reports ``changed=False``, and
+    ``dependencies.build_invalidation`` cannot tell "the caller resubmitted the identical
+    value" from "we dropped what the caller sent", so it says the first about both.
+
+    **IT FIRES ONLY WHERE THE VALUES DIFFER, AND THAT IS NOT A SOFTENING \u2014 IT IS
+    WHAT MAKES THE SENTENCE TRUE AGAIN.** An identical resubmission is a real,
+    documented, load-bearing behaviour: three tests
+    (``test_versioning::test_http_answers_noop_reentry_does_not_bump_rev``,
+    ``test_dependency_invalidation::test_noop_resubmission_invalidates_nothing_and_does_not_bump_rev``,
+    ``test_experiment_repository::test_an_identical_re_entry_through_the_api_still_succeeds``)
+    pin that a client may repeat a request it is unsure landed and get ``200`` with an
+    unmoved revision. A first draft of this refusal broke all three, which is how the
+    requirement was found rather than assumed. For an identical resubmission the sentence
+    "the submitted value was identical" is simply TRUE and nothing was lost; only a
+    DIFFERING value is a discarded one.
+
+    **EQUALITY IS ASKED OF THE TRUTH CORE, NOT RE-IMPLEMENTED HERE, and that is the
+    load-bearing design choice.** ``apply_corrections`` already answers exactly this
+    question for exactly these keys \u2014 its own comment reads *"Each branch guards on
+    an EQUALITY check first: an identical re-confirm changes NOTHING (no overwrite, no
+    fresh evidence, no wrapper-timestamp churn), so the authoritative draft signature
+    stays byte-stable"* \u2014 and it knows things a route must not restate: that a
+    descriptor is compared with its ``evidence`` excluded, that a qc verdict is compared
+    as the ``(status, note)`` PAIR (the C1/I3 defects recorded in that function), and
+    where each value physically lives. So the probe is
+    ``apply_corrections(draft, one_key_shape) != draft``, over a pure deep-copying
+    function that writes nothing and persists nothing. A hand-written comparison of five
+    storage layouts is precisely the duplication that drifts, and it would have had to be
+    got right in a file that must not know those layouts.
+
+    THREE CONSEQUENCES OF PROBING WITH THE CORRECTION WRITER, all of them wanted:
+
+    * ``answer_at`` IS PROVABLY ACTIONABLE rather than plausibly so. A key is refused
+      only if ``apply_corrections`` would write it, which means it is ``series``,
+      ``descriptor``, ``qc`` or a stored asset uri \u2014 so
+      :func:`_has_correction_target` is satisfied, :func:`_correction_is_storable` is
+      satisfied (the writer accepted the value), and
+      :func:`_refuse_correcting_an_unanswered_key` cannot fire (the question is closed).
+      ``/edit`` is therefore guaranteed to accept what this refusal redirects, which is
+      the property that function's docstring says a refusal must have: *"a refusal that
+      misdirects is worse than one that says nothing."*
+    * A BARE ``descriptor_label`` FALLS OUT ON ITS OWN. ``apply_corrections`` gates the
+      whole descriptor block on ``descriptor is not None``, so a label with no descriptor
+      changes nothing and is never refused \u2014 matching both edit operations, which
+      answer it ``422 unrecognized_field`` (measured over HTTP at both levels). No
+      special case was needed and none is written; had one been, it would have named
+      ``/edit`` for a key ``/edit`` rejects.
+    * AN UNUSABLE VALUE IS NOT REFUSED HERE. ``apply_corrections`` declines a value it
+      cannot store, so the probe reports no change and this function proceeds. That case
+      keeps its existing behaviour and is deliberately NOT changed by this slice: it
+      belongs to the route's unusable-value doctrine
+      (:func:`_correction_is_storable` / ``invalid_field_value``), which is a different
+      rule at a different layer, and adopting it on the answers path would also change
+      what an unusable answer to an OPEN question does \u2014 where the returned
+      ``pending`` list already tells the caller the answer did not land.
+
+    ``edge`` IS OUT OF SCOPE for the reason the mirror gives: it corresponds to no
+    blocker, so "closed" is not a state it can be in. It is excluded STRUCTURALLY, by
+    consulting :data:`_CORRECTABLE_KEY_KINDS` rather than the writer's key set \u2014
+    which matters, because the record operation's own response documentation promises
+    that ``edge`` is answerable there even on a record that has runs.
+
+    THE CLOSED CHECK COMES FIRST, AND NOT ONLY FOR SPEED. An OPEN question stores
+    nothing, so ``apply_corrections`` would report a change for it too \u2014 probing
+    without the state check would refuse the ordinary, correct use of this route. It also
+    means a request that answers only open questions performs no probe at all, so the
+    common path costs nothing.
+    """
+    pending = [e for e in (draft.get("pending") or []) if isinstance(e, dict)]
+    open_kinds = {e.get("kind") for e in pending}
+    open_asset_uris = {e.get("uri") for e in pending if e.get("kind") == "asset"}
+    stored_uris = {
+        a.get("uri") for a in (draft.get("assets") or []) if isinstance(a, dict)
+    }
+    offending = []
+    for key, value in (answers_by_id or {}).items():
+        if value in (None, ""):
+            continue
+        kind = _CORRECTABLE_KEY_KINDS.get(key)
+        if kind is not None:
+            if kind in open_kinds:
+                continue
+        elif key not in stored_uris or key in open_asset_uris:
+            # Not a named answer key and not a stored asset uri -> nothing this refusal
+            # has an opinion about. The `open_asset_uris` half is defence in depth, not
+            # a live case: `apply_answers` removes an asset's pending entry when it
+            # materialises it, so a uri cannot normally be both. If one were, the answer
+            # WOULD apply and must not be refused.
+            continue
+        # The question is closed. Does this value differ from the confirmed one?
+        # `edit_only=True` builds the shape `/edit` WOULD build: it narrows asset uris to
+        # the stored ones and forwards `qc` unscreened, which is what makes the probe an
+        # answer about this VALUE rather than about the answers path's own filtering.
+        probe = _answers_to_apply_shape({key: value}, draft, timestamp, edit_only=True)
+        if apply_corrections(draft, probe) != draft:
+            offending.append(key)
+    if not offending:
+        return None
+    content: dict = {
+        "error": "already_answered",
+        **identifiers,
+        "keys": sorted(offending),
+        "answer_at": edit_at,
+    }
+    content["message"] = (
+        "Each of these is already answered, and the value submitted here differs from "
+        "the confirmed one. This operation answers open questions only, so applying it "
+        "would have discarded what you sent while reporting no change. Nothing was "
+        "written and the stored value is unchanged. Correct it at the operation named "
+        "in `answer_at` instead \u2014 the ids to substitute into it are in this same "
+        "body. Resubmitting the value that is already stored is still accepted here."
+    )
+    return JSONResponse(status_code=422, content=content)
+
+
+def _refuse_correcting_an_unanswered_key(
+    draft: dict,
+    answers_by_id: dict,
+    *,
+    answer_at: str | None,
+    identifiers: dict,
+):
     """Refuse a CORRECTION of a key that is still an open question. ``None`` to proceed.
 
     THE DEFECT THIS CLOSES, measured over MCP by an independent review before it was
@@ -2679,6 +3063,48 @@ def _refuse_correcting_an_unanswered_key(draft: dict, answers_by_id: dict):
     draft. That is structurally the same rule the asset path already applies
     (``asset_uris = stored_uris``): what makes a correction legitimate is that there
     is something stored to correct.
+
+    ``answer_at`` IS A PARAMETER BECAUSE IT WAS A HARDCODED LITERAL AND THE LITERAL WAS
+    WRONG AT ONE OF THE TWO CALL SITES. It read
+    ``"POST /api/experiments/{experiment_id}/answers"`` — the RECORD's operation — and
+    this function is also called from the RUN correction path, where every one of the
+    four keys it can refuse is run-owned. Measured over HTTP on a record with one run,
+    correcting its never-answered ``qc``::
+
+        POST /runs/{run_id}/edit {"qc": {...}}   -> 422 not_yet_answered
+                                                   answer_at: POST …/answers   (record)
+        POST /answers            {"qc": {...}}   -> 409 belongs_to_a_run
+                                                   answer_at: POST …/runs/{run_id}/answers
+
+    So a client that did exactly what the first refusal told it to do was refused again,
+    by a route that is *guaranteed* to refuse it — ``_refuse_run_level_on_the_record``
+    exists precisely to refuse a run-owned key on a record that has runs — and had to
+    follow a SECOND redirect to reach the operation the first refusal should have named.
+    A refusal that misdirects is worse than one that says nothing: it spends the caller's
+    retry and reads as authoritative while doing it.
+
+    THE RECORD CALL SITE STILL PASSES THE RECORD'S OPERATION, and that is a conditional
+    fact rather than a constant one. Every key in :data:`_CORRECTABLE_KEY_KINDS` is also
+    a key in :data:`_RUN_LEVEL_ANSWER_BLOCK`, and on the record path
+    ``_refuse_run_level_on_the_record`` runs FIRST — so this refusal is reachable there
+    only on a record with no runs, which is exactly the record whose own ``/answers``
+    accepts the key. Measured in both directions: with a run, the record path answers
+    ``409 belongs_to_a_run`` and never reaches here; with no runs it answers this
+    ``422``. The record call site therefore passes ``None`` when ``exp.runs`` is
+    non-empty rather than relying on that ordering — the guarantee is a property of two
+    functions and of ``workspace.RUN_LEVEL_BLOCKS``, and if any of the three changes the
+    honest outcome is *no* ``answer_at``, not a stale one.
+
+    ``None`` IS THEREFORE A SUPPORTED VALUE AND OMITS THE KEY. Emitting an operation the
+    application would refuse is the defect above; emitting nothing, and saying in
+    ``message`` that nothing can resolve it here, is the honest alternative. The key is
+    omitted rather than set to ``null`` so a client cannot mistake "no route" for a route
+    whose name failed to render.
+
+    ``identifiers`` carries the concrete ids — ``experiment_id``, plus ``run_id`` on the
+    run path — beside the template, which is the convention ``belongs_to_a_run`` and every
+    other operation pointer in this module already follows. A caller substitutes them; the
+    refusal never ships a half-interpolated URL.
     """
     open_kinds = {
         entry.get("kind")
@@ -2694,20 +3120,24 @@ def _refuse_correcting_an_unanswered_key(draft: dict, answers_by_id: dict):
     )
     if not offending:
         return None
-    return JSONResponse(
-        status_code=422,
-        content={
-            "error": "not_yet_answered",
-            "keys": offending,
-            "answer_at": "POST /api/experiments/{experiment_id}/answers",
-            "message": (
-                "Each of these is still an open question, so there is no confirmed "
-                "value to correct. Correcting one would store the value and leave "
-                "the question open, which would report a change that resolved "
-                "nothing. Answer it instead. Nothing was written."
-            ),
-        },
+    content: dict = {"error": "not_yet_answered", **identifiers, "keys": offending}
+    if answer_at is not None:
+        content["answer_at"] = answer_at
+    content["message"] = (
+        "Each of these is still an open question, so there is no confirmed value to "
+        "correct. Correcting one would store the value and leave the question open, "
+        "which would report a change that resolved nothing. "
+        + (
+            "Answer it at the operation named in `answer_at` instead — the ids to "
+            "substitute into it are in this same body. Nothing was written."
+            if answer_at is not None
+            else "No operation on this record can answer it: the record has runs, so a "
+            "spectrum, a QC verdict, a descriptor and an asset hash belong to the run "
+            "that measured them. No `answer_at` is given rather than one that would "
+            "refuse the request. Nothing was written."
+        )
     )
+    return JSONResponse(status_code=422, content=content)
 
 
 def _has_correction_target(apply_shape: dict) -> bool:
@@ -2784,38 +3214,13 @@ def _fields_the_shape_carries(apply_shape: dict, submitted_fields: list[str]) ->
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
         # DECLARED, because the generated 422 said only "Validation Error" while this
-        # operation refuses three DOMAIN conditions under that status, each with a body
-        # the framework's schema does not describe. The description carries them.
-        #
-        # THE SCHEMA REF IS RE-DECLARED ON PURPOSE, and dropping it is a trap this
-        # repository already documents: FastAPI skips generating its own 422 entry the
-        # moment a route declares one, which silently strips the `HTTPValidationError`
-        # content ref that `test_operations_with_parameters_keep_the_validation_error_schema`
-        # pins for every operation with a parameter or a body. That framework shape is
-        # genuinely reachable here (a request body that is not a JSON object), so it is
-        # kept rather than replaced — and no JSON `example` of the domain body is attached
-        # beside it, because an example that does not validate against its own declared
-        # schema would be a second wrong answer rather than a fix.
-        422: {
-            "description": (
-                "Either the request body failed framework validation (the "
-                "`HTTPValidationError` shape below), or the correction was refused by "
-                "this operation before anything was written, as "
-                "`{error, key, keys, message}`. `error` is then "
-                "`confirmation_required` (`confirmed_by_user` was not `true`), "
-                "`unrecognized_field` (no already-answered editable field was named — "
-                "including an asset whose hash is still an open question, which belongs "
-                "to the answers operation), or `invalid_field_value` (a recognised field "
-                "carried a value the record cannot store; `key` and `keys` name the "
-                "offending field(s), and `message` deliberately states no cause). "
-                "Nothing is written on any of them."
-            ),
-            "content": {
-                "application/json": {
-                    "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
-                }
-            },
-        },
+        # operation refuses four DOMAIN conditions under that status, each with a body
+        # the framework's schema does not describe. `_R_CORRECTION_REFUSED` carries
+        # them, and it is SHARED with the run-level correction operation because that
+        # one refuses the identical four — see the constant for why one declaration is
+        # safer than two, and for the `not_yet_answered` one that was missing from the
+        # enumeration here while this route performed it.
+        **_R_CORRECTION_REFUSED,
         **_R_BELONGS_TO_A_RUN,
     },
 )
@@ -2884,7 +3289,21 @@ def post_edit(
         # things and this one is the more specific: "still open" rather than "not
         # recognised". The order is what keeps a scientist from being sent to look
         # for a misspelling in a field name that is spelled correctly.
-        refusal = _refuse_correcting_an_unanswered_key(exp.draft, body.get("answers") or {})
+        refusal = _refuse_correcting_an_unanswered_key(
+            exp.draft,
+            body.get("answers") or {},
+            # THE RECORD'S OWN `/answers` ONLY WHEN IT CAN ACTUALLY TAKE THE KEY. Every
+            # key this refusal can name is run-owned, so on a record that has runs the
+            # record-level operation would answer `409 belongs_to_a_run` — and the
+            # refusal above has already returned that, which is why `None` here is a
+            # branch this call cannot currently reach (measured: with a run the record
+            # path answers 409 and never arrives). It is passed anyway rather than
+            # assumed away: the unreachability rests on the ordering of two refusals
+            # and on `workspace.RUN_LEVEL_BLOCKS`, and if any of that moves, no
+            # `answer_at` is the truthful output and a stale one is not.
+            answer_at=None if exp.runs else _ANSWERS_OPERATION_RECORD,
+            identifiers={"experiment_id": exp.id},
+        )
         if refusal is not None:
             return refusal
         if not _has_correction_target(apply_shape):
@@ -5177,8 +5596,11 @@ def post_run_override_clear(
         "will not match.\n\n"
         "The keys are the same keys the record's `/answers` takes, and come from "
         "`GET /api/experiments/{experiment_id}/pending`, where a run-owned question "
-        "carries the `run_id` it belongs to. An answer that names no open question "
-        "on THIS run is ignored rather than invented, exactly as on the record."
+        "carries the `run_id` it belongs to. An UNRECOGNISED key is ignored rather "
+        "than invented, exactly as on the record — but a recognised key whose question "
+        "on THIS run is already CLOSED is refused with `422 already_answered` and "
+        "sent to the run's `/edit`, because applying it would write nothing while "
+        "reporting a change."
     ),
     response_description=(
         "The record's refreshed blocking questions, status, revision metadata, "
@@ -5189,6 +5611,10 @@ def post_run_override_clear(
         **_R_UNAUTHORIZED,
         **_R_RUN_NOT_FOUND,
         **_R_PRECONDITION,
+        # DECLARED, because it was not, and this operation's `422` previously carried
+        # only the framework's "Validation Error" — the same gap its sibling `/edit`
+        # had, recorded in that route's own `responses` note.
+        **_R_ALREADY_ANSWERED,
     },
 )
 def post_run_answers(
@@ -5241,6 +5667,13 @@ def post_run_answers(
         **_R_UNAUTHORIZED,
         **_R_RUN_NOT_FOUND,
         **_R_PRECONDITION,
+        # THE SAME FOUR DOMAIN REFUSALS THE RECORD-LEVEL CORRECTION DECLARES, from the
+        # same constant. This route's 422 carried only the framework's "Validation
+        # Error" while it performed all four, so a machine client reading the contract
+        # before calling found `not_yet_answered`, `unrecognized_field` and
+        # `invalid_field_value` described nowhere — and `not_yet_answered` is the one
+        # whose body a client is expected to ACT on, by following `answer_at`.
+        **_R_CORRECTION_REFUSED,
     },
 )
 def post_run_edit(
@@ -5340,7 +5773,16 @@ def _apply_to_run(
             # run that owns the value, which is the only level at which the question
             # means anything once a record has runs.
             refusal = _refuse_correcting_an_unanswered_key(
-                run_draft, body.get("answers") or {}
+                run_draft,
+                body.get("answers") or {},
+                # THE RUN'S OWN `/answers`, not the record's. The literal that used to
+                # be baked into the refusal named the record's, which on a record that
+                # has runs is the one operation guaranteed to refuse these keys — so a
+                # compliant client following the refusal was refused a second time and
+                # had to follow a second redirect to arrive where this refusal should
+                # have sent it in the first place.
+                answer_at=_ANSWERS_OPERATION_RUN,
+                identifiers={"experiment_id": exp.id, "run_id": run.id},
             )
             if refusal is not None:
                 return refusal
@@ -5380,6 +5822,21 @@ def _apply_to_run(
                 )
             run.draft = apply_corrections(run_draft, apply_shape)
         else:
+            # THE MIRROR OF THE REFUSAL DIRECTLY ABOVE, on the answering side, and asked
+            # of `run_draft` for the same reason the correcting branch asks it of
+            # `run_draft`: the run owns the value, so "already answered" only means
+            # anything at the level that holds it. `run_draft` carries the materialised
+            # `pending` for a legacy run, so a run whose questions were derived rather
+            # than stored is judged on the same list a scientist was shown.
+            refusal = _refuse_answering_an_already_answered_key(
+                run_draft,
+                body.get("answers") or {},
+                timestamp,
+                edit_at=_EDIT_OPERATION_RUN,
+                identifiers={"experiment_id": exp.id, "run_id": run.id},
+            )
+            if refusal is not None:
+                return refusal
             run.draft = apply_answers(run_draft, apply_shape)
 
         # THE SAME LOG THE RECORD PATH KEEPS, and it was missing. `answer_log` is what
@@ -5510,10 +5967,52 @@ def post_run_check(
     # the blocker already says (`_blocker_message`); nothing new is composed, and
     # `serialize.pending_to_list` is left alone because it is the shape the
     # record-level `/pending` and `/answers` operations already publish.
+    #
+    # THE ENTRIES COME FROM `Experiment.pending()`, NOT FROM `unit.draft["pending"]`,
+    # AND THE DIFFERENCE WAS A MEASURED DEFECT ON A LEGACY RUN.
+    #
+    # `resolved_run_draft` starts from a deep copy of `run.draft` and then layers the
+    # EXPERIMENT-LEVEL addresses over it; `pending` is unclassified
+    # (`workspace.block_level`), so it is neither inherited nor synthesised. A run
+    # created before `_seed_for_new_run` existed has no `pending` key at all — that is
+    # the state `ws.run_questions` was made public for, and every such run is still an
+    # empty-drafted run in PostgreSQL. `pending_to_list(unit.draft, ...)` read the
+    # absent key and got nothing. Measured over HTTP on such a run::
+    #
+    #     GET  /experiments/{id}/pending        -> series, qc, descriptor   (3)
+    #     GET  /experiments/{id}                -> pending_count 3
+    #     POST /runs/{run_id}/check             -> blockers []   ok: false
+    #                                             official.ok: false
+    #
+    # An empty `blockers` beside `ok: false` is the shape a client reads as "it fails
+    # and nothing is open to fix" — the same class as `GuidedCompletion` rendering
+    # "All blockers resolved" on an empty list, which this repository has already had
+    # to correct once on the record-level `/answers` response for the same reason.
+    #
+    # `Experiment.pending()` is the derivation every other surface uses, and it routes
+    # a legacy run through `ws.run_questions`, so this operation now agrees with
+    # `GET /pending` and with `pending_count` by construction rather than by
+    # coincidence. Filtered to THIS run because the response documents "the run's open
+    # blocking questions": the record's own non-run-level questions are deliberately
+    # NOT promoted here, which keeps the set this operation reports exactly the set it
+    # reported before for a seeded run.
+    #
+    # NO TIER IS CHANGED. `blockers` is the blocking-question list and nothing else;
+    # the advisory tier reaches this response through `official`/`draft` warnings and
+    # is not merged in. A non-dict entry (a malformed persisted document) is dropped by
+    # the `isinstance` guard, which is what `Experiment.pending()` already declines to
+    # repair — and previously reached `entry.get` and raised.
     blockers = [
         {**entry, "message": _blocker_message(entry)}
         for entry in serialize.pending_to_list(
-            unit.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+            unit.draft,
+            ws.load_demo_answers(),
+            example_scope=_example_scope(experiment_id),
+            entries=[
+                entry
+                for entry in exp.pending()
+                if isinstance(entry, dict) and entry.get("run_id") == run.id
+            ],
         )["pending"]
     ]
     return {
@@ -8532,12 +9031,20 @@ def _publication_disclosure(published: Sequence[dict] | None) -> tuple[str, dict
     UNCONDITIONALLY, AND AFTER MATERIALISATION THAT IS THE OPPOSITE OF THE TRUTH.**
     ``post_submit`` writes the official ISAAC records and saves the experiment
     state BEFORE it opens the submission transaction (the order is deliberate and is
-    argued at the call site: it is the only recoverable one). So four refusals —
-    ``tables_absent`` raised from the write, ``already_submitted``,
-    ``idempotency_key_conflict`` and the generic ``submission_conflict``, all three
-    of which can also arrive AFTER the race — could fire with two artifact files on
-    disk, ``record_id`` set and ``rev`` moved, while telling the scientist that
-    nothing had been published.
+    argued at the call site: it is the only recoverable one). So the refusals raised
+    from the write — ``tables_absent``, ``database_unavailable``,
+    ``already_submitted``, ``idempotency_key_conflict`` and the generic
+    ``submission_conflict`` — could fire with two artifact files on disk,
+    ``record_id`` set and ``rev`` moved, while telling the scientist that nothing had
+    been published.
+
+    THIS SENTENCE USED TO SAY "FOUR REFUSALS" AND LIST FOUR, and the tally was one
+    short: ``database_unavailable`` is raised from the write's own ``except
+    db_write.WriteRefused`` handler and is exactly as post-materialisation as
+    ``tables_absent`` beside it, which the served ``503`` description also omitted.
+    The numeral is gone rather than corrected — the enumeration is the claim, and it
+    is pinned against the emitting code by
+    ``apps/api/tests/test_submit_refusal_partition.py`` rather than by counting here.
 
     That is not a cosmetic inaccuracy. Exported records are IMMUTABLE and no route
     republishes one, so a scientist who believes nothing was published will edit the
@@ -8639,6 +9146,166 @@ _SUBMISSION_DB_UNREACHABLE_LEAD = (
 )
 
 
+# =============================================================================
+# THE SUBMIT REFUSAL PARTITION, DECLARED ONCE AND PINNED AGAINST THE CODE
+# =============================================================================
+#
+# WHAT WAS WRONG, AND WHY IT WAS NOT COSMETIC. The `409` description used to
+# enumerate its seven errors and then split them positionally: *"The first four are
+# raised before any official record is materialised. The last three can also be
+# raised after materialisation."* Measured against the call sites, that split was
+# wrong in three places at once:
+#
+#   * `already_submitted` was in the "first four" and IS raised after materialisation
+#     — `_already_submitted(exc.existing, published)` and `_already_submitted(settled,
+#     published)`, both inside the post-materialisation `except` handlers, and its own
+#     docstring says so ("reachable from two places");
+#   * `sibling_link_conflict` was in the "last three" and is raised ONLY before —
+#     its single call site sits immediately above the `MATERIALISE, THEN RECORD`
+#     block;
+#   * `submission_blocked` is raised from TWO places, one of them textually inside
+#     the materialisation block (the `materialisation.failures` branch), which a
+#     reader checking the claim by eye would score as post-materialisation.
+#
+# So no edit to the words "four" and "three" could make the sentence true: the
+# positional split did not correspond to the real partition, and a hand-maintained
+# tally in a safety-relevant contract is the shape `db_write._FORBIDDEN_KEYWORDS`
+# already records drifting ("that count read eight while the pinning test already
+# enumerated NINE").
+#
+# WHY IT IS CRITICAL RATHER THAN A DOC NIT. It is the same defect
+# `_publication_disclosure` (C1) exists to close, one layer out. The response BODY
+# gets it right — every refusal carries `published_record_count` and `records`. The
+# PUBLISHED CONTRACT did not, so a client author reading the OpenAPI document before
+# calling learned `already_submitted => nothing published`, and that is the
+# unrecoverable case: exported records are immutable and no route republishes one, so
+# a scientist told nothing was written will edit the record and retry, and the
+# artifacts permanently hold the pre-edit science.
+#
+# THE FIX IS STRUCTURAL, NOT EDITORIAL. Positional phrasing is gone; each refusal
+# carries its own marker, rendered from this ONE table, and
+# `test_submit_refusal_partition.py` derives the same partition from the ABSTRACT
+# SYNTAX TREE of `post_submit` and fails if the two disagree — so a refusal that
+# changes materialisation side, or a new one that is added, cannot leave this prose
+# behind.
+#
+# THE DISCRIMINATOR IS THE PUBLICATION DISCLOSURE, NOT THE LINE NUMBER, and that
+# choice is what makes the derivation right where reading by eye is wrong. A refusal
+# "can have published" exactly when its emission is handed `published` — helper call
+# sites pass it, inline bodies splat `_publication_disclosure`'s fields. Measured,
+# that classifies the second `submission_blocked` correctly as `never`: it is
+# textually after the materialisation comment, but `_materialise_pending_units`
+# validates EVERY unit before writing ANY (its PHASE 1 returns `written=False`), so
+# nothing is on disk when it fires. A positional rule would have marked it `always`
+# and published a second false claim while fixing the first.
+#
+#: `never`  — this refusal is never raised with records already published.
+#: `either` — reachable from both sides; only `published_record_count` says which.
+#: `always` — only reachable after publication.
+_SUBMIT_REFUSAL_PUBLICATION: tuple[tuple[int, str, str, str], ...] = (
+    # `human_actor_required` is raised by `require_human_actor`, a DEPENDENCY, so it
+    # resolves before the handler body runs and cannot be post-materialisation by
+    # construction. The pinning test asserts it is emitted nowhere inside the
+    # handler rather than taking that on trust.
+    (409, "human_actor_required", "this deployment cannot establish who is calling", "never"),
+    (409, "tutorial_scope_forbidden", "a worked-example session is never submitted", "never"),
+    (
+        409,
+        "submission_blocked",
+        "unanswered questions, or a unit whose export does not pass",
+        "never",
+    ),
+    (
+        409,
+        "sibling_link_conflict",
+        "publishing would falsify a link a surviving sibling record already carries",
+        "never",
+    ),
+    (
+        409,
+        "already_submitted",
+        "this exact content is already on record; the existing submission is echoed",
+        "either",
+    ),
+    (409, "idempotency_key_conflict", "that key was used for different content", "either"),
+    (
+        409,
+        "submission_conflict",
+        "a concurrent writer won and its row could not be read back",
+        "always",
+    ),
+    # The 503 reasons, for the same reason and with the same defect: the 503
+    # description named `tables_absent` as the one raisable "from the write itself,
+    # after the official records have been published" and said nothing about
+    # `database_unavailable`, which is raised from the write's own
+    # `except db_write.WriteRefused` handler and is just as post-materialisation.
+    (503, "no_durable_storage", "this deployment has no application database", "never"),
+    (503, "database_unavailable", "the database did not accept a connection", "either"),
+    (
+        503,
+        "tables_absent",
+        "the tables a submission is recorded in do not exist yet",
+        "either",
+    ),
+)
+
+#: How each marker reads to a client. Deliberately about what is ON DISK rather than
+#: about where in the handler the refusal came from: the caller cannot see the
+#: handler, and the fact they must act on is whether artifacts exist.
+_PUBLICATION_MARKER_PROSE = {
+    "never": "nothing was published",
+    "either": "**may already have published** — read `published_record_count`",
+    "always": "**published before it was refused**",
+}
+
+
+def _refusal_partition_lines(status: int) -> str:
+    """The enumeration for one status code, rendered from the table above.
+
+    Rendered rather than written out so the prose cannot disagree with the table,
+    and NO COUNT IS EMITTED anywhere in it — nor in either description around it.
+    The count that used to open the split ("the first four…") is precisely what
+    could not be corrected by editing, so no replacement tally is introduced here.
+    """
+    return "\n".join(
+        f"- `{name}` — {gloss} — {_PUBLICATION_MARKER_PROSE[marker]}"
+        for code, name, gloss, marker in _SUBMIT_REFUSAL_PUBLICATION
+        if code == status
+    )
+
+
+_SUBMIT_409_DESCRIPTION = (
+    "The submission was refused and **no submission was recorded**. That half is "
+    "unconditional: no submission row exists on any of these paths.\n\n"
+    "**Whether anything was PUBLISHED is a separate question, and it depends on "
+    "which refusal this is.** Official ISAAC records are published BEFORE the "
+    "submission transaction is opened — deliberately, because it is the only "
+    "recoverable order — so some of these can arrive with records already on "
+    "disk. `error` says which refusal this is:\n\n"
+    + _refusal_partition_lines(409)
+    + "\n\n`published_record_count` and `records` are present on EVERY one of these "
+    "bodies and are the authoritative answer for a given response; the markers above "
+    "say only which refusals can carry a non-zero count. A non-zero count means those "
+    "records exist on disk and, being immutable, will not be republished by a retry — "
+    "so editing this record before retrying leaves the published files holding the "
+    "content submitted here."
+)
+
+_SUBMIT_503_DESCRIPTION = (
+    "This deployment cannot record a submission: it is not configured with an "
+    "application database, that database did not accept a connection, or it does not "
+    "yet have the tables. `error` is `submission_unavailable` and `reason` "
+    "distinguishes them.\n\n"
+    "As with the `409`s, whether anything was PUBLISHED depends on which reason it "
+    "is — normally nothing, because the storage question is asked first with reads "
+    "only, but some of these are also raised from the write itself, after the "
+    "official records have been published:\n\n"
+    + _refusal_partition_lines(503)
+    + "\n\n`published_record_count` and `records` say what this request published "
+    "before it was refused, on every one of these bodies."
+)
+
+
 @router.post(
     "/experiments/{experiment_id}/submit",
     tags=[TAG_EXPORT],
@@ -8712,40 +9379,8 @@ _SUBMISSION_DB_UNREACHABLE_LEAD = (
                 "records the submission."
             )
         },
-        409: {
-            "description": (
-                "The submission was refused and **no submission was recorded**. "
-                "`error` says which: `human_actor_required` (this deployment cannot "
-                "establish who is calling), `tutorial_scope_forbidden` (a "
-                "worked-example session is never submitted), `submission_blocked` "
-                "(unanswered questions, or a unit whose export does not pass), "
-                "`already_submitted` (this exact content is already on record — the "
-                "existing submission is echoed), `idempotency_key_conflict` (that "
-                "key was used for different content), `submission_conflict` (a "
-                "concurrent writer won and its row could not be read back), or "
-                "`sibling_link_conflict`.\n\n"
-                "**Whether anything was PUBLISHED depends on which refusal it is, "
-                "and every 409 body says so.** The first four are raised before any "
-                "official record is materialised. The last three can also be raised "
-                "*after* materialisation, because the records are published before "
-                "the submission transaction is opened — so `published_record_count` "
-                "and `records` are present on every one of these bodies and are the "
-                "authoritative answer. A non-zero count means those records exist on "
-                "disk and, being immutable, will not be republished by a retry."
-            )
-        },
-        503: {
-            "description": (
-                "This deployment cannot record a submission: it is not configured "
-                "with an application database, that database did not accept a "
-                "connection, or it does not yet have the tables.\n\n"
-                "`reason` distinguishes them, and `published_record_count` / "
-                "`records` say what this request published before it was refused — "
-                "normally nothing, because the storage question is asked first, but "
-                "`tables_absent` can also be raised from the write itself, after the "
-                "official records have been published."
-            )
-        },
+        409: {"description": _SUBMIT_409_DESCRIPTION},
+        503: {"description": _SUBMIT_503_DESCRIPTION},
     },
 )
 def post_submit(
@@ -12856,7 +13491,49 @@ def post_assistant_query(
         # The assistant reads only the queue's LENGTH and labels, never an answer
         # value, so the example channel is withheld outright here (the fail-closed
         # default). An assistant that cannot see an example answer cannot echo one.
-        pending=serialize.pending_to_list(exp.draft, ws.load_demo_answers()),
+        #
+        # `entries=exp.pending()`, NOT `exp.draft` — THE LAST RUN-BLIND CALL SITE OF
+        # `pending_to_list` IN THIS MODULE, and the only one that was still lying to a
+        # person rather than to a screen. `GET /pending`, both `/answers` responses, the
+        # run check and the run `/answers` response were all corrected to pass `entries`;
+        # this one was not, so the assistant read `exp.draft["pending"]` — which
+        # `Experiment.pending()` WITHHOLDS once a run exists, precisely because those
+        # entries can no longer be answered anywhere. Measured over HTTP on a record
+        # created through `POST /api/experiments`, one run, every run-level question
+        # answered ON THE RUN::
+        #
+        #     exp.pending()                    -> 0        export_ready() -> True
+        #     GET /pending                     -> 0
+        #     GET /experiments/{id}            -> pending_count 0
+        #     pending_to_list(exp.draft, ...)  -> 3   ['series', 'qc', 'descriptor']
+        #
+        #     "Is this record ready to export?"
+        #        -> "... On this record, 3 fields still need you."
+        #     "What fields are still pending?"
+        #        -> "3 fields still need you: reduced_spectrum, qc_status,
+        #            required_for_evidence_record."
+        #     POST /answers {"series": ...}    -> 409 belongs_to_a_run
+        #
+        # So on a FINISHED record the assistant named three outstanding fields that were
+        # each already answered on the run AND unanswerable at the record level by
+        # design. It also contradicted ITSELF in the same session: the `record` intent
+        # reads `_summary(exp)["pending_count"]`, which is `exp.pending_count()` and was
+        # already run-aware, so "summarize this record" said 0 pending in the same
+        # breath as "what still needs me?" said 3.
+        #
+        # A zero-run record's list is byte-identical either way (`Experiment.pending()`
+        # returns `own` unchanged when `self.runs` is empty), so every seeded scenario
+        # and every existing assistant answer is unmoved.
+        #
+        # COHERENCE FOR A MULTI-RUN RECORD is `assistant_query._pending_labels`'
+        # responsibility, not this call site's: the entries carry `run_id`/`run_label`
+        # (serialize keeps the tag for exactly this reason), and three runs each needing
+        # a spectrum produce three byte-identical `about` values. Composing the run into
+        # the label is done there, where the prose is composed, rather than by rewriting
+        # entries here.
+        pending=serialize.pending_to_list(
+            exp.draft, ws.load_demo_answers(), entries=exp.pending()
+        ),
         evidence_trail=serialize.evidence_trail_from_draft(exp.draft),
         workflow=_workflow_for(exp),
         record_rev=exp.rev,

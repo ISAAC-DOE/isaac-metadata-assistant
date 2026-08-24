@@ -2,9 +2,23 @@
 
 READ-MOSTLY BY CONSTRUCTION
 ===========================
-Six of the eight are reads. The two writes touch DRAFT content only — add a run,
-write draft values — and both require the ``If-Match`` precondition the API
-already enforces, so an agent working from a stale read loses the race rather
+MOST OF THE REGISTRY IS READS, AND THE TALLY IS DELIBERATELY NOT WRITTEN HERE.
+It used to read "Six of the eight are reads. The two writes ..." and every number
+in that sentence had drifted: the registry holds ten tools, seven of them reads,
+and there are three writes rather than two. The enumeration was wrong as well as
+the count — it named "add a run, write draft values" and omitted
+``isaac_answer_questions``, which is the write that closes a blocking question and
+therefore the one a reader most needs to know is a write.
+
+``db_write.py`` reached this same conclusion after the same failure ("A
+hand-maintained tally in a safety comment drifts"), and the remedy there is the
+one taken here: state the PROPERTY and let a test enumerate the members.
+``policy.PERMITTED_TOOL_NAMES`` is the enumeration, and the connect-your-agent
+suite asserts exact coverage of it.
+
+The property, which is what this section is actually for: every write touches
+DRAFT content only, and every one requires the ``If-Match`` precondition the API
+already enforces — so an agent working from a stale read loses the race rather
 than the scientist losing an edit.
 
 Nothing here finalises. There is no export tool, no delete tool, no migration
@@ -183,7 +197,12 @@ class Tool:
 # --------------------------------------------------------------------------
 #
 # Deliberately not a JSON Schema library: this package adds no dependency, and the
-# schemas it has to check are eight fixed objects of scalars. What it does support
+# schemas it has to check are a small fixed set of flat objects. (This read "eight
+# fixed objects of scalars"; both halves drifted — there are ten, and
+# ``isaac_answer_questions``'s ``answers`` is an ``object`` with ``minProperties``
+# and no declared inner properties, so it is not a scalar and its contents are
+# unconstrained below the top level. No count is stated now, for the reason given
+# in the module docstring.) What it does support
 # is exactly what those schemas use, and anything it meets that it does not
 # understand is a RAISE rather than a pass — an unknown keyword must not silently
 # become "no constraint".
@@ -839,14 +858,22 @@ def _tools() -> tuple[Tool, ...]:
                 "descriptor REPLACE theirs, so after correcting one the record "
                 "retains no evidence that a different value was ever confirmed. "
                 "Leave `correcting` false for a question still open — correcting a "
-                "field nothing has answered is refused with `422 not_yet_answered`, "
-                "and answering one already answered is a no-op that does not advance "
-                "the revision.\n\n"
+                "field nothing has answered is refused with `422 not_yet_answered`. "
+                "THE MIRROR HOLDS TOO: answering one that is already answered with a "
+                "DIFFERENT value is refused with `422 already_answered`, which names "
+                "the correcting call in `answer_at` and writes nothing. It used to be "
+                "absorbed into a `200` reporting no change, over a value that had "
+                "neither been stored nor been identical to the stored one. "
+                "Resubmitting the value already stored is still accepted and still "
+                "does not advance the revision, so a retry of a call you are unsure "
+                "landed is safe.\n\n"
                 "`confirmed_by_user` must be sent explicitly and is passed through "
                 "unchanged: it is the caller's assertion that the scientist confirmed "
-                "these values, not this server's. No value is ever invented, a key "
-                "naming no open question on the level addressed is ignored rather "
-                "than guessed, and this does not export, finalise or submit anything."
+                "these values, not this server's. No value is ever invented, an "
+                "UNRECOGNISED key naming no open question on the level addressed is "
+                "ignored rather than guessed (a RECOGNISED one whose question is "
+                "closed gets the `already_answered` refusal above), and this does not "
+                "export, finalise or submit anything."
             ),
             scope=Scope.DRAFT_WRITE,
             operation_ids=(

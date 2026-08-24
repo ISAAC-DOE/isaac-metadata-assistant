@@ -426,16 +426,58 @@ def _scrub_sources(sources: list) -> list:
 # free to drift. The internal names are unchanged, so no call site moved.
 
 
+#: What a run-owned question's label says when the run's own label cannot be used.
+#: Two DIFFERENT unknowns, deliberately not one string: a run that was never given a
+#: label, and a run whose label exists but is withheld by this module's own scrub. A
+#: reader who cannot tell them apart cannot tell "nobody named it" from "we are not
+#: repeating what it was named".
+_RUN_UNLABELLED = "an unlabelled run"
+_RUN_LABEL_WITHHELD = "a run whose label is withheld"
+
+
+def _run_clause(entry: dict) -> str:
+    """`` (on run <name>)`` for a run-owned question; ``""`` for the record's own.
+
+    WHY A QUESTION MUST NOT BE NAMED WITHOUT ITS RUN. ``Experiment.pending()``
+    aggregates the record's own questions and every run's, and it TAGS the run-sourced
+    ones with ``run_id``/``run_label`` — ``serialize.pending_to_list`` carries the tag
+    through for exactly this purpose ("dropping the tag here would leave a client unable
+    to tell whose question it is answering"). The assistant is that client. Without the
+    clause, three runs each needing a spectrum compose as *"3 fields still need you:
+    reduced_spectrum, reduced_spectrum, reduced_spectrum"* — which reads as three
+    different fields of the record, when it is one field of three different runs, each
+    answerable only at ``POST /experiments/{id}/runs/{run_id}/answers``.
+
+    THE LABEL IS THE FIRST USER-SUPPLIED STRING TO ENTER A COMPOSED ANSWER, and it is
+    scrubbed HERE rather than left to the whole-answer guard in :func:`answer`. That
+    guard replaces the ENTIRE text with ``_NEUTRAL_ROUTED`` on a hit, so a run labelled
+    ``/Users/me`` or ``valid`` would have blanked the pending list itself — letting the
+    naming of a run decide whether the assistant answers at all. Dropping only the
+    offending fragment is the idiom this module already uses for a locator
+    (``WITHHELD_TECHNICAL``) and for a citation label (:func:`_scrub_sources`); the
+    whole-answer guard still runs afterwards and is unchanged.
+    """
+    if not entry.get("run_id"):
+        return ""
+    label = entry.get("run_label")
+    if not isinstance(label, str) or not label.strip():
+        return f" (on {_RUN_UNLABELLED})"
+    label = label.strip()
+    if _is_unsafe_string(label) or has_verdict_language(label):
+        return f" (on {_RUN_LABEL_WITHHELD})"
+    return f" (on run {label})"
+
+
 def _pending_labels(pending_items: list) -> list:
     labels = []
     for p in pending_items:
         for key in ("about", "question", "id"):
             v = p.get(key)
             if isinstance(v, str) and v.strip():
-                labels.append(v.strip())
+                labels.append(v.strip() + _run_clause(p))
                 break
         else:
-            labels.append("unnamed pending field")
+            labels.append("unnamed pending field" + _run_clause(p))
     return labels
 
 

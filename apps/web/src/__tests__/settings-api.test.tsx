@@ -1718,7 +1718,17 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // "every request that REACHES the seam", because the four validation refusals run
     // BEFORE the provider is resolved, so a malformed request is `422` in every
     // deployment and never reaches the seam at all.
-    expect(total).toBe(84584);
+    // 84,584 -> 84,757 (+173): `POST .../runs/{run_id}/answers` had its description
+    // corrected, in ONE operation. It read "An answer that names no open question on
+    // THIS run is ignored rather than invented" — true of an UNRECOGNISED key, and
+    // false of a recognised key whose question is already CLOSED, which this branch
+    // now refuses with `422 already_answered` rather than absorbing into a `200` that
+    // reported no change over a value it had discarded. The replacement states both
+    // halves and names the correcting operation the refusal redirects to. Re-measured
+    // from `create_app().openapi()`, not adjusted by the length of the new text, and
+    // `test_contract_description_parity.py` proves the captured copy matches what the
+    // server serves rather than leaving it asserted here.
+    expect(total).toBe(84757);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(185);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
