@@ -373,11 +373,18 @@ connection double**; the `postgres-migration` job proves the SQL and the constra
 `postgres:18`, and **HAS NOW RUN — successfully.** See §12B for the exact run and for the class of
 risk it still does not remove.
 
-**Its constraint coverage is PARTIAL. The WORKFLOW FILE declares cases blaming 41 of 46 as of
-2026-08-19; what a real PostgreSQL has EXECUTED is 27 of 46, unchanged.** ~~"IMPROVED on 2026-08-19
-from 27 to 41 of 46"~~ is struck rather than deleted because it read as a statement about a run: the
-fourteen extra cases are in commit `77de2db`, which is not in `main` and has never run there.
-**An operator should weigh 27.** 0003's packet
+**Its constraint coverage is STILL PARTIAL, but the partial number moved: a real PostgreSQL has now
+EXECUTED cases blaming 41 of 46 on `main`** — run
+[`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199), job
+`97660962127`, at `c153ec9` (2026-08-25). **THE FIGURE HAS CARRIED THREE LAYERS OF CORRECTION AND ALL
+THREE ARE KEPT, because the sequence — 41 (false) → 27 (true) → 41 (true, by a different run) — is
+what shows the number is measured.** (i) ~~"IMPROVED on 2026-08-19 from 27 to 41 of 46"~~ read as a
+statement about a run when the fourteen extra cases sat in commit `77de2db`, which was not then in
+`main`. (ii) ~~"what a real PostgreSQL has EXECUTED is 27 of 46, unchanged"~~ and
+~~"**An operator should weigh 27.**"~~ were the CORRECT reading on 2026-08-24 and are **retired by
+events, not by error**: `77de2db` merged to `main` via `c153ec9` — `git merge-base --is-ancestor
+77de2db origin/main` now exits 0 — and the 41 ran. **An operator should now weigh 41; 27 remains
+exactly right for run `32099627898` at `fe374c0`.** 0003's packet
 §12B carries the re-measurement, including the three constraints of `isaac_submission_runs` that
 CANNOT be blamed individually — the table's own equality CHECKs subsume its shape CHECKs, so no row
 violates exactly one of them. Read that section for the exact accounting.
@@ -385,10 +392,14 @@ violates exactly one of them. Read that section for the exact accounting.
 **The original text is kept below because it records the correction that produced the measurement.**
 0003's packet §12B then said: 46 constraints are
 declared across the two files and CI's step names 27 of them, so 19 are declared and unexercised, 17 of
-them never named in the workflow at all. Four of the unexercised belong to this migration's own tables
-(`isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`, and every id-shape
-CHECK on `isaac_submission_runs`). The list below of what the step DOES exercise is therefore the
-authoritative scope for this migration — read it as an enumeration, not as a sample.
+them never named in the workflow at all. ~~"Four of the unexercised belong to this migration's own
+tables (`isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`, and every
+id-shape CHECK on `isaac_submission_runs`)."~~ — **retired 2026-08-25**: the first three, and
+`isaac_submission_runs_id_shape`, are now individually blamed by a real run; what remains unexercised
+from this migration's tables is exactly `isaac_submission_runs_unit_id_shape`, `_record_id_shape` and
+`_run_id_shape`, which are the three that cannot be blamed individually at all. The list below of what
+the step exercised **at `fe374c0`** is therefore a historical enumeration for this migration, not the
+current one — for the current one, read 0003's packet §12B.
 
 Constraints CI's *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* step
 exercises for this migration specifically: the one-submission-per-revision uniqueness, the
@@ -410,12 +421,18 @@ that has been corrected in the same commit. 0003's packet
 §12B carries the full correction, the reasoning, and the reason a test enforcing a stale sentence is
 worse than no test.
 
-In brief: GitHub Actions run
+In brief, and there are now TWO such runs rather than one: GitHub Actions run
 [`32099627898`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32099627898), job
 *"migration and durable repository against a real PostgreSQL"*, **conclusion `success`**, on `main` at
 `fe374c0` — these exact bytes — applied this migration against a `postgres:18` service container,
 exercised every constraint listed in §12A against input each is meant to reject, and proved the
-rollback in the documented `0004, 0003, 0002, 0001` order.
+rollback in the documented `0004, 0003, 0002, 0001` order. Run
+[`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199) (job
+`97660962127`, **conclusion `success`**, on `main` at `c153ec9`, 2026-08-25) did the same over the
+widened constraint step, and is the run that carries the 41. **The SQL bytes did not change between
+them** — the digests in this packet's table are unchanged, and
+`git log --oneline -- apps/api/isaac_api/migrations/0004_submissions.sql` still shows the single
+commit `0896b07`.
 
 **Unchanged, and the reason the operator's act is still separate:** that container is **empty**, with a
 two-row synthetic stand-in for `records`. *"Valid, idempotent SQL whose constraints behave"* is now
