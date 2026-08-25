@@ -487,13 +487,23 @@ export function AssistantPanel({
    * the disclosure. Naming them as the input's description is what puts the same
    * two facts in front of both readers at the same moment.
    *
-   * `useId` rather than a module constant. The panel mounts on five screens and
-   * `AssistantDrawer` can mount a second instance beside a page one; the existing
-   * module-level ids (`PROPOSED_EYEBROW_ID`, `CAPABILITIES_PANEL_ID`) already
-   * carry that latent duplicate-id hazard, and a duplicated `aria-describedby`
-   * TARGET is worse than a duplicated label — the description a reader hears
-   * becomes whichever node the document happens to reach first. Per-instance ids
-   * cost nothing and cannot collide.
+   * `useId` rather than a module constant, and the REASON is narrower than it used
+   * to claim. ~~"`AssistantDrawer` can mount a second instance beside a page
+   * one"~~ — that is not what the drawer does. Measured: it takes `children` and
+   * renders them ONCE (`AssistantDrawer.tsx:153`), and its own comment records that
+   * the switch between static rail and slide-over "is pure CSS"; each of the five
+   * screens wraps exactly one `<AssistantPanel>` in one `<AssistantDrawer>`. No
+   * mount in this tree produces two panels, so the collision the sentence described
+   * is not reachable today.
+   *
+   * The hazard is LATENT rather than realised, and `useId` is still right: the
+   * existing module-level ids (`PROPOSED_EYEBROW_ID`, `CAPABILITIES_PANEL_ID`) would
+   * duplicate the moment anything did mount two panels, and a duplicated
+   * `aria-describedby` TARGET is worse than a duplicated label — the description a
+   * reader hears becomes whichever node the document happens to reach first. A
+   * per-instance id costs nothing, cannot collide, and does not depend on the
+   * mounting rule staying as it is. That is the whole justification; it does not
+   * need a second mount to exist, which is why the claim that one did is dropped.
    */
   const ids = useId();
   const composerHelperId = `${ids}-composer-helper`;

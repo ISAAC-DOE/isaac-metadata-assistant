@@ -22,6 +22,8 @@
  * actionability/staleness flag.
  */
 
+import { isRecognisedProposalOrigin } from './assistantAgent';
+
 export type Msg = {
   role: 'user' | 'assistant';
   text: string;
@@ -116,6 +118,18 @@ const SAFE_KEYS = new Set([
   'value',
   'sourceRev',
   'timestamp',
+  /*
+   * `origin` — WHAT PRODUCED A STAGED VALUE, and it is on this list so that
+   * `readStorage` has something to check.
+   *
+   * It was absent, which made the rehydration allowlist below unenforceable: the
+   * write path stripped `origin`, so every round-tripped proposal came back
+   * unlabelled and a guard requiring a label would have refused all of them. The
+   * value is one of three short machine-ish strings from
+   * `assistantAgent.PROPOSAL_ORIGIN` — no scientific content, no path, no secret —
+   * and `deepSanitize` still runs over it like every other kept key.
+   */
+  'origin',
 ]);
 
 // Key names that are never safe to persist, regardless of allowlist status.
@@ -230,14 +244,67 @@ function storageKey(experimentId: string): string {
   return `${STORAGE_PREFIX}${experimentId}`;
 }
 
+/**
+ * REHYDRATION IS A TRUST BOUNDARY, AND IT USED TO BE A CAST.
+ *
+ * This function reads `sessionStorage`, which is INPUT — any script running in this
+ * origin can write it, and nothing in the bytes proves this application wrote them.
+ * The previous version was
+ *
+ *     parsed.proposal && typeof parsed.proposal === 'object'
+ *       ? (parsed.proposal as Proposal)
+ *       : null
+ *
+ * so every key in the blob survived, into a type that ends `[key: string]: unknown`.
+ * The module sanitized on the way OUT and trusted on the way IN, and that asymmetry
+ * was the defect: `sanitize` exists precisely because these fields are not safe to
+ * take on faith, and a value coming back from storage has exactly as much
+ * provenance as one going in — none.
+ *
+ * TWO CHECKS, IN THIS ORDER, and both fail closed.
+ *
+ * 1. `sanitize` — the SAME function the write path uses. What this module refuses to
+ *    store, it now also refuses to trust. That matters most for the keys a forged
+ *    blob would want: `confirmationState` is one of the three gates `confirmProposal`
+ *    checks before it writes, and it is not on `SAFE_KEYS`, so it cannot have been
+ *    stored and is therefore dropped. Losing it is the safe direction —
+ *    `confirmProposal` admits only `'pending'` and refuses anything else before
+ *    touching the api.
+ *
+ * 2. `isRecognisedProposalOrigin` — the whole proposal is DISCARDED unless its
+ *    `origin` is one this application can have produced. Not stripped: discarded.
+ *    Stripping the label would rehydrate an unlabelled proposal that still satisfies
+ *    every remaining check, and a laundered value is worse than a refused one
+ *    because nothing downstream can tell it was ever questioned.
+ *
+ * WHAT THIS IS AND IS NOT DEFENDING AGAINST, stated plainly so nobody reads it as a
+ * patched breach. Measured on this branch: no production code persists a proposal
+ * (`stageProposal` has no caller outside this module) and no production code reads
+ * the rehydrated one (`useRecordSession` returns it on `session`; every screen
+ * ignores that field). So there is no path from a forged blob to a write today, and
+ * there never was a remote one — writing the blob means already running script here.
+ * What there IS, is `AssistantPanel`'s `proposal?: Proposal` prop sitting unwired
+ * beside a hook that already computes the value, one line away from being connected.
+ * `docs/ai-integration-decision-packet.md` §6.3 — "a model-proposed value is never
+ * `verified` on the model's word" — is the invariant that wire would put at the
+ * mercy of a `sessionStorage` entry, and closing it before the wire exists is
+ * cheaper than auditing the wire afterwards.
+ */
 function readStorage(experimentId: string): SessionState | null {
   try {
     const raw = sessionStorage.getItem(storageKey(experimentId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SessionState>;
-    const messages = Array.isArray(parsed.messages) ? (parsed.messages as Msg[]) : [];
-    const proposal =
-      parsed.proposal && typeof parsed.proposal === 'object' ? (parsed.proposal as Proposal) : null;
+    const messages = Array.isArray(parsed.messages)
+      ? parsed.messages
+          .filter((entry): entry is Msg => !!entry && typeof entry === 'object')
+          .map((entry) => sanitize(entry) as Msg)
+      : [];
+    const stored =
+      parsed.proposal && typeof parsed.proposal === 'object'
+        ? (sanitize(parsed.proposal) as Proposal)
+        : null;
+    const proposal = stored && isRecognisedProposalOrigin(stored.origin) ? stored : null;
     return { messages, proposal };
   } catch {
     return null;

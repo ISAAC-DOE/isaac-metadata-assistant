@@ -131,9 +131,22 @@ export const ASSISTANT_UNAVAILABLE =
  * DESIGN DECISION WITH A MEASUREMENT BEHIND IT. The first version of this
  * constant restated all of `settingsContent.ts:587`: the two facts below plus
  * "a bounded, deterministic catalog over the deployment's own data" plus
- * "refuses anything outside it rather than guessing" — 244 characters. It renders
- * at 11px inside the panel's STICKY DOCK, in a rail that is content-sized and
- * often ~300px wide, which is roughly six permanent lines above a transcript that
+ * "refuses anything outside it rather than guessing" — ~~244 characters~~.
+ *
+ * THAT FIGURE WAS NOT REPRODUCIBLE AND IS CORRECTED IN PLACE. Nothing committed
+ * measures 244. The three numbers a reader can actually check are: this constant,
+ * 92 characters exactly; `settingsContent.ts:587`, the paragraph it declines to
+ * restate, 272; and a panel-scoped reconstruction of the same four clauses (with
+ * "Nothing you type here" in place of Settings' application-wide phrasing), 238.
+ * 244 described a discarded draft, and it was stated as fact. The 92 and the 272
+ * are now ASSERTED from the committed strings in
+ * `__tests__/assistant-model-claim-parity.test.tsx` §2, so neither can drift into
+ * prose again.
+ *
+ * The cut still stands on the measurement, whichever of 238 or 272 you take as
+ * the counterfactual: either is roughly two and a half times this constant. It
+ * renders at 11px inside the panel's STICKY DOCK, in a rail that is content-sized
+ * and often ~300px wide, which is roughly six permanent lines above a transcript that
  * already competes with a composer, a disclosure trigger, the prompt controls and
  * the advisory caption. `assistant-capabilities-panel-height.test.tsx` exists
  * because that dock's height is already load-bearing.

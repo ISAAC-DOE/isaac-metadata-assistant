@@ -91,14 +91,48 @@ describe('P29.6 proposeForField — guarded staging entry', () => {
  * ADDING `'model'` to the union would be the change to argue about, not a runtime
  * branch to add.
  *
- * WHY THE RUNTIME REFUSAL IS PINNED TOO. The union is erased at runtime, and this
- * function is reachable from a `source` that arrived over the wire or out of a
- * session — `AssistantPanel` reads a persisted conversation. `proposeForField`'s
- * guard is `if (source !== 'user' && source !== 'candidate') return null`, an
- * allowlist, so it already refuses; nothing measured that it does. A future edit
- * to a denylist (`source === 'memory' || source === 'graph'`) would pass every
- * test in this file and admit a model, which is exactly the shape of the bug the
- * allowlist exists to prevent.
+ * WHY THE RUNTIME REFUSAL IS PINNED TOO. The union is erased at runtime, so the
+ * guard is the only thing standing between a `source` string and a staged value.
+ * `proposeForField`'s guard is `if (source !== 'user' && source !== 'candidate')
+ * return null`, an allowlist, so it already refuses; nothing measured that it does.
+ * A future edit to a denylist (`source === 'memory' || source === 'graph'`) would
+ * admit a model, which is exactly the shape of the bug the allowlist exists to
+ * prevent — and the block below measures how much of this file such an edit would
+ * actually turn red.
+ *
+ * ~~"this function is reachable from a `source` that arrived over the wire or out of
+ * a session — `AssistantPanel` reads a persisted conversation"~~ — THAT WAS THE
+ * STATED REASON AND IT NAMED THE WRONG PATH. It is struck rather than deleted
+ * because the correction is the useful part: the justification was checkable, and
+ * checking it moved the actual hole somewhere else. Measured on this branch:
+ *
+ *   rg -n "proposeForField\(" apps/web/src -g '*.ts' -g '*.tsx' | grep -v __tests__
+ *     → lib/assistantAgent.ts:446          (the definition)
+ *       components/AssistantPanel.tsx:1084 (the sole call)
+ *       components/AssistantPanel.tsx:202  (a comment)
+ *       screens/GuidedCompletion.tsx:813   (a comment)
+ *
+ * `AssistantPanel.tsx:1084` passes the LITERAL `source: 'user'`. No dynamic
+ * `source` reaches this function anywhere in the tree, so nothing untrusted has
+ * ever selected the branch this guard protects. The guard is still worth pinning
+ * for the reason above — it is one denylist rewrite away from mattering — but not
+ * for the reason that was written down.
+ *
+ * WHAT THE SESSION ACTUALLY REHYDRATES IS A WHOLE `Proposal`, WHICH SKIPS THIS
+ * FUNCTION ENTIRELY. `lib/assistantSession.ts`'s `readStorage` used to cast
+ * `parsed.proposal as Proposal` — a `sessionStorage` object, unvalidated, into a
+ * type ending `[key: string]: unknown`. A staged value that came back that way never
+ * passed `proposeForField` at all, so no source guard applied to it: the only
+ * remaining checks were `confirmProposal`'s (`confirmationState`, `sourceRev`) and
+ * the panel's (`experimentId`), all three of which a hand-written blob can satisfy.
+ * That was the unguarded path, it is PRE-EXISTING, and it is NOT a live
+ * vulnerability — measured, no production code persists a proposal and no production
+ * code reads the rehydrated one, and writing the blob requires already running
+ * script in the origin. It is the path a model's output would take if one were ever
+ * wired in, which is why it is closed now rather than later: `readStorage` now
+ * sanitizes on the way in and discards any proposal whose `origin` is not one this
+ * application can produce (`assistantAgent.PROPOSAL_ORIGINS`), pinned by
+ * `__tests__/assistant-rehydrated-proposal-origin.test.ts`.
  *
  * WHY IT MUST REFUSE, and it is not squeamishness about models. A staged value
  * becomes a recorded value through `confirmProposal`, and every written value
@@ -119,14 +153,35 @@ describe('a model output cannot enter the proposal flow', () => {
    *
    * The first version of this block asked about `series`, which has no evidence
    * entry — so `proposeForField` returned null down the *candidate* path
-   * (`if (!evidence) return null`) whether the source guard fired or not. Measured:
-   * with the guard mutated from its allowlist to a denylist
-   * (`source === 'memory' || source === 'graph'`), 13 of those 14 assertions still
-   * passed. They were testing a missing fixture, not a boundary.
+   * (`if (!evidence) return null`) whether the source guard fired or not. They were
+   * testing a missing fixture, not a boundary.
+   *
+   * THE FIGURE THAT USED TO STAND HERE IS UNVERIFIED, and is labelled rather than
+   * repeated: "13 of those 14 assertions still passed" under the denylist mutation.
+   * It describes a version of this block that NO COMMIT HOLDS, so it cannot be
+   * re-measured and it is a recollection, not a measurement. It is kept only because
+   * the mechanism it describes is real and is the reason `sample.material` was
+   * chosen; do not read it as a number beside the measured one below.
    *
    * `sample.material` is classified `supported`, which is the one state a
    * `candidate` source DOES stage. So a refusal here can only come from the source
-   * guard, and the same mutation fails every case.
+   * guard.
+   *
+   * MEASURED, on this branch, with `assistantAgent.ts`'s guard mutated from its
+   * allowlist to a denylist (`source === 'memory' || source === 'graph'`) and this
+   * file re-run: `Tests 7 failed | 9 passed (16)`. Of the NINE tests in this
+   * describe block, SEVEN go red — the seven parametrized sources. TWO survive, and
+   * both survive for a stated reason rather than by luck:
+   *
+   *   · the control, which SHOULD keep passing — a permitted source must still stage;
+   *   · the `memory`/`graph` case, because a denylist naming exactly those two still
+   *     refuses exactly those two. It is the one pair a denylist gets right, so it
+   *     cannot witness the rewrite. It is kept because it pins the two refusals the
+   *     project instructions name (§7, the memory plane), which is a different job.
+   *
+   * So "the same mutation fails every case" would be wrong: it is 7 of 9, and the
+   * seven parametrized sources are the whole of the detection. Narrowing that list
+   * narrows the guard's only witness.
    */
   it('the control: a permitted source DOES stage this field, so a refusal below means something', () => {
     expect(proposeForField(CTX, { field: 'sample.material', source: 'candidate' })).not.toBeNull();

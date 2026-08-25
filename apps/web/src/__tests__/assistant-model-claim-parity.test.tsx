@@ -17,14 +17,44 @@
  * THE LAST SENTENCE WAS FALSE, AND IT IS THE MITIGATION THE DECISION RESTS ON.
  * The panel never said it. Measured on `main` at `b7008b8`:
  *
- *   rg -in 'language model' apps/web/src/components/AssistantPanel.tsx  → exit 1
- *   rg -ln 'language model' apps/web/src/lib                            → lib/settingsContent.ts
+ *   git grep -in 'language model' b7008b8 -- apps/web/src/components/AssistantPanel.tsx
+ *     → exit 1
+ *   git grep -ln 'language model' b7008b8 -- apps/web/src/lib
+ *     → apps/web/src/lib/assistantCapabilities.ts
+ *       apps/web/src/lib/settingsContent.ts
  *
- * So the claim existed at exactly two places, both in Settings → AI & Automation
- * behind a tab, and the screen a scientist types into said nothing about whether
- * a model is involved or where a typed question goes. §3's argument — "a seam
- * report would only imply a model is nearly here, because the reader is already
- * told there is no model" — had a premise the product did not supply.
+ * THE SECOND COMMAND'S OUTPUT IS CORRECTED IN PLACE, and the correction is the
+ * reason it is written out rather than summarised. An earlier revision of this
+ * comment recorded that grep as ~~`→ lib/settingsContent.ts`~~ — ONE file. It is
+ * TWO, and always was: `assistantCapabilities.ts:43` also matches. Re-measure
+ * with the command above rather than trusting this block.
+ *
+ * The conclusion survives, and the reason it survives is the thing to read. The
+ * second hit is a CODE COMMENT — "* language model: the catalog is finite,
+ * literal and offline." — so it is invisible to every reader who is not reading
+ * the source, and it is not a claim the product makes to anyone. The USER-FACING
+ * claim was at `settingsContent.ts:580` and `:587`, two places, both in
+ * Settings → AI & Automation behind a tab. But a stated measurement is the whole
+ * currency of this file, so a grep whose output is wrong by one file is exactly
+ * the error this file exists to make impossible, and it is fixed rather than
+ * excused.
+ *
+ * SO: the screen a scientist types into said nothing about whether a model is
+ * involved or where a typed question goes. §3's argument — "a seam report would
+ * only imply a model is nearly here, because the reader is already told there is
+ * no model" — had a premise the product did not supply.
+ *
+ * ONE FURTHER SCOPE CORRECTION. It is tempting to write that the claim "lived
+ * only in `lib/settingsContent.ts`", and that is false of the APPLICATION. The
+ * backend authors the same claim three times in `apps/api/isaac_api/routes.py` —
+ * the `TAG_ASSISTANT` tag description (`:216`, "There is no language model: an
+ * unsupported question is refused rather than guessed"), and the descriptions of
+ * `POST /api/experiments/{id}/assistant/query` (`:14848`) and
+ * `POST /api/assistant/memory/query` (`:14988`) — and Settings → API Access
+ * renders all three, with `ApiDocs.tsx:534` listing `'no language model'` in
+ * `BOUNDARY_CAVEAT_MARKERS` precisely so the caveat cannot be collapsed behind a
+ * disclosure. The defensible scope is therefore "in `apps/web/src`", which is
+ * also the only tree this file reads.
  *
  * THE DECISION AND ITS MITIGATION ARE PINNED IN ONE FILE ON PURPOSE. Splitting
  * them would let either half drift alone, and each is only defensible while the
@@ -60,9 +90,20 @@
  *    getting smarter", "grounded answers today, more soon" — satisfies every
  *    pattern here. A human reviewer remains the backstop for newly written model
  *    claims.
- *  · It reads `apps/web/src` only. Backend-served copy is invisible to it: the
- *    refusal body `POST /api/assistant/ask` returns, and the OpenAPI description
- *    the Endpoint Explorer renders, are both authored in `routes.py`.
+ *  · It reads `apps/web/src` only. Backend-served copy is invisible to it, and
+ *    the population is THREE sites rather than the two §2 measures parity over —
+ *    a distinction worth stating, because "both sites" reads as "all sites":
+ *      – `apps/api/isaac_api/routes.py` — the refusal body
+ *        `POST /api/assistant/ask` returns, plus the tag and operation
+ *        descriptions the Endpoint Explorer renders (`:216`, `:14848`, `:14988`).
+ *      – `apps/api/isaac_api/providers/assistant.py:177-181`, the THIRD site and
+ *        the one most easily missed, because it is neither this bundle nor a
+ *        route description. `UnconfiguredAssistantProvider.status_reason()`
+ *        returns near-identical copy — "No language model is configured. Nothing
+ *        typed here is sent to a model provider, because there is no model
+ *        provider." — which is the panel's two clauses almost word for word. It
+ *        is outside this guard's reach entirely: nothing here would notice it
+ *        drifting, being inverted, or being deleted.
  *  · IT DELIBERATELY DOES NOT TREAT THE ENDPOINT EXPLORER AS A VIOLATION, and
  *    that is a judgement rather than an oversight. Settings → API Access lists
  *    every operation this application declares, `POST /api/assistant/ask`
@@ -133,6 +174,51 @@ function sourceFilesUnder(relDir: string): string[] {
   };
   walk(join(SRC_DIR, relDir), '');
   return out;
+}
+
+/** Every `.ts`/`.tsx` file in the whole bundle, as a `SRC_DIR`-relative path. */
+function allSourceFiles(): string[] {
+  return sourceFilesUnder('.');
+}
+
+/*
+ * THE CONCATENATION NORMALISER, AND EXACTLY WHAT IT CAN AND CANNOT SEE.
+ *
+ * A literal scan for `assistant/ask` is defeated by spelling the path in pieces —
+ * `'/assistant' + '/' + 'ask'` — and that is not hypothetical: it was MEASURED
+ * against the previous version of §5, sitting in a component, with all 29 tests
+ * green. Joining adjacent string literals across `+` collapses it back into the
+ * one token the pattern is looking for.
+ *
+ * WHAT IT CATCHES: any number of adjacent quoted fragments joined by `+`, in any
+ * of the three quote styles, across line breaks (`\s*` spans newlines), which is
+ * how a human actually writes a path they are splitting up.
+ *
+ * WHAT IT DOES NOT CATCH, stated rather than implied, because a guard that
+ * overstates its reach is worse than a narrow one that is honest:
+ *   · a template literal with an interpolation — `` `/assistant${sep}ask` ``;
+ *   · a path assembled from an array — `['assistant', 'ask'].join('/')`;
+ *   · fragments held in named identifiers — `const A = 'assistant'; A + '/ask'`;
+ *   · anything computed — `String.fromCharCode(...)`, an encoded constant, a
+ *     value arriving from the server.
+ * None of those is reachable by TEXT MATCHING at all, so no amount of widening
+ * this function reaches them. They are the reason §5's real strength is the
+ * ABSENCE OF A CLIENT METHOD (enforcement by non-implementation, checked below)
+ * rather than this scan, and the reason a human reviewer stays the backstop.
+ *
+ * It runs over the WHOLE bundle and produced ZERO false positives when this was
+ * written: 309 `.ts`/`.tsx` files, and the only three matches — before or after
+ * normalisation — are the three allowlisted below. A future false positive is a
+ * cheap failure (a comment or a fixture) and a false negative is the expensive
+ * one, so the collapse is deliberately eager.
+ */
+function collapseConcatenatedStrings(text: string): string {
+  return text.replace(/['"`]\s*\+\s*['"`]/g, '');
+}
+
+/** True if `source` names the assistant-seam operation, literally or in pieces. */
+function namesTheSeam(source: string): boolean {
+  return /assistant\/ask/.test(collapseConcatenatedStrings(source));
 }
 
 /*
@@ -312,13 +398,38 @@ describe('§2 · both sites make the same sub-claims', () => {
   });
 
   it('the panel does NOT restate the two Settings owns, so the dock stays short', () => {
-    // Not a style rule. The full four-clause paragraph is 244 characters at 11px
-    // in a sticky dock inside a content-sized rail; the kept pair is 92. A future
-    // slice that pastes the paragraph back in fails here and has to read
-    // `ASSISTANT_NO_MODEL_CLAIM`'s comment before doing it anyway.
+    /*
+     * Not a style rule — it is a length budget for a sticky dock at 11px inside a
+     * content-sized rail.
+     *
+     * THE FIGURE IS MEASURED HERE RATHER THAN WRITTEN DOWN, and that is a
+     * correction. An earlier revision of this comment stated the full paragraph
+     * was ~~244 characters~~ and the kept pair 92. The 92 is exact. The 244 was
+     * NOT reproducible from anything committed: Settings' real paragraph
+     * (`settingsContent.ts:587`) is 272, and a panel-scoped reconstruction of the
+     * four clauses comes to 238. 244 described a draft that no longer exists in
+     * the tree, stated as fact in the one file whose subject is that a stated
+     * measurement must be true.
+     *
+     * So both numbers are now computed from the committed strings on every run.
+     * They cannot go stale, and a reader can reproduce them by reading this test.
+     */
     const claim = norm(ASSISTANT_NO_MODEL_CLAIM);
+    const settings = settingsModelClaim();
     expect(claim).not.toMatch(/bounded, deterministic catalog/);
+
+    // The kept pair, exact — the raw constant, not the normalised copy.
+    expect(ASSISTANT_NO_MODEL_CLAIM.length).toBe(92);
+    // Settings' detail paragraph, which is what the panel declines to restate.
+    const detail = settingsConcepts(SETTINGS_FACTS).find(
+      (c) => c.id === 'no-external-model-calls',
+    )!.detail;
+    expect(detail.length).toBe(272);
+    // The budget, as a relation rather than a magic number: the dock carries
+    // comfortably under half of what Settings does.
+    expect(ASSISTANT_NO_MODEL_CLAIM.length).toBeLessThan(detail.length / 2);
     expect(claim.length).toBeLessThan(140);
+    expect(settings.length).toBeGreaterThan(claim.length);
   });
 });
 
@@ -418,18 +529,67 @@ describe('§4 · neither site implies a provider exists, is connected, or is com
 // --- §5 §3's decision, held mechanically ------------------------------------
 
 /**
- * The product surfaces. `lib/` is excluded here and checked separately below: the
- * client method that WOULD call the seam belongs in `lib/api.ts`, and asserting
- * its absence there is a different assertion from "no screen calls it".
+ * The product surfaces, kept as a named set because §6 proves the walker reaches
+ * them and because the capability-report assertion below is genuinely about
+ * screens rather than about the whole bundle.
  */
 const PRODUCT_DIRS = ['components', 'screens'] as const;
 
+/*
+ * THE SCAN IS THE WHOLE BUNDLE, AGAINST AN ALLOWLIST — and it was two directories
+ * until a review measured both ways out.
+ *
+ * The previous version read `components/` and `screens/` for the literal, plus
+ * `lib/api.ts` BY NAME. Both escapes below were measured with all 29 tests green:
+ *
+ *   (a) `const P = '/api' + '/assistant' + '/' + 'ask';` in `components/RunCard.tsx`
+ *       → 29 passed. Closed by `collapseConcatenatedStrings`.
+ *   (b) a new `src/lib/assistantSeamClient.ts` holding
+ *       `fetch('/api/assistant/ask', …)`, imported and called from
+ *       `screens/RecordWorkbench.tsx`
+ *       → 29 passed. `lib/` was exempt except for the ONE file named above, so
+ *         the client method §5 forbids in `lib/api.ts` could simply be written in
+ *         a sibling. Closed by scanning every file and naming the exceptions.
+ *
+ * (b) is the more instructive of the two: `lib/api.ts` was checked by name, which
+ * reads as "the client layer is covered" and actually means "one file is". An
+ * allowlist inverts that — a new file is a violation by default, and admitting it
+ * is an edit to this array that a reviewer sees.
+ *
+ * THE ALLOWLIST IS EXACTLY TWO ENTRIES, and the first is the judgement the
+ * docstring above defends at length: `test/apiFixtures.ts` TRANSCRIBES the
+ * OpenAPI document, `POST /api/assistant/ask` included, because Settings → API
+ * Access enumerates every operation this application declares and narrowing that
+ * reference to hide one operation would make it lie about the surface it claims
+ * to enumerate. Documenting an operation and its `501` is the opposite act from
+ * offering a model-backed answer. `__tests__/**` is allowlisted because this very
+ * file, and `settings-api.test.tsx`, must be able to write the string down.
+ */
+const SEAM_NAMING_ALLOWED: readonly RegExp[] = [
+  /^test\/apiFixtures\.ts$/,
+  /^__tests__\//,
+];
+
+function seamNamingAllowed(rel: string): boolean {
+  return SEAM_NAMING_ALLOWED.some((p) => p.test(rel));
+}
+
 describe('§5 · no product surface consumes the assistant seam', () => {
-  it.each(PRODUCT_DIRS)('no file under %s/ names the assistant-seam operation', (dir) => {
-    const offenders = sourceFilesUnder(dir).filter((rel) =>
-      /assistant\/ask/.test(rawSource(join(dir, rel))),
+  it('no file in the bundle names the assistant-seam operation, outside the allowlist', () => {
+    const offenders = allSourceFiles().filter(
+      (rel) => !seamNamingAllowed(rel) && namesTheSeam(rawSource(rel)),
     );
-    expect(offenders, `${dir}/ reaches the assistant seam`).toEqual([]);
+    expect(offenders, 'a file outside the allowlist reaches the assistant seam').toEqual([]);
+  });
+
+  it('the allowlist is exactly the two entries the docstring defends', () => {
+    // A guard whose allowlist grows quietly is a guard that stops guarding. A
+    // third entry has to be argued for HERE, next to the reasoning for the first
+    // two, rather than appearing as one more regex in a list nobody re-reads.
+    const named = allSourceFiles().filter((rel) => namesTheSeam(rawSource(rel)));
+    expect(named.filter((rel) => !seamNamingAllowed(rel))).toEqual([]);
+    expect(named).toContain('test/apiFixtures.ts');
+    expect(SEAM_NAMING_ALLOWED.length).toBe(2);
   });
 
   it('the api client declares no method for it', () => {
@@ -439,8 +599,14 @@ describe('§5 · no product surface consumes the assistant seam', () => {
      * call, so no screen can call one by accident. A future slice adding
      * `askAssistantSeam()` fails this line and has to argue with §3 rather than
      * with a linter.
+     *
+     * KEPT AS ITS OWN ASSERTION even though the bundle-wide scan above now
+     * subsumes it, because the two say different things. That one says "no file
+     * names the operation"; this one says "the file where a client method BELONGS
+     * does not have one", and it is the line whose failure message points a future
+     * author at the decision instead of at a path list.
      */
-    expect(rawSource('lib/api.ts')).not.toMatch(/assistant\/ask/);
+    expect(namesTheSeam(rawSource('lib/api.ts'))).toBe(false);
   });
 
   it('the capability report has exactly one consumer, and it is the voice surface', () => {
@@ -512,7 +678,94 @@ describe('§6 · the guards are proven on input that must fail them', () => {
     // the pattern: a scan narrowed until it matches nothing would pass §5 while
     // the offending call sat in the tree.
     const planted = "api.post('/assistant/ask', { question })";
-    expect(/assistant\/ask/.test(planted)).toBe(true);
+    expect(namesTheSeam(planted)).toBe(true);
+  });
+
+  /*
+   * THE TWO MEASURED ESCAPES, AS CONTROLS.
+   *
+   * Each of these was green against the previous §5 — verified by planting the
+   * real thing in the real tree and running the real file, not by reasoning about
+   * it. They are pinned here as literals so the detector's claim about them is
+   * checkable on every run, and so a narrowing of `collapseConcatenatedStrings`
+   * or of the allowlist turns a test red instead of turning this comment stale.
+   */
+  it.each([
+    ["'/assistant' + '/' + 'ask'", "const P = '/assistant' + '/' + 'ask';"],
+    ['a three-piece split with the prefix', "const P = '/api' + '/assistant' + '/' + 'ask';"],
+    ['double quotes', 'const P = "/assistant" + "/" + "ask";'],
+    ['template literals', 'const P = `/assistant` + `/` + `ask`;'],
+    [
+      'a split across line breaks',
+      "const P =\n  '/api/assistant' +\n  '/ask';",
+    ],
+  ])('escape (a): the normaliser sees a dynamically spelled path — %s', (_what, planted) => {
+    expect(/assistant\/ask/.test(planted), 'precondition: the literal scan MISSES it').toBe(
+      false,
+    );
+    expect(namesTheSeam(planted), 'the normalised scan must catch it').toBe(true);
+  });
+
+  it('escape (a): the normaliser does not pretend to catch what it cannot', () => {
+    // The honesty half of the control. These shapes are NOT caught, the docstring
+    // says so, and this pins that the docstring is telling the truth — if a future
+    // widening does catch one, this test fails and the comment gets updated in the
+    // same change rather than drifting into an overclaim.
+    const uncatchable = [
+      'const P = `/assistant${sep}ask`;',
+      "const P = ['assistant', 'ask'].join('/');",
+      "const A = 'assistant'; const P = `/${A}/ask`;",
+    ];
+    for (const planted of uncatchable) {
+      expect(namesTheSeam(planted), `unexpectedly caught: ${planted}`).toBe(false);
+    }
+  });
+
+  it('escape (b): a seam client in lib/ is a violation, and the allowlist does not cover it', () => {
+    // The file that was measured green against the previous §5: a real `fetch` to
+    // the operation, in `lib/`, which was exempt except for `lib/api.ts` by name.
+    const planted = [
+      "export async function askAssistantSeam(question: string) {",
+      "  const response = await fetch('/api/assistant/ask', { method: 'POST' });",
+      '  return response.json();',
+      '}',
+    ].join('\n');
+    expect(namesTheSeam(planted)).toBe(true);
+    // And the allowlist must NOT admit it wherever a plausible author would put it.
+    for (const rel of [
+      'lib/assistantSeamClient.ts',
+      'lib/assistantSeam.ts',
+      'lib/api2.ts',
+      'components/AssistantPanel.tsx',
+      'screens/RecordWorkbench.tsx',
+      'App.tsx',
+      'main.tsx',
+    ]) {
+      expect(seamNamingAllowed(rel), `allowlist wrongly admits ${rel}`).toBe(false);
+    }
+    // While the two deliberate exceptions still are admitted.
+    expect(seamNamingAllowed('test/apiFixtures.ts')).toBe(true);
+    expect(seamNamingAllowed('__tests__/settings-api.test.tsx')).toBe(true);
+  });
+
+  it('the bundle-wide walker reaches lib/, test/ and the root, so the widening is not vacuous', () => {
+    // The point of the widening is the directories the old scan never opened. A
+    // walker that still returned only `components/` and `screens/` would make §5's
+    // new assertion pass exactly as vacuously as the old one did for `lib/`.
+    const all = allSourceFiles();
+    expect(all.length, 'the bundle walked to nothing').toBeGreaterThan(100);
+    for (const probe of [
+      'lib/api.ts',
+      'lib/apiDocsModel.ts',
+      'test/apiFixtures.ts',
+      'App.tsx',
+      'main.tsx',
+    ]) {
+      expect(all, `the walker never reached ${probe}`).toContain(probe);
+    }
+    // Nested, too — `screens/settings/*` is where a model-provider tab would most
+    // plausibly be added.
+    expect(all.some((f) => f.startsWith('screens/settings/'))).toBe(true);
   });
 
   it('the source walker actually reaches files, so §5 is not vacuously empty', () => {
