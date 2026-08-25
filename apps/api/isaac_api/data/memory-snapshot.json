@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "188ed663b8e571cf6d5dcbe3937f8093722593e7945e66dc6bebb7b430377a29"
+        "sha256": "9a79e95cfe769b51421b7e2505450746fbc58f0082ccf120cd73041df908d674"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "a982324bc1b536fc1509712eaac4e17fdf97ce54124836a8ba02702bf1874de1"
+        "sha256": "9d6c0790e71aeabdd47355b40594a614ac81aea0d3e09d2532d4c266ffa4a15c"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "eb580dfcdd61d9df1ba8cbdb2ad62a1a8620d968593672a9a0722276eb8073a2"
+        "sha256": "8e4e289e3043eab7278b14cd4d9e269844447c5af5c893c1d0f1cb1fc5aab6d4"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "3b38f0320a12aae4f8ff70b2eaac56aff1bf4ae3f0152ad2ebedd94cee08c958"
+    "served_manifest_fingerprint": "7cfe63a05095e013e4feff77773455316fbf250ba34a46125dd6c08f7ae3b498"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

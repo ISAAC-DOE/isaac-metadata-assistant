@@ -29,6 +29,7 @@ import type {
   ApiExperimentDetail,
   ApiInvalidation,
   ApiPendingItem,
+  ApiPendingPage,
   PendingBlocker,
 } from '../lib/types';
 
@@ -51,6 +52,39 @@ import type {
  * so every count on this screen speaks for the whole record; the withheld questions
  * are named and reachable through "Show more questions"; and `GET /pending` without
  * parameters still answers completely for the Review Record screen beside this one.
+ *
+ * THIS SCREEN IS NOT END-TO-END BOUNDED, AND THE RESIDUE IS BIGGER THAN THIS COMMENT
+ * USED TO IMPLY. `LoadedCompletion` mounts `useRecordSession`, whose AgentContext
+ * effect reads `api.getPending(id)` — UNBOUNDED — and that effect is keyed on
+ * `[id, version, active, refreshNonce]`. `version` is adopted from every accepted
+ * answer (`setCurrentVersion(resp.version)`), so **the unbounded read fires again after
+ * EVERY SUBMISSION**, not only on mount. The measurement, and it is the honest
+ * headline for this flow rather than the one the branch's own commit message gives:
+ *
+ *   at 1,000 runs, per accepted answer
+ *     before   POST 1,773,294 B + unbounded GET 1,772,692 B  =  ~3.55 MB
+ *     after    POST    31,968 B + unbounded GET 1,772,692 B  =  ~1.80 MB
+ *
+ * A **49% reduction on this flow**, not the ~98% the mutation figures alone suggest.
+ * The mutation half is genuinely flat; the read half is untouched and repeats.
+ *
+ * ~~the residue is a per-screen, on-mount one~~ — that is how it was first described,
+ * in this comment and in `pending-is-bounded.test.tsx`, and it was wrong about the
+ * frequency. The control whose absence hid it now exists:
+ * `it('the unbounded AgentContext read REPEATS after every submission')`.
+ *
+ * WHY IT IS NOT BOUNDED HERE, measured rather than asserted. `useRecordSession`'s
+ * `pending` is what `assistantAgent.confirmProposal` searches to decide whether a
+ * staged proposal answers a still-OPEN question (`submitAnswer`) or corrects an
+ * already-answered one (`editField`). The proposal is staged from THIS screen's list,
+ * which pages deeper than 50 — so a reader who clicks "Show more" to reach question
+ * 900 and stages it would, with a 50-entry context, get `isPending: false` and the
+ * EDIT route. Measured over HTTP against that route on an unanswered question:
+ * `422 unrecognized_field`, "No editable field was recognized in the request." A
+ * legitimate first answer refused, with a reason naming the wrong cause. Bounding this
+ * read therefore requires moving the open/answered decision out of the pre-fetched
+ * list — a change to the assistant's write routing, with its own review — and is
+ * deliberately not smuggled in behind a byte saving.
  */
 const PENDING_PAGE = 50;
 
@@ -336,6 +370,43 @@ function LoadedCompletion({
   /** The contiguous prefix a `pending_page` covers — see `walked`. */
   const contiguousHead = (page: { limit: number | null; returned: number }) =>
     page.limit === null ? page.returned : Math.min(page.limit, page.returned);
+
+  /**
+   * ADOPT A MUTATION'S RECOMPUTED QUESTION LIST — ALL THREE PIECES, AND WITHOUT
+   * DEREFERENCING A KEY THAT MIGHT BE ABSENT.
+   *
+   * BOTH HALVES OF THE LIST MATTER, and the second is not optional. `resp.pending` is
+   * a WINDOW (`serialize.pending_mutation_window`), so adopting it without
+   * `pending_page.total` would silently reset every counter on this screen to the size
+   * of a page. The window is anchored on the unit the write addressed, which is what
+   * keeps `answerWasApplied`'s membership test sound.
+   *
+   * WHY THE PAGE BLOCK IS GUARDED THOUGH THE TYPE SAYS IT CANNOT BE MISSING. It was
+   * read as `resp.pending_page.total` at both call sites. The key is type-required and
+   * the server sends it on every mutation, so no reachable case is known — but the
+   * consequence if one ever existed inverts the property this whole screen is built
+   * around: the read throws INSIDE `.then()`, lands in `.catch()`, and surfaces a
+   * SUBMIT ERROR over a write that SUCCEEDED. Every other honesty guard here exists to
+   * stop the screen claiming a value landed when it did not; this one would have made
+   * it claim the opposite, which is the same defect wearing the other face. So the
+   * shape is checked rather than trusted.
+   *
+   * THE FALLBACK IS THE ONE THE CONTRACT ALREADY DEFINES, not an invention. On
+   * `GET /pending` an absent `pending_page` MEANS the response is complete
+   * (`api.getPendingPage`, `types.ApiPendingResponse`), and the mount path here already
+   * reads it that way. So absence is treated as "the list is the set" — the same
+   * reading, in the one place a server that stopped sending the block could put us —
+   * rather than as an unknown to fill with a number nobody stated.
+   */
+  const adoptServerPending = (resp: {
+    pending: ApiPendingItem[];
+    pending_page?: ApiPendingPage;
+  }) => {
+    setPending(resp.pending);
+    const page = resp.pending_page;
+    setPendingTotal(page ? page.total : resp.pending.length);
+    setWalked(page ? contiguousHead(page) : resp.pending.length);
+  };
   const [answered, setAnswered] = useState<Answered[]>([]);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
@@ -429,16 +500,23 @@ function LoadedCompletion({
       .then((token) => api.submitAnswer(id, { [blocker.id]: value }, token, blocker.runId))
       .then((resp) => {
         // Server-reported state first, unconditionally: the recomputed question list
-        // and the fresh If-Match token are facts either way.
+        // and the fresh If-Match token are facts either way. See
+        // `adoptServerPending` for why all three pieces move together and why the page
+        // block is checked rather than dereferenced.
         //
-        // BOTH HALVES, and the second is not optional. `resp.pending` is a WINDOW
-        // (`serialize.pending_mutation_window`), so adopting it without
-        // `pending_page.total` would silently reset every counter on this screen to
-        // the size of a page. The window is anchored on the unit this write addressed,
-        // which is what keeps `answerWasApplied`'s membership test below sound.
-        setPending(resp.pending);
-        setPendingTotal(resp.pending_page.total);
-        setWalked(contiguousHead(resp.pending_page));
+        // THE PAGED-IN DEPTH IS DELIBERATELY DISCARDED HERE, and naming it is the fix
+        // an independent review asked for rather than preserving it. A reader who
+        // clicked "Show more questions" three times holds 200 entries; after an answer
+        // the screen holds the server's window again, so they must click three more
+        // times to get back to where they were. Nothing becomes unreachable — the
+        // disclosure and the button both come back with it — and the alternative was
+        // measured worse: merging the previously-held entries into the window would
+        // keep displaying questions THIS WRITE MAY HAVE CLOSED. A mutation response
+        // vouches for the window and for the written unit; it says nothing about an
+        // entry outside them, and an invalidation can reopen or resolve several at
+        // once. Re-showing a question the record no longer has is a false statement;
+        // re-clicking is an inconvenience. The screen takes the inconvenience.
+        adoptServerPending(resp);
         setCurrentVersion(resp.version); // adopt the fresh token for the next submit
         if (answerWasApplied(resp, blocker.key)) {
           // APPLIED, so the staged copy has done its job. Kept only until the record
@@ -539,10 +617,9 @@ function LoadedCompletion({
       .then((token) => api.editField(id, { [blocker.id]: value }, token, blocker.runId))
       .then((resp) => {
         setCurrentVersion(resp.version);
-        // The window AND the record's total — see the note on the answer path above.
-        setPending(resp.pending);
-        setPendingTotal(resp.pending_page.total);
-        setWalked(contiguousHead(resp.pending_page));
+        // The window AND the record's total, and the paged-in depth resets here too —
+        // see the note on the answer path above, and `adoptServerPending`.
+        adoptServerPending(resp);
         if (!editWasApplied(resp)) {
           // Nothing was written, so nothing here may move: the summary row keeps the
           // value the server last confirmed, the editor stays mounted with what was

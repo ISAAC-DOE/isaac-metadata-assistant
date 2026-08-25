@@ -2320,11 +2320,21 @@ _BOUNDED_PENDING_PARAGRAPH = (
 #: there are.
 #:
 #: 500 is set against the measured per-entry cost rather than guessed: an entry
-#: serialises to ~627 bytes (`serialize`'s note above `PENDING_WINDOW` records the
-#: measurement), so a full page is ~313 KB — the worst case a client may ask for in
-#: one request, which is not the page a UI should request. The window a MUTATION
-#: returns is `serialize.PENDING_WINDOW` (50) and is deliberately a different, much
-#: smaller number: that one is a policy applied to a caller who did not ask.
+#: serialises to ~591 bytes (`serialize`'s note above `PENDING_WINDOW` records the
+#: measurement and the harness), so a full page is ~295 KB — the worst case a client
+#: may ask for in one request, which is not the page a UI should request. The window a
+#: MUTATION returns is `serialize.PENDING_WINDOW` (50) and is deliberately a different,
+#: much smaller number: that one is a policy applied to a caller who did not ask.
+#:
+#: ~~an entry serialises to ~627 bytes … so a full page is ~313 KB~~ — **both figures
+#: were overstated and are corrected in place.** An independent review re-measured the
+#: page and got 295,295 B; so did this correction, exactly. Neither number was doing
+#: any work beyond justifying the 500, which is unchanged — but a justification a
+#: reader cannot reproduce is worse than none, so here is the one command that produces
+#: it, against the same no-explicit-label harness `serialize`'s table used:
+#:
+#:     # after building a 1,000-run record (see serialize.py's note)
+#:     len(c.get(f"/api/experiments/{eid}/pending?limit=500").content)  -> 295295
 PENDING_PAGE_MAX: int = 500
 
 #: THE BOUND IS INTERPOLATED, NOT RETYPED — same reason as ``_RUN_LIMIT_DESC``.
@@ -2346,8 +2356,13 @@ _PENDING_RUN_ID_DESC = (
     "Return only the questions owned by this run — the common case of a scientist "
     "working one measurement. Refused with `404 run_not_found` when the record holds "
     "no such run, rather than answered with an empty list that reads as 'this run has "
-    "nothing left'. `pending_page.record_total` still reports the WHOLE record's open "
-    "question count, so a filtered read can never be mistaken for the record's state."
+    "nothing left'. AN EMPTY VALUE (`?run_id=`) IS A RUN ID THE RECORD DOES NOT HOLD "
+    "AND IS REFUSED THE SAME WAY, naming `\"\"` as the id that was not found; it is "
+    "not treated as if the parameter were absent, because a caller that interpolated "
+    "nothing into a run filter would otherwise be handed the WHOLE record and read it "
+    "as that run's questions. `pending_page.record_total` still reports the WHOLE "
+    "record's open question count, so a filtered read can never be mistaken for the "
+    "record's state."
 )
 
 
@@ -4041,7 +4056,11 @@ RunId = Annotated[
 # route decorator that executes far earlier in this module than this line does —
 # `GET /experiments/{id}/pending`, which grew a `run_id` filter and so grew that
 # 404 — and a decorator argument is evaluated at import time, so defining it here
-# was an ImportError waiting for the first caller who needed it earlier.
+# would have been a ~~ImportError waiting for the first caller who needed it
+# earlier~~ **`NameError` raised while importing this module**, before any route was
+# registered and before any caller existed. Naming the wrong exception mattered
+# enough to correct: an `ImportError` reads as a dependency problem a reader would
+# go looking for in another file.
 
 _R_RUN_EXPORTED: dict = {
     409: {

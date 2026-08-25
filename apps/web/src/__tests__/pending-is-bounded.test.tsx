@@ -141,13 +141,118 @@ describe('the completion screen bounds what it asks for', () => {
      * `useRecordSession` is the SHARED record-session owner mounted on all four record
      * surfaces, and it reads the complete list to build the assistant's AgentContext.
      * Bounding it is a separate decision with a separate blast radius — the context's
-     * `pending` is what routes a staged proposal to the run that owns its question —
+     * `pending` is what decides whether a staged proposal is ANSWERED or CORRECTED —
      * so it was deliberately left alone rather than changed as a side effect here.
      *
-     * It is NOT asserted, deliberately: pinning the presence of an unbounded call
-     * would turn fixing it into a test failure. The measurement is recorded so the
-     * next reader knows the screen is not yet end-to-end bounded, and why.
+     * ~~It is NOT asserted, deliberately … the next reader knows the screen is not yet
+     * end-to-end bounded, and why.~~ **THAT WAS TRUE AND INCOMPLETE, IN THE WAY THAT
+     * MATTERED.** This assertion-free note measured the call list ON MOUNT ONLY, and an
+     * independent review found the read REPEATS: `useRecordSession`'s effect keys on
+     * `version`, and this screen adopts a fresh `version` from every accepted answer —
+     * so the unbounded read fires again after every submission, on the very screen the
+     * bound was written for. The note recorded the residue and understated its
+     * frequency, which is exactly the shape of claim a missing control lets through.
+     *
+     * The control now exists, immediately below, and it counts unbounded calls AFTER a
+     * mutation rather than at rest. It still does not assert that the unbounded call is
+     * PRESENT — pinning that would turn fixing it into a test failure — it asserts the
+     * RELATIONSHIP: however many unbounded reads there are, answering a question adds
+     * one. `GuidedCompletion`'s `PENDING_PAGE` comment carries the byte arithmetic and
+     * the measured reason the read cannot simply be narrowed.
+     *
+     * AND THE RESIDUE IS WIDER THAN THIS SCREEN. `api.getPending` — the unbounded
+     * reader — is also called by `api.getRecordBundle` and `api.getExportReadiness`
+     * (`lib/api.ts`), which are the Review Record and Export Readiness bundles. Those
+     * two are deliberate: a screen reporting what is unresolved would UNDERSTATE it
+     * from a page, which is why `getPending` sends no parameters at all. They are named
+     * here so "the residue" means all three call sites and not just the one this file
+     * happens to render.
      */
+  });
+
+  it('the unbounded AgentContext read REPEATS after every submission', async () => {
+    /*
+     * THE CONTROL WHOSE ABSENCE HID A 49%-NOT-98% SAVING.
+     *
+     * The test above measures the call list on MOUNT, where one unbounded read looks
+     * like a one-off cost. `useRecordSession`'s AgentContext effect is keyed on
+     * `[id, version, active, refreshNonce]`, and `GuidedCompletion` calls
+     * `setCurrentVersion(resp.version)` on every accepted answer — but `version` in
+     * that effect is the DETAIL's version, so the repeat needs the detail to be re-read
+     * too, which is what `onRefresh`/`reload` does. What this test pins is the
+     * measurable relationship on the path a scientist actually walks: submit an
+     * answer, and the unbounded read count does not stay where it was.
+     *
+     * IT PINS THE DEFECT, WITH ITS EXACT NUMBERS, AND THAT IS DELIBERATE. The note
+     * above used to explain that the unbounded call was left UNASSERTED so that fixing
+     * it would not be a test failure — and that reasoning is precisely why the repeat
+     * went unmeasured for a whole commit. A residue nobody counts is a residue whose
+     * size nobody knows. So: **1 unbounded read on mount, 2 after one accepted answer.**
+     *
+     * WHEN THE AGENTCONTEXT READ IS BOUNDED, INVERT THIS TEST — do not delete it. That
+     * is this repository's established remedy for a test that pins a defect (`CLAUDE.md`
+     * §11, session of 2026-08-18), and it keeps the measurement in history instead of
+     * removing the only record that it was ever 2.
+     */
+    const answered = ALL.slice(1);
+    const calls = stubFetchRoutes(
+      routes({
+        'GET /api/experiments/demo/runs/01RUN000000000000000000000': {
+          body: {
+            run: {
+              id: '01RUN000000000000000000000',
+              version: 'run.1',
+              fields: {},
+              inherited: {},
+            },
+          },
+        },
+        'POST /api/experiments/demo/runs/01RUN000000000000000000000/answers': {
+          body: {
+            pending: answered.slice(0, PAGE),
+            pending_page: {
+              ...completePendingPage(answered.slice(0, PAGE)),
+              total: answered.length,
+              withheld: answered.length - PAGE,
+              complete: false,
+            },
+            status: 'needs_attention',
+            rev: 4,
+            updated_utc: '2099-04-02T09:16:00Z',
+            version: '1.1',
+            workflow: experimentDetail.workflow,
+            invalidation: {
+              changed: true,
+              rev: 4,
+              changed_fields: ['series'],
+              reopened_steps: [],
+              artifact: { state: 'none' as const, reason: null },
+              reason: 'Updated 1 field(s); no downstream steps reopened.',
+            },
+          },
+        },
+      }),
+    );
+    const screen = renderComplete();
+    await screen.findByText(/Provide the reduced spectrum for Run 1\./);
+
+    const unbounded = () =>
+      calls.filter((c) => c === 'GET /api/experiments/demo/pending').length;
+    const beforeSubmit = unbounded();
+
+    fireEvent.change(screen.getByLabelText(/series json/i), {
+      target: { value: '[{"series_id":"s"}]' },
+    });
+    fireEvent.click(screen.getByText('Confirm'));
+    await screen.findByText('1 / 120');
+
+    // THE MEASUREMENT. One on mount; a SECOND after one answer — the read repeats per
+    // submission, which is the fact the mount-only note could not see.
+    expect(beforeSubmit).toBe(1);
+    expect(unbounded()).toBe(2);
+    expect(calls).toContain(`GET /api/experiments/demo/pending?limit=${PAGE}`);
+    // And the write itself carried a bounded list — the half that IS fixed.
+    expect(screen.getByText('119 of 120 fields still to confirm')).toBeInTheDocument();
   });
 
   /*
@@ -259,6 +364,73 @@ describe('the completion screen bounds what it asks for', () => {
     // have reported 51 and told the scientist 69 questions had vanished.
     expect(await screen.findByText('1 / 120')).toBeInTheDocument();
     expect(screen.getByText('119 of 120 fields still to confirm')).toBeInTheDocument();
+  });
+
+  it('a mutation body with no page block does not report a SUCCESSFUL write as failed', async () => {
+    /*
+     * THE HONESTY PROPERTY THIS SCREEN IS BUILT AROUND, INVERTED.
+     *
+     * Both mutation handlers read `resp.pending_page.total` unguarded. The key is
+     * type-required and the server sends it on every mutation, so no reachable case is
+     * known — but the consequence if one existed is the worst class this screen has:
+     * the read throws INSIDE `.then()`, lands in `.catch()`, and paints "That answer
+     * could not be applied" over a write the server ACCEPTED. Every other guard here
+     * stops the screen claiming a value landed when it did not; this one made it claim
+     * the opposite.
+     *
+     * The response below is a real accepted answer — `invalidation.changed: true`, the
+     * question gone from the list — missing only the page block. Before the guard this
+     * test paints the failure banner and pushes no answered row; after it, the write is
+     * reported as what it was.
+     */
+    const answered = ALL.slice(1);
+    stubFetchRoutes(
+      routes({
+        'GET /api/experiments/demo/runs/01RUN000000000000000000000': {
+          body: {
+            run: {
+              id: '01RUN000000000000000000000',
+              version: 'run.1',
+              fields: {},
+              inherited: {},
+            },
+          },
+        },
+        'POST /api/experiments/demo/runs/01RUN000000000000000000000/answers': {
+          body: {
+            // NO `pending_page`. Everything else is a normal accepted answer.
+            pending: answered,
+            status: 'needs_attention',
+            rev: 4,
+            updated_utc: '2099-04-02T09:16:00Z',
+            version: '1.1',
+            workflow: experimentDetail.workflow,
+            invalidation: {
+              changed: true,
+              rev: 4,
+              changed_fields: ['series'],
+              reopened_steps: [],
+              artifact: { state: 'none' as const, reason: null },
+              reason: 'Updated 1 field(s); no downstream steps reopened.',
+            },
+          },
+        },
+      }),
+    );
+    const screen = renderComplete();
+    await screen.findByText(/Provide the reduced spectrum for Run 1\./);
+
+    fireEvent.change(screen.getByLabelText(/series json/i), {
+      target: { value: '[{"series_id":"s"}]' },
+    });
+    fireEvent.click(screen.getByText('Confirm'));
+
+    // The write is reported as applied: the counter moves and the answered row exists.
+    // `119` is `resp.pending.length`, which is the CONTRACT's reading of an absent page
+    // block ("the list is the set") rather than a number invented to fill the gap.
+    expect(await screen.findByText('1 / 120')).toBeInTheDocument();
+    // AND NO FAILURE IS CLAIMED. This is the assertion that fails without the guard.
+    expect(screen.queryByText(/That answer could not be applied/)).toBeNull();
   });
 
   it('pages from the CONTIGUOUS head after an anchored mutation window, skipping nothing', async () => {

@@ -17,8 +17,15 @@ questions::
       500          886,189     1,500                    886,792     1,499
      1000        1,772,692     3,000                  1,773,294     2,999
 
-627 bytes per entry, flat, and 71% of those bytes are ``inferability`` + ``question``
-— three fixed question templates repeated once per run.
+~~627 bytes per entry, flat, and 71% of those bytes are ``inferability`` +
+``question``~~ — **both figures were overstated and are corrected in place**: the
+marginal cost is **591.0 bytes per entry** (``(1,772,692 - 176,989) / 2,700``, and
+every other adjacent pair of rows above gives the same number), and ``inferability`` +
+``question`` are **63.5%** of the served bytes, 68.1% counting their keys. Still three
+fixed question templates repeated once per run, which is the fact those percentages
+were carrying. ``serialize.py``'s note above ``PENDING_WINDOW`` holds the command that
+re-derives them, and the harness they depend on — the runs above were created with no
+explicit label, and passing one of a different length moves every figure in the table.
 
 **THE MUTATION COLUMN IS THE WORSE HALF**, because it is the WRITE path a scientist
 hits repeatedly: answering ONE question on ONE run downloaded the whole record's
@@ -122,6 +129,19 @@ def _with_runs(client: TestClient, n: int, *, title: str = "bounded pending") ->
 
 def _run_version(client: TestClient, exp_id: str, run_id: str) -> str:
     return client.get(f"/api/experiments/{exp_id}/runs/{run_id}").json()["run"]["version"]
+
+
+def _open_for_run(client: TestClient, exp_id: str, run_id: str) -> int:
+    """How many questions THAT RUN still owes, read from the server rather than assumed.
+
+    It exists because two assertions below used to be written ``<= PENDING_WINDOW + 4``,
+    and **4 is a number the code does not bound.** ``pending_mutation_window`` returns
+    the head PLUS every still-open question of the written unit, uncapped — so the
+    honest right-hand side is the head plus THIS, measured, and an independent review
+    was right that the magic constant was asserting a guarantee that does not exist.
+    """
+    page = client.get(f"/api/experiments/{exp_id}/pending?run_id={run_id}")
+    return page.json()["pending_page"]["total"]
 
 
 def _answer_run(client: TestClient, exp_id: str, run_id: str, answers: dict):
@@ -325,9 +345,13 @@ def test_a_run_answer_on_a_large_record_returns_a_window_not_the_record(client):
     assert page["total"] == 2999, page  # the record's real count, undiminished
     assert page["complete"] is False
     assert page["withheld"] == page["total"] - page["returned"]
-    # The window is the head plus this run's own still-open questions — at most the
-    # policy window plus what a single unit can owe.
-    assert page["returned"] <= serialize.PENDING_WINDOW + 4, page
+    # The window is the head plus this run's own still-open questions — the head plus
+    # what THIS unit still owes, read from the server. ~~`<= PENDING_WINDOW + 4`~~: the
+    # 4 was a magic margin the code does not bound (see `_open_for_run`), so it is
+    # replaced by the measured quantity it was standing in for.
+    assert page["returned"] <= serialize.PENDING_WINDOW + _open_for_run(
+        client, exp_id, run_ids[500]
+    ), page
     assert len(body["pending"]) == page["returned"]
 
     # AND THE COUNTERS STILL SPEAK FOR THE RECORD, not for the page. This is the half
@@ -426,10 +450,20 @@ def test_a_record_level_write_anchors_on_the_records_own_questions(client):
 #: repository the difference).
 #:
 #: 60 KB is set against the measurement rather than guessed: a window of
-#: `PENDING_WINDOW` entries at the measured ~627 bytes each is ~31 KB, plus the
+#: `PENDING_WINDOW` entries at the measured ~591 bytes each (this said ~~627~~ and is
+#: corrected with the table in the module docstring) is ~30 KB, plus the
 #: workflow/invalidation/version envelope. It is a CEILING with real headroom, not a
-#: target — the point is that the number does not move with the run count, and the
+#: target — the point is that the number does not move with the RUN COUNT, and the
 #: equality-shaped assertion below is what actually establishes that.
+#:
+#: **IT IS NOT A CEILING ON EVERY MUTATION RESPONSE, AND SAYING SO IS PART OF THE
+#: GUARD.** The window is ANCHORED and the anchored set is uncapped, so a response is
+#: flat in the run count and LINEAR IN ONE UNIT'S OPEN-QUESTION COUNT: a unit owing 82
+#: still-open questions returns 132 entries and ~87 KB, past this number.
+#: `test_the_anchored_set_is_not_capped` measures exactly that and is the disclosure
+#: this constant would otherwise be read as denying. Every record reachable through a
+#: shipped capture path today owes at most five questions per unit, which is why the
+#: sweeps below stay far under it.
 MUTATION_RESPONSE_CEILING = 60_000
 
 
@@ -448,7 +482,11 @@ def test_the_mutation_response_does_not_grow_with_the_run_count(client):
         res = _answer_run(client, exp_id, run_ids[-1], {"qc": QC})
         assert res.status_code == 200, res.text
         measured[n] = len(res.content)
-        assert res.json()["pending_page"]["returned"] <= serialize.PENDING_WINDOW + 4
+        # See `_open_for_run`: the head plus what the written unit still owes, not the
+        # head plus 4.
+        assert res.json()["pending_page"]["returned"] <= serialize.PENDING_WINDOW + (
+            _open_for_run(client, exp_id, run_ids[-1])
+        )
 
     assert max(measured.values()) < MUTATION_RESPONSE_CEILING, measured
     # The bytes that DO move are the digits of a few integers and the run labels in
@@ -466,6 +504,150 @@ def test_a_bounded_read_does_not_grow_with_the_run_count(client):
         assert res.json()["pending_page"]["returned"] == serialize.PENDING_WINDOW
     assert max(measured.values()) < MUTATION_RESPONSE_CEILING, measured
     assert measured[1000] < measured[25] * 1.1, measured
+
+
+#: 80 extra `asset` sha256 questions, injected on one run so that ONE UNIT owes more
+#: than `PENDING_WINDOW`. Written out here rather than produced through a capture path
+#: because **no shipped capture path can produce them**: an `asset` question comes from
+#: an ingested file listing, `POST /api/uploads` refuses every upload, and
+#: `POST /ingestion/csv/preview` has no route that APPLIES a preview. That is why the
+#: residue this test pins is LATENT rather than live — and why it is pinned anyway, so
+#: that a future capture surface finds a measurement instead of a surprise.
+def _extra_asset_questions(n: int) -> list[dict]:
+    return [
+        {
+            "kind": "asset",
+            "content_role": "raw_data_pointer",
+            "uri": f"synthetic://fixture/scan_{i:03d}.h5",
+            "media_type": "application/x-hdf5",
+            "blocker": "sha256",
+            "question": f"What is the sha256 of synthetic://fixture/scan_{i:03d}.h5?",
+            "evidence": [],
+        }
+        for i in range(n)
+    ]
+
+
+def test_the_anchored_set_is_not_capped(client):
+    """THE RESPONSE IS FLAT IN THE RUN COUNT AND LINEAR IN ONE UNIT'S QUESTION COUNT.
+
+    Two clauses, and this file used to publish only the first. ``PENDING_WINDOW``'s
+    comment said a unit owes "at most five" while ``pending_mutation_window``'s
+    docstring said "three or four"; an independent review noticed the contradiction and
+    then measured what neither number bounded — ``pending_mutation_window`` puts EVERY
+    entry the written unit owns into the window, uncapped.
+
+    WHY IT IS NOT CAPPED, argued where it is implemented and restated here because a
+    test is where the next reader looks: a cap would have to drop some of the written
+    unit's still-open questions, and the function is given ``unit_run_id`` and nothing
+    finer — so it could drop the very entry ``GuidedCompletion.answerWasApplied`` looks
+    for, and an entry missing from the list reads as ANSWERED. A "Confirmed by You" chip
+    over a value the record does not hold is strictly worse than the bytes a cap saves.
+
+    WHAT IS ASSERTED, and what deliberately is not. The ENTRY COUNT is a property of
+    the construction and is asserted exactly. The BYTE size is not: it moves with the
+    length of the injected URIs (measured 87,082 B with the fixture above; an
+    independent review measured 83,672 with its own), so asserting it would pin the
+    fixture rather than the behaviour. What IS asserted about the bytes is the property
+    that matters — the response says out loud that it exceeded the policy.
+    """
+    exp_id, run_ids = _with_runs(client, 60, title="uncapped anchor")
+    exp = ws.load_experiment(exp_id)
+    last = exp.sorted_runs()[-1]
+    last.draft["pending"] = list(last.draft.get("pending") or []) + _extra_asset_questions(80)
+    exp.save_versioned()
+    target = run_ids[-1]
+
+    # 60 runs x 3, plus 80 = 260, less the `qc` this write answers.
+    res = _answer_run(client, exp_id, target, {"qc": QC})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    page = body["pending_page"]
+
+    owed = _open_for_run(client, exp_id, target)
+    assert owed == 82, owed  # 80 assets + series + descriptor; qc is answered
+    # The head (50) plus this unit's 82 — the last run's entries sort at the TAIL, so
+    # nothing overlaps and the two simply add.
+    assert page["returned"] == serialize.PENDING_WINDOW + owed == 132, page
+    assert len(body["pending"]) == 132
+
+    # THE GUARANTEE THE ANCHOR MAKES, checked entry by entry rather than by count:
+    # every one of that unit's still-open questions came back.
+    returned_keys = {
+        item["blocker_key"] for item in body["pending"] if item.get("run_id") == target
+    }
+    owned = client.get(f"/api/experiments/{exp_id}/pending?run_id={target}").json()["pending"]
+    assert returned_keys == {item["blocker_key"] for item in owned}
+
+    # AND IT IS NOT SILENT. `returned` reports what came back and `limit` reports the
+    # policy applied, so a response carrying 132 entries under a limit of 50 SAYS SO.
+    # This is the opposite of truncation and is disclosed just as plainly.
+    assert page["limit"] == serialize.PENDING_WINDOW
+    assert page["returned"] > page["limit"]
+    assert page["total"] == 259
+    assert page["withheld"] == 259 - 132
+    assert page["complete"] is False
+    # The residue, stated as a measurement rather than a worry: this response is past
+    # the ceiling the run-count sweeps assert, and the ceiling's own comment now says
+    # so. It is bounded by ONE unit's question count, never by the record's.
+    assert len(res.content) > MUTATION_RESPONSE_CEILING, len(res.content)
+
+
+def test_withheld_counts_what_is_ahead_not_what_an_offset_skipped(client):
+    """``withheld`` IS ``total - offset - returned``, and the docstring used to promise
+    something else.
+
+    It said "how many questions this response is NOT showing", which an offset makes
+    false: the questions an offset skipped are not shown and are not counted. The number
+    is the right one for "is there more to fetch?", which is what a pager asks, and the
+    fix was to the SENTENCE — an offset is something the caller chose, so a client that
+    skipped two questions knows it skipped them. Pinned here so the corrected reading is
+    the one a future edit has to keep.
+    """
+    exp_id, run_ids = _with_runs(client, 1)  # one run, three questions
+    page = client.get(
+        f"/api/experiments/{exp_id}/pending?run_id={run_ids[0]}&offset=2&limit=5"
+    ).json()["pending_page"]
+    assert (page["total"], page["offset"], page["returned"]) == (3, 2, 1)
+    assert page["withheld"] == 0  # nothing AHEAD; two were skipped behind
+    assert page["complete"] is False  # `offset != 0`, so this is not the set
+
+
+def test_complete_is_relative_to_the_filter_and_record_total_says_so(client):
+    """``complete: true`` under a ``run_id`` filter means "this RUN has nothing
+    further", never "this RECORD has nothing further".
+
+    The page block's docstring asserted that a client reading only ``complete`` cannot
+    mistake a page for the set, unqualified — and under a filter it can. ``record_total``
+    is the mitigation, is served on every page, and is what makes the two
+    distinguishable; this pins that it actually differs when it matters.
+    """
+    exp_id, run_ids = _with_runs(client, 3)  # 9 questions, 3 per run
+    page = client.get(f"/api/experiments/{exp_id}/pending?run_id={run_ids[0]}").json()[
+        "pending_page"
+    ]
+    assert page["complete"] is True and page["total"] == 3
+    assert page["record_total"] == 9  # the record is emphatically NOT complete
+    assert client.get(f"/api/experiments/{exp_id}").json()["pending_count"] == 9
+
+
+def test_an_empty_run_id_is_refused_rather_than_read_as_absent(client):
+    """``?run_id=`` IS A RUN FILTER NAMING A RUN THE RECORD DOES NOT HOLD.
+
+    Treating it as absent was the alternative and it is the more dangerous one: a
+    client that interpolated nothing into ``?run_id=${runId}`` would be handed the WHOLE
+    record and would read it as that run's questions — a superset presented as a subset,
+    which is the silent-wrong-answer class this route already refuses an unknown run to
+    avoid. So the behaviour stands and ``_PENDING_RUN_ID_DESC`` now documents it, which
+    is what an independent review asked for: the 404 names ``""`` as the id, and a
+    reader has to be able to find out why.
+    """
+    exp_id, _ = _with_runs(client, 1)
+    res = client.get(f"/api/experiments/{exp_id}/pending?run_id=")
+    assert res.status_code == 404, res.text
+    assert res.json()["error"] == "run_not_found"
+    assert res.json()["id"] == ""
+    assert "?run_id=" in routes._PENDING_RUN_ID_DESC
 
 
 def test_the_unbounded_read_is_still_deliberately_linear(client):
