@@ -3,6 +3,14 @@
 **STATUS: NOT APPROVED. NOT APPLIED ANYWHERE. Applying it is the operator's act, and no
 agent may do it.**
 
+> **POINTER, added 2026-08-25.** §9A below says its two new coverage items *"HAVE NOT YET RUN"*.
+> **They have now run** — run `32800763199`, job `97660962127`, on `main` at `c153ec9`, every step
+> `success`. The evidence, with the quoted job output, is in
+> [`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md) §2. §9A is left
+> as written rather than rewritten, because this packet's own convention is that a claim promoted from
+> "declared" to "proven" must be promoted by quoting a job, not by editing the sentence that said it
+> had not happened. **Approval status is unchanged: still NOT APPROVED.**
+
 | | |
 |---|---|
 | Migration | `apps/api/isaac_api/migrations/0005_run_projection.sql` |

@@ -1,5 +1,13 @@
 # Consolidated operator handoff — 2026-08-18
 
+> **POINTER, added 2026-08-25 — this package is NOT superseded, but it has a dated successor.**
+> [`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md) carries only what
+> is new or corrected since this one was sent. Two items in it bear on this document directly: the
+> `0003`/`0004` constraint evidence is now **41 of 46 executed by a real PostgreSQL on `main`** (§1 of
+> the addendum) rather than the 27 quoted below, and `0005`'s **forward** digest in §1A changed after
+> an independent review (§3 of the addendum). The `0003`/`0004` digests, the ask, and every "do not
+> apply `0005`" statement below are unchanged.
+
 **For:** Dean (SLAC infrastructure / database operator), via Krish.
 **From:** the ISAAC Metadata Assistant repository. **Not sent by an agent** — this is a ready-to-send
 package for Krish to review and forward.
