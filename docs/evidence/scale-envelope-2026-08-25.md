@@ -78,6 +78,11 @@ repeatedly — was **1,773,294 B** before this programme's bounding work and is 
 
 ## 3. What is still linear, named rather than implied
 
+> **STATUS CHANGED 2026-08-25 — the multiple is gone, the linearity is not.** The
+> diagnosis below stands unaltered and is what the fix was built from; §3A records what
+> was done, what it measured, and what is left. Read §3 for the defect and §3A for its
+> current state.
+
 **The record-detail route's TIME is still linear: 3.0 ms at 25 runs, 83.2 ms at 1,000**, while
 its payload is flat at ~1.5 KB. So the cost is invisible in bytes and visible only in latency,
 which is how it went unnoticed before.
@@ -114,8 +119,112 @@ the response builder is the shape that works"~~ — **that remedy was scoped to
 workload.** A slice following the original paragraph would have optimised code that never
 runs. The real callers are `draft_ok()` and `artifact_state`, and memoising `export_units()`
 per instance is still unsafe for the reason originally given — routes mutate an `Experiment`
-and re-read its state in the same request. **Not done, and not begun**, and now at least
-pointed at the right functions.
+and re-read its state in the same request. ~~**Not done, and not begun**, and now at least
+pointed at the right functions.~~ — **DONE 2026-08-25; see §3A.** The sentence is struck
+rather than deleted because it was true when written and because the thing that made it
+actionable — being pointed at the right functions — is what §3A was built on.
+
+## 3A. What the threading slice did, and what is still linear afterwards
+
+**THE REMEDY WAS THREADING, NOT MEMOISATION, AND THE DISTINCTION IS THE WHOLE DESIGN.** §3
+is right that a per-instance memo is unsafe: routes mutate an `Experiment` and re-read its
+derived state in the same request (answer → recompute status/workflow), so a
+`cached_property` or an instance dict would serve a stale composition after a write. So
+`draft_ok`, `_all_units_pass_dry_run`, `status` and `export_ready` each gained an
+**optional** already-composed `units` argument, `dependencies.artifact_state` gained the
+same, and `routes._detail` composes the list **once** through the one named seam
+`routes._shared_units` and hands it to every consumer. Nothing is stored, nothing is
+invalidated, and every other call site — `_workflow_for` is reached by every mutation
+response, a dozen sites — is byte-for-byte the code it was, because `units=None` still
+means "compose your own".
+
+**A SECOND, SMALLER SHARING, FOUND BY RE-PROFILING RATHER THAN BY READING.** Sharing the
+unit list stopped the re-*composition* but `draft_ok` was still being *derived* twice from
+it — once for the workflow's steps and once for the response's own key — i.e.
+`validate_draft` over every unit, twice: **2,000 calls per request at 1,000 runs, exactly
+2× runs**, which is also the figure §3 quotes from the original profile without remarking on
+it. `_detail` now derives it once and passes the boolean. This is why the table below has a
+`validate_draft` column that §3 does not.
+
+### Call counts per request — measured, not argued
+
+Counted by wrapping the two methods over the real HTTP surface, and asserted in the normal
+suite by `apps/api/tests/test_detail_route_composes_each_run_once.py`:
+
+| runs | `resolved_run_draft` | `export_units` | `validate_draft` |
+|---:|---:|---:|---:|
+| 25 | 75 → **25** | 3 → **1** | 50 → **25** |
+| 100 | 300 → **100** | 3 → **1** | 200 → **100** |
+| 250 | 750 → **250** | 3 → **1** | 500 → **250** |
+| 500 | 1,500 → **500** | 3 → **1** | 1,000 → **500** |
+| 1000 | **3,000 → 1,000** | 3 → **1** | 2,000 → **1,000** |
+
+The 3× confirms §3's corrected trace exactly. Two further counts §3 does not give, because
+they are worse and are the ones a scientist reaches at the END of the work: on a **fully
+answered, unexported** record it was **5×** (`status()` and `export_ready()` stop
+short-circuiting the moment `pending_count()` hits 0), and on a **fully exported fan-out**
+**4×**. Both are now 1×, and both are pinned by their own tests.
+
+### Wall-clock — the ratio is the finding; the absolutes carry a caveat
+
+A/B **interleaved in one process on one machine**, arms alternating so drift hits both
+equally. The "before" arm is the current code with the two seams disabled
+(`_shared_units → None`, `_workflow_for` dropping the boolean it is handed), which
+reproduces the old call pattern exactly; its numbers agree with §1's independently measured
+before-figures within a few percent, which is the cross-check that makes the reconstruction
+usable.
+
+| runs | §1 published (min) | A/B before (min) | **A/B after (min)** | speed-up |
+|---:|---:|---:|---:|---:|
+| 25 | 3.2 | 3.5 | **2.6** | 1.37× |
+| 100 | 8.7 | 8.9 | **4.3** | 2.06× |
+| 250 | 19.2 | 20.3 | **8.9** | 2.29× |
+| 500 | 37.0 | 39.3 | **16.7** | 2.36× |
+| 1000 | 76.0 | 78.2 | **31.4** | 2.49× |
+
+**THE ABSOLUTE MILLISECONDS ARE INDICATIVE ONLY AND THIS IS NOT A FORMALITY — IT WAS
+OBSERVED.** Two further runs of the identical harness, taken minutes later while another
+agent was working in the same repository, put the *before* arm at 107–109 ms at 1,000 runs
+against this table's 78 — a 38% inflation of the arm that was supposed to be the fixed
+reference. The **ratios in those same runs were 1.45–1.50 / 2.02–2.09 / 2.33–2.39 /
+2.38–2.40 / 2.40–2.44**, i.e. indistinguishable from this table. So the speed-up column is
+the robust figure and the millisecond columns are not, exactly as `CLAUDE.md` §7's
+contention note requires; the row above is quoted from the quietest run and only because
+its before arm reproduces §1. **Nothing in CI runs this harness and no Linux figure exists.**
+
+### STILL LINEAR, and this is a partial win reported as one
+
+**`GET /api/experiments/{id}` is still linear in time.** 2.6 ms at 25 runs, 31.4 ms at
+1,000; the marginal cost from 100 → 1,000 runs is ~30 µs per run. The multiple was removed;
+the slope was not. Where the remaining 31.4 ms goes on a 1,000-run record, measured
+best-of-ten per component:
+
+| component | ms | share |
+|---|---:|---:|
+| `export_units()` — composing 1,000 run drafts **once** | 21.7 | 68% |
+| `load_experiment()` — read the document, build 1,000 `Run` objects | 4.6 | 14% |
+| `draft_ok(units=…)` — `validate_draft` over 1,000 composed drafts | 1.7 | 5% |
+| `artifact_state(units=…)`, `pending_count()` | 0.15 | <1% |
+| remainder (ASGI, routing, response serialisation) | ~3.7 | 12% |
+
+**The dominant term is now the one composition the response genuinely needs, and it is not
+reducible without changing the storage model.** `draft_ok` is *defined* as "every unit's
+composed draft passes the no-guessing checks", and a run's draft is composed on read
+precisely so that inheritance stays by reference — edit an experiment-level field and every
+run reflects it with no fan-out write (`workspace.resolved_run_draft`, contract §2 D2).
+Avoiding the composition would mean either storing composed drafts (giving up that
+invariant) or decomposing validation into an experiment half plus a per-run half (a
+different, unproven definition of `draft_ok`). **Neither is attempted here and neither is
+justified by any measurement in this repository.** `load_experiment` and `pending()` are
+linear by contract for the same reason.
+
+**What was NOT changed, named rather than implied:** `GET /pending`'s unbounded default is
+still deliberately linear (§1) and a negative-control test keeps it that way; nothing in
+`src/isaac_records/**` was touched; and no response moved by one byte — 17 record shapes
+(the five canonical seeds, zero-run, legacy-run, multi-run, mixed, malformed `pending`,
+`draft_ok` false, partially and fully exported fan-outs, exported and stale zero-run) were
+captured before the change and after it and are **byte-identical**, with the same equality
+re-asserted in the suite by patching `_shared_units` to `None`.
 
 Also corrected: the detail response is flat as **+2 bytes**, not the +8 first published.
 `detail bytes = 1458 + len(title)` fits exactly across four independent titles, so most of

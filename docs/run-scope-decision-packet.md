@@ -1,5 +1,12 @@
 # Which fields belong to a Run, and which to the Experiment — the six that need a scientist
 
+> **SUPERSEDED AS THE DOCUMENT TO SEND, 2026-08-25** — the scientist-facing question list is now
+> [`docs/angel-scope-questions-2026-08-25.md`](angel-scope-questions-2026-08-25.md), which re-measures
+> this file against `main` = `625e4d1` and corrects two stale claims in it (the override UI HAS
+> shipped, PR #122 / `a69c9d7`; and the fan-out drops the `system.configuration` KEY rather than
+> writing `null`). This file is not withdrawn: it keeps the engineering detail and the §7
+> implementation checklist, which the successor deliberately omits.
+
 > ## RE-MEASURED 2026-08-19 — the question is the same, and it now has a MEASURED cost
 >
 > This packet has said since 2026-08-10 that **nothing in the programme is blocked** on the
