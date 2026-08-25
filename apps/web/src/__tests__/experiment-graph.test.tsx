@@ -134,8 +134,15 @@ describe('the graph lives inside the record, and is linkable', () => {
     await view.findByRole('heading', { name: 'Experiment Graph' });
     const base = `/api/experiments/${GRAPH_EXP_ID}`;
     for (const call of calls) {
-      // Every call the surface made is a route the record screens already used.
-      expect(Object.keys(routesFor(experimentGraphBundle()))).toContain(call);
+      /* Every call the surface made is a route the record screens already used.
+         THE QUERY IS STRIPPED, AND ONLY THE QUERY. `useRecordSession` asks for a bounded
+         page of the open questions (`…/pending?limit=50`) rather than the complete list,
+         which is the same ROUTE with a parameter on it — this test is about routes, and a
+         new path would still fail it. Registering the query form as a second key would
+         say the opposite: that a parameter makes a new endpoint. */
+      expect(Object.keys(routesFor(experimentGraphBundle()))).toContain(
+        call.replace(/\?.*$/, ''),
+      );
     }
     expect(calls).toContain(`GET ${base}/artifacts`);
     expect(calls).toContain(`GET ${base}/evidence-classification`);

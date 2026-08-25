@@ -129,70 +129,67 @@ describe('the completion screen bounds what it asks for', () => {
     expect(calls).toContain(`GET /api/experiments/demo/pending?limit=${PAGE}`);
 
     /*
-     * A SECOND, UNBOUNDED READ STILL HAPPENS, AND IT IS NOT THIS SCREEN'S. Measured
-     * here, the full call list on mount is:
+     * THE SECOND READ IS ALSO BOUNDED NOW, AND IT IS NOT THIS SCREEN'S. Measured here,
+     * the full call list on mount is:
      *
      *   GET /api/health
      *   GET /api/experiments/demo
      *   GET /api/experiments/demo/pending?limit=50      <- this screen
-     *   GET /api/experiments/demo/pending               <- useRecordSession
+     *   GET /api/experiments/demo/pending?limit=50      <- useRecordSession
      *   GET /api/experiments/demo/evidence-classification
      *
      * `useRecordSession` is the SHARED record-session owner mounted on all four record
-     * surfaces, and it reads the complete list to build the assistant's AgentContext.
-     * Bounding it is a separate decision with a separate blast radius — the context's
-     * `pending` is what decides whether a staged proposal is ANSWERED or CORRECTED —
-     * so it was deliberately left alone rather than changed as a side effect here.
+     * surfaces, and it builds the assistant's AgentContext. The fourth line USED TO READ
+     * `GET /api/experiments/demo/pending` — the complete list, 1,772,692 bytes at 1,000
+     * runs, fetched again after every accepted answer because that effect keys on
+     * `version`. The history is kept in the next test, which is the same test inverted.
      *
-     * ~~It is NOT asserted, deliberately … the next reader knows the screen is not yet
-     * end-to-end bounded, and why.~~ **THAT WAS TRUE AND INCOMPLETE, IN THE WAY THAT
-     * MATTERED.** This assertion-free note measured the call list ON MOUNT ONLY, and an
-     * independent review found the read REPEATS: `useRecordSession`'s effect keys on
-     * `version`, and this screen adopts a fresh `version` from every accepted answer —
-     * so the unbounded read fires again after every submission, on the very screen the
-     * bound was written for. The note recorded the residue and understated its
-     * frequency, which is exactly the shape of claim a missing control lets through.
+     * ~~Bounding it is a separate decision with a separate blast radius — the context's
+     * `pending` is what decides whether a staged proposal is ANSWERED or CORRECTED — so
+     * it was deliberately left alone.~~ It was the right reason and it has been
+     * discharged rather than waived: that decision now belongs to the server, which
+     * refuses the wrong route without writing and names the right one
+     * (`assistant-answer-routing.test.ts`). Membership in this list is a hint.
      *
-     * The control now exists, immediately below, and it counts unbounded calls AFTER a
-     * mutation rather than at rest. It still does not assert that the unbounded call is
-     * PRESENT — pinning that would turn fixing it into a test failure — it asserts the
-     * RELATIONSHIP: however many unbounded reads there are, answering a question adds
-     * one. `GuidedCompletion`'s `PENDING_PAGE` comment carries the byte arithmetic and
-     * the measured reason the read cannot simply be narrowed.
-     *
-     * AND THE RESIDUE IS WIDER THAN THIS SCREEN. `api.getPending` — the unbounded
-     * reader — is also called by `api.getRecordBundle` and `api.getExportReadiness`
-     * (`lib/api.ts`), which are the Review Record and Export Readiness bundles. Those
-     * two are deliberate: a screen reporting what is unresolved would UNDERSTATE it
-     * from a page, which is why `getPending` sends no parameters at all. They are named
-     * here so "the residue" means all three call sites and not just the one this file
-     * happens to render.
+     * AND `api.getPending` — the unbounded reader — STILL EXISTS AND IS STILL RIGHT
+     * TWICE. `api.getRecordBundle` and `api.getExportReadiness` (`lib/api.ts`) call it
+     * for the Review Record and Export Readiness screens, deliberately: a screen
+     * reporting what is unresolved would UNDERSTATE it from a page, which is why
+     * `getPending` sends no parameters at all. Those two are not a residue and must not
+     * be "fixed".
      */
   });
 
-  it('the unbounded AgentContext read REPEATS after every submission', async () => {
+  it('the AgentContext read still repeats after every submission — BOUNDED', async () => {
     /*
-     * THE CONTROL WHOSE ABSENCE HID A 49%-NOT-98% SAVING.
+     * THIS TEST IS INVERTED, NOT REWRITTEN, AND THE OLD NUMBERS ARE KEPT BECAUSE THEY
+     * ARE THE MEASUREMENT.
      *
-     * The test above measures the call list on MOUNT, where one unbounded read looks
-     * like a one-off cost. `useRecordSession`'s AgentContext effect is keyed on
-     * `[id, version, active, refreshNonce]`, and `GuidedCompletion` calls
-     * `setCurrentVersion(resp.version)` on every accepted answer — but `version` in
-     * that effect is the DETAIL's version, so the repeat needs the detail to be re-read
-     * too, which is what `onRefresh`/`reload` does. What this test pins is the
-     * measurable relationship on the path a scientist actually walks: submit an
-     * answer, and the unbounded read count does not stay where it was.
+     * It used to read `it('the unbounded AgentContext read REPEATS after every
+     * submission')` and assert **1 unbounded read on mount, 2 after one accepted
+     * answer** — pinning the defect with its exact numbers, and saying in its own note:
+     * *"WHEN THE AGENTCONTEXT READ IS BOUNDED, INVERT THIS TEST — do not delete it."*
+     * That is this repository's established remedy for a test that pins a defect
+     * (`CLAUDE.md` §11, session of 2026-08-18). This is that inversion.
      *
-     * IT PINS THE DEFECT, WITH ITS EXACT NUMBERS, AND THAT IS DELIBERATE. The note
-     * above used to explain that the unbounded call was left UNASSERTED so that fixing
-     * it would not be a test failure — and that reasoning is precisely why the repeat
-     * went unmeasured for a whole commit. A residue nobody counts is a residue whose
-     * size nobody knows. So: **1 unbounded read on mount, 2 after one accepted answer.**
+     * WHAT WAS FIXED, AND WHAT DELIBERATELY WAS NOT. The repeat was never the defect.
+     * `useRecordSession`'s AgentContext effect is keyed on `[id, version, active,
+     * refreshNonce]` and must re-derive when the record advances, or the assistant
+     * reasons over a revision that no longer exists — so it SHOULD fire again after an
+     * accepted answer, and it still does, which is what the counts below assert. The
+     * defect was its SIZE: `api.getPending(id)` served the whole record's question list,
+     * 1,772,692 bytes at 1,000 runs, per submission. It now asks for the same 50-entry
+     * window the screen does — 29,590 B, flat — so the two pending payloads of one
+     * accepted answer go 3,545,986 B -> 61,558 B (98.3%), where bounding the mutation
+     * alone had reached 1,804,660 B (49.1%).
      *
-     * WHEN THE AGENTCONTEXT READ IS BOUNDED, INVERT THIS TEST — do not delete it. That
-     * is this repository's established remedy for a test that pins a defect (`CLAUDE.md`
-     * §11, session of 2026-08-18), and it keeps the measurement in history instead of
-     * removing the only record that it was ever 2.
+     * WHY IT COULD NOT BE BOUNDED BEFORE is worth keeping too, because it constrains
+     * anyone changing either side: `confirmProposal` decided `submitAnswer` vs
+     * `editField` from MEMBERSHIP in this list, so a question outside the window read as
+     * "already answered" and took the edit route — `422 unrecognized_field` on a
+     * legitimate first answer. That decision is now the server's
+     * (`assistant-answer-routing.test.ts`), which is what made the bound safe rather
+     * than merely cheap.
      */
     const answered = ALL.slice(1);
     const calls = stubFetchRoutes(
@@ -238,7 +235,14 @@ describe('the completion screen bounds what it asks for', () => {
 
     const unbounded = () =>
       calls.filter((c) => c === 'GET /api/experiments/demo/pending').length;
+    /* BOTH readers ask for the same window, so this counts them together — the screen's
+       own page and the AgentContext's. That is not a loss of resolution: the assertion
+       that matters is that NEITHER of them is the parameterless call above, and the
+       total moving by one per submission is the repeat this test is named for. */
+    const bounded = () =>
+      calls.filter((c) => c === `GET /api/experiments/demo/pending?limit=${PAGE}`).length;
     const beforeSubmit = unbounded();
+    const boundedBefore = bounded();
 
     fireEvent.change(screen.getByLabelText(/series json/i), {
       target: { value: '[{"series_id":"s"}]' },
@@ -246,12 +250,15 @@ describe('the completion screen bounds what it asks for', () => {
     fireEvent.click(screen.getByText('Confirm'));
     await screen.findByText('1 / 120');
 
-    // THE MEASUREMENT. One on mount; a SECOND after one answer — the read repeats per
-    // submission, which is the fact the mount-only note could not see.
-    expect(beforeSubmit).toBe(1);
-    expect(unbounded()).toBe(2);
-    expect(calls).toContain(`GET /api/experiments/demo/pending?limit=${PAGE}`);
-    // And the write itself carried a bounded list — the half that IS fixed.
+    // THE INVERSION. It was 1 on mount and 2 after one answer; it is now 0 and 0 — the
+    // parameterless read is not made by this screen or by the session hook at all.
+    expect(beforeSubmit).toBe(0);
+    expect(unbounded()).toBe(0);
+    // AND THE REPEAT IS STILL THERE, still counted, just bounded: two windows on mount
+    // (the screen's page and the AgentContext's), a third after the accepted answer.
+    expect(boundedBefore).toBe(2);
+    expect(bounded()).toBe(3);
+    // And the write itself carried a bounded list — the half that was fixed first.
     expect(screen.getByText('119 of 120 fields still to confirm')).toBeInTheDocument();
   });
 

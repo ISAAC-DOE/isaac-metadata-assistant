@@ -18,7 +18,9 @@
  *     here — no duplicate record cache);
  *   - the derived P29.3 `AgentContext` (detail.workflow + evidence-classification
  *     + pending + version + rev), fetched from the two additive AgentContext
- *     inputs the screen bundle may not carry;
+ *     inputs the screen bundle may not carry — the pending half as a BOUNDED
+ *     PREFIX, never the complete list (see `AGENT_CONTEXT_PENDING_WINDOW`, which
+ *     carries the measurement and the reason it could not be bounded earlier);
  *   - the P29.1 `session` snapshot (messages + the single staged proposal);
  *   - exactly ONE `useRecordSync` poller (screens no longer mount their own);
  *   - `refresh()`, a `conflict` flag (the record moved under the current view),
@@ -60,6 +62,51 @@ import type {
   ApiExperimentDetail,
   ApiPendingItem,
 } from './types';
+
+/**
+ * HOW MANY OPEN QUESTIONS THE AGENTCONTEXT ASKS FOR.
+ *
+ * THIS READ WAS THE LAST UNBOUNDED PIECE OF THE COMPLETION FLOW, and it was not a
+ * per-screen mount cost. The effect below is keyed on `version`, which `GuidedCompletion`
+ * adopts from every accepted answer, so an unbounded `api.getPending(id)` fired again
+ * after EVERY SUBMISSION — on the very screen the pending bound was written for. Measured
+ * at 1,000 runs, per accepted answer:
+ *
+ *   originally             POST 1,773,294 B + GET 1,772,692 B  =  3,545,986 B
+ *   mutation bound only    POST    31,968 B + GET 1,772,692 B  =  1,804,660 B   (49.1%)
+ *   with this change       POST    31,968 B + GET    29,590 B  =     61,558 B   (98.3%)
+ *
+ * The bounded figure is measured rather than divided down, and it is FLAT: 29,584 B at
+ * 25 runs, 29,590 B at 1,000. `ISAAC_PERF_BENCH=1 .venv/bin/pytest
+ * apps/api/tests/test_pending_reads_are_boundable.py -q -s -k benchmark` prints the
+ * column.
+ *
+ * WHY IT COULD NOT BE BOUNDED BEFORE, and what changed. `assistantAgent.confirmProposal`
+ * decided `submitAnswer` vs `editField` from MEMBERSHIP in this list, so a question
+ * outside the window read as "already answered" and took the edit route — `422
+ * unrecognized_field` on a legitimate first answer, with a reason naming the wrong cause.
+ * That decision is now the SERVER's: the hinted route is attempted, and a `422
+ * already_answered` / `not_yet_answered` is followed once to the operation its `answer_at`
+ * names. Membership here is a hint, and being wrong costs one round trip.
+ *
+ * WHY 50 RATHER THAN 1. Both consumers of `ctx.pending` need only the head —
+ * `identify_next_missing_field` reads `pending[0]`, and `confirmProposal` needs a hint —
+ * so a window of one would be CORRECT. It would also be wrong on the common path: every
+ * proposal for a question below the first would take the redirect, doubling the writes a
+ * scientist makes one after another. 50 is `serialize.PENDING_WINDOW`, the window the
+ * server volunteers on every mutation response and the page `GuidedCompletion` holds, so
+ * the hint is right for every question inside the window — which is every question on
+ * every record that exists today — and the redirect covers the tail of a large one.
+ *
+ * NOTHING IS HIDDEN BY IT. This list feeds the assistant's context only. The Review
+ * Record and Export Readiness bundles still call `api.getPending` with no parameters,
+ * because a screen reporting what is unresolved would UNDERSTATE it from a page; the
+ * completion screen's own counters come from `pending_page.total`, which speaks for the
+ * whole record. The one claim this window could have made false —
+ * `identify_next_missing_field`'s "there are no pending fields" — is safe because the
+ * window is a PREFIX FROM OFFSET 0: an empty prefix is an empty list.
+ */
+const AGENT_CONTEXT_PENDING_WINDOW = 50;
 
 /** The additive AgentContext inputs the hook fetches (not always in the screen's
  *  bundle): the pending blockers and the evidence-support classification. */
@@ -230,10 +277,16 @@ export function useRecordSession(
     if (!active) return;
     const startedFor = id;
     let alive = true;
-    Promise.all([api.getPending(id), api.getEvidenceClassification(id)])
-      .then(([pending, classification]) => {
+    Promise.all([
+      // A BOUNDED PREFIX — see `AGENT_CONTEXT_PENDING_WINDOW`. The page block is
+      // deliberately discarded: neither consumer of `ctx.pending` may total or count the
+      // list, so carrying a total here would only invite one to start.
+      api.getPendingPage(id, { limit: AGENT_CONTEXT_PENDING_WINDOW }),
+      api.getEvidenceClassification(id),
+    ])
+      .then(([page, classification]) => {
         if (!alive || currentRef.current !== startedFor) return; // superseded → drop
-        setExtras({ pending, classification });
+        setExtras({ pending: page.pending, classification });
         setContextDegraded(false);
       })
       .catch(() => {
