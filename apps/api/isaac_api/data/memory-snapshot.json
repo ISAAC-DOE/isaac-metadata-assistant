@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "b185ac6f4cd56e061690627913c0121f4f277ecfd7a00639cfa697f75b77f747"
+        "sha256": "4b9c273da8c00e2829a59c7b811b48c6878de60a1744049958f043d791360da8"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "9a79e95cfe769b51421b7e2505450746fbc58f0082ccf120cd73041df908d674"
+        "sha256": "efae70469a1b113839e34fe3045a3e29d0af37cb5a81e8b33cf75ee08c767df4"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "9d6c0790e71aeabdd47355b40594a614ac81aea0d3e09d2532d4c266ffa4a15c"
+        "sha256": "e4a23c0af35257319936fc777521f54aa568d31e8ff1990dbbaac11ea5823027"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "8e4e289e3043eab7278b14cd4d9e269844447c5af5c893c1d0f1cb1fc5aab6d4"
+        "sha256": "3e5e8f72f58eaba68ce913fb721be3062af46953a119b9861ae144153ffc2e8f"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "ccebfb4a52fdf9890eb2ba4fb9c2a7acdf8db2ab18d12924ce1ea17c9f17e22e"
+        "sha256": "a36e8971938eb041bb70a7ec69b1ebc7d18104ce52d2ec72bfc2e11a88ac6efd"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "7cfe63a05095e013e4feff77773455316fbf250ba34a46125dd6c08f7ae3b498"
+    "served_manifest_fingerprint": "72230f9ef86d9653f3c4382e3ecacc99f701f28b00ae7672eb1b0e65be85583d"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
