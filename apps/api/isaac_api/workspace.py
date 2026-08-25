@@ -3532,9 +3532,20 @@ class Experiment:
         derivation per request (``_summary``'s ``pending_count``, ``_workflow_for``,
         ``status()`` and ``export_ready()``), so on a 1000-run record one ``GET
         /api/experiments/{id}`` entered :func:`run_questions` 4000 times and
-        constructed ~12 000 dictionaries, every one of them discarded. The response is
-        1464 bytes at any run count, so the work was invisible in the payload and
+        constructed ~12 000 dictionaries, every one of them discarded. The response stays
+        ~1.5 KB across that whole range, so the work was invisible in the payload and
         visible only in latency — flat bytes, linear time.
+
+        ~~"The response is 1464 bytes at any run count."~~ CORRECTED 2026-08-24 by an
+        independent truthfulness review, and kept struck because the substantive claim
+        is the reason this method exists and the literal was doing no work for it.
+        Re-measured over HTTP: **1,258** bytes at 0 runs, 1,462 at 1, 1,466 at 10,
+        1,470 at 100. It is not constant — it moves by the DIGIT COUNT of
+        ``pending_count`` and the zero-run document is a different shape — and "at ANY
+        run count" was therefore false at the one run count a reader is most likely to
+        check by hand. Flat-against-linear is the point and survives; a fabricated
+        constant beside it is the kind of precision that invites a reader to trust the
+        rest without checking.
 
         Measured in-process, best of 5, 1000 runs, by the committed opt-in harness
         (``ISAAC_PERF_BENCH=1``; see :func:`run_question_count`)::
