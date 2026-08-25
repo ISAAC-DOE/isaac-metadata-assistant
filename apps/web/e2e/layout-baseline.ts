@@ -93,6 +93,21 @@ export interface LayoutFinding {
   readonly note: string;
 }
 
+/**
+ * An instance MEASURED AS FIXED on darwin, still tolerated on linux.
+ *
+ * `darwin: []` is a measurement, not an omission — see the platform note above.
+ * The linux list is retained deliberately, following LAYOUT-02's precedent
+ * verbatim: this environment cannot measure Linux, "expected" is not "measured",
+ * and a stale entry only produces an annotation while deleting one that still
+ * fires produces a red build. When CI annotates a linux instance as not-fired,
+ * delete the whole entry then.
+ *
+ * The darwin side is not slack: `[]` tolerates nothing, so a regression on macOS
+ * now FAILS where it used to be pre-authorised.
+ */
+const fixedOnDarwin = (...linux: string[]): PlatformInstances => ({ darwin: [], linux });
+
 // The StatusBar offenders, named once so the table below stays readable.
 const SB_PHASE = 'span.statusbar-phase < footer.statusbar < div.screen-card';
 const SB_NOTE = 'span.statusbar-note < footer.statusbar < div.screen-card';
@@ -204,33 +219,65 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       'fixed trigger and the non-reflowing footer (LAYOUT-01), both of which predate it. It was ' +
       'invisible until this slice, because the old `findObscuredControls` only ever examined ' +
       'INTERACTIVE elements — a `<span>` label was outside the probe\'s universe entirely. ' +
-      'It is recorded rather than fixed because it falls outside the authorized defect list for ' +
-      'that slice (C1, I1-I5); recording it with exact selectors keeps the ratchet honest ' +
+      'It WAS recorded rather than fixed because it fell outside the authorized defect list for ' +
+      'that slice (C1, I1-I5); recording it with exact selectors kept the ratchet honest ' +
       'instead of letting an annotation quietly absorb it. ' +
-      'Fix belongs in `src/components/chrome.css` (.statusbar / the trigger\'s offset), not here.',
+      'FIXED 2026-08-25 in `src/components/chrome.css` — exactly where this note said the fix ' +
+      'belonged — as `--assistant-trigger-reserve`: 64px of space AFTER `div.screen-card`, with the ' +
+      'same amount taken back out of the card\'s `min-height` so a short page gains no scrollbar. ' +
+      'The reserve, and not a change to the trigger, is the fix because the footer is `position: ' +
+      'static` and the LAST child of the card while the DOCUMENT is the scroller at these widths: ' +
+      'the coverage "survived scrollIntoView" only because there was nothing below the footer to ' +
+      'scroll INTO. All 17 recorded instances stopped firing on darwin in one run; see the ' +
+      'per-instance note below for why the linux lists are kept.',
+    /*
+     * ── FIXED ON DARWIN, 2026-08-25 — ALL SEVENTEEN INSTANCES ────────────────
+     *
+     * `components/chrome.css`'s `@media (max-width: 1024px)` block now reserves
+     * `--assistant-trigger-reserve` (64px) after `div.screen-card` and gives the
+     * same amount back out of the card's `min-height`, so the status bar can be
+     * scrolled clear of the trigger. That closes the mechanism this entry
+     * describes rather than moving it: the note above says the coverage
+     * "survives `scrollIntoView`", and the reason it did was simply that there
+     * was nothing below the footer to scroll INTO.
+     *
+     * MEASURED: `specs/layout-responsive.spec.ts` ran green across all five
+     * projects and reported 16 of these instances as not-fired, and
+     * `specs/layout-widths.spec.ts` reported the seventeenth
+     * (`export-readiness@width-1024`). So every recorded instance stopped firing
+     * on darwin in one run, which is what a shared-cause fix looks like.
+     *
+     * WHY THE LINUX LISTS SURVIVE. Same reasoning as LAYOUT-02, and it is a
+     * deliberate conservatism rather than a doubt about the fix: this
+     * environment cannot measure Linux font metrics, and while the reserve is
+     * STRUCTURAL (64px of document space, which no glyph width can consume) the
+     * status bar's own content is not — LAYOUT-01 records that the footer's
+     * segments already clip differently under the wider Linux face. If CI
+     * annotates these as not-fired, delete the entries then.
+     *
+     * The `@width-1024` key is the width sweep's namespace: that file keys by
+     * WIDTH inside one project rather than by Playwright project.
+     */
     instances: {
-      'record-detail@laptop-1024x768': [SB_RIGHT],
-      'guided-completion@laptop-1024x768': [SB_RIGHT],
-      'evidence@laptop-1024x768': [SB_RIGHT],
-      'export-readiness@laptop-1024x768': [SB_RIGHT],
-      'export-readiness-done@laptop-1024x768': [SB_RIGHT],
-      'record-detail@tablet-768x1024': [SB_RIGHT],
-      'guided-completion@tablet-768x1024': [SB_RIGHT],
-      'evidence@tablet-768x1024': [SB_RIGHT],
-      'export-readiness@tablet-768x1024': [SB_RIGHT],
-      'export-readiness-done@tablet-768x1024': [SB_RIGHT],
-      'guided-completion@mobile-375x812': [SB_RIGHT],
+      'record-detail@laptop-1024x768': fixedOnDarwin(SB_RIGHT),
+      'guided-completion@laptop-1024x768': fixedOnDarwin(SB_RIGHT),
+      'evidence@laptop-1024x768': fixedOnDarwin(SB_RIGHT),
+      'export-readiness@laptop-1024x768': fixedOnDarwin(SB_RIGHT),
+      'export-readiness-done@laptop-1024x768': fixedOnDarwin(SB_RIGHT),
+      'record-detail@tablet-768x1024': fixedOnDarwin(SB_RIGHT),
+      'guided-completion@tablet-768x1024': fixedOnDarwin(SB_RIGHT),
+      'evidence@tablet-768x1024': fixedOnDarwin(SB_RIGHT),
+      'export-readiness@tablet-768x1024': fixedOnDarwin(SB_RIGHT),
+      'export-readiness-done@tablet-768x1024': fixedOnDarwin(SB_RIGHT),
+      'guided-completion@mobile-375x812': fixedOnDarwin(SB_RIGHT),
       // Not SB_RIGHT here: at this pair the record's own status text is shorter,
       // so a different segment lands under the trigger. Recorded as measured.
-      'export-readiness-done@mobile-375x812': [SB_EYEBROW],
-      'guided-completion@zoom-200': [SB_RIGHT],
-      'evidence@zoom-200': [SB_RIGHT],
-      'export-readiness@zoom-200': [SB_RIGHT],
-      'export-readiness-done@zoom-200': [SB_RIGHT],
-      // The width sweep (`layout-widths.spec.ts`) keys by WIDTH rather than by
-      // Playwright project, so its pairs are namespaced `@width-<n>`. Measured
-      // on darwin; Linux may differ and CI is the authority.
-      'export-readiness@width-1024': [SB_RIGHT],
+      'export-readiness-done@mobile-375x812': fixedOnDarwin(SB_EYEBROW),
+      'guided-completion@zoom-200': fixedOnDarwin(SB_RIGHT),
+      'evidence@zoom-200': fixedOnDarwin(SB_RIGHT),
+      'export-readiness@zoom-200': fixedOnDarwin(SB_RIGHT),
+      'export-readiness-done@zoom-200': fixedOnDarwin(SB_RIGHT),
+      'export-readiness@width-1024': fixedOnDarwin(SB_RIGHT),
     },
   },
   {
@@ -294,9 +341,25 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
         darwin: [],
         linux: ['main#main.screen-main.centered < div.screen-body.record < div.screen-card'],
       },
-      'load@width-320': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],
-      'load@width-375': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],
-      'load@width-390': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],
+      /*
+       * FIXED ON DARWIN, 2026-08-25. `components/runner.css` gave `.onramps`
+       * `repeat(auto-fit, minmax(240px, 1fr))` in place of a hard `1fr 1fr` that
+       * this file had no `@media` rule to soften, so Load Materials reflows to
+       * one column below ~494px of container instead of holding 468px of cards
+       * in a 242px box. That grid was the whole of this region's overflow: the
+       * widest overflowing child measured `div.onramp` with a right edge of 507
+       * against main's scrollWidth of 496. The same geometry was also the source
+       * of an `[unusable-sliver]` occlusion finding on `button.drop-target`
+       * (15px of 194px), which stopped firing in the same run.
+       *
+       * Unlike LAYOUT-02's font-metric instances, this one is STRUCTURAL — a
+       * single `1fr` track cannot overflow its own container under any font — so
+       * the linux lists are kept only for the reason the helper documents, not
+       * because the mechanism is in doubt.
+       */
+      'load@width-320': fixedOnDarwin('main#main.screen-main.centered < div.screen-body.full < div.screen-card'),
+      'load@width-375': fixedOnDarwin('main#main.screen-main.centered < div.screen-body.full < div.screen-card'),
+      'load@width-390': fixedOnDarwin('main#main.screen-main.centered < div.screen-body.full < div.screen-card'),
     },
   },
 ];

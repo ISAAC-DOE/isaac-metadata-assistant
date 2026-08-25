@@ -672,11 +672,35 @@ export function graphParamKey(get: ParamReader): string {
   return GRAPH_URL_PARAMS.map((k) => `${k}=${get(k) ?? ''}`).join('&');
 }
 
+/**
+ * The width below which the node canvas stops being a usable surface.
+ *
+ * Exported because the decision it encodes has to be re-asked when the viewport
+ * CHANGES, not only when the surface mounts — see `isNarrowGraphViewport`.
+ */
+export const NARROW_GRAPH_VIEWPORT_QUERY = '(max-width: 860px)';
+
+/**
+ * Is the viewport too narrow for the node canvas, right now?
+ *
+ * `false` where `matchMedia` does not exist (SSR, jsdom): the honest answer to
+ * "is this viewport narrow" with no viewport to measure is not "yes".
+ */
+export function isNarrowGraphViewport(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia(NARROW_GRAPH_VIEWPORT_QUERY).matches;
+}
+
 /** The default mode a URL with no `gmode` implies, given the viewport. Narrow
- *  viewports open in Browse — a 220-node canvas is not a phone surface. */
+ *  viewports open in Browse — a 220-node canvas is not a phone surface.
+ *
+ *  This is only the MOUNT-TIME answer. `MemoryGraphCard` also re-asks it on
+ *  viewport change, because a decision taken once at mount is wrong for anyone
+ *  who resizes or rotates: measured on darwin, a window opened at 1280 in
+ *  Explore and dragged to 320 kept 206 nodes on a 320px canvas at 9.3-10.8px
+ *  each. See `isNarrowGraphViewport` and the effect that consumes it. */
 export function defaultGraphMode(): GraphMode {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'explore';
-  return window.matchMedia('(max-width: 860px)').matches ? 'browse' : 'explore';
+  return isNarrowGraphViewport() ? 'browse' : 'explore';
 }
 
 // ------------------------------------------------- natural-language intents

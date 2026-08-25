@@ -27,6 +27,7 @@ import {
   GRAPH_URL_PARAMS,
   MAX_HISTORY,
   MAX_QUERY_LENGTH,
+  NARROW_GRAPH_VIEWPORT_QUERY,
   decodeGraphActions,
   defaultGraphMode,
   describeCommandOutcome,
@@ -252,6 +253,62 @@ function MemoryGraphAvailable({
   const [commandOutcome, setCommandOutcome] = useState<string | null>(null);
   const [history, setHistory] = useState<GraphCommandHistoryEntry[]>([]);
   const historySeq = useRef(0);
+
+  /*
+   * THE NARROW-VIEWPORT DECISION, RE-ASKED ON RESIZE.
+   *
+   * `defaultGraphMode()` already says a canvas is not a phone surface below
+   * 860px, and it was right — a fresh load at 390 or 320 renders no `<svg>` at
+   * all. But it ran ONLY in the initial reducer state, so anyone who resized a
+   * wide window down, or rotated a tablet, stayed in Explore. Measured on
+   * darwin: opened at 1280 in Explore and resized to 320, the canvas still held
+   * 206 nodes drawn at 9.3-10.8px each, most of them under the fixed Assistant
+   * trigger.
+   *
+   * ONE-DIRECTIONAL, and that asymmetry is the decision rather than an
+   * oversight. Becoming narrow coerces Explore -> Browse, because the render it
+   * would otherwise produce is not a view of anything. Becoming wide again does
+   * NOT coerce Browse -> Explore: mount-time Browse on a wide viewport can only
+   * come from a deliberate choice (a click, or `?gmode=browse` in a shared
+   * link), and overriding that would be this bug with the sign flipped. Coerce
+   * away from an unusable render; never coerce into one.
+   *
+   * It dispatches through the same reducer a click uses, and deliberately does
+   * NOT write the URL: a window resize is not a navigational act and must not
+   * push a history entry. A link already carrying `?gmode=explore` therefore
+   * still opens honestly, and still switches to Browse if the window is narrow.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(NARROW_GRAPH_VIEWPORT_QUERY);
+    /*
+     * Seeded from the CURRENT width so only a genuine wide -> narrow CROSSING
+     * coerces. A real browser fires `change` only when `matches` flips, so this
+     * is belt-and-braces — but the braces matter: without them, any repeated
+     * `matches: true` notification would undo a reader who deliberately asked for
+     * Explore at a narrow width, and the mode toggle would be a control that
+     * appears to work and then silently reverts. Caught by
+     * `__tests__/graph-mode-follows-viewport.test.tsx`, which asserts exactly
+     * that case rather than assuming the browser's firing rule.
+     */
+    let wasNarrow = mql.matches;
+    const onChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      const nowNarrow = e.matches;
+      const crossedIntoNarrow = nowNarrow && !wasNarrow;
+      wasNarrow = nowNarrow;
+      if (!crossedIntoNarrow) return;
+      setState((s) => (s.mode === 'explore' ? applyGraphAction(s, { kind: 'setMode', mode: 'browse' }, index) : s));
+    };
+    // Older WebKit exposes only `addListener`. Both paths are kept because the
+    // fallback is two lines and losing the subscription silently reintroduces
+    // exactly the defect this effect exists to close.
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
+  }, [index]);
 
   const dispatch = useCallback(
     (action: GraphAction) => {

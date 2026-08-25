@@ -217,6 +217,44 @@
   /* Horizontally scrollable, and therefore focusable — a scroll container that
      cannot take keyboard focus is unreachable by keyboard alone. */
   overflow-x: auto;
+
+  /*
+   * NOT decoration, and nothing here is positioned against it. This is what
+   * stops the WHOLE PAGE scrolling sideways at phone widths.
+   *
+   * `overflow` makes this a scroll container; it does NOT make it a containing
+   * block for absolutely-positioned descendants. Every `.rc-cell > .rc-open`
+   * carries an `.sr-only` span for its accessible name, and `.sr-only` is
+   * `position: absolute` with `left`/`top` at `auto` (`styles/base.css`), so
+   * each span was laid out at its static position INSIDE the 620px-min-width
+   * table but resolved against `body` — escaping the scroller and contributing
+   * its own right edge to the document's scrollable overflow.
+   *
+   * MEASURED, darwin, at 390 and 320: `documentElement.scrollWidth` 417 against
+   * a `clientWidth` of 390 (and of 320), while `document.body.scrollWidth`
+   * matched the viewport exactly — i.e. the overflow was on `html`, and the
+   * 27px strip the user could scroll to was empty. The offender was
+   * `td.rc-cell > a.rc-open > span.sr-only` ("Sweep Run B at
+   * context.temperature_K"), laid out at left 416 / right 417 with
+   * `offsetParent: body`.
+   *
+   * With this one declaration the span's containing block becomes this wrap, so
+   * its overflow is absorbed by the scroller that already exists for the table.
+   * Isolated in-page proof at 390, both states measured in the same evaluate():
+   * `static` → documentElement 662 / 390 with `offsetParent: BODY`;
+   * `position: relative` → 390 / 390 with the wrap as `offsetParent`. The
+   * span's own right edge is 662 in BOTH — it is not moved, it stops being the
+   * document's problem.
+   *
+   * The alternative — hiding the spans — was rejected: they carry the only
+   * accessible name distinguishing one "Open" link from another.
+   *
+   * `.scroll-x` (base.css) has the same latent shape and is deliberately NOT
+   * changed: its three call sites (`SourcePreview.tsx`) are leaf `<pre>` /
+   * `<div>` text containers with no `.sr-only` inside, so there is no measured
+   * defect there to fix.
+   */
+  position: relative;
 }
 
 .rc-tablewrap:focus-visible {
