@@ -2564,7 +2564,30 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // second 26-minute browser run — which is the whole point of
   // `e2e/invariants/baseline-aggregate.invariant.test.ts`, doing its job on its
   // first real use.
-  darwin: 2551,
+  //
+  // ── EVIDENCE TRAIL NO LONGER EMPTY, 2026-08-25: darwin 2551 -> 2564 (+13). ──
+  //
+  // **NOT A DARWIN MEASUREMENT. NOT ONE OF THE FOURTEEN CELLS WAS MEASURED ON DARWIN.**
+  // The seven `evidence-graph@*` keys are SCALARS, and a scalar asserts BOTH columns —
+  // so raising them from a linux reading necessarily moves the darwin total, whether or
+  // not darwin agrees. That is the compromise this file's header already records: the
+  // guard rejects a pair whose halves are equal, so a one-platform reading has no other
+  // way to be written.
+  //
+  //   evidence-graph @ desktop      +1
+  //   evidence-graph @ 6 viewports  +2 each  = +12
+  //                                   net      = +13   (2551 -> 2564)
+  //
+  // The seven `evidence@*` keys are PAIRS, so their +21 lands on linux ALONE and darwin
+  // is genuinely untouched there. **A FIRST DRAFT OF THIS CHANGE MOVED ONLY THE LINUX
+  // TOTAL AND ASSERTED "darwin does not move"** — false, and for the scalar half of its
+  // own change. `baseline-aggregate.invariant.test.ts` caught it (`darwin = 2551, entries
+  // sum to 2564`), which is what that invariant is for: it sums the cells independently
+  // and does not care what the note beside them claims.
+  //
+  // So if a darwin run disagrees with any of the seven, split that key and correct this
+  // total; do not derive it.
+  darwin: 2564,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -2703,7 +2726,12 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   //
   // TRANSCRIBED from the fourteen GREW messages of the CI run on head `60b5ebb`, and
   // the arithmetic is stated so the total can be checked against the cells rather than
-  // trusted. darwin does not move: not one of the fourteen was measured there.
+  // trusted. ~~darwin does not move: not one of the fourteen was measured there.~~
+  // **CORRECTED before merge:** the first half is true and the CONCLUSION was false. None
+  // of the fourteen was measured on darwin — but the seven `evidence-graph` keys are
+  // scalars, which assert darwin too, so the darwin total moves by +13 as a matter of
+  // arithmetic rather than of evidence. See the darwin note for why that is unavoidable
+  // in this file. The `evidence@*` pairs are the half that genuinely leaves darwin alone.
   linux: 2835,
 };
 
