@@ -1211,16 +1211,50 @@ def test_the_three_workflow_call_sites_agree_on_a_fully_exported_fan_out(client)
     assert detail["artifact_refs"]["record_filename"] is None
     assert detail["artifact_refs"]["reason"]
 
+    # THE MUTATION WAS `POST /edit {"edge": "L3"}` AND IT REACHED NOTHING. That is why
+    # the old assertions below could be `reopened_steps: []` and "no downstream steps
+    # reopened": `implicit` is merged onto a run only while that run holds every one of
+    # the record's values, and an independent review measured this write answering 200
+    # with `changed_fields: ['edge']` while the run's composed `implicit` was `[]`. The
+    # route now REFUSES a run-owned key on a record with runs (`409 belongs_to_a_run`),
+    # `edge` included, so that write is no longer available — and it should not be, since
+    # it was reporting a change nothing read.
+    #
+    # The substitute is a REAL write, on the run, through the route that owns it. The
+    # assertions therefore change too, and they change in the direction that makes this
+    # test stronger: a genuine edit to an exported fan-out DOES stale the artifacts and
+    # DOES reopen the export step. The property this test exists for — the three workflow
+    # call sites agreeing — is asserted on a mutation whose consequences are real.
+    run_id = store.load_experiment(experiment_id).sorted_runs()[0].id
+    run_etag = client.get(f"/api/experiments/{experiment_id}/runs/{run_id}").headers["ETag"]
     edited = client.post(
-        f"/api/experiments/{experiment_id}/edit",
-        json={"confirmed_by_user": True, "answers": {"edge": "L3"}},
-        headers={"If-Match": _etag(client, experiment_id)},
+        f"/api/experiments/{experiment_id}/runs/{run_id}/edit",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"qc": {"status": "compromised", "evidence": "Re-checked; I0 drifted."}},
+        },
+        headers={"If-Match": run_etag},
     )
     assert edited.status_code == 200, edited.text
     invalidation = edited.json()["invalidation"]
     assert invalidation["changed"] is True
-    assert invalidation["reopened_steps"] == []
-    assert invalidation["reason"] == "Updated 1 field(s); no downstream steps reopened."
+    assert invalidation["changed_fields"] == ["qc"], invalidation
+    # `reopened_steps` IS EMPTY, AND THAT IS CORRECT RATHER THAN A LEFTOVER. `export`
+    # reopens when a completed step regresses, and `all_units_exported()` is still true:
+    # every unit HAS been exported, and that fact did not become false. What did change
+    # is whether the written artifacts still match the record — which is the `artifact`
+    # block's job, and it says so. Asserting both together is the point: the workflow
+    # claims no step was undone, the artifact claims it is stale, and neither is
+    # borrowing the other's authority.
+    assert invalidation["reopened_steps"] == [], invalidation
+    # AND ALL THREE CALL SITES STILL AGREE.
+    edited_step = next(
+        s for s in edited.json()["workflow"]["ordered_steps"] if s["id"] == "export"
+    )
+    after = client.get(f"/api/experiments/{experiment_id}").json()
+    after_step = next(s for s in after["workflow"]["ordered_steps"] if s["id"] == "export")
+    assert edited_step["state"] == after_step["state"] == "completed", (edited_step, after_step)
+    assert after["artifact"]["state"] == "stale", after["artifact"]
 
 
 def test_validate_does_not_return_a_false_negative_for_an_exported_fan_out(client):

@@ -142,6 +142,76 @@ def test_wildcard_if_match_still_matches_existing(client):
     assert r.status_code == 200, r.text
 
 
+def test_the_contract_DISCLOSES_that_the_wildcard_skips_the_revision_comparison(client):
+    """THE TWO STATEMENTS MUST AGREE, and for a long time they did not.
+
+    The test above pins that `If-Match: *` is ACCEPTED — deliberately, because RFC
+    9110 defines it as "if the resource exists" and this application implements that
+    (`_check_if_match` returns `None` for `*` without comparing anything). Meanwhile
+    the published `428` description read:
+
+        "Every write requires the record's current `ETag`, so a blind overwrite is
+         not possible."
+
+    Two independent audits rated that HIGH, and they were right: `*` IS a blind
+    overwrite. A caller that has never read the record — or the RUN — can send three
+    bytes and overwrite it, and the machine-readable contract said that could not
+    happen. An agent reading it would not defend against a client that sends `*`.
+
+    THE BEHAVIOUR IS NOT CHANGED HERE. It is tested above and it is what the RFC
+    says; reversing a tested decision is not this test's business. What is fixed is
+    that the contract now says so. This pins the agreement in both directions, so
+    neither side can drift back alone.
+    """
+    described = client.get("/api/openapi").json()["paths"][
+        "/api/experiments/{experiment_id}/answers"
+    ]["post"]["responses"]["428"]["description"]
+    flat = " ".join(described.split())
+    # It names the exception, names what `*` means, and says the write SUCCEEDS.
+    assert "`If-Match: *` is accepted" in flat
+    assert "if the resource exists" in flat
+    assert "has never read" in flat
+    # NEGATIVE CONTROL: the retired sentence must not return. It is the exact
+    # sentence a well-meaning copy edit would restore.
+    assert "a blind overwrite is not possible" not in flat.replace(
+        '"a blind overwrite is not possible"', ""
+    )
+
+
+def test_the_wildcard_writes_a_RUN_the_caller_never_read(client):
+    """The half that is more surprising than the record-level one, measured.
+
+    `_apply_to_run`'s own docstring says a per-run validator exists so that "a
+    client holding the RECORD's token cannot use it here, which is deliberate: it
+    would let a caller write a run it never read." `*` lets exactly that — it is
+    neither the record's token nor the run's, and it is accepted.
+
+    Asserted so the disclosure above is grounded in a measurement rather than in
+    reading `_check_if_match`, and so that a future change to the run path cannot
+    quietly diverge from the record path here.
+    """
+    # A SEED RECORD, because this fixture is a worked-example client and
+    # `POST /api/experiments` is refused in that scope. The wildcard question is
+    # about the precondition, not about how the record came to exist.
+    eid = ws.SEED_NEW_DRAFT_ID
+    run = client.post(
+        f"/api/experiments/{eid}/runs",
+        json={"label": "R1"},
+        # NEVER READ THE RECORD. No GET precedes this, and no ETag is held.
+        headers={"If-Match": "*"},
+    )
+    assert run.status_code in {200, 201}, run.text
+    rid = run.json()["run"]["id"]
+    written = client.patch(
+        f"/api/experiments/{eid}/runs/{rid}",
+        json={"confirmed_by_user": True, "fields": {"context.temperature_K": 301.0}},
+        headers={"If-Match": "*"},
+    )
+    assert written.status_code == 200, written.text
+    reread = client.get(f"/api/experiments/{eid}/runs/{rid}").json()["run"]
+    assert reread["fields"]["context.temperature_K"]["value"] == 301.0
+
+
 # --- 428 must precede the 422 confirmation gate? NO: shape(422) precedes -------
 # (documented ordering: request-shape validation precedes precondition). A missing
 # body confirmation is still 422 regardless of If-Match. We assert the mandate order.

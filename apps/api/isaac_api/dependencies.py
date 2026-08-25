@@ -23,6 +23,7 @@ import json
 from isaac_records.export import transform
 
 from .workflow import CANONICAL_LABELS, derive_workflow
+from .record_attribution import without_server_stamp
 from .workspace import without_sibling_links
 
 _STALE_REASON = (
@@ -91,7 +92,18 @@ def artifact_state(exp) -> dict:
     except Exception:  # pragma: no cover - defensive; transform is read-only + total
         return {"state": "stale", "reason": MISSING_REASON}
 
-    if _canonical(current) == _canonical(ondisk):
+    # `record_attribution.without_server_stamp` on BOTH sides, for the same reason
+    # `without_sibling_links` is applied on both sides in the fan-out branch below:
+    # `attribution.uploaded_by` is SERVER-stamped at write time and `transform`
+    # cannot emit it (that is the truth core's invariant), so without this every
+    # stamped artifact would report `stale` on every read, forever, and the only
+    # remedy the reason offers is a destructive workspace reset. What is deliberately
+    # lost is that a change to the stamp ALONE does not stale an artifact — correct,
+    # because the stamp is not draft content and "the record changed after export" is
+    # not what a differing stamp means.
+    if _canonical(without_server_stamp(current)) == _canonical(
+        without_server_stamp(ondisk)
+    ):
         return {"state": "current", "reason": None}
     return {"state": "stale", "reason": _STALE_REASON}
 
@@ -146,8 +158,8 @@ def _fan_out_artifact_state(exp) -> dict:
             current = transform(unit.draft, record_id=unit.target_id, now=now0)
         except Exception:
             return {"state": "stale", "reason": MISSING_REASON}
-        current = without_sibling_links(current)
-        ondisk = without_sibling_links(ondisk)
+        current = without_server_stamp(without_sibling_links(current))
+        ondisk = without_server_stamp(without_sibling_links(ondisk))
         if _canonical(current) != _canonical(ondisk):
             return {"state": "stale", "reason": _STALE_REASON}
     return {"state": "current", "reason": None}

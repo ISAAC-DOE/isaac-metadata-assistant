@@ -271,6 +271,87 @@ describe('S6 · Ready to Export (live)', () => {
     expect(getByText('Back to Complete →')).toBeInTheDocument();
   });
 
+  it('an EXACTNESS finding on the dry run is not attributed to the official schema', async () => {
+    /*
+     * I1 — THE FOURTH SCREEN MAKING THE CLAIM `RunCard`, `evidenceGraph` and
+     * `WorkflowProgressBanner` were corrected for. This section read "The in-memory
+     * dry-run does not pass the official ISAAC schema, so export stays gated", and a
+     * dry-run FAILURE does not establish that the official schema ever ran: `export.py`
+     * returns `official_report=None` on two paths BEFORE `validate_official` is called
+     * — a failed no-guessing report (`:305`) and a failed anchored-pattern EXACTNESS
+     * gate, whose findings it folds into `draft_report` (`:339-343`) — while the route
+     * stamps `schema: "ISAAC v1.05"` over whatever came back.
+     *
+     * WHY THE EXISTING TEST ABOVE COULD NOT CATCH IT: `validateDryRun`'s messages are
+     * schema-shaped ("assets is a required property"), so the headline reads plausibly
+     * over them and the assertion only checks the heading. This fixture is the payload
+     * measured over HTTP on a record whose descriptor name carries a trailing newline —
+     * ISAAC's own gate, arriving in the same undifferentiated list, with the schema
+     * label stamped on beside it.
+     */
+    const exactnessMessage =
+      "value is accepted by the schema pattern '^[A-Za-z0-9_.-]+$' only because " +
+      "Python's '$' also matches before a trailing newline";
+    stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      'POST /api/experiments/demo/validate': {
+        body: {
+          ok: false,
+          dry_run: true,
+          schema: 'ISAAC v1.05',
+          errors: [
+            {
+              path: 'descriptors.outputs.0.descriptors.0.name',
+              message: exactnessMessage,
+            },
+          ],
+        },
+      },
+    });
+    const { findByText, container } = renderAt('/record/demo/export');
+
+    expect(await findByText('Would Not Validate Yet')).toBeInTheDocument();
+    const blocked = container.querySelector('.preexport-blocked') as HTMLElement;
+    expect(blocked).not.toBeNull();
+    // The finding is rendered verbatim — withholding the attribution never withholds
+    // the finding, and the gate is not softened either.
+    expect(blocked.textContent).toContain(exactnessMessage);
+    expect(blocked.textContent).toMatch(/Export stays gated/);
+    expect(blocked.textContent).toMatch(/nothing was written/i);
+    // AND NO SOURCE IS NAMED. `CLAUDE.md` §12: the exactness gate is ISAAC's, not
+    // upstream's, so no surface may report its refusal as an official-schema error.
+    expect(blocked.textContent).not.toMatch(
+      /does not pass the official ISAAC schema|invalid against/i,
+    );
+    // The three candidate sources are named as three, so a reader cannot arrive at
+    // the schema by elimination either.
+    expect(blocked.textContent).toMatch(/exactness gate/);
+  });
+
+  it('the READY sentence names all three gates a dry-run pass clears', async () => {
+    /*
+     * M2 — the same omission on the other branch of the same payload, and the
+     * `RunCard` fix already corrected its twin. The sentence "the in-memory dry-run
+     * would pass the official ISAAC schema" is TRUE — `export_draft` returns `ok: true`
+     * at exactly one return (`export.py:350`), reachable only after `validate_official`
+     * passed — but a dry-run pass clears THREE gates, because `check_exactness` runs on
+     * the assembled record between the no-guessing report and the official validator
+     * (`:339`). Naming two of three on the PASS branch is what makes the FAILURE
+     * branch's deliberate silence look like evasion.
+     */
+    stubFetchRoutes(exportReadyRoutes('demo'));
+    const { findByText, container } = renderAt('/record/demo/export');
+
+    await findByText('Export Official Record + Sidecar');
+    const ready = container.querySelector('.preexport-ready') as HTMLElement;
+    expect(ready).not.toBeNull();
+    expect(ready.textContent).toMatch(/no-guessing checks/);
+    expect(ready.textContent).toMatch(/exactness gate/);
+    expect(ready.textContent).toMatch(/official ISAAC\s*schema/);
+    // Still a dry run, and still claims nothing was written.
+    expect(ready.textContent).toMatch(/candidate record/);
+  });
+
   it('ready → export writes both artifacts as SEPARATE cards; three distinct signal components', async () => {
     stubFetchRoutes({
       ...exportReadyRoutes('demo'),

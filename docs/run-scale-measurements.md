@@ -1,5 +1,213 @@
 # High-run-count: the measured envelope, and what it rules out
 
+> # RE-MEASURED IN FULL ON 2026-08-20 — AND IT FOUND A DEFECT THAT MADE THIS DOCUMENT'S HEADLINE CONCLUSION FALSE
+>
+> **Everything below the horizontal rule is the OLD measurement.** It is kept because it is what the
+> new numbers are measured against, and because two of its conclusions were right and one has been
+> overturned. Read this block first; the body of the document is history.
+>
+> The browser-side half of this document had been un-re-measured through the paging slice, the run
+> browser, the field-adoption change and everything since, and said so. This is the re-measurement,
+> with the four things §23 asked for and the old harness did not have: a **paged** read, **search**
+> latency, **Focus Run** latency, and a corrected long-task observer.
+>
+> ## 1. THE DEFECT: the record screen's DOM cost was not the run cards. It was the pending banner.
+>
+> At 1000 runs the record screen held **16,134 DOM nodes**. The Run browser's cards were **50** of
+> them — it pages at `RUNS_PAGE_SIZE`. A DOM probe attributed the rest:
+>
+> | class | count |
+> |---|---:|
+> | `needsyou-item` / `needsyou-num` / `needsyou-q` / `needsyou-about` / `mono` | **3,002 each** |
+> | `run-card` | 50 |
+> | everything else together | ~~under 700~~ **~1,074** |
+>
+> *(`under 700` CORRECTED 2026-08-24 by an independent truthfulness review. It contradicted this table's own arithmetic: 16,134 − (3,002 × 5 = 15,010) − 50 = **1,074**. The document's post-fix figure corroborates it — 16,134 − (2,992 × 5) = 1,174, against the 1,175 reported — implying a non-banner baseline of ~1,125. The five-nodes-per-item markup is confirmed at `RecordWorkbench.tsx:552-577`. It is NOT independently re-measurable: the per-class DOM probe was never committed — `run-scale.bench.ts:243` records only `getElementsByTagName('*').length` — so this correction is arithmetic over the table's own published numbers, not a fresh measurement, and is labelled as such.)*
+>
+> `RecordWorkbench`'s "Fields Need Your Confirmation" banner rendered **every** blocking question:
+> 1000 runs × 3 run-level questions + 2 record-level = 3,002 list items at five nodes each. ~15,000
+> of the 16,134.
+>
+> **So this document's headline — "The DOM is not the problem, and this is the finding that redirects
+> the work" — was TRUE WHEN IT WAS MEASURED AND IS NOW FALSE.** Not because the measurement was
+> wrong: at the time the run count WAS the card count, so this list was as short as the card list. It
+> went false when runs began paging and this banner did not. That is worth stating precisely, because
+> the wrong lesson to draw is "the old measurement was sloppy". The right one is that a conclusion
+> about where cost lives expires when the thing it was measured on changes shape.
+>
+> **A second defect in the same place, and it is a correctness one.** The list was keyed on `p.id`.
+> A run-owned question's `id` is its KIND — `series`, `qc`, `descriptor` — so a record with N runs
+> produced N identical `<li key="series">`. Duplicate React keys, on the first screen a scientist
+> opens. Now keyed on `blocker_key`.
+>
+> ## 2. The fix is one bound, and this is what it bought
+>
+> The banner now lists the first **10** and states the remainder in words — *"Showing the first 10 of
+> 3002. 2992 more are waiting"* — with the full count still in the title, because a truncated list
+> that read as complete would be worse than a slow one.
+>
+> | at 1000 runs | before | after |
+> |---|---:|---:|
+> | DOM nodes | 16,134 | **1,175** |
+> | expand first card | 127 ms | **44 ms** |
+> | expand last card | 124 ms | **39 ms** |
+> | Focus Run | 287 ms | **46 ms** |
+> | paged read (`limit=50`) | 234 ms | **36 ms** |
+> | long tasks | 3 | **0** |
+> | load (navigation → usable) | 10,009 ms | 6,681 ms |
+>
+> **DOM is now FLAT above the first page** — 1,172 at 50 runs, 1,175 at 1000. So is expand, so is
+> Focus Run, so is search, and long tasks are 0 at every count including 1000. Five columns that
+> degraded no longer do.
+>
+> ## 3. The full table, after the fix
+>
+> Local machine, Chromium, backend on loopback, `workers: 1`, `retries: 0`. **These are not a promise
+> about any deployment**; what transfers is the shape and the ratios.
+>
+> | runs | unpaged ms | unpaged KiB | paged ms | paged KiB | inh/run | load ms | cards | DOM nodes | expand 1st | expand last | search ms | focus ms | long tasks |
+> |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+> | 25 | 16 | 188 | 18 | 188 | 15 | 773 | 25 | 797 | 65 | 35 | 808 | 49 | 0 |
+> | 50 | 28 | 375 | 28 | 375 | 15 | 805 | 50 | 1 172 | 41 | 39 | 808 | 41 | 0 |
+> | 100 | 53 | 748 | 29 | 375 | 15 | 1 126 | 50 | 1 175 | 38 | 40 | 811 | 46 | 0 |
+> | 250 | 130 | 1 869 | 31 | 375 | 15 | 2 151 | 50 | 1 175 | 41 | 38 | 814 | 45 | 0 |
+> | 500 | 274 | 3 736 | 32 | 375 | 15 | 3 648 | 50 | 1 175 | 42 | 39 | 811 | 40 | 0 |
+> | 1000 | 570 | 7 472 | 36 | 375 | 15 | 6 681 | 50 | 1 175 | 44 | 39 | 808 | 46 | 0 |
+>
+> Reproduce: `E2E_BENCH_COUNTS=25,50,100,250,500,1000 npm run bench:runs`. The paged column, the two
+> interaction columns and the ceiling row all have a committed reproduction path now; the old
+> document said its paging figures did not.
+>
+> **`cards` is capped at 50 by the product, not by the harness**, and the harness's final assertion
+> was WRONG about that: it asserted `cards == COUNTS[last]`, which was right while the Runs section
+> rendered the unpaged list and false since the Run browser landed. The 1000-run row would have
+> failed it after a 30-minute run, and the failure would have read as a performance problem. It now
+> asserts the capped count **and** that the runs really exist, because a capped count alone would
+> pass for a harness that created none.
+>
+> **`search ms` is ~810 at every count and is NOT a scale finding.** 300 ms of it is
+> `RUN_SEARCH_DEBOUNCE_MS` and the rest is a round trip — the Run browser matches on the SERVER, so
+> nothing here is filtered in the browser. It is flat, which is the useful fact. *An earlier pass of
+> this benchmark read 369/419 ms at 500/1000 and ~810 below that; those two figures came from the
+> pre-fix runs where the page was busy, and the post-fix column is uniform. The inversion is not
+> explained here and is not needed for any conclusion.*
+>
+> ## 4. TWO SERVER-SIDE COSTS THAT STILL SCALE, AND ONE OF THEM IS THE MORE INTERESTING RESULT
+>
+> `load ms` still grows — 805 ms at 50 runs to 6,681 ms at 1000 — while the list the page fetches is
+> flat at 375 KiB. So the remaining cost is not the run list. Measured directly, in process
+> (`TestClient`, no network):
+>
+> | runs | `GET /pending` | entries | `GET /experiments/{id}` | detail KiB |
+> |---:|---:|---:|---:|---:|
+> | 25 | 75.7 KiB / 4.7 ms | 77 | 15.3 ms | 1.5 |
+> | 100 | 293.9 KiB / 14.2 ms | 302 | 66.7 ms | 1.6 |
+> | 250 | 730.7 KiB / 34.3 ms | 752 | 151.5 ms | 1.6 |
+> | 1000 | **2 914.8 KiB / 133.7 ms** | **3 002** | **634.2 ms** | **1.6** |
+>
+> **(a) `/pending` is unbounded — 2.9 MiB at 1000 runs.** The banner's RENDER is bounded now; its
+> FETCH is not. This is the payload behind `load ms`. Bounding it is a contract change — the route
+> has no `limit` — and is named here as the next slice rather than half-done at the end of a long
+> one.
+>
+> **(b) The detail route's payload is FLAT at 1.6 KiB and its latency grows LINEARLY to 634 ms.**
+> This is the more interesting number in the whole benchmark, because there is no payload to justify
+> it: the response does not contain the per-run work it does. It derives every blocking question in
+> order to report `pending_count`, then returns the count. At 1000 runs that is 3,002 derivations for
+> one integer. Nothing about this is fixed by paging anything.
+>
+> ## 5. What is NOT claimed
+>
+> **Tested ceiling: 1000 runs**, and that is now re-established rather than inherited — the previous
+> ceiling rested on a browser run that predated a 76% payload growth, and this document said to treat
+> it as unverified. Nothing beyond 1000 was measured and nothing here supports a claim beyond it.
+>
+> **The envelope is not "fine".** At 1000 runs a scientist waits ~6.7 s for the record screen. That
+> is better than the ~10 s before the fix and it is not good, and the two costs in §4 are where the
+> remaining seconds are. **Do not read "DOM is flat" as "scale is solved".**
+>
+> **The old conclusion that survives**: the cost is in the DATA, not in the rendering — now true for a
+> second, sharper reason than when it was written. Virtualization is still ruled out: 1,175 nodes is
+> nothing to virtualize.
+>
+> ---
+>
+> ## RE-MEASURED AGAIN, LATER ON 2026-08-19 — THE ×1.76 "GROWTH" LOOKS LIKE TWO DIFFERENT RUN SHAPES
+>
+> **Read this before the block below it.** That block reports the per-run payload growing from
+> ≈7.47 KiB to 13.12 KiB and attributes it to features landing since 2026-08-12. Measured three
+> ways today, the ×1.76 is better explained by the PROBE changing than by the payload growing —
+> and if that is right, the older figure was never superseded, it was measuring a different thing.
+>
+> | How the runs were created | KiB/run | What each run carries |
+> |---|---:|---|
+> | `add_run(draft=deepcopy(full_draft))` — the reproduction command below | **13.12** | its OWN copy of a 26-entry field map |
+> | `POST /api/experiments/{id}/runs` on the SAME full-field record | **7.48** | no own fields; the 26 arrive as `inherited` |
+> | `POST .../runs` on a record CREATED IN THE APP | **0.41** | no own fields, and almost nothing to inherit |
+>
+> Linear in every case (7.52 at 25 runs, 7.48 at 100; 0.42 at 25, 0.41 at 100 and 250).
+>
+> **Why the middle row matters.** `_run_view` serialises the run's own `fields` and its `inherited`
+> resolution — not its `series`, `qc` or `descriptors_outputs`. So a run that owns a field map pays
+> for it twice (once as its own copy, once resolved) and a run that inherits pays once. A
+> deep-copied draft is the first shape; every run the API creates is the second.
+>
+> **7.48 is within 0.01 KiB of the 7.47 this document reported for the older measurement.** That
+> coincidence, plus the mechanism above, is why the growth claim is doubted here. It is **not
+> proof**: the older probe is not recorded in this document, so what it did cannot be checked, and
+> the honest statement is that the two figures are consistent with measuring inherited-only and
+> own-fields runs respectively rather than with a 1.76× increase over time. Whoever wrote the block
+> below may have had a reason this reader cannot see.
+>
+> **What is NOT in doubt, and is the useful part.** Every figure is linear in run count, and the
+> cost is in the DATA rather than the rendering — which is the conclusion the body of this document
+> reaches and which none of this disturbs. The planning number depends on which shape you expect:
+>
+> * **0.41 KiB/run** is what the product produces TODAY for a record created in it, because the
+>   campaign-sheet fields (technique, facility, sample, contributors) still have **no capture
+>   surface**. At 1000 runs that is ≈400 KiB unpaged.
+> * **7.5 KiB/run** is what the same product will produce the moment those fields CAN be captured,
+>   because they become inherited content on every run. ≈7.3 MiB unpaged at 1000 runs.
+> * **13.1 KiB/run** is the worst case, reachable only if a run acquires its own copy of the field
+>   map. No API path does that today.
+>
+> So the envelope is conditional on a capability that does not exist yet, and a ×18 jump is waiting
+> behind it. That is worth knowing before anyone treats 0.41 as the answer.
+>
+> Read latency, same runs, same process (`TestClient`, so no network): 15 ms unpaged at 25 runs,
+> 52 ms at 100 for the 7.5 KiB/run shape; 3/5/10 ms at 25/100/250 for the 0.41 shape. Exporting 25
+> runs — 25 official records and 25 sidecars — took 0.3 s. **These are process-local timings and
+> are not a browser measurement**; the DOM, long-task and initial-load figures the body of this
+> document discusses are still not re-measured.
+>
+> Reproduce the middle and bottom rows:
+>
+> ```bash
+> PYTHONPATH=apps/api:src .venv/bin/python - <<'EOF'
+> import os, tempfile, copy, time
+> os.environ['ISAAC_UI_WORKSPACE'] = tempfile.mkdtemp()
+> from isaac_api.app import create_app
+> import isaac_api.workspace as ws
+> from fastapi.testclient import TestClient
+> c = TestClient(create_app(), raise_server_exceptions=False)
+> EID = '01SCALEAPIPATH000000000001'
+> exp = ws.create_experiment('full-field record', {'kind': 'synthetic'},
+>                            copy.deepcopy(ws._full_draft()), id=EID)
+> exp.save_versioned()
+> def v(): return c.get(f'/api/experiments/{EID}').json()['version']
+> for target in (25, 100):
+>     while len(ws.load_experiment(EID).sorted_runs()) < target:
+>         c.post(f'/api/experiments/{EID}/runs',
+>                json={'label': f'run {len(ws.load_experiment(EID).sorted_runs())+1}'},
+>                headers={'If-Match': f'"{v()}"'})
+>     b = len(c.get(f'/api/experiments/{EID}/runs').content)
+>     print(f'{target:>4} runs  {b/1024:8.1f} KiB  {b/target/1024:6.2f} KiB/run')
+> EOF
+> ```
+>
+> For the 0.41 row, create the record with `POST /api/experiments` instead and answer it through
+> `POST /answers` — the difference is entirely in how many fields the record carries.
+
 > ## RE-MEASURED 2026-08-19 — THE HEADLINE PER-RUN FIGURE IS 1.76× WHAT THIS DOCUMENT SAYS
 >
 > Everything below was measured on or before **2026-08-12**. Since then the run payload has grown:

@@ -78,6 +78,34 @@ describe('WorkflowProgressBanner · content per current_step', () => {
     expect(getByRole('button', { name: /Review Export Readiness/ })).toBeInTheDocument();
   });
 
+  it('review_export_readiness: does NOT blame the official ISAAC schema', () => {
+    /* THE BODY USED TO SAY the record "doesn't pass the official ISAAC schema check
+       yet", and no state reaching this step supports that. `review_export_readiness`
+       is derived from `Experiment.export_ready()` -> `_all_units_pass_dry_run()` ->
+       `export_draft`, which refuses on THREE gates: the no-guessing draft validator,
+       ISAAC's own anchored-pattern exactness gate, and the official schema. For the
+       first two `export.py` returns `official_report=None` — the official validator
+       never ran — so the banner named a verdict that did not exist.
+
+       CLAUDE.md §1 makes the schema upstream-owned; §12 records a surface shipping
+       this same conflation once before. This banner renders on four record screens,
+       which made it the widest instance of it. Pinned in BOTH directions so a copy
+       edit cannot restore the blame or drop the pointer. */
+    const wf = fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: false, exported: false, rev: 1 });
+    const { getByText, container } = renderAt(
+      '/record/rec1',
+      <WorkflowProgressBanner workflow={wf} recordId="rec1" pendingCount={0} />,
+    );
+    const text = container.textContent ?? '';
+    // NEGATIVE: no source is named, and no schema verdict is claimed.
+    expect(text).not.toMatch(/official ISAAC schema/i);
+    expect(text).not.toMatch(/ISAAC v1\.05/);
+    expect(text).not.toMatch(/schema (check|error|verdict)/i);
+    // POSITIVE: it still says something actionable and still routes onward.
+    expect(getByText(/does not pass the export checks yet/i)).toBeInTheDocument();
+    expect(text).toMatch(/Review export readiness/i);
+  });
+
   it('export: "Ready to export"', () => {
     const wf = fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: false, rev: 1 });
     const { getByText, getByRole } = renderAt(

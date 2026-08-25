@@ -32,7 +32,7 @@ import { MemoryRouter } from 'react-router-dom';
 import axe from 'axe-core';
 
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
-import { CAPTURE_GUIDANCE_SENTENCE } from '../lib/transcriptCaptureContent';
+import { CAPTURE_COPY, CAPTURE_GUIDANCE_SENTENCE } from '../lib/transcriptCaptureContent';
 import {
   CAPTURE_GUIDANCE_KEY,
   isCaptureGuidanceSeen,
@@ -530,6 +530,53 @@ describe('voice capture', () => {
     await screen.findByText(/No transcription provider is configured\. Speech is not transcribed/);
   });
 
+  it('I9 — the seam line still renders when the capability report never arrives', async () => {
+    /*
+     * THE DISCLOSURE WAS CONDITIONAL ON THE VERY THING IT DISCLOSES. The seam line was
+     * guarded by `transcription !== null`, and `transcription` is `null` in three
+     * reachable states: the capabilities fetch has not resolved (every first paint after
+     * the panel opens), it rejected, or the report names no such seam. In all three the
+     * voice section rendered with NO statement about whether this deployment can
+     * transcribe at all.
+     *
+     * WHY THAT IS LOAD-BEARING RATHER THAN COSMETIC. `docs/ai-integration-decision-packet.md`'s
+     * D6 supersession justifies shipping a recorder against an unconfigured seam on the
+     * grounds that "the mitigation is disclosure, not prevention — the seam's status
+     * renders ABOVE the controls, before any recording starts". That argument is false
+     * for exactly as long as the fetch has not resolved, which is the window in which a
+     * reader decides whether to press Start.
+     *
+     * The failure is simulated the way it actually happens — the capabilities request
+     * rejects — and the assertion is that the panel says UNKNOWN. It must not say "not
+     * configured": the panel's own rule is that a string in this bundle describes the
+     * build the browser came from, not the deployment it is talking to, which is why the
+     * `.catch` leaves the report absent rather than defaulting it.
+     */
+    stubFetchRoutes({ ...BASE_ROUTES, [CAPS]: { status: 503, body: { detail: 'no' } } } as never);
+    const { container } = await renderPanel();
+
+    const seam = await waitFor(() => {
+      const el = container.querySelector('.capture-seam');
+      if (!el) throw new Error('no seam line rendered');
+      return el as HTMLElement;
+    });
+    expect(seam.getAttribute('data-configured')).toBe('unreported');
+    expect(seam.textContent).toMatch(/not reported/i);
+    // It states the consequence for the reader…
+    expect(seam.textContent).toMatch(/treat turning a recording into text as unavailable/i);
+    // …and the audio claim, which is true either way and is what matters most when the
+    // rest is unknown.
+    expect(seam.textContent).toMatch(/nothing is sent anywhere/i);
+    // AND IT DOES NOT OVERSTATE. Unknown is not "not configured" — a client cannot
+    // assert a fact about the server it failed to read.
+    expect(seam.textContent).not.toMatch(/no transcription provider is configured/i);
+
+    // THE POSITION IS THE ARGUMENT: the status is above the controls, before any
+    // recording starts. `voiceHeading` opens the section the line belongs to.
+    const voice = container.querySelector('.capture-voice') as HTMLElement;
+    expect(voice.contains(seam)).toBe(true);
+  });
+
   it('the refusal is rendered from the server’s own words, with what is missing', async () => {
     stubFetchRoutes({
       ...BASE_ROUTES,
@@ -561,6 +608,47 @@ describe('voice capture', () => {
     await renderPanel();
     await screen.findByText(/This browser does not offer audio recording/);
     expect(await screen.findByLabelText('Transcript')).toBeInTheDocument();
+  });
+
+  it('the header does NOT offer dictation as a third equal option', async () => {
+    /*
+     * THE COPY THIS PINS USED TO OVERCLAIM. `panelIntro` read "Type, paste, or
+     * dictate notes about a run, then finalize them." — dictation offered
+     * unqualified, in the panel HEADER, which renders BEFORE the panel is opened
+     * and therefore before the seam status and the refusal body that would explain
+     * it. `POST /api/transcription` answers `501` `no_provider_configured` in every
+     * shipped deployment, and not by accident: `providers/config.py::_selected`
+     * resolves unset, empty and unrecognised values all to `unconfigured`, and
+     * `validate_provider_config_or_raise` REFUSES TO BOOT an app whose seam is set
+     * to `deterministic-fake` (DECISION D6) — so the unconfigured implementation is
+     * the only one a running application can hold.
+     * `ai-integration-decision-packet.md` §9, "build nothing that implies any of it
+     * exists", binds per `CLAUDE.md` §15.
+     *
+     * WHAT THIS TEST MUST NOT BECOME: a requirement that the recorder is gone. The
+     * Record / Request a transcript / Discard controls are a deliberate product
+     * decision and stay. Only the promise around them is corrected, and the
+     * assertions below check the copy — not the controls.
+     */
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('or dictate');
+    expect(text).not.toMatch(/Type, paste, or dictate/);
+    // It still says what DOES work, and says the audio path depends on something
+    // this bundle cannot assert the presence of.
+    expect(CAPTURE_COPY.panelIntro).toContain('Type or paste notes');
+    expect(CAPTURE_COPY.panelIntro).toContain('needs a transcription');
+    /*
+     * AND IT STILL DOES NOT STATE A STATUS, which is the rule at the top of
+     * `transcriptCaptureContent.ts`: every claim about what the deployment CAN do
+     * comes from the server. A hardcoded "not configured" here would be a claim
+     * about a deployment this bundle has never met — so fixing an overclaim must
+     * not introduce the opposite one.
+     */
+    for (const banned of ['not configured', 'unavailable', 'cannot transcribe', 'disabled']) {
+      expect(CAPTURE_COPY.panelIntro.toLowerCase()).not.toContain(banned);
+    }
   });
 
   it('no request this panel makes carries audio', async () => {

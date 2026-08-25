@@ -626,10 +626,27 @@ function LoadedExport({
                 <span className="preexport-ready-title">{LABELS.groupReady}</span>
                 <span className="preexport-ready-note">dry-run · would validate</span>
               </div>
+              {/*
+                M2 — THE PASS SENTENCE WAS TRUE AND INCOMPLETE, and the omission is the
+                same one the `RunCard` fix corrected on the other branch of the same
+                payload. A dry-run PASS really does imply the official schema said yes:
+                `export_draft` returns `ok: true` at exactly one return (`export.py:350`),
+                reachable only after `validate_official` has run and passed. But it
+                clears THREE gates, not two — `export.py` runs `check_exactness` on the
+                assembled record between the no-guessing report and the official
+                validator (`:339`) — and ISAAC's own gate got no credit for passing.
+
+                Naming it here is not symmetry for its own sake: the failure branch below
+                must NOT name the official schema, and a reader who saw only the "would
+                pass the official ISAAC schema" sentence had no way to learn that a third
+                gate exists at all, which is exactly what makes the failure branch's
+                silence look like evasion rather than precision.
+              */}
               <p className="preexport-text">
-                All blockers are resolved and the in-memory dry-run would pass the official ISAAC
-                schema. Exporting runs the real, gated validation and writes the official record +
-                evidence sidecar. There is no override and no portal submission.
+                All blockers are resolved, and on an in-memory candidate record the no-guessing
+                checks, ISAAC&rsquo;s own anchored-pattern exactness gate and the official ISAAC
+                schema all pass. Exporting runs the real, gated validation and writes the official
+                record + evidence sidecar. There is no override and no portal submission.
               </p>
               <button
                 type="button"
@@ -647,9 +664,44 @@ function LoadedExport({
           {pendingZero && !dryRunOk && (
             <section className="preexport-blocked card">
               <h2>Would Not Validate Yet</h2>
+              {/*
+                I1 — THE FOURTH SCREEN TO MAKE THIS CLAIM, and the three others were
+                corrected without it. ~~"The in-memory dry-run does not pass the official
+                ISAAC schema, so export stays gated."~~ — STRUCK. A dry-run FAILURE does
+                not establish that the official schema ever ran: `export.py` returns
+                `official_report=None` on two paths BEFORE `validate_official` is called
+                — a failed no-guessing report (`:305`) and a failed anchored-pattern
+                EXACTNESS gate, whose findings it folds into `draft_report` (`:339-343`)
+                — and the route stamps `schema: "ISAAC v1.05"` over whatever came back.
+
+                Measured over HTTP, on a record whose descriptor name carries a trailing
+                newline, `POST /api/experiments/{id}/validate` answered:
+
+                    { "ok": false, "dry_run": true, "schema": "ISAAC v1.05",
+                      "errors": [{ "path": "descriptors.outputs.0.descriptors.0.name",
+                                   "message": "value is accepted by the schema pattern
+                                     '…' only because Python's '$' also matches before a
+                                     trailing newline …" }] }
+
+                `dryRunOk` is `validate.dry_run && validate.ok`, so that payload lands
+                here — and this section rendered ISAAC'S OWN findings under an
+                official-schema headline. `CLAUDE.md` §12: "the gate is ISAAC's, not
+                upstream's — §1 makes the schema not ours to speak for, so no surface may
+                report an exactness refusal as an official-schema error."
+
+                THE DISCRIMINATOR IS `ValidateReview`'s, reused exactly as `RunCard` now
+                reuses it rather than restated a fourth way: name the official ISAAC
+                schema ONLY where `dry_run === false`; otherwise report the findings and
+                say plainly that the source is not named. The gate sentence keeps its full
+                force either way — what is withheld is the attribution, never the
+                refusal. The Standalone Validator on Governance & Safety is the one
+                surface that reports `schema_ok`, `exactness_errors` and `ok` separately,
+                and it is named so the reader has somewhere to go.
+              */}
               <p className="preexport-text">
-                The in-memory dry-run does not pass the official ISAAC schema, so export stays gated.
-                Nothing was written. Resolve these in the draft, then return.
+                {validate.dry_run === false
+                  ? 'The record already written does not pass the official ISAAC schema, so export stays gated. Nothing was written. Resolve these in the draft, then return.'
+                  : 'A candidate record assembled from this draft did not pass. Export stays gated and nothing was written. This check does not record which findings came from the no-guessing checks, which from ISAAC’s own anchored-pattern exactness gate, and which from the official ISAAC schema, so none is claimed — the Standalone Validator on Governance & Safety reports those separately. Resolve these in the draft, then return.'}
               </p>
               <ul className="preexport-errors mono">
                 {validate.errors.map((e, i) => (

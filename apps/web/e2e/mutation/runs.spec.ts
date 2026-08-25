@@ -261,9 +261,21 @@ test.describe('R5 · the Run workspace', () => {
     await expect(nthCard(page, 0)).toHaveAttribute('data-run-id', after[0].id);
     await expect(header(nthCard(page, 0))).toContainText(after[0].label);
 
-    // Nothing is claimed about a run nobody has touched.
+    /*
+     * THE FIRST RUN ADOPTS WHAT THE RECORD ALREADY HOLDS, and this assertion is the
+     * inverse of what it used to be. It read "Nothing is claimed about a run nobody has
+     * touched" with `toContainText('No conditions recorded yet')` — true while a new run
+     * started empty, and that emptiness was a DEFECT: `resolved_run_draft` reads the
+     * run-level values off the RUN, so adding a run silently removed every evidenced
+     * condition from the record it exports (`routes._seed_for_new_run`).
+     *
+     * So the first run carries the record's conditions, and the claim IS supported —
+     * they are the record's own evidenced values, not invented ones. The
+     * "nothing is claimed" property is asserted on the SECOND run below, which is where
+     * it still holds and where it is now the interesting case.
+     */
     await expect(saveStatus(nthCard(page, 0))).toHaveText('');
-    await expect(conditions(nthCard(page, 0))).toContainText('No conditions recorded yet');
+    await expect(conditions(nthCard(page, 0))).toContainText('298 K');
     /*
      * The scope is part of the figure — a bare "0 of N" is a completion claim the
      * number is not entitled to make. See the note in RunCard.tsx.
@@ -276,8 +288,17 @@ test.describe('R5 · the Run workspace', () => {
      * `runFields.ts`'s business and is asserted against the rendered controls below.
      */
     await expect(progress(nthCard(page, 0))).toHaveText(
-      /^\s*0 of \d+\s+run fields on this screen\s*$/,
+      /^\s*\d+ of \d+\s+run fields on this screen\s*$/,
     );
+
+    // AND THE SECOND RUN ADOPTS NOTHING, which is the other half of the rule: copying
+    // one run's spectrum or conditions onto another would assert they measured the same
+    // thing. So "nothing is claimed about a run nobody has touched" survives here.
+    await clickAddRun(page, 2);
+    const second = nthCard(page, 1);
+    await expect(saveStatus(second)).toHaveText('');
+    await expect(conditions(second)).toContainText('No conditions recorded yet');
+    await expect(progress(second)).toHaveText(/^\s*0 of \d+\s+run fields on this screen\s*$/);
   });
 
   test('a typed value says Saved only AFTER the server acknowledges, and survives a reload', async ({
@@ -313,7 +334,12 @@ test.describe('R5 · the Run workspace', () => {
     // 2, not 1: creating the run was the first write (see the I2 spec below).
     expect(run.rev, 'a write must advance the run rev').toBe(2);
 
-    await expect(progress(card)).toHaveText(/^\s*1 of \d+\s+run fields on this screen\s*$/);
+    /* THE NUMERATOR IS NO LONGER 1. The first run adopts the record's five run-level
+       values, so typing over one of them CHANGES a value rather than adding the first —
+       the count was `1 of N` when a run started empty. What this test is about is that
+       the typed value reached the server and is rendered, which the next line asserts;
+       the count is checked only for the shape it has always had. */
+    await expect(progress(card)).toHaveText(/^\s*\d+ of \d+\s+run fields on this screen\s*$/);
     await expect(conditions(card)).toContainText('277.15 K');
 
     // The denominator is the number of controls the card actually renders — asserted
@@ -329,7 +355,7 @@ test.describe('R5 · the Run workspace', () => {
     await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
     const reloaded = nthCard(page, 0);
     await expect(conditions(reloaded)).toContainText('277.15 K');
-    await expect(progress(reloaded)).toHaveText(/^\s*1 of \d+\s+run fields on this screen\s*$/);
+    await expect(progress(reloaded)).toHaveText(/^\s*\d+ of \d+\s+run fields on this screen\s*$/);
     // And the value is in the box, not merely in the summary line.
     await header(reloaded).click();
     await expect(fieldControl(reloaded, 'context.temperature_K')).toHaveValue('277.15');
@@ -360,14 +386,22 @@ test.describe('R5 · the Run workspace', () => {
     const a1 = after.find((r) => r.id === first.id)!;
     const a2 = after.find((r) => r.id === second.id)!;
     expect(a2.values['context.temperature_K']).toBe(310);
-    // THE ASSERTION THIS SPEC EXISTS FOR. A replace-by-index would have attached
-    // the response to whichever card sat in that slot.
-    expect(a1.values['context.temperature_K'] ?? null).toBeNull();
+    /*
+     * THE ASSERTION THIS SPEC EXISTS FOR. A replace-by-index would have attached the
+     * response to whichever card sat in that slot.
+     *
+     * IT USED TO BE `toBeNull()`, and that was only true while a new run started empty.
+     * Run 1 is the FIRST run, so it adopts the record's evidenced 298 K
+     * (`routes._seed_for_new_run`) — and asserting it still holds THAT is a stronger
+     * isolation claim than asserting it holds nothing: a replace-by-index would now
+     * overwrite a real value rather than fill an empty slot.
+     */
+    expect(a1.values['context.temperature_K']).toBe(298);
     expect(a1.rev, 'Run 1 must not have been written at all').toBe(firstRevBefore);
 
     // And the screen agrees about both.
     await expect(saveStatus(nthCard(page, 0))).toHaveText('');
-    await expect(conditions(nthCard(page, 0))).toContainText('No conditions recorded yet');
+    await expect(conditions(nthCard(page, 0))).toContainText('298 K');
     await expect(conditions(card2)).toContainText('310 K');
   });
 
@@ -451,7 +485,11 @@ test.describe('R5 · the Run workspace', () => {
     // the run did not move at all.
     const during = await readRuns(request, session, SEED.fresh);
     expect(during[0].values['context.typo_K']).toBeUndefined();
-    expect(during[0].values['context.temperature_K'] ?? null).toBeNull();
+    /* 298, not null, and that is a STRONGER claim than the one this line used to make.
+       The first run adopts the record's evidenced conditions, so a refused write must
+       leave a REAL value intact rather than leave an empty slot empty — a partial write
+       that landed the legitimate key would now be visible as a changed number. */
+    expect(during[0].values['context.temperature_K']).toBe(298);
     expect(during[0].rev, 'a refused write must not advance the run').toBe(created[0].rev);
 
     // The reader's own edit was never lost: Retry sends the held field, which this

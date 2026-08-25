@@ -1,6 +1,6 @@
 # Running ISAAC's MCP server locally
 
-ISAAC ships an MCP tool server — eight least-privilege tools over ISAAC's own HTTP
+ISAAC ships an MCP tool server — ten least-privilege tools over ISAAC's own HTTP
 API — and, since this slice, a **Streamable HTTP transport** that a real MCP client
 can speak to. It is off by default, and "off" means *there is no route*, not a route
 that refuses.
@@ -166,20 +166,44 @@ permanently disqualified. No binding in this build reads a header, and a future 
 must not either.
 
 Until one of those contracts exists, the honest state is the one this build has:
-`ISAAC_MCP_DEPLOYMENT` unset, no route, **and no product surface that mentions MCP
-at all.** This build ships no `Connect Your Agent` screen — verify with
-`rg -i 'Connect Your Agent' apps/web/src apps/api src`, which matches nothing —
-and that absence is itself the honest state, because
-`docs/ai-integration-decision-packet.md` §9 says to build nothing that implies a
-connection exists.
+`ISAAC_MCP_DEPLOYMENT` unset and no route.
 
-> **Forward reference, NOT a description of this build.** A separate branch
-> (`feat/connect-agent`, PR #142) adds a `Connect Your Agent` screen whose copy
-> says organization configuration is required rather than showing a connection it
-> cannot verify (`docs/ai-integration-decision-packet.md` §6.1, §9). It is not on
-> this branch and may land after it. Do not read the sentence above as describing
-> a shipped screen; when that branch merges, this note is what should be replaced
-> with a present-tense statement.
+~~**and no product surface that mentions MCP at all.** This build ships no
+`Connect Your Agent` screen — verify with
+`rg -i 'Connect Your Agent' apps/web/src apps/api src`, which matches nothing —
+and that absence is itself the honest state~~
+
+**SUPERSEDED 2026-08-24 — AND THE PARAGRAPH'S OWN CITED COMMAND DISPROVED IT.** The
+screen ships. Re-running the command exactly as written:
+
+```
+rg -i 'Connect Your Agent' apps/web/src apps/api src
+→ 34 matches across 9 files, including
+  apps/web/src/screens/settings/ConnectYourAgent.tsx
+  apps/web/src/screens/SettingsPage.tsx
+  apps/web/src/lib/mcpConnectContent.ts
+  apps/web/src/lib/settingsContent.ts
+  apps/web/src/lib/routes.ts
+  (plus four test files)
+```
+
+It is struck in place rather than deleted because a claim that carried its own
+falsifier is worth remembering: the sentence was self-checking and nobody re-ran it.
+
+**What is still true, and is the half worth keeping:** there is still no hosted MCP
+endpoint. `POST /api/mcp` returns **404** in the default environment and the loopback
+binding is off by default, so no scientist's agent can connect to the deployment. The
+`Connect Your Agent` screen says organization configuration is required rather than
+showing a connection it cannot verify — which is what
+`docs/ai-integration-decision-packet.md` §6.1 and §9 require ("build nothing that
+implies any of it exists"): §9 forbids implying a CONNECTION exists, not describing a
+capability that does.
+
+> **The forward reference this replaces, kept for the record.** This note used to
+> read: *"A separate branch (`feat/connect-agent`, PR #142) adds a `Connect Your
+> Agent` screen … It is not on this branch and may land after it … when that branch
+> merges, this note is what should be replaced with a present-tense statement."* That
+> branch merged; this is the present-tense statement it asked for.
 
 ---
 
@@ -191,7 +215,7 @@ parity cases, and four negative controls that disable one guard each and assert 
 behaviour changes.
 
 `apps/api/tests/test_mcp_boundaries.py` — what must never be reachable.
-`apps/api/tests/test_mcp_server.py` — the eight tools, in process.
+`apps/api/tests/test_mcp_server.py` — every registered tool, in process.
 
 **None of them reads real data, touches a database, or sends anything off this
 machine.** *This line previously said "None of them opens a socket", which was

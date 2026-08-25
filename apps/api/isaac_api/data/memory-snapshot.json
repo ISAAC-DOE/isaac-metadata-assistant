@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "1e4292f13f6c0e1aabd10bf25a486c04b392c47f73d0e21534631a9d273157c5"
+        "sha256": "4268a27b29f5f1c8ee280394fa95b0268f1ee793fcb0e5535733acf02c8145b2"
       },
       {
         "path": "AGENTS.md",
@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "aa15e78f1ef5455b187d0d9164aa3872f9d1a344211b0dff7074bf56bb438dd3"
+        "sha256": "b185ac6f4cd56e061690627913c0121f4f277ecfd7a00639cfa697f75b77f747"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "b8765f25a7dd45fac8d12525ce6a7f2fee1e1f89a0752123d7319d3e917692af"
+        "sha256": "5796c6c56e51ec98faa4e7d84fe64afd55ebf1579f75cf0de5a30a00532003f4"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "3d304ca1f38cd878e699658e96d65353ccd8b51c46ab161f33daddf1a2d67f80"
+        "sha256": "fa4bbed681b3e85fba6328d6ba76f0ff20c16ac85aec862a424e244c7853f6c8"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "7c44c55be1e0d1ac2a97251a789f9ec91eecb55ba6de53645995b4e84523f0cf"
+        "sha256": "6cbaf7e4e4b8911cb6430c085d79daccff4d79a3f8f5378b5f1e37a0876d80c2"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10332,7 +10332,7 @@
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
-        "sha256": "a8596015bbfa28b546cf842402fa5b4eb6eec69aabab361c7be4ebaad90cdf2b"
+        "sha256": "d32782431deeb5ea74fe3bae84dff4171cb20a2060f9495e525e65c3f9e22ed9"
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
@@ -10340,7 +10340,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "0c4c992ad9ccba470d5b59b3f36a35519dc587a6c46b97d4afe6d81f42c89dc5"
+        "sha256": "4987363a83b15c6126b6a9884191a92871017585d6b46c44662889587c001f89"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10360,7 +10360,7 @@
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
-        "sha256": "da7d76c593517bbb2da223e23e1b8748001628bd2514bbac80862df58230f62c"
+        "sha256": "b8be3a3e5f767fb521790afb7cca3a0ac61bde54359d51db30ec80027f91545b"
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "bbff974c0cfca80681c0a72496999f9b09d1b443806268de5f7d938e479d5d93"
+        "sha256": "a054b5b97d471684e2ec4580e79e9c11a9d06b784ada0d90c87add3ab401faa8"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "aaf039a6fbefb1cc55ff041edfbc06b7d56d400f373ecd35ef8aa4c71ba55b9b"
+        "sha256": "2871cf447f0b63f5ef3fe5214705c0ddec6480fd7197fc892bf53d8364a672ca"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10500,11 +10500,11 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "ebadf93b5d71f7c5d8b40cdd6cff1f49bb156e8f05bea0a4f218955282570cc6"
+        "sha256": "87082fefe51d87442a8510386da6f3895ce6d2bc708e9f807e1e24688624fb1f"
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "71c9ac47103f02f526bfb0ef1692575821a77708f7ca6b8c23ceee1a5555e72a"
+        "sha256": "d125d4745ffa10c48b463a21e1e5570f75c2f8c286bd8b4e74a7279671c59c94"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "87551bc6ec3271e07f32e490110269a2b0ce787a974239bdd04475b6202b9ae6"
+        "sha256": "56bb606a2f05882b1efa51861a0aab607ffe6784a58d2eff68f697e1215e58ce"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "af6a70334a7119ff10f018b9191e6bc880c16b92af5607e080525defb420769e"
+        "sha256": "f56999630837b721ee5effde838aed7f1ddfe4b50eba112455dc837ae60bdad8"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "e60743252558ba505527a10fe8525a1587c5a50bda5e69e4c0331b05c11d2028"
+        "sha256": "e58b1df8b543f1158bcd53fff750fd13ecb6fab0ebf1d6c14501389396d98d66"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "a8c8559cb400919af66c1ca11378c07ab6d68b050fb2e35fc22e2068a123e54b"
+        "sha256": "8bccddcfac2887597dc6da643b7b24ec27302077f0c8b37b57bce52eca465420"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "341c26c14e4fede0e704f0f0217aa438de3a9916b36a31e621a68447b08ca2ff"
+        "sha256": "aae6538fa98af27a10c5dc1093f3f9f1036075fb3f0610c9f55288488fdc3f59"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10692,11 +10692,11 @@
       },
       {
         "path": "docs/samples/01JQZ0SYNTHXANESDEMO000000.evidence.json",
-        "sha256": "dd01263c53c8569b50269c607ac1fb3caae39a9b586895b32bef7c5ac5881e3e"
+        "sha256": "afb409aa07c6a2bab743c8b21430576fc9ce6867b845bde0ac3eb3af0827b731"
       },
       {
         "path": "docs/samples/01JQZ0SYNTHXANESDEMO000000.json",
-        "sha256": "23fc6e1f5b834e6e76c07b6180e02a7134b1195c43159e03ed3984c181090fd9"
+        "sha256": "b220c99642a07dab6ea2f631cace2289fe272c158e69aae7656e44573442abcc"
       },
       {
         "path": "docs/samples/README.md",
@@ -10820,7 +10820,7 @@
       },
       {
         "path": "src/isaac_records/complete.py",
-        "sha256": "8647a21b7b4f6ce9edda039d0b59ae523fa0bd80d56ad21a982e2828f53d405f"
+        "sha256": "0daf9e0ebf80e1078e77f9ea6b141a7b78d2442c817d1306b70d8ff7a6be326b"
       },
       {
         "path": "src/isaac_records/draft_validator.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "cf8682c1e07f7013939e8ae5548338efe7d453f9eae13d8bf20c1da882370940"
+    "served_manifest_fingerprint": "ae0470a73b997c1f3e153bc1bf70e1a85baf530e92eaa6c345bebd5853e1ec92"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

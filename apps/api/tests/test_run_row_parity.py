@@ -183,6 +183,35 @@ def _probe_engine(env: Mapping[str, str] | None = None) -> tuple[bool, str]:
             f"PGHOST={host!r} is not a loopback target; this suite runs only against "
             "a local throwaway engine"
         )
+    # ── `PGHOSTADDR` DEFEATED THE CHECK DIRECTLY ABOVE, AND IS REFUSED OUTRIGHT. ──────
+    # Measured by an independent security review on 2026-08-24. `_is_loopback_target`
+    # reads the `PGHOST` STRING, and libpq fills every unspecified connection parameter
+    # from the matching `PG*` variable — so when `PGHOSTADDR` is also set it is the
+    # address libpq CONNECTS to, while `host` is used only for TLS/GSSAPI name
+    # verification. `PGHOST=localhost` + `PGHOSTADDR=<a hosted address>` +
+    # `PGDATABASE=metadata_assistant` therefore passed every gate in this function AND
+    # `write_transaction`'s own `current_database()` re-check — which asks the server it
+    # is talking to, so it agrees with itself — and this suite, which WRITES, would have
+    # written there.
+    #
+    # `db_write.connect_psycopg2` now passes `hostaddr=None` explicitly, which is the
+    # real fix and makes libpq ignore the variable. This refusal is the second half:
+    # an environment that sets `PGHOSTADDR` at all is one whose author intends a target
+    # this suite cannot verify, so it declines rather than proceeding on the strength of
+    # a keyword argument in another module. Refused rather than ignored, because a
+    # SKIPPED suite is a visible non-result and a silently-redirected one is not.
+    #
+    # NEITHER HALF IS THE GATE. `ISAAC_RUN_REAL_ENGINE_PARITY` is, and it is checked
+    # first and unconditionally. This is defence in depth on a check that, until now,
+    # did not defend — and saying that plainly is better than implying the suite was
+    # ever safe by accident.
+    hostaddr = (env.get("PGHOSTADDR") or "").strip()
+    if hostaddr:
+        return False, (
+            "PGHOSTADDR is set. libpq would connect to that address while PGHOST was "
+            "used only for TLS name verification, so the loopback check above cannot "
+            "speak for the target this suite would WRITE to. Unset it."
+        )
     try:
         dbw.pgdatabase_gate(env)
     except dbw.WriteRefused as exc:
@@ -316,6 +345,148 @@ def test_the_opt_in_alone_does_not_admit_a_non_loopback_target(monkeypatch):
         available, reason = _probe_engine(dict(consented, PGHOST=local))
         assert available is False, local
         assert "could not reach the database (AssertionError)" == reason, reason
+
+
+def test_PGHOSTADDR_is_refused_because_the_loopback_check_cannot_see_it(monkeypatch):
+    """THE HOLE THE LOOPBACK CHECK HAD, and the reason a string check is not a target
+    check.
+
+    Measured by an independent security review on 2026-08-24, by reading libpq's
+    parameter precedence and this suite's own gates rather than by connecting. libpq
+    fills every unspecified connection parameter from the matching `PG*` variable, and
+    when `hostaddr` is set it is the address that is CONNECTED to while `host` is used
+    only for TLS certificate and GSSAPI name verification. So this environment —
+
+        PGHOST=localhost   PGHOSTADDR=<a hosted address>   PGDATABASE=metadata_assistant
+
+    — passed `_is_loopback_target`, passed `pgdatabase_gate`, and would have passed
+    `write_transaction`'s own `current_database()` re-check, because that check asks the
+    server it is talking to and therefore agrees with itself. This suite WRITES.
+
+    Two changes, and this asserts the one that lives here. `db_write.connect_psycopg2`
+    now passes `hostaddr=None` explicitly, which is the real fix; the probe additionally
+    REFUSES an environment that sets the variable, because an author who sets it intends
+    a target this suite cannot verify, and a skipped suite is a visible non-result while
+    a silently-redirected one is not.
+
+    NEITHER IS THE GATE. `ISAAC_RUN_REAL_ENGINE_PARITY` is, and it is checked first. This
+    is defence in depth on a check that until now did not defend.
+    """
+    monkeypatch.setattr(dbw, "write_transaction", _refuse_to_connect)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _refuse_to_connect)
+    smuggled = {
+        OPT_IN_ENV: OPT_IN_VALUE,
+        "PGHOST": "localhost",
+        "PGHOSTADDR": "10.42.7.9",
+        "PGUSER": "metadata_assistant",
+        "PGPASSWORD": "irrelevant-to-this-test",
+        "PGDATABASE": "metadata_assistant",
+    }
+    # The premise, asserted rather than assumed: every OTHER gate says yes.
+    assert _is_loopback_target(smuggled["PGHOST"]) is True
+    dbw.pgdatabase_gate(smuggled)  # raises WriteRefused if it disagreed
+
+    available, reason = _probe_engine(smuggled)
+    assert available is False
+    assert "PGHOSTADDR" in reason, reason
+
+    # AND IT IS THE VARIABLE, NOT THE HOST, THAT DECIDES. The same environment without
+    # it reaches the connection attempt — the raiser — which is the documented limit of
+    # every string gate in this function.
+    without = {k: v for k, v in smuggled.items() if k != "PGHOSTADDR"}
+    available, reason = _probe_engine(without)
+    assert available is False
+    assert "could not reach the database (AssertionError)" == reason, reason
+
+    # An EMPTY or whitespace value is not "set": libpq ignores it, so refusing would be
+    # a false positive that made a legitimate environment unusable for no gain.
+    for blank in ("", "   "):
+        available, reason = _probe_engine(dict(without, PGHOSTADDR=blank))
+        assert "PGHOSTADDR" not in reason, blank
+
+
+def test_connect_psycopg2_pins_hostaddr_so_libpq_cannot_fill_it_from_the_environment():
+    """THE REAL FIX, ASSERTED WHERE IT ACTUALLY HAPPENS — and the first version of this
+    test asserted it one layer too early and so passed over an INERT fix.
+
+    THE FAILURE THIS TEST NOW EXISTS TO PREVENT. Version 1 injected a fake `psycopg2`
+    whose `connect` merely recorded its keyword arguments, and asserted
+    ``seen["hostaddr"] is None``. That passed. It also could not fail, because the real
+    `psycopg2.connect` DOES NOT HAND ITS KEYWORDS TO libpq — it builds a DSN with
+    `psycopg2.extensions.make_dsn`, which contains, verbatim::
+
+        # Drop the None arguments
+        kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
+
+    So `hostaddr=None` was deleted before libpq saw it, the DSN went out with no
+    `hostaddr`, and libpq read `PGHOSTADDR` from the environment exactly as before. The
+    application shipped a guard that did nothing and a comment asserting that it worked,
+    and a green test between them.
+
+    TWO ASSERTIONS AT TWO LAYERS, deliberately:
+
+    * the CALL still binds the keyword — checkable in any interpreter, with the fake
+      driver, and it is what catches a "fix" that renames or drops the parameter;
+    * the DSN still CARRIES it — checked against the REAL `make_dsn` when psycopg2 is
+      importable, and skipped when it is not. This is the layer version 1 could not
+      see, and it is the one the guarantee actually rests on.
+
+    Measured in an interpreter with psycopg2 present::
+
+        make_dsn(host="localhost", dbname="d", hostaddr=None) -> 'host=localhost dbname=d'
+        make_dsn(host="localhost", dbname="d", hostaddr="")   -> "... hostaddr=''"
+
+    Still narrower than "the connection goes to PGHOST": no socket is opened here, and no
+    agent may connect to the SLAC database. What is established is that libpq is TOLD an
+    explicit `hostaddr`, which is what stops it consulting `PGHOSTADDR`; the rest rests on
+    libpq's documented precedence.
+    """
+    import sys
+    import types
+
+    seen: dict = {}
+
+    fake = types.ModuleType("psycopg2")
+    fake.connect = lambda **kwargs: seen.update(kwargs) or object()  # type: ignore[attr-defined]
+    real = sys.modules.get("psycopg2")
+    sys.modules["psycopg2"] = fake
+    try:
+        dbw.connect_psycopg2(
+            {
+                "PGHOST": "localhost",
+                "PGUSER": "metadata_assistant",
+                "PGPASSWORD": "irrelevant-to-this-test",
+                "PGHOSTADDR": "10.42.7.9",
+            }
+        )
+    finally:
+        if real is None:
+            del sys.modules["psycopg2"]
+        else:  # pragma: no cover - psycopg2 is not installed in this interpreter
+            sys.modules["psycopg2"] = real
+
+    assert "hostaddr" in seen, sorted(seen)
+    # EMPTY STRING, NOT `None` — `None` is dropped by `make_dsn` and never reaches libpq.
+    assert seen["hostaddr"] == "", repr(seen["hostaddr"])
+
+    # LAYER 2: the keyword must SURVIVE INTO THE DSN. This is what version 1 missed.
+    make_dsn = pytest.importorskip(
+        "psycopg2.extensions",
+        reason="psycopg2 is not installed in this interpreter; the CI PostgreSQL job "
+        "has it and runs this assertion there.",
+    ).make_dsn
+    dsn = make_dsn(**{k: v for k, v in seen.items() if k != "connect_timeout"})
+    assert "hostaddr" in dsn, dsn
+    # And the control that proves the assertion above can fail: the value the fix
+    # replaced is dropped by the same function.
+    assert "hostaddr" not in make_dsn(host="localhost", dbname="d", hostaddr=None)
+    # THE ENVIRONMENT'S VALUE IS NOT FORWARDED UNDER ANY OTHER NAME EITHER, which is the
+    # failure mode a "fix" that renamed the parameter would have.
+    assert "10.42.7.9" not in {str(v) for v in seen.values()}, seen
+    assert seen["host"] == "localhost"
+    # AND THE DATABASE IS STILL NEVER THE ENV VALUE — the gate pinned it, and this call
+    # has always used the constant. Asserted so the edit above cannot have moved it.
+    assert seen["dbname"] == dbw.EXPECTED_DATABASE
 
 
 # =============================================================================

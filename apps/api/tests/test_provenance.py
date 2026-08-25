@@ -548,8 +548,14 @@ def test_the_assistant_origin_never_appears_over_the_committed_example_records(c
 def test_the_voice_arm_has_no_producer_but_is_not_unreachable_over_the_api(client):
     """PRECISION, because the two easy summaries are both wrong.
 
-    Nothing in this build TRANSCRIBES anything — there is no recorder, no
-    transcription provider, and the notes panel hard-codes `typed_note`. But
+    Nothing in this build TRANSCRIBES anything — ~~there is no recorder~~, no
+    transcription provider, and the notes panel hard-codes `typed_note`.
+    (CORRECTED 2026-08-24: there IS a recorder. `TranscriptCapturePanel` ships
+    `MediaRecorder`/`getUserMedia` and is mounted at `RecordWorkbench.tsx:687`. The
+    claim this test actually rests on is the surviving one — no transcription
+    provider, so nothing is transcribed: `POST /api/transcription` answers `501`
+    and `providers/config.py` refuses to BOOT with the deterministic fake. The
+    recorder half was false and the assertions below never depended on it.) But
     `POST .../notes` validates `source` against the whole note vocabulary, so a
     direct API caller CAN store a transcript note today, and this module reports
     `voice` for it. "No producer exists" is true of the application; "the arm is

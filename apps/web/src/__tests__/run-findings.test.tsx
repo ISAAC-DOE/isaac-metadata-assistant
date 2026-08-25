@@ -379,6 +379,36 @@ describe('Validate & Review · a failing run is distinguished, and owns its erro
       "'series' is a required property",
     );
   });
+
+  it('M1 — the dry-run caption names THREE candidate sources, not two', () => {
+    /*
+     * NAMING TWO WHERE THERE ARE THREE IS AN ATTRIBUTION BY ELIMINATION. The caption
+     * read "the no-guessing checks and … the official ISAAC schema", which reads as an
+     * exhaustive pair — so a reader meeting an unfamiliar finding concludes it must be
+     * the schema's. `export.py` runs `check_exactness` on the assembled record BETWEEN
+     * those two (`:339`) and folds a refusal into `draft_report` (`:339-343`), so
+     * ISAAC's own gate is a third source arriving in this very list. `CLAUDE.md` §12
+     * forbids reporting an exactness refusal as an official-schema error, and reaching
+     * that conclusion by omission is the same claim made quietly.
+     *
+     * `ValidateReview` names all three in a standing note above its list (`:412-420`);
+     * this component renders without that note, so if the caption does not name the
+     * third source, nothing on the surface does.
+     */
+    const dryCaption = groupFor(
+      renderFindings([{ ...FAILING, dry_run: true }]).container as HTMLElement,
+      'Run 2',
+    ).querySelector('.run-finding-caption')!.textContent!;
+
+    expect(dryCaption).toMatch(/no-guessing checks/);
+    expect(dryCaption).toMatch(/exactness gate/);
+    expect(dryCaption).toMatch(/official ISAAC schema/);
+    // The gate is ISAAC's, and the copy says whose it is rather than leaving the
+    // reader to assume it is upstream's.
+    expect(dryCaption).toMatch(/ISAAC’s own anchored-pattern exactness gate/);
+    // And it still claims none of them.
+    expect(dryCaption).toMatch(/none is claimed/);
+  });
 });
 
 // --- 3. `unavailable` is NOT `ok: false` -------------------------------------

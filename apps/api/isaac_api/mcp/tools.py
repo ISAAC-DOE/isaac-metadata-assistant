@@ -1,11 +1,41 @@
-"""The eight tools, their schemas, and the registry that refuses a ninth.
+"""The tools, their schemas, and the registry that refuses one it does not know.
 
 READ-MOSTLY BY CONSTRUCTION
 ===========================
-Six of the eight are reads. The two writes touch DRAFT content only — add a run,
-write draft values — and both require the ``If-Match`` precondition the API
-already enforces, so an agent working from a stale read loses the race rather
+MOST OF THE REGISTRY IS READS, AND THE TALLY IS DELIBERATELY NOT WRITTEN HERE.
+It used to read "Six of the eight are reads. The two writes ..." and every number
+in that sentence had drifted: the registry holds ten tools, seven of them reads,
+and there are three writes rather than two. The enumeration was wrong as well as
+the count — it named "add a run, write draft values" and omitted
+``isaac_answer_questions``, which is the write that closes a blocking question and
+therefore the one a reader most needs to know is a write.
+
+``db_write.py`` reached this same conclusion after the same failure ("A
+hand-maintained tally in a safety comment drifts"), and the remedy there is the
+one taken here: state the PROPERTY and let a test enumerate the members.
+``policy.PERMITTED_TOOL_NAMES`` is the enumeration, and the connect-your-agent
+suite asserts exact coverage of it.
+
+The property, which is what this section is actually for: every write touches
+DRAFT content only, and every one requires the ``If-Match`` precondition the API
+already enforces — so an agent working from a stale read loses the race rather
 than the scientist losing an edit.
+
+**THAT SECOND HALF WAS FALSE FOR ONE HEADER VALUE, and it is recorded here rather
+than only fixed, because the sentence reads identically before and after.** An
+independent security review measured it on 2026-08-24: an agent holding a STALE
+etag gets ``412 stale_write``, and the identical call with ``if_match: "*"``
+returned ``200`` and silently overwrote a scientist's already-confirmed
+``measurement.series`` correction with no conflict recorded. ``policy._validated``
+refuses to import an operation that mutates without ``requires_if_match``, but that
+guard can only see that a header is REQUIRED, not what it says — so the strongest
+statement in this file rested on a check that a single character walked past.
+``client._render_headers`` now refuses the wildcard, in the existing
+``invalid_if_match`` family, and each of the three tools that declare ``if_match``
+says so in its own argument description. **The HTTP API's acceptance of ``If-Match:
+*`` is deliberate, documented in ``routes._check_if_match``, and UNCHANGED** — the
+refusal belongs to this layer because this layer is the one making the stronger
+promise, to a caller that is a language model rather than a person.
 
 Nothing here finalises. There is no export tool, no delete tool, no migration
 tool and no governance tool; ``policy.py`` explains why that is four structures
@@ -183,7 +213,12 @@ class Tool:
 # --------------------------------------------------------------------------
 #
 # Deliberately not a JSON Schema library: this package adds no dependency, and the
-# schemas it has to check are eight fixed objects of scalars. What it does support
+# schemas it has to check are a small fixed set of flat objects. (This read "eight
+# fixed objects of scalars"; both halves drifted — there are ten, and
+# ``isaac_answer_questions``'s ``answers`` is an ``object`` with ``minProperties``
+# and no declared inner properties, so it is not a scalar and its contents are
+# unconstrained below the top level. No count is stated now, for the reason given
+# in the module docstring.) What it does support
 # is exactly what those schemas use, and anything it meets that it does not
 # understand is a RAISE rather than a pass — an unknown keyword must not silently
 # become "no constraint".
@@ -437,6 +472,89 @@ async def _update_draft(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcom
     return _settle("update_run_draft", result)
 
 
+async def _list_questions(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    """The record's open blocking questions, run ownership included.
+
+    This is the discovery half of ``isaac_answer_questions`` and it exists because
+    the answer keys are not guessable. They are not field paths: ``series``, ``qc``,
+    ``descriptor`` and per-file asset URIs, plus the ``run_id`` each belongs to once
+    a record has runs. ``isaac_get_experiment`` carries a pending COUNT and not the
+    questions, and ``isaac_check_run`` carries one run's. Neither answers "what is
+    this record waiting for", which is the question an agent actually starts with.
+    """
+    result = await ctx.client.call(
+        "list_questions", path_params={"experiment_id": args["experiment_id"]}
+    )
+    return _settle("list_questions", result)
+
+
+#: The four operations :func:`_answer_questions` can reach, keyed by
+#: ``(a run was named, the caller said this is a correction)``.
+#:
+#: A TABLE RATHER THAN NESTED IFS, because the failure this shape prevents is a
+#: branch that falls through to the wrong level. Every combination is written
+#: down, so there is no default and no "else" to land in.
+_ANSWER_OPERATIONS: Mapping[tuple[bool, bool], str] = MappingProxyType(
+    {
+        (False, False): "answer_record_question",
+        (False, True): "correct_record_field",
+        (True, False): "answer_run_question",
+        (True, True): "correct_run_field",
+    }
+)
+
+
+async def _answer_questions(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    """Answer, or correct, the blocking questions ISAAC is asking.
+
+    WHY THIS IS SEPARATE FROM :func:`_update_draft`, and the distinction is the
+    caller's, not an implementation detail. ``isaac_update_draft`` writes **official
+    field paths** — ``context.temperature_K`` and the four others PATCH accepts, or a
+    dotted path on the record. This tool writes **blocking-question keys**, the ones
+    ``GET .../pending`` hands out: ``series``, ``qc``, ``descriptor``, an asset URI.
+    They are different key spaces reaching different core writers, and a tool whose
+    description said "write values" for both would be describing two things at once.
+
+    THE LEVEL IS THE CALLER'S EXPLICIT CHOICE, never inferred from the key. Inferring
+    it was the obvious shortcut and it is wrong twice over: this server would be
+    deciding that a spectrum belongs to a run, which is a scientific fact about the
+    record rather than a fact about the string ``"series"``; and it would silently
+    redirect a request, so a caller holding the record's ETag would get a ``412`` from
+    a route it never asked for. When the level is wrong the API says so — the record's
+    ``/answers`` answers with ``409 belongs_to_a_run`` and NAMES every run and the
+    operation that can take the answer — and that refusal reaching the caller intact
+    is more useful than a guess that happens to be right.
+
+    ``correct_record_field`` is deliberately the SAME operation ``isaac_update_draft``
+    calls at the record level. One route behind two tool surfaces is not a second
+    write path; it is the one write path, described in the two vocabularies a caller
+    might arrive with.
+    """
+    run_id = args.get("run_id")
+    correcting = bool(args.get("correcting", False))
+    operation = _ANSWER_OPERATIONS[(run_id is not None, correcting)]
+
+    path_params: dict[str, str] = {"experiment_id": args["experiment_id"]}
+    if run_id is not None:
+        path_params["run_id"] = run_id
+
+    result = await ctx.client.call(
+        operation,
+        path_params=path_params,
+        json_body={
+            # PASSED THROUGH UNCHANGED, exactly as `_update_draft` does, and for the
+            # same reason: hard-coding `True` here would be one line and would record
+            # a user confirmation that no user gave. The scientist's own client
+            # asserts it on the scientist's behalf; this server does not assert it for
+            # them, and `false` is refused by the route rather than corrected here.
+            "confirmed_by_user": args["confirmed_by_user"],
+            "answers": args["answers"],
+        },
+        if_match=args["if_match"],
+    )
+    return _settle(operation, result)
+
+
 async def _check_run(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
     result = await ctx.client.call(
         "check_run",
@@ -565,13 +683,44 @@ def _tools() -> tuple[Tool, ...]:
             read_only=True,
             idempotent=True,
         ),
+        # THIS DESCRIPTION STATED THE OPPOSITE OF THE BEHAVIOUR, and it is the half of
+        # one feature that a language model reads before acting. It said *"The new run
+        # starts EMPTY: no record-level value is copied into it"*, while the REST
+        # description of the same operation (`routes.py`, `POST .../runs`) and
+        # `workspace.py` both say the first run ADOPTS the record's per-run content.
+        # Measured over HTTP by an independent review: answer `qc` on a record with no
+        # runs, then add the first run, and `run.draft["qc"]` is
+        # `{"status": "valid", "evidence": "I0 stable"}` — not absent.
+        #
+        # The human-facing half of the same feature (`mcpConnectContent.ts`) had already
+        # been corrected, so the product told a person the truth and told an agent the
+        # reverse. An agent acting on "starts EMPTY" would re-answer values that are
+        # already there, or refuse to add a first run in order to protect content that
+        # adding it would have carried across.
+        #
+        # THE FIX REUSES THE ROUTE'S OWN SENTENCE VERBATIM rather than paraphrasing it,
+        # so the two cannot drift again by wording, and
+        # `test_mcp_and_route_descriptions_agree.py` pins that the shared sentence is
+        # present in BOTH — no test compared these two surfaces at all, which is why
+        # this survived.
         Tool(
             name="isaac_create_run",
             title="Add a run to a record",
             description=(
-                "Add one run — one measurement condition — to a record. The new run "
-                "starts EMPTY: no record-level value is copied into it and no "
-                "scientific value is invented. Requires the RECORD's current `etag` "
+                "Add one run — one measurement condition — to a record. "
+                "THE FIRST RUN ADOPTS THE RECORD'S PER-RUN CONTENT; A LATER RUN DOES "
+                "NOT. A record with no runs is its own record, so adding the first "
+                "moves the exported identity onto that run, and the spectrum, the QC "
+                "verdict, the descriptors, the assets and the run-level context and "
+                "timing values travel with it — without that, adding a run would "
+                "silently remove everything already recorded from every record this "
+                "one publishes. Open questions travel the same way. A SECOND run "
+                "receives none of it and does start empty: copying one run's spectrum "
+                "onto another would assert that two runs measured the same thing, "
+                "which nothing here evidences.\n\n"
+                "Record-LEVEL values are never copied down either way — they are "
+                "inherited by reference at read time — and no scientific value is "
+                "invented anywhere. Requires the RECORD's current `etag` "
                 "in `if_match`; omitted is refused, stale is refused with nothing "
                 "written."
             ),
@@ -586,7 +735,10 @@ def _tools() -> tuple[Tool, ...]:
                         "maxLength": 256,
                         "description": (
                             "The RECORD's current ETag, exactly as isaac_get_experiment "
-                            "returned it."
+                            "returned it. It must be a validator a read returned: `*` "
+                            "is refused, because it would apply this write whatever the "
+                            "record now says and overwrite a change made since your "
+                            "last read without reporting a conflict."
                         ),
                     },
                     "label": {
@@ -620,12 +772,22 @@ def _tools() -> tuple[Tool, ...]:
                 "that has no other evidence, so it is the caller's assertion that "
                 "the scientist confirmed it, not this server's. Send `false` and the "
                 "write is refused.\n\n"
-                "Every key in `fields` must be a real official field path at the "
-                "level you are writing. An invented, misspelt or wrong-level path is "
-                "refused naming it, and NOTHING in the request is written. No value "
-                "is ever invented. Re-submitting a value the draft already holds is "
-                "a no-op and does not advance the revision. This does not export, "
-                "finalise or submit anything."
+                "THE TWO BRANCHES TAKE DIFFERENT KEY SPACES, and this sentence "
+                "used to claim they took the same one. WITH a `run_id`, `fields` "
+                "takes official field paths and exactly five are writable — "
+                "`context.environment`, `context.temperature_K`, "
+                "`context.thermodynamics.atmosphere` and the two "
+                "`timestamps.acquired_*`. WITHOUT one, it takes the same "
+                "BLOCKING-QUESTION keys `isaac_answer_questions` takes, because it "
+                "posts to the record's correction route — so an official field path "
+                "there is refused as `unrecognized_field`. Prefer "
+                "`isaac_answer_questions` for the record level; this tool's "
+                "record-level branch exists for callers that already used it.\n\n"
+                "An invented, misspelt or wrong-level key is refused naming it, and "
+                "NOTHING in the request is written. No value is ever invented. "
+                "Re-submitting a value the draft already holds is a no-op and does "
+                "not advance the revision. This does not export, finalise or submit "
+                "anything."
             ),
             scope=Scope.DRAFT_WRITE,
             operation_ids=("update_run_draft", "correct_record_field"),
@@ -645,7 +807,10 @@ def _tools() -> tuple[Tool, ...]:
                         "maxLength": 256,
                         "description": (
                             "Required. THE RUN's ETag when `run_id` is given, the "
-                            "RECORD's ETag when it is not."
+                            "RECORD's ETag when it is not. It must be a validator a "
+                            "read returned: `*` is refused, because it would apply this "
+                            "write whatever the record now says and overwrite a change "
+                            "made since your last read without reporting a conflict."
                         ),
                     },
                     "confirmed_by_user": {
@@ -677,14 +842,191 @@ def _tools() -> tuple[Tool, ...]:
             idempotent=True,
         ),
         Tool(
+            name="isaac_list_questions",
+            title="List blocking questions",
+            description=(
+                "The open questions blocking one record, each with the stable key an "
+                "answer must be submitted under, what it is about, and — once the "
+                "record has runs — the `run_id` and `run_label` of the run that owns "
+                "it. Pass those to `isaac_answer_questions`.\n\n"
+                "`blocker_key` is a display and de-duplication key. It is "
+                "`<run_id>:<id>` for a run-owned question and the bare `id` for a "
+                "record-level one, so on a record with no runs the two are equal. The "
+                "answer key is always `id`, and the run is named separately. A record "
+                "with two runs lists the same `id` twice with different `run_id`s, and "
+                "they are different questions about different measurements.\n\n"
+                "For the built-in worked examples a question may carry a clearly "
+                "labelled `demo_answer`. It is a suggestion for a person to read and "
+                "is never applied automatically — sending it back is asserting that "
+                "the scientist confirmed it. Read-only; writes nothing."
+            ),
+            scope=Scope.READ,
+            operation_ids=("list_questions",),
+            input_schema=_object_schema(
+                {"experiment_id": dict(_EXPERIMENT_ID)}, ["experiment_id"]
+            ),
+            handler=_list_questions,
+            read_only=True,
+            idempotent=True,
+        ),
+        Tool(
+            name="isaac_answer_questions",
+            title="Answer blocking questions",
+            description=(
+                "Answer the open blocking questions ISAAC is asking about a draft — "
+                "a reduced spectrum, a QC verdict, a descriptor, an asset hash — "
+                "recording a user confirmation for each. The keys are the ones "
+                "`isaac_list_questions` returns, NOT official "
+                "field paths; use `isaac_update_draft` for those.\n\n"
+                "**Name the `run_id` a question belongs to.** `isaac_list_questions` "
+                "tells you: a run-owned question carries `run_id`, `run_label` and a "
+                "`blocker_key` of `<run_id>:<id>`. Each run is one official ISAAC record and its "
+                "spectrum, verdict, descriptors and asset hashes are read off the "
+                "run, so once a record has runs the record-level call REFUSES those "
+                "keys with `409 belongs_to_a_run` and writes nothing — it names every "
+                "run in the refusal. This server does not guess the level for you: "
+                "the answer to which run measured something is not something a tool "
+                "can infer from a key name.\n\n"
+                "ONE KEY IS DELIBERATELY EXEMPT. `edge` — the absorption edge — is "
+                "answerable on the record and is NOT refused there, because it lives "
+                "in the record's implicit derivations, which every run that has "
+                "recorded no override inherits. A run that HAS recorded one inherits "
+                "none of them, so for that run the write reaches no exported record. "
+                "`edge` corresponds to no blocking question, so it will not appear in "
+                "`isaac_list_questions`.\n\n"
+                "`if_match` is THE RUN's ETag when `run_id` is given (from "
+                "`isaac_get_run`) and the RECORD's when it is not (from "
+                "`isaac_get_experiment`). They are different validators and the wrong "
+                "one is a `412`.\n\n"
+                "**DO NOT FEED THIS RESULT's OWN `etag` BACK INTO A SECOND RUN-LEVEL "
+                "CALL.** It is the RECORD's new validator, not the run's, and reusing "
+                "it is a `412`. For a second write to the same run, take "
+                "`data.run_version` from this result and wrap it in double quotes, or "
+                "call `isaac_get_run` again.\n\n"
+                "Set `correcting: true` to overwrite a value already confirmed. "
+                "WHAT HAPPENS TO THE PREVIOUS CONFIRMATION DEPENDS ON THE FIELD, and "
+                "the difference matters if you are relying on the audit trail: a QC "
+                "verdict, an asset hash and the absorption edge keep the earlier "
+                "confirmation BESIDE the new one; a spectrum (`series`) and a "
+                "descriptor REPLACE theirs, so after correcting one the record "
+                "retains no evidence that a different value was ever confirmed. "
+                "Leave `correcting` false for a question still open — correcting a "
+                "field nothing has answered is refused with `422 not_yet_answered`. "
+                "THE MIRROR HOLDS TOO: answering one that is already answered with a "
+                "DIFFERENT value is refused with `422 already_answered`, which names "
+                "the correcting call in `answer_at` and writes nothing. It used to be "
+                "absorbed into a `200` reporting no change, over a value that had "
+                "neither been stored nor been identical to the stored one. "
+                "Resubmitting the value already stored is still accepted and still "
+                "does not advance the revision, so a retry of a call you are unsure "
+                "landed is safe.\n\n"
+                "`confirmed_by_user` must be sent explicitly and is passed through "
+                "unchanged: it is the caller's assertion that the scientist confirmed "
+                "these values, not this server's. No value is ever invented, an "
+                "UNRECOGNISED key naming no open question on the level addressed is "
+                "ignored rather than guessed (a RECOGNISED one whose question is "
+                "closed gets the `already_answered` refusal above), and this does not "
+                "export, finalise or submit anything."
+            ),
+            scope=Scope.DRAFT_WRITE,
+            operation_ids=(
+                "answer_record_question",
+                "answer_run_question",
+                "correct_record_field",
+                "correct_run_field",
+            ),
+            input_schema=_object_schema(
+                {
+                    "experiment_id": dict(_EXPERIMENT_ID),
+                    "run_id": {
+                        **_RUN_ID,
+                        "description": (
+                            "Optional. The run that owns the question, as "
+                            "`isaac_list_questions` reports it. Omit only for a "
+                            "record-level question."
+                        ),
+                    },
+                    "if_match": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": (
+                            "Required. THE RUN's ETag when `run_id` is given, the "
+                            "RECORD's ETag when it is not. It must be a validator a "
+                            "read returned: `*` is refused, because it would apply this "
+                            "write whatever the record now says and overwrite a change "
+                            "made since your last read without reporting a conflict."
+                        ),
+                    },
+                    "confirmed_by_user": {
+                        "type": "boolean",
+                        "description": (
+                            "Required. True only if the scientist confirmed these "
+                            "answers. It is recorded as the evidence for them."
+                        ),
+                    },
+                    "answers": {
+                        "type": "object",
+                        "minProperties": 1,
+                        "description": (
+                            "Blocking-question keys to answers, as "
+                            "`isaac_list_questions` lists them. Use `id`, not "
+                            "`blocker_key`: the run is named by `run_id` instead."
+                        ),
+                    },
+                    "correcting": {
+                        "type": "boolean",
+                        "description": (
+                            "Optional, default false. True overwrites a value already "
+                            "confirmed rather than answering an open question."
+                        ),
+                    },
+                },
+                ["experiment_id", "if_match", "confirmed_by_user", "answers"],
+            ),
+            handler=_answer_questions,
+            read_only=False,
+            # Re-answering with the same values is a no-op that does not advance the
+            # revision, so a retry is safe. The `if_match` precondition is what makes
+            # a retry safe after a value CHANGED, exactly as for `isaac_update_draft`.
+            idempotent=True,
+        ),
+        Tool(
             name="isaac_check_run",
             title="Check a run",
+            # ~~"the official ISAAC schema verdict"~~ — THE SAME CONFLATION THE TWO
+            # REST DESCRIPTIONS CARRIED, and it is corrected here rather than left
+            # for the client to discover. `official` holds the schema's verdict only
+            # where `validate_official` ran; a dry run refused earlier — by the
+            # no-guessing check or by ISAAC's own anchored-pattern exactness gate —
+            # returns THOSE findings under the same key, with `schema` stamped
+            # regardless. Measured on a run whose descriptor `name` carries a
+            # trailing newline: `draft {"ok": true}` beside `official {"ok": false,
+            # "schema": "ISAAC v1.05"}` whose sole error is ISAAC's own exactness
+            # message. CLAUDE.md §12: the gate is ISAAC's, not upstream's, and no
+            # surface may report an exactness refusal as an official-schema error.
+            # The vocabulary is `POST /api/validate/record`'s, which already names
+            # `schema_ok` and `exactness` separately. See `routes._validate_unit` for
+            # why a discriminator on the wire is the durable fix and why it is not in
+            # this slice.
             description=(
                 "Check the official record one run WOULD export — its own content "
                 "plus what it inherits — and return the no-guessing draft verdict, "
-                "the official ISAAC schema verdict, and the run's open blocking "
+                "the `official` block, and the run's open blocking "
                 "questions. Writes nothing, exports nothing, and advances no "
-                "revision. Both verdicts come from the same deterministic core the "
+                "revision.\n\n"
+                "`official` carries the vendored official ISAAC schema's verdict "
+                "WHERE THE OFFICIAL VALIDATOR RAN, and otherwise the findings that "
+                "stopped the export before it could — the no-guessing draft check, "
+                "or ISAAC's own anchored-pattern exactness gate, which refuses a "
+                "value that satisfies one of the schema's `^...$` patterns only "
+                "because Python's `$` also matches before a trailing newline. Those "
+                "arrive under the same `errors` key, so `official.ok: false` is not "
+                "by itself evidence that the official schema rejected anything; "
+                "`official.schema` names the schema this deployment would validate "
+                "against and is stamped on every response. A dry-run PASS does mean "
+                "official validation ran and passed.\n\n"
+                "Both verdicts come from the same deterministic core the "
                 "command line uses; an advisory warning never turns a pass into a "
                 "failure."
             ),

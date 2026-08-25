@@ -1177,28 +1177,111 @@ function CheckResult({ check }: { check: CheckState }) {
       <FindingList title="Draft checks" findings={draftErrors} />
       {/*
         THE TITLE NAMES WHICH DOCUMENT WAS READ, and it used to lie in one direction.
-        It was hard-coded to "Official schema (dry run)". `_validate_unit`
-        (`routes.py:3901`) returns `dry_run: false` for a MATERIALISED unit, where it
-        validates the record already written to `records/` — so after an export the
-        card described findings about a filed artifact as a dry run. The default is
-        the cautious one: `dry_run` is optional on the wire, and an absent flag is not
-        evidence of a dry run, so the unqualified heading is used rather than a
-        claim about which document it was.
+        It was hard-coded to "Official schema (dry run)". `_validate_unit` returns
+        `dry_run: false` for a MATERIALISED unit, where it validates the record
+        already written to `records/` — so after an export the card described findings
+        about a filed artifact as a dry run.
+
+        AND IT LIED IN A SECOND, WORSE DIRECTION — the one fixed here. Naming the
+        official schema AT ALL is only earned when `dry_run === false`.
+        `_validate_unit`'s dry-run branch returns `export_draft`'s result, and
+        `export.py` returns `official_report=None` on TWO paths BEFORE
+        `validate_official` is ever called: a failed no-guessing report
+        (`export.py:305`) and a failed anchored-pattern EXACTNESS gate, whose findings
+        it deliberately folds into `draft_report` (`export.py:339-343`).
+        `_validate_unit` then falls back to `draft_report.errors`, and
+        `post_run_check` stamps `official["schema"] = SCHEMA_LABEL` — "ISAAC v1.05" —
+        over the result. Measured over HTTP on a run whose descriptor name carries a
+        trailing newline:
+
+            "draft":    { "ok": true, "errors": [], "warnings": [] }
+            "official": { "ok": false, "dry_run": true, "schema": "ISAAC v1.05",
+                          "errors": [{ "message": "value is accepted by the schema
+                            pattern ... only because Python's '$' also matches
+                            before a trailing newline ..." }] }
+
+        So this card headed an ISAAC-OWNED finding "Official schema (dry run)" while
+        the draft block beside it sat empty. `CLAUDE.md` §12 is explicit: "the gate is
+        ISAAC's, not upstream's — §1 makes the schema not ours to speak for, so no
+        surface may report an exactness refusal as an official-schema error."
+        `VerdictCard` shipped exactly this defect once already.
+
+        THE RULE IS `ValidateReview`'s, REUSED RATHER THAN REINVENTED — see its
+        comment at `ValidateReview.tsx:86-105` and its heading at `:655-658`. Name the
+        official ISAAC schema as the source ONLY where `dry_run === false`; otherwise
+        report the findings and say plainly that the source is not named. The wording
+        below is that surface's own ("candidate record", "source not named"), so the
+        two renderers of this payload cannot drift apart on the one claim that
+        matters. The Standalone Validator on Governance & Safety is the surface that
+        reports `schema_ok`, `exactness_errors` and `ok` separately.
+
+        AN ABSENT FLAG IS WEAKER STILL, and the old default was already cautious about
+        half of it: `dry_run` is optional on the wire, so an absent flag is evidence
+        of neither document — and, because the source may only be named on the
+        `false` branch, of no source either. It now says both, where it used to say
+        "Official schema" unqualified.
+
+        AND `unavailable` IS TESTED FIRST, because branching on `dry_run` ALONE put
+        the fix's own strongest claim on the one payload that supports no claim at
+        all. `_validate_unit`'s materialised-unreadable branch returns
+
+            { ok: false, dry_run: false, unavailable: true,
+              errors: [{ path: "$", message: "Validation could not be completed." }] }
+
+        under its own comment "no verdict, not a schema violation" — `dry_run: false`
+        there means NO DRY RUN HAPPENED, not that a written record was read; it is
+        returned precisely BECAUSE that record could not be read. So the first branch
+        above matched, and this heading named the official ISAAC schema and a specific
+        document for a check that never ran — an inch below a chip this same component
+        already renders correctly as "Could Not Be Checked" from the very same flag
+        (`:1112`, `:1158`). Two contradictory claims a centimetre apart, which is the
+        pattern `CLAUDE.md` §11 records for the F4 correction.
+
+        The wording is `ValidateReview`'s and `RunFindings`' ("no verdict … not a
+        schema failure"), not a fourth phrasing of the same idea — see
+        `ValidateReview.tsx:640` and `RunFindings.tsx:227`. Those two surfaces suppress
+        the document line entirely on this branch and let their caption carry the whole
+        statement; this one has no such caption, so the heading has to say it.
       */}
       <FindingList
         title={
-          data.official?.dry_run === true
-            ? 'Official schema (dry run)'
+          unavailable
+            ? 'What the check reported — no verdict, and not a schema failure'
             : data.official?.dry_run === false
               ? 'Official schema (the record already written)'
-              : 'Official schema'
+              : data.official?.dry_run === true
+                ? 'Findings on this candidate record — source not named'
+                : 'Findings — neither the source nor the document named'
         }
         findings={officialErrors}
       />
 
+      {/*
+        WHY THE PASS PATH MAY NAME THE OFFICIAL SCHEMA WHERE THE FAILURE PATH ABOVE
+        MAY NOT, because the asymmetry is not obvious and the old single sentence
+        flattened it. `post_run_check` computes `ok` as `draft_verdict["ok"] and
+        official["ok"]`, and `official["ok"]` on a dry run is `export_draft(...).ok`,
+        which is `True` at exactly ONE return — `export.py:350` — reached only after
+        `validate_official` has run and passed. A PASS is therefore unreachable
+        without the official schema having actually said yes; a FAILURE is reachable
+        with it never having run at all.
+
+        WHAT THE OLD SENTENCE LEFT OUT ON A DRY RUN. It read "The draft and
+        official-schema checks found nothing blocking this run" for every branch,
+        naming two of the THREE gates a dry-run pass clears: `export.py` runs
+        `check_exactness` on the assembled record between them (`:339`), so ISAAC's
+        own gate passed too and got no credit for it. The materialised branch must NOT
+        claim that gate — `_validate_unit` calls `validate_official` alone there and
+        `check_exactness` never runs — so one shared sentence could only ever be
+        wrong for one of the two.
+      */}
       {data.ok && (data.blockers?.length ?? 0) === 0 && (
         <p className="run-check-clean">
-          The draft and official-schema checks found nothing blocking this run.
+          {data.official?.dry_run === true
+            ? 'Nothing blocking was found: the no-guessing checks, ISAAC’s own anchored-pattern exactness gate and the official ISAAC schema all passed on a candidate record assembled from this run. Nothing was written.'
+            : data.official?.dry_run === false
+              ? 'The draft checks and the official ISAAC schema found nothing blocking, on the record already written for this run.'
+              : 'The draft and official-schema checks found nothing blocking this run. The server did not say which document was checked.'}
         </p>
       )}
     </section>

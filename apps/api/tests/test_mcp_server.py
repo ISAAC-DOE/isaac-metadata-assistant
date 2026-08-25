@@ -35,6 +35,7 @@ from isaac_api.mcp import (
     McpServer,
     Scope,
 )
+from isaac_api.mcp.tools import TOOLS
 from isaac_api.mcp.server import (
     INSUFFICIENT_SCOPE,
     INTERNAL_ERROR,
@@ -213,7 +214,16 @@ def test_tools_list_is_filtered_by_the_callers_scopes(reader, writer):
     assert "isaac_create_run" not in read_only
     assert "isaac_update_draft" not in read_only
     assert {"isaac_create_run", "isaac_update_draft"} <= both
-    assert len(both) == 8
+    # A tool that answers a blocking question WRITES, so it must be absent from a
+    # read-only caller's list. Named explicitly rather than left to the count: a
+    # count catches a tool that vanished, not one that leaked into the wrong scope.
+    assert "isaac_answer_questions" not in read_only
+    assert "isaac_answer_questions" in both
+    # ...and the DISCOVERY half is read-only, so it is present in both. Asserted
+    # rather than inferred: the pair is only useful if exactly one of them writes.
+    assert "isaac_list_questions" in read_only
+    assert "isaac_list_questions" in both
+    assert len(both) == 10
 
 
 def test_every_descriptor_states_the_scope_a_call_will_cost(writer):
@@ -391,7 +401,21 @@ def test_get_run_is_denied_without_the_read_scope(write_only, writer):
 # 5. isaac_create_run
 # ==========================================================================
 
-def test_create_run_adds_one_empty_run_and_advances_the_record(writer):
+def test_create_run_adopts_the_records_run_level_science_and_advances_it(writer):
+    """THE FIRST RUN IS NOT EMPTY ANY MORE, and the old claim is quoted because it was
+    a deliberate assertion rather than an accident.
+
+    It read: *"# EMPTY. No record-level value is copied down into a new run."* — and
+    `assert run["fields"] == {}`. That was true, and it was the defect: `series`, `qc`,
+    `assets`, `descriptors_outputs` and the run-level `context.*` / `timestamps.*`
+    fields are read off the RUN at export, so a run that copied nothing meant adding one
+    silently removed every evidenced value from the record it exports.
+
+    What has NOT changed, and is asserted below, is the half the old comment was really
+    protecting: no EXPERIMENT-level value is copied down. `attribution` is inherited by
+    reference at read time, not duplicated onto the run, and a SECOND run copies nothing
+    at all. See `apps/api/tests/test_run_seeding.py` for both halves.
+    """
     experiment_id = a_record(writer)
     before = etag_of(writer, experiment_id)
     body = payload(
@@ -404,8 +428,13 @@ def test_create_run_adds_one_empty_run_and_advances_the_record(writer):
     assert body["status"] == 201
     run = body["data"]["run"]
     assert run["label"] == "Cu K-edge, 300 K"
-    # EMPTY. No record-level value is copied down into a new run.
-    assert run["fields"] == {}
+
+    adopted = set(run["fields"])
+    assert adopted, "the first run adopted nothing, so the record's science is lost"
+    for path in adopted:
+        assert ws.field_level(path) == ws.LEVEL_RUN, (
+            f"{path} is not run-level and must not be copied onto a run"
+        )
     assert etag_of(writer, experiment_id) != before
 
 
@@ -496,6 +525,7 @@ def test_update_draft_passes_a_false_confirmation_through_and_is_refused(writer)
     """
     experiment_id = a_record(writer)
     run = new_run(writer, experiment_id)
+    before_fields = dict(run["fields"])
     result = call(
         writer,
         "isaac_update_draft",
@@ -510,7 +540,12 @@ def test_update_draft_passes_a_false_confirmation_through_and_is_refused(writer)
     refreshed = payload(
         writer, "isaac_get_run", experiment_id=experiment_id, run_id=run["id"]
     )["data"]["run"]
-    assert refreshed["fields"] == {}
+    # UNCHANGED, not empty. This asserted `== {}` and passed only because a new
+    # run started empty; the first run now adopts the record's run-level science,
+    # so "nothing was written" has to be measured against what was there BEFORE.
+    # That is strictly the stronger claim — an empty comparison would also pass on
+    # a run whose values had been wiped by the refused call.
+    assert refreshed["fields"] == before_fields
 
 
 def test_update_draft_refuses_a_field_path_that_is_not_run_level(writer):
@@ -546,6 +581,7 @@ def test_update_draft_refuses_a_label_without_a_run_before_calling_anything(writ
 def test_update_draft_is_denied_to_a_read_only_caller(reader, writer):
     experiment_id = a_record(writer)
     run = new_run(writer, experiment_id)
+    before_fields = dict(run["fields"])
     denied(
         reader,
         "isaac_update_draft",
@@ -558,7 +594,415 @@ def test_update_draft_is_denied_to_a_read_only_caller(reader, writer):
     refreshed = payload(
         reader, "isaac_get_run", experiment_id=experiment_id, run_id=run["id"]
     )["data"]["run"]
-    assert refreshed["fields"] == {}
+    # UNCHANGED, not empty. This asserted `== {}` and passed only because a new
+    # run started empty; the first run now adopts the record's run-level science,
+    # so "nothing was written" has to be measured against what was there BEFORE.
+    # That is strictly the stronger claim — an empty comparison would also pass on
+    # a run whose values had been wiped by the refused call.
+    assert refreshed["fields"] == before_fields
+
+
+# ==========================================================================
+# 6A. isaac_list_questions + isaac_answer_questions
+#
+# THE CAPABILITY THIS PAIR CLOSES, recorded in `docs/mcp-capability-audit.md` §5A
+# before it was closed. Until they existed an agent could add a run and write its
+# five `RUN_WRITABLE_FIELD_PATHS`, and could correct a record-level field that had
+# ALREADY been answered — so it could not answer an OPEN question at either level.
+# On a record created through ISAAC's own Create Experiment path that is every
+# question the record has, and the spectrum, QC verdict, descriptors and asset
+# hashes are not among the five PATCH takes.
+# ==========================================================================
+
+#: The seed with open `series` and `descriptor` questions and nothing else.
+PARTIAL_ID = "01SYNTHXANESSEED0000000002"
+#: A reduced spectrum shaped as the store keeps it. Synthetic, and obviously so.
+SPECTRUM = [{"energy_eV": 8979.0, "mu": 0.11}, {"energy_eV": 8999.0, "mu": 1.23}]
+
+
+def questions(server: McpServer, experiment_id: str) -> list[dict]:
+    return payload(server, "isaac_list_questions", experiment_id=experiment_id)["data"][
+        "pending"
+    ]
+
+
+def test_list_questions_carries_the_answer_key_and_the_owning_run(writer):
+    """The discovery half, and the two things about its output that matter.
+
+    The answer key is `id` and it is NOT a field path; and once a record has runs
+    the same `id` appears once per run with different `run_id`s, because they are
+    questions about different measurements. An agent that could not see the second
+    fact would answer two runs' spectra into one.
+    """
+    before = questions(writer, PARTIAL_ID)
+    assert {q["id"] for q in before} == {"series", "descriptor"}
+    assert all(q.get("run_id") is None for q in before)
+    assert all(q["blocker_key"] == q["id"] for q in before)
+
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+    payload(
+        writer,
+        "isaac_create_run",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        label="R2",
+    )
+
+    after = questions(writer, PARTIAL_ID)
+    series = [q for q in after if q["id"] == "series"]
+    assert len(series) == 2, [q["blocker_key"] for q in after]
+    assert {q["run_label"] for q in series} == {"R1", "R2"}
+    # DIFFERENT questions, and the key says so while the answer key does not.
+    assert len({q["blocker_key"] for q in series}) == 2
+    assert {q["blocker_key"] for q in series} == {
+        f"{q['run_id']}:series" for q in series
+    }
+
+
+def test_answer_questions_gives_a_run_its_spectrum_and_leaves_the_other_run_alone(writer):
+    """THE CASE THE AUDIT NAMED AS IMPOSSIBLE, walked end to end over MCP.
+
+    Two runs, one spectrum. The second run must not receive it: asserting that two
+    runs measured the same spectrum is a scientific claim this application has no
+    evidence for, so the write is scoped to the run named and nothing propagates.
+    """
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+    payload(
+        writer,
+        "isaac_create_run",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        label="R2",
+    )
+    runs = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"]
+    first, second = runs[0], runs[1]
+
+    body = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=first["id"],
+        if_match=f'"{first["version"]}"',
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert body["operation"] == "answer_run_question"
+
+    remaining = {q["blocker_key"] for q in questions(writer, PARTIAL_ID)}
+    assert f"{first['id']}:series" not in remaining
+    assert f"{second['id']}:series" in remaining
+
+    # And the run the answer named is the one that would export it.
+    checked = payload(
+        writer, "isaac_check_run", experiment_id=PARTIAL_ID, run_id=first["id"]
+    )["data"]
+    assert "series" not in {b["id"] for b in checked["blockers"]}
+
+
+def test_answering_a_run_owned_question_on_the_record_surfaces_the_refusal_intact(writer):
+    """THE REFUSAL IS THE PRODUCT, and this layer must not paper over it.
+
+    The obvious shortcut was to infer the level from the key — see `series`, find
+    the runs, pick one. That decides which run measured a spectrum, which is a
+    scientific fact about the record and not a fact about the string `"series"`.
+    So the record-level call goes to the record, is refused, and the refusal
+    reaches the caller naming every run and the operation that can take the
+    answer. Nothing is written.
+    """
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert result["isError"] is True
+    refusal = result["structuredContent"]
+    assert refusal["operation"] == "answer_record_question"
+    assert refusal["status"] == 409
+    body = refusal["data"]
+    assert body["error"] == "belongs_to_a_run"
+    assert body["keys"] == ["series"]
+    assert [r["run_label"] for r in body["runs"]] == ["R1"]
+    assert "runs/{run_id}/answers" in body["answer_at"]
+    # NOTHING WRITTEN — the question is still open, on the run.
+    assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
+
+
+def test_answer_questions_answers_a_record_with_no_runs_at_the_record_level(writer):
+    """The zero-run case, which is the one a freshly created record is in."""
+    body = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert body["operation"] == "answer_record_question"
+    assert body["data"]["invalidation"]["changed"] is True
+    assert "series" not in {q["id"] for q in questions(writer, PARTIAL_ID)}
+
+
+def test_answer_questions_corrects_a_run_value_at_a_level_update_draft_cannot_reach(
+    writer,
+):
+    """`correcting: true` at the run level — the operation `isaac_update_draft` cannot
+    reach, because PATCH takes only the five run-writable FIELD PATHS.
+
+    THIS TEST WAS NAMED `..._and_keeps_the_earlier_confirmation` AND ASSERTED NOTHING
+    OF THE KIND. An independent review found the name was the only carrier of the
+    claim — and measured the claim FALSE for `series`, which is the key this test
+    uses: `complete.py` ASSIGNS `block_evidence[f"series:{id}"] = [one entry]` rather
+    than appending, so the earlier confirmation is gone. Only `qc`, assets and `edge`
+    append. The name is corrected to what the test proves, and the real behaviour is
+    measured in its own test below.
+    """
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+    run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
+    payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=run["id"],
+        if_match=f'"{run["version"]}"',
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    fresh = payload(
+        writer, "isaac_get_run", experiment_id=PARTIAL_ID, run_id=run["id"]
+    )["data"]["run"]
+    corrected = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=run["id"],
+        if_match=f'"{fresh["version"]}"',
+        confirmed_by_user=True,
+        correcting=True,
+        answers={"series": SPECTRUM[:1]},
+    )
+    assert corrected["operation"] == "correct_run_field"
+    assert corrected["data"]["invalidation"]["changed"] is True
+
+
+def test_what_a_CORRECTION_does_to_THE_EARLIER_CONFIRMATION_is_per_field(writer):
+    """MEASURED, BOTH WAYS, because a tool description now states the difference.
+
+    A scientist granting `isaac:draft.write` is told a spectrum's earlier
+    confirmation is REPLACED and a QC verdict's is KEPT BESIDE the new one. That is
+    an audit-trail promise in two directions and neither half may be assumed: this
+    reads the stored draft after each correction and counts the entries.
+    """
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+
+    def correct(key, value):
+        run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
+        payload(
+            writer,
+            "isaac_answer_questions",
+            experiment_id=PARTIAL_ID,
+            run_id=run["id"],
+            if_match=f'"{run["version"]}"',
+            confirmed_by_user=True,
+            correcting=True,
+            answers={key: value},
+        )
+
+    # A `series_id` IS REQUIRED for the evidence entry to exist at all —
+    # `complete.py` skips a series without one — so this test uses its own value
+    # rather than `SPECTRUM`, which deliberately has none.
+    identified = [{"energy_eV": 8979.0, "mu": 0.11, "series_id": "s1"}]
+
+    def stored():
+        exp = ws.load_experiment(PARTIAL_ID, session_id=writer.binding.tutorial_session_id)
+        return exp.sorted_runs()[0].draft
+
+    # SERIES — answered, then corrected. The evidence list is REPLACED.
+    run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
+    payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=run["id"],
+        if_match=f'"{run["version"]}"',
+        confirmed_by_user=True,
+        answers={"series": identified},
+    )
+    keys = [k for k in stored().get("block_evidence", {}) if k.startswith("series:")]
+    assert len(keys) == 1, stored().get("block_evidence")
+    series_key = keys[0]
+    assert len(stored()["block_evidence"][series_key]) == 1
+    correct("series", identified[:1])
+    after = stored()["block_evidence"][series_key]
+    # ONE ENTRY, NOT TWO. The record retains no evidence that a different spectrum
+    # was ever confirmed, which is what the description now says out loud.
+    assert len(after) == 1, after
+
+    # QC — CORRECTED TWICE, not answered-then-corrected, and the reason is a
+    # measurement rather than a preference: on this seed `qc` arrives from the sheet
+    # already carrying a status, so it is NOT an open question on the run and the
+    # answer path drops it. Correcting a value the draft already holds is exactly the
+    # legitimate case, and it is `apply_corrections` — the writer that APPENDS — that
+    # this half is about.
+    assert stored()["qc"]["status"] == "valid"
+    correct("qc", {"status": "failed", "evidence": "second look: sample degraded"})
+    first_trail = stored()["block_evidence"]["qc:status"]
+    assert len(first_trail) == 1, first_trail
+    assert stored()["qc"]["status"] == "failed"
+    correct("qc", {"status": "valid", "evidence": "third look: the step is real"})
+    grown = stored()["block_evidence"]["qc:status"]
+    # THE EARLIER CONFIRMATION IS STILL THERE, beside the new one — the opposite of
+    # what `series` does, which is the whole point of stating the difference.
+    assert len(grown) > len(first_trail)
+    assert [e["answer"] for e in grown][: len(first_trail)] == [
+        e["answer"] for e in first_trail
+    ]
+    assert "valid" in [e["answer"] for e in grown]
+    # THREE, NOT TWO, and the extra entry is not noise: `_supersede_qc_evidence` also
+    # records that the previous NOTE was superseded. Asserted as growth-plus-prefix
+    # rather than as an exact count, because the exact count is a property of that
+    # helper and this test is about the trail surviving.
+    assert len(grown) == 3, grown
+
+    # AND THE DESCRIPTION SAYS BOTH, in the direction each actually goes. Read off the
+    # served tool rather than the source, because the description IS the contract a
+    # model reads.
+    described = TOOLS["isaac_answer_questions"].description
+    assert "keep the earlier confirmation BESIDE" in described
+    assert "REPLACE theirs" in described
+
+
+def test_correcting_an_unanswered_question_is_REFUSED_as_the_description_promises(
+    writer,
+):
+    """THE CLAIM THE DESCRIPTION MAKES, and it was false when the description first
+    made it.
+
+    An independent review measured `correcting: true` on an OPEN question returning
+    `200` with the value stored and the question still open — a success report about a
+    write that resolved nothing, while the contract sent to the model guaranteed a
+    refusal. The route now refuses it; this is the assertion that keeps the two
+    agreeing.
+    """
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        correcting=True,
+        answers={"series": SPECTRUM},
+    )
+    assert result["isError"] is True
+    body = result["structuredContent"]
+    assert body["status"] == 422
+    assert body["data"]["error"] == "not_yet_answered"
+    # AND THE QUESTION IS STILL OPEN, which is the half that made the old 200 a lie.
+    assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
+    assert "not_yet_answered" in TOOLS["isaac_answer_questions"].description
+
+
+def test_update_draft_record_level_takes_ANSWER_KEYS_and_refuses_a_field_path(writer):
+    """THE PRE-EXISTING FALSE SENTENCE, now measured in both directions.
+
+    `isaac_update_draft`'s description said "Every key in `fields` must be a real
+    official field path at the level you are writing". At the RECORD level that is
+    inverted: the branch posts to `/edit`, which takes blocking-question keys, and an
+    official field path is refused as `unrecognized_field`. An independent review
+    measured it; this pins the reality so the corrected description cannot drift back.
+    """
+    # A real official field path — REFUSED at the record level.
+    refused = call(
+        writer,
+        "isaac_update_draft",
+        experiment_id=ws.SEED_READY_ID,
+        if_match=etag_of(writer, ws.SEED_READY_ID),
+        confirmed_by_user=True,
+        fields={RUN_LEVEL_FIELD: 300.0},
+    )
+    assert refused["isError"] is True
+    assert refused["structuredContent"]["status"] == 422
+
+    # An ANSWER KEY — accepted. `SEED_READY_ID` has already answered its questions,
+    # so this is a genuine correction rather than the refused unanswered case.
+    accepted = payload(
+        writer,
+        "isaac_update_draft",
+        experiment_id=ws.SEED_READY_ID,
+        if_match=etag_of(writer, ws.SEED_READY_ID),
+        confirmed_by_user=True,
+        fields={"edge": "K"},
+    )
+    assert accepted["operation"] == "correct_record_field"
+
+    described = TOOLS["isaac_update_draft"].description
+    # The corrected sentence, and a NEGATIVE CONTROL against the false one returning.
+    assert "BLOCKING-QUESTION keys" in described
+    assert "Every key in `fields` must be a real official field path" not in described
+
+
+def test_answer_questions_passes_a_false_confirmation_through_and_is_refused(writer):
+    """Same rule as `isaac_update_draft`, asserted separately because it is a
+    separate handler: hard-coding `True` would record a confirmation no user gave,
+    for values whose only support IS that confirmation."""
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=False,
+        answers={"series": SPECTRUM},
+    )
+    assert result["isError"] is True
+    assert result["structuredContent"]["error"] == "confirmation_required"
+    assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
+
+
+def test_answer_questions_needs_the_runs_etag_not_the_records(writer):
+    """The two validators are different and the wrong one is a 412, not a write."""
+    etag = etag_of(writer, PARTIAL_ID)
+    payload(writer, "isaac_create_run", experiment_id=PARTIAL_ID, if_match=etag, label="R1")
+    run = payload(writer, "isaac_list_runs", experiment_id=PARTIAL_ID)["data"]["runs"][0]
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        run_id=run["id"],
+        if_match=etag_of(writer, PARTIAL_ID),  # the RECORD's — wrong on purpose
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert result["isError"] is True
+    assert result["structuredContent"]["status"] == 412
+    assert f"{run['id']}:series" in {
+        q["blocker_key"] for q in questions(writer, PARTIAL_ID)
+    }
+
+
+def test_answer_questions_is_denied_to_a_read_only_caller(reader, writer):
+    denied(
+        reader,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )
+    assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
+
+
+def test_list_questions_is_denied_to_a_write_only_caller(write_only):
+    """The discovery tool is READ, and the write scope does not imply it."""
+    denied(write_only, "isaac_list_questions", experiment_id=PARTIAL_ID)
 
 
 # ==========================================================================

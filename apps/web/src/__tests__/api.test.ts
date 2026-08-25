@@ -349,8 +349,45 @@ describe('P27.5 · If-Match send + 412 body handling', () => {
     });
   });
 
-  it('keeps the existing 409 export behavior — status only, no body plumbing', async () => {
+  it('now carries a 409 body too, because two refusals explain themselves in it', async () => {
+    /* THIS TEST IS INVERTED. It read "keeps the existing 409 export behavior — status
+       only, no body plumbing" and asserted `body: undefined`, which was a correct
+       description of a deliberate scoping decision at the time: no caller read a 409
+       body, so none was parsed.
+
+       Two refusals since then DO explain themselves in one — `belongs_to_a_run` names
+       the run and the route that can take the answer, `already_exported_without_runs`
+       says why adding a run would publish a second official record — and an independent
+       review measured what a scientist saw instead: "That answer could not be applied
+       (409). Nothing was changed — try again", whose advice is false because retrying
+       always 409s.
+
+       The change is ADDITIVE in exactly the way the 422 case was: it only POPULATES
+       `err.body` where it was `undefined`. `status` is unchanged, and the one caller
+       that writes its own 409 copy (`RunsSection`'s Remove flow, which does so because
+       that route has exactly one 409) is unaffected — asserted below. */
     captureFetch({ ok: false, status: 409, body: { error: 'record_exists' } });
+    await expect(api.exportRecord(EXP_ID, '1.0')).rejects.toMatchObject({
+      status: 409,
+      body: { error: 'record_exists' },
+    });
+  });
+
+  it('a 409 whose body will not parse still yields an ApiError, not a crash', async () => {
+    // NEGATIVE CONTROL: the parse is `.catch(() => undefined)`, so a non-JSON 409 must
+    // degrade to no body rather than throw a second error over the first. `captureFetch`
+    // cannot express this — its `json` returns `response.body ?? {}` — so the stub is
+    // inline, which is the point: a helper that cannot fail cannot test failing.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => {
+          throw new SyntaxError('not JSON');
+        },
+      }) as unknown as Response),
+    );
     await expect(api.exportRecord(EXP_ID, '1.0')).rejects.toMatchObject({
       status: 409,
       body: undefined,

@@ -58,30 +58,41 @@ interface Row {
   runs: number;
   apiMs: number;
   apiKiB: number;
+  /** `limit=50` — what the product's own Run browser asks for. */
+  pagedMs: number;
+  pagedKiB: number;
   inheritedPerRun: number;
   loadMs: number;
   cards: number;
   domNodes: number;
   expandFirstMs: number;
   expandLastMs: number;
+  /** Typing a query until the filtered list settles. */
+  searchMs: number;
+  /** Opening Focus Run on the first rendered run. */
+  focusMs: number;
   longTasks: number;
 }
 
 function table(rows: Row[]): string {
   const head =
-    '  runs |   API ms |  payload KiB | inh/run |  load ms | cards | DOM nodes | expand 1st | expand last | long tasks';
+    '  runs | unpaged ms | unpaged KiB | paged ms | paged KiB | inh/run |  load ms | cards | DOM nodes | expand 1st | expand last | search ms | focus ms | long tasks';
   const sep = '  '.padEnd(head.length, '-');
   const body = rows.map(
     (r) =>
       `${String(r.runs).padStart(6)} |` +
-      `${r.apiMs.toFixed(0).padStart(9)} |` +
-      `${r.apiKiB.toFixed(0).padStart(13)} |` +
+      `${r.apiMs.toFixed(0).padStart(11)} |` +
+      `${r.apiKiB.toFixed(0).padStart(12)} |` +
+      `${r.pagedMs.toFixed(0).padStart(9)} |` +
+      `${r.pagedKiB.toFixed(0).padStart(10)} |` +
       `${String(r.inheritedPerRun).padStart(8)} |` +
       `${r.loadMs.toFixed(0).padStart(9)} |` +
       `${String(r.cards).padStart(6)} |` +
       `${String(r.domNodes).padStart(10)} |` +
       `${r.expandFirstMs.toFixed(0).padStart(11)} |` +
       `${r.expandLastMs.toFixed(0).padStart(12)} |` +
+      `${r.searchMs.toFixed(0).padStart(10)} |` +
+      `${r.focusMs.toFixed(0).padStart(9)} |` +
       `${String(r.longTasks).padStart(11)}`
   );
   return [head, sep, ...body].join('\n');
@@ -172,6 +183,31 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
     }
     apiSamples.sort((a, b) => a - b);
 
+    /*
+     * THE PAGED READ, WHICH IS THE ONE THE PRODUCT ACTUALLY ISSUES.
+     *
+     * The paging figures were quoted in the commit that introduced paging and had NO
+     * COMMITTED REPRODUCTION PATH — `docs/run-scale-measurements.md` said so and
+     * labelled them "asserted, not reproducible". This closes that: `limit` is
+     * `RUNS_PAGE_SIZE`, imported rather than written as 50, so a change to the page
+     * size moves the measurement instead of silently invalidating it.
+     *
+     * It is measured beside the unpaged read rather than instead of it, because the
+     * two answer different questions: unpaged is what the DATA costs and is the thing
+     * that grows, paged is what a scientist waits for and is the thing that should
+     * not.
+     */
+    const pagedSamples: number[] = [];
+    let pagedBytes = 0;
+    for (let i = 0; i < 3; i += 1) {
+      const t0 = Date.now();
+      const res = await request.get(`${runsUrl}?limit=${RUNS_PAGE_SIZE}`, { headers });
+      const text = await res.text();
+      pagedSamples.push(Date.now() - t0);
+      pagedBytes = text.length;
+    }
+    pagedSamples.sort((a, b) => a - b);
+
     // --- navigate, and time until the Runs section is actually usable -------
     const tLoad = Date.now();
     await openRecord(page, TARGET);
@@ -227,6 +263,38 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
     // rendered, so the bounded page is the right list to take the tail of.
     const expandLastMs = await expand(expectedCards - 1);
 
+    /*
+     * SEARCH, AND FOCUS RUN — the two interactions a scientist reaches for once a
+     * record has more runs than fit on a screen, and the two the published table did
+     * not measure at all.
+     *
+     * SEARCH IS SERVER-SIDE, and that is why it is timed as a round trip rather than
+     * as a keystroke. The Run browser's box matches a literal substring of the run's
+     * label, id and exported record id on the SERVER; nothing is filtered in the
+     * browser. So this number includes the request, and a query that matches nothing
+     * is deliberate: it is the cheapest possible RESULT with the full cost of the
+     * lookup, so the figure is about the lookup and not about rendering the matches.
+     */
+    const searchBox = page.getByLabel('Search runs');
+    const tSearch = Date.now();
+    await searchBox.fill('zzz-matches-nothing');
+    // The list settles to zero cards, which is the observable end of the round trip.
+    await expect(cards).toHaveCount(0, { timeout: 120_000 });
+    const searchMs = Date.now() - tSearch;
+    await searchBox.fill('');
+    await expect(cards).toHaveCount(expectedCards, { timeout: 120_000 });
+
+    /*
+     * FOCUS RUN gives one run the whole screen. It is the product's answer to "this
+     * list is too long to work in", so its cost is the one that must NOT scale with
+     * run count — if it does, the escape hatch has the same problem as the thing it
+     * escapes.
+     */
+    const tFocus = Date.now();
+    await cards.nth(0).getByRole('button', { name: /^Focus run / }).click();
+    await expect(page.locator('article.run-card')).toHaveCount(1, { timeout: 120_000 });
+    const focusMs = Date.now() - tFocus;
+
     const longTasks = await page.evaluate(
       () => (window as unknown as { __longTasks?: number }).__longTasks ?? 0
     );
@@ -235,12 +303,18 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
       runs: target,
       apiMs: apiSamples[1],
       apiKiB: apiBytes / 1024,
+      pagedMs: pagedSamples[1],
+      pagedKiB: pagedBytes / 1024,
       inheritedPerRun,
       loadMs,
-      cards: await cards.count(),
+      // MEASURED BEFORE Focus Run, not after: Focus Run leaves one card on screen,
+      // so reading the count here would report 1 for every row above the first.
+      cards: expectedCards,
       domNodes,
       expandFirstMs,
       expandLastMs,
+      searchMs,
+      focusMs,
       longTasks,
     });
 
@@ -253,8 +327,22 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
   // eslint-disable-next-line no-console
   console.log(`\n[run-scale] FINAL\n${table(rows)}\n`);
 
-  // The ONE assertion, and it is a sanity check on the harness rather than a
-  // performance gate: if the page did not render the runs it was given, every number
-  // above describes something other than what was asked for.
-  expect(rows[rows.length - 1].cards).toBe(COUNTS[COUNTS.length - 1]);
+  /*
+   * THE SANITY ASSERTION, and it was WRONG for every count above the page size.
+   *
+   * It read `expect(rows[last].cards).toBe(COUNTS[last])` — correct while the Runs
+   * section rendered the unpaged list, and false the moment the bounded Run browser
+   * landed: it renders `min(target, RUNS_PAGE_SIZE)`. So the 1000-run row every
+   * headline figure in `docs/run-scale-measurements.md` cites would have FAILED this
+   * line after a thirty-minute run, and the failure would have looked like a
+   * performance problem rather than a stale assertion.
+   *
+   * It is still a harness check and not a performance gate: if the page did not render
+   * the page of runs it was given, every number above describes something else.
+   */
+  const last = rows[rows.length - 1];
+  expect(last.cards).toBe(Math.min(COUNTS[COUNTS.length - 1], RUNS_PAGE_SIZE));
+  // AND THE RUNS REALLY EXIST, which the card count alone no longer establishes once
+  // it is capped — without this, a harness that created no runs at all would pass.
+  expect((await readRuns()).runs.length).toBe(COUNTS[COUNTS.length - 1]);
 });

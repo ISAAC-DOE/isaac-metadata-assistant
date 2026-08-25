@@ -635,6 +635,192 @@ def block_level(key: str) -> str:
     return LEVEL_UNCLASSIFIED
 
 
+#: The draft BLOCK each pending-blocker ``kind`` writes into. One map, so "is this
+#: question a Run's?" is answered by :func:`block_level` rather than by a second list
+#: that could drift from it. ``descriptor`` is the one whose kind and block differ.
+BLOCKER_KIND_BLOCK: dict[str, str] = {
+    "series": "series",
+    "qc": "qc",
+    "descriptor": "descriptors_outputs",
+    "asset": "assets",
+}
+
+
+def blocker_is_run_level(entry: object) -> bool:
+    """Does this pending entry belong to a Run rather than to the record itself?
+
+    FAIL-CLOSED: a kind :data:`BLOCKER_KIND_BLOCK` does not know is NOT run-level.
+    Getting that default the other way round would ask a scientist the same
+    record-level question once per run, which is worse than leaving a new question
+    where it already is.
+
+    Used for two things that must agree, which is why it is one function:
+
+    * seeding a new Run with the questions it actually owns
+      (``routes._seed_for_new_run``); and
+    * withholding the EXPERIMENT's own copies of those questions from
+      :meth:`Experiment.pending` once a run exists — because at that point the
+      experiment's ``series``/``qc``/``assets``/``descriptors_outputs`` are no longer
+      part of any exported record (``resolved_run_draft`` reads them off the RUN), so
+      asking them would be asking for an answer that reaches nothing.
+    """
+    if not isinstance(entry, dict):
+        return False
+    block = BLOCKER_KIND_BLOCK.get(entry.get("kind"))
+    return block is not None and block_level(block) == LEVEL_RUN
+
+
+#: The run-level blank-draft template, derived ONCE per process, as
+#: ``(entries, json_payload_or_None)``. Built lazily by :func:`_run_level_template`
+#: because ``experiment_repository`` imports this module, so it cannot be imported at
+#: module scope.
+_RUN_LEVEL_TEMPLATE: "tuple[list, str | None] | None" = None
+
+
+def _run_level_template() -> "tuple[list, str | None]":
+    """The blank-draft entries a legacy run is given, derived ONCE.
+
+    IT WAS DERIVED PER RUN, and on a read path that runs per request. ``blank_draft()``
+    builds a fresh document out of literals every call; :func:`run_questions` called it
+    once per run and then deep-copied every entry it kept, so a 1000-run record cost
+    1000 blank-draft builds and 3000 ``copy.deepcopy`` calls per ``pending()`` — four
+    times per record-detail request. The build itself was the smaller half (``cProfile``
+    ``tottime`` 0.007 s of 0.359 s, ~2%); the copying was 86%. Both are removed here,
+    the first by caching and the second by :func:`run_question_count` not copying at all.
+
+    **THE SECOND ELEMENT IS A DEEP-COPY FAST PATH, AND ITS SAFETY IS PROVED RATHER
+    THAN ASSUMED.** The copy in :func:`run_questions` is not decoration:
+    ``routes._apply_to_run`` MATERIALISES the returned list into a run's draft and
+    writes it, and ``complete.apply_answers`` then mutates that list — so a caller
+    that received the template's own objects would corrupt the template for every
+    later run and every later request. ``json.loads`` of a pre-serialised payload
+    yields a completely fresh tree that shares nothing with anything, which is the
+    same guarantee ``copy.deepcopy`` gives, at 2.19 us against 7.07 us per call
+    (measured over the 3-entry template, best of 5 x 20 000).
+
+    Sound only if the round-trip is LOSSLESS for this data, which is a real
+    precondition and not a formality: a tuple would come back a list, a non-string key
+    a string. ``blank_draft()``'s ``pending`` is JSON literals and the whole draft is
+    persisted as JSON, so it round-trips — but that is checked HERE, once, rather than
+    trusted, and the payload is discarded (``None``) if it ever stops being true, which
+    falls back to ``copy.deepcopy`` with no behaviour change. ``TypeError``/``ValueError``
+    are caught for the same reason: a template carrying something unserialisable must
+    degrade to the slow path, never raise on a read.
+
+    CACHED FOR THE PROCESS. ``blank_draft()`` is a pure function of module literals, so
+    there is nothing for a later call to observe differently; a test that wanted to
+    monkeypatch it would have to reset this global, and none does.
+    """
+    global _RUN_LEVEL_TEMPLATE
+    cached = _RUN_LEVEL_TEMPLATE
+    if cached is None:
+        from .experiment_repository import blank_draft  # noqa: PLC0415 - avoids a cycle
+
+        entries = [e for e in blank_draft()["pending"] if blocker_is_run_level(e)]
+        payload: str | None
+        try:
+            payload = json.dumps(entries)
+            if json.loads(payload) != entries:
+                payload = None
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            payload = None
+        cached = _RUN_LEVEL_TEMPLATE = (entries, payload)
+    return cached
+
+
+def run_questions(run: "Run") -> list:
+    """The open blocking questions ONE run carries, legacy runs included.
+
+    ``run.draft["pending"]`` when the key is present — that list IS the answer state,
+    because ``apply_answers`` removes an entry when it is answered and writes the key
+    back every time.
+
+    **WHEN THE KEY IS ABSENT the run is given the run-level questions a seeded one
+    would have had**, and that branch exists for a state that lives in the DURABLE
+    STORE rather than in theory. ``new_run`` defaulted a run's draft to ``{}`` until
+    ``routes._seed_for_new_run`` shipped, and ``Experiment.to_state()`` serialises
+    runs — so every run created before that deploy is still an empty-drafted run in
+    PostgreSQL. Without this, such a run reports nothing pending while its export
+    refuses, which is the exact failure the seeding change was written to close.
+
+    THE ABSENT KEY IS THE ONLY SIGNAL, and it is a reliable one: a run that has
+    ANSWERED everything has ``pending: []`` — the key present and empty — and a run
+    seeded from a record that had already answered everything gets the same. So
+    "answered" and "never asked" are distinguishable, which is what stops this branch
+    from re-asking a question somebody already answered.
+
+    An independent review found the alternative — making
+    :meth:`Experiment.pending`'s withholding conditional on a run still carrying the
+    kind — to be worse in a way that reached a scientist: it un-withheld the record's
+    copy the moment a run answered the question, leaving three questions visible on
+    the record, refused by every route, and unanswerable. Fixing the gap on the RUN
+    side keeps each question owned by exactly one entity.
+
+    PUBLIC, because a WRITER needs it too, and finding that out was the next defect.
+    ``complete.apply_answers`` iterates ``draft["pending"]`` and then assigns
+    ``draft["pending"] = remaining_pending`` unconditionally — so on a draft with NO
+    such key it matched no branch, applied nothing, and wrote back ``[]``. Measured:
+    answering a legacy run's QC verdict returned **200** reporting ``pending: []``,
+    stored ``qc: None``, erased the derived questions permanently, and left the record
+    saying nothing was pending while its export refused. ``routes._apply_to_run``
+    therefore MATERIALISES this list into the run's draft before writing, which is why
+    it is not private.
+    """
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    if "pending" in draft:
+        return list(draft.get("pending") or [])
+    entries, payload = _run_level_template()
+    if payload is not None:
+        # A FRESH TREE, SHARING NOTHING — see :func:`_run_level_template` for why a
+        # JSON round-trip is a sound deep copy here and for the equality check that
+        # proves it before this branch is ever taken.
+        return json.loads(payload)
+    return [copy.deepcopy(entry) for entry in entries]
+
+
+def run_question_count(run: "Run") -> int:
+    """``len(run_questions(run))``, WITHOUT BUILDING THE LIST.
+
+    It exists because the whole list was being built to read its length, and that
+    was measured rather than suspected. ``Experiment.pending_count`` was
+    ``len(self.pending())``, and the record-detail route derives ``pending_count``,
+    ``status``, ``export_ready`` and the workflow from it — so ONE ``GET
+    /api/experiments/{id}`` on a 1000-run record entered :func:`run_questions` 4000
+    times (``cProfile`` ``ncalls``) to produce four integers, and 86% of that time
+    was ``copy.deepcopy`` (``cumtime`` 0.308 s of :func:`run_questions`' own 0.359 s,
+    over ten ``pending_count()`` calls on a 1000-legacy-run record). Measured before/after, 1000 legacy runs,
+    ``pending_count()`` **8.18 ms -> 0.09 ms**. THE HARNESS IS COMMITTED so the number
+    is re-measurable rather than quoted from a lost session::
+
+        ISAAC_PERF_BENCH=1 .venv/bin/pytest -q -s -k benchmark \\
+          apps/api/tests/test_pending_count_is_not_materialised.py
+
+    It is opt-in and asserts nothing about time — a wall-clock assertion in the normal
+    suite is flaky under CPU contention, which this repository has already been bitten
+    by (``CLAUDE.md`` §7).
+
+    THE TWO BRANCHES MIRROR :func:`run_questions` EXACTLY, INCLUDING ITS BEHAVIOUR ON
+    A MALFORMED DOCUMENT. ``run_questions`` returns ``list(draft["pending"] or [])``,
+    so a persisted ``pending`` that is not a list still yields *some* length (a dict
+    yields its key count) and a non-iterable still raises ``TypeError`` — this counts
+    the same way rather than special-casing the malformed case into a different
+    answer. A derived count that disagrees with the derived list on a broken document
+    would be a second source of truth for exactly the input least able to survive
+    one.
+
+    The invariant ``Experiment.pending_count() == len(Experiment.pending())`` is what
+    makes this safe to have at all, and it is PINNED — see
+    ``apps/api/tests/test_pending_count_is_not_materialised.py``, which asserts it for
+    zero-run, seeded, legacy, mixed, answered, partly-answered and malformed
+    workloads. Nothing here may be "optimised" in a way that breaks it.
+    """
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    if "pending" in draft:
+        raw = draft.get("pending") or []
+        return len(raw) if isinstance(raw, list) else len(list(raw))
+    return len(_run_level_template()[0])
+
+
 def address_level(address: str) -> str:
     """Classify a namespaced draft address. Raises ``ValueError`` on a malformed one."""
     kind, name = parse_address(address)
@@ -1470,6 +1656,7 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #   [caller] routes.py::get_evidence
 #   [caller] routes.py::post_audit
 #   [caller] routes.py::post_export
+#   [caller] routes.py::post_run
 #   [caller] routes.py::post_validate
 #   [caller] runtime_records.py::_project_one
 #   [caller] workspace.py::_plan_digest_row
@@ -1558,6 +1745,13 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #     dry-ran ``exp.draft`` and advised ``NO_LINKS`` / ``NO_MEASUREMENT_SERIES`` about
 #     a fan-out whose every record on disk carries a ``measurement`` block. FIXED
 #     (F5): per run, with ``runs[]`` and a deduplicated union at the top level.
+#   * ``routes.post_run`` reads ``exported()`` to REFUSE adding a run to a record
+#     already exported under its own identity. That is a fan-out question by nature:
+#     a zero-run record exports as itself, and the first run moves the exported
+#     identity onto the run — so without the refusal, adding one published a SECOND
+#     official record with the same science, a different id, and no relation between
+#     them. It reads the singular state precisely because the singular state is the
+#     thing it is asking about, and it names it in the refusal body.
 #   * ``routes.post_export`` itself: the 409 named one arbitrary run's record as
 #     though it were THE record (FIXED, C10), the prune could delete a record a
 #     surviving run or a surviving link still named (FIXED, C3/C4/C7), and it could
@@ -2469,11 +2663,25 @@ class Experiment:
         document, and ``rev`` is deliberately not bumped, because nothing new
         happened.
 
-        THIS IS THE ONLY CALL TO ``PostgresOrdinaryStore.persist`` IN THE
-        CODEBASE, which is why the adoption lives here and not in the route helper
-        that renders the 412. Not "it covers four call sites instead of three" —
-        it covers every caller by construction, and a caller added later inherits
-        it without knowing it exists.
+        THIS IS THE ONLY CALL TO ``PostgresOrdinaryStore.persist`` ON ANY PATH A
+        REQUEST CAN REACH, which is why the adoption lives here and not in the
+        route helper that renders the 412. Not "it covers four call sites instead
+        of three" — it covers every caller by construction, and a caller added
+        later inherits it without knowing it exists.
+
+        **THE SENTENCE ABOVE SAID "IN THE CODEBASE" AND THAT IS NO LONGER TRUE.**
+        ``scripts/db_backfill_runs.py`` calls ``persist`` directly, and it is
+        recorded here rather than left for a reader to discover, because a
+        maintainer relying on the stronger claim would conclude that no code path
+        can persist without adopting a winner locally.
+
+        The exception is deliberate and narrow. That script is an OPERATOR
+        artifact: it has never been executed, it is absent from the container image
+        (the Dockerfile COPY allowlist), and no route can reach it — so it is not a
+        path a request can take. It also must not adopt: adoption writes the
+        winner's document into the local workspace file, which is exactly right for
+        a client that is about to re-read, and meaningless for a batch that owns no
+        client. It counts the conflict and moves to the next experiment instead.
         """
         store = _ordinary_store(self.session_id)
         if store is not None:
@@ -3257,14 +3465,55 @@ class Experiment:
         to what it always was. A non-dict entry (a malformed persisted document) is
         passed through as-is rather than wrapped — this is a derived view, not a
         place to start repairing documents.
+
+        **IF YOU CHANGE WHAT THIS RETURNS, CHANGE :meth:`pending_count` IN THE SAME
+        EDIT.** It answers ``len()`` of this list without building it, because the
+        record-detail route wanted only the integer and four times per request; the two
+        derivations are deliberately parallel and the equality is pinned by test.
         """
         own = list(self.draft.get("pending") or [])
         if not self.runs:
             return own
-        out = list(own)
+        # ONCE A RUN EXISTS, THE RECORD'S OWN RUN-LEVEL QUESTIONS ARE WITHHELD.
+        #
+        # A zero-run experiment is its own record. The moment a run exists, the record
+        # each unit exports is the RUN's, and `resolved_run_draft` reads `series`,
+        # `qc`, `assets` and `descriptors_outputs` off the run — so the record's copies
+        # of those questions can no longer be answered into anything that ships. And
+        # they cannot be answered at all: `routes._refuse_run_level_on_the_record`
+        # refuses them with `409 belongs_to_a_run`. Listing them would be a dead end
+        # wearing the chrome of a real question.
+        #
+        # **THE CONDITION IS `self.runs`, NOT "some run still carries this kind", AND
+        # THE SECOND VERSION WAS A MEASURED DEFECT.** It was introduced to fix the
+        # opposite problem — a run with an EMPTY draft carries no blockers, so
+        # withholding unconditionally hid a question from both places — and it created a
+        # worse one, because it un-withheld the record's copy the instant a run ANSWERED
+        # the question. Measured over HTTP by an independent review, on the exact flow
+        # this feature exists to enable::
+        #
+        #     create -> POST /runs -> answer series+qc+descriptor ON THE RUN   (all 200)
+        #     GET /experiments/{id}  -> pending_count 3 · export BLOCKED
+        #     POST /export           -> 200 {"ok": true}      <- contradicts the workflow
+        #     POST /answers|/edit    -> 409 belongs_to_a_run   ("send them to the run")
+        #     POST /runs/{id}/answers-> 200, changed nothing, the entries stay
+        #
+        # Three questions shown in both places and accepted in neither, with the record
+        # claiming export was blocked while export succeeded. The only escape was
+        # removing the run and re-answering on the record — discarding the run's science.
+        #
+        # THE LEGACY-EMPTY-RUN CASE IS FIXED ON THE RUN SIDE INSTEAD, by
+        # :func:`run_questions`, which is where it belongs: a run that was created
+        # before `_seed_for_new_run` existed is missing its questions, so it is given
+        # them, rather than the record keeping a copy nobody can answer.
+        #
+        # This is a DERIVED view and withholds rather than deletes: the entries stay in
+        # the document, so removing every run restores them intact. Record-level
+        # questions are untouched, and a zero-run experiment's list is byte-identical to
+        # what it always was (the branch above returns before reaching here).
+        out = [entry for entry in own if not blocker_is_run_level(entry)]
         for run in self.sorted_runs():
-            run_draft = run.draft if isinstance(run.draft, dict) else {}
-            for item in run_draft.get("pending") or []:
+            for item in run_questions(run):
                 if isinstance(item, dict):
                     out.append({**item, "run_id": run.id, "run_label": run.label})
                 else:
@@ -3272,7 +3521,69 @@ class Experiment:
         return out
 
     def pending_count(self) -> int:
-        return len(self.pending())
+        """``len(self.pending())`` WITHOUT MATERIALISING THE LIST.
+
+        THIS WAS LITERALLY ``len(self.pending())``, AND THAT IS A MEASURED
+        PERFORMANCE DEFECT ON THE PRODUCT'S HOTTEST READ, not a stylistic one.
+        :meth:`pending` builds one dict per question per run — ``{**item, "run_id":
+        ..., "run_label": ...}`` — and, for a run whose draft predates
+        ``routes._seed_for_new_run``, first deep-copies the blank-draft template to get
+        that item at all. The record-detail route reads FOUR integers out of this
+        derivation per request (``_summary``'s ``pending_count``, ``_workflow_for``,
+        ``status()`` and ``export_ready()``), so on a 1000-run record one ``GET
+        /api/experiments/{id}`` entered :func:`run_questions` 4000 times and
+        constructed ~12 000 dictionaries, every one of them discarded. The response stays
+        ~1.5 KB across that whole range, so the work was invisible in the payload and
+        visible only in latency — flat bytes, linear time.
+
+        ~~"The response is 1464 bytes at any run count."~~ CORRECTED 2026-08-24 by an
+        independent truthfulness review, and kept struck because the substantive claim
+        is the reason this method exists and the literal was doing no work for it.
+        Re-measured over HTTP: **1,258** bytes at 0 runs, 1,462 at 1, 1,466 at 10,
+        1,470 at 100. It is not constant — it moves by the DIGIT COUNT of
+        ``pending_count`` and the zero-run document is a different shape — and "at ANY
+        run count" was therefore false at the one run count a reader is most likely to
+        check by hand. Flat-against-linear is the point and survives; a fabricated
+        constant beside it is the kind of precision that invites a reader to trust the
+        rest without checking.
+
+        Measured in-process, best of 5, 1000 runs, by the committed opt-in harness
+        (``ISAAC_PERF_BENCH=1``; see :func:`run_question_count`)::
+
+            before   seeded  0.717 ms   legacy  8.183 ms
+            after    seeded  0.086 ms   legacy  0.089 ms
+
+        The legacy path collapses to the seeded one because the count of a legacy
+        run's questions is a property of the TEMPLATE, not of the run: it is the same
+        constant for every such run, so there is nothing per-run to build.
+
+        **THE BINDING INVARIANT IS ``pending_count() == len(pending())``**, for every
+        workload — zero-run, seeded, legacy, mixed, answered, partly answered, and
+        malformed (a non-dict entry, which :meth:`pending` deliberately passes through
+        as-is and this therefore counts as one). It is pinned by
+        ``apps/api/tests/test_pending_count_is_not_materialised.py``, together with a
+        structural guard that fails if the materialisation returns. Two counts derived
+        by two routes are a drift hazard by construction, so the derivations are kept
+        line-for-line parallel with :meth:`pending`:
+
+        * the zero-run early return mirrors ``list(self.draft.get("pending") or [])``;
+        * the withholding filter is the SAME ``blocker_is_run_level`` predicate over the
+          SAME ``own`` list — the withholding rule is not re-expressed here, so it
+          cannot be re-broken here;
+        * each run contributes ``run_question_count(run)``, which mirrors
+          :func:`run_questions` branch for branch.
+
+        ``self.runs`` rather than :meth:`sorted_runs`, because a sum is
+        order-independent and the sort is pure overhead for a count. That is the one
+        place this deliberately does NOT mirror :meth:`pending`, and it is safe for a
+        reason that is a property of addition rather than of this code.
+        """
+        own = self.draft.get("pending") or []
+        if not self.runs:
+            return len(own) if isinstance(own, list) else len(list(own))
+        return sum(1 for entry in own if not blocker_is_run_level(entry)) + sum(
+            run_question_count(run) for run in self.runs
+        )
 
     def evidenced_field_count(self) -> int:
         """Draft fields that carry a non-null value AND at least one evidence entry."""

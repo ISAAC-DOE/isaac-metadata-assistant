@@ -1008,3 +1008,254 @@ def test_a_notes_run_comes_from_the_selection_and_is_never_inferred(
     _make_run(client, other.id)
     _finalize(client, other.id, "The cryostat rattled.")
     assert _notes(client, other.id)[0]["run_id"] is None
+
+
+# =============================================================================
+# The ASSISTANT seam, over HTTP
+# =============================================================================
+#
+# WHY THESE LIVE IN THIS FILE. `providers/assistant.py` had no route at all: it was
+# a fully-built, fully-tested seam with no HTTP consumer, so "does this deployment
+# have a native assistant?" was answerable only by reading Python. That is the same
+# gap `POST /api/transcription` was written to close for its own seam, and the route
+# is deliberately its twin — same two-status split, same refusal vocabulary, same
+# "no fake connected state" rule. Testing it beside its twin is what keeps the two
+# from drifting into two different policies for one question.
+#
+# WHAT THESE CANNOT SHOW: that a real provider behaves. None exists, none is
+# authorized, and `validate_provider_config_or_raise` refuses to boot an
+# application that names the fake. Every 200 below is produced by a test double
+# constructed directly in the test, exactly as the transcription cases do it.
+
+ASK = "/api/assistant/ask"
+
+
+def _fake_assistant(monkeypatch):
+    from isaac_api.providers.assistant import DeterministicAssistantFake
+
+    monkeypatch.setattr(
+        routes.provider_config,
+        "resolve_assistant_provider",
+        lambda: DeterministicAssistantFake(),
+    )
+
+
+def test_the_assistant_seam_refuses_and_names_what_is_missing(client):
+    response = client.post(ASK, json={"question": "What is the edge?"})
+    assert response.status_code == 501, response.text
+    body = response.json()
+    assert body["refused"] is True
+    assert body["seam"] == "assistant"
+    assert body["reason"] == "no_provider_configured"
+    assert body["missing"]
+    assert body["decision_reference"] == "docs/ai-integration-decision-packet.md"
+
+
+def test_the_assistant_refusal_never_implies_a_provider_exists(client):
+    message = client.post(ASK, json={"question": "anything"}).json()["message"]
+    lowered = message.lower()
+    for banned in ("temporarily", "try again", "retry", "connected", "coming soon"):
+        assert banned not in lowered
+
+
+def test_an_uncovered_question_is_a_422_not_a_501(client, monkeypatch):
+    """The two refusal reasons must not collapse into one status.
+
+    `501` says this deployment has no provider — an institutional decision, not a
+    wait. `422` says the context you sent does not cover the question. A client
+    that retried the first would be waiting for something nobody has decided to
+    build; a client shown the first for the second would think the deployment was
+    broken when its own request was the problem.
+    """
+    _fake_assistant(monkeypatch)
+    refused = client.post(
+        ASK,
+        json={
+            "question": "What temperature was this measured at?",
+            "context": [
+                {"key": "title", "text": "Copper oxide study", "origin": "the record"}
+            ],
+        },
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["reason"] == "outside_grounded_context"
+
+
+def test_an_answer_cites_the_context_it_used_and_claims_no_authority(client, monkeypatch):
+    """THE STRUCTURAL COMMITMENT OF THIS SEAM, over HTTP.
+
+    An uncited answer cannot be constructed — `AssistantAnswer` raises — so this
+    asserts the citation reaches the wire, and that `authoritative` is there and
+    false. A client that rendered an answer without `grounded_in` would be showing
+    a scientist a paragraph with no stated basis, which is the failure the whole
+    seam is shaped around.
+    """
+    _fake_assistant(monkeypatch)
+    response = client.post(
+        ASK,
+        json={
+            "question": "What temperature was recorded?",
+            "context": [
+                {
+                    "key": "context.temperature_K",
+                    "text": "temperature 298 K",
+                    "origin": "the run's own draft, read by the caller",
+                },
+                {"key": "title", "text": "Copper oxide study", "origin": "the record"},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["refused"] is False
+    assert body["authoritative"] is False
+    # ONLY the item that shares a token, so the citation is a statement about what
+    # was used rather than an echo of everything supplied.
+    assert body["grounded_in"] == ["context.temperature_K"]
+    assert "298 K" in body["text"]
+    assert body["produced_by"] == "deterministic-fake"
+
+
+def test_the_seam_fetches_nothing_so_an_unknown_key_is_REFUSED(client):
+    """A caller sending `record_id` is asking this operation to fetch something.
+
+    Answering `200` while dropping the key would leave them believing the answer
+    was grounded in a record nobody read — which is worse than a refusal, because
+    the answer would look grounded and cite whatever context they happened to send.
+    """
+    response = client.post(
+        ASK, json={"question": "what is missing?", "record_id": "01SYNTHXANESSEED0000000002"}
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "unrecognized_field"
+    assert body["keys"] == ["record_id"]
+
+
+def test_a_context_item_with_no_stated_origin_is_refused_rather_than_sent(client, monkeypatch):
+    """`ContextItem.__post_init__`'s rule, relayed rather than re-implemented:
+    "unattributed context is how an answer loses its grounding"."""
+    _fake_assistant(monkeypatch)
+    response = client.post(
+        ASK,
+        json={
+            "question": "What temperature was recorded?",
+            "context": [{"key": "temp", "text": "298 K"}],
+        },
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "invalid_field_value"
+    assert body["key"] == "context[0]"
+
+
+@pytest.mark.parametrize(
+    "body,key",
+    [
+        ({"question": ""}, "question"),
+        ({"question": "   "}, "question"),
+        ({"question": 5}, "question"),
+        ({}, "question"),
+        ({"question": "ok", "context": "not a list"}, "context"),
+        ({"question": "ok", "context": [5]}, "context[0]"),
+    ],
+)
+def test_an_unaskable_request_is_refused_naming_the_key(client, body, key):
+    response = client.post(ASK, json=body)
+    assert response.status_code == 422, response.text
+    assert response.json()["key"] == key
+
+
+def test_an_unknown_key_INSIDE_a_context_item_is_refused_too(client):
+    response = client.post(
+        ASK,
+        json={
+            "question": "ok",
+            "context": [
+                {"key": "k", "text": "t", "origin": "o", "verified": True}
+            ],
+        },
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "unrecognized_field"
+    assert body["keys"] == ["verified"]
+    # `verified: true` is the exact key worth refusing rather than ignoring: it is
+    # the vocabulary of an EVIDENCE envelope, and a caller who sent it would be
+    # asserting a classification this seam has no power to make.
+
+
+def test_a_context_key_that_would_trip_the_refusal_guard_is_not_a_500(client, monkeypatch):
+    """A REFUSAL ROUTE MUST NOT 500, and this one could — by shape.
+
+    `ProviderRefusal.__post_init__` refuses a message containing any of
+    `_FORBIDDEN_MESSAGE_SUBSTRINGS` ("retry", "timeout", "connected", …), which exists
+    so a refusal can never imply a provider is coming back. The deterministic double
+    built its out-of-context message by LISTING THE CONTEXT KEYS — and those are
+    caller data. So a context item keyed `retry_policy` raised `ValueError` out of a
+    constructor, and an HTTP caller saw a 500 from the one route whose entire subject
+    is refusing honestly. An independent review found it by reading the shape.
+
+    Unreachable in a booted application — `validate_provider_config_or_raise` refuses
+    to boot with the double selected — but "unreachable today" is not "cannot happen",
+    and the message says everything the list did by reporting the COUNT instead.
+    """
+    _fake_assistant(monkeypatch)
+    result = client.post(
+        ASK,
+        json={
+            "question": "what is the absorbing element?",
+            "context": [
+                {
+                    "key": "retry_policy",
+                    "text": "timeout after 30s, then connected again",
+                    "origin": "a caller who chose these words",
+                }
+            ],
+        },
+    )
+    # A TYPED 422, not a 500.
+    assert result.status_code == 422, result.text
+    body = result.json()
+    assert body["reason"] == "outside_grounded_context"
+    # AND THE CALLER'S OWN WORDS ARE NOT ECHOED BACK into the refusal.
+    assert "retry_policy" not in body["message"]
+    assert "1 item(s)" in body["message"]
+
+
+def test_the_assistant_seam_declares_no_multipart_form_either(client):
+    import isaac_api.app as app_module
+
+    operation = app_module.create_app().openapi()["paths"][ASK]["post"]
+    assert list(operation["requestBody"]["content"]) == ["application/json"]
+
+
+def test_the_assistant_boot_refusal_of_the_test_double_is_unchanged(monkeypatch):
+    """The fake stays unreachable through a booted application (DECISION D6).
+
+    This is what makes "no deployment can show a connected assistant" structural
+    rather than a promise: an operator who names the fake gets a refusal to boot,
+    not a working demo.
+    """
+    monkeypatch.setenv(
+        provider_config.ASSISTANT_PROVIDER_ENV,
+        provider_base.IMPLEMENTATION_DETERMINISTIC_FAKE,
+    )
+    with pytest.raises(RuntimeError):
+        provider_config.validate_provider_config_or_raise()
+
+
+def test_the_deterministic_memory_QA_is_not_this_seam(client):
+    """The shipped Q&A does not depend on any provider being configured.
+
+    MUTATION: routing `/assistant/memory/query` through
+    `resolve_assistant_provider` turns this RED — and would make the one working
+    question-answering path in the product refuse in every deployment, which is
+    precisely the confusion the route description exists to prevent.
+    """
+    seam = client.post(ASK, json={"question": "anything"})
+    assert seam.status_code == 501
+    shipped = client.post(
+        "/api/assistant/memory/query", json={"question": "what changed recently?"}
+    )
+    assert shipped.status_code == 200, shipped.text

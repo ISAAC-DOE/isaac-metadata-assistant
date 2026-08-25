@@ -388,7 +388,22 @@ def test_no_new_migration_or_rollback_names_the_production_table():
             assert not re.search(r"\brecords\b", stripped), name
 
 
-@pytest.mark.parametrize("version,packet", [("0003_revisions", "0003"), ("0004_submissions", "0004")])
+@pytest.mark.parametrize(
+    "version,packet",
+    [
+        ("0003_revisions", "0003"),
+        ("0004_submissions", "0004"),
+        # `0005_run_projection` is not a submission migration, and this test lives in
+        # the submission file. It is parametrised here rather than copied into
+        # `test_experiment_repository.py` for one reason: THIS is the version of the
+        # digest check that is driven by the version name rather than by a hardcoded
+        # table, so adding a row costs one line and a copy would cost a second
+        # implementation to keep correct. The alternative — a third near-identical
+        # digest test — is how the 0002 packet's digest drifted for the whole life of
+        # a branch while a test that looked like this one passed.
+        ("0005_run_projection", "0005"),
+    ],
+)
 def test_the_approval_packet_digests_match_the_committed_files(version, packet):
     """THE ONE CHECK THAT MAKES AN APPROVAL MEAN ANYTHING.
 
@@ -444,20 +459,60 @@ def test_the_packets_do_not_claim_a_hosted_application(version="0003"):
     claim, because that is the one a reader could mistake for standing permission.
     """
     root = Path(sstore.__file__).resolve().parents[3]
-    for packet in ("0003", "0004"):
+    # `0005` IS COVERED HERE TOO, and its STATUS wording is deliberately different:
+    # `0003`/`0004` are APPROVED-and-unapplied, while `0005` is NOT APPROVED. So the
+    # exact literal cannot be shared, and each packet is checked against the phrasing
+    # its own state requires. What is shared, and is the invariant, is that neither
+    # reads as applied and neither reads as a delegation.
+    for packet in ("0003", "0004", "0005"):
         doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
             encoding="utf-8"
         )
-        assert "NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE." in doc, packet
-        # The operator's act is outstanding, and the packet must say so in a form a
-        # reader cannot mistake for a delegation.
-        assert "no agent may run it" in doc, packet
+        if packet == "0005":
+            # WHITESPACE-NORMALISED, because a Markdown file wraps at 90 columns and
+            # a phrase that happens to straddle a line break is not a different
+            # phrase. The first version of this assertion failed for exactly that
+            # reason, and reflowing the document to satisfy a test would have been
+            # the tail wagging the dog.
+            flat = " ".join(doc.split())
+            assert "NOT APPLIED ANYWHERE" in flat, packet
+            assert "NOT APPROVED" in flat, packet
+            assert "no agent may do it" in flat, packet
+        else:
+            assert "NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE." in doc, packet
+            # The operator's act is outstanding, and the packet must say so in a form
+            # a reader cannot mistake for a delegation.
+            assert "no agent may run it" in doc, packet
         # And it must not have quietly acquired the opposite claim.
         for forbidden in (
             "APPLIED TO THE HOSTED DATABASE BY DEAN",
             "has been applied to the hosted database",
         ):
             assert forbidden not in doc, (packet, forbidden)
+
+
+def test_the_0005_packet_does_not_read_as_proven_against_real_data():
+    """`0005`'s OWN standing caveat, pinned separately because it is the load-bearing
+    one and it is the sentence a re-issue would most naturally tidy away.
+
+    CI proves the migration against an EMPTY `postgres:18` container with a two-row
+    synthetic stand-in for `records`. That is not "behaves against the real data, the
+    real roles and the real grants", and it is the entire reason the operator's step
+    exists as a separate act rather than as a formality after a green build.
+
+    Pinned as the invariant rather than the sentence: the packet must say the
+    container is empty AND must not claim the hosted database has been contacted.
+    """
+    root = Path(sstore.__file__).resolve().parents[3]
+    doc = (root / "docs" / "migration-approval-packet-0005.md").read_text(encoding="utf-8")
+    flat = " ".join(doc.split())
+    assert "the CI container is **empty**" in flat
+    assert "no agent has connected to the hosted database" in flat.lower()
+    for forbidden in (
+        "proven against the hosted database",
+        "verified against the real data",
+    ):
+        assert forbidden not in flat.lower(), forbidden
 
 
 def test_the_packets_do_not_still_carry_the_expired_ci_claim():
@@ -546,9 +601,24 @@ def test_the_packets_do_not_overstate_CI_constraint_coverage():
         f"the two migrations now declare {len(declared)} constraints, not 46. "
         f"Re-measure and update both packets' §12A/§12B and CLAUDE.md."
     )
-    assert len(blamed) == 27, (
+    # 27 -> 41. The seventeen constraints the packets listed as declared-and-never-
+    # exercised are now exercised, fourteen of them individually. THREE ARE NOT, AND
+    # CANNOT BE: `isaac_submission_runs` carries `record_id = unit_id` and
+    # `run_id IS NULL OR run_id = unit_id`, so a row violating `unit_id_shape`,
+    # `record_id_shape` or `run_id_shape` ALWAYS violates an equality CHECK at the same
+    # time, and PostgreSQL reports only the first constraint it happens to check. There
+    # is no assignment of those three columns that violates exactly one of them. That is
+    # defence in depth rather than a defect — the equality CHECKs subsume the shape
+    # CHECKs — and the workflow proves those rows are refused by a CHECK on that table
+    # through a deliberately weaker helper (`refuse_by_the_table`) so nobody mistakes it
+    # for the individual blame this counter measures.
+    #
+    # The other two are the pre-existing pair this guard's own comment names:
+    # `isaac_revision_changes_revision_fk` and `isaac_submissions_experiment_fk` appear
+    # in the workflow for other reasons with no refusal blamed on them.
+    assert len(blamed) == 41, (
         f"CI's constraint step now blames {len(blamed)} of the {len(declared)} declared "
-        f"constraints, not 27. Update both packets' §12A/§12B and CLAUDE.md to the "
+        f"constraints, not 41. Update both packets' §12A/§12B and CLAUDE.md to the "
         f"measured number — upward if coverage improved, and do not leave a stale "
         f"limitation sitting in a document a reader trusts."
     )
@@ -557,9 +627,167 @@ def test_the_packets_do_not_overstate_CI_constraint_coverage():
         doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
             encoding="utf-8"
         )
-        assert "27" in doc and "46" in doc, packet
+        assert "41" in doc and "46" in doc, packet
         # And the packets must not have re-acquired the overstatement.
         assert "exercised every constraint these five tables declare" not in doc, packet
+
+
+#: Sentences that credited a real CI RUN with coverage only the workflow FILE declares.
+#: Each may survive ONLY inside a strikethrough that corrects it — the repository's
+#: established remedy, and the one `test_the_packets_do_not_claim_a_hosted_application`
+#: already uses for an expired claim about this same job.
+#:
+#: Written WITHOUT markdown emphasis; the check strips `*` before searching, so a
+#: re-bolded or un-bolded copy cannot slip past.
+RETIRED_COVERAGE_CLAIMS: tuple[str, ...] = (
+    # CLAUDE.md §15 — the one the review measured.
+    "exercising 41 of the 46 declared constraints (27 when that sentence was written)",
+    # CLAUDE.md §11.
+    "41 of 46 declared (re-measured 2026-08-19, up from 27)",
+    # CLAUDE.md §15, the readiness table row.
+    "41 of the 46 declared constraints are exercised there",
+    # docs/dean-handoff-consolidated-2026-08-18.md — the UNSENT EXTERNAL PACKAGE.
+    "Constraint coverage moved 27 → 41 of 46, validated against a real",
+    "CI's constraint step now blames 41 of them, up from 27",
+    # the two approval packets.
+    "coverage improved from 27 to 41 of 46",
+    "IMPROVED on 2026-08-19 from 27 to 41 of 46",
+)
+
+#: Every document that quotes either figure.
+COVERAGE_DOCUMENTS: tuple[str, ...] = (
+    "CLAUDE.md",
+    "docs/dean-handoff-consolidated-2026-08-18.md",
+    "docs/migration-approval-packet-0003.md",
+    "docs/migration-approval-packet-0004.md",
+)
+
+
+def test_no_document_credits_a_real_RUN_with_the_branch_file_s_coverage():
+    """41 IS A PROPERTY OF THE WORKFLOW FILE; 27 IS WHAT A REAL POSTGRESQL HAS RUN.
+
+    THE DEFECT THIS CLOSES, measured by an independent review and re-derived by the
+    test below. `CLAUDE.md` said the `postgres-migration` job *"has since run and
+    passed on `main` at `fe374c0` (Actions run `32099627898`) ... exercising 41 of the
+    46 declared constraints"*. It cannot have::
+
+        git show fe374c0:.github/workflows/ci.yml   ->  27 declared names blamed
+        git show HEAD:.github/workflows/ci.yml      ->  41
+
+    The fourteen extra cases arrived in `77de2db` (2026-08-19), which is NOT in `main`
+    — `git merge-base --is-ancestor 77de2db origin/main` reports so — and whose own
+    commit message says *"CI is the first execution."*
+
+    IT MATTERED MOST WHERE IT WAS REPEATED. `docs/dean-handoff-consolidated-2026-08-18
+    .md` is an UNSENT EXTERNAL PACKAGE and the operator's evidence basis for applying
+    `0003`/`0004` to the hosted database. Inflating that evidence inflates the basis of
+    a decision an agent may not make and cannot undo.
+
+    THE RULE IS THE REPOSITORY'S OWN REMEDY RATHER THAN A PROSE JUDGEMENT: "does this
+    paragraph imply a run" is not decidable mechanically, so each retired sentence is
+    named and must survive only inside a strikethrough. A future slice that reverts a
+    correction fails here; one that rewords a sentence entirely does not, which is
+    correct — the pinned numbers are guarded by the test below.
+    """
+    import re
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    for relative in COVERAGE_DOCUMENTS:
+        raw = (root / relative).read_text(encoding="utf-8")
+        # Emphasis removed, blockquote markers removed, whitespace collapsed — so a
+        # line wrap, a bold marker, or a `>` continuation inside the sentence cannot
+        # hide it. The `>` rule was added after a corrected sentence in packet 0003
+        # wrapped mid-phrase and the search missed it, which is the same near-miss
+        # this whole family of guards keeps having.
+        flat = re.sub(r"\s+", " ", re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw).replace("*", ""))
+        for claim in RETIRED_COVERAGE_CLAIMS:
+            index = flat.find(claim)
+            while index != -1:
+                window = flat[max(0, index - 12) : index]
+                assert "~~" in window, (
+                    f"{relative} asserts a retired coverage claim as its own statement "
+                    f"rather than striking it: {claim!r}. 41 is what the workflow FILE "
+                    "declares on this branch; 27 is what run 32099627898 executed on "
+                    "`main` at fe374c0."
+                )
+                index = flat.find(claim, index + 1)
+
+
+def test_the_retired_coverage_claims_are_actually_still_findable():
+    """NEGATIVE CONTROL: the guard above passes trivially on a document that deleted
+    the correction instead of keeping it.
+
+    Deleting a struck sentence is how a corrected claim becomes indistinguishable from
+    one that never existed — the failure mode CLAUDE.md's own convention exists to
+    prevent. So at least one retired claim must still be PRESENT somewhere, struck.
+    """
+    import re
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    found = 0
+    for relative in COVERAGE_DOCUMENTS:
+        raw = (root / relative).read_text(encoding="utf-8")
+        flat = re.sub(
+            r"\s+", " ", re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw).replace("*", "")
+        )
+        found += sum(1 for claim in RETIRED_COVERAGE_CLAIMS if claim in flat)
+    assert found >= len(RETIRED_COVERAGE_CLAIMS), (
+        f"only {found} of {len(RETIRED_COVERAGE_CLAIMS)} retired coverage claims are "
+        "still visible as corrections. A struck sentence that is deleted leaves a "
+        "reader unable to tell a corrected claim from one that never drifted."
+    )
+
+
+def test_the_two_constraint_numbers_are_each_still_the_measured_ones():
+    """Both vantage points, re-derived, so neither can drift in prose alone.
+
+    The sibling test above pins that the numbers are not CONFLATED. This one pins that
+    they are the numbers, using the same "blamed" rule
+    `test_the_packets_do_not_overstate_CI_constraint_coverage` applies: the third
+    argument of a `refuse()` call, on its own continuation line as a bare quoted name.
+
+    `fe374c0` is read out of git rather than out of the working tree, because the claim
+    being guarded is about a commit that has already run.
+    """
+    import re
+    import subprocess
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    declared: set[str] = set()
+    for version in ("0003_revisions", "0004_submissions"):
+        text = (MIGRATIONS / f"{version}.sql").read_text(encoding="utf-8")
+        code = "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("--")
+        )
+        declared |= set(re.findall(r"CONSTRAINT\s+([a-z0-9_]+)", code))
+
+    def blamed(lines: list[str]) -> set[str]:
+        return {
+            m.group(1)
+            for m in (re.fullmatch(r'"([a-z0-9_]+)"', line.strip()) for line in lines)
+            if m is not None and m.group(1) in declared
+        }
+
+    try:
+        historic = subprocess.run(
+            ["git", "show", "fe374c0:.github/workflows/ci.yml"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        pytest.skip(f"fe374c0 is not readable from this checkout: {exc}")
+
+    assert len(blamed(historic.splitlines())) == 27, (
+        "the number of declared constraints CI blamed at `fe374c0` is no longer 27. "
+        "That is the figure an operator acts on, and it is quoted in CLAUDE.md, the "
+        "Dean handoff and both approval packets."
+    )
+    current = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert len(blamed(current.splitlines())) == 41, (
+        "the number of declared constraints the workflow blames today is no longer 41."
+    )
 
 
 # =============================================================================
@@ -847,3 +1075,72 @@ def test_the_capability_block_opens_no_connection_and_never_claims_availability(
     # cannot be known from configuration, and a key called `available` would be read
     # as saying it can.
     assert "available" not in block
+
+
+def test_the_operator_handoff_quotes_digests_that_match_the_committed_files():
+    """THE HANDOFF IS THE THING THAT ACTUALLY GETS SENT, so it gets the same guard.
+
+    `docs/dean-handoff-consolidated-2026-08-18.md` is the package a human forwards
+    to the database operator, and it carries the digest table the operator is told
+    to recompute — *"That check is the only evidence that the bytes applied are the
+    bytes approved."* Until now nothing checked the handoff's own copy of those
+    values, only each packet's.
+
+    That is exactly how the `0002` packet's forward digest went stale for the whole
+    life of a branch: the migration was corrected in place, the prose was updated,
+    and the digest was not. An operator following the packet's own instruction would
+    have computed a mismatch against the very file they were about to apply and had
+    to guess whether the document was stale or the file had been tampered with.
+
+    Driven off the document's own table rows rather than a hardcoded list, so adding
+    a migration to the handoff is covered without editing this test.
+    """
+    import hashlib
+    import re
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    doc = (root / "docs" / "dean-handoff-consolidated-2026-08-18.md").read_text(
+        encoding="utf-8"
+    )
+    quoted = set(re.findall(r"`([0-9a-f]{64})`", doc))
+    assert quoted, "the handoff quotes no digests at all — re-read this test"
+
+    on_disk = {}
+    for path in sorted((root / "apps/api/isaac_api/migrations").glob("*.sql")):
+        on_disk[hashlib.sha256(path.read_bytes()).hexdigest()] = path.name
+
+    unmatched = sorted(d for d in quoted if d not in on_disk)
+    assert not unmatched, (
+        "the handoff quotes SHA-256 values that no committed migration hashes to: "
+        f"{unmatched}. Recompute the table in "
+        "docs/dean-handoff-consolidated-2026-08-18.md in the SAME commit as the SQL "
+        "— an operator is told that check is the only evidence the bytes applied are "
+        "the bytes approved."
+    )
+
+
+def test_the_operator_handoff_does_not_read_as_if_0005_were_approved():
+    """A NEW MIGRATION FILE MUST NOT ACQUIRE AN APPROVAL BY PROXIMITY.
+
+    The handoff's §1 lists two migrations the owner HAS approved and that need an
+    operator window. `0005_run_projection` is not one of them. The specific failure
+    this guards is not a false sentence but a false IMPRESSION: a third migration
+    appearing in a document whose subject is "migrations awaiting an operator" reads
+    as a third thing waiting on the operator, and an operator who applied it would
+    have skipped the owner's review entirely.
+
+    So the document must say the word, in the section that names it, and must
+    instruct against applying it.
+    """
+    root = Path(sstore.__file__).resolve().parents[3]
+    doc = (root / "docs" / "dean-handoff-consolidated-2026-08-18.md").read_text(
+        encoding="utf-8"
+    )
+    flat = " ".join(doc.split())
+    assert "0005_run_projection" in flat
+    assert "NOT approved" in flat or "NOT APPROVED" in flat
+    assert "Do NOT apply `0005`" in flat
+    # AND THE HEADING MUST NOT PROMISE TWO WHILE LISTING THREE. "Two migrations,
+    # approved" was the original heading and became misleading the moment a third
+    # appeared in the file.
+    assert "## 1. Two migrations, approved and awaiting an operator" not in doc

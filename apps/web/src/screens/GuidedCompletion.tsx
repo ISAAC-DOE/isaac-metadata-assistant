@@ -72,7 +72,13 @@ export function GuidedCompletion() {
    * A ref rather than state, deliberately: this must not re-render on every
    * keystroke, and nothing reads it during render except as an initial value.
    */
-  const staged = useRef<Record<string, string>>({});
+  /* `unknown`, NOT `string`. It was `string`, and that made the promise above false
+     for exactly one blocker: a QC verdict's answer is `{status, evidence}`, so the
+     `onTextChange` channel could not carry it and a Refresh destroyed a verdict and a
+     paragraph of reasoning while the banner beside the button said it did not — on the
+     one question whose input is most expensive to retype. Widening the ref is the whole
+     fix; `initialValue` and `discardStaged` are keyed identically and need no change. */
+  const staged = useRef<Record<string, unknown>>({});
 
   /*
    * RESET ON A RECORD CHANGE, because a blocker id is not record-scoped.
@@ -158,8 +164,44 @@ export function GuidedCompletion() {
  * they ever disagree we do not KNOW the value landed, and this screen must not put a
  * "Confirmed by You" chip over a value it cannot support. Fail closed.
  */
-function answerWasApplied(resp: ApiAnswersResponse, blockerId: string): boolean {
-  const stillOpen = resp.pending.some((p) => p.id === blockerId);
+/**
+ * The server's own words for a refusal it explained, or `null`.
+ *
+ * TWO 409s SHIPPED WITHOUT THIS and an independent review measured what a scientist
+ * saw. `belongs_to_a_run` names the run, names the route that CAN take the answer, and
+ * says nothing was written — and it surfaced as *"That answer could not be applied
+ * (409). Nothing was changed — try again"*, whose advice is false because retrying
+ * always 409s. Preferring the server's `message` when it has one is the general fix:
+ * this application already writes careful refusal prose on the server, and discarding it
+ * to render a status code is throwing away the better sentence.
+ *
+ * Only a `message` the body actually carries is used, so a refusal with no explanation
+ * still falls back to the generic copy rather than to a blank.
+ */
+function serverExplanation(err: { status?: number; body?: unknown } | null): string | null {
+  /* SCOPED TO 409, and the scoping is a correction. The first version preferred the
+     server's `message` for ANY status that carried one, which overrode a deliberate
+     choice on 422: `edit-field.test.tsx` pins that a 422 with an unexpected error code
+     gets the GENERIC notice "claiming less", precisely so the screen does not assert a
+     specific cause the response may not support. That reasoning is right and is left
+     alone.
+     409 is different because it has no other copy at all: both of this application's
+     409s explain themselves in prose written for a reader, and the generic notice
+     replaced them with a status code and the false advice "try again". */
+  if (err?.status !== 409) return null;
+  const body = err?.body;
+  if (body === null || typeof body !== 'object') return null;
+  const message = (body as { message?: unknown }).message;
+  return typeof message === 'string' && message.trim() !== '' ? message : null;
+}
+
+function answerWasApplied(resp: ApiAnswersResponse, blockerKey: string): boolean {
+  /* KEYED ON `blocker_key`, NOT ON `id`, and this was a measured defect. `id` is the
+     blocker KIND, so three runs each needing a QC verdict produce three entries whose
+     `id` is `"qc"`. Answering run 2's verdict returned `changed: true` AND left run 3's
+     identical entry in the list, so this function answered FALSE and the screen told the
+     scientist their answer had not been applied — about an answer that had. */
+  const stillOpen = resp.pending.some((p) => (p.blocker_key ?? p.id) === blockerKey);
   return resp.invalidation.changed === true && !stillOpen;
 }
 
@@ -206,7 +248,7 @@ function LoadedCompletion({
   reload: () => void;
   /** Staged answers keyed by blocker id, held by the parent so a `reload` — which
    *  unmounts this component — cannot destroy what the reader typed. */
-  staged: MutableRefObject<Record<string, string>>;
+  staged: MutableRefObject<Record<string, unknown>>;
 }) {
   const navigate = useNavigate();
   const [pending, setPending] = useState<ApiPendingItem[]>(initialPending);
@@ -255,34 +297,60 @@ function LoadedCompletion({
 
   const total = answered.length + pending.length;
   const remaining = pending.length;
+  /* `pending` holds the RAW `ApiPendingItem`s, whose identity key is `blocker_key`.
+     The adapted `PendingBlocker` exposes the same value as `key`; both fall back to
+     `id`, which is correct for a record with no runs (the two are equal there) and
+     degrades to the pre-existing collision only where the server itself did not
+     distinguish the owners. */
+  const itemKey = (p: ApiPendingItem) => p.blocker_key ?? p.id;
   const currentItem = useMemo(
-    () => pending.find((p) => !skipped.has(p.id)),
+    () => pending.find((p) => !skipped.has(itemKey(p))),
     [pending, skipped],
   );
-  const skippedItems = pending.filter((p) => skipped.has(p.id));
+  const skippedItems = pending.filter((p) => skipped.has(itemKey(p)));
   const upcomingItems = pending.filter(
-    (p) => p.id !== currentItem?.id && !skipped.has(p.id),
+    (p) => itemKey(p) !== (currentItem ? itemKey(currentItem) : null) && !skipped.has(itemKey(p)),
   );
+
+  /* THE TOKEN A WRITE NEEDS DEPENDS ON WHO OWNS THE QUESTION.
+   *
+   * A record-level answer takes the RECORD's version, which this screen already holds.
+   * A run-owned one goes to the run's route and takes THE RUN's version, which this
+   * screen does not — so it is read immediately before the write. That is one extra
+   * round trip on the questions that need it, and the alternative (caching a run
+   * version alongside the record's) is a second staleness to keep in step for no gain:
+   * `GET /pending` does not report run versions, so there is nothing to keep it fresh
+   * from.
+   *
+   * Sending the record's token to a run route is not a silent bug — it is a 412 — but
+   * it is a 412 the reader would be told to resolve by refreshing something that was
+   * never stale, which is why the tokens are resolved here rather than at the caller.
+   */
+  const tokenFor = async (blocker: PendingBlocker): Promise<string | undefined> => {
+    if (!blocker.runId) return currentVersion;
+    const { run } = await api.getRun(id, blocker.runId);
+    return run.version;
+  };
 
   const confirmAnswer = (blocker: PendingBlocker, value: unknown) => {
     setSubmitting(true);
     setSubmitError(null);
     setAnswerNotApplied(null);
-    api
-      .submitAnswer(id, { [blocker.id]: value }, currentVersion)
+    tokenFor(blocker)
+      .then((token) => api.submitAnswer(id, { [blocker.id]: value }, token, blocker.runId))
       .then((resp) => {
         // Server-reported state first, unconditionally: the recomputed question list
         // and the fresh If-Match token are facts either way.
         setPending(resp.pending);
         setCurrentVersion(resp.version); // adopt the fresh token for the next submit
-        if (answerWasApplied(resp, blocker.id)) {
+        if (answerWasApplied(resp, blocker.key)) {
           // APPLIED, so the staged copy has done its job. Kept only until the record
           // holds the value: leaving it would re-offer a value the record already has
           // if this blocker ever returned to `pending` through a downstream
           // invalidation, which reads as an unsaved edit that is not one.
-          discardStaged(blocker.id);
+          discardStaged(blocker.key);
         }
-        if (!answerWasApplied(resp, blocker.id)) {
+        if (!answerWasApplied(resp, blocker.key)) {
           // The server did not report this value as applied, so this screen may not
           // show it as answered. No `answered` row (so no "Confirmed by You" chip
           // over a value the record does not hold), no counter movement — `total` is
@@ -291,19 +359,26 @@ function LoadedCompletion({
           // left it: open. The typed input survives, because `pending` still holds
           // this blocker so `GuidedPrompt`'s `key` is unchanged and it is not
           // remounted.
-          setAnswerNotApplied(blocker.id);
+          setAnswerNotApplied(blocker.key);
           return;
         }
         setSkipped((prev) => {
-          if (!prev.has(blocker.id)) return prev;
+          if (!prev.has(blocker.key)) return prev;
           const next = new Set(prev);
-          next.delete(blocker.id);
+          next.delete(blocker.key);
           return next;
         });
         setAnswered((prev) => [
           ...prev,
           {
-            id: blocker.id,
+            // THE ANSWERED ROW'S IDENTITY IS THE BLOCKER'S KEY, not its kind. It was
+            // `blocker.id`, and an independent review measured the consequence: with two
+            // runs owing the same thing, ONE Edit click opened TWO editors, `saveEdit`
+            // rewrote both rows' displayed value, React warned about duplicate keys, and
+            // both Edit buttons carried the same accessible name. Worse, `editNotApplied`
+            // is set with the KEY and read with this — so a correction the server refused
+            // was reported by NOTHING, which the parent commit did report.
+            id: blocker.key,
             label: blocker.label,
             storedValue: answerValuePreview(blocker.kind, value),
             rawValue: value,
@@ -363,8 +438,8 @@ function LoadedCompletion({
     setEditSubmitting(true);
     setEditError(null);
     setEditNotApplied(null);
-    api
-      .editField(id, { [blocker.id]: value }, currentVersion)
+    tokenFor(blocker)
+      .then((token) => api.editField(id, { [blocker.id]: value }, token, blocker.runId))
       .then((resp) => {
         setCurrentVersion(resp.version);
         setPending(resp.pending);
@@ -373,12 +448,12 @@ function LoadedCompletion({
           // value the server last confirmed, the editor stays mounted with what was
           // typed (as on a 412), and no `editImpact` is rendered — its
           // `invalidation.reason` would name a cause the response cannot know.
-          setEditNotApplied(blocker.id);
+          setEditNotApplied(blocker.key);
           return;
         }
         setAnswered((prev) =>
           prev.map((a) =>
-            a.id === blocker.id
+            a.id === blocker.key
               ? { ...a, storedValue: answerValuePreview(blocker.kind, value), rawValue: value }
               : a,
           ),
@@ -386,13 +461,16 @@ function LoadedCompletion({
         setEditImpact(resp.invalidation);
         // The correction is stored, so the staged copy is spent. Same reason as the
         // answer path above.
-        discardStaged(`edit:${blocker.id}`);
+        discardStaged(`edit:${blocker.key}`);
         setEditingId(null);
       })
       .catch((err: ApiError) => setEditError(err))
       .finally(() => setEditSubmitting(false));
   };
 
+  /* `blockerId` here is the blocker's IDENTITY key, not its kind. Skipping is
+     per-question, and keying it by kind made skipping one run's spectrum skip every
+     run's — measured by an independent review. */
   const leaveMissing = (blockerId: string) => {
     // Declining to answer is an ABANDONMENT of whatever was typed. Without this the
     // value returns pre-filled under "Answer Now", one click from being confirmed.
@@ -489,6 +567,10 @@ function LoadedCompletion({
   const stageField = currentBlocker
     ? {
         id: currentBlocker.id,
+        // The identity key, so the assistant's write reaches the run that OWNS this
+        // question rather than the first run owing one of the same kind.
+        key: currentBlocker.key,
+        runId: currentBlocker.runId,
         label: currentBlocker.about ?? currentBlocker.question ?? currentBlocker.id,
         suggestedValue: currentBlocker.demo_answer?.value,
         suggestedValueLabel: currentBlocker.demo_answer?.label,
@@ -637,8 +719,12 @@ function LoadedCompletion({
         </div>
       ) : (
         <div className="completion-submit-error" role="alert">
-          That correction could not be applied ({editError.status ?? 'error'}). Nothing was changed
-          — try again.
+          {serverExplanation(editError) ?? (
+            <>
+              That correction could not be applied ({editError.status ?? 'error'}). Nothing was
+              changed — try again.
+            </>
+          )}
         </div>
       )}
     </div>
@@ -679,11 +765,36 @@ function LoadedCompletion({
              Refresh mid-edit restores what the reader had rewritten rather than
              snapping back to the stored value. Namespaced `edit:` so an edit and a
              fresh answer to the same blocker cannot overwrite one another. */
-          initialValue={
-            staged.current[`edit:${ans.id}`] ??
-            (typeof ans.rawValue === 'string' ? ans.rawValue : undefined)
-          }
+          /* `rawValue` IS PASSED THROUGH FOR EVERY ANSWER NOW, and the clause that used
+             to sit here was false about the one case it described.
+             ~~"A series/descriptor value is still not prefilled into a text box: it is
+             confirmed via `initialStaged`."~~ — STRUCK. `initialStaged` is INERT on the
+             entry path: `GuidedPrompt` computes `entering = structured && demo ===
+             undefined`, and on that branch `canConfirm` is `entryReady`, which reads the
+             form and never reads `staged`. A record a scientist created has no
+             `demo_answer`, so EVERY such edit took the entry path. Measured, for both
+             structured blockers on such a record:
+
+                 SERIES     editor value = ""                          SAVE DISABLED = true
+                 DESCRIPTOR Name="" Kind="" Source="" Value="" Unit="" SAVE DISABLED = true
+
+             So correcting one field of a descriptor meant retyping the whole value, and
+             until it was complete Save was dead with nothing on screen explaining why —
+             on the very screen whose comment above says an edit opens "prefilled with the
+             current value". The `qc` half of this defect was found and fixed; this is the
+             other half.
+
+             The three-way `??` chain is gone with it. It existed to keep a non-string
+             `rawValue` out of a text box, and that job now belongs to `GuidedPrompt`,
+             which types each control's own initial state (`descriptorDraftFrom`,
+             `seriesTextFrom`, and the `typeof === 'string'` guard on `text`). Keeping a
+             second copy of the rule here is how the two drifted apart in the first
+             place. */
+          initialValue={staged.current[`edit:${ans.id}`] ?? ans.rawValue}
           onTextChange={(value) => {
+            staged.current[`edit:${ans.id}`] = value;
+          }}
+          onStagedChange={(value) => {
             staged.current[`edit:${ans.id}`] = value;
           }}
           initialStaged={ans.blocker.inputType === 'structured'}
@@ -763,7 +874,15 @@ function LoadedCompletion({
       <Check size={14} strokeWidth={2.4} aria-hidden="true" />
       <div>
         <div className="edit-impact-reason">{editImpact.reason}</div>
-        {editImpact.artifact.state === 'stale' && (
+        {/* OPTIONAL-CHAINED, and the reason is not defensiveness. `artifact` is
+            declared required on `ApiInvalidation` and `dependencies.build_invalidation`
+            always returns it — but a bare `.state` on a server field is a whole-screen
+            crash if a deployment ever omits it, and the failure would land on the
+            reader mid-edit with their typed value on screen. An independent review
+            found this while writing a test whose fixture omitted `artifact`: the
+            product crashed on the fixture instead of the test failing on the product,
+            which is the wrong way round for a defect to surface. */}
+        {editImpact.artifact?.state === 'stale' && (
           <p className="edit-impact-note">
             The exported record is now out of date — records are immutable, so regenerate (or reset
             the workspace) to refresh it.
@@ -858,19 +977,22 @@ function LoadedCompletion({
       {blocker && (
         <div style={{ marginTop: 10 }}>
           <GuidedPrompt
-            key={blocker.id}
+            key={blocker.key}
             blocker={blocker}
             index={Math.min(answered.length + skippedItems.length, total - 1)}
             total={total}
             submitting={submitting}
             /* Restored across a Refresh, and kept current on every keystroke. See
                the `staged` ref in the parent for why it lives there. */
-            initialValue={staged.current[blocker.id]}
+            initialValue={staged.current[blocker.key]}
             onTextChange={(value) => {
-              staged.current[blocker.id] = value;
+              staged.current[blocker.key] = value;
+            }}
+            onStagedChange={(value) => {
+              staged.current[blocker.key] = value;
             }}
             onConfirm={(value) => confirmAnswer(blocker, value)}
-            onDontKnow={() => leaveMissing(blocker.id)}
+            onDontKnow={() => leaveMissing(blocker.key)}
           />
         </div>
       )}
@@ -878,7 +1000,7 @@ function LoadedCompletion({
       {answerNotAppliedNote}
 
       {upcomingItems.map((item, i) => (
-        <div className="upcoming-row" key={item.id}>
+        <div className="upcoming-row" key={itemKey(item)}>
           <span className="upcoming-num" aria-hidden="true">
             {answered.length + skippedItems.length + 2 + i}
           </span>
@@ -947,8 +1069,12 @@ function LoadedCompletion({
             </div>
           ) : (
             <div className="completion-submit-error" role="alert">
-              That answer could not be applied ({submitError.status ?? 'error'}). Nothing was
-              changed — try again.
+              {serverExplanation(submitError) ?? (
+                <>
+                  That answer could not be applied ({submitError.status ?? 'error'}). Nothing
+                  was changed — try again.
+                </>
+              )}
             </div>
           )}
         </div>
@@ -969,13 +1095,13 @@ function LoadedCompletion({
             Left Honestly Missing · This Visit, Not Saved
           </div>
           {skippedItems.map((item) => (
-            <div className="leftmissing-row" key={item.id}>
+            <div className="leftmissing-row" key={itemKey(item)}>
               <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
               <span className="leftmissing-q">{item.question}</span>
               <button
                 type="button"
                 className="leftmissing-answer"
-                onClick={() => answerLater(item.id)}
+                onClick={() => answerLater(itemKey(item))}
               >
                 Answer Now
               </button>

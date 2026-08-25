@@ -173,6 +173,30 @@ OWNED_TABLES: frozenset[str] = frozenset(
         "isaac_revision_changes",
         "isaac_submissions",
         "isaac_submission_runs",
+        # `isaac_run_projection` (0005). LISTED IN THE SAME CHANGE THAT CREATES IT.
+        #
+        # ~~"and NAMED IN `CLAUDE.md` §15 IN THAT SAME CHANGE — which is the whole
+        # point of the two corrections recorded above."~~ **THAT HALF WAS FALSE BY ONE
+        # COMMIT, and an independent review measured it.** The table shipped in
+        # `6dce6fd`, which does not touch `CLAUDE.md`; §15 was updated in `8f7c650`.
+        # So the enumeration was corrected AFTER the write existed for the third time
+        # running — a smaller gap than the two below, and not the thing that was
+        # claimed. Struck through rather than deleted, because the point of those two
+        # corrections is that a claim like this is checkable, and quietly replacing a
+        # checked-false claim is the failure they exist to record. `isaac_runs` and the five
+        # submission-lifecycle tables were both added here before any committed
+        # sentence named them; for the second of those it took an independent
+        # review to notice. Its authorization basis is §15's "minimum supporting
+        # persistence architecture that feature requires" clause PLUS the
+        # enumeration, not the clause alone, and the contract that says why the
+        # table has to exist at all is `docs/isaac-runs-stage-2-contract.md` §1.
+        #
+        # WHAT LISTING IT PERMITS, precisely: `0005`'s two CREATE statements, and
+        # the write path's `Q_UPSERT_RUN_PROJECTION`. Nothing reads it. There is no
+        # UPDATE and no DELETE naming it anywhere in this application — the upsert
+        # is the only writer, and the rollback's DROP lives in a file the runner
+        # never loads.
+        "isaac_run_projection",
     }
 )
 
@@ -441,6 +465,73 @@ def connect_psycopg2(env: Mapping[str, str]) -> Any:
     try:
         return psycopg2.connect(
             host=env["PGHOST"],
+            # ── `hostaddr=None` IS EXPLICIT, AND IT IS NOT REDUNDANT. ─────────────────
+            # libpq fills EVERY connection parameter this call leaves unspecified from
+            # the corresponding `PG*` environment variable, and `PGHOSTADDR` is one of
+            # them. When both are set, `hostaddr` is the address libpq actually
+            # CONNECTS to and `host` is used only for TLS certificate and GSSAPI name
+            # verification — so passing `host=` and saying nothing about `hostaddr`
+            # means the string this application reasoned about is not necessarily the
+            # machine it reached.
+            #
+            # WHAT THAT DEFEATED, measured by an independent security review on
+            # 2026-08-24. `apps/api/tests/test_run_row_parity.py` — a suite that
+            # WRITES — decides "this is a local throwaway engine" from the `PGHOST`
+            # STRING alone (`_is_loopback_target`). With `PGHOST=localhost`,
+            # `PGHOSTADDR=<a hosted address>` and `PGDATABASE=metadata_assistant`,
+            # every gate in that suite passes — including `write_transaction`'s own
+            # `current_database()` re-check, which asks the server it is talking to and
+            # so agrees with itself — and the writes land wherever `hostaddr` points.
+            # Passing `None` explicitly makes libpq ignore `PGHOSTADDR` entirely, so
+            # `host` is once again both the name that is verified and the target that
+            # is reached.
+            #
+            # ── THE VALUE IS `""` AND IT WAS `None` FOR ONE COMMIT, WHICH DID
+            # ── NOTHING AT ALL. ──────────────────────────────────────────────────────
+            # `psycopg2.connect(**kwargs)` does not hand its keywords to libpq; it
+            # builds a DSN string with `psycopg2.extensions.make_dsn`, and that
+            # function contains, verbatim:
+            #
+            #     # Drop the None arguments
+            #     kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
+            #
+            # So `hostaddr=None` was DELETED before libpq ever saw it, the connection
+            # string went out with no `hostaddr` at all, and libpq read `PGHOSTADDR`
+            # from the environment exactly as before. The guard was inert and the
+            # comment beside it asserted that it worked — the same class of defect
+            # (a correct-sounding fix with a false reason) that the review which
+            # prompted it was looking for.
+            #
+            # MEASURED, in this interpreter, against the real psycopg2:
+            #
+            #     make_dsn(host="localhost", dbname="d", hostaddr=None)
+            #       -> 'host=localhost dbname=d'                 <- keyword gone
+            #     make_dsn(host="localhost", dbname="d", hostaddr="")
+            #       -> "host=localhost dbname=d hostaddr=''"     <- survives
+            #
+            # An EXPLICIT EMPTY `hostaddr` is what libpq needs: a parameter given in
+            # the connection string is never filled from its `PG*` environment
+            # variable, and an empty `hostaddr` means "no address supplied — resolve
+            # `host` by name", which is the behaviour this call always intended.
+            #
+            # THE CONNECTION ITSELF IS STILL NOT EXECUTED HERE. No agent may connect
+            # to the SLAC database, so what is proven above is that the keyword
+            # REACHES THE DSN — the step that was actually broken — and not that a
+            # session opened. `test_run_row_parity`'s connection-keyword test asserts
+            # the DSN, not just the call.
+            #
+            # REFUSING A SET `PGHOSTADDR` OUTRIGHT WAS CONSIDERED AND REJECTED HERE:
+            # this function runs in the hosted pod against an environment this
+            # repository does not own, and a hard refusal would take the application
+            # down if Dean's manifest ever legitimately set it. Neutralising it is
+            # the same guarantee without that failure mode. `_probe_engine` DOES
+            # refuse it, because that is a test suite and stopping is free there.
+            #
+            # IT IS DEFENCE IN DEPTH AND THE OPT-IN IS STILL THE REAL GATE.
+            # `ISAAC_RUN_REAL_ENGINE_PARITY` is what stops that suite connecting at
+            # all; this closes a hole in a check that was already the second line, and
+            # it should not be described as making the environment safe.
+            hostaddr="",
             port=env.get("PGPORT", "5432"),
             dbname=EXPECTED_DATABASE,  # never the env value: the gate already pinned it
             user=env["PGUSER"],

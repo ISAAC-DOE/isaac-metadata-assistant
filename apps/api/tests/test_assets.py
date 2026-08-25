@@ -1098,11 +1098,27 @@ def test_export_reach_none_is_measured_against_the_real_export_composition(clien
     run cites reaches no exported record. The UI states that in words on the card; this
     measures it against `export_units()` rather than trusting the label.
 
-    IT ALSO PINS A PRE-EXISTING BEHAVIOUR THIS SLICE DID NOT INTRODUCE AND DOES NOT
-    CHANGE: the THREE assets the extractor already put on this seed are dropped from
-    the run's export draft too, because adding a run makes the record export per-run
-    and nothing carries record-level assets down. Surfacing that is the whole point of
-    `export_reach`; changing it would be an export-path change and is out of scope.
+    **THE SECOND HALF OF THIS TEST IS INVERTED, and the old text is quoted rather than
+    deleted because it was right about the behaviour and right to flag it.** It read:
+
+        "IT ALSO PINS A PRE-EXISTING BEHAVIOUR THIS SLICE DID NOT INTRODUCE AND DOES
+        NOT CHANGE: the THREE assets the extractor already put on this seed are dropped
+        from the run's export draft too, because adding a run makes the record export
+        per-run and nothing carries record-level assets down. Surfacing that is the
+        whole point of `export_reach`; changing it would be an export-path change and
+        is out of scope."
+
+    That behaviour was a DEFECT, not a property — adding a run silently removed three
+    evidenced assets from every record the experiment would ever export — and it is now
+    fixed at the source: `routes._seed_for_new_run` gives the FIRST run a copy of the
+    experiment's run-level blocks, so what a person already recorded survives the act of
+    adding a run. The slice that wrote the paragraph above was right to call the fix an
+    export-path change and right to leave it alone; this test is the evidence it left
+    behind that the behaviour was known.
+
+    What this still measures is unchanged, and is the part that matters: an asset NO run
+    cites reaches no exported record, and `export_reach` says so — asserted against
+    `export_units()` rather than against a derived label.
     """
     from isaac_api import workspace as ws
 
@@ -1117,11 +1133,16 @@ def test_export_reach_none_is_measured_against_the_real_export_composition(clien
     listing = {a["asset_id"]: a for a in _listing(client, experiment_id)["assets"]}
     assert listing["unassociated_ref"]["export_reach"] == "none"
     assert listing["associated_ref"]["export_reach"] == "runs"
-    for stale in before:
-        assert listing[stale]["export_reach"] == "none", stale
+    # The seed's own three assets are ADOPTED by the first run, so they reach it.
+    for adopted in before:
+        assert listing[adopted]["export_reach"] == "runs", adopted
 
     store = client_ws(client)
     units = store.load_experiment(experiment_id).export_units()
     assert len(units) == 1
     composed = {a["asset_id"] for a in (units[0].draft.get("assets") or [])}
-    assert composed == {"associated_ref"}, composed
+    # The explicitly-associated one plus the three the run adopted. The point of the
+    # assertion is the EXCLUSION: `unassociated_ref` names no run and reaches nothing.
+    assert "associated_ref" in composed, composed
+    assert "unassociated_ref" not in composed, composed
+    assert before <= composed, (before, composed)

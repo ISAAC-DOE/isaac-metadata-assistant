@@ -447,11 +447,15 @@ describe('Connect Your Agent — the draft-write confirmation, whose claim it is
     }
   });
 
-  it('keeps the half that IS structural — an unknown field path writes nothing', () => {
-    // The refusal of an invented or misspelt path is enforced by the server, so
-    // it stays stated plainly. Weakening it while fixing the confirmation claim
-    // would trade one inaccuracy for another.
-    expect(writeRow!.detail).toMatch(/invented or misspelt field path is refused with nothing written/i);
+  it('keeps the half that IS structural — an unknown key writes nothing', () => {
+    /* The refusal of an invented or misspelt key is enforced by the server, so it
+       stays stated plainly. Weakening it while fixing the confirmation claim would
+       trade one inaccuracy for another.
+       "field path" BECAME "key", because the row no longer claims the two branches
+       take the same key space — the record-level branch takes blocking-question keys
+       and refuses an official field path. The structural property is unchanged: an
+       unrecognised key is refused and nothing is written. */
+    expect(writeRow!.detail).toMatch(/invented or misspelt key is refused with nothing written/i);
   });
 
   it('is what the backend says about itself, in the backend’s own words', () => {
@@ -700,5 +704,154 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     // The status the page shows is the phrase the audit prescribes for it.
     expect(AUDIT_SOURCE).toContain('Requires organization configuration');
     expect(MCP_CONNECT_COPY.statusLabel).toBe('Requires organization configuration');
+  });
+});
+
+describe('the write permission describes the reach it actually has', () => {
+  /*
+   * THIS TEST WAS INVERTED, NOT DELETED, and the inversion is the record.
+   *
+   * It used to REQUIRE the copy to say `cannot give a run its spectrum`, and it was
+   * right to: `isaac_update_draft` reached a run's five context/timing fields and the
+   * record-level correction route, and the run-level blocks — series, qc, descriptors,
+   * assets — had no MCP operation at all. The gap was recorded in
+   * `docs/mcp-capability-audit.md` §5A rather than closed, so the copy had to say so.
+   *
+   * §5A.1 closed it: `isaac_list_questions` and `isaac_answer_questions` reach exactly
+   * those blocks, at the level that owns them. A test still requiring the "cannot"
+   * sentence would have been requiring the product to keep a FALSE claim on a screen
+   * whose whole job is to describe a permission truthfully — with the test reading as
+   * evidence of honesty. So it now pins the two properties that survive the change and
+   * are what a scientist is actually deciding on.
+   */
+  it('routes the spectrum, verdict and descriptors to the answer capability, not the field one', () => {
+    const write = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'write-draft');
+    expect(write, 'the write capability row is gone; re-read this test').toBeDefined();
+    /* "FIELD PATHS ONLY" WAS ALSO FALSE, and an independent review measured it one
+       revision after this test was inverted the first time. `isaac_update_draft`'s
+       RECORD-level branch posts to `/edit`, which takes blocking-question keys — so it
+       writes exactly the spectrum and QC verdict that sentence said it could not, and
+       REFUSES the official field path that sentence said was all it took. Only its
+       RUN-level branch is field paths.
+       So the row no longer makes a claim about key spaces at all. It describes what a
+       scientist is granting, and both negative controls stay: neither the original
+       "cannot" sentence nor its replacement may return. */
+    expect(write!.detail).toMatch(/five context and timing fields/i);
+    expect(write!.detail).toMatch(/refused with nothing written/i);
+    expect(write!.detail).not.toMatch(/cannot give a run its spectrum/i);
+    expect(write!.detail).not.toMatch(/field paths only/i);
+
+    const answer = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'answer-questions');
+    expect(answer, 'the answer capability row is gone; re-read this test').toBeDefined();
+    expect(answer!.detail).toMatch(/QC verdict/i);
+    expect(answer!.detail).toMatch(/descriptor/i);
+    // THE LEVEL IS NOT GUESSED, and this is the scientist's protection rather than a
+    // detail: ISAAC does not decide which run measured something.
+    expect(answer!.detail).toMatch(/will not guess which run measured something/i);
+    expect(answer!.detail).toMatch(/refused with nothing written/i);
+    // AND THE CONFIRMATION CAVEAT IS RESTATED HERE, not left one row away. This row
+    // authorises writing scientific judgement on the strength of a boolean the caller
+    // sends and nothing verifies.
+    expect(answer!.detail).toMatch(/assertion that you gave it/i);
+    /* WHAT A CORRECTION DOES TO THE AUDIT TRAIL, IN BOTH DIRECTIONS. This row said
+       "keeping the earlier confirmation beside the new one" flatly, and a review
+       measured it FALSE for a spectrum and a descriptor: `complete.py` ASSIGNS their
+       evidence list rather than appending, so the earlier confirmation is gone. A
+       scientist granting this permission on the strength of an audit-trail promise is
+       owed the exception. Backend-measured in
+       `test_mcp_server.py::test_what_a_CORRECTION_does_to_THE_EARLIER_CONFIRMATION_is_per_field`. */
+    expect(answer!.detail).toMatch(/keeps the earlier confirmation beside/i);
+    expect(answer!.detail).toMatch(/REPLACES it for a spectrum or a descriptor/);
+
+    const scope = MCP_PERMISSIONS.find((p) => p.id === 'draft-write');
+    expect(scope, 'the draft.write scope row is gone; re-read this test').toBeDefined();
+    expect(scope!.allows).not.toMatch(/does not reach a run.s spectrum/i);
+    expect(scope!.allows).toMatch(/does not export, submit or finalise/i);
+  });
+
+  it('does not claim a new run starts empty, because the first one does not', () => {
+    /*
+     * A SEPARATE HONESTY DEFECT, found while closing §5A and not caused by it. This
+     * row read "It starts empty — no value is copied into it and none is invented",
+     * which was true when it was written and stopped being true when
+     * `routes._seed_for_new_run` began carrying the record's run-level values onto the
+     * FIRST run — a change made because a first run that started empty silently
+     * deleted evidenced values from the record it exports.
+     *
+     * Both halves are required. "It inherits everything" is as false as "it starts
+     * empty": a LATER run does start empty, because copying one run's spectrum onto
+     * another asserts they measured the same thing.
+     */
+    const add = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'add-run');
+    expect(add, 'the add-run capability row is gone; re-read this test').toBeDefined();
+    expect(add!.detail).not.toMatch(/starts empty — no value is copied/i);
+    expect(add!.detail).toMatch(/first run carries across/i);
+    expect(add!.detail).toMatch(/every run after the first starts empty/i);
+    expect(add!.detail).toMatch(/no value is ever invented/i);
+    /* AND IT SAYS "MOST", NOT "WHAT THE RECORD HOLDS". A review found the umbrella
+       phrase overstated it in both directions: `_seed_for_new_run` deliberately does
+       NOT carry the six `system.configuration.*` fields (whether two runs may differ
+       in detector model is an open scientific question, and copying them would answer
+       it), and the earlier parenthetical named only three of the six things that DO
+       carry. Both are now stated, including the cost of the omission. */
+    expect(add!.detail).toMatch(/carries across most of what/i);
+    expect(add!.detail).toMatch(/do NOT move/);
+    expect(add!.detail).toMatch(/dropped from a record exported per run/i);
+  });
+
+  it('M7 — the withheld set is named by its members, not by a category two of them are not in', () => {
+    /*
+     * "THE INSTRUMENT AND DETECTOR SETTINGS" UNDER-STATED WHAT IS DROPPED. The
+     * unclassified namespace has SIX members (`extract/structured.FIELD_MAP`), and
+     * `proposal_id` and `session_id` are ADMINISTRATIVE identifiers — not settings of
+     * an instrument or a detector, and not something a reader would picture under that
+     * phrase. They are exactly what somebody reconciling a run against a beamtime
+     * schedule looks for, and they are dropped from a record exported per run.
+     *
+     * `workspace.field_level`'s own docstring records the same undercount being found
+     * and corrected there — "SIX fields, not the five this list used to name" — by
+     * enumerating the map rather than reading the prose. This copy was the next copy
+     * of the same mistake, in the surface a reader uses to decide what to grant.
+     */
+    const add = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'add-run');
+    expect(add, 'the add-run capability row is gone; re-read this test').toBeDefined();
+    expect(add!.detail).not.toMatch(/The instrument and detector settings do NOT move/);
+    for (const named of [/detector model/i, /monochromator/i, /spectrometer/i, /scan count/i]) {
+      expect(add!.detail).toMatch(named);
+    }
+    // The two that are NOT instrument settings, named as such.
+    expect(add!.detail).toMatch(/proposal and session identifiers/i);
+    expect(add!.detail).toMatch(/administrative rather than instrument settings/i);
+    // The count is stated, so a future edit that drops one is visible.
+    expect(add!.detail).toMatch(/Six fields do NOT move/);
+    expect(add!.detail).toMatch(/all six are dropped/i);
+  });
+
+  it('I2 — the check-run row names all three gates, so none is reached by elimination', () => {
+    /*
+     * "THE NO-GUESSING DRAFT CHECK AND THE OFFICIAL ISAAC SCHEMA" reads as an
+     * exhaustive pair, so an agent meeting an unfamiliar finding concludes it is the
+     * schema's. `export.py` runs `check_exactness` on the assembled record BETWEEN
+     * those two (`:339`) and folds a refusal into `draft_report` (`:339-343`), returning
+     * `official_report=None` — so a finding this tool surfaces may belong to a gate
+     * neither named validator owns, and the reply carries no discriminator.
+     *
+     * `CLAUDE.md` §12: the exactness gate is ISAAC's, not upstream's, and §1 makes the
+     * schema not ours to speak for. Reaching that attribution by omission is the same
+     * claim made quietly, which is why the fix is naming the third rather than
+     * softening the other two.
+     */
+    const check = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'check-run');
+    expect(check, 'the check-run capability row is gone; re-read this test').toBeDefined();
+    expect(check!.detail).not.toMatch(
+      /no-guessing draft check and the official ISAAC schema say/,
+    );
+    expect(check!.detail).toMatch(/no-guessing draft check/i);
+    expect(check!.detail).toMatch(/anchored-pattern exactness gate/i);
+    expect(check!.detail).toMatch(/official ISAAC schema/);
+    // And it says the reply does not label which of the three spoke.
+    expect(check!.detail).toMatch(/does not label which of the three/i);
+    // The read-only claim is untouched.
+    expect(check!.detail).toMatch(/writes nothing and changes nothing/i);
   });
 });

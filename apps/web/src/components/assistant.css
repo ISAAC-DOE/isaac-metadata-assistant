@@ -1660,6 +1660,170 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .guided-staged .mono { font-size: 11.5px; color: var(--text-muted); }
 
+/* WHOSE question this is — shown only when a RUN owns it. */
+.guided-owner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -2px 0 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.guided-owner-label {
+  flex: none;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-token);
+  padding: 2px 6px;
+}
+
+/* Entering a structured value a record has no worked example for.
+
+   A GRID THAT COLLAPSES TO ONE COLUMN, because this is the densest form in the app and
+   it has to survive 320px. `minmax(0, 1fr)` rather than `1fr`: a grid item's default
+   `min-width: auto` is its CONTENT width, so a long placeholder or an unbroken token
+   would push the track wider than the container and scroll the page sideways. */
+.structured-entry {
+  margin-bottom: 12px;
+  min-width: 0;
+}
+.structured-entry-lead {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+.structured-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 10px 14px;
+  min-width: 0;
+}
+.structured-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.structured-label {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* The required marker. `abbr[title]` gives it an accessible name ("required") instead
+   of an asterisk a screen reader reads as punctuation or skips. */
+.structured-label abbr {
+  color: var(--text-secondary);
+  text-decoration: none;
+  cursor: help;
+}
+.structured-field .input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+}
+.structured-entry-json {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  /* Vertical only: a horizontally resizable textarea can be dragged past its container
+     and overflow the page at narrow widths. */
+  resize: vertical;
+  white-space: pre;
+  overflow-x: auto;
+}
+.structured-entry-note {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+  margin: 10px 0 0;
+}
+.structured-entry-error {
+  font-size: 12px;
+  /* `--fail-text`, the token the rest of the app uses for a refusal. An earlier
+     draft wrote `var(--danger, ...)` and `--danger` is defined nowhere, so the
+     fallback always won and a later definition would have changed this silently. */
+  color: var(--fail-text);
+  line-height: 1.55;
+  margin: 10px 0 0;
+  font-weight: 500;
+}
+
+/* The QC verdict blocker: a closed choice plus the reasoning behind it.
+
+   A RADIO GROUP RATHER THAN A SELECT, deliberately. All four verdicts are visible
+   without opening anything, so a scientist sees that "compromised" and "failed" are
+   distinct options rather than discovering it inside a dropdown; and an unset radio
+   group has no value at all, whereas a <select> shows its first option as though it
+   were chosen. The blocker's own text says no verdict is assumed, "not even 'valid'",
+   and the control has to be able to say that. */
+.guided-verdict-set {
+  /* `--cover-border` directly. An earlier version wrote
+     `var(--border-subtle, var(--cover-border))` and `--border-subtle` is defined
+     nowhere in the design system, so the fallback always won — and if that token
+     were later defined for something else this control would change silently. */
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-token);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  min-width: 0;
+}
+.guided-verdict-legend {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  padding: 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.guided-verdict-option {
+  /* Left at the default a native radio paints itself in the VIEWER'S OS accent, which
+     is a colour this app has never chosen and which carries no meaning here — the same
+     reason the checkboxes in graph.css, assets.css and run-compare.css set it. Pinned
+     by `native-control-accent.test.ts`, which caught this control shipping without it. */
+  accent-color: var(--action);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 14px;
+  padding: 4px 0;
+  /* 32px keeps the whole row a touch target at 390/320px rather than the radio
+     dot alone, which is ~13px and below every guideline. */
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.guided-verdict-note-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.guided-verdict-note {
+  width: 100%;
+  max-width: 100%;
+  /* `resize: vertical` only — a horizontally resizable textarea can be dragged wider
+     than its container and overflow the page at narrow widths. */
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.guided-verdict-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+  margin: 10px 0;
+}
+
 /* A message whose text the browser-transcript scrubber withheld. Muted and italic:
    it is an absence, not an error — nothing failed, and the live turn was answered
    normally. Only the archived copy is affected. Before this existed the message

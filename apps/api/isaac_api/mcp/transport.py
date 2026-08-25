@@ -1,4 +1,4 @@
-"""The Streamable HTTP transport: the thing that makes the eight tools reachable.
+"""The Streamable HTTP transport: the thing that makes the tools reachable.
 
 WHY STREAMABLE HTTP AND NOT STDIO
 =================================
