@@ -81,3 +81,98 @@ export const ASSISTANT_COMPOSER_HELPER =
 // assistant is advisory and never gates anything.
 export const ASSISTANT_UNAVAILABLE =
   'The assistant is unavailable right now. The record, workflow, evidence, and validation are still available.';
+
+/*
+ * THE PANEL DID NOT SAY THIS, AND A COMMITTED DOCUMENT SAID THAT IT DID.
+ *
+ * `docs/ai-integration-decision-packet.md` §3 (UPDATED 2026-08-19) refuses to put
+ * the model-backed assistant seam on any product screen, and the mitigation it
+ * offers for that refusal is this sentence:
+ *
+ *   "The Assistant panel goes on saying 'There is no language model', which is
+ *    true of the shipped deterministic Q&A and stays true."
+ *
+ * MEASURED, AND FALSE. The panel has never said it. Before this constant, the
+ * claim existed at exactly two places in the product, both in
+ * `lib/settingsContent.ts` (`:580`, `:587`) — Settings → AI & Automation, behind a
+ * tab. The panel's own persistent copy is `SUBORDINATE_CAPTION` (authority) and
+ * `ASSISTANT_COMPOSER_HELPER` (scope); neither says a word about whether a model
+ * is involved or where a typed question goes. So a scientist typing into the
+ * composer was told nothing about it on the screen where the question arises.
+ *
+ * WHY THAT IS MORE THAN A COSMETIC GAP. §3 uses the panel's supposed disclosure
+ * as the JUSTIFICATION for surfacing no seam status: the argument is that the
+ * reader is already told there is no model, so a seam report would only imply a
+ * model is nearly here. The premise was untrue, so the mitigation the decision
+ * rests on did not exist. That is the same structural defect as
+ * `CAPTURE_COPY.voiceSeamUnreported`'s — a disclosure conditional on the very
+ * thing it discloses — and the same class as the three false claims recorded in
+ * `CLAUDE.md` §11, which every test passed through.
+ *
+ * WHAT THIS DOES NOT DO, and the distinction is the whole authorization basis.
+ * It reports NO seam. It names no provider, no decision, no missing item and no
+ * `docs/ai-integration-decision-packet.md` reference, and it reads
+ * `GET /api/providers/capabilities` never. §9's amendment of 2026-08-12 draws the
+ * line in a committed sentence — "if a screen would have to say a provider exists
+ * in order for the work to be visible, that screen is out of scope until D3–D8
+ * are answered" — and this needs no provider to exist in order to be true. It is
+ * a statement about the shipped deterministic assistant, which §3 itself says
+ * "is true ... and stays true".
+ *
+ * IT IS SCOPED TO THE PANEL, ON PURPOSE. Settings says "Nothing you type, and
+ * nothing shown on any screen here, is sent to a model provider" — a claim about
+ * the whole application, which Settings is the right surface to make. This one
+ * says "Nothing you type HERE", because the panel can speak for the panel. A
+ * component asserting a deployment-wide negative is how the Governance and Load
+ * Materials copy came to be false (`__tests__/upload-claim-parity.test.tsx`),
+ * and the narrower claim is the one this file can defend.
+ *
+ * IT IS TWO SENTENCES, NOT SETTINGS' FOUR-CLAUSE PARAGRAPH, AND THE CUT IS A
+ * DESIGN DECISION WITH A MEASUREMENT BEHIND IT. The first version of this
+ * constant restated all of `settingsContent.ts:587`: the two facts below plus
+ * "a bounded, deterministic catalog over the deployment's own data" plus
+ * "refuses anything outside it rather than guessing" — ~~244 characters~~.
+ *
+ * THAT FIGURE WAS NOT REPRODUCIBLE AND IS CORRECTED IN PLACE. Nothing committed
+ * measures 244. The three numbers a reader can actually check are: this constant,
+ * 92 characters exactly; `settingsContent.ts:587`, the paragraph it declines to
+ * restate, 272; and a panel-scoped reconstruction of the same four clauses (with
+ * "Nothing you type here" in place of Settings' application-wide phrasing), 238.
+ * 244 described a discarded draft, and it was stated as fact. The 92 and the 272
+ * are now ASSERTED from the committed strings in
+ * `__tests__/assistant-model-claim-parity.test.tsx` §2, so neither can drift into
+ * prose again.
+ *
+ * The cut still stands on the measurement, whichever of 238 or 272 you take as
+ * the counterfactual: either is roughly two and a half times this constant. It
+ * renders at 11px inside the panel's STICKY DOCK, in a rail that is content-sized
+ * and often ~300px wide, which is roughly six permanent lines above a transcript that
+ * already competes with a composer, a disclosure trigger, the prompt controls and
+ * the advisory caption. `assistant-capabilities-panel-height.test.tsx` exists
+ * because that dock's height is already load-bearing.
+ *
+ * The two clauses that were cut are the two the panel does not need to make,
+ * because the panel already makes them under their own controls:
+ * `ASSISTANT_COMPOSER_HELPER` names the grounded scopes directly beneath the
+ * input, and `CAPABILITIES_BOUNDARY` — inside "What Can I Ask?" — says "These
+ * families are the whole set ... anything outside them is refused, not guessed".
+ * The two that are KEPT are the two nothing else on this panel says at all.
+ *
+ * That division is also the actual lesson of `upload-claim-parity.test.tsx`,
+ * which is worth stating because the tempting reading is the opposite one. The
+ * defect there was not that four sites said different amounts; it was that three
+ * of them made a claim BROADER than the site could defend. Settings speaks for
+ * the application and states the whole paragraph; the panel speaks for the panel.
+ * Requiring every site to recite every clause is how a site ends up asserting
+ * something it cannot see.
+ *
+ * THE DAY A MODEL IS CONFIGURED, THIS STRING BECOMES FALSE. That is deliberate
+ * and it is the point: enabling capability B is a disclosure change in the same
+ * release as the capability, not after it. `__tests__/assistant-model-claim-parity.test.tsx`
+ * pins this site and the Settings site together over the two claims BOTH must
+ * make, pins the other two clauses to the panel controls that own them, and pins
+ * POLARITY, because `upload-claim-parity`'s first version passed an inverted
+ * disclosure.
+ */
+export const ASSISTANT_NO_MODEL_CLAIM =
+  'There is no language model in this build. Nothing you type here is sent to a model provider.';

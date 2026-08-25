@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "38757be008ed3072751b7d3a61669923771c79bb0e8c6e9cba156d096b0b0ad5"
+        "sha256": "ef7b0f57501115f1b62558b17cd0ce7152bfdd26a3f718c1f3a8b950e04e10ab"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "a054b5b97d471684e2ec4580e79e9c11a9d06b784ada0d90c87add3ab401faa8"
+        "sha256": "35a96ec87c9ec3778b91cb233064bf1275efcf21416c7922dd113b2566ec61c1"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10508,7 +10508,7 @@
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
-        "sha256": "205db39f047e737d7c3b7cffbee66b13ef7203526e6d5472fe681bbec61001fe"
+        "sha256": "6121ac209e53a43cdbb2505960c4fd9b3066672a76b1945f66960df6efc0eb13"
       },
       {
         "path": "apps/web/src/lib/labels.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "9bdde4a1fad40e8129a7a9a7ede3df02246972b0534a3542e8888ade6a37ce78"
+    "served_manifest_fingerprint": "1c72ffe7621e4d5b3cbed23a9dcb5a16a46088ae3eb895d7e73f8f3b7900f670"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

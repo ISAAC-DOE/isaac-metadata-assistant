@@ -75,6 +75,28 @@ class ContextItem:
     origin: str
 
     def __post_init__(self) -> None:
+        # THE TYPE CHECK IS NOT DEFENSIVE PADDING — the truthiness test alone let a
+        # STRUCTURE through. `{"key": "k", "text": {"submit": true}, "origin": "o"}`
+        # is a non-empty dict, so it satisfied `not self.text` and constructed
+        # cleanly; the route then answered `501`, which reads as "your request was
+        # fine, this build has no provider". It was not fine. And
+        # `DeterministicAssistantFake.answer` concatenates `text`, so the same item
+        # raised `TypeError` on `dict + str` — a `500` out of the one code path
+        # whose entire subject is refusing honestly.
+        #
+        # The annotations are `str` and are not enforced at runtime by anything
+        # else: the route constructs this from `entry.get(...)` with an explicit
+        # `type: ignore`, so this is the only place the shape can be established.
+        # Refusing here means the route's existing `except (ValueError, TypeError)`
+        # branch relays ONE rule from ONE place, which is why the check is added
+        # here rather than duplicated into `routes.py`.
+        for name, value in (("key", self.key), ("text", self.text), ("origin", self.origin)):
+            if not isinstance(value, str):
+                raise TypeError(
+                    f"a context item's {name} must be a string, not "
+                    f"{type(value).__name__} — a context item carries text a caller "
+                    "chose to send, never a structure for the seam to interpret"
+                )
         if not self.key or not self.text or not self.origin:
             raise ValueError(
                 "a context item must have a key, text, and a stated origin — "

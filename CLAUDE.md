@@ -681,7 +681,14 @@ Current state:
   `test_about_and_openapi.py` pins. So the sentence was not describing a gap; it was describing
   absent *routes* that existed. **The true residue, which is what the clause was reaching for and
   what still holds: no product screen advertises the assistant seam** — deliberately, per
-  `docs/ai-integration-decision-packet.md` §9. Voice is the opposite case and must not be folded back
+  `docs/ai-integration-decision-packet.md` §9. **Added 2026-08-25, so the next reader does not
+  re-derive it:** §3's stated mitigation for surfacing no seam status — that the Assistant panel
+  already says there is no language model — **was absent on the panel when §3 relied on it** (the
+  user-facing claim lived in Settings → AI & Automation, behind a tab), and now exists as
+  `ASSISTANT_NO_MODEL_CLAIM` rendered in the panel's dock on all five mounts, pinned together with
+  the §3 decision by `apps/web/src/__tests__/assistant-model-claim-parity.test.tsx`. It names no
+  seam, no provider and no decision, which is precisely why it closes §3's premise without
+  weakening the sentence above. Voice is the opposite case and must not be folded back
   in with it: `TranscriptCapturePanel` is a **shipped** voice surface, mounted ungated at
   `apps/web/src/screens/RecordWorkbench.tsx:687`, so any future sentence pairing "assistant and
   voice" as equally unsurfaced is wrong about the second half. See also the D6 supersession, which is

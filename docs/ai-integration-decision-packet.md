@@ -396,9 +396,29 @@ module's own docstring prescribes.
 **NO PRODUCT SCREEN CONSUMES IT, and that is a decision rather than an unfinished edge.**
 §9's rule is *"build nothing that implies any of it exists"*, and a panel reporting an
 assistant seam — even one reporting it as unconfigured — would put a model-backed assistant
-in front of a scientist as a thing that is nearly here. The Assistant panel goes on saying
-*"There is no language model"*, which is true of the shipped deterministic Q&A and stays
-true. `GET /api/providers/capabilities` reports the seam's status for a client that asks;
+in front of a scientist as a thing that is nearly here.
+
+~~The Assistant panel goes on saying *"There is no language model"*, which is true of the
+shipped deterministic Q&A and stays true.~~ **THAT WAS FALSE WHEN IT WAS WRITTEN, and the
+decision above rested on it.** Measured at `b7008b8`, before the change described next:
+`rg -in 'language model' apps/web/src/components/AssistantPanel.tsx` → **exit 1**. The claim
+lived only in `lib/settingsContent.ts:580,587` — Settings → AI & Automation, behind a tab.
+**The screen a scientist actually types into said nothing about whether a model is involved,
+or where their words go.** So the mitigation this decision cites as the reason no surface is
+needed did not exist on the surface it names.
+
+It exists now. `ASSISTANT_NO_MODEL_CLAIM` — *"There is no language model in this build.
+Nothing you type here is sent to a model provider."* — renders in the panel's dock beneath
+the composer on all five mounts, as an `aria-describedby` target of the composer input
+(neither it nor the pre-existing composer helper had any programmatic relation to that
+input). **It announces no seam, names no provider and no decision, never reads
+`/providers/capabilities`, and is true with no provider in existence** — so it is the
+mitigation §3 assumed, not a step toward the surface §3 forbids. The sentence is struck
+rather than simply corrected because *"the decision was sound and its stated mitigation was
+absent"* is the thing worth remembering: this is the same shape as the transcript panel's
+disclosure that was conditional on the very thing it disclosed.
+
+`GET /api/providers/capabilities` reports the seam's status for a client that asks;
 `TranscriptCapturePanel` is the precedent for consuming that honestly if a surface is ever
 authorized.
 
@@ -416,15 +436,53 @@ because a pipeline's `$?` is the last command's status):
 rg --text -n -i 'anthropic|openai|whisper|deepgram|assemblyai|google-cloud-speech|
    azure.*cognitiveservices|langchain|litellm|transformers|huggingface|ollama|bedrock|vertexai' \
    -g '!node_modules' -g '!.git' -g '!graphify-out' .
-→ every hit is prose in a document, EXCEPT one false positive worth recording:
+→ ~~every hit is prose in a document, EXCEPT one false positive worth recording:~~
+  **RE-MEASURED 2026-08-25: 18 hits across 6 files, rg exit 0 — and one of those files is
+  source, so "every hit is prose in a document" no longer holds.**
+  (**20 after this correction was written**, because writing it added two vendor names to
+  THIS file. That is not pedantry: 9 of the 20 are now in this document, so anyone re-running
+  grep 1 must expect the packet to be its own largest source of hits, and a future editor who
+  finds 20 rather than 18 has not found a regression. A grep whose subject includes the file
+  that reports it cannot have a stable count.)
+  Five hits are in apps/api/tests/test_providers.py, and they are vendor names used as TEST
+  DATA inside refusal guards, which is the opposite of a call site:
+    :162-163  "openai" / "anthropic" as env values that must resolve to `unconfigured`
+    :228      "anthropic" as a garbage value that must FAIL provider validation
+    :627-628  two entries in that file's FORBIDDEN-IMPORT denylist, which also lists
+              `httpx`, `requests`, `aiohttp`, `boto3`, `socket` and `subprocess`
+  A vendor name inside a prohibition is evidence the prohibition exists. It is still worth
+  recording that the grep now hits source, because the next reader cannot tell these apart
+  from an SDK import without opening the file — which is the whole reason this correction is
+  written down rather than the count quietly updated.
+  The remaining 13 hits are prose in documents (7 of them in THIS file), plus the one false
+  positive originally recorded, which is unchanged:
   apps/web/src/styles/tokens.css:111  /* … depth is a whisper */
   (re-checked in isolation: `rg --text -n -i 'whisper' apps src scripts` → that one CSS
-   comment only. A naive grep for an ASR vendor name hits English prose.)
+   comment only, rg exit 0. A naive grep for an ASR vendor name hits English prose.)
 
 # 2. outbound HTTP in the runtime backend and the truth core
 rg --text -n -e 'httpx' -e 'requests\.post' -e 'requests\.get' -e 'aiohttp' -e 'urllib\.request' \
    apps/api/isaac_api src/isaac_records
-→ exit 1 (zero matches)
+→ ~~exit 1 (zero matches)~~ **RE-MEASURED 2026-08-25: FALSE — and this was the load-bearing
+  one, because it is the measurement that makes "no outbound call" safe to assert.**
+  rg exits **0**, with **7 hits across 2 files**:
+    apps/api/isaac_api/mcp/client.py:30     docstring prose
+    apps/api/isaac_api/mcp/client.py:66     import httpx        ← RUNTIME code, not a test,
+    apps/api/isaac_api/mcp/client.py:156                          not a comment
+    apps/api/isaac_api/mcp/client.py:157
+    apps/api/isaac_api/mcp/client.py:308
+    apps/api/isaac_api/mcp/transport.py:12  docstring prose
+    apps/api/isaac_api/mcp/transport.py:48  docstring prose
+  THE CONCLUSION SURVIVES, and the reason is exactly the distinction this grep was standing
+  in for. `client.py:156-159` builds `httpx.ASGITransport(app=self.app)` and an
+  `AsyncClient` whose `base_url` is the hardcoded literal `"http://isaac.invalid"`. Both are
+  literals: `rg -n 'getenv|environ|base_url' apps/api/isaac_api/mcp/client.py` returns the
+  `base_url` line and nothing else, so no host, scheme, or transport is env-driven. An ASGI
+  transport dispatches into the FastAPI application object in-process — it opens no socket
+  and resolves no DNS (`.invalid` is an RFC 2606 reserved TLD that never resolves, which is
+  why that base URL is safe to hardcode). So *"no outbound HTTP call site exists in runtime
+  code"* is still true. *"httpx does not appear in runtime code"* never was, and the grep as
+  written asserted the second while the argument only needed the first.
 
 # 3. audio capture APIs, whole tree
 rg --text -n -i 'MediaRecorder|SpeechRecognition|webkitSpeech|getUserMedia|AudioContext|
@@ -438,10 +496,29 @@ rg --text -n -i 'MediaRecorder|SpeechRecognition|webkitSpeech|getUserMedia|Audio
 
 **One precision that a bare "no HTTP client" would get wrong.** `httpx>=0.27` **is** a declared
 dependency — `pyproject.toml:23`, in the `api` optional extra. So the *library* is installable;
-what does not exist is a **call site**. Its only occurrence in `apps/api` or `src` is a comment in
-a test (`apps/api/tests/test_deploy_config.py:117`). The honest statement is therefore *"no
-outbound HTTP call site exists in runtime code"*, not *"ISAAC could not make an HTTP request"*.
-`docs/dean-integration-review-brief.md:28` records the same conclusion from an equivalent grep.
+what does not exist is a call site that **leaves the machine**.
+~~Its only occurrence in `apps/api` or `src` is a comment in a test
+(`apps/api/tests/test_deploy_config.py:117`).~~ **FALSE, and corrected 2026-08-25 by grep 2
+above:** httpx occurs 7 times across 2 runtime modules, and `mcp/client.py:66` imports it. That
+test comment is real — `test_deploy_config.py:117`, about httpx refusing non-ASCII `str` header
+values — but it was never the *only* occurrence, and this sentence is why the false reading of
+grep 2 went unchallenged for as long as it did: two places asserted it, so checking one against
+the other confirmed nothing.
+
+The honest statement is therefore *"no outbound HTTP call site exists in runtime code — the one
+httpx client in the tree is an in-process ASGI transport against the application object"*. It is
+**not** *"httpx does not appear in runtime code"*, and it is **not** *"ISAAC could not make an
+HTTP request"*: the library is present and importable, so what stands between this build and an
+outbound call is a decision and a review, not an absent dependency.
+`docs/dean-integration-review-brief.md:28` records the same conclusion from an equivalent grep —
+and, being an equivalent grep, it should be re-read rather than cited as corroboration.
+
+> **STANDING NOTE, added 2026-08-25 — a PR that edits §3 MUST re-run §3's three greps and paste
+> what they actually print.** All three have now been found stale at least once: grep 3 in
+> 2026-08-24 (zero → 45 hits), and greps 1 and 2 in 2026-08-25 (grep 2's stated `exit 1` was
+> never re-checked after the MCP package landed). A grep result in prose is a measurement with a
+> timestamp, not a property of the repository; it decays silently, and it decays in the
+> reassuring direction, because the sentence around it goes on reading as though it still held.
 
 ### The app currently tells users, in writing, that there is no model
 

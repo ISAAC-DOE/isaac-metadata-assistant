@@ -388,7 +388,7 @@ export function stageAnswer(
     ...(blockerKey ? { blockerKey } : {}),
     ...(runId ? { runId } : {}),
     value, // the user's value, verbatim — never invented
-    origin: origin ?? 'user',
+    origin: origin ?? PROPOSAL_ORIGIN.DEFAULT,
     ...(evidence
       ? { classification: evidence.classification, explanation: evidence.explanation }
       : {}),
@@ -404,6 +404,50 @@ export function stageAnswer(
  * propose a scientific value (§7 of the project instructions).
  */
 export type ProposeSource = 'user' | 'candidate' | 'memory' | 'graph';
+
+/**
+ * EVERY `origin` A PROPOSAL IN THIS APPLICATION CAN CARRY. Exhaustive by
+ * construction: the three producers are `stageAnswer`'s default and the two labels
+ * `proposeForField` passes, and each of them reads its literal from this object
+ * rather than spelling one, so a new origin cannot appear without appearing here.
+ *
+ * WHY IT IS A CONSTANT AND NOT A COMMENT. `lib/assistantSession.ts` rehydrates a
+ * `Proposal` out of `sessionStorage`, which is input rather than state, and it needs
+ * a closed set to check it against. An ALLOWLIST rather than a denylist, for the
+ * reason `proposeForField`'s own source guard is one: a denylist has to predict the
+ * next author's spelling, and the shape of the mistake this project has already
+ * made once (`__tests__/assistant-propose.test.ts`) is a guard rewritten from the
+ * first form to the second.
+ *
+ * `user` is here because `stageAnswer` defaults to it when a caller supplies no
+ * origin. No production caller does — `proposeForField` always names one — but the
+ * parameter is optional, so the default is producible and is therefore legitimate.
+ */
+export const PROPOSAL_ORIGIN = {
+  /** `stageAnswer`'s default, for a caller that names no origin. */
+  DEFAULT: 'user',
+  /** A focused answer the scientist typed or selected. */
+  USER: 'user-provided',
+  /** A value taken verbatim from the field's own evidence classification. */
+  CANDIDATE: 'candidate (evidence-grounded)',
+} as const;
+
+/** The allowlist, as a set, for the rehydration boundary to check against. */
+export const PROPOSAL_ORIGINS: ReadonlySet<string> = new Set(
+  Object.values(PROPOSAL_ORIGIN),
+);
+
+/**
+ * Whether `value` is an origin this application can have produced.
+ *
+ * ABSENCE IS NOT ACCEPTED, and that is the load-bearing half. A check that let an
+ * origin-less proposal through would be decoration: a forger who can invent an
+ * origin can also omit the key. Every proposal this code constructs goes through
+ * `stageAnswer`, which always sets one.
+ */
+export function isRecognisedProposalOrigin(value: unknown): boolean {
+  return typeof value === 'string' && PROPOSAL_ORIGINS.has(value);
+}
 
 /** One staging request: a NAMED field, the source it comes from, and (for a
  *  user answer or an explicitly-selected conflict option) the value verbatim. */
@@ -457,7 +501,13 @@ export function proposeForField(
     // classification at all — a user-typed value is never described by the
     // field's evidence classification, so strip any copied classification
     // unconditionally (defensive hardening from the P29.6 independent review).
-    const p = stageAnswer(ctx, { field, blockerKey, runId, value, origin: 'user-provided' });
+    const p = stageAnswer(ctx, {
+      field,
+      blockerKey,
+      runId,
+      value,
+      origin: PROPOSAL_ORIGIN.USER,
+    });
     delete p.classification;
     return p;
   }
@@ -471,10 +521,10 @@ export function proposeForField(
     case 'conflicting_evidence':
       // Never auto-pick a winner; only an explicitly selected option may stage.
       if (value === undefined) return null;
-      return stageAnswer(ctx, { field, value, origin: 'candidate (evidence-grounded)' });
+      return stageAnswer(ctx, { field, value, origin: PROPOSAL_ORIGIN.CANDIDATE });
     case 'inferred_candidate':
     case 'supported':
-      return stageAnswer(ctx, { field, value, origin: 'candidate (evidence-grounded)' });
+      return stageAnswer(ctx, { field, value, origin: PROPOSAL_ORIGIN.CANDIDATE });
     default:
       return null; // insufficient/other → nothing defensible to stage
   }
