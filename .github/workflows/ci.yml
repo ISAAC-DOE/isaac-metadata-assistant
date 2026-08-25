@@ -1967,6 +1967,31 @@ jobs:
             "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, run_count, projector) VALUES ('$parent', 0, 0, 'write-path')" \
             "experiment_generation"
 
+          # THE OTHER THREE NOT NULLs, WHICH WERE DECLARED AND UNEXERCISED. An
+          # independent review measured that only ONE of 0005's four NOT NULLs was
+          # ever aimed at — `experiment_generation`, above — while `experiment_rev`,
+          # `run_count` and `projector` were declared in the migration and blamed by
+          # nothing. Each is a column a writer could plausibly omit, and each omission
+          # would be a claim that says less than it appears to.
+          #
+          # THE BLAME STRING IS `column "<name>"`, NOT THE BARE NAME, and the reason
+          # is specific to `projector`: bare `projector` also appears inside
+          # `isaac_run_projection_projector_known`, so a CHECK failure would satisfy a
+          # bare-name grep and the case would pass while proving the wrong thing.
+          # (It would not, in fact, be a CHECK failure — `projector IN (...)` with a
+          # NULL evaluates to NULL, which a CHECK treats as satisfied, so NOT NULL is
+          # what must fire. That is exactly the distinction the precise blame keeps
+          # honest rather than assumed.)
+          refuse "a claim with no experiment_rev at all" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_generation, run_count, projector) VALUES ('$parent', 'ci', 0, 'write-path')" \
+            'column "experiment_rev"'
+          refuse "a claim with no run_count at all" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, projector) VALUES ('$parent', 0, 'ci', 'write-path')" \
+            'column "run_count"'
+          refuse "a claim that does not say who made it" \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count) VALUES ('$parent', 0, 'ci', 0)" \
+            'column "projector"'
+
           # THE PRIMARY KEY: one CURRENT claim per experiment, no history.
           psql -v ON_ERROR_STOP=1 -c \
             "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$parent', 0, 'ci', 0, 'write-path')"
@@ -2058,6 +2083,129 @@ jobs:
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_runs WHERE experiment_id = '$eid'"
           psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id = '$eid'"
           echo "0005: the application's own claim matches the document AND the rows"
+
+      # THE OPERATOR'S OWN STAGE-2b GATE, EXECUTED — AND THE FIRST `backfill` ROW
+      # THIS REPOSITORY HAS EVER COMMITTED TO ANY ENGINE.
+      #
+      # WHY THIS STEP EXISTS. An independent review measured that the gate an
+      # operator is asked to act on had ZERO engine evidence behind it.
+      # `docs/migration-approval-packet-0005.md` §8A tells the operator to run two
+      # queries and to proceed only if both return 0 — and NEITHER HAD EVER
+      # EXECUTED ANYWHERE. No step and no test ever constructed a projection row
+      # whose `(experiment_rev, experiment_generation)` DISAGREES with the document,
+      # so "the stale query finds a stale claim" was a belief about SQL rather than
+      # an observation, in the one place a wrong belief would let a reader be
+      # switched on over incomplete data.
+      #
+      # AND THE `backfill` VALUE HAD ONLY EVER BEEN REFUSED-ADJACENT. The step above
+      # asserts the application stamps `write-path`; the constraint step asserts an
+      # UNKNOWN projector is refused. Nothing had ever committed `backfill`, so the
+      # CHECK's ACCEPTANCE of the value the entire gate is phrased in terms of was
+      # inferred from reading the CHECK. It is measured here.
+      #
+      # THE COUNTS ARE READ AS DELTAS, DELIBERATELY. The two queries are run
+      # VERBATIM as §8A prints them, which means they are unscoped: they describe the
+      # whole database, and earlier steps in this job may leave experiments behind. A
+      # baseline taken immediately before the fixtures makes the assertion about THIS
+      # step's rows without rewriting the operator's query into something the
+      # operator will never run. Which rows moved is then read back by id, using the
+      # same predicate.
+      - name: Prove the Stage-2b gate queries detect what the packet says they detect
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-projection-gate
+        run: |
+          set -euo pipefail
+
+          # VERBATIM FROM `docs/migration-approval-packet-0005.md` §8A. If these two
+          # strings ever stop matching that section, the packet is describing a query
+          # nothing has run.
+          q_never="SELECT count(*) FROM isaac_experiments e WHERE NOT EXISTS (SELECT 1 FROM isaac_run_projection p WHERE p.experiment_id = e.experiment_id)"
+          q_stale="SELECT count(*) FROM isaac_experiments e JOIN isaac_run_projection p ON p.experiment_id = e.experiment_id WHERE p.experiment_rev <> COALESCE((e.state ->> 'rev')::bigint, 0) OR p.experiment_generation <> COALESCE(e.state ->> 'generation', '')"
+
+          before_never=$(psql -Atc "$q_never")
+          before_stale=$(psql -Atc "$q_stale")
+          echo "baseline: never_projected=$before_never stale=$before_stale"
+
+          fresh=01CIGATEFRESH00000000000A0
+          stalerev=01CIGATESTALEREV000000000A
+          stalegen=01CIGATESTALEGEN000000000A
+          absent=01CIGATEABSENT0000000000A0
+
+          # FOUR EXPERIMENTS, ONE PER STATE THE FOUR-STATE READ MODEL DISTINGUISHES.
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_experiments (experiment_id, state) VALUES ('$fresh', '{\"id\": \"$fresh\", \"rev\": 3, \"generation\": \"gen-fresh\"}')"
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_experiments (experiment_id, state) VALUES ('$stalerev', '{\"id\": \"$stalerev\", \"rev\": 5, \"generation\": \"gen-stale\"}')"
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_experiments (experiment_id, state) VALUES ('$stalegen', '{\"id\": \"$stalegen\", \"rev\": 2, \"generation\": \"gen-new\"}')"
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_experiments (experiment_id, state) VALUES ('$absent', '{\"id\": \"$absent\", \"rev\": 1, \"generation\": \"gen-absent\"}')"
+
+          # (1) A CURRENT CLAIM, MADE BY THE BACKFILL. `projector = 'backfill'` is
+          # COMMITTED here, which is the value's first acceptance anywhere, and the
+          # version pair matches the document so this row must satisfy the gate.
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$fresh', 3, 'gen-fresh', 0, 'backfill')"
+          committed=$(psql -Atc "select projector from isaac_run_projection where experiment_id = '$fresh'")
+          [ "$committed" = "backfill" ] || {
+            echo "::error::the CHECK did not accept a committed backfill claim: '$committed'"; exit 1; }
+          echo "accepted and committed as designed: projector = backfill"
+
+          # (2) STALE BY REV: the document moved to 5, the claim still names 4. This
+          # is the ordinary staleness a save that did not maintain the rows leaves.
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$stalerev', 4, 'gen-stale', 2, 'backfill')"
+
+          # (3) STALE BY GENERATION AT THE SAME REV: delete-and-recreate. The rev
+          # pair alone cannot see this, which is the entire reason `generation` is in
+          # the primary comparison, and it had never been exercised against a server.
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO isaac_run_projection (experiment_id, experiment_rev, experiment_generation, run_count, projector) VALUES ('$stalegen', 2, 'gen-old', 1, 'backfill')"
+
+          # (4) `$absent` deliberately gets NO claim: NEVER PROJECTED.
+
+          after_never=$(psql -Atc "$q_never")
+          after_stale=$(psql -Atc "$q_stale")
+          echo "after: never_projected=$after_never stale=$after_stale"
+
+          [ "$after_never" = "$((before_never + 1))" ] || {
+            echo "::error::query 1 counted $after_never; exactly one experiment was left unprojected"
+            echo "::error::(baseline was $before_never). A claim-bearing experiment must NOT be counted."
+            exit 1; }
+          [ "$after_stale" = "$((before_stale + 2))" ] || {
+            echo "::error::query 2 counted $after_stale; exactly two claims were made stale"
+            echo "::error::(baseline was $before_stale)."
+            exit 1; }
+
+          # AND WHICH ROWS, by the same predicates — so a coincidental delta cannot
+          # pass. The gate's value is not that a number moved; it is that it names
+          # the right experiments.
+          never_ids=$(psql -Atc "SELECT string_agg(e.experiment_id, ',' ORDER BY e.experiment_id) FROM isaac_experiments e WHERE NOT EXISTS (SELECT 1 FROM isaac_run_projection p WHERE p.experiment_id = e.experiment_id) AND e.experiment_id LIKE '01CIGATE%'")
+          [ "$never_ids" = "$absent" ] || {
+            echo "::error::never-projected named '$never_ids', expected '$absent'"; exit 1; }
+          stale_ids=$(psql -Atc "SELECT string_agg(e.experiment_id, ',' ORDER BY e.experiment_id) FROM isaac_experiments e JOIN isaac_run_projection p ON p.experiment_id = e.experiment_id WHERE (p.experiment_rev <> COALESCE((e.state ->> 'rev')::bigint, 0) OR p.experiment_generation <> COALESCE(e.state ->> 'generation', '')) AND e.experiment_id LIKE '01CIGATE%'")
+          [ "$stale_ids" = "$stalegen,$stalerev" ] || {
+            echo "::error::stale named '$stale_ids', expected '$stalegen,$stalerev'"; exit 1; }
+
+          # THE FRESH, BACKFILL-STAMPED CLAIM IS IN NEITHER SET. That is the state
+          # the gate is looking for, and asserting it explicitly is what stops both
+          # queries from passing by being vacuously empty.
+          case "$never_ids,$stale_ids" in
+            *"$fresh"*) echo "::error::a current claim was reported as never-projected or stale"; exit 1;;
+          esac
+
+          # THE THIRD, NON-GATE QUERY §8A prints, run so the packet does not describe
+          # output nobody has seen.
+          psql -Atc "SELECT projector, count(*) FROM isaac_run_projection WHERE experiment_id LIKE '01CIGATE%' GROUP BY projector"
+
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_run_projection WHERE experiment_id LIKE '01CIGATE%'"
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_experiments WHERE experiment_id LIKE '01CIGATE%'"
+          end_never=$(psql -Atc "$q_never")
+          end_stale=$(psql -Atc "$q_stale")
+          [ "$end_never" = "$before_never" ] && [ "$end_stale" = "$before_stale" ] || {
+            echo "::error::this step did not leave the database as it found it"; exit 1; }
+          rm -rf /tmp/isaac-pg-projection-gate
+          echo "0005 §8A: both gate queries executed against a real engine and named the right rows"
 
       # THE DEPLOYMENT-ORDER GUARD, AGAINST A REAL ENGINE AND IN ONE PROCESS.
       #

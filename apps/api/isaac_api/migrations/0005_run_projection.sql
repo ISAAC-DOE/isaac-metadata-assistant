@@ -31,7 +31,22 @@
 -- does NOT change any read. No read path in this application consults this table
 -- in the build that ships it — the write path stamps it and nothing else. Moving a
 -- reader onto `isaac_runs` is Stage 2b, a separate reviewed slice, gated on the
--- backfill of the contract's §3 having RUN and reported `never_projected: 0`.
+-- backfill of the contract's §3 having RUN in the target environment with its
+-- `experiments UNREADABLE`, `refused` and `failed` counts ALL AT 0, and on the
+-- operator's two completeness queries (`docs/migration-approval-packet-0005.md`
+-- §8A) both returning 0.
+-- ~~"gated on the backfill of the contract's §3 having RUN and reported
+-- `never_projected: 0`."~~ — **CORRECTED IN PLACE, and deliberately corrected HERE
+-- rather than only in the prose.** No script prints that word and none can: the
+-- backfill never reads `isaac_run_projection`, because a read would make it the
+-- table's first reader, and that is the Stage-2b decision the gate exists to
+-- PRECEDE. `test_db_backfill_runs.py::test_it_reads_no_projection_table_and_
+-- prints_no_gate_figure` pins both halves. The gate is therefore a
+-- query an operator runs, not a number a script prints. It is struck rather than
+-- deleted because this file is approved BYTE FOR BYTE: a claim this repository has
+-- already recorded as impossible must not survive into an approved artifact, where
+-- it would be unfixable without a fresh packet, and a reader must still be able to
+-- tell a corrected claim from one that never drifted.
 --
 -- IT DOES NOT TOUCH `0002_runs`, `0003_revisions` OR `0004_submissions`. `0002` is
 -- applied to the hosted database (by Dean, 2026-08-12) and editing it is
@@ -50,12 +65,36 @@
 -- FORWARD-ONLY, ADDITIVE AND IDEMPOTENT. Both statements are
 -- `CREATE ... IF NOT EXISTS`. No DROP, no TRUNCATE, no ALTER.
 --
--- ORDERING IS WHAT MAKES ONE PRESENCE CHECK ENOUGH. The runner applies migrations
--- in lexical version order and refuses to apply one out of order (proven in CI),
--- so `isaac_runs` exists in every environment where this table does. The write
--- path still stamps only inside the branch where it actually wrote run rows, so a
--- hand-rolled-back `0002` under a live pod produces no stamp rather than a false
--- one.
+-- ORDERING IS NOT WHAT MAKES THE PRESENCE CHECK SAFE — THE WRITER IS.
+--
+-- ~~"ORDERING IS WHAT MAKES ONE PRESENCE CHECK ENOUGH. The runner applies
+-- migrations in lexical version order and refuses to apply one out of order
+-- (proven in CI), so `isaac_runs` exists in every environment where this table
+-- does."~~ — **BOTH HALVES OVERREACHED, and an independent review measured both.**
+-- What CI proves is PLAN ORDERING (`--plan` naming the five versions in order,
+-- `--apply` applying them in it) and ROLLBACK wrong-order refusal. NO step
+-- anywhere attempts an out-of-order FORWARD apply, so nothing has ever been
+-- observed refusing one. And `scripts/db_migrate.py` exposes only `--plan` and
+-- `--apply` — there is no `--only` — so the runner DOES NOT OFFER out-of-order
+-- application rather than REFUSING it. "Does not offer" and "refuses" are
+-- different claims and only the weaker one is true; `db_migrate.migrate` takes a
+-- `directory=`, which is how CI itself stages a single migration.
+-- The CONCLUSION was false besides, and this repository's own artifacts say so:
+-- `0005_run_projection.rollback.sql` states that rolling `0002` back does NOT
+-- require rolling this one back first, so a database holding THIS table while
+-- `isaac_runs` is absent is legal, documented and reachable — and
+-- `test_0002_ABSENT_makes_no_claim_either_even_though_0005_may_be_there` exists
+-- precisely because that environment is reachable.
+--
+-- WHAT ACTUALLY MAKES IT SAFE is a property of the writer, not of the runner, and
+-- no statement in this file changes on account of the correction.
+-- `PostgresOrdinaryStore.persist` probes `PROJECTION_TABLE` SEPARATELY from
+-- `RUN_TABLE`, and stamps ONLY INSIDE the branch that actually wrote run rows. So
+-- an environment carrying this table without `isaac_runs` — a hand-rolled-back
+-- `0002` under a live pod, or `0005` staged alone — produces NO claim rather than
+-- a false one, which is the direction that matters: a claim written while the rows
+-- were not maintained would tell a future reader the table is complete for a
+-- version whose rows were never written.
 --
 -- COLUMN BY COLUMN, CONSTRAINT BY CONSTRAINT:
 --

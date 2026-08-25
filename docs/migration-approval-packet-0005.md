@@ -6,7 +6,7 @@ agent may do it.**
 | | |
 |---|---|
 | Migration | `apps/api/isaac_api/migrations/0005_run_projection.sql` |
-| SHA-256 (forward) | `ebff660fc51559cd4ab6ce66a7b1ec943de86f2362d37adde153f0c74c8ae7ee` |
+| SHA-256 (forward) | `86bf111cf030c15cb3d2349f428370476ad84262da9e5127a1e213c62da98304` |
 | Rollback | `apps/api/isaac_api/migrations/0005_run_projection.rollback.sql` |
 | SHA-256 (rollback) | `54a17432150525f75a6e94557a137029a3ce3fd41cea9debced361abda90e735` |
 | Creates | one table, `isaac_run_projection`, and one index |
@@ -80,8 +80,10 @@ CREATE INDEX IF NOT EXISTS isaac_run_projection_projector_idx
     ON isaac_run_projection (projector, projected_utc)
 ```
 
-The committed file carries ~130 lines of comment above this explaining every column and
-constraint. Read the file, not this excerpt, before approving.
+The committed file carries **177 lines of comment above this** explaining every column and
+constraint — measured, not estimated (`awk '/^CREATE TABLE/{print NR-1; exit}'`), and up from
+~130 because the 2026-08-24 review struck two claims in place there. Read the file, not this
+excerpt, before approving.
 
 ## 3. The foreign key refuses a parent delete — and that is a decision
 
@@ -252,11 +254,18 @@ psql -c "\copy (SELECT * FROM isaac_run_projection) TO 'run-projection.csv' CSV 
 
 ## 8A. The Stage-2b completeness gate — a query YOU run, not a number a script prints
 
-**Four committed documents once described this gate as "the backfill reported
+**FIVE committed artifacts once described this gate as "the backfill reported
 `never_projected: 0`". No script prints that, and none can:** the backfill deliberately
 never reads `isaac_run_projection`, because a read would make it the table's first reader
 and that is the Stage-2b decision the gate exists to *precede*. An independent review
 measured the gap. The gate is these two queries.
+
+~~"Four committed documents"~~ — **RECOUNTED 2026-08-24, and the miscount is the point.**
+The first sweep fixed `CLAUDE.md`, the Stage-2 contract, `scripts/db_backfill_runs.py` and
+this section — and missed **`0005_run_projection.sql` itself**, where the same claim sat in
+the header comment of the artifact the owner approves BYTE FOR BYTE, and **§11 of this very
+document**. Both are corrected now. An enumeration written while correcting an enumeration
+error was itself short, which is exactly the failure §10 records in the other direction.
 
 **Run them AFTER `python scripts/db_backfill_runs.py --apply` has reported
 `experiments UNREADABLE: 0`, `refused: 0` and `failed: 0`.** Any non-zero there means some
@@ -295,6 +304,10 @@ are what the claim is about, and the claim is written in the same transaction as
 — which is the invariant, not a measurement. A reader built on this should still fall back
 to the document on any mismatch; the contract's §2.1 four-state table is what it must
 implement.
+
+**A CI step that runs both of these against a real `postgres:18` was added on 2026-08-24
+and HAS NOT YET RUN.** Until it does, nothing in this packet claims either query has ever
+executed anywhere. See §9A, which records how they came to have no engine evidence at all.
 
 ## 9. Evidence, and what remains unproven — read this before approving
 
@@ -351,6 +364,43 @@ deleted until the claim is deleted first.** That is the design (the alternative,
 `ON DELETE CASCADE`, is declined in §3), and it means any operational script that removes
 experiments needs one more statement.
 
+### 9A. DECLARED IN THE WORKFLOW AND NOT YET RUN — added 2026-08-24
+
+**Read this section as "written and reviewed", not as "observed".** The repository has
+already had one packet assert proof for a step that had never executed (the paragraph
+above), so new coverage is listed here in a section of its own until a real run exists,
+and is promoted into §9 only by quoting the job.
+
+An independent review measured that **the Stage-2b gate of §8A had no engine evidence at
+all**: no CI step and no test ever constructed a projection row whose
+`(experiment_rev, experiment_generation)` disagrees with the document, so **neither §8A query
+had ever executed anywhere**; and **no row with `projector = 'backfill'` had ever been
+committed to any engine** — the CHECK's *acceptance* of that value was inferred from reading
+the CHECK, while every case that had run tested its *refusals*.
+
+One new step and three cases added to an existing one now cover it. **Neither has run**:
+
+- *"Prove the Stage-2b gate queries detect what the packet says they detect"* — commits a
+  `projector = 'backfill'` claim and reads it back; builds one experiment stale **by rev**,
+  one stale **by generation at the same rev** (the delete-and-recreate case `generation`
+  exists for), and one **never projected**; runs both §8A queries **verbatim**, asserts the
+  deltas, and asserts by id **which** experiments each names — with the current claim in
+  neither set, so neither query can pass by being vacuously empty. Counts are read as
+  deltas against a baseline taken immediately before, because the §8A queries are unscoped
+  by design and the step must not rewrite the query the operator will actually run.
+- Three cases added to the existing constraint step for the NOT NULLs on
+  **`experiment_rev`**, **`run_count`** and **`projector`**, which were declared and blamed
+  by nothing. They blame `column "<name>"` rather than the bare name, because bare
+  `projector` also occurs inside `isaac_run_projection_projector_known` and a CHECK failure
+  would otherwise satisfy the grep.
+
+**These do not move the "41 of 46 declared / 27 executed on `main`" figures** quoted in
+`CLAUDE.md` and the `0003`/`0004` packets. That counter is derived only from constraint
+names declared by `0003_revisions` and `0004_submissions`; `0005`'s constraints have never
+been inside it. Re-derived, not assumed:
+`test_submission_store.py::test_the_two_constraint_numbers_are_each_still_the_measured_ones`
+passes unchanged.
+
 **NOT proven, and this is the whole reason the operator's step is separate:** the CI
 container is **empty**, with a two-row synthetic stand-in for `records`. So *"behaves
 against the real data, the real roles and the real grants"* is unproven, exactly as it was
@@ -364,20 +414,53 @@ the same standing caveat `0002`'s report carries.
 
 `CLAUDE.md` §15's 2026-08-07 write lift covers Create Experiment persistence *"plus the
 minimum supporting persistence architecture that feature requires"*, and its enumerated
-table list **now names `isaac_run_projection`, added in the same change that creates the
-table** (§15, "added 2026-08-19").
+table list **now names `isaac_run_projection`** (§15, "added 2026-08-19") — **ONE COMMIT
+AFTER the table shipped**, not in the same change.
 
-That ordering is the point. The list has been corrected twice — once for `isaac_runs`,
-found and reported by the implementing slice; once for the five submission-lifecycle
-tables, found only by an independent review. **This is the first time the sentence exists
-before the table is written**, and it is stated here so a future reader can see it was not
-a permission written down late.
+**Measured, and re-measurable:**
+
+```bash
+git log --diff-filter=A -- apps/api/isaac_api/migrations/0005_run_projection.sql
+#   -> 6dce6fd   (its diffstat touches six files; CLAUDE.md is not one of them)
+git log -S"isaac_run_projection" -- CLAUDE.md
+#   -> 8f7c650 is the first, and 6dce6fd is an ancestor of it
+```
+
+~~"added in the same change that creates the table … **This is the first time the sentence
+exists before the table is written**, and it is stated here so a future reader can see it
+was not a permission written down late."~~ — **FALSE BY ONE COMMIT, struck 2026-08-24.**
+An independent review measured it against git (the two commands above), and
+`db_write.py`, the Stage-2 contract and `test_experiment_repository.py` each recorded the
+correction at the time —
+**this packet did not**, so for one commit `CLAUDE.md` asserted that "all four artifacts
+now carry the correction in place" while the fourth still carried the original claim. That
+second review is what caught it, and it is the durable part of this section.
+
+**What is true, stated without the flourish:** the list has now been corrected three times
+— `isaac_runs`, found and reported by the implementing slice; the five submission-lifecycle
+tables, found only by an independent review; and this table, one commit late. Each time the
+enumeration followed the write rather than preceding it. **This slice's authorization basis
+is §15's "minimum supporting persistence architecture" clause PLUS the enumeration, and the
+enumeration was committed after the table**, which is a smaller gap than the two before it
+and is still not the thing that was claimed.
 
 ## 11. What this packet does not cover
 
 - **Stage 2b — moving a reader onto `isaac_runs`.** A separate reviewed slice, gated on
-  the backfill having RUN in the target environment and reported `never_projected: 0`.
-  That is a measurement, not a belief.
+  **§8A** of this packet: the backfill having RUN in the target environment with
+  `experiments UNREADABLE: 0`, `refused: 0` and `failed: 0`, **and** the operator's two
+  completeness queries there both returning 0. That is a measurement, not a belief — but
+  it is a measurement **you** take, not one a script hands you.
+
+  ~~"gated on the backfill having RUN in the target environment and reported
+  `never_projected: 0`."~~ — **STRUCK 2026-08-24: this document was arguing both sides of
+  its own gate.** §8A above already records that the gate was once described that way and
+  that **no script prints it and none can**, because the backfill deliberately never reads
+  `isaac_run_projection`. `CLAUDE.md`, the Stage-2 contract and
+  `scripts/db_backfill_runs.py` all carried the correction; **this packet — the one
+  document an operator actually reads before acting — still contradicted itself twelve
+  sections later**, and an independent review measured it. Kept struck rather than deleted
+  so the contradiction reads as corrected rather than as never having existed.
 - **Removing `runs` from the experiment document.** A third decision, justified by no
   measurement in this repository. The brief that motivates it ("contract §8 D7") is cited
   by several files here and committed to none of them.

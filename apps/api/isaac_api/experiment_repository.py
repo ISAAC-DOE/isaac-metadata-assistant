@@ -1487,8 +1487,21 @@ class PostgresOrdinaryStore:
                             #
                             # The presence check is SEPARATE from the run table's
                             # because rolling `0005` back while `0002` stays is a
-                            # reachable operator action; the migration ORDER
-                            # guarantees the converse cannot happen.
+                            # reachable operator action.
+                            # ~~"the migration ORDER guarantees the converse cannot
+                            # happen."~~ — CORRECTED 2026-08-24, the same overreach
+                            # an independent review measured in
+                            # `0005_run_projection.sql`'s header. The converse IS
+                            # reachable: `0005_run_projection.rollback.sql` states
+                            # that rolling `0002` back does not require rolling
+                            # `0005` back first, and
+                            # `test_0002_ABSENT_makes_no_claim_either_even_though_0005_may_be_there`
+                            # exists because it is. Nothing about THIS CODE changes
+                            # — the two probes were already separate and the stamp
+                            # is already nested inside the run-row branch, so that
+                            # environment produces no claim rather than a false
+                            # one. Only the comment claimed a guarantee the runner
+                            # does not give.
                             if _table_available(cursor, policy, PROJECTION_TABLE):
                                 self._stamp_projection(
                                     cursor, policy, exp, written, projector

@@ -194,8 +194,10 @@ def main(argv: list[str] | None = None) -> int:
         # measures. So the dry run reports what the DOCUMENTS say.
         #
         # THE CONSEQUENCE, STATED BECAUSE IT WAS PREVIOUSLY MISSTATED: this script
-        # CANNOT report `never_projected` or `stale`. Four committed documents once
-        # described the Stage-2b gate as "the backfill reported never_projected: 0",
+        # CANNOT report `never_projected` or `stale`. FIVE committed artifacts once
+        # described the Stage-2b gate as "the backfill reported never_projected: 0"
+        # — ~~"Four"~~, recounted 2026-08-24: the first sweep missed
+        # `0005_run_projection.sql`'s own header and the `0005` packet's §11 —
         # and an independent review measured that no print statement anywhere emits
         # that word. The gate is now a SQL query the operator runs — see the packet's
         # section 8A — and this script's job is to make the answer be zero, not to

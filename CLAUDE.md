@@ -879,11 +879,27 @@ Out of scope unless explicitly approved:
   independent review. **The third time it is a SMALLER correction and still a correction — and the
   slice published a claim that it was not.** `db_write.py`, the Stage-2 contract and the `0005`
   packet all said "named in the same change that creates it"; an independent review measured that
-  false by one commit (the table shipped in `6dce6fd`, §15 was updated in `8f7c650`), and all four
-  artifacts now carry the correction in place. **`isaac_run_projection`
+  false by one commit (the table shipped in `6dce6fd`, §15 was updated in `8f7c650`).
+  **`isaac_run_projection`
   (`0005_run_projection`)** is the per-experiment completeness claim for `isaac_runs`: one row per
   experiment recording the `(rev, generation)` its run rows were projected from, how many were
   written, and which projector wrote it.
+
+  ***AND THAT CORRECTION WAS ITSELF INCOMPLETE — THE FOURTH INSTANCE OF THIS PATTERN, AND THE FIRST
+  IN WHICH THE FIX RATHER THAN THE CLAIM WAS THE DEFECT.*** ~~"and all four artifacts now carry the
+  correction in place"~~ — **struck 2026-08-24, because a SECOND independent review measured it
+  false.** Three carried it: `db_write.py:176-186`, `docs/isaac-runs-stage-2-contract.md` §5, and
+  `apps/api/tests/test_experiment_repository.py:839`. **The `0005` operator packet did not** — its
+  §10 still read *"added in the same change that creates the table"* and *"This is the first time the
+  sentence exists before the table is written"*. So for one commit this file asserted the completeness
+  of a correction whose most consequential copy was missing, in the one artifact an operator actually
+  reads before acting. Packet §10 now carries it, and this sentence records that the completeness was
+  published before it was true. **The durable lesson is not "enumerate the table earlier" — that has
+  been learned three times. It is that a correction sweep needs the same enumeration-and-measurement
+  discipline as the claim it corrects: "all N artifacts are fixed" is itself a checkable claim, and
+  this one was published unchecked.** The same sweep also miscounted a second enumeration — the
+  `never_projected: 0` claim sat in FIVE committed artifacts, not four, the uncounted ones being
+  `0005_run_projection.sql`'s own header and the `0005` packet's §11; both are corrected in place.
 
   **Why it has to exist at all, measured rather than argued:** `SELECT ... FROM isaac_runs WHERE
   experiment_id = %s` returning zero rows means EITHER "this experiment has no runs" OR "its runs

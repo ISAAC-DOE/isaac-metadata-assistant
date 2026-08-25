@@ -131,7 +131,7 @@ the commands are in `0003`'s packet.
 |---|---|
 | **Owner approval** | **NOT APPROVED** (Krish has not reviewed the text) |
 | **Hosted application** | **NOT APPLIED, anywhere** |
-| **Forward SHA-256** | `ebff660fc51559cd4ab6ce66a7b1ec943de86f2362d37adde153f0c74c8ae7ee` |
+| **Forward SHA-256** | `86bf111cf030c15cb3d2349f428370476ad84262da9e5127a1e213c62da98304` |
 | **Rollback SHA-256** | `54a17432150525f75a6e94557a137029a3ce3fd41cea9debced361abda90e735` |
 | **Table created** | `isaac_run_projection` (one table, one index) |
 | **Packet** | [`docs/migration-approval-packet-0005.md`](migration-approval-packet-0005.md) |
