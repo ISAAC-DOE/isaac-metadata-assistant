@@ -76,6 +76,7 @@ __all__ = [
     "address_value_changes",
     "blocker_report",
     "canonical_json",
+    "conflict_decisions",
     "conflict_summary",
     "content_signature",
     "field_values",
@@ -103,7 +104,13 @@ TRUST_BASIS_UNATTRIBUTED = "unattributed"
 
 #: What :func:`content_signature` covers, echoed into the API response so a reader
 #: never has to infer the scope of a digest from its name.
-SIGNATURE_SCOPE = "export_unit_ids_and_drafts"
+#:
+#: **IT USED TO READ ``export_unit_ids_and_drafts``, AND THE VALUE MOVED BECAUSE THE
+#: COVERAGE DID.** The digest now also covers the record's stored conflict decisions
+#: — see :func:`content_signature` for the measured defect that forced it. The string
+#: is served, so leaving it unchanged would have made the response describe a scope
+#: one term narrower than the digest it labels.
+SIGNATURE_SCOPE = "export_unit_ids_drafts_and_conflict_decisions"
 
 #: What :func:`conflict_summary` looked at. Same reason.
 CONFLICT_SCOPE = "draft_field_evidence"
@@ -142,8 +149,15 @@ def unit_payloads(units: Sequence[Any]) -> list[dict]:
     ``unit_id`` is ``ExportUnit.target_id`` — a run's id for an experiment with
     runs, the experiment's own id for one without — and ``draft`` is the FULLY
     RESOLVED draft that unit would export, inheritance and overrides already
-    applied. Those two are the whole of what becomes an official ISAAC record, which
-    is why they are the whole of what the signature covers.
+    applied. Those two are the whole of what becomes an official ISAAC record.
+
+    THEY ARE NO LONGER THE WHOLE OF WHAT THE SIGNATURE COVERS, and this sentence used
+    to say they were. :func:`content_signature` adds the record's conflict decisions
+    as a component of its own; that component publishes no byte, and it is there
+    because a submission row discloses THAT a conflict was decided. It is covered
+    **verbatim**, which is broader than that disclosure — see that function, whose
+    rule paragraph states the coverage and argues why the broader side is the safe
+    one.
 
     Sorted by ``unit_id`` rather than left in ``sorted_runs()`` order on purpose:
     ``sorted_runs`` orders on ``(ordinal, created_utc, id)``, so REORDERING two runs
@@ -164,14 +178,147 @@ def unit_payloads(units: Sequence[Any]) -> list[dict]:
     )
 
 
-def content_signature(experiment_id: str, units: Sequence[Any]) -> str:
-    """The stable sha256 identity of what a submission would publish.
+def conflict_decisions(units: Sequence[Any]) -> Any:
+    """The record's stored conflict decisions, VERBATIM, or ``None`` if it has none.
 
-    WHAT IT COVERS: the experiment id, and each export unit's id and fully resolved
-    draft. Nothing else.
+    READ OFF THE UNITS' EXPERIMENT RATHER THAN TAKEN AS A PARAMETER, and that is the
+    one decision in this function. :func:`conflict_summary` takes its resolutions as
+    an argument and says why; this one must not, because the digest it feeds decides
+    whether a second submission may exist AT ALL. Three call sites in ``routes``
+    compute the signature (submit, the history listing, the revision diff) and they
+    have to agree: a parameter with a default of ``()`` would let one of them omit
+    the decisions and report a digest the write path would never produce. Every unit
+    of one record shares one :class:`~isaac_api.workspace.Experiment`, so the first
+    unit answers for all of them.
+
+    VERBATIM — the raw stored list, readable and unreadable entries alike, in stored
+    order. Not the parsed :class:`~isaac_api.conflict_resolution.ConflictResolution`
+    objects, for two reasons. An entry this build cannot read is still a recorded
+    human decision, and a digest that skipped it would call two different documents
+    the same content. And stored order is stable by construction:
+    ``conflict_resolution.write_resolution`` upserts IN PLACE and preserves the
+    position of every row, readable or not, precisely so that a byte-identical
+    re-decision does not rewrite the document.
+
+    AN EMPTY LIST AND AN ABSENT KEY ARE TREATED IDENTICALLY — both give ``None`` — and
+    that conflation is deliberate rather than sloppy. Both mean the same thing about
+    the science: this record carries no decision. Distinguishing them would make the
+    digest of a record that has never had a decision depend on whether some earlier
+    write happened to leave an empty list behind, which is a difference no reader of a
+    submission could act on.
+    """
+    from . import conflict_resolution as cr  # noqa: PLC0415 - cycle; see conflict_summary
+
+    if not units:
+        return None
+    draft = getattr(getattr(units[0], "experiment", None), "draft", None)
+    if not isinstance(draft, dict):
+        return None
+    stored = draft.get(cr.DRAFT_KEY)
+    return stored if stored else None
+
+
+def content_signature(experiment_id: str, units: Sequence[Any]) -> str:
+    """The stable sha256 identity of what a submission would publish and declare.
+
+    WHAT IT COVERS: the experiment id, each export unit's id and fully resolved
+    draft, and the record's stored conflict decisions. Nothing else.
+
+    THE LAST OF THOSE THREE WAS ADDED TO CLOSE A MEASURED DEFECT, AND THE DEFECT IS
+    WORTH STATING BECAUSE IT DECIDES WHAT THIS DIGEST IS FOR. One act — ``POST
+    .../conflicts/resolve``, ``200`` — used to be recordable or unrecordable
+    depending only on whether the record had runs:
+
+      * a ZERO-RUN record's one unit draft IS ``exp.draft``, which is where
+        ``conflict_resolution.write_resolution`` stores decisions, so a decision moved
+        the digest and the resubmission that discloses it was accepted;
+      * a record WITH RUNS composes its units from run drafts, and
+        ``workspace.resolved_run_draft`` deliberately does not copy the record-level
+        decisions key into one, so the digest did not move, the resubmission was
+        refused ``already_submitted``, and ``isaac_submissions.conflict_summary`` —
+        the ONE place a submission discloses that a person settled a conflicting
+        field — could never be written again for that record. A record with runs is
+        the shape this product normally produces.
+
+    So the coverage was shape-dependent by accident, and the shape a scientist most
+    often has was the one that lost the decision.
+
+    IS A RESUBMISSION AFTER A DECISION A NEW SUBMISSION OR A DUPLICATE? A NEW ONE,
+    and the reason is the row rather than the artifacts. A decision changes no
+    exported byte — ``ConflictResolution.is_field_value`` is permanently ``False``,
+    and no route republishes an immutable record — so if a submission were only its
+    published records, this would be a duplicate. It is not: a submission row also
+    carries ``conflict_summary``, and two rows that disagree about whether a human
+    settled a conflicting field are not two copies of one declaration.
+
+    ~~**The rule this digest now follows is: it covers what a submission DISCLOSES
+    about itself — the records it publishes and the conflict state it reports — and
+    nothing else.**~~ **THAT SENTENCE WAS NARROWER THAN THIS FUNCTION, and it is
+    struck rather than deleted because the reasoning either side of it is still the
+    reasoning that decides identity.** :func:`conflict_decisions` returns the stored
+    decisions **VERBATIM** — ``rationale``, ``recorded_utc`` and the whole ``history``
+    tuple included — and :func:`conflict_summary` reports none of those three: it
+    discloses addresses, counts, and four fixed state words, and says in its own
+    docstring that it carries "no value, no rationale text, no subject". So the digest
+    is strictly BROADER than what a submission discloses, and describing it as the
+    disclosure was a claim about a projection this function does not perform.
+
+    **THE TRUE RULE: the digest covers what a submission PUBLISHES — each unit's id
+    and fully resolved draft — plus the record's stored conflict decisions AS STORED,
+    not a summary of them, and nothing else.** Over-inclusion is the safe direction
+    here, and the two consequences it has are CHOSEN rather than incidental. Both were
+    measured over HTTP and both are pinned by
+    ``apps/api/tests/test_the_signature_covers_a_decision_verbatim.py``:
+
+    * A **RATIONALE-ONLY** revision moves the digest. ``submit#3`` is accepted
+      ``200``, revisions read ``[1, 2, 3]``, and submission 2's and submission 3's
+      ``conflict_summary`` are byte-identical — the digest moved on something no
+      disclosure column mentions.
+    * **REVISE-THEN-REVERT** does not restore the earlier digest; it produces a THIRD
+      distinct value, and revisions read ``[1, 2, 3, 4]``. The mechanism is
+      ``conflict_resolution.revise_resolution``: it compares ``rationale`` when
+      deciding whether an act changed anything, and any act that did APPENDS an
+      ``ACTION_REVISE`` transition — so ``ConflictResolution.to_state()`` can never
+      re-enter a value it has already had. A monotonically growing audit trail cannot
+      be un-grown.
+
+    WHY NARROWING THE DIGEST TO THE DISCLOSED SUMMARY WOULD BE WORSE, which is the
+    argument for leaving it broad rather than an apology for it. Both consequences
+    above fail **OPEN**: one extra submission row, no exported byte rewritten, nothing
+    lost, and the row's own claims are all true. A digest over only
+    ``conflict_summary``'s projection would fail **CLOSED**. A scientist who corrected
+    the reason they had given, or who changed their mind and then changed it back,
+    would get ``409 already_submitted`` — a refusal asserting the record is unchanged
+    while the persisted document has moved, which is the exact defect the widening was
+    made to fix, reintroduced one layer further in. Worse, a submission is the only
+    durable declaration this application writes: the reconsideration would live in the
+    decision's ``history`` and **no submission on file would ever attest that it
+    happened**. Losing the record of a change of mind is the direction that hurts;
+    writing an extra row that is true is not.
+
+    That is also what keeps the exclusions below from looking arbitrary, on the
+    corrected rule rather than the struck one: they are excluded because they are
+    neither the published content nor a recorded decision — not because some
+    disclosure column happens not to mention them.
+
+    THE ONE THING THAT RULE MUST NOT BE READ AS SAYING, because a revision row does
+    hold more than its disclosure columns: ``isaac_experiment_revisions.state``
+    archives the WHOLE experiment document, notes and title included, so a second
+    submission's snapshot would differ from the first's whenever anything at all had
+    moved. That is deliberately not treated as new content. If it were, every note,
+    every rename and every keystroke that touches the document would license another
+    submission, and the digest would stop being an idempotency key. The archive
+    records what the document held; the disclosure is what the submission CLAIMS, and
+    only the second decides identity.
 
     WHAT IT DELIBERATELY EXCLUDES, AND WHY EACH EXCLUSION IS LOAD-BEARING:
 
+    * ``notes``, the captured transcript, and everything else that lives in the
+      experiment's STATE rather than in a unit draft or the decisions list. Measured,
+      not assumed: capture a note after a submission and the digest does not move, so
+      the resubmission is refused — correctly, because no column of the submission
+      says anything about notes, and the second row would differ from the first in no
+      claim a reader could act on.
     * ``rev``, ``updated_utc``, ``generation`` — they move on every save, including
       saves that change no record. A signature carrying them would differ between
       two submissions of identical science.
@@ -201,11 +348,29 @@ def content_signature(experiment_id: str, units: Sequence[Any]) -> str:
 
     The digest is over :func:`canonical_json`, so it is stable across Python
     versions, dict insertion order, and whitespace.
+
+    ONE REDUNDANCY, STATED RATHER THAN ENGINEERED AWAY. A zero-run unit's draft IS
+    ``exp.draft``, so for that shape the decisions are inside ``units`` as well as in
+    ``conflict_decisions`` — counted twice, which changes no outcome, because the
+    question the digest answers is only ever "did this move". The alternative was to
+    strip the key out of a copy of every unit draft, which buys tidiness in exchange
+    for a per-unit deep copy and a second place where the digest's coverage is
+    decided. Uniformity is what the fix needed, and the extra component provides it
+    for BOTH shapes; counting the zero-run case once instead of twice would not make
+    any record behave differently.
+
+    NEITHER THE OLD NOR THE NEW DIGEST IS PERSISTED ANYWHERE TODAY, so widening the
+    coverage — and moving :data:`SIGNATURE_SCOPE`, which is itself in the payload and
+    therefore changes every digest value — invalidates no stored row.
+    ``submission_store.store()`` has no filesystem fallback and returns ``None``
+    without a database, and ``0003_revisions``/``0004_submissions`` are applied in no
+    deployment, so no ``isaac_submissions`` row exists to compare against.
     """
     payload = {
         "experiment_id": experiment_id,
         "scope": SIGNATURE_SCOPE,
         "units": unit_payloads(units),
+        "conflict_decisions": conflict_decisions(units),
     }
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 

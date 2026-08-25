@@ -1993,7 +1993,7 @@ export function revisionHistoryUnavailable(id: string = EXP_ID): StubbedRoute {
       experiment_id: id,
       record_rev: VERSION_FIELDS.rev,
       current_content_signature: 'f'.repeat(64),
-      signature_scope: 'export_unit_ids_and_drafts',
+      signature_scope: 'export_unit_ids_drafts_and_conflict_decisions',
       limit: 200,
       availability: {
         state: 'unavailable',

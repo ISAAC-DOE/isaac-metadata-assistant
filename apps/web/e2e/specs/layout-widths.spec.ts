@@ -602,3 +602,243 @@ test.describe('probe regression cases (injected geometry)', () => {
     ).toBe(false);
   });
 });
+
+/**
+ * ── THE `.sr-only` ESCAPE (F1) ──────────────────────────────────────────────
+ *
+ * A defect class the sweep above could not have found, because the surface it
+ * shipped on is not in `../surfaces.ts` and CANNOT BE — see the catalogue note
+ * at the bottom of this file.
+ *
+ * `.sr-only` (`src/styles/base.css`) is `position: absolute` with `left`/`top`
+ * at `auto`, so it is laid out at its STATIC position and resolved against its
+ * nearest positioned ancestor. `overflow` does not make an element a containing
+ * block. So an accessible-name span inside a wide, horizontally-scrolling
+ * container resolved against `body`, escaped the scroller, and contributed its
+ * own right edge to the DOCUMENT's scrollable overflow — making the whole page
+ * scroll sideways to a strip with nothing painted in it.
+ *
+ * MEASURED on Compare Runs, darwin, at 390 and 320: `documentElement`
+ * scrollWidth 417 against a clientWidth of 390 (and of 320), while
+ * `document.body.scrollWidth` matched the viewport exactly. Offender:
+ * `td.rc-cell > a.rc-open > span.sr-only` at left 416 / right 417, with
+ * `offsetParent: body`.
+ *
+ * Both cases below use the app's REAL classes against the app's REAL stylesheet,
+ * so they fail if the `position: relative` on `.rc-tablewrap` is removed.
+ */
+test.describe('the .sr-only escape (F1)', () => {
+  test.beforeEach(({}, testInfo) => {
+    test.skip(testInfo.project.name !== HOST_PROJECT, `runs only in ${HOST_PROJECT}`);
+  });
+
+  const experiments = SURFACES.find((s) => s.id === 'experiments')!;
+
+  test('@responsive S1: a real .rc-tablewrap does not let its accessible names escape', async ({ page, app }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    await app.open(experiments);
+    await page.setViewportSize({ width: 320, height: 812 });
+
+    const before = await horizontalPageScroll(page);
+    expect(
+      before.docScrollWidth,
+      'the page must be clean BEFORE the fixture is injected, or this case proves nothing'
+    ).toBeLessThanOrEqual(before.docClientWidth + 1);
+
+    // The real markup shape: `.rc-tablewrap` (overflow-x: auto) > a table wider
+    // than the viewport > an `.sr-only` accessible name near its right edge, as
+    // every `.rc-cell > .rc-open` carries.
+    const geometry = await page.evaluate(() => {
+      const wrap = document.createElement('div');
+      wrap.id = 'e2e-regression-s1';
+      wrap.className = 'rc-tablewrap';
+      const table = document.createElement('table');
+      table.className = 'rc-table';
+      const row = table.insertRow();
+      // The ADDRESS column, which is what makes the table 620px wide at these
+      // viewports (`@media (max-width: 720px)` → `.rc-table { min-width: 620px }`).
+      // It has to be here, and the link has to be in a LATER cell: the whole
+      // defect is that the accessible name ends up to the RIGHT of the viewport.
+      const addr = row.insertCell();
+      addr.className = 'rc-cell rc-addr';
+      addr.style.cssText = 'min-width: 560px;';
+      addr.textContent = 'context.temperature_K';
+      const cell = row.insertCell();
+      cell.className = 'rc-cell';
+      const link = document.createElement('a');
+      link.className = 'rc-open';
+      link.href = '#';
+      link.textContent = 'Open';
+      const sr = document.createElement('span');
+      sr.className = 'sr-only';
+      sr.textContent = ' Sweep Run B at context.temperature_K';
+      link.appendChild(sr);
+      cell.appendChild(link);
+      row.appendChild(cell);
+      wrap.appendChild(table);
+      document.querySelector('main')!.appendChild(wrap);
+
+      const st = getComputedStyle(wrap);
+      const r = sr.getBoundingClientRect();
+      return {
+        wrapPosition: st.position,
+        wrapOverflowX: st.overflowX,
+        srOffsetParent: sr.offsetParent === document.body ? 'BODY' : (sr.offsetParent as HTMLElement | null)?.id ?? null,
+        srRight: Math.round(r.right),
+        tableScrolls: wrap.scrollWidth > wrap.clientWidth + 1,
+      };
+    });
+
+    // Prove the FIXTURE is the real geometry before asserting on the outcome.
+    expect(geometry.wrapOverflowX, '.rc-tablewrap must still be a scroller').toBe('auto');
+    expect(geometry.tableScrolls, 'the table must be wider than the wrap, as it is at these widths').toBe(true);
+    expect(
+      geometry.srRight,
+      'and the accessible name must sit beyond the viewport, which is the whole premise'
+    ).toBeGreaterThan(320);
+
+    // THE FIX, and the exact thing that was missing: `overflow` alone does not
+    // establish a containing block, so without `position: relative` the span
+    // resolves against `body`.
+    expect(
+      geometry.wrapPosition,
+      '.rc-tablewrap must establish a containing block, or its absolutely-positioned ' +
+        'accessible-name spans resolve against `body` and escape the scroller'
+    ).toBe('relative');
+    expect(
+      geometry.srOffsetParent,
+      'the span\'s offsetParent must be the wrap, not BODY — that difference IS the defect'
+    ).toBe('e2e-regression-s1');
+
+    const after = await horizontalPageScroll(page);
+    expect(
+      after.docScrollWidth,
+      `the whole PAGE now scrolls sideways: ${after.docScrollWidth} > ${after.docClientWidth}. ` +
+        `An .sr-only span (right edge ${geometry.srRight}) escaped a scroller whose own overflow ` +
+        `is handled. Isolated proof of the mechanism, measured at 390 in one evaluate(): ` +
+        `wrap \`static\` -> documentElement 662/390 with offsetParent BODY; ` +
+        `wrap \`position: relative\` -> 390/390 with the wrap as offsetParent.`
+    ).toBeLessThanOrEqual(after.docClientWidth + 1);
+  });
+
+  /*
+   * THE GENERAL GUARD, stated honestly: it passes today on every catalogued
+   * surface and passed before the fix too, because the ONE surface that
+   * exhibited the defect is not in the catalogue. It is here so the class
+   * cannot come back on a surface that IS catalogued — the sweep's per-region
+   * overflow probe never looked at where an absolutely-positioned element
+   * resolves, so nothing else in this suite asks this question.
+   *
+   * ── ONE TEST PER (width, surface), and why it is not one test ─────────────
+   *
+   * This was a SINGLE test whose body was
+   * `for (const width of [390, 320]) for (const surface of SURFACES)` — 46 full
+   * `app.open()` page loads sharing ONE 60s budget (`playwright.config.ts` →
+   * `timeout: 60_000`). It exhausted that budget on `ubuntu-latest` and failed
+   * as `Test timeout of 60000ms exceeded` on both the first attempt and the
+   * retry, dying in a DIFFERENT place each time: once inside the loading-panel
+   * wait (`div.fetch-state[role=status]`), once waiting for the `Evidence
+   * Graph` heading. A death point that moves between runs is the signature of
+   * budget exhaustion rather than of a product regression — and a test that
+   * fails as a timeout tells the next reader nothing about which surface broke.
+   *
+   * Raising the timeout was REJECTED: it would have kept exactly the property
+   * that made the failure unreadable. Declaring one test per (width, surface)
+   * pair costs the same 46 page loads, gives each pair its own budget and its
+   * own NAME, lets the workers run them in parallel (`fullyParallel: true`),
+   * and makes a genuinely slow surface fail as ITSELF.
+   *
+   * The `@responsive` tag has to stay in EVERY generated title. The read-only
+   * config collects every `*.spec.ts` under `e2e/`, and the per-project `grep`
+   * over the TITLE is the only thing that keeps a spec in the right suite — an
+   * untagged title would be collected and then matched by no project at all.
+   *
+   * The widths are 390 and 320 — the two at which the escape was measured on
+   * Compare Runs (see the header of this describe block).
+   */
+  for (const width of [390, 320]) {
+    for (const surface of SURFACES) {
+      test(`@responsive S2 ${surface.id} @ ${width}: no .sr-only escapes to the document`, async ({
+        page,
+        app,
+      }) => {
+        const escapes: string[] = [];
+        await page.setViewportSize({ width, height: 812 });
+        await app.open(surface);
+        await page.setViewportSize({ width, height: 812 });
+        const found = await page.evaluate(() => {
+          const out: string[] = [];
+          const vw = document.documentElement.clientWidth;
+          for (const el of Array.from(document.querySelectorAll('.sr-only'))) {
+            const e = el as HTMLElement;
+            if (getComputedStyle(e).position !== 'absolute') continue;
+            // The defect signature: the containing block is the initial one, so
+            // the element's own box is part of the DOCUMENT's overflow.
+            if (e.offsetParent !== document.body && e.offsetParent !== null) continue;
+            const r = e.getBoundingClientRect();
+            if (r.right <= vw + 1) continue;
+            const owner = e.parentElement;
+            const cls =
+              owner && typeof owner.className === 'string' && owner.className.trim()
+                ? '.' + owner.className.trim().split(/\s+/).slice(0, 2).join('.')
+                : (owner?.tagName.toLowerCase() ?? '?');
+            out.push(`${cls} > span.sr-only right ${Math.round(r.right)} > viewport ${vw}: "${(e.textContent ?? '').slice(0, 48)}"`);
+          }
+          return out;
+        });
+        for (const f of found) escapes.push(`${surface.id}@width-${width}: ${f}`);
+        expect(
+          escapes,
+          `An \`.sr-only\` span resolved against \`body\` while sitting outside the viewport, so it is ` +
+            `part of the DOCUMENT's horizontal overflow — the page scrolls sideways to an empty strip. ` +
+            `The fix is \`position: relative\` on the nearest scrolling/clipping container, NOT hiding ` +
+            `the span (it carries the only accessible name distinguishing one control from ` +
+            `another):\n${escapes.join('\n')}`
+        ).toEqual([]);
+      });
+    }
+  }
+});
+
+/**
+ * ── THE CATALOGUE GAP THAT LET F1 SHIP, and why it is still open ────────────
+ *
+ * `compare-runs` — `/record/<id>?compare=<runA>&compare=<runB>` — is NOT in
+ * `../surfaces.ts`, and the sweep above only measures catalogued surfaces. That
+ * is how a whole-page sideways scroll at 320 and 390 shipped past a suite that
+ * already asserts exactly that at exactly those widths.
+ *
+ * IT CANNOT SIMPLY BE ADDED, and this test records the reason mechanically so
+ * the next reader does not spend the measurement again. None of the five seeded
+ * worked-example records has any runs — `GET /api/experiments/<id>/runs` returns
+ * `{"runs": [], "total": 0}` for all of them — so the Compare Runs table never
+ * mounts in this suite's read-only scope, and a catalogued entry would silently
+ * measure the "no such run" state instead of the table. Making it reachable
+ * means CREATING a run, which is a mutation, and mutations belong to
+ * `playwright.mutation.config.ts` and its own workspace, never to this suite:
+ * this one asserts canonical seed CONTENT across five parallel projects.
+ *
+ * So the geometry is pinned by S1 above (real classes, real stylesheet, injected
+ * geometry) and the class is guarded by S2, while the SURFACE stays uncovered.
+ */
+test.describe('surface catalogue coverage', () => {
+  test.beforeEach(({}, testInfo) => {
+    test.skip(testInfo.project.name !== HOST_PROJECT, `runs only in ${HOST_PROJECT}`);
+  });
+
+  test('@responsive the Compare Runs table is still unreachable in the read-only scope', async ({ page, app }) => {
+    const partial = SURFACES.find((s) => s.id === 'record-detail')!;
+    await app.open(partial);
+    // No run cards on a seeded example record, therefore no Focus / Compare
+    // controls, therefore no `?compare=` table to catalogue. This is the
+    // mechanical form of the prose above, so the note cannot rot into a claim
+    // nobody re-checks.
+    expect(
+      await page.locator('.run-card-compare').count(),
+      'If run cards now render on a seeded example record, Compare Runs has become reachable ' +
+        'read-only and SHOULD be added to `../surfaces.ts` — plus `.run-card-focus` and ' +
+        '`.run-card-compare` (measured 52x23 and 69.5x23) become measurable by the target-size ' +
+        'probe, which currently cannot see them. Delete this test when that happens.'
+    ).toBe(0);
+  });
+});

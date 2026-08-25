@@ -500,6 +500,39 @@
 /* ---- GovernanceBanner ---------------------------------------------- */
 .gov-banner {
   display: flex;
+  /*
+   * The banner never wrapped, so the disclosure it carries degraded into a
+   * ribbon of about one word per line. The icon (18px) and the "Read Policy"
+   * action (83px) are both `flex: none`; the body was `flex: 1 1 0%`, so it
+   * absorbed 100% of the shrink. MEASURED on Load Materials, darwin:
+   *
+   *   viewport   banner content   .gov-body        lines
+   *   1280       950px            825 x 94px       5
+   *    768       656px            531 x 150px      8
+   *    640       528px            403 x 206px     11
+   *    390       278px            153 x 544px     29
+   *    320       208px             83 x 1125px    60
+   *
+   * A 5-line honesty statement rendering as a 1,125px column is not a rough
+   * edge — it is the disclosure becoming unreadable at the width where a reader
+   * is most likely to skip it.
+   *
+   * `wrap` + a real basis on the body is the fix, and the 160px basis is chosen
+   * by arithmetic rather than taste: the icon and one gap cost 30px, so a basis
+   * of 160 keeps icon + body on the FIRST line down to a 190px content box —
+   * below every width this product claims — while making the action drop to its
+   * own line as soon as 18 + 12 + 160 + 12 + 83 = 285px stops fitting. The body
+   * then grows into the whole line. Result, same measurements:
+   * 320 → body 178px (was 83), 390 → 248px (was 153), and 640/768/1280 are
+   * byte-identical to before because the action still fits beside the body.
+   *
+   * The rejected alternative was a `@media` stack. It would have had to name a
+   * viewport width for a container-width problem — this banner appears on Load
+   * Materials inside `.centered-col`, whose measure follows the shell's
+   * `data-width` mode — so the breakpoint would have been wrong on the day the
+   * mode changed.
+   */
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
@@ -513,7 +546,46 @@
   margin-top: 1px;
 }
 .gov-banner .gov-body {
-  flex: 1;
+  /* `1 1 160px`, not `1`: see the arithmetic on `.gov-banner` above. `flex: 1`
+     is `1 1 0%`, and a zero basis is what let the paragraph be shrunk to 83px
+     while the 83px action kept its width. `min-width: 0` stays explicit so the
+     basis governs LINE BREAKING without becoming a hard floor that could push
+     the body past the container's edge.
+
+     ── THE IMPROVEMENT IS BAND-LIMITED, AND THE BAND IS RECORDED RATHER THAN
+     CLAIMED AWAY (2026-08-25). ──
+
+     A review measured `.gov-body` at 414px as 177 x 488, identical to pre-PR,
+     and it is right. Re-measured here across the whole range, in headless
+     Chromium on Load Materials (`bodyW x bodyH`, lines at a 1.5 line-height):
+
+       320 -> 178 x 488  26 lines      480 -> 243 x 338  18 lines
+       375 -> 233 x 338  18 lines      540 -> 303 x 263  14 lines
+       390 -> 248 x 319  17 lines      640 -> 403 x 206  11 lines
+       414 -> 177 x 488  26 lines      768 -> 531 x 150   8 lines
+       430 -> 193 x 413  22 lines     1024 -> 787 x  94   5 lines
+
+     THE SHAPE IS NON-MONOTONIC ON PURPOSE, and that is the whole finding: from
+     ~414 to ~470 the banner is just wide enough for the ~83px action to stay on
+     line 1 beside a 160px-basis body, so the body is squeezed to ~180px —
+     narrower than it gets at 390, where the action wraps to its own line and
+     leaves the body 248px. So 414 is UNCHANGED by this PR rather than regressed
+     by it, and it is the widest point at which the paragraph still reads as a
+     ribbon.
+
+     NOTHING MEASURES IT: `LAYOUT_SWEEP_WIDTHS` in `e2e/layout-baseline.ts` is
+     [1280, 1024, 768, 640, 390, 375, 320], and 414 is not in it.
+
+     WIDENING THE SWEEP WAS REJECTED, and the reason is cost rather than
+     disinterest: adding a width adds a `surfaceId@width-414` key for every
+     surface in `e2e/surfaces.ts`, and this environment cannot measure the linux
+     column for any of them — so it would trade one known, disclosed band for a
+     whole column of baseline entries asserted from darwin alone. The honest
+     alternative is to record the band, which is what this is. Fixing it means
+     making the action wrap below ~470px rather than ~414px, which is a design
+     decision about the banner and not a defect closure. */
+  flex: 1 1 160px;
+  min-width: 0;
   font-size: 12.5px;
   color: var(--text-secondary);
   line-height: 1.5;
@@ -521,6 +593,27 @@
 .gov-banner .gov-body strong { color: var(--text-strong); }
 .gov-banner .gov-action {
   flex: none;
+  /* A no-op while the action shares line 1 (the body's `flex-grow` has already
+     taken the slack); once the body's 160px basis pushes it onto its own line
+     this parks it at the end of the banner rather than under the icon. */
+  margin-left: auto;
+  /* ~~"Centres the label inside the 24px WCAG 2.5.8 floor that `styles/base.css`
+     puts on this control"~~ — **A MEASURED NO-OP, corrected in place
+     2026-08-25.** This control is a `<button type="button">`
+     (`components/GovernanceBanner.tsx`), and Chromium's UA button layout already
+     centres a button's content at any `display`. Stripping all three of these
+     declarations in the running app at 1280px left the box at 24 x 82.9 with
+     top/bottom gaps 4.5/4.5 and left/right 6/6 — byte-identical to keeping them.
+     Kept anyway: `margin-left: auto` above IS load-bearing, and deleting a
+     harmless declaration to make a point is not worth the risk of finding out it
+     mattered in a browser this environment cannot measure. The reason it lives
+     here rather than in base.css is unchanged and still right: a second
+     `.gov-banner .gov-action` block in base.css would have the same 0-2-0
+     specificity, so the winner would be decided by import order. The 24px floor
+     itself is real and comes from base.css (measured 82.9 x 17.0 before it). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--action);
   font-weight: 600;
   font-size: 12.5px;
@@ -551,7 +644,43 @@
    stacking/collapse, not a pixel-perfect mobile redesign. */
 @media (max-width: 1024px) {
   .app { padding: 10px; }
-  .screen-card { min-height: calc(100vh - 20px); }
+
+  /*
+   * ROOM FOR THE FLOATING ASSISTANT TRIGGER, which is engaged by this same
+   * `max-width: 1024px` band in `components/assistant-drawer.css`.
+   *
+   * MEASURED, darwin, on Review Record: the trigger is `position: fixed`, 38px
+   * tall, 16px off the bottom — it owns the bottom 54px of the viewport at every
+   * width in this band. `footer.statusbar` is `position: static`, 52px tall, and
+   * the LAST child of `div.screen-card`; at these widths the DOCUMENT is the
+   * scroller (`main` measured `scrollHeight == clientHeight` while the document
+   * scrolled), so scrolling to the end put the footer at viewport y 760..812 with
+   * the trigger at 758..796 — directly on top of it. Probed at the bottom scroll
+   * offset, the honesty statement "local dev · no telemetry"
+   * (`span.statusbar-right`) came back covered on 3 to 5 of 5 sampled points on
+   * ALL FIVE record surfaces at 1024 and at 768. That is `e2e/layout-baseline.ts`
+   * LAYOUT-03, and the reason it survived `scrollIntoView` is simply that there
+   * was nothing below the footer to scroll into.
+   *
+   * So the reserve is space AFTER the card, not padding inside `main`: the footer
+   * comes after `main`, and `main` is not the scroller here. 64px = 38 (trigger)
+   * + 16 (offset) + 10 clearance; `.app`'s 10px bottom padding in this band is on
+   * top of that, giving a measured 20px of clearance.
+   *
+   * The floor gives back exactly the same amount. Without that, `calc(100vh -
+   * 20px)` plus a 64px margin would make EVERY page 64px taller than the viewport
+   * and hand a screen whose content fits a permanent vertical scrollbar — trading
+   * an occlusion for a scrollbar is not a fix.
+   *
+   * Declared HERE rather than beside the trigger because the `.screen-card`
+   * min-height below is the incumbent declaration at this specificity in this
+   * band; a competing block in another file would be resolved by import order.
+   */
+  :root { --assistant-trigger-reserve: 64px; }
+  .screen-card {
+    min-height: calc(100vh - 20px - var(--assistant-trigger-reserve));
+    margin-bottom: var(--assistant-trigger-reserve);
+  }
 
   /* Responsive equivalent of the shared top gutter — ONE redeclaration of the
      token, so every preset (.pad / none / .centered) tracks it together. */

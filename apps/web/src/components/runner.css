@@ -112,7 +112,35 @@
 /* ---- On-ramp cards -------------------------------------------------- */
 .onramps {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /*
+   * WCAG 1.4.10 (Reflow). This was `1fr 1fr` and this file carried NO `@media`
+   * rule at all, so Load Materials was two columns at every width down to 320.
+   *
+   * MEASURED, darwin @320: `.onramps` scrollWidth 468 in a clientWidth of 242,
+   * the two cards at x 39→261 and 275→507, and the overflow landing on
+   * `main#main.screen-main.centered` (scrollWidth 496 / clientWidth 298) — which
+   * is also the vertical scroller, so it offered no horizontal affordance and
+   * the second on-ramp sat off the right edge with a sliver showing. The page
+   * itself measured a clean 320 == 320, which is why the document-level probe
+   * never saw it. The same geometry was ALSO reported by the occlusion probe as
+   * `[unusable-sliver] button.drop-target < div.onramp < div.onramps` — 15px of
+   * a 194px control — so this one track definition broke Reflow and target
+   * usability at once.
+   *
+   * `repeat(auto-fit, minmax(240px, 1fr))` rather than a `@media` single-column
+   * rule, and the reason is that the constraint is the CONTAINER's width, not
+   * the viewport's: these cards sit inside `.centered-col`, whose measure is set
+   * by the shell's `data-width` mode, so a viewport breakpoint would state the
+   * wrong thing and would go wrong again the moment the mode changed. This says
+   * what is actually true — an on-ramp card needs 240px to be readable — and
+   * lets the track count follow from it.
+   *
+   * There are exactly two cards, and `auto-fit` collapses the empty tracks, so
+   * every wide measurement is UNCHANGED: 1280 → 2 × 485px, 768 → 2 × 338px,
+   * 640 → 2 × 274px (all identical to `1fr 1fr`); 390 and 320 → one column,
+   * because 2 × 240 + 14 = 494 no longer fits.
+   */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 14px;
   margin: 16px 0 22px;
 }
@@ -132,6 +160,39 @@
   gap: 10px;
   margin-bottom: 10px;
 }
+/* THE TITLE/TAGLINE STACK — an unclassed `<div>` between the icon and the tag
+   pill (see `screens/LoadMaterials.tsx`). A flex item's automatic minimum size
+   is its MIN-CONTENT size, so without this the row's width is floored by the
+   longest word in the title and the row can push the grid track wider than its
+   container under a wider face.
+
+   MEASURED in headless Chromium at a 320px viewport, injecting a font-size
+   scale on `.onramp-title`/`.onramp-tagline`/`.onramp-tag` as a proxy for the
+   wider Linux system face. `grid` is `.onramps` scrollWidth/clientWidth:
+
+     scale   grid (no min-width)   grid (min-width: 0)
+      1.0        242/242                242/242
+      1.1        242/242                242/242
+      1.2        242/242  *             242/242
+      1.3        245/242  (+3)          242/242
+      1.5        265/242  (+23)         242/242
+      2.0        318/242  (+76)         242/242
+
+   * at 1.2x the SECOND `.onramp-head` already overflows its own track (215/204)
+   while the grid still measures clean; the grid follows one step later.
+
+   `min-width: 0` removes the overflow at every scale tested, and the cost is the
+   trade this design wants: the stack wraps taller (its box goes 99px -> 344px of
+   height at 2.0x) instead of the page scrolling sideways. WCAG 1.4.10 Reflow and
+   1.4.4 Resize Text both prefer the taller box.
+
+   NOT REPRODUCED, and recorded because a review asserted it: at 1.10x this
+   measures ZERO grid overflow on darwin, not the 21px an independent review
+   reported. The MECHANISM the review described is real and is what this rule
+   closes; the threshold it quoted is not what this environment measures, and the
+   review's 193.6px min-content figure is not reproducible either — the stack's
+   min-content measures 61.7px at 1.0x and 67.1px at 1.1x. */
+.onramp-head > div { min-width: 0; }
 .onramp-icon {
   width: 30px;
   height: 30px;
@@ -182,7 +243,55 @@
   padding: 20px;
   text-align: center;
   font-size: 12px;
-  color: var(--text-tertiary);
+  /* --text-tertiary (#78838f) is 3.86:1 on the white card — below the 4.5:1 AA
+   * threshold for 12px normal text. Corrected to --text-muted (#5b6570, 5.93:1),
+   * following EXACTLY the precedent `.onramp-tagline` sets above (the
+   * `.onramp-tagline` rule, same file): the token is used on dozens of other
+   * surfaces, so it is not moved globally; only this rule is corrected.
+   *
+   * ~~"~3.6:1"~~ and ~~"26 lines above"~~ WERE BOTH WRONG AND ARE CORRECTED IN
+   * PLACE. 3.86:1 is the computed ratio of #78838f on --surface #ffffff, and axe
+   * independently reported 3.85. **3.56:1 is the ratio on --screen-base
+   * (#f4f6f9)** — a background this control does not sit on — so the old figure
+   * reads as a transposition of the wrong pair's digits. The precedent's own
+   * comment says ~3.9:1 and is right. The line count is not restated as a
+   * number: it was 29 lines above this comment's first line and 48 above the
+   * declaration it corrects, and both figures rot the next time anything in
+   * between is edited — which is exactly what happened. The selector is the
+   * durable citation.
+   *
+   * The defect was PRE-EXISTING — this control has always used this colour — and
+   * it was invisible to axe for the same reason the tagline's was. Until the
+   * `.onramps` reflow fix above, the second on-ramp sat off the right edge at 320
+   * and 390 with 15px of a 194px control visible, so axe could not resolve this
+   * button's background and filed it under `incomplete` rather than `violations`.
+   * Making the card reachable made the node newly MEASURABLE, which is the same
+   * mechanism `e2e/a11y-baseline.ts` records for `guided-completion`.
+   *
+   * Measured consequence, darwin: `load@width-320` and `load@width-390`
+   * color-contrast went 1 -> 2 nodes with the reflow fix alone, and back to 1
+   * with this line.
+   *
+   * ~~"So the count in `e2e/a11y-baseline.ts` is UNCHANGED and no number in that
+   * file was touched — which is the point."~~ **FALSE, AND CORRECTED IN PLACE
+   * 2026-08-25.** The darwin measurement above was right; the sentence
+   * generalised it to a file whose LINUX column CI has since moved. Six cells
+   * and both totals were re-transcribed from the `browser accessibility and
+   * responsive baseline` job on head `d4ac207`:
+   *
+   *   load@desktop-1280x800   3 -> 2      load@mobile-375x812   2 -> 1
+   *   load@laptop-1024x768    3 -> 2      load@zoom-200         2 -> 1
+   *   load@tablet-768x1024    3 -> 2      load@width-390        2 -> 1 (pair
+   *                                         collapsed to a scalar)
+   *   A11Y_BASELINE_TOTAL_NODES  darwin 2564 -> 2559, linux 2835 -> 2829
+   *
+   * EVERY ONE OF THEM MOVED DOWN, which is the claim the old sentence was
+   * reaching for and the only claim worth making: this colour change REMOVED a
+   * counted violation from five project cells that had been carrying it all
+   * along. `load@width-320` did NOT move — it was already 1. So the honest form
+   * is "no baseline was RAISED", not "no number was touched". Fixing the colour
+   * is the right response; raising the baseline was not. */
+  color: var(--text-muted);
   line-height: 1.55;
 }
 /* The approval-gated refusal — protective slate, never alarming red. */

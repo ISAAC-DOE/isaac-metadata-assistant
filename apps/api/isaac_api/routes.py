@@ -10503,7 +10503,10 @@ _SUBMIT_REFUSAL_PUBLICATION: tuple[tuple[int, str, str, str], ...] = (
     (
         409,
         "already_submitted",
-        "this exact content is already on record; the existing submission is echoed",
+        (
+            "this record's published content and conflict decisions are already on "
+            "record; the existing submission is echoed"
+        ),
         "either",
     ),
     (409, "idempotency_key_conflict", "that key was used for different content", "either"),
@@ -11092,6 +11095,18 @@ def _already_submitted(
     record is materialised, and the write, after every one of them is. The old
     single sentence — "nothing was written and nothing was published again" — was
     true of the first and false of the second. See :func:`_publication_disclosure`.
+
+    **THE MESSAGE NO LONGER SAYS "WITH EXACTLY THIS CONTENT", AND THAT WORDING WAS A
+    MEASURED HONESTY DEFECT RATHER THAN A CLUMSY PHRASE.** The comparison is
+    ``submissions.content_signature``, whose scope is narrower than the document: it
+    deliberately excludes the title, the notes, the captured transcript and every
+    other piece of workspace state (that function lists each exclusion and why). So a
+    scientist who captured a note, renamed the record, or — before the signature was
+    widened — recorded a conflict decision, was told the record was unchanged by the
+    very request that had just moved it, and had no way to tell which of their work
+    the submission on file actually covers. The message now names the comparison's
+    scope instead of asserting whole-document identity, and it says what a
+    resubmission would therefore never record.
     """
     note, fields = _publication_disclosure(published)
     return JSONResponse(
@@ -11099,9 +11114,12 @@ def _already_submitted(
         content={
             "error": "already_submitted",
             "message": (
-                "This record has already been submitted with exactly this content, "
-                f"so no second submission was recorded. {note} Send an "
-                "Idempotency-Key with your original key if you are retrying a "
+                "A submission is already on record for this record's published "
+                "content and its conflict decisions, so no second submission was "
+                f"recorded. {note} Workspace-only changes are outside that "
+                "comparison — the title, captured notes and the transcript are not "
+                "compared, so changing one does not make this a new submission. Send "
+                "an Idempotency-Key with your original key if you are retrying a "
                 "request whose response you did not receive."
             ),
             "submission": existing,

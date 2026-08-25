@@ -27,6 +27,7 @@ import {
   GRAPH_URL_PARAMS,
   MAX_HISTORY,
   MAX_QUERY_LENGTH,
+  NARROW_GRAPH_VIEWPORT_QUERY,
   decodeGraphActions,
   defaultGraphMode,
   describeCommandOutcome,
@@ -73,6 +74,23 @@ import { GraphHelp, type GraphHelpExpand } from './graph/GraphHelp';
 import { GraphPathFinder, GraphPathToggle } from './graph/GraphPathFinder';
 
 // --- top-level card ---------------------------------------------------------
+
+/**
+ * WHAT THE POLITE LIVE REGION SAYS WHEN THE VIEWPORT — not the reader — changed
+ * the mode.
+ *
+ * It names the threshold rather than only reporting the move, so the reader can
+ * tell it apart from a control that malfunctioned. `860` is
+ * `NARROW_GRAPH_VIEWPORT_QUERY`'s own number; both are pinned by
+ * `__tests__/graph-mode-follows-viewport.test.tsx`, so they cannot drift apart
+ * silently. It does NOT claim the canvas is unavailable — the reader can ask for
+ * Explore again and will get it, which is a decision the coercion deliberately
+ * does not take away.
+ */
+const NARROW_VIEWPORT_COERCION =
+  'The window is now narrower than 860px, so this switched to Browse — the node canvas is not ' +
+  'legible at this width. Choosing Explore again still works.';
+
 
 interface MemoryGraphCardProps {
   /**
@@ -252,6 +270,97 @@ function MemoryGraphAvailable({
   const [commandOutcome, setCommandOutcome] = useState<string | null>(null);
   const [history, setHistory] = useState<GraphCommandHistoryEntry[]>([]);
   const historySeq = useRef(0);
+
+  /*
+   * THE NARROW-VIEWPORT DECISION, RE-ASKED ON RESIZE.
+   *
+   * `defaultGraphMode()` already says a canvas is not a phone surface below
+   * 860px, and it was right — a fresh load at 390 or 320 renders no `<svg>` at
+   * all. But it ran ONLY in the initial reducer state, so anyone who resized a
+   * wide window down, or rotated a tablet, stayed in Explore. Measured on
+   * darwin: opened at 1280 in Explore and resized to 320, the canvas still held
+   * 206 nodes drawn at 9.3-10.8px each, most of them under the fixed Assistant
+   * trigger.
+   *
+   * ONE-DIRECTIONAL, and that asymmetry is the decision rather than an
+   * oversight. Becoming narrow coerces Explore -> Browse, because the render it
+   * would otherwise produce is not a view of anything. Becoming wide again does
+   * NOT coerce Browse -> Explore: mount-time Browse on a wide viewport can only
+   * come from a deliberate choice (a click, or `?gmode=browse` in a shared
+   * link), and overriding that would be this bug with the sign flipped. Coerce
+   * away from an unusable render; never coerce into one.
+   *
+   * It dispatches through the same reducer a click uses, and deliberately does
+   * NOT write the URL: a window resize is not a navigational act and must not
+   * push a history entry. A link already carrying `?gmode=explore` therefore
+   * still opens honestly, and still switches to Browse if the window is narrow.
+   *
+   * IT ANNOUNCES ITSELF, AND THAT WAS ADDED 2026-08-25 AFTER A REVIEW FOUND IT
+   * SILENT. The coercion used to call `setState` directly, and
+   * `applyGraphAction`'s `setMode` case attaches no notice and clears none — so
+   * a reader who had TYPED `explore` watched the mode revert with nothing said,
+   * while the line their command had put in the polite live region stayed there
+   * describing a view they no longer had. Two defects, one cause.
+   *
+   * NOTICE RATHER THAN DOCUMENTED SILENCE, and the argument is short: the mode
+   * is a control the reader operates, and this is the only case where something
+   * else operates it. Overriding a deliberate act without saying so is the exact
+   * class of defect this codebase has been removing. The announcement uses the
+   * existing lowest-precedence `commandOutcome` slot inside the ONE polite
+   * region — no second live region, which the render site forbids — and the
+   * stale reducer notice is cleared through `dismissNotice` so it cannot outrank
+   * it. This is the same three-line shape the `help` branch of `runCommand`
+   * already uses.
+   *
+   * WHAT STAYS SILENT, deliberately: the URL (see above) and the COMMAND
+   * HISTORY. That list records commands; a row for something nobody typed would
+   * misdescribe itself. Announcing an event and recording it as a user action
+   * are different claims, and only the first is true here.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(NARROW_GRAPH_VIEWPORT_QUERY);
+    /*
+     * Seeded from the CURRENT width so only a genuine wide -> narrow CROSSING
+     * coerces. A real browser fires `change` only when `matches` flips, so this
+     * is belt-and-braces — but the braces matter: without them, any repeated
+     * `matches: true` notification would undo a reader who deliberately asked for
+     * Explore at a narrow width, and the mode toggle would be a control that
+     * appears to work and then silently reverts. Caught by
+     * `__tests__/graph-mode-follows-viewport.test.tsx`, which asserts exactly
+     * that case rather than assuming the browser's firing rule.
+     */
+    let wasNarrow = mql.matches;
+    const onChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      const nowNarrow = e.matches;
+      const crossedIntoNarrow = nowNarrow && !wasNarrow;
+      wasNarrow = nowNarrow;
+      if (!crossedIntoNarrow) return;
+      // Read the CURRENT mode rather than deciding inside the updater, because
+      // the announcement below must fire only when a coercion actually happened
+      // — a reader already in Browse is not told anything.
+      if (stateRef.current.mode !== 'explore') return;
+      setState((s) => {
+        if (s.mode !== 'explore') return s;
+        // Both hops through the one reducer: coerce, then drop the notice the
+        // command that put them in Explore left behind. `setMode` preserves
+        // `notice`, and a preserved notice outranks the announcement.
+        const coerced = applyGraphAction(s, { kind: 'setMode', mode: 'browse' }, index);
+        return applyGraphAction(coerced, { kind: 'dismissNotice' }, index);
+      });
+      setCommandError(null);
+      setCommandOutcome(NARROW_VIEWPORT_COERCION);
+    };
+    // Older WebKit exposes only `addListener`. Both paths are kept because the
+    // fallback is two lines and losing the subscription silently reintroduces
+    // exactly the defect this effect exists to close.
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
+  }, [index]);
 
   const dispatch = useCallback(
     (action: GraphAction) => {

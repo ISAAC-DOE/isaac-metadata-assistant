@@ -19,6 +19,24 @@
 }
 
 @media (max-width: 1024px) {
+  /*
+   * THIS TRIGGER OCCLUDES THE STATUS BAR, and the compensation for it is NOT in
+   * this file. It lives in `components/chrome.css`, in that file's own
+   * `@media (max-width: 1024px)` block, as `--assistant-trigger-reserve` plus
+   * two `.screen-card` declarations. Read that comment for the measurements.
+   *
+   * It is over there and not here for a mechanical reason, not a stylistic one:
+   * chrome.css ALREADY declares `.screen-card { min-height: calc(100vh - 20px) }`
+   * inside the same media band, at the same 0-1-0 specificity. A second
+   * `.screen-card` block here would be resolved by stylesheet import order, and
+   * whether the shell reserves room for this button is not a thing to leave to
+   * import order.
+   *
+   * If the trigger's box changes — its `padding`, `font-size` or `bottom` — the
+   * reserve is what has to change with it. The measured box is 38px tall at a
+   * 16px offset, so it owns the bottom 54px of the viewport.
+   */
+
   /* The rail collapses behind a clearly labelled, floating "Assistant" control. */
   .assistant-drawer-trigger {
     position: fixed;

@@ -229,7 +229,7 @@ CREATE INDEX IF NOT EXISTS isaac_revision_changes_address_idx
 | `isaac_experiment_revisions` | One row per captured snapshot of an experiment. `state` holds `Experiment.to_state()` verbatim — a **snapshot, not a diff**, because a diff chain is only as good as its oldest link and one corrupt link makes every later revision unreadable. |
 | `revision_no` + `UNIQUE (experiment_id, revision_no)` | The human-facing ordinal, assigned as `previous + 1` inside the same transaction that inserts the row. The UNIQUE constraint is what makes that assignment safe under concurrency: two writers computing the same next number cannot both land, and the loser's whole transaction rolls back. It also supplies the index for "the latest revision of this experiment", so no separate index is created for that read. |
 | `experiment_rev`, distinct from `revision_no` | `rev` counts every authoritative mutation and moves without anything being recorded here; `revision_no` counts rows in this table. Conflating them is the mistake this column pair exists to prevent. |
-| `content_signature` + `CHECK (~ '^[0-9a-f]{64}$')` | The sha256 of the **submitted content** — the export units' ids and drafts only. It excludes `rev`, `updated_utc`, `record_id` and every server timestamp, so it is **stable across materialisation**: the value computed before the official records are written equals the one computed after. That stability is what makes it usable as an idempotency key and is why the column is not a digest of `state`. **One degraded exception (M4):** a materialised record that is unreadable, or whose own `record_id` disagrees with the file carrying it, drops out of its sibling group in `workspace._linkable`, which changes the links composed into its siblings' drafts and moves the signature. The claim holds for every readable, self-consistent artifact set. |
+| `content_signature` + `CHECK (~ '^[0-9a-f]{64}$')` | The sha256 of the **submitted content** — ~~the export units' ids and drafts only~~ **the export units' ids and drafts, plus the record's stored conflict decisions (corrected in place; see the note under this table)**. It excludes `rev`, `updated_utc`, `record_id` and every server timestamp, so it is **stable across materialisation**: the value computed before the official records are written equals the one computed after. That stability is what makes it usable as an idempotency key and is why the column is not a digest of `state`. **One degraded exception (M4):** a materialised record that is unreadable, or whose own `record_id` disagrees with the file carrying it, drops out of its sibling group in `workspace._linkable`, which changes the links composed into its siblings' drafts and moves the signature. The claim holds for every readable, self-consistent artifact set. |
 | `reason` + `CHECK (IN ('submission'))` | A closed set rather than free text, because an unconstrained column becomes a place to write prose nothing can query. One member today. |
 | `subject`, nullable, `CHECK (subject IS NULL OR length(subject) > 0)` | The canonical Authentik username, or NULL. **Never** a display name, an email, or a uid — `docs/identity-trust-contract.md` §9 disqualifies email as an identifier and records it as personal data, and the 2026-08-12 decision is that the username is the one canonical key. **The non-empty CHECK closes the value that slips between the two halves of the attribution pairing (review item M1):** `''` is not NULL, so without it a row whose subject is the empty string reads as **attributed** while naming nobody. Unreachable from this application — `HumanActor` and `EdgeAssertion` both reject an empty subject before a row is built — and declared anyway, because `ALTER` is a forbidden verb and a CHECK omitted here would need a whole further migration. |
 | `trust_basis` + `CHECK (IN ('unattributed','test_fixture','verified_edge_assertion'))` | **What vouched for `subject`, recorded in the row rather than inferable later.** No verifier in this build mints `verified_edge_assertion`, so no row can carry it yet; it is admitted so that the day one does, the older rows are already visibly labelled as something weaker. |
@@ -238,6 +238,69 @@ CREATE INDEX IF NOT EXISTS isaac_revision_changes_address_idx
 | `isaac_run_revisions.run_id` — **no foreign key** | See §3. |
 | `isaac_revision_changes` | Which addresses differ from the previous revision. See §2.1 for the exact, narrow meaning of "differ". |
 | The three indexes | `isaac_experiment_revisions_experiment_time_idx` is the chronological listing (the UNIQUE constraint already indexes `(experiment_id, revision_no)` for the latest-revision read, so this is not a duplicate) and also serves the parent-side foreign-key check. `isaac_run_revisions_run_idx` and `isaac_revision_changes_address_idx` lead on a column the UNIQUE constraints do not, so each is a genuinely different access path. |
+
+**CORRECTION IN PLACE, 2026-08-25 — the `content_signature` row above described a scope
+one term too narrow, and the SQL is untouched.** `submissions.content_signature` now
+digests the export units' ids and drafts **and** the record's stored conflict decisions
+(`draft["conflict_resolutions"]`). Nothing about this migration changed: the column's
+type, its `^[0-9a-f]{64}$` CHECK, the `UNIQUE (experiment_id, content_signature)` on
+`isaac_submissions`, and the file's sha256 digests are all exactly as approved — what
+widened is the application's computation of the value the column stores, which the
+migration deliberately does not constrain.
+
+Why it widened, briefly, because it bears on the `reason` row directly below. A conflict
+decision taken AFTER a submission was recordable on a record with no runs and
+unrecordable on a record with runs: the zero-run export unit's draft IS `exp.draft`,
+where decisions are stored, while a run's composed draft deliberately excludes them
+(`workspace.resolved_run_draft`). So the digest moved for one record shape and not the
+other, and `isaac_submissions.conflict_summary` — the one place a submission discloses
+that a person settled a conflicting field — could never be written again for a record
+with runs. **The alternative fix was a second `reason` value** ("a decision" as its own
+revision reason), and it was rejected precisely because of the row below: `reason` is a
+closed CHECK set with one member, widening it needs an `ALTER`, `ALTER` is a forbidden
+verb here, and it would require a further migration, a further packet and a further
+operator action to record something the existing columns can already express.
+
+Two consequences a reader of this packet should be able to check rather than take on
+trust. **No stored row is invalidated**, because no `isaac_submissions` row exists
+anywhere: `0003` and `0004` are applied in no deployment, and `submission_store.store()`
+has no filesystem fallback. And **the M4 stability exception above is unaffected** — a
+decision is not written by materialisation, so the "stable across materialisation"
+property is exactly as strong as it was.
+
+**AND THE SQL FILE'S OWN PROSE NOW SAYS SOMETHING FALSE — DISCLOSED HERE BECAUSE IT
+CANNOT BE CORRECTED.** `0003_revisions.sql:122-123` documents the column as *"computed
+by `submissions.content_signature` over the export units' ids and drafts **ONLY**"*.
+That `ONLY` is now wrong, in exactly the way the table row above was wrong before it was
+struck: the digest also covers the record's stored conflict decisions. **The comment is
+not correctable, and the reason is the approval rather than the effort.** §"The bytes
+being approved" pins this file's sha256; `git log --follow` shows the SQL has had exactly
+one version ever (commit `0896b07`, never since touched); and the project owner approved
+**those exact bytes** on 2026-08-17. Changing one comment character changes the digest,
+so it would invalidate an owner approval of a migration whose operator step is still
+outstanding. Re-opening an approval to reword a comment is the wrong trade; leaving the
+staleness undisclosed is not an option either, so the staleness is recorded here instead
+of being fixed.
+
+**What a reader of that comment should treat as authoritative instead**, in this order:
+the corrected `content_signature` row in the table above, and
+`submissions.content_signature`'s own docstring, which states the coverage as the
+experiment id, each export unit's id and fully resolved draft, and the record's stored
+conflict decisions — and carries the measured defect that widened it. The scope is also
+served rather than only documented: `submissions.SIGNATURE_SCOPE` reads
+`export_unit_ids_drafts_and_conflict_decisions` and moved when the coverage moved. The
+rest of that SQL comment — the exclusions of `rev`, `updated_utc`, `record_id` and every
+server timestamp, the stability-across-materialisation property, and the M4 degraded
+exception — is unchanged and still accurate; the single stale term is `ONLY`.
+
+**Nothing about the migration changed, and this note changes nothing about it.** No SQL
+byte, no column type, no CHECK, no UNIQUE constraint, no index, no digest in this packet
+and no approval was altered — what widened is the application's computation of the value
+the column stores, which the migration deliberately does not constrain.
+`0004_submissions.sql:70-71` carries the same stale `only` about the same digest, and
+[`docs/migration-approval-packet-0004.md`](migration-approval-packet-0004.md) §2
+discloses it there in the same terms, because that is the packet for the table whose
+`UNIQUE (experiment_id, content_signature)` actually uses the column.
 
 ### 2.1 What a change row means, stated narrowly
 

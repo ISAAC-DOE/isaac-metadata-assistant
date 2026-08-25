@@ -261,6 +261,162 @@ a:hover {
   filter: none;
 }
 
+/*
+ * ── WCAG 2.5.8 (AA) POINTER TARGET FLOOR ────────────────────────────────────
+ *
+ * 24 x 24 CSS px is the minimum for a pointer target. Every selector below was
+ * MEASURED under it — on darwin, in headless Chromium, at 1280 and 390, across
+ * the whole `e2e/surfaces.ts` catalogue — and every one of them is a control a
+ * user is expected to hit:
+ *
+ *   82.9 x 17.0   button.gov-action                 "Read Policy"
+ *   ~x   x 21.7   a.record-title.record-title-link  the breadcrumb record title
+ *  252.4 x 17.0   button.guided-dontknow            "I don't know — leave honestly missing"
+ *  133.5 x 21.0   button.memory-graph-help-trigger  "About This Graph"
+ *   77.0 x 23.0   button.graph-cmd-help
+ *   63.6 x 21.0   button.api-copy-btn
+ *   50.8 x 21.0   button.api-samples-tabs-tab
+ *
+ * Four more `<summary>` toggles were measured under the floor and are recorded
+ * further down as DELIBERATELY LEFT OPEN, with the measurement that decided it.
+ *
+ * Plus two that this suite's surface catalogue cannot reach, because no seeded
+ * example record has a run, so no surface renders a run card. Reported at 23px —
+ * ONE pixel short — and they are the two a scientist uses constantly:
+ *
+ *   52.0 x 23.0   button.run-card-focus             "Focus run …"
+ *   69.5 x 23.0   button.run-card-compare           "Compare run …"
+ *
+ * `.btn` is included as a FLOOR rather than as a finding: it measures ~35px tall
+ * today, and the point of naming it is that a future compact variant cannot fall
+ * under 24 without someone deleting a line from this block.
+ *
+ * ── DELIBERATELY NOT LISTED, each because it was measured and is exempt ──────
+ *
+ *   * `input.memory-graph-search-input` (250.7 x 17.0) and
+ *     `input.graph-cmd-input` (346.5 x 17.0). Both sit inside a `<label>` that
+ *     FORWARDS the click — measured `label.memory-graph-search-wrap` at
+ *     293.7 x 31.0 and `label.graph-cmd-field` at 382.8 x 32.6, with
+ *     `HTMLLabelElement.control === input` in both cases — so the effective
+ *     target already clears 24px. Growing the input would change the field's
+ *     appearance to satisfy a criterion it already meets.
+ *   * `input.csv-recon-visually-hidden` / `input.rec-val-visually-hidden`
+ *     (1 x 1). Visually-hidden file inputs; the visible label is the target.
+ *   * a bare `a` in Governance prose (178.6 x 16.0, `display: inline`). 2.5.8's
+ *     own INLINE exception: the target is in a sentence and its size is
+ *     constrained by the line-height of the surrounding non-target text.
+ *   * `g` (7.4 x 7.4) — a node inside the graph canvas, where position and size
+ *     carry the data. 2.5.8's ESSENTIAL exception, and a floor there would be a
+ *     different (and larger) piece of work than a floor here.
+ *   * the 13 x 13 Compare Runs checkbox. It is wrapped in a `<label>`, so its
+ *     effective target may already satisfy 2.5.8 the way the two inputs above
+ *     do — but unlike them it was NOT measured, because the surface is
+ *     unreachable read-only. Recorded as unmeasured rather than assumed either
+ *     way, and deliberately not "fixed" on a guess.
+ *
+ * ── FOUR MEASURED VIOLATIONS DELIBERATELY LEFT OPEN ─────────────────────────
+ *
+ * `<summary>` disclosure toggles, all four under the floor:
+ *
+ *   109.4 x 18.6   summary                          (Validator, "When to use this")
+ *   113.0 x 17.3   summary.stats-chart-table-toggle
+ *   128.8 x 20.1   summary.api-connect-summary
+ *    99.5 x 17.8   summary.api-samples-summary
+ *
+ * A one-line `summary { padding-block: 4px }` clears all four, and it was
+ * written, measured and then REMOVED. Measured consequence, darwin: growing
+ * those boxes moved previously-unresolvable nodes into axe's `violations`
+ * bucket on the Endpoint Explorer — `settings-explorer` color-contrast +1 at
+ * desktop-1280x800, +1 at mobile-375x812 and +2 at zoom-200 — the same
+ * incomplete-to-violations mechanism `e2e/a11y-baseline.ts` records for
+ * `guided-completion`, and that `.drop-target` in `components/runner.css`
+ * demonstrates on Load Materials. Removing the rule returned all three pairs to
+ * their prior numbers exactly, which is how the attribution was established.
+ *
+ * So the target-size fix is cheap and the contrast debt it uncovers is not:
+ * those nodes are pre-existing failures on a surface this change does not
+ * otherwise touch, and fixing them is a colour-token decision across the API
+ * browser rather than a floor. Left open ON PURPOSE, with the numbers recorded,
+ * rather than shipped with three a11y counts raised to absorb it.
+ *
+ * NOTHING THAT REMAINS HERE CHANGES TEXT WRAPPING, which is why none of it can
+ * move a count in `e2e/a11y-baseline.ts` — verified by an A/B run of the full
+ * axe + narrow sweeps.
+ *
+ * ~~"the only counts this block moves are the FIVE `load@*` color-contrast
+ * entries, and they move DOWN"~~ — **WRONG ABOUT OWNERSHIP, CORRECTED IN PLACE
+ * 2026-08-25.** This block is the 2.5.8 `min-height` rule set, and it moves
+ * NOTHING: an independent A/B at three widths measured +0/+0/+0. The SAFETY
+ * claim in the paragraph above is the one that holds and is the one worth
+ * keeping. The five `load@*` moves — and a sixth, `load@width-390` — belong to
+ * `components/runner.css`'s `.drop-target` COLOUR change (`--text-tertiary`
+ * 3.86:1 -> `--text-muted` 5.93:1), which is a different declaration in a
+ * different file; the per-cell arithmetic lives at `load@desktop-1280x800` in
+ * `e2e/a11y-baseline.ts`. Attributing another change's improvement to this one
+ * is the kind of credit that hides a regression later.
+ */
+.btn,
+.run-card-focus,
+.run-card-compare,
+.gov-banner .gov-action,
+.guided-dontknow,
+.memory-graph-help-trigger,
+.graph-cmd-help,
+.api-copy-btn,
+.api-samples-tabs-tab,
+.record-title-link {
+  min-height: 24px;
+}
+/* VERTICAL CENTRING INSIDE THE GROWN BOX IS FREE FOR ALL NINE — and the reason
+   is NOT the one this comment used to give.
+
+   ~~"Vertical centring for the ones that are already flex containers is free.
+   For `.gov-action` it has to be asked for"~~ — **CORRECTED IN PLACE 2026-08-25,
+   after a review asked whether `.api-samples-tabs-tab`, `.run-card-focus` and
+   `.run-card-compare` had been given the 24px box without the centring.** They
+   had, and it does not matter. Two independent reasons cover the whole list.
+   `.btn` declares its own `display: inline-flex; align-items: center` a few rules
+   above, so it is centred BY DECLARATION and does not depend on its element —
+   which matters, because it is the one selector here that is not always a button
+   (`components/FetchStates.tsx:1009` puts it on a router `<Link>`). Every OTHER
+   selector in the list except `.record-title-link` is a `<button>` — verified
+   one by one, `.api-samples-tabs-tab` included, which `RovingTabs` in
+   `screens/settings/apiShared.tsx` renders as one — and Chromium's UA button
+   layout centres a button's content vertically at ANY `display`. MEASURED, on a
+   24px-floored button with 3px/4px padding and an 11-11.5px label:
+
+     button, display: inline-block (no align-items)   top 5.5 / bottom 5.5
+     button, display: inline-flex + align-items:center top 5.5 / bottom 5.5
+     span,   display: inline-block                     top 4.0 / bottom 15.0
+
+   Only the non-button shows the top-aligned asymmetry the review was looking
+   for. Three of these nine are not flex containers (`.run-card-focus`,
+   `.run-card-compare`, `.api-samples-tabs-tab` declare no `display`) and are
+   centred anyway.
+
+   `.gov-action` IS ALSO A `<button>`, so its `display: inline-flex;
+   align-items: center; justify-content: center` in `components/chrome.css` is a
+   MEASURED NO-OP for centring: stripping all three in the running app left the
+   box at 24 x 82.9 with gaps 4.5/4.5 and 6/6, byte-identical. It is left in
+   place — `margin-left: auto` in the same rule IS load-bearing, and removing a
+   harmless declaration to prove a point is not worth the risk — but it is not
+   evidence that anything else in this list is missing something. The reason that
+   declaration lives beside the rest of the rule in `components/chrome.css`
+   rather than here is unchanged and still right: the two selectors would have
+   identical specificity (0-2-0), so which one won would depend on stylesheet
+   import order.
+
+   `.record-title-link` is deliberately NOT given `display: flex`: it is an `<a>`
+   (a router `Link`), not a button, and it carries `.record-title`'s
+   `text-overflow: ellipsis`, which a flex container would silently stop
+   applying. It is the one control here that a UA button box does not centre, and
+   it is the one that must not be turned into a flex box — so the honest status is
+   a recorded trade, not a gap.
+
+   CAVEAT ON THE MEASUREMENT: headless Chromium only. UA button-content centring
+   is form-control behaviour rather than a declaration in this repository, so it
+   is not something these stylesheets guarantee. */
+
 /* Input — spacing-layout.md primitive. */
 .input {
   width: 100%;

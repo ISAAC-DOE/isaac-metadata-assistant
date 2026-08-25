@@ -135,7 +135,7 @@ function history(overrides: Partial<ApiRevisionHistory> = {}): ApiRevisionHistor
     experiment_id: EXP,
     record_rev: 3,
     current_content_signature: 'b'.repeat(64),
-    signature_scope: 'export_unit_ids_and_drafts',
+    signature_scope: 'export_unit_ids_drafts_and_conflict_decisions',
     limit: 200,
     availability: { state: 'available', reason: null, message: READ_MESSAGE },
     lifecycle: lifecycle(),
@@ -198,7 +198,7 @@ describe('an unreadable history', () => {
           experiment_id: EXP,
           record_rev: 3,
           current_content_signature: 'b'.repeat(64),
-          signature_scope: 'export_unit_ids_and_drafts',
+          signature_scope: 'export_unit_ids_drafts_and_conflict_decisions',
           limit: 200,
           availability: {
             state: 'unavailable',

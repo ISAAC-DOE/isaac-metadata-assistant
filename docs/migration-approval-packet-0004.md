@@ -200,7 +200,7 @@ CREATE INDEX IF NOT EXISTS isaac_submission_runs_record_idx
 |---|---|
 | `isaac_submissions` | One row per act of submitting. `submission_id` names the ACT; the records it published are named in `isaac_submission_runs`. |
 | `revision_id` FK + `UNIQUE` | **One submission per revision, enforced by the database.** The revision is the immutable snapshot of exactly what was submitted; a second submission over the same snapshot would be a second declaration over one body of content, with nothing to distinguish them. |
-| `content_signature` + `UNIQUE (experiment_id, content_signature)` | **The natural idempotency key**, and the reason the route is safe across processes without a distributed lock: two callers submitting the same unchanged content compute the same signature and the database admits exactly one. It duplicates the column on the revision row deliberately — the uniqueness is a property of the *submission*, and a UNIQUE constraint cannot reach through a join. |
+| `content_signature` + `UNIQUE (experiment_id, content_signature)` | **The natural idempotency key**, and the reason the route is safe across processes without a distributed lock: two callers submitting the same unchanged content compute the same signature and the database admits exactly one. It duplicates the column on the revision row deliberately — the uniqueness is a property of the *submission*, and a UNIQUE constraint cannot reach through a join. **What the signature covers, corrected in place:** ~~the export units' ids and drafts only~~ **the export units' ids and drafts, plus the record's stored conflict decisions** — see the note under this table. It still excludes `rev`, `updated_utc`, `record_id` and every server timestamp, so it is still **stable across materialisation**, with the one degraded exception (**M4**) 0003's packet §2 records. |
 | `idempotency_key`, nullable + `UNIQUE (experiment_id, idempotency_key)` | An optional client token, echoed on a replay. PostgreSQL's default NULLS DISTINCT is what makes the nullable column work: any number of rows may carry NULL, while two rows may not share a non-NULL key for one experiment. `CHECK` non-empty when present, because `''` is a key every keyless retry could collide with. |
 | `unit_count` + `CHECK >= 1` | A submission that published nothing is not a submission. |
 | `conflict_summary jsonb` + object CHECK | See §3. |
@@ -210,6 +210,53 @@ CREATE INDEX IF NOT EXISTS isaac_submission_runs_record_idx
 | `CHECK (record_id = unit_id)` | **The one-run-one-record rule written into the schema.** `ExportUnit.mark_exported` already refuses to let a unit's target id and its record id diverge; this is the same invariant one layer down, where an application bug cannot reach it. Both columns are kept rather than collapsed because they *mean* different things — a unit is a thing to publish, a record is the published thing — and a schema that states the equality can be read without knowing the domain rule by heart. |
 | `run_id` nullable + `CHECK (run_id IS NULL OR run_id = unit_id)` | NULL for the single unit of an experiment with no runs. **NULL rather than a copy of `unit_id`**: such an experiment *has* no run, and writing its own id into a column called `run_id` would assert one exists. |
 | The two indexes | `isaac_submissions_experiment_time_idx` is the chronological listing — both UNIQUE constraints serve a *lookup* and neither can order by time — and it also serves the parent-side foreign-key check. `isaac_submission_runs_record_idx` is the reverse lookup from a record id back to the act that published it; **no code in this build issues that read yet**, and it is created now for the reason 0003's packet §2.2 gives. |
+
+**CORRECTION IN PLACE, 2026-08-25 — the `content_signature` row above repeated a scope
+one term too narrow, and the SQL that says so out loud CANNOT BE CORRECTED.**
+`submissions.content_signature` now digests the export units' ids and drafts **and** the
+record's stored conflict decisions (`draft["conflict_resolutions"]`). This packet's row
+is corrected above. The SQL comment is not, and that is deliberate:
+`0004_submissions.sql:70-71` documents the column as *"computed by
+`submissions.content_signature` over the export units' ids and drafts **only** — never
+over `rev`, `updated_utc`, `record_id` or any server timestamp"*, and that `only` is now
+false.
+
+**Why it stays false: the approval, not the effort.** §"The bytes being approved" pins
+this file's sha256; `git log --follow` shows the SQL has had exactly one version ever
+(commit `0896b07`, never since touched); and the project owner approved **those exact
+bytes** on 2026-08-17. Changing a single comment character changes the digest and so
+invalidates an owner approval of a migration whose operator step is still outstanding.
+Re-opening an approval to reword a comment is the wrong trade — and leaving the
+staleness undisclosed is not an option, which is why it is written down here rather than
+edited away there.
+
+**What a reader of that comment should treat as authoritative instead**, in this order:
+the corrected `content_signature` row above, and `submissions.content_signature`'s own
+docstring, which states the coverage as the experiment id, each export unit's id and
+fully resolved draft, and the record's stored conflict decisions, and carries the
+measured defect that widened it. The scope is served, not merely documented:
+`submissions.SIGNATURE_SCOPE` reads `export_unit_ids_drafts_and_conflict_decisions` and
+moved when the coverage moved. **The rest of that comment is unchanged and still
+accurate** — the exclusions, the stability-across-materialisation property, the M4
+degraded exception, and the argument for duplicating the column on the submission row.
+The single stale term is `only`.
+
+**Why it matters more here than in 0003's packet, and why both disclose it.** This is the
+table whose `UNIQUE (experiment_id, content_signature)` actually *uses* the column, so a
+reader deciding what a duplicate submission means lands on this row. A conflict decision
+now moves the signature for every record shape, which is what makes a resubmission after
+a decision a NEW submission rather than an `already_submitted` refusal — the whole point
+of the widening, and the reason `isaac_submissions.conflict_summary` (§3 below) can be
+written again for a record with runs. The same stale `only` appears at
+`0003_revisions.sql:122-123` and is disclosed in
+[`docs/migration-approval-packet-0003.md`](migration-approval-packet-0003.md) §2.
+
+**Nothing about this migration changed.** No SQL byte, no column type, no CHECK, no
+UNIQUE constraint, no index, no digest in this packet and no approval was altered — what
+widened is the application's computation of the value the column stores, which the
+migration deliberately does not constrain. No stored row is invalidated either, because
+no `isaac_submissions` row exists anywhere: `0003` and `0004` are applied in no
+deployment, and `submission_store.store()` has no filesystem fallback.
 
 ## 3. `conflict_summary` — recorded and disclosed, deliberately NOT gated on
 
