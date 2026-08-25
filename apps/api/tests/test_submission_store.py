@@ -632,6 +632,164 @@ def test_the_packets_do_not_overstate_CI_constraint_coverage():
         assert "exercised every constraint these five tables declare" not in doc, packet
 
 
+#: Sentences that credited a real CI RUN with coverage only the workflow FILE declares.
+#: Each may survive ONLY inside a strikethrough that corrects it — the repository's
+#: established remedy, and the one `test_the_packets_do_not_claim_a_hosted_application`
+#: already uses for an expired claim about this same job.
+#:
+#: Written WITHOUT markdown emphasis; the check strips `*` before searching, so a
+#: re-bolded or un-bolded copy cannot slip past.
+RETIRED_COVERAGE_CLAIMS: tuple[str, ...] = (
+    # CLAUDE.md §15 — the one the review measured.
+    "exercising 41 of the 46 declared constraints (27 when that sentence was written)",
+    # CLAUDE.md §11.
+    "41 of 46 declared (re-measured 2026-08-19, up from 27)",
+    # CLAUDE.md §15, the readiness table row.
+    "41 of the 46 declared constraints are exercised there",
+    # docs/dean-handoff-consolidated-2026-08-18.md — the UNSENT EXTERNAL PACKAGE.
+    "Constraint coverage moved 27 → 41 of 46, validated against a real",
+    "CI's constraint step now blames 41 of them, up from 27",
+    # the two approval packets.
+    "coverage improved from 27 to 41 of 46",
+    "IMPROVED on 2026-08-19 from 27 to 41 of 46",
+)
+
+#: Every document that quotes either figure.
+COVERAGE_DOCUMENTS: tuple[str, ...] = (
+    "CLAUDE.md",
+    "docs/dean-handoff-consolidated-2026-08-18.md",
+    "docs/migration-approval-packet-0003.md",
+    "docs/migration-approval-packet-0004.md",
+)
+
+
+def test_no_document_credits_a_real_RUN_with_the_branch_file_s_coverage():
+    """41 IS A PROPERTY OF THE WORKFLOW FILE; 27 IS WHAT A REAL POSTGRESQL HAS RUN.
+
+    THE DEFECT THIS CLOSES, measured by an independent review and re-derived by the
+    test below. `CLAUDE.md` said the `postgres-migration` job *"has since run and
+    passed on `main` at `fe374c0` (Actions run `32099627898`) ... exercising 41 of the
+    46 declared constraints"*. It cannot have::
+
+        git show fe374c0:.github/workflows/ci.yml   ->  27 declared names blamed
+        git show HEAD:.github/workflows/ci.yml      ->  41
+
+    The fourteen extra cases arrived in `77de2db` (2026-08-19), which is NOT in `main`
+    — `git merge-base --is-ancestor 77de2db origin/main` reports so — and whose own
+    commit message says *"CI is the first execution."*
+
+    IT MATTERED MOST WHERE IT WAS REPEATED. `docs/dean-handoff-consolidated-2026-08-18
+    .md` is an UNSENT EXTERNAL PACKAGE and the operator's evidence basis for applying
+    `0003`/`0004` to the hosted database. Inflating that evidence inflates the basis of
+    a decision an agent may not make and cannot undo.
+
+    THE RULE IS THE REPOSITORY'S OWN REMEDY RATHER THAN A PROSE JUDGEMENT: "does this
+    paragraph imply a run" is not decidable mechanically, so each retired sentence is
+    named and must survive only inside a strikethrough. A future slice that reverts a
+    correction fails here; one that rewords a sentence entirely does not, which is
+    correct — the pinned numbers are guarded by the test below.
+    """
+    import re
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    for relative in COVERAGE_DOCUMENTS:
+        raw = (root / relative).read_text(encoding="utf-8")
+        # Emphasis removed, blockquote markers removed, whitespace collapsed — so a
+        # line wrap, a bold marker, or a `>` continuation inside the sentence cannot
+        # hide it. The `>` rule was added after a corrected sentence in packet 0003
+        # wrapped mid-phrase and the search missed it, which is the same near-miss
+        # this whole family of guards keeps having.
+        flat = re.sub(r"\s+", " ", re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw).replace("*", ""))
+        for claim in RETIRED_COVERAGE_CLAIMS:
+            index = flat.find(claim)
+            while index != -1:
+                window = flat[max(0, index - 12) : index]
+                assert "~~" in window, (
+                    f"{relative} asserts a retired coverage claim as its own statement "
+                    f"rather than striking it: {claim!r}. 41 is what the workflow FILE "
+                    "declares on this branch; 27 is what run 32099627898 executed on "
+                    "`main` at fe374c0."
+                )
+                index = flat.find(claim, index + 1)
+
+
+def test_the_retired_coverage_claims_are_actually_still_findable():
+    """NEGATIVE CONTROL: the guard above passes trivially on a document that deleted
+    the correction instead of keeping it.
+
+    Deleting a struck sentence is how a corrected claim becomes indistinguishable from
+    one that never existed — the failure mode CLAUDE.md's own convention exists to
+    prevent. So at least one retired claim must still be PRESENT somewhere, struck.
+    """
+    import re
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    found = 0
+    for relative in COVERAGE_DOCUMENTS:
+        raw = (root / relative).read_text(encoding="utf-8")
+        flat = re.sub(
+            r"\s+", " ", re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw).replace("*", "")
+        )
+        found += sum(1 for claim in RETIRED_COVERAGE_CLAIMS if claim in flat)
+    assert found >= len(RETIRED_COVERAGE_CLAIMS), (
+        f"only {found} of {len(RETIRED_COVERAGE_CLAIMS)} retired coverage claims are "
+        "still visible as corrections. A struck sentence that is deleted leaves a "
+        "reader unable to tell a corrected claim from one that never drifted."
+    )
+
+
+def test_the_two_constraint_numbers_are_each_still_the_measured_ones():
+    """Both vantage points, re-derived, so neither can drift in prose alone.
+
+    The sibling test above pins that the numbers are not CONFLATED. This one pins that
+    they are the numbers, using the same "blamed" rule
+    `test_the_packets_do_not_overstate_CI_constraint_coverage` applies: the third
+    argument of a `refuse()` call, on its own continuation line as a bare quoted name.
+
+    `fe374c0` is read out of git rather than out of the working tree, because the claim
+    being guarded is about a commit that has already run.
+    """
+    import re
+    import subprocess
+
+    root = Path(sstore.__file__).resolve().parents[3]
+    declared: set[str] = set()
+    for version in ("0003_revisions", "0004_submissions"):
+        text = (MIGRATIONS / f"{version}.sql").read_text(encoding="utf-8")
+        code = "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("--")
+        )
+        declared |= set(re.findall(r"CONSTRAINT\s+([a-z0-9_]+)", code))
+
+    def blamed(lines: list[str]) -> set[str]:
+        return {
+            m.group(1)
+            for m in (re.fullmatch(r'"([a-z0-9_]+)"', line.strip()) for line in lines)
+            if m is not None and m.group(1) in declared
+        }
+
+    try:
+        historic = subprocess.run(
+            ["git", "show", "fe374c0:.github/workflows/ci.yml"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        pytest.skip(f"fe374c0 is not readable from this checkout: {exc}")
+
+    assert len(blamed(historic.splitlines())) == 27, (
+        "the number of declared constraints CI blamed at `fe374c0` is no longer 27. "
+        "That is the figure an operator acts on, and it is quoted in CLAUDE.md, the "
+        "Dean handoff and both approval packets."
+    )
+    current = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert len(blamed(current.splitlines())) == 41, (
+        "the number of declared constraints the workflow blames today is no longer 41."
+    )
+
+
 # =============================================================================
 # 3. the write path against the connection double
 # =============================================================================

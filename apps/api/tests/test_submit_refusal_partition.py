@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -102,15 +103,63 @@ def _module_functions() -> dict[str, ast.FunctionDef]:
     }
 
 
-def _json_refusals(node, status: int) -> list[tuple[str, bool]]:
+#: The module constant a refusal splats to say "I carry the disclosure, and I cannot
+#: have published anything". A splat of any OTHER name is the materialised
+#: ``_publication_disclosure(published)`` result and means the opposite.
+#:
+#: THIS DISTINCTION IS NEW AND IS THE REASON THE DERIVATION BELOW RETURNS TWO FACTS
+#: RATHER THAN ONE. Until the disclosure was added to the four refusals that lacked
+#: it, "splats something" and "may have published" were the same fact, so one boolean
+#: served for both. They are now different: six of the seven ``409``s carry the two
+#: keys, and only three of those can carry a non-zero count.
+NOTHING_PUBLISHED_CONSTANT = "_NOTHING_PUBLISHED_FIELDS"
+
+#: The two keys the disclosure puts on a body. Read off the product constant rather
+#: than written out, so a rename cannot leave this file asserting the old names.
+DISCLOSURE_KEYS = frozenset(routes._NOTHING_PUBLISHED_FIELDS)
+
+
+class _Refusal(NamedTuple):
+    """One ``JSONResponse`` the code can build, read off the AST."""
+
+    #: The literal ``error`` value.
+    name: str
+    #: Every key the body sets literally.
+    literal_keys: frozenset[str]
+    #: The names it dict-unpacks. Empty means it carries no disclosure at all.
+    splats: frozenset[str]
+
+    @property
+    def carries_disclosure(self) -> bool:
+        return bool(self.splats)
+
+    @property
+    def can_have_published(self) -> bool:
+        """True when the body splats a MATERIALISED disclosure rather than the
+        constant-zero one. This is the fact the partition table declares."""
+        return any(name != NOTHING_PUBLISHED_CONSTANT for name in self.splats)
+
+    @property
+    def keys(self) -> frozenset[str]:
+        return self.literal_keys | (DISCLOSURE_KEYS if self.splats else frozenset())
+
+
+def _json_refusals(node, status: int) -> list[_Refusal]:
     """Every ``JSONResponse(status_code=<status>, ...)`` built inside ``node``.
 
-    Returns ``(error name, carries the publication disclosure)``. The disclosure
-    is detected as dict-unpacking in the content literal — ``**fields`` parses to
-    a ``None`` key — because that splat is the only way
+    The disclosure is detected as dict-unpacking in the content literal —
+    ``**fields`` parses to a ``None`` key — because that splat is the only way
     ``_publication_disclosure``'s fields reach a body.
+
+    **WHICH NAME IS SPLATTED IS NOW LOAD-BEARING.** The previous version of this
+    helper returned a single boolean for "unpacks something", and read it as "can
+    have published". That was sound only while the disclosure appeared exclusively
+    on the post-write refusals. It no longer is: ``_NOTHING_PUBLISHED_FIELDS`` puts
+    the same two keys on refusals that publish nothing, so a name-blind check would
+    now declare four ``never`` refusals ``always`` and fail against a table that is
+    correct.
     """
-    out: list[tuple[str, bool]] = []
+    out: list[_Refusal] = []
     for call in ast.walk(node):
         if not (
             isinstance(call, ast.Call)
@@ -128,18 +177,30 @@ def _json_refusals(node, status: int) -> list[tuple[str, bool]]:
             "so this file can no longer read the contract off the code"
         )
         name = None
-        unpacks = False
+        literal_keys: set[str] = set()
+        splats: set[str] = set()
         for key, value in zip(content.keys, content.values):
             if key is None:
-                unpacks = True
-            elif isinstance(key, ast.Constant) and key.value == "error":
+                assert isinstance(value, ast.Name), (
+                    f"a {status} body unpacks an expression this file cannot name "
+                    f"({ast.dump(value)[:60]}…), so it can no longer tell a "
+                    "constant-zero disclosure from a materialised one"
+                )
+                splats.add(value.id)
+                continue
+            assert isinstance(key, ast.Constant), (
+                f"a {status} body carries a computed key; the contract can no longer "
+                "be derived statically"
+            )
+            literal_keys.add(key.value)
+            if key.value == "error":
                 assert isinstance(value, ast.Constant), (
                     "an `error` value is computed rather than literal; the partition "
                     "can no longer be derived statically"
                 )
                 name = value.value
         assert name is not None, f"a {status} body carries no `error` key"
-        out.append((name, unpacks))
+        out.append(_Refusal(name, frozenset(literal_keys), frozenset(splats)))
     return out
 
 
@@ -170,8 +231,8 @@ def _derived_partition() -> dict[tuple[int, str], str]:
         sides.setdefault((status, name), set()).add(published)
 
     # Bodies built inline in the handler.
-    for name, unpacks in _json_refusals(handler, 409):
-        record(409, name, unpacks)
+    for refusal in _json_refusals(handler, 409):
+        record(409, refusal.name, refusal.can_have_published)
 
     # Bodies built by a helper the handler calls. Walking CALLS rather than
     # RETURNS is deliberate: `_sibling_link_conflict`'s result is assigned to a
@@ -184,8 +245,8 @@ def _derived_partition() -> dict[tuple[int, str], str]:
         if target is None or target is handler:
             continue
         published = _supplies_published(call, target)
-        for name, _unpacks in _json_refusals(target, 409):
-            record(409, name, published)
+        for refusal in _json_refusals(target, 409):
+            record(409, refusal.name, published)
         if call.func.id == "_submission_unavailable":
             record(503, _reason_of(call), published)
     return {key: _marker(value) for key, value in sides.items()}
@@ -287,13 +348,124 @@ def test_the_dependency_raised_refusal_is_emitted_nowhere_in_the_handler():
     slice raised it from the body, the declared `never` could become false silently.
     """
     functions = _module_functions()
-    emitted = {name for name, _ in _json_refusals(functions["post_submit"], 409)}
+    emitted = {refusal.name for refusal in _json_refusals(functions["post_submit"], 409)}
     for name in DEPENDENCY_RAISED:
         assert name not in emitted, (
             f"`{name}` is now emitted by the handler body, so its declared "
             "`never` is no longer established by dependency ordering"
         )
         assert (409, name) in _declared_partition(), name
+
+
+# =============================================================================
+# the KEYS on each body — the half this file used to leave to inspection
+# =============================================================================
+
+
+def _emitted_refusals() -> dict[str, _Refusal]:
+    """``{error name: refusal}`` for every ``409`` ``post_submit`` can build.
+
+    Inline bodies and helper-built bodies alike. A helper reached from more than one
+    call site contributes one entry, because the BODY is the same object either way —
+    which side of materialisation it fires on is what ``_derived_partition`` answers.
+    """
+    functions = _module_functions()
+    handler = functions["post_submit"]
+    out: dict[str, _Refusal] = {}
+    for refusal in _json_refusals(handler, 409):
+        out[refusal.name] = refusal
+    for call in ast.walk(handler):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)):
+            continue
+        target = functions.get(call.func.id)
+        if target is None or target is handler:
+            continue
+        for refusal in _json_refusals(target, 409):
+            out[refusal.name] = refusal
+    return out
+
+
+def test_every_refusal_this_operation_emits_carries_the_publication_disclosure():
+    """THE ASSERTION THAT WAS MISSING, AND ITS ABSENCE IS WHY THE PROMISE WENT FALSE.
+
+    This file called itself "a static parity check between three things": the emitting
+    code, the declared table, and the served document. It compared the MARKER on each
+    refusal and never the KEYS on the body — so the served sentence
+    "`published_record_count` and `records` are present on EVERY one of these bodies"
+    could be false for four of the seven refusals with every test green.
+
+    Measured over HTTP before the fix:
+
+        human_actor_required     -> ['error', 'message', 'operation', 'reason', 'trust']
+        tutorial_scope_forbidden -> ['error', 'header', 'message', 'operation']
+
+    plus BOTH `submission_blocked` emissions and `sibling_link_conflict`. A client
+    told to read `published_record_count` for the authoritative answer found no such
+    key on the refusal it was most likely to receive — `human_actor_required` is what
+    every shipped deployment returns, because no verifier is configured.
+    """
+    disclosure = sorted(DISCLOSURE_KEYS)
+    assert disclosure, "the disclosure declares no keys; this test would be vacuous"
+    for name, refusal in sorted(_emitted_refusals().items()):
+        assert refusal.carries_disclosure, (
+            f"the `{name}` 409 body carries none of {disclosure}, while the served "
+            "409 description promises them on every body it does not except. Splat "
+            f"`{NOTHING_PUBLISHED_CONSTANT}` into it, or — if it genuinely cannot "
+            "carry them — except it in the served description the way "
+            "`human_actor_required` is excepted, and say why here."
+        )
+        assert DISCLOSURE_KEYS <= refusal.keys, (name, sorted(refusal.keys))
+
+
+def test_the_dependency_raised_refusal_is_the_only_declared_exception():
+    """The exception is NAMED, bounded, and cannot silently grow.
+
+    `human_actor_required` is built in `identity.py` by a dependency shared with any
+    operation that needs an attributable person, so its payload cannot honestly carry
+    a claim about what THIS operation published. That is one exception with a reason.
+    A second one appearing without a reason is the drift this asserts against.
+    """
+    declared = {
+        name
+        for status, name, _gloss, _marker in routes._SUBMIT_REFUSAL_PUBLICATION
+        if status == 409
+    }
+    emitted = set(_emitted_refusals())
+    assert declared - emitted == DEPENDENCY_RAISED, (
+        "the set of declared 409 refusals `post_submit` does not itself emit has "
+        f"changed: {sorted(declared - emitted)}. Every such refusal is an exception "
+        "to the disclosure promise and must be named in the served description."
+    )
+
+
+def test_a_constant_zero_disclosure_is_not_read_as_a_published_one():
+    """NEGATIVE CONTROL on the derivation change this fix required.
+
+    `_NOTHING_PUBLISHED_FIELDS` puts the SAME two keys on a body as a materialised
+    `_publication_disclosure(published)` does. If `_json_refusals` went back to a
+    name-blind "does it unpack anything", every refusal that now carries the
+    constant-zero disclosure would derive as `always` — a false claim that an official
+    record was published before the refusal, introduced while fixing a false claim
+    about the keys. So the two are asserted to be distinguishable, and to be
+    distinguished the right way round.
+    """
+    emitted = _emitted_refusals()
+    constant_only = {
+        name
+        for name, refusal in emitted.items()
+        if refusal.splats == frozenset({NOTHING_PUBLISHED_CONSTANT})
+    }
+    assert constant_only, (
+        "no refusal splats the constant-zero disclosure any more; either the fix was "
+        "reverted or the constant was renamed without updating this file"
+    )
+    for name in constant_only:
+        assert not emitted[name].can_have_published, name
+        assert emitted[name].carries_disclosure, name
+        assert _declared_partition()[(409, name)] == "never", (
+            f"`{name}` splats the constant-zero disclosure but is declared "
+            f"{_declared_partition()[(409, name)]!r} — one of the two is wrong"
+        )
 
 
 # =============================================================================
@@ -369,3 +541,27 @@ def test_both_descriptions_send_the_caller_to_the_authoritative_field(submit_res
     """
     for status in ("409", "503"):
         assert "published_record_count" in submit_responses[status]["description"]
+
+
+def test_the_409_description_states_its_one_exception_rather_than_overclaiming(
+    submit_responses,
+):
+    """The served sentence must match the bodies, in BOTH directions.
+
+    It used to read "present on EVERY one of these bodies", which was false for four
+    of the seven. It now excepts exactly the refusal the code cannot give them to —
+    and this asserts the exception is stated, that the exempt refusal is named so a
+    client can branch on `error` rather than on prose, and that the unqualified claim
+    has not crept back.
+    """
+    description = submit_responses["409"]["description"]
+    for name in sorted(DEPENDENCY_RAISED):
+        assert name in description, (
+            f"the 409 description does not name `{name}`, so a client cannot tell "
+            "which body lacks the disclosure"
+        )
+    assert "EXCEPT" in description, description
+    assert "present on EVERY one of these bodies" not in description, (
+        "the unqualified promise is back, and it is false for the "
+        f"{sorted(DEPENDENCY_RAISED)} refusal"
+    )

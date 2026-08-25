@@ -683,13 +683,44 @@ def _tools() -> tuple[Tool, ...]:
             read_only=True,
             idempotent=True,
         ),
+        # THIS DESCRIPTION STATED THE OPPOSITE OF THE BEHAVIOUR, and it is the half of
+        # one feature that a language model reads before acting. It said *"The new run
+        # starts EMPTY: no record-level value is copied into it"*, while the REST
+        # description of the same operation (`routes.py`, `POST .../runs`) and
+        # `workspace.py` both say the first run ADOPTS the record's per-run content.
+        # Measured over HTTP by an independent review: answer `qc` on a record with no
+        # runs, then add the first run, and `run.draft["qc"]` is
+        # `{"status": "valid", "evidence": "I0 stable"}` — not absent.
+        #
+        # The human-facing half of the same feature (`mcpConnectContent.ts`) had already
+        # been corrected, so the product told a person the truth and told an agent the
+        # reverse. An agent acting on "starts EMPTY" would re-answer values that are
+        # already there, or refuse to add a first run in order to protect content that
+        # adding it would have carried across.
+        #
+        # THE FIX REUSES THE ROUTE'S OWN SENTENCE VERBATIM rather than paraphrasing it,
+        # so the two cannot drift again by wording, and
+        # `test_mcp_and_route_descriptions_agree.py` pins that the shared sentence is
+        # present in BOTH — no test compared these two surfaces at all, which is why
+        # this survived.
         Tool(
             name="isaac_create_run",
             title="Add a run to a record",
             description=(
-                "Add one run — one measurement condition — to a record. The new run "
-                "starts EMPTY: no record-level value is copied into it and no "
-                "scientific value is invented. Requires the RECORD's current `etag` "
+                "Add one run — one measurement condition — to a record. "
+                "THE FIRST RUN ADOPTS THE RECORD'S PER-RUN CONTENT; A LATER RUN DOES "
+                "NOT. A record with no runs is its own record, so adding the first "
+                "moves the exported identity onto that run, and the spectrum, the QC "
+                "verdict, the descriptors, the assets and the run-level context and "
+                "timing values travel with it — without that, adding a run would "
+                "silently remove everything already recorded from every record this "
+                "one publishes. Open questions travel the same way. A SECOND run "
+                "receives none of it and does start empty: copying one run's spectrum "
+                "onto another would assert that two runs measured the same thing, "
+                "which nothing here evidences.\n\n"
+                "Record-LEVEL values are never copied down either way — they are "
+                "inherited by reference at read time — and no scientific value is "
+                "invented anywhere. Requires the RECORD's current `etag` "
                 "in `if_match`; omitted is refused, stale is refused with nothing "
                 "written."
             ),
@@ -963,12 +994,39 @@ def _tools() -> tuple[Tool, ...]:
         Tool(
             name="isaac_check_run",
             title="Check a run",
+            # ~~"the official ISAAC schema verdict"~~ — THE SAME CONFLATION THE TWO
+            # REST DESCRIPTIONS CARRIED, and it is corrected here rather than left
+            # for the client to discover. `official` holds the schema's verdict only
+            # where `validate_official` ran; a dry run refused earlier — by the
+            # no-guessing check or by ISAAC's own anchored-pattern exactness gate —
+            # returns THOSE findings under the same key, with `schema` stamped
+            # regardless. Measured on a run whose descriptor `name` carries a
+            # trailing newline: `draft {"ok": true}` beside `official {"ok": false,
+            # "schema": "ISAAC v1.05"}` whose sole error is ISAAC's own exactness
+            # message. CLAUDE.md §12: the gate is ISAAC's, not upstream's, and no
+            # surface may report an exactness refusal as an official-schema error.
+            # The vocabulary is `POST /api/validate/record`'s, which already names
+            # `schema_ok` and `exactness` separately. See `routes._validate_unit` for
+            # why a discriminator on the wire is the durable fix and why it is not in
+            # this slice.
             description=(
                 "Check the official record one run WOULD export — its own content "
                 "plus what it inherits — and return the no-guessing draft verdict, "
-                "the official ISAAC schema verdict, and the run's open blocking "
+                "the `official` block, and the run's open blocking "
                 "questions. Writes nothing, exports nothing, and advances no "
-                "revision. Both verdicts come from the same deterministic core the "
+                "revision.\n\n"
+                "`official` carries the vendored official ISAAC schema's verdict "
+                "WHERE THE OFFICIAL VALIDATOR RAN, and otherwise the findings that "
+                "stopped the export before it could — the no-guessing draft check, "
+                "or ISAAC's own anchored-pattern exactness gate, which refuses a "
+                "value that satisfies one of the schema's `^...$` patterns only "
+                "because Python's `$` also matches before a trailing newline. Those "
+                "arrive under the same `errors` key, so `official.ok: false` is not "
+                "by itself evidence that the official schema rejected anything; "
+                "`official.schema` names the schema this deployment would validate "
+                "against and is stamped on every response. A dry-run PASS does mean "
+                "official validation ran and passed.\n\n"
+                "Both verdicts come from the same deterministic core the "
                 "command line uses; an advisory warning never turns a pass into a "
                 "failure."
             ),

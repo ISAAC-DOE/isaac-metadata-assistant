@@ -2972,6 +2972,9 @@ def post_answers(
         )
         if refusal is not None:
             return refusal
+        draft_before = exp.draft
+        # `apply_answers` deep-copies its input and returns a NEW draft, so
+        # `draft_before` is the pre-write document and stays that way.
         exp.draft = apply_answers(exp.draft, apply_shape)
         # answer_log is EXCLUDED from the rev signature: log the submission only when it
         # actually changes the authoritative draft, so an identical re-entry is neither
@@ -2985,10 +2988,18 @@ def post_answers(
             exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
         # Derived downstream invalidation (P28.2) at the post-mutation revision. A
         # byte-stable no-op reports changed=False with empty deltas and no rev bump.
-        # The fields reported are the ones the apply-shape CARRIED, not every key the
-        # body happened to contain — see `_fields_the_shape_carries`.
+        # WHAT LANDED, NOT WHAT WAS SUBMITTED. `_fields_the_shape_carries` removes keys
+        # the core never received; `_fields_the_write_landed` additionally removes keys
+        # it received and DECLINED — a wrong-typed `series` reported "Updated 1
+        # field(s)" while the stored value was `None`. See that function for the
+        # measurement. `Updated 0 field(s)` is now reachable with `changed: true`, on a
+        # write whose only effect was materialising a legacy run's derived questions;
+        # that sentence is literally true and is left alone rather than replaced with
+        # one that would have to guess WHY the document moved.
         changed_fields = (
-            _fields_the_shape_carries(apply_shape, submitted_fields) if changed else []
+            _fields_the_write_landed(apply_shape, submitted_fields, draft_before, exp.draft)
+            if changed
+            else []
         )
         invalidation = dependencies.build_invalidation(
             changed=changed,
@@ -3459,6 +3470,132 @@ def _fields_the_shape_carries(apply_shape: dict, submitted_fields: list[str]) ->
     return [k for k in submitted_fields if k in carried]
 
 
+#: Where in a draft each shaped-answer key's VALUE actually lives.
+#:
+#: Read against :func:`_answers_to_apply_shape`, which is the only producer of these
+#: keys, and pinned by ``test_answers_report_only_what_landed.py`` so a key added
+#: there without a slot here fails loudly instead of silently reverting to the weaker
+#: claim this table exists to replace. Asset keys are absent deliberately: an asset is
+#: keyed by its URI, so it has no fixed name to list — it is handled by
+#: :func:`_asset_entry` below.
+_ANSWER_KEY_VALUE_SLOT: dict[str, str] = {
+    "series": "series",
+    "descriptor": "descriptors_outputs",
+    # `descriptor_label` is written only by the branch that writes `descriptors_outputs`
+    # (``complete.apply_answers`` / ``apply_corrections`` build the whole block), so a
+    # label whose descriptor was declined lands nowhere and shares the slot.
+    "descriptor_label": "descriptors_outputs",
+    "qc": "qc",
+    "edge": "implicit",
+}
+
+
+def _asset_entry(draft: dict, uri: str) -> dict | None:
+    """The stored asset with this URI, or ``None``. Compared before/after a write."""
+    for asset in draft.get("assets") or []:
+        if isinstance(asset, dict) and asset.get("uri") == uri:
+            return asset
+    return None
+
+
+def _open_blockers(draft: dict) -> tuple[frozenset[str], frozenset[str]]:
+    """``(open blocker kinds, open asset URIs)`` for one draft."""
+    entries = [e for e in (draft.get("pending") or []) if isinstance(e, dict)]
+    return (
+        frozenset(e.get("kind") for e in entries),
+        frozenset(e.get("uri") for e in entries if e.get("kind") == "asset"),
+    )
+
+
+def _fields_the_write_landed(
+    apply_shape: dict, submitted_fields: list[str], before: dict, after: dict
+) -> list[str]:
+    """The carried keys whose write ACTUALLY LANDED, in submission order.
+
+    THE DEFECT THIS CLOSES, measured over HTTP by an independent review, on a LEGACY
+    run — a run created before ``_seed_for_new_run`` existed, so its draft has no
+    ``pending`` key::
+
+        POST .../runs/{run_id}/answers  {"series": "not-a-list"}
+          -> 200
+             invalidation.changed        true
+             invalidation.changed_fields ["series"]
+             invalidation.reason         "Updated 1 field(s); no downstream steps
+                                          reopened."
+             stored series AFTER         None
+             `series` STILL an open question
+
+    The same request against a SEEDED run correctly reported ``changed: false``. The
+    two halves came from different places and only one of them was about the write:
+    ``changed`` is ``save_versioned()``'s answer, which is true here because
+    ``_apply_to_run`` MATERIALISES a legacy run's derived questions into the document
+    before writing — a real change to the document — while ``changed_fields`` was
+    :func:`_fields_the_shape_carries`, derived from the SUBMITTED shape. So a field
+    that was never written was named as updated, and the sentence counted it.
+
+    **THIS IS THE MIRROR OF THE ``already_answered`` DEFECT THIS BRANCH FIXED, WITH
+    THE POLARITY REVERSED**, on exactly the runs the branch's legacy handling was
+    written for: that one reported *"the submitted value was identical"* about a value
+    that had changed; this one reported *"Updated 1 field(s)"* about a value that had
+    not been stored at all.
+
+    **THE LEGITIMATE HALF IS PRESERVED DELIBERATELY.** Materialising a legacy run's
+    template IS a change to the document, the revision SHOULD move, and ``changed``
+    stays true — that is not the defect and reverting it would re-open the 200 that
+    destroyed a run's questions. What must not happen is NAMING a field that was not
+    written, and that is all this narrows.
+
+    TWO TESTS PER FIELD, BECAUSE ONE IS NOT ENOUGH FOR EITHER WRITER:
+
+    * the VALUE SLOT moved — the rule that fits ``apply_corrections``, which never
+      touches ``pending`` and whose whole job is to overwrite a stored value; and
+    * the field's own BLOCKER was resolved — the rule that fits ``apply_answers``,
+      which removes a ``pending`` entry exactly when it applied that entry's value.
+      It catches the one case the slot comparison cannot: a legacy run whose draft
+      already holds a ``qc`` verdict beside an open ``qc`` blocker (the state
+      ``_apply_to_run`` materialises), answered with the value already stored. The
+      value does not move; the question is genuinely closed.
+
+    Evidence-only movement is NOT counted, and that is a decision rather than an
+    omission. ``block_evidence`` is shared between fields — ``series`` and ``qc`` both
+    append to it — so treating it as a per-field signal would report ``qc`` as updated
+    because ``series`` was. A field whose value did not move and whose question stayed
+    open was not updated, whatever else the write touched; ``changed`` reports that
+    the document moved, which is a different claim and still true.
+
+    NARROWER THAN :func:`_fields_the_shape_carries` AND LAYERED ON TOP OF IT, not a
+    replacement: that function removes keys the core never received, this one removes
+    keys the core received and declined.
+    """
+    carried = _fields_the_shape_carries(apply_shape, submitted_fields)
+    asset_uris = set(apply_shape.get("asset_sha256") or {})
+    kinds_before, uris_before = _open_blockers(before)
+    kinds_after, uris_after = _open_blockers(after)
+    landed: list[str] = []
+    for key in carried:
+        if key in asset_uris:
+            if _asset_entry(before, key) != _asset_entry(after, key) or (
+                key in uris_before and key not in uris_after
+            ):
+                landed.append(key)
+            continue
+        slot = _ANSWER_KEY_VALUE_SLOT.get(key)
+        kind = _CORRECTABLE_KEY_KINDS.get(key)
+        if slot is None and kind is None:
+            # A key `_answers_to_apply_shape` produces that this table does not know.
+            # Keep the older, weaker claim rather than dropping the field silently —
+            # under-reporting an update is its own false statement. The pinning test
+            # is what stops this branch from ever being the live path.
+            landed.append(key)
+            continue
+        if slot is not None and before.get(slot) != after.get(slot):
+            landed.append(key)
+            continue
+        if kind is not None and kind in kinds_before and kind not in kinds_after:
+            landed.append(key)
+    return landed
+
+
 @router.post(
     "/experiments/{experiment_id}/edit",
     tags=[TAG_DRAFTS],
@@ -3655,6 +3792,7 @@ def post_edit(
         # OVERWRITE the current value(s) for the recognized keys, recording a fresh
         # user_confirmation. apply_corrections never touches pending and never
         # invents a value (a malformed sha256 / off-enum qc leaves the value as-is).
+        draft_before = exp.draft  # `apply_corrections` deep-copies; this stays pre-write
         exp.draft = apply_corrections(exp.draft, apply_shape)
         exp.answer_log.append({"edited": apply_shape, "at": timestamp})
         changed, stale = _save_versioned(exp, if_match)
@@ -3662,10 +3800,18 @@ def post_edit(
             return stale  # another replica won the race; this change was not applied
         if not changed:
             exp.answer_log.pop()  # byte-stable no-op: discard the speculative log append
-        # Only the fields the apply-shape carried — a ride-along key the shape dropped is
-        # not an updated field, and the count in `reason` is derived from this list.
+        # WHAT LANDED, NOT WHAT WAS SUBMITTED. `_fields_the_shape_carries` removes keys
+        # the core never received; `_fields_the_write_landed` additionally removes keys
+        # it received and DECLINED — a wrong-typed `series` reported "Updated 1
+        # field(s)" while the stored value was `None`. See that function for the
+        # measurement. `Updated 0 field(s)` is now reachable with `changed: true`, on a
+        # write whose only effect was materialising a legacy run's derived questions;
+        # that sentence is literally true and is left alone rather than replaced with
+        # one that would have to guess WHY the document moved.
         changed_fields = (
-            _fields_the_shape_carries(apply_shape, submitted_fields) if changed else []
+            _fields_the_write_landed(apply_shape, submitted_fields, draft_before, exp.draft)
+            if changed
+            else []
         )
         invalidation = dependencies.build_invalidation(
             changed=changed,
@@ -6116,6 +6262,7 @@ def _apply_to_run(
                         ),
                     },
                 )
+            draft_before = run_draft
             run.draft = apply_corrections(run_draft, apply_shape)
         else:
             # THE SAME SIZE/DEPTH/RENDERABILITY SCREEN THE RECORD's `/answers` APPLIES,
@@ -6150,6 +6297,7 @@ def _apply_to_run(
             )
             if refusal is not None:
                 return refusal
+            draft_before = run_draft
             run.draft = apply_answers(run_draft, apply_shape)
 
         # THE SAME LOG THE RECORD PATH KEEPS, and it was missing. `answer_log` is what
@@ -6176,8 +6324,22 @@ def _apply_to_run(
         # PostgreSQL deployment, and suppressing coverage of it hid that.
         if stale is not None:
             return stale
+        # `draft_before` is `run_draft` — the draft the writer was actually handed,
+        # INCLUDING a legacy run's materialised `pending`. That is what makes the
+        # blocker-resolution half of the test honest: the question a scientist was
+        # shown is the question this compares against.
+        # WHAT LANDED, NOT WHAT WAS SUBMITTED. `_fields_the_shape_carries` removes keys
+        # the core never received; `_fields_the_write_landed` additionally removes keys
+        # it received and DECLINED — a wrong-typed `series` reported "Updated 1
+        # field(s)" while the stored value was `None`. See that function for the
+        # measurement. `Updated 0 field(s)` is now reachable with `changed: true`, on a
+        # write whose only effect was materialising a legacy run's derived questions;
+        # that sentence is literally true and is left alone rather than replaced with
+        # one that would have to guess WHY the document moved.
         changed_fields = (
-            _fields_the_shape_carries(apply_shape, submitted_fields) if changed else []
+            _fields_the_write_landed(apply_shape, submitted_fields, draft_before, run.draft)
+            if changed
+            else []
         )
         invalidation = dependencies.build_invalidation(
             changed=changed,
@@ -6210,8 +6372,20 @@ def _apply_to_run(
     description=(
         "Checks the official record ONE run would export — its own content plus "
         "the record-level content it inherits — and returns the no-guessing draft "
-        "verdict, the official-schema verdict, and the run's open blocking "
+        "verdict, the `official` block, and the run's open blocking "
         "questions.\n\n"
+        "**The `official` block carries the vendored official ISAAC schema's verdict "
+        "WHERE THE OFFICIAL VALIDATOR RAN — and otherwise the findings that stopped "
+        "the export before it could.** A dry run is refused before official "
+        "validation by the no-guessing draft check and by ISAAC's own "
+        "anchored-pattern exactness gate (a value matching a `^...$` pattern only "
+        "because Python's `$` also matches before a trailing newline). Those "
+        "findings arrive under the same `errors` key, so `official.ok: false` is not "
+        "by itself evidence that the official schema rejected anything; "
+        "`official.schema` names the schema this deployment would validate against "
+        "and is stamped on every response. A dry-run PASS does mean official "
+        "validation ran and passed. `POST /api/validate/record` reports the two "
+        "gates separately (`schema_ok` and `exactness_errors`).\n\n"
         "Read-only: it writes nothing, exports nothing, and does not advance the "
         "run's or the record's revision. `checked_run_version` states which "
         "revision of the run the verdict describes. Every entry in `blockers` "
@@ -8942,6 +9116,17 @@ def _sibling_link_conflict(exp, units) -> JSONResponse | None:
                 "sample id to match the one the exported record names."
             ),
             "conflicts": conflicts,
+            # THE PUBLICATION DISCLOSURE, on a refusal that publishes nothing. The
+            # submit contract promises `published_record_count` and `records` on
+            # EVERY one of its 409 bodies and this one did not carry them; see
+            # `_publication_disclosure` for the measurement and for why the promise
+            # was restored rather than scoped down.
+            #
+            # IT LANDS ON THE EXPORT ROUTE TOO, because this helper is shared, and
+            # that is correct rather than collateral: this check runs before either
+            # route writes anything, so `0`/`[]` is exactly as true there. Adding a
+            # constant-zero pair is additive for a client and cannot mislead one.
+            **_NOTHING_PUBLISHED_FIELDS,
         },
     )
 
@@ -9379,8 +9564,37 @@ def _publication_disclosure(published: Sequence[dict] | None) -> tuple[str, dict
     sentence has to cover all three, so it claims only what all three support.
 
     Returns ``(sentence, fields)``. ``fields`` carries ``published_record_count`` and
-    ``records`` on every refusal, exactly as the ``200`` carries them, so a client
-    never has to branch on the status code to learn what reached the disk.
+    ``records``, exactly as the ``200`` carries them, so a client never has to branch
+    on the status code to learn what reached the disk.
+
+    ~~"on every refusal"~~ **— THAT WAS FALSE WHEN IT WAS WRITTEN, and it is struck
+    rather than edited because the sentence it appeared in is the served contract's
+    own promise.** This helper is consulted only by the refusals raised from or after
+    the write. Measured over HTTP: ``human_actor_required`` came back with keys
+    ``['error', 'message', 'operation', 'reason', 'trust']`` and
+    ``tutorial_scope_forbidden`` with ``['error', 'header', 'message', 'operation']``
+    — neither carrying either field — while the ``409`` description promised both "on
+    EVERY one of these bodies". Four of the seven ``409``s lacked them:
+    ``tutorial_scope_forbidden``, BOTH ``submission_blocked`` emissions,
+    ``sibling_link_conflict``, and ``human_actor_required``.
+
+    **THE FIX RESTORES THE PROMISE RATHER THAN RETREATING IT, AND THE CHOICE IS
+    ARGUED.** Scoping the sentence to "the refusals that carry it" would have been the
+    smaller edit, and it would have left a client branching on ``error`` before it
+    knew whether it was allowed to read ``published_record_count`` — which is the
+    exact thing the field exists to spare it. So the refusals this module emits itself
+    now splat :data:`_NOTHING_PUBLISHED_FIELDS`, and every one of them carries the
+    two keys with the constant ``0``/``[]`` that is true of them.
+
+    **``human_actor_required`` IS THE ONE EXCEPTION, AND IT IS SCOPED RATHER THAN
+    OVERLOOKED.** It is raised by ``identity.require_human_actor`` — a DEPENDENCY,
+    shared with any future operation, whose payload is built in ``identity.py`` and
+    knows nothing about publication; giving it these two keys would put a claim about
+    THIS operation into a refusal shape that is not this operation's. FastAPI resolves
+    it before the handler body runs, so nothing can have been published when it fires,
+    and a client reading ``body.get("published_record_count", 0)`` is correct there.
+    The served description names it by ``error``, which is the one thing a client can
+    branch on without guessing.
     """
     entries = list(published or [])
     if not entries:
@@ -9400,6 +9614,26 @@ def _publication_disclosure(published: Sequence[dict] | None) -> tuple[str, dict
         "retrying, the published files will still hold the content submitted here.",
         {"published_record_count": len(entries), "records": entries},
     )
+
+
+#: The publication disclosure for a refusal that CANNOT have published anything.
+#:
+#: DERIVED FROM :func:`_publication_disclosure` RATHER THAN WRITTEN OUT, so the two
+#: key names cannot drift apart — a second literal copy is exactly how the served
+#: partition drifted from the bodies in the first place.
+#:
+#: Only the FIELDS are taken, never the sentence: each body that splats this already
+#: ends its own ``message`` with "Nothing was written.", and appending a second "and
+#: no official record was published" would restate it in the helper's words rather
+#: than the refusal's.
+#:
+#: THE SPLAT IS A NAMED CONSTANT AND NOT AN INLINE DICT, because
+#: ``test_submit_refusal_partition.py`` reads the partition off the AST: a splat of
+#: THIS name means "carries the disclosure, and cannot have published", while a splat
+#: of a local ``fields`` means "carries the disclosure, and may have published". Two
+#: different facts that a bare ``**{...}`` could not tell apart, and the second is the
+#: one the whole partition exists to state.
+_NOTHING_PUBLISHED_FIELDS: dict = _publication_disclosure(None)[1]
 
 
 def _submission_unavailable(
@@ -9596,9 +9830,15 @@ _SUBMIT_409_DESCRIPTION = (
     "recoverable order — so some of these can arrive with records already on "
     "disk. `error` says which refusal this is:\n\n"
     + _refusal_partition_lines(409)
-    + "\n\n`published_record_count` and `records` are present on EVERY one of these "
-    "bodies and are the authoritative answer for a given response; the markers above "
-    "say only which refusals can carry a non-zero count. A non-zero count means those "
+    + "\n\n`published_record_count` and `records` are present on every one of these "
+    "bodies EXCEPT `human_actor_required`, and are the authoritative answer for a "
+    "given response; the markers above say only which refusals can carry a non-zero "
+    "count. `human_actor_required` is raised before this operation's own handler "
+    "runs — by the dependency that establishes who is calling, which is shared with "
+    "any operation that needs an attributable person and states nothing about "
+    "publication — so it carries neither field, and nothing can have been published "
+    "when it fires. Reading `published_record_count` with a default of `0` is "
+    "therefore correct on every body above. A non-zero count means those "
     "records exist on disk and, being immutable, will not be republished by a retry — "
     "so editing this record before retrying leaves the published files holding the "
     "content submitted here."
@@ -9754,6 +9994,10 @@ def post_submit(
                     "discarded with the session, so they are never submitted. "
                     "Nothing was written."
                 ),
+                # Measured lacking both keys the 409 description promises on every
+                # body: `['error', 'header', 'message', 'operation']`. See
+                # `_publication_disclosure`.
+                **_NOTHING_PUBLISHED_FIELDS,
             },
         )
 
@@ -9864,6 +10108,9 @@ def post_submit(
                     "pending_count": blockers["pending_count"],
                     "pending": blockers["pending"],
                     "failing_units": blockers["failing_units"],
+                    # Refused before anything is materialised. See
+                    # `_publication_disclosure`.
+                    **_NOTHING_PUBLISHED_FIELDS,
                 },
             )
 
@@ -9943,6 +10190,14 @@ def post_submit(
                             }
                             for unit, result in materialisation.failures
                         ],
+                        # STILL `never`, and the reason is `_materialise_pending_units`
+                        # PHASE 1 rather than this body's position in the file: it
+                        # validates every unit before writing any, and returns
+                        # `written=False`. The partition test derives that from the
+                        # code for exactly this reason — a positional reading would
+                        # classify this emission `always` and publish a false claim
+                        # while fixing another.
+                        **_NOTHING_PUBLISHED_FIELDS,
                     },
                 )
             if materialisation.stale is not None:
@@ -11191,6 +11446,42 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
             "dry_run": True,
             "unavailable": True,
         }
+    # THE OFFICIAL-SCHEMA CONFLATION, RECORDED WHERE IT IS MINTED.
+    #
+    # These three branches produce THREE different kinds of finding under one key:
+    #
+    #   official_report is not None  -> the vendored official ISAAC schema's own verdict
+    #   official_report is None      -> `export_draft` returned BEFORE `validate_official`
+    #                                   ran, and `errors` are the no-guessing draft
+    #                                   findings WITH ISAAC's anchored-pattern EXACTNESS
+    #                                   findings folded in (see `export.py`)
+    #
+    # Measured over HTTP on a run whose descriptor `name` carries a trailing newline:
+    #
+    #   draft    {"ok": true, "errors": []}
+    #   official {"ok": false, "dry_run": true, "schema": "ISAAC v1.05"}
+    #            errors[0] = ISAAC's OWN exactness message
+    #
+    # A caller reading that has been told the official ISAAC schema rejected a record
+    # the official ISAAC schema never examined. `CLAUDE.md` §12 states the rule
+    # directly — *"the gate is ISAAC's, not upstream's ... no surface may report an
+    # exactness refusal as an official-schema error"* — and `_export_step_detail`
+    # already closed exactly this defect one wire over.
+    #
+    # WHY FOUR SURFACES GOT IT WRONG AT ONCE, which is the part worth fixing later:
+    # THERE IS NOTHING ON THE PAYLOAD TO BRANCH ON. `schema` is stamped
+    # unconditionally by the two callers, and `dry_run` does not discriminate — a
+    # dry-run PASS does require `validate_official`, while a dry-run FAILURE may never
+    # have reached it. So no client, however careful, can tell the two apart.
+    #
+    # THE DURABLE FIX IS A DISCRIMINATOR ON THE WIRE — an `official_validator_ran`
+    # boolean (or moving exactness findings to their own list, as
+    # `POST /api/validate/record` already does with `exactness_errors`/`schema_ok`).
+    # It is deliberately NOT done here: a new field needs coordinated frontend work,
+    # and this slice is bounded to making the DESCRIPTIONS stop claiming something the
+    # payload does not support. The three descriptions now say "the official verdict
+    # where the official validator ran; otherwise the findings that stopped it before
+    # it could", which is exactly what these branches return.
     if result.official_report is not None:
         errors = [
             {"path": e.path, "message": e.message} for e in result.official_report.errors
@@ -11251,9 +11542,23 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
     tags=[TAG_VALIDATION],
     summary="Validate a Record Against the Official Schema",
     description=(
-        "Checks this record against the vendored official ISAAC schema and returns "
-        "`ok`, a list of `{path, message}` errors, the schema label, and whether "
-        "the check was a dry run.\n\n"
+        "Runs this record through the export gate and returns `ok`, a list of "
+        "`{path, message}` findings, the schema label, and whether the check was a "
+        "dry run.\n\n"
+        "**`errors` is the vendored official ISAAC schema's verdict WHERE THE "
+        "OFFICIAL VALIDATOR RAN — and otherwise the findings that stopped the export "
+        "before it could.** On a dry run the export is refused before official "
+        "validation by two earlier gates: the no-guessing draft check, and ISAAC's "
+        "own anchored-pattern exactness gate, which refuses a value that satisfies "
+        "one of the schema's `^...$` patterns only because Python's `$` also matches "
+        "before a trailing newline. Those findings arrive here under the same "
+        "`errors` key, so a failing verdict is not by itself evidence that the "
+        "official schema rejected anything. `schema` names the schema this "
+        "deployment would validate against; it is stamped on every response and is "
+        "not a claim that the schema produced the findings beside it. A dry-run PASS "
+        "does mean official validation ran and passed. **`POST /api/validate/record` "
+        "reports the two gates separately (`schema_ok` and `exactness_errors`) and "
+        "is the operation to use when the distinction matters.**\n\n"
         "For an already-exported record the written record is validated "
         "(`dry_run: false`). Otherwise the export is run in memory and the "
         "resulting candidate record is validated without writing anything "

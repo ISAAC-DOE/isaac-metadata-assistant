@@ -391,7 +391,11 @@ def _operations() -> tuple[Operation, ...]:
             path_template="/api/experiments/{experiment_id}/runs",
             scope=Scope.DRAFT_WRITE,
             mutates=True,
-            summary="Add one empty run to a record.",
+            # NOT "one empty run" — the same false claim `isaac_create_run`'s tool
+            # description carried, in the catalog entry beside it. The FIRST run adopts
+            # the record's per-run content; only a LATER run is empty. Nothing reads
+            # this field today, which is precisely why it drifted unnoticed.
+            summary="Add one run to a record; the first adopts its per-run content.",
             requires_if_match=True,
         ),
         Operation(
