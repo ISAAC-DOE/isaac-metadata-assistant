@@ -118,9 +118,23 @@ export interface RouteResult {
  * that means to hold a response open must be able to, and must be able to say so in
  * the type.
  */
+/**
+ * A thunk ALSO RECEIVES THE REQUESTED PATH, and that is what lets ONE registered key
+ * answer a bounded and an unbounded read differently.
+ *
+ * `GET .../pending` serves the complete list; `GET .../pending?limit=50` serves a page
+ * plus the `pending_page` block that says it is one. Registering those as two literal
+ * keys WOULD work — the exact key wins — and it lays a trap: a test that overrides only
+ * the bare key (nine do) would keep receiving the shared fixture's bounded body for the
+ * bounded request, silently, because its override never matched. Branching inside one
+ * entry cannot be half-overridden.
+ *
+ * `path` is the same string used as the lookup key, query included, so a thunk sees
+ * exactly what `calls` records. Existing thunks take one parameter and are unaffected.
+ */
 export type RouteEntry =
   | StubbedRoute
-  | ((init?: RequestInit) => RouteResult | Promise<RouteResult>);
+  | ((init?: RequestInit, path?: string) => RouteResult | Promise<RouteResult>);
 
 /**
  * Stub `fetch` with a `"METHOD /api/path" -> response` map. Returns the list of
@@ -164,7 +178,7 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
     // no-op, so the synchronous thunks (the conditional-GET sequencers) are unaffected
     // in value — they now resolve a microtask later, which no assertion depends on
     // because every caller already awaits through `waitFor`/`findBy*`.
-    const resolved: RouteResult = typeof hit === 'function' ? await hit(init) : hit;
+    const resolved: RouteResult = typeof hit === 'function' ? await hit(init, key) : hit;
     const status = resolved.status ?? 200;
     const body =
       typeof resolved.body === 'function' ? (resolved.body as () => unknown)() : resolved.body;
@@ -745,6 +759,77 @@ export const draftResponse = {
     },
   ],
 };
+
+/**
+ * THE MUTATION WINDOW, TRANSCRIBED FROM THE SERVER, NOT INVENTED HERE.
+ *
+ * `serialize.PENDING_WINDOW`. It is the number of open questions a mutation response
+ * carries back before it starts withholding, and the number `GuidedCompletion` asks
+ * `GET /pending` for. Every fixture record in this file owes fewer questions than
+ * this, so every fixture list below is COMPLETE — which is why `completePendingPage`
+ * is the only page builder here and why no fixture models a truncated response. A test
+ * that wants truncation must say so, and must say `complete: false` when it does.
+ */
+export const PENDING_WINDOW = 50;
+
+/**
+ * The `pending_page` block a real response carries when the list IS the whole set.
+ *
+ * DERIVED FROM THE LIST, NEVER HAND-WRITTEN, so a fixture whose `pending` changes
+ * cannot end up beside a page block that describes the list it used to have. That is
+ * the failure this shape is meant to prevent on the wire, and a fixture free to drift
+ * from itself would model the defect rather than the contract.
+ */
+export function completePendingPage(
+  entries: readonly unknown[],
+  limit: number | null = PENDING_WINDOW,
+) {
+  return {
+    total: entries.length,
+    returned: entries.length,
+    offset: 0,
+    limit,
+    withheld: 0,
+    complete: true,
+    run_id: null,
+    record_total: entries.length,
+  };
+}
+
+/**
+ * THE PENDING ROUTE, ANSWERING BOTH OF THE QUESTIONS IT IS NOW ASKED.
+ *
+ * `GET .../pending` with no parameters is the COMPLETE list — what the Review Record
+ * and Export Readiness bundles read, byte-identical to what this route has always
+ * served, and carrying NO `pending_page` (absence is the statement that the list is the
+ * set). `GET .../pending?limit=50` is the bounded read `GuidedCompletion` makes, and the
+ * server answers that one with the page block.
+ *
+ * Serving only the bare body would model a response the server does not send — a
+ * bounded request answered with no statement of what was bounded — and would leave
+ * every `GuidedCompletion` test exercising only the screen's "no page block, so the
+ * list is complete" fallback while the deployment takes the other branch.
+ *
+ * IT IS ONE ENTRY THAT BRANCHES, NOT TWO KEYS. See `RouteEntry`: two literal keys lay a
+ * trap for the nine existing tests that override the bare key, whose override would
+ * silently fail to match the bounded request.
+ *
+ * The paging PARAMETERS are ignored on purpose. Every fixture list here is shorter than
+ * one page, so slicing would be a no-op with a second implementation of the server's
+ * arithmetic sitting behind it, free to disagree. A test that needs a truncated page
+ * registers its own body and says `complete: false` in it.
+ */
+export function pendingRoutes(
+  base: string,
+  response: { pending: unknown[] },
+): Record<string, RouteEntry> {
+  return {
+    [`GET ${base}/pending`]: (_init?: RequestInit, path?: string) =>
+      path && path.includes('?')
+        ? { body: { ...response, pending_page: completePendingPage(response.pending) } }
+        : { body: response },
+  };
+}
 
 export const pendingResponse = {
   pending: [
@@ -1607,13 +1692,13 @@ export function resetDemoRoutes(
 }
 
 /** The full route map for one S3 record bundle (plus S1's list) for `id`. */
-export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+export function bundleRoutes(id: string = EXP_ID): Record<string, RouteEntry> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
   return {
     'GET /api/experiments': { body: { experiments: [experimentSummary] } },
     [`GET ${base}`]: { body: { ...experimentDetail, id } },
     [`GET ${base}/draft`]: { body: draftResponse },
-    [`GET ${base}/pending`]: { body: pendingResponse },
+    ...pendingRoutes(base, pendingResponse),
     [`POST ${base}/validate`]: { body: validateDryRun },
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
@@ -1661,6 +1746,10 @@ const SYNTH_SHA = 'c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b
  *  so it modelled an APPLIED answer with a response shape the server never sends. */
 export const answersAfterNotebook = {
   pending: pendingResponse.pending.slice(1),
+  // ALWAYS PRESENT on a mutation response, unlike on a read — the server bounds this
+  // list whether the caller asked or not, so it states so unconditionally. Derived
+  // from the list beside it, so the two cannot disagree.
+  pending_page: completePendingPage(pendingResponse.pending.slice(1)),
   status: 'needs_attention',
   rev: 4,
   updated_utc: '2099-04-02T09:16:00Z',
@@ -1695,6 +1784,7 @@ export const answersAfterNotebook = {
  *  client must not render it. */
 export const answersDropped = {
   pending: pendingResponse.pending,
+  pending_page: completePendingPage(pendingResponse.pending),
   status: 'needs_attention',
   rev: 3,
   updated_utc: '2099-04-02T09:16:00Z',
@@ -1722,6 +1812,7 @@ export const answersDropped = {
  *  change with no downstream reopen. */
 export const editApplied = {
   pending: [],
+  pending_page: completePendingPage([]),
   status: 'ready_to_export',
   rev: 4,
   updated_utc: '2099-04-02T09:18:00Z',
@@ -1755,6 +1846,7 @@ export const editRefused = {
   // which is a different render tree, and a correction that was refused must not move
   // the record to "ready".
   pending: pendingResponse.pending.slice(1),
+  pending_page: completePendingPage(pendingResponse.pending.slice(1)),
   status: 'needs_attention',
   rev: 4,
   updated_utc: '2099-04-02T09:18:00Z',
@@ -1951,7 +2043,7 @@ export function revisionHistoryUnavailable(id: string = EXP_ID): StubbedRoute {
   };
 }
 
-export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+export function exportReadyRoutes(id: string = EXP_ID): Record<string, RouteEntry> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
   return {
     [`GET ${base}`]: {
@@ -1963,7 +2055,7 @@ export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRo
         workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: false, rev: VERSION_FIELDS.rev }),
       },
     },
-    [`GET ${base}/pending`]: { body: { pending: [] } },
+    ...pendingRoutes(base, { pending: [] }),
     [`POST ${base}/validate`]: { body: validateReadyDryRun },
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
@@ -2131,7 +2223,7 @@ export const sourcePreviewCsv = {
 };
 
 /** S5 routes for an exported experiment (evidence + artifacts + both source previews). */
-export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, RouteEntry> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
   return {
     [`GET ${base}`]: {
@@ -2153,7 +2245,7 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
     [`GET ${base}/evidence`]: { body: evidenceExported },
     [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     // P29.4 — the shared record-session owner's AgentContext pending input.
-    [`GET ${base}/pending`]: { body: { pending: [] } },
+    ...pendingRoutes(base, { pending: [] }),
     [`GET ${base}/artifacts`]: { body: { ...artifactsExported, record: { ...artifactsExported.record, record_id: id }, sidecar: { ...artifactsExported.sidecar, record_id: id } } },
     // The Conflicting Evidence panel's two reads: the conflicts themselves, and the
     // run list that draws its scope control. The runs read is deliberately not
@@ -2375,7 +2467,7 @@ export function runtimeRecordsRoutes(): Record<string, StubbedRoute> {
 }
 
 /** S6 routes for an ALREADY-exported experiment on fresh load (View/Download live). */
-export function exportedReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+export function exportedReadyRoutes(id: string = EXP_ID): Record<string, RouteEntry> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
   return {
     [`GET ${base}`]: {
@@ -2394,7 +2486,7 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
         artifact: { state: 'current' as const, reason: null },
       },
     },
-    [`GET ${base}/pending`]: { body: { pending: [] } },
+    ...pendingRoutes(base, { pending: [] }),
     [`POST ${base}/validate`]: { body: validateExported },
     [`POST ${base}/audit`]: { body: auditExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
@@ -2422,7 +2514,7 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
 export const FAN_OUT_REASON =
   "This record's runs each export their own official record, so there is no single record file. The export response lists each run's record and sidecar filename; no read operation lists them yet.";
 
-export function fanOutExportedRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+export function fanOutExportedRoutes(id: string = EXP_ID): Record<string, RouteEntry> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
   return {
     ...bundleRoutes(id),
@@ -2444,7 +2536,7 @@ export function fanOutExportedRoutes(id: string = EXP_ID): Record<string, Stubbe
         artifact: { state: 'current' as const, reason: null },
       },
     },
-    [`GET ${base}/pending`]: { body: { pending: [] } },
+    ...pendingRoutes(base, { pending: [] }),
     [`POST ${base}/validate`]: { body: validateExported },
     [`POST ${base}/audit`]: { body: auditExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
@@ -3017,9 +3109,9 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "POST /api/experiments", description: "Creates a new, empty experiment in the ordinary workspace and returns its full detail bundle, so a client can go straight to it.\n\nIt takes a title and an optional note, and nothing else. No scientific value is invented: the new record starts with every scientific field genuinely empty and with the blocking questions an ISAAC record has to answer already open, which is what the guided completion workflow then works through. The record id is always minted by the server — a caller-supplied id is rejected, as is any other unrecognised field.\n\nIt refuses with `409` when the `X-Isaac-Tutorial-Session` header is present, and writes nothing. A worked-example session is temporary and is discarded on a timer; a record you created must not inherit that, and it must not be written into a workspace you are not currently looking at either.\n\nWhether the new experiment is stored durably depends on this deployment. `GET /api/health` reports which, in `experiment_storage`, and the reader is told the same thing before they create anything.\n\nWhere this deployment stores experiments in a database and that database does not accept the write, the request fails with `503` and nothing is created. It is never quietly written somewhere temporary instead: you have been told your work is kept, and a create that could not keep it says so rather than looking like it succeeded." },
   { op: "GET /api/experiments/{experiment_id}", description: "The full detail bundle for one experiment: its summary row plus whether the draft passes the no-guessing checks, the exported artifact filenames (basenames only, never a server path), the source files it was extracted from, the derived workflow progression, the exported-artifact freshness state, and the current revision metadata.\n\nThe response carries the record's current `ETag`. Send it back as `If-None-Match` to receive `304` while the record is unchanged. Read-only." },
   { op: "GET /api/experiments/{experiment_id}/draft", description: "This record's draft fields, grouped into the stable sections the record review screen renders. Each field carries its label, official path, current value, the status derived from its evidence, and the kinds of source that evidence came from. Read-only; the response carries the record's current `ETag`." },
-  { op: "GET /api/experiments/{experiment_id}/pending", description: "The questions that are still blocking this draft, each with the stable key an answer must be submitted under, what the question is about, and — for the built-in examples only — a clearly labelled suggested answer that is never applied automatically. Read-only; the response carries the record's current `ETag`." },
-  { op: "POST /api/experiments/{experiment_id}/answers", description: "Applies caller-supplied answers to this draft's open blocking questions and returns the refreshed question list, the record's status, its new revision metadata, the derived workflow, and which downstream steps the change reopened.\n\nRequires `confirmed_by_user: true` and the record's current `ETag` in `If-Match`. Blank and unrecognised answers are dropped rather than invented, so a submission that changes nothing is a no-op: it is not logged and does not advance the revision." },
-  { op: "POST /api/experiments/{experiment_id}/edit", description: "Overwrites the current value of a field that has already been answered, recording a fresh user confirmation, and returns the same refreshed bundle as the answers operation.\n\nRequires `confirmed_by_user: true` and the record's current `ETag` in `If-Match`. A body that names no recognised editable field is rejected with `422` rather than silently doing nothing, and so is a recognised field carrying a value the record cannot store — the refusal happens before any mutation, so the stored value is unchanged. It never reopens or creates a blocking question.\n\nOnly a field that is already answered can be corrected here. An asset whose hash is still an open question is answered through the answers operation, not this one." },
+  { op: "GET /api/experiments/{experiment_id}/pending", description: "The questions that are still blocking this draft, each with the stable key an answer must be submitted under, what the question is about, and — for the built-in examples only — a clearly labelled suggested answer that is never applied automatically. Read-only; the response carries the record's current `ETag`.\n\nWITHOUT PARAMETERS THE ANSWER IS COMPLETE: every open question on the record, its runs' included. A record's question count grows with its runs, so `run_id`, `offset` and `limit` let a client bound what it asks for — but bounding is something a client asks for, never something imposed on one that does not know to page. Send any of the three and the response gains a `pending_page` block reporting `total`, `returned`, `withheld` and whether the list is `complete`, so a page can never be mistaken for the whole set." },
+  { op: "POST /api/experiments/{experiment_id}/answers", description: "Applies caller-supplied answers to this draft's open blocking questions and returns the refreshed question list, the record's status, its new revision metadata, the derived workflow, and which downstream steps the change reopened.\n\nRequires `confirmed_by_user: true` and the record's current `ETag` in `If-Match`. Blank and unrecognised answers are dropped rather than invented, so a submission that changes nothing is a no-op: it is not logged and does not advance the revision.\n\nTHE REFRESHED QUESTION LIST IS BOUNDED. A record's open questions grow with its runs, and at 1,000 runs this response measured 1.77 MB — the whole record's question set, returned on every submission, to report one answer. It now carries at most the first 50, plus every still-open question of the unit this write addressed, so the question you just answered is always in it. `pending_page` is ALWAYS present and reports `total`, `returned`, `withheld` and whether the list is `complete`, so a page can never be mistaken for the whole set, and `GET /api/experiments/{experiment_id}/pending` still answers completely by default, so no question becomes unreachable. `status`, `workflow` and the record's pending count are derived from the whole list BEFORE any bounding and are unchanged." },
+  { op: "POST /api/experiments/{experiment_id}/edit", description: "Overwrites the current value of a field that has already been answered, recording a fresh user confirmation, and returns the same refreshed bundle as the answers operation.\n\nRequires `confirmed_by_user: true` and the record's current `ETag` in `If-Match`. A body that names no recognised editable field is rejected with `422` rather than silently doing nothing, and so is a recognised field carrying a value the record cannot store — the refusal happens before any mutation, so the stored value is unchanged. It never reopens or creates a blocking question.\n\nOnly a field that is already answered can be corrected here. An asset whose hash is still an open question is answered through the answers operation, not this one.\n\nTHE REFRESHED QUESTION LIST IS BOUNDED. A record's open questions grow with its runs, and at 1,000 runs this response measured 1.77 MB — the whole record's question set, returned on every submission, to report one answer. It now carries at most the first 50, plus every still-open question of the unit this write addressed, so the question you just answered is always in it. `pending_page` is ALWAYS present and reports `total`, `returned`, `withheld` and whether the list is `complete`, so a page can never be mistaken for the whole set, and `GET /api/experiments/{experiment_id}/pending` still answers completely by default, so no question becomes unreachable. `status`, `workflow` and the record's pending count are derived from the whole list BEFORE any bounding and are unchanged." },
   { op: "POST /api/experiments/{experiment_id}/export", description: "Runs the schema-gated export for this record. On success it writes the official ISAAC record and its evidence sidecar into the workspace and returns the record id, the two artifact filenames (basenames only, never a server path), the refreshed revision metadata, the workflow, and the downstream invalidation.\n\nA record with **runs** exports one official record per run (`record_id = run.id`), not one per record. In that case `record_id` and `artifact_refs` are `null` — they are singular and a fan-out has several — and `records[]` carries one entry per run instead. A record with no runs — which is how every record starts, and how it stays until a run is added through `POST /api/experiments/{experiment_id}/runs` — exports exactly one record with `record_id` equal to its own id, unchanged.\n\n**What is guaranteed if something fails part-way.** Every run is validated before any file is written, so a validation failure on one run means no file is written for any of them. The state is saved once, after every file. It is NOT atomic across the individual file writes: a fault between them can leave some records on disk with the state still saying they were not exported. That is the same half-written shape a single-record export has always been able to produce, and the same repair applies — retry the export and every not-yet-exported run is republished from its current draft.\n\nA gated failure also returns `200`, with `ok: false`, the failing draft and official reports, and a flat `errors` list — decide by reading `ok`, not the status code. With runs, `runs[]` carries each run's own verdict and `failed_run_ids` names the ones that refused. Nothing is written in that case.\n\n**What happens to the records of runs that have been removed.** When a record with runs exports, artifact pairs in its own records directory that no current run claims are removed, and `pruned_record_ids` names them. Two things stop that removal, and they are reported separately because an empty `pruned_record_ids` would otherwise mean three different things. A pair a surviving record still links to is kept and named in `protected_record_ids` — records are immutable, so removing it would leave that link pointing at nothing. And if a record being kept cannot be read at all, nothing is removed and `prune_declined` is `true`, because a record whose links are unknown may reference anything.\n\nRequires the record's current `ETag` in `If-Match`. Exported records are immutable: exporting a record whose runs have all already been exported is refused, and a run that is already exported is never rewritten when a sibling run is exported alongside it. An export is also refused with `sibling_link_conflict` when it would rewrite a record that an already-exported record links to as sharing its sample id, with a different sample id — the link could not be corrected afterwards, so one of the two records would be false. Nothing is written in that case." },
   // TRANSCRIBED from `create_app().openapi()`, never hand-written. It sits beside
   // the export it is deliberately NOT a flag on: exporting is a mechanical
@@ -3041,8 +3133,8 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   // and had no HTTP caller.
   { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/overrides", description: "Records that ONE run deliberately holds its own value at ONE record-level address, instead of the value it inherits. Returns the refreshed run and when the override was recorded.\n\nNothing is copied down. The run stores the override and only the override, so every OTHER record-level value it holds still resolves from the record and still changes when the record does. The override itself does not: it keeps the value you gave it, and it keeps a copy of the inherited value it displaced at the moment it was recorded, which the run view reports as `displaced_payload` beside the record's current `inherited_payload`. The two legitimately differ once the record-level value is edited afterwards.\n\nWHAT IS RECORDED, AND WHAT IS NOT. The time of the override and the value it displaced are stored. WHO recorded it is NOT: this application receives no verified user identity, so no name is attached rather than an unverified one being attached.\n\nRequires `confirmed_by_user: true` and THE RUN's current `ETag` in `If-Match` — not the record's. Omitted is `428`, malformed is `400`, and stale is `412` with nothing written and the run's current `ETag` echoed.\n\n`address` is spelt exactly as the run's `inherited` map spells it — `field:<official.dotted.path>`, `block:attribution` or `block:tags`. Appearing in that map is where a client READS the spelling, and it is neither necessary nor sufficient: `block:tags` is overridable but is absent from the map until the record carries a tag, and `field:system.domain` is reported there but is NOT overridable, because the set of overridable field paths is the deterministic extractor's own map of official paths and that one is not in it. A run-level address, a misspelt or invented path, and one the contract assigns to neither level are each rejected with `422` naming the address; a run's own fields are edited on the run instead. A `field:` payload must be a draft field envelope the no-guessing rules accept — a `verified` value carrying no evidence is refused, not stored — and a `block:` payload must be the block itself, of the type the official schema declares for it. Nothing is written on any refusal.\n\nRecording the same override twice is a no-op: the recorded time is not restamped and the run's revision does not advance." },
   { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/overrides/clear", description: "Removes ONE run's override at ONE record-level address, so the run inherits again. Returns the refreshed run and whether an override was actually there.\n\nThe run goes back to holding NO value at that address — not to holding a copy of what the record currently says — so it resolves from the record again and follows every later change to it. The value the override displaced is not restored onto the run, because it was never taken off the record in the first place.\n\nRequires `confirmed_by_user: true` and THE RUN's current `ETag` in `If-Match` — not the record's. Omitted is `428`, malformed is `400`, and stale is `412` with nothing written and the run's current `ETag` echoed.\n\n`address` is spelt exactly as the run's `inherited` map spells it, and the admissible set is the same one the override operation accepts — appearing in that map is neither necessary nor sufficient, for the reasons that operation states. Anything that could not hold an override in the first place is rejected with `422` naming it, rather than reported as an override that was not there. Clearing an address that carries no override IS a success — `cleared` is `false`, nothing is written, and the run's revision does not advance — so a client may repeat the request or retry a dropped one safely." },
-  { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/answers", description: "Applies caller-supplied answers to ONE RUN's open blocking questions and returns the refreshed question list for the whole record, its status, the record's new revision metadata, the derived workflow, and the downstream invalidation.\n\nWHY THIS EXISTS SEPARATELY FROM THE RECORD'S OWN `/answers`. A spectrum, a QC verdict, a descriptor and an asset hash are per-RUN: each run is one official ISAAC record, and the record's composed draft reads those blocks off the run. Answering them on the record once runs exist would write a value no exported record reads, so that route refuses them with `409 belongs_to_a_run` and names this one.\n\n`If-Match` is THE RUN's `ETag`, exactly as `GET .../runs/{run_id}` returned it — not the record's. The two are different validators and the record's will not match.\n\nThe keys are the same keys the record's `/answers` takes, and come from `GET /api/experiments/{experiment_id}/pending`, where a run-owned question carries the `run_id` it belongs to. An UNRECOGNISED key is ignored rather than invented, exactly as on the record — but a recognised key whose question on THIS run is already CLOSED is refused with `422 already_answered` and sent to the run's `/edit`, because applying it would write nothing while reporting a change." },
-  { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/edit", description: "Overwrites a value ONE RUN has already confirmed, recording a fresh user confirmation beside the previous one rather than replacing it. Same key set and same refusals as the record's `/edit`; `If-Match` is THE RUN's `ETag`.\n\nA body that names no editable field is `422` rather than a silent no-op, and a recognised field carrying a value the store cannot keep is `422` `invalid_field_value` — the value was the problem, not the field name." },
+  { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/answers", description: "Applies caller-supplied answers to ONE RUN's open blocking questions and returns the refreshed question list for the whole record, its status, the record's new revision metadata, the derived workflow, and the downstream invalidation.\n\nWHY THIS EXISTS SEPARATELY FROM THE RECORD'S OWN `/answers`. A spectrum, a QC verdict, a descriptor and an asset hash are per-RUN: each run is one official ISAAC record, and the record's composed draft reads those blocks off the run. Answering them on the record once runs exist would write a value no exported record reads, so that route refuses them with `409 belongs_to_a_run` and names this one.\n\n`If-Match` is THE RUN's `ETag`, exactly as `GET .../runs/{run_id}` returned it — not the record's. The two are different validators and the record's will not match.\n\nThe keys are the same keys the record's `/answers` takes, and come from `GET /api/experiments/{experiment_id}/pending`, where a run-owned question carries the `run_id` it belongs to. An UNRECOGNISED key is ignored rather than invented, exactly as on the record — but a recognised key whose question on THIS run is already CLOSED is refused with `422 already_answered` and sent to the run's `/edit`, because applying it would write nothing while reporting a change.\n\nTHE REFRESHED QUESTION LIST IS BOUNDED. A record's open questions grow with its runs, and at 1,000 runs this response measured 1.77 MB — the whole record's question set, returned on every submission, to report one answer. It now carries at most the first 50, plus every still-open question of the unit this write addressed, so the question you just answered is always in it. `pending_page` is ALWAYS present and reports `total`, `returned`, `withheld` and whether the list is `complete`, so a page can never be mistaken for the whole set, and `GET /api/experiments/{experiment_id}/pending` still answers completely by default, so no question becomes unreachable. `status`, `workflow` and the record's pending count are derived from the whole list BEFORE any bounding and are unchanged." },
+  { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/edit", description: "Overwrites a value ONE RUN has already confirmed, recording a fresh user confirmation beside the previous one rather than replacing it. Same key set and same refusals as the record's `/edit`; `If-Match` is THE RUN's `ETag`.\n\nA body that names no editable field is `422` rather than a silent no-op, and a recognised field carrying a value the store cannot keep is `422` `invalid_field_value` — the value was the problem, not the field name.\n\nTHE REFRESHED QUESTION LIST IS BOUNDED. A record's open questions grow with its runs, and at 1,000 runs this response measured 1.77 MB — the whole record's question set, returned on every submission, to report one answer. It now carries at most the first 50, plus every still-open question of the unit this write addressed, so the question you just answered is always in it. `pending_page` is ALWAYS present and reports `total`, `returned`, `withheld` and whether the list is `complete`, so a page can never be mistaken for the whole set, and `GET /api/experiments/{experiment_id}/pending` still answers completely by default, so no question becomes unreachable. `status`, `workflow` and the record's pending count are derived from the whole list BEFORE any bounding and are unchanged." },
   { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/check", description: "Checks the official record ONE run would export — its own content plus the record-level content it inherits — and returns the no-guessing draft verdict, the `official` block, and the run's open blocking questions.\n\n**The `official` block carries the vendored official ISAAC schema's verdict WHERE THE OFFICIAL VALIDATOR RAN — and otherwise the findings that stopped the export before it could.** A dry run is refused before official validation by the no-guessing draft check and by ISAAC's own anchored-pattern exactness gate (a value matching a `^...$` pattern only because Python's `$` also matches before a trailing newline). Those findings arrive under the same `errors` key, so `official.ok: false` is not by itself evidence that the official schema rejected anything; `official.schema` names the schema this deployment would validate against and is stamped on every response. A dry-run PASS does mean official validation ran and passed. `POST /api/validate/record` reports the two gates separately (`schema_ok` and `exactness_errors`).\n\nRead-only: it writes nothing, exports nothing, and does not advance the run's or the record's revision. `checked_run_version` states which revision of the run the verdict describes. Every entry in `blockers` carries a non-empty `message` taken from what that blocking question already records — no finding text is composed here.\n\nBoth verdicts come from the same deterministic core functions the command line and the record-level validate operation use; no second validator exists. `ok` is true only when both pass, and it is computed from those alone — an advisory warning never turns a pass into a failure. If the run has already been exported and its written record cannot be read, no verdict is invented: the official block reports the single fixed error `Validation could not be completed.`" },
   { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/remove", description: "Removes one run from this record and reports what was removed.\n\nONLY A RUN THAT KEEPS NO PUBLISHED RECORD CLAIMED. A run that has produced an official ISAAC record holds a record and an evidence sidecar that this application never rewrites. Removing the run that names them would leave them claimed by nothing, and a later export of this record deletes exactly such a pair — so this operation refuses that run with `409 run_exported` and writes nothing. The refusal asks BOTH whether the run carries a `record_id` AND whether an artifact pair is present on disk under its own id, because an export writes both files before it persists the state and a refused state save leaves the pair with no `record_id` naming it.\n\nEvery run that has appeared in a submitted revision carries a `record_id` — a submission materialises every unit before it records anything — so a SUBMITTED record is out of this operation's reach. That is a statement about submitted records specifically, not a claim that removal is the only way a record can stop being claimed. No revision, submission or official record is deleted, rewritten or marked by this operation in any case.\n\nWHAT IS REMOVED is the run's own draft content: the run-level values it holds, the overrides it recorded, its association with any asset reference, and its open questions. The record's own values are unchanged, no other run is changed, the record's asset library keeps every entry, and no file at an asset `uri` is read or altered — this application has never read one.\n\nTHE REMAINING RUNS KEEP THEIR NUMBERS. Ordinals are not renumbered, so a record whose runs were 1, 2 and 3 reads 1 and 3 after the second is removed, and every surviving run's revision and `ETag` are untouched by this request. `ordinals_compacted` is `false` in the response so a client never has to infer it. A run added afterwards takes the next number above the highest still present.\n\nRemoving a run rewrites the record, so this requires `confirmed_by_user: true` and the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing removed. Repeating the request for a run that is already gone is `404` rather than a second success: this operation is addressed to a run, and every other run operation answers `404` for an id this record does not hold." },
   { op: "POST /api/validate/record", description: "Standalone validator for a candidate official ISAAC record supplied directly as a JSON request body — no experiment, no draft, and no workspace involved. Returns `ok`, the official schema's own `schema_ok`, a rendered summary line, the `{path, message}` schema errors, the separately-listed `exactness_errors`, the schema version checked against, and `warnings`.\n\n**Two gates, reported separately.** `schema_ok` and `errors` are the vendored official schema's verdict, produced by the same authoritative validator the per-experiment validation operation calls — those agree by construction. `ok` is narrower: it is `schema_ok` AND ISAAC's anchored-pattern exactness gate, which refuses a value that satisfies one of the schema's `^...$` patterns only because Python's `$` also matches before a trailing newline. That gate is ISAAC's own, not the official schema's, so its findings are listed in `exactness_errors` and are never merged into `errors`.\n\n**A correction, kept visible.** This description used to say that this operation and the per-experiment one 'agree by construction', full stop. That is true of the schema verdict and false of the top-level `ok`, which is why the sentence is now scoped. This operation is the stricter of the two: `export_draft` applies the exactness gate, so the per-experiment operation applies it on its dry-run branch, while validating an ALREADY-EXPORTED record reports the schema verdict alone. A record carrying such a value therefore reads `ok: false` here and `ok: true` there. Read `schema_ok` to ask whether the official schema accepts the record, and `ok` to ask whether ISAAC would export it.\n\n`warnings` is the same advisory tier the per-record warnings operation serves, run over the supplied document. It is ADVISORY and NON-GATING, and that is unchanged by the exactness gate above: a warning can never turn a pass into a failure, and this operation is never a second authority on validity beside the vendored schema. **A second correction, also kept visible:** this paragraph used to add 'so `ok` is computed from the schema verdict alone'. The non-gating claim about WARNINGS is still exactly true; the clause it leaned on is not, because `ok` now also carries the exactness gate. The two are independent — warnings never move `ok`, and exactness always can.\n\nThe body is never written anywhere and its content is never logged; only the outcome, error count and warning count are.\n\nSend the record as a raw JSON body. The body is read in memory under a hard size limit." },

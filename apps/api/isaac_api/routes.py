@@ -327,6 +327,17 @@ _R_EXPERIMENT_NOT_FOUND: dict = {
     },
 }
 
+_R_RUN_NOT_FOUND: dict = {
+    404: {
+        "description": (
+            "No experiment in the selected workspace has that id, that experiment "
+            "has no run with that id, or the `X-Isaac-Tutorial-Session` header "
+            "named a worked-example session that does not exist. The request is "
+            "never silently answered from the ordinary workspace instead."
+        )
+    },
+}
+
 #: THE DURABLE-STORAGE OUTAGE, DECLARED WHEREVER IT CAN HAPPEN.
 #:
 #: It was declared on ONE operation — ``POST /api/experiments``, and only for its
@@ -2224,6 +2235,137 @@ def _example_scope(experiment_id: str) -> bool:
     return experiment_id in ws.CANONICAL_IDS
 
 
+def _mutation_pending_response(exp, experiment_id: str, *, unit_run_id: str | None) -> dict:
+    """The recomputed question list a MUTATION returns — BOUNDED, and saying so.
+
+    THE MEASURED DEFECT, and it is the write path rather than the read path, which is
+    why it is the worse half. All four mutations (`POST /answers`, `POST /edit`, and
+    the two run-level equivalents) returned `serialize.pending_to_list(entries=
+    exp.pending())` — EVERY open question of the WHOLE record, unbounded. Measured
+    in-process over HTTP on `c153ec9`, answering ONE question on ONE run::
+
+           runs   POST /runs/{run_id}/answers -> 200      entries
+             25                        44,840 B               74
+            250                       443,542 B              749
+           1000                     1,773,294 B            2,999
+
+    So a scientist working through a 1000-run record downloaded 1.77 MB per
+    submission, on every submission, to learn whether the one question they had just
+    answered was still open.
+
+    WHY THE DEFAULT IS BOUNDED HERE AND UNBOUNDED ON `GET /pending`. They are
+    different acts. A GET is a client ASKING what is unresolved, and answering it with
+    a page a caller did not request is exactly the silent truncation this repository
+    refuses. A mutation response is a report the server volunteers alongside a write;
+    nobody asked for it to be the whole record, and it is a contract change made
+    deliberately and documented in the operation descriptions.
+
+    NOTHING IS SILENTLY TRUNCATED AND NOTHING BECOMES UNDISCOVERABLE. `pending_page`
+    is ALWAYS present — including when the window IS the whole set (`complete: true`),
+    so a client never has to infer from absence — and it reports how many entries were
+    withheld. `GET /pending` still answers completely by default, so every open
+    question remains reachable in one request.
+
+    THE WINDOW IS ANCHORED ON THE UNIT THAT WAS WRITTEN. See
+    `serialize.pending_mutation_window`: a plain head-of-list window would not contain
+    run 900's questions, and `GuidedCompletion` decides "was my answer applied?" by
+    asking whether its question is still in this list — so an answer the core REFUSED
+    would have read as applied. `unit_run_id` is the run this write addressed, or
+    `None` for a record-level write.
+
+    `pending_count`, `status`, `export_ready` and `workflow` are untouched by this:
+    they are derived from `Experiment.pending()` in full, before any bounding, so the
+    counts on the response continue to agree with the record rather than with the page.
+    """
+    entries = exp.pending()
+    window, page = serialize.pending_mutation_window(entries, unit_run_id=unit_run_id)
+    result = serialize.pending_to_list(
+        exp.draft,
+        ws.load_demo_answers(),
+        example_scope=_example_scope(experiment_id),
+        entries=window,
+    )
+    result["pending_page"] = page
+    return result
+
+
+#: THE ONE PARAGRAPH THE FOUR MUTATION OPERATIONS SHARE, written once.
+#:
+#: All four return the same recomputed-question bundle and all four are bounded by the
+#: same policy, so four hand-written copies would be four places for the sentence to
+#: drift — and `apps/web/src/test/apiFixtures.ts` holds a transcribed copy of every
+#: one of them, which `test_contract_description_parity.py` compares byte-for-byte.
+#: The window size is INTERPOLATED from `serialize.PENDING_WINDOW` for the same reason
+#: `_RUN_LIMIT_DESC` interpolates `RUN_PAGE_MAX`: a retyped bound is a copy free to
+#: drift silently, and the copy that drifts is the one published in the contract.
+_BOUNDED_PENDING_PARAGRAPH = (
+    "THE REFRESHED QUESTION LIST IS BOUNDED. A record's open questions grow with its "
+    "runs, and at 1,000 runs this response measured 1.77 MB — the whole record's "
+    "question set, returned on every submission, to report one answer. It now carries "
+    f"at most the first {serialize.PENDING_WINDOW}, plus every still-open question of "
+    "the unit this write addressed, so the question you just answered is always in it. "
+    "`pending_page` is ALWAYS present and reports `total`, `returned`, `withheld` and "
+    "whether the list is `complete`, so a page can never be mistaken for the whole "
+    "set, and `GET /api/experiments/{experiment_id}/pending` still answers completely "
+    "by default, so no question becomes unreachable. `status`, `workflow` and the "
+    "record's pending count are derived from the whole list BEFORE any bounding and "
+    "are unchanged."
+)
+
+#: The largest page ONE bounded `GET /pending` request may ask for.
+#:
+#: Same shape of decision as ``RUN_PAGE_MAX`` above, and the same non-limit: OMITTING
+#: `limit` STILL RETURNS EVERY OPEN QUESTION. This bounds a single bounded response,
+#: never how many questions a record may have, and `total` always reports how many
+#: there are.
+#:
+#: 500 is set against the measured per-entry cost rather than guessed: an entry
+#: serialises to ~591 bytes (`serialize`'s note above `PENDING_WINDOW` records the
+#: measurement and the harness), so a full page is ~295 KB — the worst case a client
+#: may ask for in one request, which is not the page a UI should request. The window a
+#: MUTATION returns is `serialize.PENDING_WINDOW` (50) and is deliberately a different,
+#: much smaller number: that one is a policy applied to a caller who did not ask.
+#:
+#: ~~an entry serialises to ~627 bytes … so a full page is ~313 KB~~ — **both figures
+#: were overstated and are corrected in place.** An independent review re-measured the
+#: page and got 295,295 B; so did this correction, exactly. Neither number was doing
+#: any work beyond justifying the 500, which is unchanged — but a justification a
+#: reader cannot reproduce is worse than none, so here is the one command that produces
+#: it, against the same no-explicit-label harness `serialize`'s table used:
+#:
+#:     # after building a 1,000-run record (see serialize.py's note)
+#:     len(c.get(f"/api/experiments/{eid}/pending?limit=500").content)  -> 295295
+PENDING_PAGE_MAX: int = 500
+
+#: THE BOUND IS INTERPOLATED, NOT RETYPED — same reason as ``_RUN_LIMIT_DESC``.
+_PENDING_LIMIT_DESC = (
+    f"Maximum questions to return, 1–{PENDING_PAGE_MAX}. OMIT to return every open "
+    "question: this parameter bounds one response and is never a limit on how many "
+    "questions a record may have. When you send it, the response carries a "
+    "`pending_page` block reporting the total and how many were withheld."
+)
+
+_PENDING_OFFSET_DESC = (
+    "How many questions to skip, in the order this operation returns them (the "
+    "record's own, then each run's in run order). An offset past the end is CLAMPED "
+    "to an empty page rather than refused, and `pending_page.total` tells the client "
+    "it ran off the end."
+)
+
+_PENDING_RUN_ID_DESC = (
+    "Return only the questions owned by this run — the common case of a scientist "
+    "working one measurement. Refused with `404 run_not_found` when the record holds "
+    "no such run, rather than answered with an empty list that reads as 'this run has "
+    "nothing left'. AN EMPTY VALUE (`?run_id=`) IS A RUN ID THE RECORD DOES NOT HOLD "
+    "AND IS REFUSED THE SAME WAY, naming `\"\"` as the id that was not found; it is "
+    "not treated as if the parameter were absent, because a caller that interpolated "
+    "nothing into a run filter would otherwise be handed the WHOLE record and read it "
+    "as that run's questions. `pending_page.record_total` still reports the WHOLE "
+    "record's open question count, so a filtered read can never be mistaken for the "
+    "record's state."
+)
+
+
 @router.get(
     "/experiments/{experiment_id}/pending",
     tags=[TAG_DRAFTS],
@@ -2233,25 +2375,75 @@ def _example_scope(experiment_id: str) -> bool:
         "key an answer must be submitted under, what the question is about, and — "
         "for the built-in examples only — a clearly labelled suggested "
         "answer that is never applied automatically. Read-only; the response "
-        "carries the record's current `ETag`."
+        "carries the record's current `ETag`.\n\n"
+        "WITHOUT PARAMETERS THE ANSWER IS COMPLETE: every open question on the "
+        "record, its runs' included. A record's question count grows with its runs, "
+        "so `run_id`, `offset` and `limit` let a client bound what it asks for — but "
+        "bounding is something a client asks for, never something imposed on one that "
+        "does not know to page. Send any of the three and the response gains a "
+        "`pending_page` block reporting `total`, `returned`, `withheld` and whether "
+        "the list is `complete`, so a page can never be mistaken for the whole set."
     ),
     response_description="The open blocking questions, with the current `ETag`.",
-    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_RUN_NOT_FOUND,
+    },
 )
-def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
+def get_pending(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    run_id: Annotated[str | None, Query(description=_PENDING_RUN_ID_DESC)] = None,
+    offset: Annotated[int, Query(ge=0, description=_PENDING_OFFSET_DESC)] = 0,
+    limit: Annotated[
+        int | None, Query(ge=1, le=PENDING_PAGE_MAX, description=_PENDING_LIMIT_DESC)
+    ] = None,
+):
     exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
+    # AN UNKNOWN RUN IS REFUSED, NOT ANSWERED WITH AN EMPTY PAGE. A filter that
+    # silently matches nothing is a surface answering less than it claims: a client
+    # that mistyped a run id would read `total: 0` as "this run has no open
+    # questions". `_run_not_found` is the same body every other run route uses.
+    if run_id is not None and exp.get_run(run_id) is None:
+        return _run_not_found(experiment_id, run_id)
+    # SEE `list_runs`' ETag NOTE. This tag is the EXPERIMENT's, so two different pages
+    # of the same record carry the same tag. Harmless while nothing reads
+    # `If-None-Match` here, and a trap for whoever adds a conditional GET next.
     response.headers["ETag"] = exp.etag()
     # `exp.pending()`, NOT `exp.draft` — see `serialize.pending_to_list`'s `entries`
     # override. This route was run-blind while the detail response's `pending_count`
     # was not, so the two disagreed the moment a record had a run.
-    return serialize.pending_to_list(
+    entries = exp.pending()
+    bounded = run_id is not None or offset != 0 or limit is not None
+    # THE UNBOUNDED RESPONSE IS BYTE-IDENTICAL TO WHAT IT ALWAYS WAS — same single
+    # `pending` key, no page block. `pending_page` is not "always present, sometimes
+    # trivial" here, because the whole point of the default is that a consumer which
+    # never learned to page is handed nothing new to interpret. The MUTATION responses
+    # make the opposite choice for the opposite reason: they are bounded whether the
+    # caller asked or not, so they must say so unconditionally.
+    if not bounded:
+        return serialize.pending_to_list(
+            exp.draft,
+            ws.load_demo_answers(),
+            example_scope=_example_scope(experiment_id),
+            entries=entries,
+        )
+    window, page = serialize.pending_slice(
+        entries, run_id=run_id, offset=offset, limit=limit
+    )
+    result = serialize.pending_to_list(
         exp.draft,
         ws.load_demo_answers(),
         example_scope=_example_scope(experiment_id),
-        entries=exp.pending(),
+        entries=window,
     )
+    result["pending_page"] = page
+    return result
 
 
 # --- 7. answers ---------------------------------------------------------------
@@ -2847,6 +3039,7 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
         "`If-Match`. Blank and unrecognised answers are dropped rather than "
         "invented, so a submission that changes nothing is a no-op: it is not "
         "logged and does not advance the revision."
+        "\n\n" + _BOUNDED_PENDING_PARAGRAPH
     ),
     response_description=(
         "The refreshed blocking questions, status, revision metadata, workflow, "
@@ -3013,12 +3206,7 @@ def post_answers(
         # said three questions remained, and `GuidedCompletion` renders "All blockers
         # resolved" on an empty list. The screen a scientist answers questions on told
         # them they were finished, about a record that could not export.
-        result = serialize.pending_to_list(
-            exp.draft,
-            ws.load_demo_answers(),
-            example_scope=_example_scope(experiment_id),
-            entries=exp.pending(),
-        )
+        result = _mutation_pending_response(exp, experiment_id, unit_run_id=None)
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
         result["workflow"] = _workflow_for(exp)
@@ -3613,6 +3801,7 @@ def _fields_the_write_landed(
         "Only a field that is already answered can be corrected here. An asset "
         "whose hash is still an open question is answered through the answers "
         "operation, not this one."
+        "\n\n" + _BOUNDED_PENDING_PARAGRAPH
     ),
     response_description=(
         "The refreshed blocking questions, status, revision metadata, workflow, "
@@ -3825,12 +4014,7 @@ def post_edit(
         # said three questions remained, and `GuidedCompletion` renders "All blockers
         # resolved" on an empty list. The screen a scientist answers questions on told
         # them they were finished, about a record that could not export.
-        result = serialize.pending_to_list(
-            exp.draft,
-            ws.load_demo_answers(),
-            example_scope=_example_scope(experiment_id),
-            entries=exp.pending(),
-        )
+        result = _mutation_pending_response(exp, experiment_id, unit_run_id=None)
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
         result["workflow"] = _workflow_for(exp)
@@ -3868,16 +4052,15 @@ RunId = Annotated[
     ),
 ]
 
-_R_RUN_NOT_FOUND: dict = {
-    404: {
-        "description": (
-            "No experiment in the selected workspace has that id, that experiment "
-            "has no run with that id, or the `X-Isaac-Tutorial-Session` header "
-            "named a worked-example session that does not exist. The request is "
-            "never silently answered from the ordinary workspace instead."
-        )
-    },
-}
+# `_R_RUN_NOT_FOUND` MOVED UP, next to `_R_EXPERIMENT_NOT_FOUND`. It is read by a
+# route decorator that executes far earlier in this module than this line does —
+# `GET /experiments/{id}/pending`, which grew a `run_id` filter and so grew that
+# 404 — and a decorator argument is evaluated at import time, so defining it here
+# would have been a ~~ImportError waiting for the first caller who needed it
+# earlier~~ **`NameError` raised while importing this module**, before any route was
+# registered and before any caller existed. Naming the wrong exception mattered
+# enough to correct: an `ImportError` reads as a dependency problem a reader would
+# go looking for in another file.
 
 _R_RUN_EXPORTED: dict = {
     409: {
@@ -6032,6 +6215,7 @@ def post_run_override_clear(
         "on THIS run is already CLOSED is refused with `422 already_answered` and "
         "sent to the run's `/edit`, because applying it would write nothing while "
         "reporting a change."
+        "\n\n" + _BOUNDED_PENDING_PARAGRAPH
     ),
     response_description=(
         "The record's refreshed blocking questions, status, revision metadata, "
@@ -6088,6 +6272,7 @@ def post_run_answers(
         "A body that names no editable field is `422` rather than a silent no-op, and "
         "a recognised field carrying a value the store cannot keep is `422` "
         "`invalid_field_value` — the value was the problem, not the field name."
+        "\n\n" + _BOUNDED_PENDING_PARAGRAPH
     ),
     response_description=(
         "The record's refreshed questions, status, revision metadata, workflow and "
@@ -6350,12 +6535,15 @@ def _apply_to_run(
         # THE WHOLE RECORD's questions, not this run's. A scientist working through a
         # multi-run record needs to know what is left overall, and every entry carries
         # the `run_id` that owns it, so nothing is ambiguous about where each belongs.
-        result = serialize.pending_to_list(
-            exp.draft,
-            ws.load_demo_answers(),
-            example_scope=_example_scope(experiment_id),
-            entries=exp.pending(),
-        )
+        #
+        # ~~"the whole record's questions"~~ is now the whole record's questions
+        # BOUNDED TO A WINDOW, and the old sentence is struck rather than rewritten
+        # because its reasoning is why the window is over the RECORD's list at all
+        # rather than over this run's. What is left overall is still reported, as
+        # `pending_page.total`, on every response — so the claim the sentence was
+        # protecting is served as a number instead of as 3,000 entries. The window is
+        # ANCHORED on `run.id`, so this run's own open questions are always in it.
+        result = _mutation_pending_response(exp, experiment_id, unit_run_id=run.id)
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
         result["run_version"] = run.version_token()

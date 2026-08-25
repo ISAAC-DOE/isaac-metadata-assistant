@@ -10,6 +10,7 @@ import {
   editRefused,
   pendingResponse,
   stubFetchRoutes,
+  completePendingPage,
 } from '../test/apiFixtures';
 
 /**
@@ -140,6 +141,7 @@ describe('S4 · an answer is shown as confirmed only when the server reported it
         body: {
           ...answersDropped,
           pending: pendingResponse.pending.slice(1), // notebook resolved…
+          pending_page: completePendingPage(pendingResponse.pending.slice(1)),
           invalidation: { ...answersDropped.invalidation, changed: false }, // …but nothing written
         },
       },

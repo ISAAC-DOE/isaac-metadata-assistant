@@ -1747,13 +1747,46 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // Re-measured from `create_app().openapi()`, not adjusted by the length of the
     // new text, and `test_contract_description_parity.py` proves the captured copy
     // matches what the server serves.
-    expect(total).toBe(86556);
+    // 86,556 -> 90,213 (+3,657) and 187 -> 192 post-lead paragraphs (+5), operations
+    // UNCHANGED at 69: THE PENDING LIST BECAME BOUNDABLE. Five operation descriptions
+    // moved, and they moved because the contract did:
+    //
+    //   · `GET .../pending` gained a paragraph. It answers completely by default and
+    //     now accepts `run_id`, `offset` and `limit`; a description that documented
+    //     only the unbounded read would understate what a caller may ask for, and —
+    //     worse — would not say that a bounded response carries `pending_page`.
+    //   · The FOUR mutation operations (`POST .../answers`, `.../edit` and the two
+    //     run-level ones) each gained the SAME paragraph, written once in `routes.py`
+    //     as `_BOUNDED_PENDING_PARAGRAPH` and interpolating `serialize.PENDING_WINDOW`
+    //     rather than retyping it. Their `pending` list is now a window rather than
+    //     the whole record — measured at 1,000 runs, that response was 1,773,294 bytes
+    //     — and a bounded response that did not say so in the published contract would
+    //     be exactly the silent truncation the bound exists to prevent.
+    //
+    // MEASURED three independent ways and NOT by adding the length of the new text:
+    //
+    //   · the splitPurpose paragraph rule transcribed into Python over
+    //     `create_app().openapi()`, restricted to the 69 operations this array names,
+    //     gives total 90,213 and 192 post-lead paragraphs;
+    //   · the same rule over the transcribed array gives the same two numbers;
+    //   · internal consistency: raw sum of `d.description.length` = 90,597, minus 2
+    //     per `\n\n` separator (192 x 2 = 384) = 90,213.
+    //
+    // All five entries were RE-TRANSCRIBED from `create_app().openapi()` with
+    // `json.dumps(..., ensure_ascii=False)`, never hand-edited, and
+    // `test_contract_description_parity.py` proves the copy matches the served
+    // document rather than leaving it asserted here.
+    expect(total).toBe(90213);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
     // `test_contract_description_parity.py` proves that rather than leaving it
     // asserted here.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(187);
+    // 187 -> 192 (+5): one added paragraph in each of the five operations named
+    // above. Re-measured, not incremented — and note that the count moves by exactly
+    // five because each is an APPENDED paragraph (one added `\n\n`), not a reflow of
+    // an existing one.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(192);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

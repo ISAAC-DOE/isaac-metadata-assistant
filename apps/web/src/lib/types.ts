@@ -784,8 +784,47 @@ export interface ApiPendingItem {
   blocker_key?: string;
 }
 
+/**
+ * THE SELF-DESCRIPTION A BOUNDED QUESTION LIST CARRIES.
+ *
+ * A record's open questions grow with its runs — measured at 1,000 runs,
+ * `GET /pending` was 1,772,692 bytes over 3,000 entries and a single
+ * `POST /runs/{id}/answers` was 1,773,294. So both can now be bounded, and this block
+ * is what makes bounding SAFE: it states how many questions there are, how many came
+ * back, how many were WITHHELD, and whether the list is the whole set. A client can
+ * never mistake a page for the record's state.
+ *
+ * `record_total` is not redundant beside `total`: under a `run_id` filter `total` is
+ * that run's count, and a screen rendering it as "N still to confirm" would understate
+ * the record. Unfiltered the two are equal by construction.
+ */
+export interface ApiPendingPage {
+  /** Open questions matching the filter (the whole record when unfiltered). */
+  total: number;
+  /** Entries in `pending`. */
+  returned: number;
+  offset: number;
+  /** The bound the server applied, or `null` when none was. */
+  limit: number | null;
+  /** `total - offset - returned`, never negative. `> 0` means this is NOT the set. */
+  withheld: number;
+  /** `pending` IS the whole matching set. The signal to key "nothing left" off. */
+  complete: boolean;
+  run_id: string | null;
+  /** The WHOLE record's open question count, whatever the filter. */
+  record_total: number;
+}
+
 export interface ApiPendingResponse {
   pending: ApiPendingItem[];
+  /**
+   * Present ONLY on a BOUNDED read — one that sent `run_id`, `offset` or `limit`.
+   * An unbounded `GET /pending` is byte-identical to what it always was, deliberately:
+   * a consumer that never learned to page is handed nothing new to interpret, and is
+   * never handed a page it might read as the whole set. Absent therefore MEANS
+   * complete; it is not an unknown.
+   */
+  pending_page?: ApiPendingPage;
 }
 
 export interface ApiValidateResult {
@@ -1568,7 +1607,25 @@ export interface RecordBundle {
 // plus the P27.5 version triplet (the new If-Match token to adopt for the next
 // mutation).
 export interface ApiAnswersResponse extends VersionFields {
+  /**
+   * The recomputed question list — BOUNDED, and read `pending_page` beside it.
+   *
+   * At most the first `PENDING_WINDOW` (50) of the record's open questions, PLUS every
+   * still-open question of the unit this write addressed. That anchor is what keeps
+   * `answerWasApplied` sound: it decides "did my answer land?" by asking whether its
+   * question is still in this list, and on a 1,000-run record a plain head-of-list
+   * window would not contain run 900's question at all — so an answer the core REFUSED
+   * would have read as applied and the screen would have shown a "Confirmed by You"
+   * chip over a value the record does not hold.
+   */
   pending: ApiPendingItem[];
+  /**
+   * ALWAYS present here, unlike on `ApiPendingResponse`, and the asymmetry is the
+   * point. This response is bounded whether the caller asked or not, so it must say so
+   * unconditionally — including when the window IS the whole set (`complete: true`),
+   * so a client never has to infer completeness from an absent key.
+   */
+  pending_page: ApiPendingPage;
   status: ApiExperimentStatus;
   // P28.2 — the post-mutation workflow + downstream-invalidation summary.
   workflow: ApiWorkflow;

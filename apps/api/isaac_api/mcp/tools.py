@@ -66,6 +66,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping
 
+from .. import serialize
 from .client import ApiResult, IsaacApiClient
 from .policy import (
     OPERATIONS,
@@ -326,6 +327,36 @@ _RUN_ID = {
     "maxLength": 128,
     "description": "The run's id, as returned by isaac_list_runs.",
 }
+
+#: THE ONE SENTENCE EVERY TOOL WHOSE OPERATION RETURNS `pending_page` HAS TO SAY.
+#:
+#: `_ok` forwards `result.body` verbatim as `data`, so when the HTTP API started
+#: bounding its mutation responses these tools started returning a WINDOWED `pending`
+#: — and said nothing about it. The five HTTP operation descriptions were updated in
+#: the same change and these were not, which is the failure this constant exists to
+#: make structural: **the MCP tool description is a SEPARATE PUBLISHED CONTRACT**, read
+#: by external agents that never see the OpenAPI document, and this repository's own
+#: standard for the bound is that "a bounded response that did not say so in the
+#: published contract would be exactly the silent truncation the bound exists to
+#: prevent".
+#:
+#: Interpolated from `serialize.PENDING_WINDOW` for the same reason
+#: `routes._BOUNDED_PENDING_PARAGRAPH` interpolates it: a retyped bound is a copy free
+#: to drift, and the copy that drifts is the one published to the caller.
+#: `test_mcp_publishes_the_pending_bound.py` derives which tools must carry this from
+#: the OpenAPI document rather than from a list maintained here.
+_BOUNDED_PENDING_NOTE = (
+    "**THE `pending` LIST IN THIS RESULT IS A WINDOW, NOT THE RECORD'S WHOLE SET.** "
+    "A record's open questions grow with its runs — at 1,000 runs this response "
+    "measured 1.77 MB — so `data.pending` carries at most the first "
+    f"{serialize.PENDING_WINDOW}, plus every still-open question of the unit this "
+    "write addressed, which is what guarantees the question you just answered is in "
+    "it. `data.pending_page` is ALWAYS present and reports `total`, `returned`, "
+    "`offset`, `limit`, `withheld`, `complete` and `record_total`, so a page can never "
+    "be mistaken for the set: read `pending_page.total`, never `len(data.pending)`, "
+    "for how much is left. `isaac_list_questions` still answers COMPLETELY and is "
+    "where to go for the whole list, so no question becomes unreachable."
+)
 
 
 # --------------------------------------------------------------------------
@@ -787,7 +818,9 @@ def _tools() -> tuple[Tool, ...]:
                 "NOTHING in the request is written. No value is ever invented. "
                 "Re-submitting a value the draft already holds is a no-op and does "
                 "not advance the revision. This does not export, finalise or submit "
-                "anything."
+                "anything.\n\n"
+                "ON THE RECORD-LEVEL BRANCH ONLY (no `run_id`), which posts to the "
+                "record's correction route: " + _BOUNDED_PENDING_NOTE
             ),
             scope=Scope.DRAFT_WRITE,
             operation_ids=("update_run_draft", "correct_record_field"),
@@ -926,7 +959,7 @@ def _tools() -> tuple[Tool, ...]:
                 "UNRECOGNISED key naming no open question on the level addressed is "
                 "ignored rather than guessed (a RECOGNISED one whose question is "
                 "closed gets the `already_answered` refusal above), and this does not "
-                "export, finalise or submit anything."
+                "export, finalise or submit anything.\n\n" + _BOUNDED_PENDING_NOTE
             ),
             scope=Scope.DRAFT_WRITE,
             operation_ids=(

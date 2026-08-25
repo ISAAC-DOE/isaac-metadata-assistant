@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { bundleRoutes, stubFetchRoutes } from '../test/apiFixtures';
+import { bundleRoutes, completePendingPage, stubFetchRoutes } from '../test/apiFixtures';
 
 /**
  * THE COMPLETION SCREEN WITH RUN-OWNED QUESTIONS — the case no test rendered.
@@ -261,6 +261,7 @@ describe('the completion screen with questions two different runs own', () => {
         'POST /api/experiments/demo/runs/01RUNAAAAAAAAAAAAAAAAAAAA0/answers': {
           body: {
             pending: [twoRunsPending().pending[1]],
+            pending_page: completePendingPage([twoRunsPending().pending[1]]),
             status: 'needs_attention',
             version: '1.1',
             rev: 1,
@@ -313,6 +314,7 @@ describe('the completion screen with questions two different runs own', () => {
         'POST /api/experiments/demo/runs/01RUNAAAAAAAAAAAAAAAAAAAA0/answers': {
           body: {
             pending: [qcQuestion(RUN_TWO, '400 K')],
+            pending_page: completePendingPage([qcQuestion(RUN_TWO, '400 K')]),
             status: 'needs_attention',
             version: '1.1',
             rev: 1,
@@ -366,6 +368,7 @@ describe('the completion screen with questions two different runs own', () => {
     // produced ZERO alerts where the parent produced the honest notice.
     const answered = {
       pending: [twoRunsPending().pending[1]],
+      pending_page: completePendingPage([twoRunsPending().pending[1]]),
       status: 'needs_attention',
       version: '1.1',
       rev: 1,
@@ -432,6 +435,7 @@ describe('the completion screen with questions two different runs own', () => {
      */
     const applied = {
       pending: [twoRunsPending().pending[1]],
+      pending_page: completePendingPage([twoRunsPending().pending[1]]),
       status: 'needs_attention',
       version: '1.1',
       rev: 1,
@@ -530,6 +534,7 @@ describe('the completion screen with questions two different runs own', () => {
         'POST /api/experiments/demo/runs/01RUNAAAAAAAAAAAAAAAAAAAA0/answers': {
           body: {
             pending: [withDemo(seriesQuestion(RUN_TWO, '400 K'))],
+            pending_page: completePendingPage([withDemo(seriesQuestion(RUN_TWO, '400 K'))]),
             status: 'needs_attention',
             version: '1.1',
             rev: 1,
@@ -540,6 +545,7 @@ describe('the completion screen with questions two different runs own', () => {
         'POST /api/experiments/demo/runs/01RUNBBBBBBBBBBBBBBBBBBBB0/answers': {
           body: {
             pending: [],
+            pending_page: completePendingPage([]),
             status: 'ready_to_export',
             version: '1.1',
             rev: 1,
@@ -647,6 +653,7 @@ describe('the completion screen with questions two different runs own', () => {
     // cannot: the screen has to resolve the run's own ETag first.
     const answered = {
       pending: [twoRunsPending().pending[1]],
+      pending_page: completePendingPage([twoRunsPending().pending[1]]),
       status: 'needs_attention',
       version: '1.1',
       rev: 1,
@@ -704,6 +711,7 @@ describe('editing a structured answer opens on the value being edited', () => {
   function afterOneAnswer(pendingAfter: unknown) {
     const answered = {
       pending: [pendingAfter],
+      pending_page: completePendingPage([pendingAfter]),
       status: 'needs_attention',
       version: '1.1',
       rev: 1,

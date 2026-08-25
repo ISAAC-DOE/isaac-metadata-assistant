@@ -20,6 +20,7 @@ import {
   stubFetchDown,
   stubFetchRoutes,
   validateDryRun,
+  completePendingPage,
 } from '../test/apiFixtures';
 
 // P30.6 — the API returns a SAFE basename only (never an absolute server/mount
@@ -172,6 +173,7 @@ describe('S4 · Guided Completion (live)', () => {
         // omit it and so modelled a response the backend never returns.
         body: {
           pending: [],
+          pending_page: completePendingPage([]),
           status: 'ready_to_export',
           rev: 4,
           updated_utc: '2099-04-02T09:16:00Z',
@@ -546,6 +548,7 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
             ? answersAfterNotebook // version: '1.1'
             : {
                 pending: pendingResponse.pending.slice(2),
+                pending_page: completePendingPage(pendingResponse.pending.slice(2)),
                 status: 'needs_attention',
                 rev: 5,
                 updated_utc: '2099-04-02T09:17:00Z',
