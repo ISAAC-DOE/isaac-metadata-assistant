@@ -192,7 +192,7 @@ export const MCP_CONNECT_COPY = {
   /** Permissions. */
   permissionsHeading: 'Permissions an Agent Will Hold',
   permissionsDetail:
-    'Two permissions, and they do not nest: an agent granted only the draft-write permission is refused every read tool, and one granted only read is refused every write. Neither of them means “may finalize”, and there is no third permission that does.',
+    'Two permissions, and the draft-write one is additive only: it is granted on top of read, never instead of it. Every write tool costs both permissions, because a write also returns the record state it produced — so an agent granted draft-write alone can call nothing at all, not even a write, and would sit completely inert. Grant read for an agent that should only look, and read plus draft-write for one that should fill in drafts. Neither permission means “may finalize”, and there is no third permission that does.',
 } as const;
 
 /** One capability row: what an agent will be able to do, in a scientist's terms. */
@@ -448,9 +448,9 @@ export const MCP_PERMISSIONS: readonly McpPermission[] = [
     id: 'draft-write',
     name: 'isaac:draft.write',
     allows:
-      'Change draft content: add a run, answer or re-answer the questions a record or one of its runs is blocked on — including a run’s spectrum, QC verdict and descriptors — correct an answered field, and edit a run’s own five context and timing fields. It does not export, submit or finalise anything.',
+      'Added to read, it lets an agent change draft content: add a run, answer or re-answer the questions a record or one of its runs is blocked on — including a run’s spectrum, QC verdict and descriptors — correct an answered field, and edit a run’s own five context and timing fields. It does not export, submit or finalise anything.',
     refuses:
-      'Finalizes nothing. It unlocks a fixed, reviewed list of operations and none of them mints an official record.',
+      'On its own it permits nothing. Every write tool requires read as well, so an agent granted draft-write without read is refused all ten tools and is shown none of them. It also finalizes nothing: it unlocks a fixed, reviewed list of operations and none of them mints an official record.',
   },
 ];
 
@@ -498,7 +498,7 @@ export const MCP_SETUP_STEPS: readonly McpSetupStep[] = [
     id: 'scope',
     title: 'Grant only what you need',
     detail:
-      'Grant the read permission for an agent that should only look, and add the draft-write permission only if you want it filling in drafts. They are granted separately and one never implies the other.',
+      'Grant the read permission for an agent that should only look, and add the draft-write permission on top of read if you want it filling in drafts. Draft-write is never a substitute for read: granted by itself it permits nothing, so an agent holding it alone is refused every tool.',
   },
   {
     id: 'verify',

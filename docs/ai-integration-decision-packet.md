@@ -188,9 +188,36 @@ rg --text -n -i -e 'mcp' -e 'jsonrpc' -e 'model context protocol' \
 → exit 1 (zero matches)
 ```
 
-The only MCP artifact in the repository is the audit document itself
+~~"The only MCP artifact in the repository is the audit document itself
 (`find . -iname '*mcp*'` → `./docs/mcp-capability-audit.md`, one result). **So capability A is
-specified and audited, but wholly unimplemented.**
+specified and audited, but wholly unimplemented.**"~~
+
+**STRUCK 2026-08-25.** The sentences above the strike were already struck and the block already
+carries a supersession note, but these two rendered as live prose asserting the output of a command
+anybody can re-run — which is the one kind of stale claim that reads as evidence. Unlike the
+`mcp-capability-audit.md` bullet corrected the same day, **this one was TRUE when it was committed**
+(`d53ea6a`, 2026-08-10, before any MCP code existed); it went stale rather than shipping false, and
+the distinction is worth keeping. Re-running it now:
+
+```
+find . -iname '*mcp*' -not -path './.git/*' -not -path './.venv/*' \
+  -not -path '*/node_modules/*' -not -path '*/__pycache__/*' \
+  -not -path './.claude/worktrees/*'
+→ 10 results: the apps/api/isaac_api/mcp package directory, six apps/api/tests/test_mcp_*.py
+  files, apps/web/src/lib/mcpConnectContent.ts, docs/mcp-capability-audit.md and
+  docs/mcp-local-transport.md
+```
+
+**Three numbers, deliberately given together rather than one bare figure**, because the count depends
+on what you ask: **10** by the command as written above; **9** if the `mcp/` package *directory* is
+excluded and only files counted; **16** git-TRACKED paths whose basename contains `mcp`
+(`git ls-files | grep -ic mcp`), since `find -iname` matches basenames and so reports the package
+directory once instead of its seven modules. And the command **exactly as the original sentence wrote
+it** — `find . -iname '*mcp*'`, unfiltered — returns **63** in this working tree, most of them
+`__pycache__` entries and per-agent worktrees under `.claude/worktrees/`; drop only `__pycache__` and
+it is **37**. A frozen command output is a poor claim precisely because four defensible readings of
+one command give 9, 10, 37 and 63. **The number will keep moving**: the
+tenth result, `test_mcp_publishes_the_pending_bound.py`, landed on 2026-08-25 in `249f8e3`.
 
 > **SUPERSEDED 2026-08-24: capability A is IMPLEMENTED** (10 tools, 13 operations, a Connect Your Agent surface) **and UNREACHABLE** (no hosted endpoint; `POST /api/mcp` → 404 by default). Those are different claims and only the second still holds.
 

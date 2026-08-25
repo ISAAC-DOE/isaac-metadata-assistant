@@ -632,6 +632,19 @@ const AUDIT_SOURCE = readFileSync(join(REPO_ROOT, 'docs/mcp-capability-audit.md'
   .replace(/^\s*>\s?/gm, '')
   .replace(/\*+/g, '')
   .replace(/\s+/g, ' ');
+/**
+ * The local-transport note, normalised the same way as `AUDIT_SOURCE`.
+ *
+ * Read purely so the two MCP documents can be checked TOGETHER. On 2026-08-24 the
+ * self-falsifying "no product screen mentions MCP" sentence was struck here and the
+ * identical claim in the audit was missed, so the pair diverged for a day inside a
+ * document read as an audit. Pinning them in one test is what stops the next sweep
+ * fixing one copy again.
+ */
+const TRANSPORT_SOURCE = readFileSync(join(REPO_ROOT, 'docs/mcp-local-transport.md'), 'utf8')
+  .replace(/^\s*>\s?/gm, '')
+  .replace(/\*+/g, '')
+  .replace(/\s+/g, ' ');
 
 /** Every tool name the backend permits, read off `PERMITTED_TOOL_NAMES`. */
 function permittedToolNames(): string[] {
@@ -670,6 +683,189 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
 
   it('the two permissions are exactly the scopes the backend can express', () => {
     expect(MCP_PERMISSIONS.map((p) => p.name).sort()).toEqual(scopeValues());
+  });
+
+  /*
+   * THE COPY FOR A PERMISSION MUST MATCH WHAT THAT PERMISSION ACTUALLY PERMITS.
+   *
+   * THE DEFECT THIS CLOSES, measured on 2026-08-25. The tab said *"Two
+   * permissions, and they do not nest: an agent granted only the draft-write
+   * permission is refused every read tool, and one granted only read is refused
+   * every write"*, and the draft-write row's `allows` described write capability
+   * as something that grant confers. Both halves misled in the same direction.
+   *
+   * What a principal holding ONLY `isaac:draft.write` can actually do, driven
+   * through `McpServer.handle`:
+   *
+   *     tools/list                 -> []           (not one of the ten)
+   *     tools/call, every tool     -> JSON-RPC -32002
+   *       "'isaac_answer_questions' requires the scope(s)
+   *        ['isaac:draft.write', 'isaac:read'], and this connection was not
+   *        granted ['isaac:read']."
+   *
+   * Because `Tool.required_scopes` returns `frozenset({Scope.READ, self.scope})`
+   * — every tool costs READ, since a write tool also returns the state it
+   * produced. Non-nesting is real and is the SAFE property; the tab turned it
+   * into a false capability claim. `tools.py`'s own docstring already said the
+   * true thing the screen omitted: *"a principal holding DRAFT_WRITE alone can
+   * now call nothing at all rather than being able to write blind."*
+   *
+   * A scientist who granted draft-write alone would have found the agent totally
+   * inert, having been told it would write.
+   *
+   * So the rule this block enforces: the number of tools a single-scope
+   * principal can call is DERIVED from `tools.py`, and the copy for that scope
+   * must agree with it. Deriving rather than hard-coding is what makes this
+   * catch the next divergence instead of pinning today's sentence.
+   */
+  /** Every tool name in `tools.py` with the scope it declares. */
+  function declaredTools(): { name: string; scope: string }[] {
+    const source = readFileSync(join(REPO_ROOT, 'apps/api/isaac_api/mcp/tools.py'), 'utf8');
+    const out: { name: string; scope: string }[] = [];
+    const pattern = /name="(isaac_[a-z_]+)"[\s\S]*?scope=Scope\.([A-Z_]+)/g;
+    for (const match of source.matchAll(pattern)) {
+      out.push({ name: match[1], scope: match[2] });
+    }
+    return out;
+  }
+
+  /**
+   * Does every tool require READ on top of its own scope? Read off the
+   * `required_scopes` property rather than assumed — if a future change makes a
+   * write tool cost DRAFT_WRITE alone, this flips and the assertions below
+   * change with it instead of going quietly stale.
+   */
+  function everyToolAlsoCostsRead(): boolean {
+    const source = readFileSync(join(REPO_ROOT, 'apps/api/isaac_api/mcp/tools.py'), 'utf8')
+      .replace(/\s+/g, ' ');
+    return source.includes('return frozenset({Scope.READ, self.scope})');
+  }
+
+  /** The tools a principal holding EXACTLY `scope` can call. */
+  function callableWithOnly(scope: 'READ' | 'DRAFT_WRITE'): string[] {
+    const alsoRead = everyToolAlsoCostsRead();
+    return declaredTools()
+      .filter(({ scope: own }) => {
+        const cost = new Set(alsoRead ? ['READ', own] : [own]);
+        return cost.size === 1 && cost.has(scope);
+      })
+      .map((t) => t.name)
+      .sort();
+  }
+
+  it('the parser found the tools and the scope rule — a vacuous read would pass the rest', () => {
+    const declared = declaredTools();
+    expect(declared.length).toEqual(permittedToolNames().length);
+    expect(declared.map((t) => t.name).sort()).toEqual(permittedToolNames());
+    expect(declared.some((t) => t.scope === 'DRAFT_WRITE')).toBe(true);
+    expect(everyToolAlsoCostsRead()).toBe(true);
+  });
+
+  it('draft-write alone permits NOTHING, and the copy for it says so', () => {
+    // Derived, not asserted: every tool costs READ, so a draft-write-only
+    // principal reaches zero of them.
+    expect(callableWithOnly('DRAFT_WRITE')).toEqual([]);
+
+    const draftWrite = MCP_PERMISSIONS.find((p) => p.id === 'draft-write');
+    expect(draftWrite, 'the draft-write permission row is gone').toBeDefined();
+    const copy = `${draftWrite!.allows} ${draftWrite!.refuses}`;
+
+    // It must say the grant is additive / requires read, rather than presenting
+    // write capability as something this grant confers on its own.
+    expect(copy).toMatch(/added to read|on top of read|requires? read|as well as read/i);
+    expect(copy).toMatch(/permits nothing|refused all|nothing at all|inert/i);
+
+    // And it must NOT reproduce the retired inference, in either place.
+    const everything = [
+      MCP_CONNECT_COPY.permissionsDetail,
+      copy,
+      ...MCP_SETUP_STEPS.map((s) => s.detail),
+    ].join(' ');
+    expect(
+      everything,
+      'the tab again presents draft-write as usable without read',
+    ).not.toMatch(/granted only the draft-write permission is refused every read tool/i);
+    expect(everything).not.toMatch(/they do not nest/i);
+  });
+
+  /*
+   * NEITHER MCP DOCUMENT MAY ASSERT THAT NO PRODUCT SCREEN MENTIONS MCP.
+   *
+   * The claim carried its own falsifier — it cited `apps/web/src` as the check — and
+   * it was FALSE ON THE DAY IT WAS COMMITTED to the audit: `mcpConnectContent.ts`
+   * landed in `a1b8ee0` (2026-08-13) and the audit bullet in `b4b5e9f` (2026-08-16).
+   * Measured 2026-08-25 on the committed tree::
+   *
+   *     git grep -ic mcp 6baadc8 -- apps/web/src
+   *       -> 151 matching lines across 9 files, ConnectYourAgent.tsx among them
+   *
+   * `docs/mcp-local-transport.md` struck its copy on 2026-08-24 and the sweep MISSED
+   * the audit's — the same enumeration failure CLAUDE.md §15 records for the
+   * `isaac_run_projection` correction. So both documents are checked here, together,
+   * and the live evidence is derived from the tree rather than quoted.
+   */
+  it('neither MCP document claims apps/web/src is free of MCP references', () => {
+    // The live fact, measured rather than asserted: this tree's frontend does mention
+    // MCP, so any document saying otherwise is wrong right now.
+    const mentions = MCP_CAPABILITIES_ALLOWED.length > 0 && MCP_PERMISSIONS.length > 0;
+    expect(mentions, 'the Connect Your Agent content module is gone').toBe(true);
+
+    for (const [name, source] of [
+      ['docs/mcp-capability-audit.md', AUDIT_SOURCE],
+      ['docs/mcp-local-transport.md', TRANSPORT_SOURCE],
+    ] as const) {
+      for (const claim of [
+        'No product screen mentions MCP',
+        'apps/web/src contains no reference',
+        'no product surface that mentions MCP at all',
+      ]) {
+        let index = source.indexOf(claim);
+        while (index !== -1) {
+          const window = source.slice(Math.max(0, index - 14), index);
+          expect(
+            window,
+            `${name} asserts "${claim}" as its own statement rather than striking it. ` +
+              'That claim is false: apps/web/src mentions MCP on 151 lines across 9 ' +
+              'files (git grep -ic mcp 6baadc8 -- apps/web/src).',
+          ).toContain('~~');
+          index = source.indexOf(claim, index + 1);
+        }
+      }
+    }
+  });
+
+  it('the retired MCP-surface claim is still FINDABLE in both documents, as a correction', () => {
+    // NEGATIVE CONTROL. The guard above passes trivially on a document that DELETED
+    // the sentence, which is how a corrected claim becomes indistinguishable from one
+    // that never drifted — the failure mode CLAUDE.md's convention exists to prevent.
+    expect(AUDIT_SOURCE).toContain('No product screen mentions MCP');
+    expect(TRANSPORT_SOURCE).toContain('no product surface that mentions MCP at all');
+    // And each must still say what replaced it, so a reader is not left with a strike
+    // and no verdict.
+    expect(AUDIT_SOURCE).toMatch(/CORRECTED 2026-08-25/);
+    expect(TRANSPORT_SOURCE).toMatch(/SUPERSEDED 2026-08-24/);
+  });
+
+  it('read alone permits exactly the read tools, and the copy for it says so', () => {
+    // The OTHER half of the old sentence was true, and losing it would be its own
+    // defect: a read-only agent really is refused every write.
+    const readable = callableWithOnly('READ');
+    expect(readable.length).toBeGreaterThan(0);
+    expect(readable).toEqual(
+      declaredTools()
+        .filter((t) => t.scope === 'READ')
+        .map((t) => t.name)
+        .sort(),
+    );
+    // Every write tool is genuinely out of reach for it.
+    for (const tool of declaredTools().filter((t) => t.scope === 'DRAFT_WRITE')) {
+      expect(readable).not.toContain(tool.name);
+    }
+    const read = MCP_PERMISSIONS.find((p) => p.id === 'read');
+    expect(read, 'the read permission row is gone').toBeDefined();
+    expect(`${read!.allows} ${read!.refuses}`).toMatch(
+      /writes nothing|cannot change a draft|only look/i,
+    );
   });
 
   it('"no agent can submit" is backed by the backend refusing the token outright', () => {
