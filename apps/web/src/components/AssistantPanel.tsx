@@ -1,5 +1,5 @@
 import './assistant.css';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MessageSquare,
@@ -20,6 +20,7 @@ import {
 import { LABELS } from '../lib/labels';
 import {
   ASSISTANT_COMPOSER_HELPER,
+  ASSISTANT_NO_MODEL_CLAIM,
   ASSISTANT_UNAVAILABLE,
   MEMORY_UNAVAILABLE_CAVEAT,
   SOURCE_LABELS,
@@ -437,6 +438,13 @@ const NEAR_BOTTOM_PX = 64;
  *                 never a chat message, directly above the composer
  *   FOOT          the sticky dock, in order:
  *                   COMPOSER    directly beneath the transcript, always reachable
+ *                   NOTES       the grounded-scope helper, then the no-model
+ *                               disclosure — both named as the input's
+ *                               `aria-describedby`, so the reader who tabs into
+ *                               the field hears what the reader who looks at it
+ *                               sees. The disclosure is here rather than in the
+ *                               caption because it answers "where do my words
+ *                               go?" at the moment of typing.
  *                   CONTROLS    empty state → Agent Actions; conversation →
  *                               Suggested Questions + Agent Actions collapsed
  *                               into ONE compact disclosure (never between the
@@ -467,6 +475,30 @@ export function AssistantPanel({
   stageField,
   graphCapability,
 }: AssistantPanelProps) {
+  /*
+   * THE COMPOSER'S TWO STANDING NOTES ARE NOW REACHABLE BY A SCREEN READER, and
+   * before this they were not — neither of them.
+   *
+   * `ASSISTANT_COMPOSER_HELPER` names the grounded scopes and
+   * `ASSISTANT_NO_MODEL_CLAIM` says where a typed question does and does not go.
+   * Both render directly beneath the input and both were plain `<p>`s with no
+   * programmatic relationship to it, so a reader who tabs to the field hears only
+   * its `aria-label` ("Ask the assistant a question") and neither the scope nor
+   * the disclosure. Naming them as the input's description is what puts the same
+   * two facts in front of both readers at the same moment.
+   *
+   * `useId` rather than a module constant. The panel mounts on five screens and
+   * `AssistantDrawer` can mount a second instance beside a page one; the existing
+   * module-level ids (`PROPOSED_EYEBROW_ID`, `CAPABILITIES_PANEL_ID`) already
+   * carry that latent duplicate-id hazard, and a duplicated `aria-describedby`
+   * TARGET is worse than a duplicated label — the description a reader hears
+   * becomes whichever node the document happens to reach first. Per-instance ids
+   * cost nothing and cannot collide.
+   */
+  const ids = useId();
+  const composerHelperId = `${ids}-composer-helper`;
+  const noModelClaimId = `${ids}-no-model`;
+
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [messages, setMessages] = useState<Msg[]>(() => loadSession(experimentId).messages);
   const [showJump, setShowJump] = useState(false);
@@ -1624,6 +1656,7 @@ export function AssistantPanel({
             type="text"
             className="assistant-composer-input"
             aria-label="Ask the assistant a question"
+            aria-describedby={`${composerHelperId} ${noModelClaimId}`}
             placeholder="Ask a question"
             value={composerText}
             onChange={(e) => setComposerText(e.target.value)}
@@ -1637,7 +1670,32 @@ export function AssistantPanel({
             <CornerDownRight size={15} strokeWidth={2} aria-hidden="true" />
           </button>
         </form>
-        <p className="assistant-composer-helper">{ASSISTANT_COMPOSER_HELPER}</p>
+        <p className="assistant-composer-helper" id={composerHelperId}>
+          {ASSISTANT_COMPOSER_HELPER}
+        </p>
+
+        {/* WHERE A TYPED QUESTION GOES, STATED WHERE IT IS TYPED.
+            `docs/ai-integration-decision-packet.md` §3 asserts this panel already
+            says "There is no language model"; it never did — the claim lived only
+            in Settings → AI & Automation, behind a tab (`lib/assistant.ts`'s
+            `ASSISTANT_NO_MODEL_CLAIM` records the measurement). §3 uses that
+            supposed disclosure as its reason for surfacing no seam status, so the
+            mitigation the decision rests on did not exist.
+
+            IT REPORTS NO SEAM, and that is the authorization boundary rather than
+            a style choice. It names no provider, no missing item and no decision;
+            it never reads `GET /api/providers/capabilities`; and it is true with
+            no provider in existence. §9's 2026-08-12 amendment is the test — "if a
+            screen would have to say a provider exists in order for the work to be
+            visible, that screen is out of scope" — and nothing here needs one to.
+
+            NOT ITALIC, unlike `assistant-caption` directly below it. That caption
+            is advisory ("the Assistant is advisory ... it never validates"); this
+            is a fact about the build. Rendering a fact in the advisory register
+            invites it to be read as a disposition, and this one is checkable. */}
+        <p className="assistant-no-model" id={noModelClaimId}>
+          {ASSISTANT_NO_MODEL_CLAIM}
+        </p>
 
         {/* P36X — "What Can I Ask?": the real, per-surface capability catalog.
             The composer's helper line above names the grounded scopes in one

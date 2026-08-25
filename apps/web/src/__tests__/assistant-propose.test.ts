@@ -79,3 +79,77 @@ describe('P29.6 proposeForField — guarded staging entry', () => {
     expect(proposeForField(CTX, { field: '', value: 'v', source: 'user' } as never)).toBeNull();
   });
 });
+
+/*
+ * A MODEL IS NOT A SOURCE THIS FLOW ADMITS, and nothing said so.
+ *
+ * `ProposeSource` is `'user' | 'candidate' | 'memory' | 'graph'`, and the suite
+ * above pins the two refusals it names. A MODEL is not in the union at all, so
+ * TypeScript is the first line of defence and the strongest one — the call
+ * `{ source: 'model' }` does not compile, which is why every assertion here needs
+ * an `as never` to be written down. That is worth stating rather than assuming:
+ * ADDING `'model'` to the union would be the change to argue about, not a runtime
+ * branch to add.
+ *
+ * WHY THE RUNTIME REFUSAL IS PINNED TOO. The union is erased at runtime, and this
+ * function is reachable from a `source` that arrived over the wire or out of a
+ * session — `AssistantPanel` reads a persisted conversation. `proposeForField`'s
+ * guard is `if (source !== 'user' && source !== 'candidate') return null`, an
+ * allowlist, so it already refuses; nothing measured that it does. A future edit
+ * to a denylist (`source === 'memory' || source === 'graph'`) would pass every
+ * test in this file and admit a model, which is exactly the shape of the bug the
+ * allowlist exists to prevent.
+ *
+ * WHY IT MUST REFUSE, and it is not squeamishness about models. A staged value
+ * becomes a recorded value through `confirmProposal`, and every written value
+ * carries evidence or a `user_confirmation` (`CLAUDE.md` §5). There is no ISAAC
+ * source type for a model's output: `src/isaac_records/models.py`'s `SOURCE_TYPES`
+ * is closed at seven, and adding an eighth is a truth-core change under §13.
+ * `providers/guards.py`'s docstring already worked this through for the transcript
+ * seam and reached the same place — a transcript candidate is *pre-evidence*
+ * because it QUOTES what a scientist said, and the scientist's confirmation of
+ * their own words is what writes the evidence. A generated value quotes nothing,
+ * so the same confirmation would be a rubber stamp on a guess.
+ * `docs/ai-integration-decision-packet.md` §6.3: "a model-proposed value is never
+ * `verified` on the model's word."
+ */
+describe('a model output cannot enter the proposal flow', () => {
+  /*
+   * EVERY CASE BELOW USES `sample.material`, AND THE CHOICE IS THE TEST.
+   *
+   * The first version of this block asked about `series`, which has no evidence
+   * entry — so `proposeForField` returned null down the *candidate* path
+   * (`if (!evidence) return null`) whether the source guard fired or not. Measured:
+   * with the guard mutated from its allowlist to a denylist
+   * (`source === 'memory' || source === 'graph'`), 13 of those 14 assertions still
+   * passed. They were testing a missing fixture, not a boundary.
+   *
+   * `sample.material` is classified `supported`, which is the one state a
+   * `candidate` source DOES stage. So a refusal here can only come from the source
+   * guard, and the same mutation fails every case.
+   */
+  it('the control: a permitted source DOES stage this field, so a refusal below means something', () => {
+    expect(proposeForField(CTX, { field: 'sample.material', source: 'candidate' })).not.toBeNull();
+  });
+
+  it.each(['model', 'assistant', 'llm', 'provider', 'mcp', 'transcription-seam', ''])(
+    'the source %o stages nothing, on a field a permitted source would stage',
+    (source) => {
+      expect(
+        proposeForField(CTX, { field: 'sample.material', value: '300 K', source } as never),
+      ).toBeNull();
+    },
+  );
+
+  it('the two named refusals are refused on that field too, not only where evidence is absent', () => {
+    // `memory` and `graph` are pinned above against `series`, which has no
+    // evidence — so those assertions also survived the denylist mutation. Re-put
+    // against a stageable field, they measure the guard.
+    expect(
+      proposeForField(CTX, { field: 'sample.material', value: 'x', source: 'memory' } as never),
+    ).toBeNull();
+    expect(
+      proposeForField(CTX, { field: 'sample.material', value: 'x', source: 'graph' } as never),
+    ).toBeNull();
+  });
+});

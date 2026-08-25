@@ -1350,6 +1350,32 @@ button.assistant-source-chip-nav:focus-visible {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* The no-model disclosure, directly beneath the grounded-scope helper.
+ *
+ * It reads as a SECOND note in the same block rather than as a new region: a
+ * 6px gap, no divider, and the same 11px/1.5 as the helper above it. The two
+ * belong together — one says what the assistant can answer, the other says
+ * where the question goes — and separating them with a rule would have made
+ * three visually independent pieces of fine print stacked above the caption,
+ * which is how a standing claim stops being read.
+ *
+ * NOT `font-style: italic`. `.assistant-caption` below owns the italic advisory
+ * register; this is a checkable fact about the build, and the two registers must
+ * stay distinguishable.
+ *
+ * COLOUR IS `--text-secondary`, the same token `.assistant-composer-helper`
+ * carries and for the same measured reason: 6.86:1 on the --assist-tint rail
+ * (P33 S2 review). The tertiary token would have been the closer match to this
+ * text's visual weight and does not clear AA at 11px here, so weight is carried
+ * by size and position instead of by contrast. */
+.assistant-no-model {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .assistant-composer-notice {
   margin: 8px 0 0;
   padding: 8px 10px;

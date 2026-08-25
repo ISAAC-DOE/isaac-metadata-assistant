@@ -396,9 +396,29 @@ module's own docstring prescribes.
 **NO PRODUCT SCREEN CONSUMES IT, and that is a decision rather than an unfinished edge.**
 §9's rule is *"build nothing that implies any of it exists"*, and a panel reporting an
 assistant seam — even one reporting it as unconfigured — would put a model-backed assistant
-in front of a scientist as a thing that is nearly here. The Assistant panel goes on saying
-*"There is no language model"*, which is true of the shipped deterministic Q&A and stays
-true. `GET /api/providers/capabilities` reports the seam's status for a client that asks;
+in front of a scientist as a thing that is nearly here.
+
+~~The Assistant panel goes on saying *"There is no language model"*, which is true of the
+shipped deterministic Q&A and stays true.~~ **THAT WAS FALSE WHEN IT WAS WRITTEN, and the
+decision above rested on it.** Measured at `b7008b8`, before the change described next:
+`rg -in 'language model' apps/web/src/components/AssistantPanel.tsx` → **exit 1**. The claim
+lived only in `lib/settingsContent.ts:580,587` — Settings → AI & Automation, behind a tab.
+**The screen a scientist actually types into said nothing about whether a model is involved,
+or where their words go.** So the mitigation this decision cites as the reason no surface is
+needed did not exist on the surface it names.
+
+It exists now. `ASSISTANT_NO_MODEL_CLAIM` — *"There is no language model in this build.
+Nothing you type here is sent to a model provider."* — renders in the panel's dock beneath
+the composer on all five mounts, as an `aria-describedby` target of the composer input
+(neither it nor the pre-existing composer helper had any programmatic relation to that
+input). **It announces no seam, names no provider and no decision, never reads
+`/providers/capabilities`, and is true with no provider in existence** — so it is the
+mitigation §3 assumed, not a step toward the surface §3 forbids. The sentence is struck
+rather than simply corrected because *"the decision was sound and its stated mitigation was
+absent"* is the thing worth remembering: this is the same shape as the transcript panel's
+disclosure that was conditional on the very thing it disclosed.
+
+`GET /api/providers/capabilities` reports the seam's status for a client that asks;
 `TranscriptCapturePanel` is the precedent for consuming that honestly if a surface is ever
 authorized.
 
