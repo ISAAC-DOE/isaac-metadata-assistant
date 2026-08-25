@@ -1026,7 +1026,22 @@ jobs:
           # of the slice adds one `@real_engine` function and no other. The guard
           # worked exactly as its note above describes, which is why the number is
           # being changed here deliberately rather than discovered later.
-          expected_scenarios=30
+          #
+          # 30 -> 32: the PGHOSTADDR slice adds exactly two scenarios. An
+          # independent security review measured that this suite's own
+          # "this is a local throwaway engine" gate reads the `PGHOST` STRING
+          # alone, while `db_write.connect_psycopg2` never passed or cleared
+          # `hostaddr` — so `PGHOST=localhost` + `PGHOSTADDR=<a hosted address>`
+          # + `PGDATABASE=metadata_assistant` passed every gate, including
+          # `write_transaction`'s own `current_database()` re-check, and this
+          # WRITING suite would have written wherever `hostaddr` pointed. The two
+          # new scenarios are the probe-level refusal and the connection-keyword
+          # assertion. Counted by MEASUREMENT: this step's own failure output on
+          # `905c706` said 32 where 30 was expected, and the diff adds exactly two
+          # `@real_engine` functions. The guard worked exactly as its note above
+          # describes, which is why the number is changed here deliberately rather
+          # than discovered later.
+          expected_scenarios=32
           passed=$(grep -Eo '[0-9]+ passed' /tmp/parity.log | grep -Eo '^[0-9]+' || echo 0)
           [ "$passed" = "$expected_scenarios" ] || {
             echo "::error::$passed parity test(s) passed; exactly $expected_scenarios are expected."

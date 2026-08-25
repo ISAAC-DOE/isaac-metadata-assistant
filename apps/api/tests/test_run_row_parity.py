@@ -406,18 +406,40 @@ def test_PGHOSTADDR_is_refused_because_the_loopback_check_cannot_see_it(monkeypa
 
 
 def test_connect_psycopg2_pins_hostaddr_so_libpq_cannot_fill_it_from_the_environment():
-    """THE REAL FIX, ASSERTED AT THE CALL rather than inferred from the comment beside it.
+    """THE REAL FIX, ASSERTED WHERE IT ACTUALLY HAPPENS — and the first version of this
+    test asserted it one layer too early and so passed over an INERT fix.
 
-    psycopg2 is not importable in this interpreter (`test_db_provider` has a test that
-    depends on exactly that), and no agent may connect to the SLAC database — so what is
-    checkable here is the KEYWORD the application binds, not the socket libpq opens. A
-    fake driver is injected into `sys.modules` for the duration of the call, and the
-    assertion is that `hostaddr` is passed and is `None`.
+    THE FAILURE THIS TEST NOW EXISTS TO PREVENT. Version 1 injected a fake `psycopg2`
+    whose `connect` merely recorded its keyword arguments, and asserted
+    ``seen["hostaddr"] is None``. That passed. It also could not fail, because the real
+    `psycopg2.connect` DOES NOT HAND ITS KEYWORDS TO libpq — it builds a DSN with
+    `psycopg2.extensions.make_dsn`, which contains, verbatim::
 
-    That is a narrower claim than "the connection goes to PGHOST", and it is stated
-    narrowly on purpose: it establishes that libpq is told to ignore `PGHOSTADDR`, and it
-    rests on libpq's documented precedence for the rest. Nothing here was executed against
-    a server.
+        # Drop the None arguments
+        kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
+
+    So `hostaddr=None` was deleted before libpq saw it, the DSN went out with no
+    `hostaddr`, and libpq read `PGHOSTADDR` from the environment exactly as before. The
+    application shipped a guard that did nothing and a comment asserting that it worked,
+    and a green test between them.
+
+    TWO ASSERTIONS AT TWO LAYERS, deliberately:
+
+    * the CALL still binds the keyword — checkable in any interpreter, with the fake
+      driver, and it is what catches a "fix" that renames or drops the parameter;
+    * the DSN still CARRIES it — checked against the REAL `make_dsn` when psycopg2 is
+      importable, and skipped when it is not. This is the layer version 1 could not
+      see, and it is the one the guarantee actually rests on.
+
+    Measured in an interpreter with psycopg2 present::
+
+        make_dsn(host="localhost", dbname="d", hostaddr=None) -> 'host=localhost dbname=d'
+        make_dsn(host="localhost", dbname="d", hostaddr="")   -> "... hostaddr=''"
+
+    Still narrower than "the connection goes to PGHOST": no socket is opened here, and no
+    agent may connect to the SLAC database. What is established is that libpq is TOLD an
+    explicit `hostaddr`, which is what stops it consulting `PGHOSTADDR`; the rest rests on
+    libpq's documented precedence.
     """
     import sys
     import types
@@ -444,7 +466,20 @@ def test_connect_psycopg2_pins_hostaddr_so_libpq_cannot_fill_it_from_the_environ
             sys.modules["psycopg2"] = real
 
     assert "hostaddr" in seen, sorted(seen)
-    assert seen["hostaddr"] is None, seen["hostaddr"]
+    # EMPTY STRING, NOT `None` — `None` is dropped by `make_dsn` and never reaches libpq.
+    assert seen["hostaddr"] == "", repr(seen["hostaddr"])
+
+    # LAYER 2: the keyword must SURVIVE INTO THE DSN. This is what version 1 missed.
+    make_dsn = pytest.importorskip(
+        "psycopg2.extensions",
+        reason="psycopg2 is not installed in this interpreter; the CI PostgreSQL job "
+        "has it and runs this assertion there.",
+    ).make_dsn
+    dsn = make_dsn(**{k: v for k, v in seen.items() if k != "connect_timeout"})
+    assert "hostaddr" in dsn, dsn
+    # And the control that proves the assertion above can fail: the value the fix
+    # replaced is dropped by the same function.
+    assert "hostaddr" not in make_dsn(host="localhost", dbname="d", hostaddr=None)
     # THE ENVIRONMENT'S VALUE IS NOT FORWARDED UNDER ANY OTHER NAME EITHER, which is the
     # failure mode a "fix" that renamed the parameter would have.
     assert "10.42.7.9" not in {str(v) for v in seen.values()}, seen

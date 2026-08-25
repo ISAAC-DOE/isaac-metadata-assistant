@@ -486,18 +486,52 @@ def connect_psycopg2(env: Mapping[str, str]) -> Any:
             # `host` is once again both the name that is verified and the target that
             # is reached.
             #
-            # THIS WAS CODE-VERIFIED, NOT EXECUTED. psycopg2 is not installed in this
-            # interpreter (see `test_db_provider`'s absent-driver test), and no agent
-            # may connect to the SLAC database, so the claim above rests on libpq's
-            # documented parameter precedence and on reading this call — not on a
-            # connection anybody opened. The test beside it asserts the KEYWORD is
-            # passed and is `None`, which is the part that is checkable here.
+            # ── THE VALUE IS `""` AND IT WAS `None` FOR ONE COMMIT, WHICH DID
+            # ── NOTHING AT ALL. ──────────────────────────────────────────────────────
+            # `psycopg2.connect(**kwargs)` does not hand its keywords to libpq; it
+            # builds a DSN string with `psycopg2.extensions.make_dsn`, and that
+            # function contains, verbatim:
+            #
+            #     # Drop the None arguments
+            #     kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
+            #
+            # So `hostaddr=None` was DELETED before libpq ever saw it, the connection
+            # string went out with no `hostaddr` at all, and libpq read `PGHOSTADDR`
+            # from the environment exactly as before. The guard was inert and the
+            # comment beside it asserted that it worked — the same class of defect
+            # (a correct-sounding fix with a false reason) that the review which
+            # prompted it was looking for.
+            #
+            # MEASURED, in this interpreter, against the real psycopg2:
+            #
+            #     make_dsn(host="localhost", dbname="d", hostaddr=None)
+            #       -> 'host=localhost dbname=d'                 <- keyword gone
+            #     make_dsn(host="localhost", dbname="d", hostaddr="")
+            #       -> "host=localhost dbname=d hostaddr=''"     <- survives
+            #
+            # An EXPLICIT EMPTY `hostaddr` is what libpq needs: a parameter given in
+            # the connection string is never filled from its `PG*` environment
+            # variable, and an empty `hostaddr` means "no address supplied — resolve
+            # `host` by name", which is the behaviour this call always intended.
+            #
+            # THE CONNECTION ITSELF IS STILL NOT EXECUTED HERE. No agent may connect
+            # to the SLAC database, so what is proven above is that the keyword
+            # REACHES THE DSN — the step that was actually broken — and not that a
+            # session opened. `test_run_row_parity`'s connection-keyword test asserts
+            # the DSN, not just the call.
+            #
+            # REFUSING A SET `PGHOSTADDR` OUTRIGHT WAS CONSIDERED AND REJECTED HERE:
+            # this function runs in the hosted pod against an environment this
+            # repository does not own, and a hard refusal would take the application
+            # down if Dean's manifest ever legitimately set it. Neutralising it is
+            # the same guarantee without that failure mode. `_probe_engine` DOES
+            # refuse it, because that is a test suite and stopping is free there.
             #
             # IT IS DEFENCE IN DEPTH AND THE OPT-IN IS STILL THE REAL GATE.
             # `ISAAC_RUN_REAL_ENGINE_PARITY` is what stops that suite connecting at
             # all; this closes a hole in a check that was already the second line, and
             # it should not be described as making the environment safe.
-            hostaddr=None,
+            hostaddr="",
             port=env.get("PGPORT", "5432"),
             dbname=EXPECTED_DATABASE,  # never the env value: the gate already pinned it
             user=env["PGUSER"],
