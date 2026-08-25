@@ -493,6 +493,16 @@ def test_a_second_session_cannot_reach_the_first_sessions_record(app):
     `test_two_sessions_are_independently_mutable_and_mutually_invisible` establishes
     independence at the store level. This adds the HTTP write path, because a route
     that resolved the scope for reads but not for a mutation would pass that one.
+
+    **THIS TEST USED TO PASS VACUOUSLY, and that was found by making `/answers` refuse a
+    body it cannot act on (2026-08-25).** It sent `next(iter(ws.load_demo_answers()))`,
+    and that map is APPLY-SHAPE shaped rather than blocker-keyed — its first key is
+    `_synthetic`, a boolean flag. So the "write" the isolation was being demonstrated
+    over was `{"_synthetic": true}`, which the mapper dropped: the request wrote nothing
+    in EITHER session, and `after == before` held for a reason that had nothing to do
+    with scope resolution. It now sends the demo `series`, which really is answered on
+    this record, so the second session's write really happens and the first session's
+    copy really has to be shown untouched.
     """
     first = tutorial_client(app)
     second = tutorial_client(app)
@@ -510,13 +520,19 @@ def test_a_second_session_cannot_reach_the_first_sessions_record(app):
         )
     )
     answers = ws.load_demo_answers()
-    field = next(iter(answers))
+    field = "series"
+    assert field in answers, sorted(answers)
     response = second.post(
         f"/api/experiments/{target}/answers",
         json={"answers": {field: answers[field]}, "confirmed_by_user": True},
         headers={"If-Match": version},
     )
     assert response.status_code == 200, response.text
+    # THE WRITE REALLY LANDED in the session that made it — without this the assertion
+    # below is satisfied by nothing having happened anywhere, which is how this test
+    # passed for years while demonstrating nothing.
+    assert response.json()["invalidation"]["changed"] is True, response.json()
+
     after = json.loads(
         (ws.scope_root(first.tutorial_session_id) / target / "experiment.json").read_text(
             encoding="utf-8"

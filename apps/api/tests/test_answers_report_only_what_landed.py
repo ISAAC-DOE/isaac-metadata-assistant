@@ -117,11 +117,22 @@ def _seeded_run(client):
 
 
 def test_a_declined_answer_on_a_legacy_run_names_no_updated_field(client):
-    """THE REGRESSION TEST. 200, the revision moves, and NOTHING is named."""
+    """THE REGRESSION TEST. 200, the revision moves, and NOTHING is named.
+
+    THE VEHICLE CHANGED ON 2026-08-25 AND THE SUBJECT DID NOT. This sent
+    ``{"series": "not-a-list"}``, which is now ``422 invalid_field_value`` — asserted at
+    the bottom of this test, so the coverage moved rather than vanished. The property
+    under test was never about the wrong TYPE; it is that a key the core RECEIVED and
+    did not write must not be named as updated on a document that moved for another
+    reason. ``descriptor_label`` is the honest remaining vehicle for exactly that: both
+    core writers build the whole descriptor block and gate it on
+    ``descriptor is not None``, so a bare label is received, stored NOWHERE, and
+    deliberately outside the shape screen (see ``_SHAPE_SCREENED_ANSWER_KEYS``).
+    """
     exp_id, run_id = _legacy_run(client)
     response = client.post(
         f"/api/experiments/{exp_id}/runs/{run_id}/answers",
-        json={"answers": {"series": "not-a-list"}, "confirmed_by_user": True},
+        json={"answers": {"descriptor_label": "relabel"}, "confirmed_by_user": True},
         headers={"If-Match": _run_etag(client, exp_id, run_id)},
     )
     assert response.status_code == 200, response.text
@@ -135,25 +146,40 @@ def test_a_declined_answer_on_a_legacy_run_names_no_updated_field(client):
     # questions were materialised), so `changed` stays true.
     assert invalidation["changed"] is True, invalidation
 
-    # And the write really was declined: nothing stored, question still open.
+    # And the write really was declined: nothing stored, questions still open.
     stored = ws.load_experiment(exp_id).get_run(run_id).draft
-    assert stored.get("series") is None, stored.get("series")
-    assert "series" in {e["kind"] for e in stored["pending"]}, stored["pending"]
-    assert "series" in {q["id"] for q in response.json()["pending"]}
+    assert stored.get("descriptors_outputs") in (None, []), stored
+    assert "descriptor" in {e["kind"] for e in stored["pending"]}, stored["pending"]
+
+    # WHERE THE OLD VEHICLE WENT. A wrong-TYPED value is now refused by name before any
+    # write, so it can no longer reach the reporting code this test guards at all.
+    refused = client.post(
+        f"/api/experiments/{exp_id}/runs/{run_id}/answers",
+        json={"answers": {"series": "not-a-list"}, "confirmed_by_user": True},
+        headers={"If-Match": _run_etag(client, exp_id, run_id)},
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"] == "invalid_field_value", refused.json()
 
 
 def test_the_same_request_on_a_seeded_run_is_unchanged(client):
-    """The control the defect report itself used: the seeded path was already right."""
+    """The control the defect report itself used: the seeded path was already right.
+
+    Same re-vehicling as the test above, for the same reason.
+    """
     exp_id, run_id = _seeded_run(client)
     response = client.post(
         f"/api/experiments/{exp_id}/runs/{run_id}/answers",
-        json={"answers": {"series": "not-a-list"}, "confirmed_by_user": True},
+        json={"answers": {"descriptor_label": "relabel"}, "confirmed_by_user": True},
         headers={"If-Match": _run_etag(client, exp_id, run_id)},
     )
     assert response.status_code == 200, response.text
     invalidation = response.json()["invalidation"]
     assert invalidation["changed"] is False, invalidation
     assert invalidation["changed_fields"] == [], invalidation
+    # AND THE NO-OP CLAIMS NOTHING. A bare label is written nowhere, so `changed=False`
+    # proves nothing about a stored value and the reason must not say it does.
+    assert "identical" not in invalidation["reason"], invalidation
 
 
 def test_a_good_answer_on_a_legacy_run_is_still_named(client):
@@ -220,10 +246,14 @@ def test_a_mixed_request_on_a_record_names_only_the_field_that_landed(client):
     as the run defect, one level up.
     """
     exp_id = client.post("/api/experiments", json={"title": "Mixed"}).json()["id"]
+    # ~~`{"series": SERIES, "descriptor": "not-a-mapping"}`~~ — the wrong-typed half is
+    # now `422 invalid_field_value` and the whole body is refused, which is asserted at
+    # the end of this test. `descriptor_label` is the remaining key the core receives and
+    # writes nowhere, so it exercises the same reporting rule.
     response = client.post(
         f"/api/experiments/{exp_id}/answers",
         json={
-            "answers": {"series": SERIES, "descriptor": "not-a-mapping"},
+            "answers": {"series": SERIES, "descriptor_label": "relabel"},
             "confirmed_by_user": True,
         },
         headers={"If-Match": f'"{_version(client, exp_id)}"'},
@@ -237,6 +267,21 @@ def test_a_mixed_request_on_a_record_names_only_the_field_that_landed(client):
     assert stored.get("descriptors_outputs") in (None, []), stored.get(
         "descriptors_outputs"
     )
+
+    # WHERE THE OLD VEHICLE WENT: one unstorable key refuses the WHOLE body, so a
+    # partially-applied write is not a state any response has to describe.
+    other = client.post("/api/experiments", json={"title": "Mixed 2"}).json()["id"]
+    refused = client.post(
+        f"/api/experiments/{other}/answers",
+        json={
+            "answers": {"series": SERIES, "descriptor": "not-a-mapping"},
+            "confirmed_by_user": True,
+        },
+        headers={"If-Match": f'"{_version(client, other)}"'},
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["keys"] == ["descriptor"], refused.json()
+    assert ws.load_experiment(other).draft.get("series") is None, "nothing may land"
 
 
 def test_a_record_correction_that_lands_is_still_named(client):

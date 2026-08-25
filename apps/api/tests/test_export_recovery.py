@@ -1358,15 +1358,21 @@ def test_the_self_heal_reports_changed_false_not_a_fabricated_field_update(clien
     record_path, sidecar_path, _ = _paths(target)
     assert record_path.exists() and sidecar_path.exists()
     assert inv["artifact"]["state"] == "current"
-    # KNOWN, documented, NOT fixed here: `build_invalidation`'s changed=False `reason`
+    # ~~KNOWN, documented, NOT fixed here: `build_invalidation`'s changed=False `reason`
     # is worded for /answers ("the submitted value was identical"), which is not
     # literally what happened on an export self-heal. That string is SHARED with
-    # /answers and /edit, whose tests pin it, so rewording it is a separate slice. The
-    # machine-readable fields above are the contract; this asserts the current wording
-    # rather than pretending it is ideal.
-    assert inv["reason"] == (
-        "No change — the submitted value was identical; nothing was invalidated."
-    )
+    # /answers and /edit, whose tests pin it, so rewording it is a separate slice.~~
+    #
+    # FIXED 2026-08-25, and the old note is struck rather than deleted because it named
+    # the obstacle correctly and the fix is exactly the removal of that obstacle: the
+    # sentence is no longer SHARED unconditionally. `build_invalidation` now takes an
+    # `identical` argument — the caller's answer to "did you actually compare the
+    # values?" — and its DEFAULT is the claim-free sentence. Export passes nothing,
+    # because nothing was submitted to it, so "the submitted value" names nothing here.
+    # The answering and correcting routes pass what they established, so they keep the
+    # confident sentence exactly where it is true.
+    assert inv["reason"] == dependencies.NO_OP_UNKNOWN_REASON
+    assert "identical" not in inv["reason"], inv["reason"]
 
 
 def test_a_real_export_still_reports_the_record_id_mutation(client):

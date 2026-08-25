@@ -930,6 +930,146 @@ def evidence_trail_from_draft(draft: dict) -> list[dict]:
     return entries
 
 
+def confirmed_block_trail_from_draft(draft: dict) -> list[dict]:
+    """The trail entries for a draft's CONFIRMED BLOCKS — the ones
+    :func:`evidence_trail_from_draft` does not walk.
+
+    THE DEFECT THIS CLOSES, measured over HTTP and over MCP on records built through
+    this application's own Create Experiment path::
+
+        a record with no runs, `series` answered at the record level  ->  0 entries  []
+        a fully completed record, official.ok true, ready_to_export   ->  0 entries  []
+        the five seeded worked examples                               ->  28/31/31/31/36
+
+    ``evidence_trail_from_draft`` walks ``fields``, ``implicit`` and ``assets``, and
+    ``complete.apply_answers`` writes the confirmations for ``series``, ``qc`` and the
+    descriptor block into ``block_evidence`` and ``descriptors_outputs`` instead. The
+    seeds only looked right because their ``fields`` map comes from a fixture sheet; a
+    created record has an empty ``fields`` map, so its trail was ALWAYS empty — beside
+    ``ready_to_export``, and beside a tool description promising "each official path, its
+    value, the kind of support behind it, and the source file and locator cited".
+
+    IT IS A SEPARATE FUNCTION, NOT AN EXTENSION OF ``evidence_trail_from_draft``, and
+    that is the load-bearing decision here rather than a matter of taste. That walker has
+    eight consumers and two of them would be made WRONG by widening it:
+
+    * ``provenance._DESCRIBED_DRAFT_KEYS`` is the frozen set ``{fields, implicit,
+      assets}``, pinned by a test against that walker's own source, and it exists so the
+      module can OWN UP TO the blocks it does not describe. Widening the walker without
+      widening that set makes the disclosure false; widening both makes provenance claim
+      to describe blocks it has no per-address model for.
+    * ``conflict_resolution`` reads the trail to find *"two distinct non-null answers
+      recorded against one address"*. ``block_evidence["qc:status"]`` is APPEND-ONLY —
+      ``apply_answers`` appends a confirmation on every accepted verdict — so folding it
+      in would manufacture a conflict finding out of one scientist answering one question
+      twice, which is the exact defect that module was built to remove.
+
+    So this is composed at the ONE surface whose contract is the trail a person or an
+    agent reads (``GET /experiments/{id}/evidence``), and the shared walker keeps its
+    existing meaning everywhere else.
+
+    ``value`` IS ``None`` ON EVERY ENTRY, AND THAT IS PARITY RATHER THAN LAZINESS. These
+    same keys are written verbatim into the export sidecar (``export.build_sidecar``
+    copies ``block_evidence`` through and keys descriptors as ``descriptors:<name>``), and
+    ``evidence_trail_from_sidecar`` resolves a value only for a dotted official path, an
+    ``assets:`` key and an ``implicit:`` key — every other namespace gets ``None``. Had
+    this resolved values, the same record would have read differently before and after
+    export on the one endpoint whose whole promise is that the two are the same trail from
+    the same source. A value that appears for a draft and vanishes on export is a worse
+    answer than a value that is honestly absent in both.
+
+    Per-item isolation is ``_trail_entry``/``_unreadable_entry``'s, exactly as in the
+    sibling walker: one malformed block becomes ONE entry marked unavailable, never a
+    lost trail.
+    """
+    entries: list[dict] = []
+    for index, out in enumerate(_bundle_list(draft, "descriptors_outputs", "descriptor outputs")):
+        if not isinstance(out, dict):
+            entries.append(
+                _unreadable_entry(
+                    f"descriptors:#{index}",
+                    f"the stored descriptor output at position {index} is {_kind(out)}, "
+                    f"not a descriptor block; it has no recorded name to cite",
+                )
+            )
+            continue
+        try:
+            descriptors = out.get("descriptors") or []
+            if not isinstance(descriptors, list):
+                raise TypeError(f"descriptors is {_kind(descriptors)}, not a list")
+        except _ITEM_SHAPE_ERRORS as exc:
+            entries.append(
+                _unreadable_entry(
+                    f"descriptors:#{index}",
+                    f"this descriptor block could not be read ({type(exc).__name__})",
+                )
+            )
+            continue
+        for position, descriptor in enumerate(descriptors):
+            if not isinstance(descriptor, dict):
+                entries.append(
+                    _unreadable_entry(
+                        f"descriptors:#{index}.{position}",
+                        f"the stored descriptor at position {position} is "
+                        f"{_kind(descriptor)}, not a descriptor",
+                    )
+                )
+                continue
+            # `descriptors:<name>` — `export.build_sidecar`'s key, including its `'?'`
+            # fallback, so the pre-export and post-export trails name the same thing.
+            path = f"descriptors:{descriptor.get('name', '?')}"
+            payload = descriptor.get("evidence")
+            if not payload:
+                # NO ENTRY FOR AN UNEVIDENCED DESCRIPTOR, matching `build_sidecar`'s own
+                # `if d.get("evidence")` gate. An entry with empty support would read as
+                # "this value is in the trail", which is the opposite of the truth.
+                continue
+            try:
+                entries.append(
+                    _trail_entry(
+                        path, None, _status_from_evidence(_readable_evidence(payload)[0]), payload
+                    )
+                )
+            except _ITEM_SHAPE_ERRORS as exc:
+                entries.append(
+                    _unreadable_entry(
+                        path,
+                        f"this descriptor's stored evidence could not be read "
+                        f"({type(exc).__name__})",
+                    )
+                )
+    block_evidence = draft.get("block_evidence")
+    if block_evidence is None:
+        return entries
+    if not isinstance(block_evidence, dict):
+        # A BUNDLE-LEVEL failure, the same answer `_bundle_list` gives for a container
+        # that is not a container: there is no position to key N entries by.
+        entries.append(
+            _unreadable_entry(
+                "block_evidence",
+                f"draft['block_evidence'] is {_kind(block_evidence)}, not a map of "
+                f"block keys to evidence; no block-level confirmation can be read",
+            )
+        )
+        return entries
+    for key, payload in block_evidence.items():
+        path = str(key)
+        try:
+            entries.append(
+                _trail_entry(
+                    path, None, _status_from_evidence(_readable_evidence(payload)[0]), payload
+                )
+            )
+        except _ITEM_SHAPE_ERRORS as exc:
+            entries.append(
+                _unreadable_entry(
+                    path,
+                    f"this block's stored evidence could not be read ({type(exc).__name__})",
+                )
+            )
+    return entries
+
+
 def evidence_trail_from_sidecar(sidecar: dict, record: dict) -> list[dict]:
     """Evidence trail for an exported experiment: read the real sidecar faithfully.
 

@@ -1325,6 +1325,40 @@ function LoadedCompletion({
                 Refresh
               </button>
             </div>
+          ) : isUnstorableFieldValue(submitError) ? (
+            /*
+             * A VALUE THE RECORD CANNOT STORE, ON THE ANSWERING PATH. The mirror of the
+             * `editError` branch far above, and it exists for the same reason and NOT
+             * with the same words.
+             *
+             * WHY IT EXISTS. Until 2026-08-25 `POST /answers` absorbed a wrong-shaped
+             * `series`, `qc` or `descriptor` into a `200` whose `invalidation.reason`
+             * read "the submitted value was identical", and this screen showed the
+             * `answerNotApplied` note ("That answer was not applied … nothing was
+             * invented in its place"). The backend now refuses with `422
+             * invalid_field_value`, so that note is unreachable for these values and
+             * without this branch the reader got the generic sentence — which ends
+             * "try again", advice that is FALSE here because resending the same value
+             * refuses again every time.
+             *
+             * WHY NOT THE EDIT BRANCH'S COPY. That one says "this field still holds the
+             * value it held before", which is true of a correction and false of an
+             * answer: the field may never have held a value at all. The backend's own
+             * message draws exactly that distinction, and this copy follows it.
+             *
+             * Every claim is one the 422 supports: `Nothing was written` is what it
+             * asserts, and the question being open is what the reader is looking at. No
+             * cause is named — the response names none, and inventing one is the defect
+             * this whole path exists to avoid.
+             */
+            <div
+              className="completion-submit-error"
+              role="alert"
+              data-testid="answer-unstorable-notice"
+            >
+              That answer was not applied — nothing was written, so this question is still
+              open and nothing was invented in its place. Check the value and confirm again.
+            </div>
           ) : (
             <div className="completion-submit-error" role="alert">
               {serverExplanation(submitError) ?? (

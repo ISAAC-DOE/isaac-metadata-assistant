@@ -89,6 +89,16 @@ def _answer(client, exp_id: str, answers: dict):
     )
 
 
+def _pending(client, exp_id: str) -> list[dict]:
+    """The open questions read from a GET.
+
+    Added when the off-enum cases became `422`: a refusal body carries no question list,
+    deliberately, so "the question is still open" has to be asked of the record rather
+    than of the refusal.
+    """
+    return client.get(f"/api/experiments/{exp_id}/pending").json()["pending"]
+
+
 def _export(client, exp_id: str):
     return client.post(
         f"/api/experiments/{exp_id}/export",
@@ -179,20 +189,42 @@ def test_the_answer_is_recorded_as_a_user_confirmation_in_the_evidence_trail(app
     "verdict",
     ["VALID", "ok", "good", "", "probably valid", "Valid", None, 7, [], {"status": "valid"}],
 )
-def test_an_off_enum_verdict_is_never_stored_and_the_question_stays_open(app, verdict):
-    """NEGATIVE CONTROL: the route must not have widened the enum by forwarding the key.
+def test_an_off_enum_verdict_is_refused_by_name_and_the_question_stays_open(app, verdict):
+    """INVERTED 2026-08-25. ~~`..._is_never_stored_and_the_question_stays_open`~~
 
+    NEGATIVE CONTROL: the route must not have widened the enum by forwarding the key.
     `complete._QC_STATUSES` is the only definition of an acceptable verdict, and the
-    route reaches it through `is_qc_shaped` rather than restating it. Anything outside
-    it leaves the blocker OPEN — the response itself tells the caller nothing happened.
+    route reaches it through `is_qc_shaped` rather than restating it. That half is
+    UNCHANGED and is still what the last two assertions check.
+
+    **THE DOCSTRING'S LAST CLAUSE WAS THE DEFECT, and it is why this test is inverted
+    rather than edited.** It read *"Anything outside it leaves the blocker OPEN — the
+    response itself tells the caller nothing happened."* This test asserted the `200` and
+    the still-open question and NEVER READ `invalidation.reason`, which said the
+    opposite: *"No change — the submitted value was identical; nothing was invalidated."*
+    So the sentence describing the response's honesty was the one thing the test did not
+    check, and the response was not honest. An independent end-to-end verification of the
+    MCP surface followed that pair mechanically into a closed loop — `changed: false`
+    reads as "already stored", the documented remedy is `correcting: true`, and that is
+    refused with `not_yet_answered` pointing back at this same operation.
+
+    The route now refuses by name. The response tells the caller what happened because it
+    is an error naming the key, not a success sentence about a value that was never
+    compared.
     """
     client = TestClient(app)
     exp_id = _new_record(client)
     _answer(client, exp_id, _harvested_answers(app))
 
     res = _answer(client, exp_id, {"qc": {"status": verdict}})
-    assert res.status_code == 200, res.text
-    assert [q["id"] for q in res.json()["pending"]] == ["qc"], res.json()["pending"]
+    assert res.status_code == 422, res.text
+    body = res.json()
+    assert body["error"] == "invalid_field_value", body
+    assert body["keys"] == ["qc"], body
+    # THE CLAIM THAT USED TO BE MADE AND WAS FALSE.
+    assert "identical" not in body["message"], body["message"]
+    # UNCHANGED: nothing stored, question still open.
+    assert [q["id"] for q in _pending(client, exp_id)] == ["qc"], _pending(client, exp_id)
     assert (ws.load_experiment(exp_id).draft.get("qc") or {}).get("status") is None
 
 
@@ -224,8 +256,14 @@ def test_a_verdict_with_a_non_string_evidence_note_is_refused_not_stored(app):
     _answer(client, exp_id, _harvested_answers(app))
 
     res = _answer(client, exp_id, {"qc": {"status": "valid", "evidence": {"note": "x"}}})
-    assert res.status_code == 200, res.text
-    assert [q["id"] for q in res.json()["pending"]] == ["qc"]
+    # ~~200 with the blocker left open~~ — a typed `422` since 2026-08-25, which is what
+    # the docstring above was already arguing for ("refusing at the route is what stops a
+    # 200 about a record official validation will then reject"). The status now matches
+    # the argument.
+    assert res.status_code == 422, res.text
+    assert res.json()["error"] == "invalid_field_value", res.json()
+    assert res.json()["keys"] == ["qc"], res.json()
+    assert [q["id"] for q in _pending(client, exp_id)] == ["qc"]
     assert (ws.load_experiment(exp_id).draft.get("qc") or {}).get("status") is None
 
 

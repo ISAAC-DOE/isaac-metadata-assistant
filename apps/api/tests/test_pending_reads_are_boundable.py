@@ -388,15 +388,31 @@ def test_the_window_is_anchored_on_the_run_that_was_written(client):
 def test_a_refused_answer_far_from_the_head_is_reported_as_still_open(client):
     """THE DEFECT THE ANCHOR EXISTS TO PREVENT, exercised end to end.
 
-    `apply_answers` leaves a wrong-typed `series` unapplied and puts the blocker
-    straight back — over HTTP that is a 200 with `changed: false`. The client reads
-    "still open" off this list. On run 900 of a 1,000-run record, an unanchored window
-    would omit the entry entirely and the screen would put a "Confirmed by You" chip
-    over a value the record does not hold.
+    ~~`apply_answers` leaves a wrong-typed `series` unapplied and puts the blocker
+    straight back — over HTTP that is a 200 with `changed: false`.~~ **THE VEHICLE
+    CHANGED ON 2026-08-25; THE ANCHOR IS UNCHANGED AND SO IS WHAT IT PROTECTS.** A
+    wrong-typed `series` is now `422 invalid_field_value` before any write — asserted
+    below — so that particular request no longer produces a `200` for a client to
+    misread at all. The property is preserved MORE strongly by the refusal, because
+    `GuidedCompletion` takes its error path and claims nothing.
+
+    What still reaches the reporting code is a bare `descriptor_label`: the core receives
+    it, both writers gate the descriptor block on `descriptor is not None`, so it is
+    stored nowhere and every one of the run's questions is still open. That is the
+    remaining `200`-that-wrote-nothing on a run, and it is the one this window must still
+    carry from index ~2,700 of the record's list.
     """
     exp_id, run_ids = _with_runs(client, 1000)
     target = run_ids[900]
-    res = _answer_run(client, exp_id, target, {"series": ["not an object"]})
+
+    # The refusal, first: the old vehicle cannot reach the window because it cannot
+    # reach the write. A 422 carries no `pending` list, and needs none.
+    refused = _answer_run(client, exp_id, target, {"series": ["not an object"]})
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"] == "invalid_field_value", refused.json()
+    assert "pending" not in refused.json(), refused.json()
+
+    res = _answer_run(client, exp_id, target, {"descriptor_label": "relabel"})
     assert res.status_code == 200, res.text  # a 200 that wrote NOTHING
 
     body = res.json()
