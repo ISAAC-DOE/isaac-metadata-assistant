@@ -36,6 +36,40 @@ rollout is precisely what the authorization for this work excludes.
 
 :func:`pending_versions` is the read-only half — it reports what WOULD be applied
 without applying anything, so the operator can see the plan first.
+
+BOUNDING A RUN: "UP TO AND INCLUDING", AND NOTHING ELSE
+======================================================
+:func:`select_through` truncates the ordered migration list to the PREFIX ending
+at a named version, and :func:`load_migrations`, :func:`pending_versions` and
+:func:`migrate` all take the same ``through=`` keyword. It exists for one
+measured reason: an operator can be approved to apply some migrations and
+forbidden to apply a later one, and until this existed there was no invocation
+of the operator command that did the first without the second — so the approval
+and the prohibition were not jointly satisfiable and the operator was told not
+to start.
+
+**A PREFIX IS THE ONLY SHAPE, ON PURPOSE.** There is deliberately no
+per-version cherry-pick and no "skip this one": every migration here declares
+foreign keys into tables an earlier one creates, and the presence checks inside
+a migration are sound only because everything before it has run. A tool that
+could apply ``0004`` without ``0003`` would be a tool for corrupting a schema,
+so that shape is not expressible rather than merely discouraged.
+
+**IT IS NOT A ROLLBACK AND CANNOT BECOME ONE.** ``through`` selects a prefix of
+the FORWARD set to apply; it removes nothing, drops nothing, and deletes no
+bookkeeping row. Rollback remains what it has always been — a committed
+``*.rollback.sql`` file a human runs with psql, which this module never loads
+(excluded by suffix) and which the write path's statement policy refuses.
+
+**THE BOOKKEEPING STAYS THE SAME BOOKKEEPING.** A bounded apply records exactly
+the versions it applied, in the same transaction as their DDL, so a later
+unbounded apply picks up precisely what the bound withheld, and a second bounded
+apply is a no-op. The bound is an argument to one invocation; it is never
+persisted, so no state can remember it and quietly withhold something later.
+
+**AN UNKNOWN VERSION REFUSES, LOUDLY, BEFORE ANY CONNECTION IS OPENED.** The
+failure mode that would matter is a typo silently applying everything or
+nothing, so the match is exact — no prefix, no substring, no glob.
 """
 
 from __future__ import annotations
@@ -55,6 +89,7 @@ __all__ = [
     "load_migrations",
     "migrate",
     "pending_versions",
+    "select_through",
     "split_statements",
 ]
 
@@ -161,14 +196,68 @@ def split_statements(sql: str) -> list[str]:
     return out
 
 
-def load_migrations(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
+def select_through(
+    migrations: Sequence[Migration], through: str | None
+) -> tuple[list[Migration], list[str]]:
+    """Truncate an ordered migration list to the prefix ENDING AT ``through``.
+
+    Returns ``(selected, withheld_versions)``. ``through=None`` selects
+    everything and withholds nothing, which is the unbounded behaviour this
+    runner has always had.
+
+    A PREFIX, NOT A PICK. ``selected`` is always ``migrations[:i + 1]`` for the
+    index of ``through``, so a caller cannot express "apply 0004 but not 0003",
+    "apply them in another order", or "skip one in the middle". Those are not
+    options this function withholds by policy; they are shapes its return type
+    cannot represent. That matters because every migration here declares a
+    foreign key into a table an earlier one creates, and because the presence
+    checks inside a later migration are sound only if the runner's ordering
+    guarantee held.
+
+    ``withheld_versions`` is a fact about the FILE SET, not about the database:
+    it is every version after the boundary, applied or not. It is returned so a
+    caller can say out loud what a bounded run is leaving alone, which is the
+    thing an operator has to confirm. Computing it needs no connection.
+
+    AN EXACT MATCH OR A REFUSAL. A typo must never quietly apply everything or
+    quietly apply nothing, so there is no prefix match, no substring match and
+    no glob. A ``*.rollback.sql`` stem is not in ``migrations`` at all (excluded
+    by suffix in :func:`load_migrations`), so naming one refuses here — this is
+    a forward-only selector and cannot be pointed at a rollback.
+    """
+    ordered = list(migrations)
+    if through is None:
+        return ordered, []
+    versions = [m.version for m in ordered]
+    if through not in versions:
+        known = ", ".join(versions) if versions else "(none)"
+        raise WriteRefused(
+            f"no migration is named {through!r}, so there is nothing to apply "
+            f"through. The committed versions are: {known}. A version must be "
+            "given EXACTLY as its file stem — no prefix, substring or partial "
+            "match is accepted, and a rollback file is never a migration. "
+            "Nothing was applied and no connection was opened."
+        )
+    cut = versions.index(through) + 1
+    return ordered[:cut], versions[cut:]
+
+
+def load_migrations(
+    directory: Path = MIGRATIONS_DIR, *, through: str | None = None
+) -> list[Migration]:
     """Every committed migration, ordered by filename.
 
     The version IS the filename stem, so ordering is lexicographic and visible in
     a directory listing. Rollback files are excluded by suffix.
+
+    ``through`` bounds the result to the prefix ending at that version, and
+    refuses if no such version exists — see :func:`select_through`. The bound is
+    applied AFTER loading, so a version that exists but sits after the boundary
+    is still read and still parsed: a syntactically broken migration cannot hide
+    behind a bound.
     """
     if not directory.is_dir():
-        return []
+        return select_through([], through)[0]
     out: list[Migration] = []
     for path in sorted(directory.glob("*.sql")):
         if path.name.endswith(_ROLLBACK_SUFFIX):
@@ -176,7 +265,7 @@ def load_migrations(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
         out.append(
             Migration(path.stem, path, split_statements(path.read_text(encoding="utf-8")))
         )
-    return out
+    return select_through(out, through)[0]
 
 
 def applied_versions(cursor: Any, policy: Any) -> list[str]:
@@ -191,16 +280,25 @@ def applied_versions(cursor: Any, policy: Any) -> list[str]:
 
 
 def pending_versions(
-    env: Mapping[str, str] | None = None, *, directory: Path = MIGRATIONS_DIR, **kwargs
+    env: Mapping[str, str] | None = None,
+    *,
+    directory: Path = MIGRATIONS_DIR,
+    through: str | None = None,
+    **kwargs,
 ) -> list[str]:
     """What :func:`migrate` WOULD apply, applying nothing.
 
     Opens one transaction, ensures the bookkeeping table exists, reads it, and
     commits. It is not read-only (it may create the bookkeeping table), and saying
     so is more useful than a name that implies otherwise.
+
+    ``through`` bounds the answer EXACTLY as it bounds :func:`migrate`, and that
+    is the whole point of it being the same keyword on both: the plan an operator
+    reads is the plan the apply carries out. A bad ``through`` refuses before the
+    transaction is opened, because :func:`load_migrations` runs first.
     """
     env = os.environ if env is None else env
-    migrations = load_migrations(directory)
+    migrations = load_migrations(directory, through=through)
     with write_transaction(env, **kwargs) as (cursor, policy):
         cursor.execute(policy.check(Q_ENSURE_BOOKKEEPING))
         done = set(applied_versions(cursor, policy))
@@ -208,7 +306,11 @@ def pending_versions(
 
 
 def migrate(
-    env: Mapping[str, str] | None = None, *, directory: Path = MIGRATIONS_DIR, **kwargs
+    env: Mapping[str, str] | None = None,
+    *,
+    directory: Path = MIGRATIONS_DIR,
+    through: str | None = None,
+    **kwargs,
 ) -> list[str]:
     """Apply every pending migration. Returns the versions actually applied.
 
@@ -217,10 +319,19 @@ def migrate(
 
     Every statement passes through the write path's statement policy, so a
     migration that tried to ``DROP`` something, or to name a table this
-    application does not own, refuses here rather than at the database.
+    application does not own, refuses here rather than at the database. **That
+    is as true of a bounded run as of an unbounded one** — ``through`` narrows
+    which files are considered and changes nothing about how their statements are
+    checked or executed, which is why it is not a way around the policy.
+
+    ``through`` applies every pending migration UP TO AND INCLUDING that version
+    and nothing after it. Bookkeeping is unchanged: only the versions actually
+    applied are recorded, each inside its own transaction, so a later unbounded
+    run applies exactly what the bound withheld and a second bounded run returns
+    ``[]``. The bound is never persisted anywhere.
     """
     env = os.environ if env is None else env
-    migrations = load_migrations(directory)
+    migrations = load_migrations(directory, through=through)
     applied: list[str] = []
     for migration in migrations:
         if not migration.statements:

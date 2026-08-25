@@ -14,8 +14,12 @@
 > `CLAUDE.md` and the two packets needed correcting. **The body is now corrected in place**, at §1's
 > table, §1's "evidence supporting your decision" paragraph, §1's accounting sentence, and the closing
 > summary. **One more thing the addendum adds that this document does not yet reflect anywhere: the
-> command that applies `0003`/`0004` has no per-version option and would take `0005_run_projection`
-> with it.** Read the addendum's §0 before running anything; it records that conflict as **BLOCKED**.
+> command that applies `0003`/`0004` ~~has no per-version option and would take
+> `0005_run_projection` with it~~ — corrected again 2026-08-25: it now takes `--through VERSION`, and
+> the command to run is `python scripts/db_migrate.py --apply --through 0004_submissions`.** The
+> unbounded `--apply` would still take `0005` with it, so the hazard the strike describes is real and
+> only the remedy has changed. Read the addendum's §0 before running anything; it records that
+> conflict as **resolved**, having recorded it as **BLOCKED** when it was.
 
 **For:** Dean (SLAC infrastructure / database operator), via Krish.
 **From:** the ISAAC Metadata Assistant repository. **Not sent by an agent** — this is a ready-to-send
@@ -40,8 +44,13 @@ yours. Do not apply it.
 
 `0003_revisions` and `0004_submissions` are **ONE decision** — `0004` declares a foreign key into a
 table `0003` creates, so 0003-without-0004 leaves the application unable to record a submission and
-0004-without-0003 cannot be applied at all. `db_migrate` orders them lexicographically, so a single
-`--apply` does both in the right order.
+0004-without-0003 cannot be applied at all. `db_migrate` orders them lexicographically, so one
+bounded command — `python scripts/db_migrate.py --apply --through 0004_submissions` — does both in
+the right order and applies nothing after them. **Corrected 2026-08-25:** this used to read *"a
+single `--apply`"*, which stopped being safe when `0005_run_projection.sql` was committed, because an
+unbounded `--apply` would have taken that unapproved migration along too. See
+[`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md) §0 and
+[`docs/migration-approval-packet-0003.md`](migration-approval-packet-0003.md) §9.
 
 | | `0003_revisions` | `0004_submissions` |
 |---|---|---|

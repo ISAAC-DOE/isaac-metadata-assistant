@@ -38,8 +38,9 @@
 > **`0003_revisions` and `0004_submissions` are ONE decision, and must be applied together or not at all.**
 > `0004_submissions` declares a foreign key into a table `0003_revisions` creates, so 0003 without
 > 0004 leaves the application unable to record a submission, and 0004 without 0003 cannot be applied
-> at all. `db_migrate` orders them lexicographically, so a single `--apply` does both in the right
-> order. Read both packets before approving either.
+> at all. `db_migrate` orders them lexicographically, so the single bounded command in §9
+> (`--apply --through 0004_submissions`) does both in the right order and stops there. Read both
+> packets before approving either.
 
 ## Authorization basis
 
@@ -338,14 +339,21 @@ psql -Atc "select current_database()"
 # 2. Confirm what is already applied. Expect exactly two rows: 0001_experiments, 0002_runs.
 psql -Atc "select version from isaac_schema_migrations order by version"
 
-# 3. See what WOULD be applied. THIS IS THE CHECK THAT DECIDES WHETHER §9 IS SAFE
-#    TO RUN AT ALL — read §9's table before acting on the output.
-#    EXPECT (safe):     pending: 0003_revisions, 0004_submissions
-#    IF IT ALSO NAMES 0005_run_projection, STOP: `--apply` has no per-version
-#    option and would apply it too, and 0005 is NOT owner-approved.
+# 3. See what WOULD be applied, UNBOUNDED — i.e. what the runner can see at all.
+#    EXPECT: pending: 0003_revisions, 0004_submissions, 0005_run_projection
+#    That third name is EXPECTED and is not a problem: 0005 is committed but not
+#    owner-approved, and §9's command is bounded so it cannot reach it. If this
+#    line names 0002_runs, or names anything you do not recognise, STOP.
 #    Applies no MIGRATION — but it is NOT read-only: `pending_versions` opens a
 #    transaction and ensures the bookkeeping table exists.
 python scripts/db_migrate.py --plan
+
+# 3b. The BOUNDED plan — this is the one §9 tells you to diff, and it is the same
+#     selection §9's apply carries out.
+#     EXPECT, exactly two lines:
+#       pending through 0004_submissions: 0003_revisions, 0004_submissions
+#       withheld by --through 0004_submissions: 0005_run_projection
+python scripts/db_migrate.py --plan --through 0004_submissions
 
 # 4. THE COUNT THAT MATTERS. Record it; postcheck 1 compares against it.
 psql -Atc "select count(*) from records"
@@ -367,36 +375,74 @@ psql -Atc "select count(*) from pg_locks l join pg_class c on c.oid = l.relation
 psql -Atc "select version()"
 ```
 
-## 9. The exact command — and it applies EVERY pending migration, not just these two
+## 9. The exact command — bounded to these two migrations
+
+**Two invocations. Run the first, read its output against the block below, then run the second.**
 
 ```bash
-python scripts/db_migrate.py --apply
+python scripts/db_migrate.py --plan --through 0004_submissions
 ```
 
-**READ THE OUTPUT BEFORE AND AFTER, because the runner cannot be pointed at a version.**
-`scripts/db_migrate.py` exposes `--plan` and `--apply` and **no `--only <version>`**, and
-`apps/api/isaac_api/db_migrate.py::load_migrations` globs **every** `*.sql` in the migrations
-directory. So this command applies every migration not already recorded, in lexical order.
+Expected output, exactly — two lines:
 
-> **CORRECTED 2026-08-25 — the previous wording was FALSE, and it was false in the sentence an
-> operator acts on.** It read: ~~*"It applies **both** `0003_revisions` and `0004_submissions`, in
-> that order, one transaction each. Expected output, exactly: `applied: 0003_revisions,
-> 0004_submissions`"*~~. That was true when written and stopped being true when
-> `0005_run_projection.sql` was committed. **`0005` is NOT owner-approved and must NOT be applied**
-> (see `docs/dean-operator-addendum-2026-08-25.md` §0 and §2), so an operator who ran this command on
-> the strength of the old "exactly" would have applied an unapproved migration to a database holding
-> 30 production-derived records.
+```
+pending through 0004_submissions: 0003_revisions, 0004_submissions
+withheld by --through 0004_submissions: 0005_run_projection
+```
 
-**What to expect, by state — and precheck 3 (`--plan`) tells you which state you are in before
-anything is applied:**
+```bash
+python scripts/db_migrate.py --apply --through 0004_submissions
+```
 
-| `--plan` says | then `--apply` prints | do |
-|---|---|---|
-| `pending: 0003_revisions, 0004_submissions` | `applied: 0003_revisions, 0004_submissions` | proceed — this is the ask |
-| `pending: 0003_revisions, 0004_submissions, 0005_run_projection` | `applied: 0003_revisions, 0004_submissions, 0005_run_projection` | **STOP.** `0005` is not approved. Do not run `--apply` in this state |
-| anything else | — | **STOP** and report what it said |
+Expected output, exactly — two lines:
 
-Each migration gets its own transaction, in lexical order.
+```
+applied through 0004_submissions: 0003_revisions, 0004_submissions
+withheld by --through 0004_submissions: 0005_run_projection
+```
+
+**If either invocation prints anything else, STOP and report what it printed.** In particular, a
+first line naming `0002_runs` means the database is not where precheck 2 said it was, and a first
+line naming `0005_run_projection` means the bound was not applied — neither is a state to proceed
+from.
+
+Each migration gets its own transaction, in lexical order. The second line is a fact about the
+committed migration files, not about your database: it names what this invocation deliberately left
+alone, so *"`0005` was not applied"* is something you read rather than something you infer.
+
+> **CORRECTED 2026-08-25 (second correction, same section) — the instruction above is now a
+> BOUNDED command, and the two corrections are kept in order because they are different defects.**
+>
+> **The first correction** retired a false "exactly". §9 used to read: ~~*"It applies **both**
+> `0003_revisions` and `0004_submissions`, in that order, one transaction each. Expected output,
+> exactly: `applied: 0003_revisions, 0004_submissions`"*~~. That was true when written and stopped
+> being true when `0005_run_projection.sql` was committed, so an operator who acted on the old
+> "exactly" would have applied an unapproved migration to a database holding 30 production-derived
+> records. That strike stands.
+>
+> **The first correction left the section honest and the ask impossible**, and it said so: it
+> replaced the command with a bare `--apply` plus a table of states, one of whose rows was
+> *"**STOP.** `0005` is not approved. Do not run `--apply` in this state"* — and that row is the
+> state the hosted database is actually in. So §9's own instruction could not be carried out. The
+> operator addendum recorded that as **BLOCKED** rather than pending, which was the right call and is
+> now discharged: ~~*"`scripts/db_migrate.py` exposes `--plan` and `--apply` and **no `--only
+> <version>`**"*~~ — **the runner now takes `--through VERSION`**, which applies every pending
+> migration up to and including that version and nothing after it. It bounds `--plan` identically, so
+> the plan you read above is the apply you get.
+>
+> **What `--through` is, and is not.** *Up to and including* is its only shape: there is no
+> per-version pick and no way to skip one, because `0004` declares a foreign key into a table `0003`
+> creates and a runner that could apply one without the other would be a runner for breaking a
+> schema. It is **not a rollback** — it selects a prefix of the forward set, drops nothing, and
+> deletes no bookkeeping row; it cannot even be pointed at a `*.rollback.sql` file, because the
+> loader excludes those by suffix and an unrecognised version is a refusal. **A misspelled version
+> refuses loudly, before any connection is opened**, and never falls back to applying everything or
+> to applying nothing. And **every statement still passes `db_write.WriteStatementPolicy`** — that is
+> why this is the resolution and "apply the SQL by hand with psql" was not.
+>
+> **Nothing about the bytes being approved changed.** The four digests in the STATUS block and in
+> §"The bytes being approved" are unchanged; this is a change to the operator command, not to the
+> migration.
 
 ## 10. Postchecks — what would prove it worked
 
@@ -435,8 +481,13 @@ psql -Atc "select (select count(*) from isaac_experiment_revisions),
                   (select count(*) from isaac_run_revisions),
                   (select count(*) from isaac_revision_changes)"
 
-# 8. Idempotence: a second run applies nothing.
-python scripts/db_migrate.py --apply     # -> nothing to apply (every migration is already recorded)
+# 8. Idempotence: a second run applies nothing. KEEP THE BOUND ON. Without it
+#    this postcheck would itself apply 0005_run_projection — the exact outcome
+#    §9 exists to prevent, arriving through a check meant to prove nothing moved.
+python scripts/db_migrate.py --apply --through 0004_submissions
+#    EXPECT, exactly two lines:
+#      nothing to apply through 0004_submissions (every migration up to it is already recorded)
+#      withheld by --through 0004_submissions: 0005_run_projection
 
 # 9. The engine build string again, so it is on the record either side.
 psql -Atc "select version()"

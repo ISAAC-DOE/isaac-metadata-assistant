@@ -2428,6 +2428,167 @@ jobs:
             echo "::error::rollback modified the production-derived stand-in table"; exit 1; }
           echo "rollback OK: pre-migration table set restored, records untouched"
 
+      # THE BOUNDED APPLY, AGAINST A REAL ENGINE, IN THE OPERATOR'S OWN SHAPE.
+      #
+      # `scripts/db_migrate.py --apply` applies EVERY pending migration, and
+      # `0005_run_projection` is committed but NOT owner-approved. So the external ask
+      # — apply `0003` and `0004`, do not apply `0005` — was not satisfiable with an
+      # unbounded runner, and `docs/dean-operator-addendum-2026-08-25.md` §0 recorded
+      # the operator's DO row as BLOCKED for that reason. `--through VERSION` applies
+      # every pending migration UP TO AND INCLUDING that version and nothing after it.
+      #
+      # WHY THIS STEP RUNS LAST, AND WHAT IT STARTS FROM. The step above rolled every
+      # migration back, so the schema here is the pre-migration table set — including
+      # NO `isaac_schema_migrations`. That is what lets this step reconstruct the
+      # hosted database's actual state (0001 and 0002 applied, nothing else) and then
+      # run the operator's own two commands against it, rather than asserting a
+      # bounded apply from whatever state an earlier step happened to leave.
+      #
+      # THE ASSERTIONS ARE THE EXACT STRINGS THE PACKET QUOTES. §9 of
+      # `docs/migration-approval-packet-0003.md` is the block an operator diffs their
+      # console against, so a literal here that drifted from it would be worse than no
+      # assertion at all. `apps/api/tests/test_bounded_migration_apply.py` pins the
+      # same strings against the packet FILE; this step pins them against PostgreSQL.
+      - name: Apply 0001-0004 with --through and prove 0005's table is ABSENT
+        run: |
+          set -euo pipefail
+
+          # ── 1. Reconstruct the hosted database's state: 0001 and 0002, no more. ──
+          # This is itself a bounded apply, at a different boundary, so the bound is
+          # exercised twice at two different points in the sequence.
+          plan=$(python scripts/db_migrate.py --plan --through 0002_runs)
+          echo "$plan"
+          [ "$(printf '%s\n' "$plan" | sed -n 1p)" = "pending through 0002_runs: 0001_experiments, 0002_runs" ] || {
+            echo "::error::unexpected 0002-bounded plan: $plan"; exit 1; }
+          [ "$(printf '%s\n' "$plan" | sed -n 2p)" = "withheld by --through 0002_runs: 0003_revisions, 0004_submissions, 0005_run_projection" ] || {
+            echo "::error::unexpected 0002-bounded withheld line: $plan"; exit 1; }
+          out=$(python scripts/db_migrate.py --apply --through 0002_runs)
+          echo "$out"
+          [ "$(printf '%s\n' "$out" | sed -n 1p)" = "applied through 0002_runs: 0001_experiments, 0002_runs" ] || {
+            echo "::error::unexpected 0002-bounded apply: $out"; exit 1; }
+          # NOTHING PAST THE BOUNDARY EXISTS. Not "the count is small" — the relations
+          # 0003, 0004 and 0005 create must be absent by name.
+          for t in isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs isaac_run_projection; do
+            c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
+            [ "$c" = "0" ] || { echo "::error::--through 0002_runs created $t"; exit 1; }
+          done
+
+          # ── 2. THE OPERATOR'S PLAN, and it must read exactly as the packet says. ──
+          plan=$(python scripts/db_migrate.py --plan --through 0004_submissions)
+          echo "$plan"
+          [ "$(printf '%s\n' "$plan" | wc -l | tr -d ' ')" = "2" ] || {
+            echo "::error::the bounded plan was not exactly two lines: $plan"; exit 1; }
+          [ "$(printf '%s\n' "$plan" | sed -n 1p)" = "pending through 0004_submissions: 0003_revisions, 0004_submissions" ] || {
+            echo "::error::the bounded plan does not match packet 0003 section 9: $plan"; exit 1; }
+          [ "$(printf '%s\n' "$plan" | sed -n 2p)" = "withheld by --through 0004_submissions: 0005_run_projection" ] || {
+            echo "::error::the bounded plan's withheld line does not match packet 0003 section 9: $plan"; exit 1; }
+          # A PLAN APPLIES NOTHING.
+          c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_experiment_revisions'")
+          [ "$c" = "0" ] || { echo "::error::the bounded plan applied 0003"; exit 1; }
+
+          # ── 3. THE OPERATOR'S APPLY. ──
+          out=$(python scripts/db_migrate.py --apply --through 0004_submissions)
+          echo "$out"
+          [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = "2" ] || {
+            echo "::error::the bounded apply was not exactly two lines: $out"; exit 1; }
+          [ "$(printf '%s\n' "$out" | sed -n 1p)" = "applied through 0004_submissions: 0003_revisions, 0004_submissions" ] || {
+            echo "::error::the bounded apply does not match packet 0003 section 9: $out"; exit 1; }
+          [ "$(printf '%s\n' "$out" | sed -n 2p)" = "withheld by --through 0004_submissions: 0005_run_projection" ] || {
+            echo "::error::the bounded apply's withheld line does not match packet 0003 section 9: $out"; exit 1; }
+
+          # ── 4. THE ASSERTION THE WHOLE FEATURE EXISTS FOR. ──
+          # 0003's and 0004's five tables are present; 0005's ONE table is absent.
+          for t in isaac_experiment_revisions isaac_run_revisions isaac_revision_changes isaac_submissions isaac_submission_runs; do
+            c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
+            [ "$c" = "1" ] || { echo "::error::the bounded apply did not create $t"; exit 1; }
+          done
+          c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_run_projection'")
+          [ "$c" = "0" ] || { echo "::error::THE BOUND LEAKED: isaac_run_projection exists after --through 0004_submissions"; exit 1; }
+          # AND THE BOOKKEEPING SAYS THE SAME THING, which is what a later run reads.
+          rows=$(psql -Atc "select string_agg(version, ',' order by version) from isaac_schema_migrations")
+          [ "$rows" = "0001_experiments,0002_runs,0003_revisions,0004_submissions" ] || {
+            echo "::error::unexpected bookkeeping after the bounded apply: $rows"; exit 1; }
+
+          # ── 5. A SECOND identical bounded apply is a no-op, bound still stated. ──
+          out=$(python scripts/db_migrate.py --apply --through 0004_submissions)
+          echo "$out"
+          [ "$(printf '%s\n' "$out" | sed -n 1p)" = "nothing to apply through 0004_submissions (every migration up to it is already recorded)" ] || {
+            echo "::error::a second bounded apply was not a no-op: $out"; exit 1; }
+          [ "$(printf '%s\n' "$out" | sed -n 2p)" = "withheld by --through 0004_submissions: 0005_run_projection" ] || {
+            echo "::error::the no-op dropped its withheld line: $out"; exit 1; }
+          c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_run_projection'")
+          [ "$c" = "0" ] || { echo "::error::the second bounded apply created isaac_run_projection"; exit 1; }
+
+          # ── 6. The UNBOUNDED plan still sees what the bound withheld. ──
+          plan=$(python scripts/db_migrate.py --plan)
+          [ "$plan" = "pending: 0005_run_projection" ] || {
+            echo "::error::the unbounded plan is wrong after a bounded apply: $plan"; exit 1; }
+
+          # ── 7. A MISSPELLED BOUNDARY REFUSES, and changes nothing. ──
+          # The failure that would matter is a typo silently applying everything.
+          set +e
+          python scripts/db_migrate.py --apply --through 0004_submision > /tmp/through-typo.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/through-typo.log
+          [ "$code" = "3" ] || { echo "::error::a misspelled --through exited $code, not 3"; exit 1; }
+          grep -q "no migration is named '0004_submision'" /tmp/through-typo.log || {
+            echo "::error::the refusal did not name the version it was given"; exit 1; }
+          # A ROLLBACK STEM IS NOT A BOUNDARY, and asking for one drops nothing.
+          set +e
+          python scripts/db_migrate.py --apply --through 0003_revisions.rollback > /tmp/through-rollback.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/through-rollback.log
+          [ "$code" = "3" ] || { echo "::error::a rollback stem was accepted as a boundary (exit $code)"; exit 1; }
+          rows=$(psql -Atc "select string_agg(version, ',' order by version) from isaac_schema_migrations")
+          [ "$rows" = "0001_experiments,0002_runs,0003_revisions,0004_submissions" ] || {
+            echo "::error::a refused --through changed the bookkeeping: $rows"; exit 1; }
+          for t in isaac_experiment_revisions isaac_run_revisions isaac_revision_changes; do
+            c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
+            [ "$c" = "1" ] || { echo "::error::a refused --through dropped $t"; exit 1; }
+          done
+
+          # ── 8. THE WRONG-ORDER ROLLBACK REFUSAL IS UNCHANGED IN THE BOUNDED STATE. ──
+          # A partially-migrated schema is not a special case: 0001's rollback must
+          # still refuse while its children stand, and must destroy nothing. This is
+          # the same property the step above proves with all five applied — asserted
+          # again here because "bounded" is a new schema state an operator can be in.
+          if psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0001_experiments.rollback.sql > /tmp/bounded-wrong-order.log 2>&1; then
+            echo "::error::0001's rollback succeeded in the bounded state"; exit 1
+          fi
+          cat /tmp/bounded-wrong-order.log
+          for t in isaac_experiments isaac_runs isaac_schema_migrations isaac_experiment_revisions isaac_submissions; do
+            c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
+            [ "$c" = "1" ] || { echo "::error::$t was destroyed by the failed rollback attempt"; exit 1; }
+          done
+
+          # ── 9. The BOOKKEEPING HANDOFF: an unbounded apply finishes the job. ──
+          out=$(python scripts/db_migrate.py --apply)
+          echo "$out"
+          [ "$out" = "applied: 0005_run_projection" ] || {
+            echo "::error::the unbounded apply did not pick up exactly what the bound withheld: $out"; exit 1; }
+          c=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_run_projection'")
+          [ "$c" = "1" ] || { echo "::error::the unbounded apply did not create isaac_run_projection"; exit 1; }
+
+          # WHAT THIS STEP LEAVES BEHIND, STATED EXACTLY RATHER THAN AS "nothing".
+          # It rolls all five back in the documented order, so the job ends in the
+          # state the step above asserted — the pre-migration table set, with the
+          # production-derived stand-in untouched. Without this a step added after
+          # this one would silently inherit a fully migrated database.
+          for f in 0005_run_projection 0004_submissions 0003_revisions 0002_runs 0001_experiments; do
+            psql -v ON_ERROR_STOP=1 -f "apps/api/isaac_api/migrations/$f.rollback.sql"
+          done
+          psql -Atc "select table_name from information_schema.tables where table_schema='public' order by table_name" \
+            > /tmp/tables-after-bounded.txt
+          diff /tmp/tables-before.txt /tmp/tables-after-bounded.txt || {
+            echo "::error::the bounded-apply step did not leave the pre-migration table set"; exit 1; }
+          psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
+            > /tmp/records-after-bounded.txt
+          diff /tmp/records-before.txt /tmp/records-after-bounded.txt || {
+            echo "::error::the bounded-apply step modified the production-derived stand-in table"; exit 1; }
+          echo "--through: 0001-0004 applied, isaac_run_projection ABSENT, typo refused, handoff and rollback clean"
+
   frontend:
     name: frontend tests and build
     runs-on: ubuntu-latest

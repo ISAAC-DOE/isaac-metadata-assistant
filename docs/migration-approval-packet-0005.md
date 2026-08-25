@@ -141,8 +141,10 @@ psql -Atc "select version from isaac_schema_migrations order by version"
 #    EXPECT: 0001_experiments, 0002_runs, 0003_revisions, 0004_submissions
 #
 #    IF 0003 AND 0004 ARE ABSENT, STOP AND READ SECTION 6. They are owner-approved
-#    and, as of this writing, NOT applied to the hosted database — and `--apply` has
-#    no per-version option, so it would apply all three at once.
+#    and, as of this writing, NOT applied to the hosted database. Apply them from
+#    their own packets with the bounded command
+#    (`--apply --through 0004_submissions`), which is what stops a single
+#    unbounded `--apply` landing all three at once.
 
 # 2. The table does not already exist.
 psql -Atc "select count(*) from information_schema.tables
@@ -175,25 +177,32 @@ after.
 
 ## 6. The exact command — and it applies EVERY pending migration, not just this one
 
-**READ THIS BEFORE RUNNING IT.** `db_migrate` has `--plan` and `--apply` and **no
-`--only <version>`**. `--apply` applies every pending migration in lexical order. As of this
-writing `0003_revisions` and `0004_submissions` are owner-approved and **not applied to the
-hosted database**, so against the real hosted database this one command would apply **three**
-migrations, two of which have their own packets and their own operator step.
+**READ THIS BEFORE RUNNING IT.** An **unbounded** `--apply` applies every pending migration in
+lexical order. As of this writing `0003_revisions` and `0004_submissions` are owner-approved and
+**not applied to the hosted database**, so against the real hosted database the unbounded command
+would apply **three** migrations, two of which have their own packets and their own operator step.
+
+~~`db_migrate` has `--plan` and `--apply` and **no `--only <version>`**.~~ **Corrected 2026-08-25:**
+the runner takes **`--through VERSION`**, applying every pending migration up to and including that
+version and nothing after it, and bounding `--plan` the same way. That is what makes sequence 1 below
+reachable. It does not make this migration approved.
 
 That is not a hidden hazard — precheck 1 is what catches it, and it is why the precheck comes
 first. Two sequences were listed here; **the second is now marked NOT AUTHORIZED and the
 correction is left visible, because it conflicted with the operator addendum in the operator's
 own instruction.**
 
-1. **Apply `0003` and `0004` first**, from their own packets; confirm precheck 1 reads
-   `0001, 0002, 0003, 0004`; then run the command below and expect exactly
-   `applied: 0005_run_projection`. **This is the only shape that is authorized — and it is
-   currently unreachable with the shipped runner**, because `--apply` has no per-version option
-   and would take `0005` along with `0003`/`0004`. See
-   [`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md) §0, which
-   records that conflict as **BLOCKED** and names the three candidate resolutions. None of them
-   is an operator's to choose.
+1. **Apply `0003` and `0004` first**, from their own packets, with the bounded command
+   `python scripts/db_migrate.py --apply --through 0004_submissions`; confirm precheck 1 reads
+   `0001, 0002, 0003, 0004`; then — **only if and when Krish has approved this migration** — run the
+   command below and expect exactly `applied: 0005_run_projection`. **This is the only shape that is
+   authorized.** ~~"and it is currently unreachable with the shipped runner, because `--apply` has no
+   per-version option and would take `0005` along with `0003`/`0004`"~~ — **corrected 2026-08-25: it
+   is now reachable.** `--through` bounds a run to a named version, which is resolution 3 of the
+   three named in [`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md)
+   §0; that section now records the conflict as **resolved** rather than **BLOCKED**. **The tooling
+   was the blocker, not the approval** — this migration is still unapproved, and reachability is not
+   permission.
 2. ~~**Apply all three together, deliberately**, having read all three packets, and expect
    `applied: 0003_revisions, 0004_submissions, 0005_run_projection`. Report the postchecks for
    all three.~~ **NOT AUTHORIZED, struck 2026-08-25.** It presupposes an owner approval of `0005`
@@ -209,6 +218,10 @@ afterwards that three migrations landed.
 python scripts/db_migrate.py --apply
 #    EXPECT (once 0003/0004 are applied): applied: 0005_run_projection
 #    EXPECT (if they are not):            applied: 0003_revisions, 0004_submissions, 0005_run_projection
+#
+#    THE SECOND LINE IS THE STATE TO STOP IN, NOT TO PROCEED FROM. If 0003/0004
+#    are pending, apply them first with `--apply --through 0004_submissions` from
+#    their own packets; do not let this command pick them up.
 ```
 
 One transaction. The runner issues `CREATE TABLE IF NOT EXISTS isaac_schema_migrations`

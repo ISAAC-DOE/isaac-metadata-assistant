@@ -38,8 +38,9 @@
 > **`0004_submissions` and `0003_revisions` are ONE decision, and must be applied together or not at all.**
 > `0004_submissions` declares a foreign key into a table `0003_revisions` creates, so 0003 without
 > 0004 leaves the application unable to record a submission, and 0004 without 0003 cannot be applied
-> at all. `db_migrate` orders them lexicographically, so a single `--apply` does both in the right
-> order. Read both packets before approving either.
+> at all. `db_migrate` orders them lexicographically, so the single bounded command in §9
+> (`--apply --through 0004_submissions`) does both in the right order and stops there. Read both
+> packets before approving either.
 
 ## Authorization basis
 
@@ -264,7 +265,8 @@ Identical to 0003's packet §7. **No agent may apply this.**
 
 ## 8. Prechecks
 
-Run 0003's prechecks 1–3, 4, 5, 7 and 8 unchanged (a single `--apply` does both migrations), plus:
+Run 0003's prechecks 1–3, 3b, 4, 5, 7 and 8 unchanged — the single bounded command in §9 does both
+migrations, so 0003's precheck 3b is this packet's bounded plan too — plus:
 
 ```bash
 # 6b. Confirm neither target table already exists (expect 0).
@@ -275,14 +277,30 @@ psql -Atc "select count(*) from information_schema.tables where table_schema='pu
 ## 9. The exact command
 
 ```bash
-python scripts/db_migrate.py --apply
+python scripts/db_migrate.py --plan --through 0004_submissions
+python scripts/db_migrate.py --apply --through 0004_submissions
 ```
 
-The same single command applies 0003 and then 0004. Expected output, exactly:
+**BOUNDED, and 0003's packet §9 is authoritative** — read it, including both corrections, before
+running either line. The same single bounded command applies 0003 and then 0004 and stops there.
+Expected output, exactly — the plan, then the apply:
 
 ```
-applied: 0003_revisions, 0004_submissions
+pending through 0004_submissions: 0003_revisions, 0004_submissions
+withheld by --through 0004_submissions: 0005_run_projection
 ```
+
+```
+applied through 0004_submissions: 0003_revisions, 0004_submissions
+withheld by --through 0004_submissions: 0005_run_projection
+```
+
+> **CORRECTED 2026-08-25.** This section used to read `python scripts/db_migrate.py --apply` with
+> *"Expected output, exactly: `applied: 0003_revisions, 0004_submissions`"*. That was true when
+> written and became false when `0005_run_projection.sql` was committed — the same defect 0003's
+> packet §9 records, in the same words, one document over. The bound is what makes the quoted output
+> true again. **`0005_run_projection` is NOT owner-approved and must not be applied**; the second
+> line of each block is how you see that it was not.
 
 ## 10. Postchecks — what would prove it worked
 
@@ -317,8 +335,12 @@ psql -Atc "select version, applied_utc from isaac_schema_migrations order by ver
 psql -Atc "select (select count(*) from isaac_submissions),
                   (select count(*) from isaac_submission_runs)"
 
-# 8. Idempotence: a second run applies nothing.
-python scripts/db_migrate.py --apply     # -> nothing to apply (every migration is already recorded)
+# 8. Idempotence: a second run applies nothing. KEEP THE BOUND ON — without it
+#    this postcheck would itself apply 0005_run_projection.
+python scripts/db_migrate.py --apply --through 0004_submissions
+#    EXPECT, exactly two lines:
+#      nothing to apply through 0004_submissions (every migration up to it is already recorded)
+#      withheld by --through 0004_submissions: 0005_run_projection
 
 # 9. The engine build string.
 psql -Atc "select version()"
