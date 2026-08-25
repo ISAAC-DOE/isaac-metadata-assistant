@@ -1723,7 +1723,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // THIS run is ignored rather than invented" — true of an UNRECOGNISED key, and
     // false of a recognised key whose question is already CLOSED, which this branch
     // now refuses with `422 already_answered` rather than absorbing into a `200` that
-    // reported no change over a value it had discarded. The replacement states both
+    // reported no change over a value it had discarded. (THE "true of an UNRECOGNISED
+    // key" HALF EXPIRED ON 2026-08-25 and this entry is left as the historical record
+    // it is: a body naming ONLY unrecognised keys is now `422 unrecognized_field`, and
+    // only a RIDE-ALONG unrecognised key is still ignored. See the 91,780 entry below.)
+    // The replacement states both
     // halves and names the correcting operation the refusal redirects to. Re-measured
     // from `create_app().openapi()`, not adjusted by the length of the new text, and
     // `test_contract_description_parity.py` proves the captured copy matches what the
@@ -1776,7 +1780,57 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `json.dumps(..., ensure_ascii=False)`, never hand-edited, and
     // `test_contract_description_parity.py` proves the copy matches the served
     // document rather than leaving it asserted here.
-    expect(total).toBe(90213);
+    //
+    // 90,213 -> 91,780 and 192 -> 193 post-lead paragraphs (2026-08-25). THREE entries
+    // moved, and the operation count did not: `POST .../answers` and
+    // `POST .../runs/{run_id}/answers` each state the two refusals they now perform
+    // instead of promising that an unrecognised key is ignored, and
+    // `GET .../evidence` states that a block-level confirmation carries `value: null`
+    // — the entries it had been omitting entirely for a record created through this
+    // API. The paragraph count moves by exactly ONE because only the evidence
+    // description APPENDED a paragraph; the two answers descriptions rewrote existing
+    // ones in place.
+    //
+    // RE-MEASURED the same three ways, not incremented:
+    //
+    //   · the splitPurpose rule in Python over `create_app().openapi()`, restricted to
+    //     the 69 operations this array names: total 91,780, paragraphs 193;
+    //   · the same rule over the transcribed array: the same two numbers;
+    //   · internal consistency: raw sum of `d.description.length` = 92,166, minus 2 per
+    //     `\n\n` separator (193 x 2 = 386) = 91,780.
+    //
+    // 91,780 -> 92,916 and 193 -> 194 post-lead paragraphs (2026-08-25, review fixes to
+    // the slice above). TWO entries moved, operations UNCHANGED at 69, and both moves
+    // are corrections to text this same PR published rather than new features:
+    //
+    //   · `POST .../runs/{run_id}/answers` had its unrecognised-key paragraph SCOPED.
+    //     It said the key is "now REFUSED with `422 unrecognized_field`, exactly as on
+    //     the record" without saying that refusal fires only where NOTHING in the body
+    //     is recognised — so a ride-along key is still dropped on a `200`. The scope is
+    //     now stated. Text was inserted INTO an existing paragraph, so this entry adds
+    //     no paragraph.
+    //   · `GET .../evidence` APPENDED one paragraph. Its block-level sentence named
+    //     `qc:`, `series:` and `descriptors:` and called them scientist confirmations;
+    //     the reader also serves `attribution:` (two entries per seeded record, the
+    //     largest single namespace it added) and can serve `links:`, and those are
+    //     source-document citations, not confirmations. Five namespaces, and two of
+    //     them are not confirmations — that is the added paragraph.
+    //
+    // The paragraph count moves by exactly ONE for that reason, and the direction is
+    // the tell: a scope correction that reflows an existing paragraph must not move it.
+    //
+    // RE-MEASURED the same three ways, not incremented:
+    //
+    //   · the splitPurpose rule in Python over `create_app().openapi()`, restricted to
+    //     the 69 operations this array names: total 92,916, paragraphs 194;
+    //   · the same rule over the transcribed array: the same two numbers;
+    //   · internal consistency: raw sum of `d.description.length` = 93,304, minus 2 per
+    //     `\n\n` separator (194 x 2 = 388) = 92,916.
+    //
+    // Both entries were RE-TRANSCRIBED from `create_app().openapi()` by script, never
+    // hand-edited, and `test_contract_description_parity.py` proves the copy matches
+    // the served document.
+    expect(total).toBe(92916);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1786,7 +1840,12 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // above. Re-measured, not incremented — and note that the count moves by exactly
     // five because each is an APPENDED paragraph (one added `\n\n`), not a reflow of
     // an existing one.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(192);
+    // 193 -> 194 (+1): only `GET .../evidence` APPENDED a paragraph (the five block
+    // namespaces, two of which are not confirmations). The scope correction to
+    // `POST .../runs/{run_id}/answers` was written INTO an existing paragraph and
+    // therefore must not move this count — which is why it is asserted separately from
+    // the character total rather than inferred from it.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(194);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

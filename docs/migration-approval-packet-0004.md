@@ -38,8 +38,9 @@
 > **`0004_submissions` and `0003_revisions` are ONE decision, and must be applied together or not at all.**
 > `0004_submissions` declares a foreign key into a table `0003_revisions` creates, so 0003 without
 > 0004 leaves the application unable to record a submission, and 0004 without 0003 cannot be applied
-> at all. `db_migrate` orders them lexicographically, so a single `--apply` does both in the right
-> order. Read both packets before approving either.
+> at all. `db_migrate` orders them lexicographically, so the single bounded command in §9
+> (`--apply --through 0004_submissions`) does both in the right order and stops there. Read both
+> packets before approving either.
 
 ## Authorization basis
 
@@ -264,7 +265,8 @@ Identical to 0003's packet §7. **No agent may apply this.**
 
 ## 8. Prechecks
 
-Run 0003's prechecks 1–3, 4, 5, 7 and 8 unchanged (a single `--apply` does both migrations), plus:
+Run 0003's prechecks 1–3, 3b, 4, 5, 7 and 8 unchanged — the single bounded command in §9 does both
+migrations, so 0003's precheck 3b is this packet's bounded plan too — plus:
 
 ```bash
 # 6b. Confirm neither target table already exists (expect 0).
@@ -275,14 +277,30 @@ psql -Atc "select count(*) from information_schema.tables where table_schema='pu
 ## 9. The exact command
 
 ```bash
-python scripts/db_migrate.py --apply
+python scripts/db_migrate.py --plan --through 0004_submissions
+python scripts/db_migrate.py --apply --through 0004_submissions
 ```
 
-The same single command applies 0003 and then 0004. Expected output, exactly:
+**BOUNDED, and 0003's packet §9 is authoritative** — read it, including both corrections, before
+running either line. The same single bounded command applies 0003 and then 0004 and stops there.
+Expected output, exactly — the plan, then the apply:
 
 ```
-applied: 0003_revisions, 0004_submissions
+pending through 0004_submissions: 0003_revisions, 0004_submissions
+withheld by --through 0004_submissions: 0005_run_projection
 ```
+
+```
+applied through 0004_submissions: 0003_revisions, 0004_submissions
+withheld by --through 0004_submissions: 0005_run_projection
+```
+
+> **CORRECTED 2026-08-25.** This section used to read `python scripts/db_migrate.py --apply` with
+> *"Expected output, exactly: `applied: 0003_revisions, 0004_submissions`"*. That was true when
+> written and became false when `0005_run_projection.sql` was committed — the same defect 0003's
+> packet §9 records, in the same words, one document over. The bound is what makes the quoted output
+> true again. **`0005_run_projection` is NOT owner-approved and must not be applied**; the second
+> line of each block is how you see that it was not.
 
 ## 10. Postchecks — what would prove it worked
 
@@ -317,8 +335,12 @@ psql -Atc "select version, applied_utc from isaac_schema_migrations order by ver
 psql -Atc "select (select count(*) from isaac_submissions),
                   (select count(*) from isaac_submission_runs)"
 
-# 8. Idempotence: a second run applies nothing.
-python scripts/db_migrate.py --apply     # -> nothing to apply (every migration is already recorded)
+# 8. Idempotence: a second run applies nothing. KEEP THE BOUND ON — without it
+#    this postcheck would itself apply 0005_run_projection.
+python scripts/db_migrate.py --apply --through 0004_submissions
+#    EXPECT, exactly two lines:
+#      nothing to apply through 0004_submissions (every migration up to it is already recorded)
+#      withheld by --through 0004_submissions: 0005_run_projection
 
 # 9. The engine build string.
 psql -Atc "select version()"
@@ -373,11 +395,18 @@ connection double**; the `postgres-migration` job proves the SQL and the constra
 `postgres:18`, and **HAS NOW RUN — successfully.** See §12B for the exact run and for the class of
 risk it still does not remove.
 
-**Its constraint coverage is PARTIAL. The WORKFLOW FILE declares cases blaming 41 of 46 as of
-2026-08-19; what a real PostgreSQL has EXECUTED is 27 of 46, unchanged.** ~~"IMPROVED on 2026-08-19
-from 27 to 41 of 46"~~ is struck rather than deleted because it read as a statement about a run: the
-fourteen extra cases are in commit `77de2db`, which is not in `main` and has never run there.
-**An operator should weigh 27.** 0003's packet
+**Its constraint coverage is STILL PARTIAL, but the partial number moved: a real PostgreSQL has now
+EXECUTED cases blaming 41 of 46 on `main`** — run
+[`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199), job
+`97660962127`, at `c153ec9` (2026-08-25). **THE FIGURE HAS CARRIED THREE LAYERS OF CORRECTION AND ALL
+THREE ARE KEPT, because the sequence — 41 (false) → 27 (true) → 41 (true, by a different run) — is
+what shows the number is measured.** (i) ~~"IMPROVED on 2026-08-19 from 27 to 41 of 46"~~ read as a
+statement about a run when the fourteen extra cases sat in commit `77de2db`, which was not then in
+`main`. (ii) ~~"what a real PostgreSQL has EXECUTED is 27 of 46, unchanged"~~ and
+~~"**An operator should weigh 27.**"~~ were the CORRECT reading on 2026-08-24 and are **retired by
+events, not by error**: `77de2db` merged to `main` via `c153ec9` — `git merge-base --is-ancestor
+77de2db origin/main` now exits 0 — and the 41 ran. **An operator should now weigh 41; 27 remains
+exactly right for run `32099627898` at `fe374c0`.** 0003's packet
 §12B carries the re-measurement, including the three constraints of `isaac_submission_runs` that
 CANNOT be blamed individually — the table's own equality CHECKs subsume its shape CHECKs, so no row
 violates exactly one of them. Read that section for the exact accounting.
@@ -385,10 +414,14 @@ violates exactly one of them. Read that section for the exact accounting.
 **The original text is kept below because it records the correction that produced the measurement.**
 0003's packet §12B then said: 46 constraints are
 declared across the two files and CI's step names 27 of them, so 19 are declared and unexercised, 17 of
-them never named in the workflow at all. Four of the unexercised belong to this migration's own tables
-(`isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`, and every id-shape
-CHECK on `isaac_submission_runs`). The list below of what the step DOES exercise is therefore the
-authoritative scope for this migration — read it as an enumeration, not as a sample.
+them never named in the workflow at all. ~~"Four of the unexercised belong to this migration's own
+tables (`isaac_submissions_id_shape`, `_conflict_summary_is_object`, `_trust_basis_known`, and every
+id-shape CHECK on `isaac_submission_runs`)."~~ — **retired 2026-08-25**: the first three, and
+`isaac_submission_runs_id_shape`, are now individually blamed by a real run; what remains unexercised
+from this migration's tables is exactly `isaac_submission_runs_unit_id_shape`, `_record_id_shape` and
+`_run_id_shape`, which are the three that cannot be blamed individually at all. The list below of what
+the step exercised **at `fe374c0`** is therefore a historical enumeration for this migration, not the
+current one — for the current one, read 0003's packet §12B.
 
 Constraints CI's *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* step
 exercises for this migration specifically: the one-submission-per-revision uniqueness, the
@@ -410,12 +443,18 @@ that has been corrected in the same commit. 0003's packet
 §12B carries the full correction, the reasoning, and the reason a test enforcing a stale sentence is
 worse than no test.
 
-In brief: GitHub Actions run
+In brief, and there are now TWO such runs rather than one: GitHub Actions run
 [`32099627898`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32099627898), job
 *"migration and durable repository against a real PostgreSQL"*, **conclusion `success`**, on `main` at
 `fe374c0` — these exact bytes — applied this migration against a `postgres:18` service container,
 exercised every constraint listed in §12A against input each is meant to reject, and proved the
-rollback in the documented `0004, 0003, 0002, 0001` order.
+rollback in the documented `0004, 0003, 0002, 0001` order. Run
+[`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199) (job
+`97660962127`, **conclusion `success`**, on `main` at `c153ec9`, 2026-08-25) did the same over the
+widened constraint step, and is the run that carries the 41. **The SQL bytes did not change between
+them** — the digests in this packet's table are unchanged, and
+`git log --oneline -- apps/api/isaac_api/migrations/0004_submissions.sql` still shows the single
+commit `0896b07`.
 
 **Unchanged, and the reason the operator's act is still separate:** that container is **empty**, with a
 two-row synthetic stand-in for `records`. *"Valid, idempotent SQL whose constraints behave"* is now

@@ -586,11 +586,21 @@ def test_the_packets_do_not_overstate_CI_constraint_coverage():
     # BLAMED, NOT MERELY MENTIONED, and the difference is the whole measurement. A
     # `refuse()` call's third argument is the object PostgreSQL must be shown to
     # blame, and it sits on its own continuation line as a bare quoted name. Counting
-    # names that merely APPEAR anywhere in the workflow gives 29 and overstates the
-    # evidence by two: `isaac_revision_changes_revision_fk` and
-    # `isaac_submissions_experiment_fk` are referenced for other reasons without any
-    # refusal being blamed on them. The first version of this guard made exactly that
-    # mistake, which is a small demonstration of why the packets made the larger one.
+    # names that merely APPEAR anywhere in the workflow gives 43 (re-measured
+    # 2026-08-25; it was 29 when the strict rule gave 27, and the comment was not
+    # updated when the strict rule moved to 41) and overstates the evidence by two:
+    # `isaac_revision_changes_revision_fk` and `isaac_submissions_experiment_fk` are
+    # referenced for other reasons without any refusal being blamed on them. The first
+    # version of this guard made exactly that mistake, which is a small demonstration
+    # of why the packets made the larger one.
+    #
+    # THE LOOSE RULE IS ALSO THE ONE COMMIT `5dc833a`'s MESSAGE PRINTS BESIDE THE
+    # NUMBER, and it does not produce that number. That message states the recipe as
+    # "blamed = that name appearing in `.github/workflows/ci.yml`" and then reports
+    # 41 blamed / 5 unblamed. Applied literally, that recipe gives 43 blamed and 3
+    # unblamed. The NUMBER is right and the RECIPE printed beside it is one this guard
+    # rejects; a commit message cannot be edited, so the corrected wording lives in the
+    # documents and here.
     blamed = {
         m.group(1)
         for m in (re.fullmatch(r'"([a-z0-9_]+)"', line.strip()) for line in workflow_lines)
@@ -632,14 +642,26 @@ def test_the_packets_do_not_overstate_CI_constraint_coverage():
         assert "exercised every constraint these five tables declare" not in doc, packet
 
 
-#: Sentences that credited a real CI RUN with coverage only the workflow FILE declares.
-#: Each may survive ONLY inside a strikethrough that corrects it — the repository's
-#: established remedy, and the one `test_the_packets_do_not_claim_a_hosted_application`
-#: already uses for an expired claim about this same job.
+#: Sentences that must survive ONLY inside a strikethrough that corrects them — the
+#: repository's established remedy, and the one
+#: `test_the_packets_do_not_claim_a_hosted_application` already uses for an expired
+#: claim about this same job.
+#:
+#: THERE ARE NOW TWO GENERATIONS OF RETIRED SENTENCE HERE, AND THEY WERE WRONG IN
+#: OPPOSITE DIRECTIONS. The first group credited a real CI RUN with coverage only the
+#: workflow FILE declared (41 when a run had produced 27). The second group is the
+#: CORRECTION to the first, retired in turn on 2026-08-25 when `77de2db` merged to
+#: `main` via `c153ec9` and run `32800763199` executed the 41. Keeping both means a
+#: reader sees the sequence 41 (false) -> 27 (true) -> 41 (true, by a different run)
+#: rather than only the latest number.
 #:
 #: Written WITHOUT markdown emphasis; the check strips `*` before searching, so a
 #: re-bolded or un-bolded copy cannot slip past.
-RETIRED_COVERAGE_CLAIMS: tuple[str, ...] = (
+
+#: Generation 1 — credited run `32099627898` with the branch file's 41. STILL
+#: FORBIDDEN as a live statement, and forbidden for a reason that did not expire: that
+#: run blamed 27, and no later run changes what an earlier one did.
+_RUN_CREDITED_WITH_FILE_COVERAGE: tuple[str, ...] = (
     # CLAUDE.md §15 — the one the review measured.
     "exercising 41 of the 46 declared constraints (27 when that sentence was written)",
     # CLAUDE.md §11.
@@ -654,34 +676,155 @@ RETIRED_COVERAGE_CLAIMS: tuple[str, ...] = (
     "IMPROVED on 2026-08-19 from 27 to 41 of 46",
 )
 
+#: Generation 2 — the 2026-08-24 correction, which was RIGHT and has been OVERTAKEN BY
+#: EVENTS rather than refuted. Each of these lives in exactly one of the three
+#: documents this repository owns outright (`CLAUDE.md` and the two packets), so the
+#: per-claim control below can require each to be findable without coupling the suite
+#: to the state of the external hand-off package.
+_CORRECTION_RETIRED_BY_THE_C153EC9_RUN: tuple[str, ...] = (
+    # CLAUDE.md §11.
+    "Constraint coverage is 41 of 46 DECLARED IN THE WORKFLOW; 27 of 46 is what a "
+    "real PostgreSQL has actually executed on `main`",
+    # CLAUDE.md §15, the two-number table and the paragraph under it.
+    "Declared in the workflow and NOT YET RUN on `main`",
+    "The fourteen extra constraints arrived in `77de2db` (2026-08-19), which `git "
+    "merge-base --is-ancestor 77de2db origin/main` reports is NOT in `main`",
+    "`fe374c0` could only ever have exercised 27, and 41 is a property of the "
+    "workflow file, not of any run this repository can point to",
+    # CLAUDE.md §15, the readiness table row.
+    "An operator weighing this evidence should read 27, not 41.",
+    # docs/migration-approval-packet-0003.md — §12A and §12B.
+    "YES, for the 27. The other 19 are declared and unexercised",
+    "the WORKFLOW FILE now declares 41 of 46; a real PostgreSQL has run 27",
+    "Run `32099627898`, at `fe374c0`, is the only execution against a real "
+    "PostgreSQL this repository can point to",
+    "An operator weighing this packet's evidence should read 27.",
+    "27 — unchanged",
+    # docs/migration-approval-packet-0004.md — §12A.
+    "what a real PostgreSQL has EXECUTED is 27 of 46, unchanged",
+    "An operator should weigh 27.",
+    "Four of the unexercised belong to this migration's own tables "
+    "(`isaac_submissions_id_shape`, `_conflict_summary_is_object`, "
+    "`_trust_basis_known`, and every id-shape CHECK on `isaac_submission_runs`).",
+)
+
+RETIRED_COVERAGE_CLAIMS: tuple[str, ...] = (
+    _RUN_CREDITED_WITH_FILE_COVERAGE + _CORRECTION_RETIRED_BY_THE_C153EC9_RUN
+)
+
 #: Every document that quotes either figure.
+#:
+#: EXTENDED 2026-08-25. `docs/dean-operator-addendum-2026-08-25.md` was added by the
+#: same PR that introduced these guards, its §1 is ENTIRELY the 41-vs-27 correction,
+#: and it was pinned by no test at all — so the one document most likely to restate
+#: either figure was the one document nothing checked.
 COVERAGE_DOCUMENTS: tuple[str, ...] = (
     "CLAUDE.md",
     "docs/dean-handoff-consolidated-2026-08-18.md",
+    "docs/dean-operator-addendum-2026-08-25.md",
     "docs/migration-approval-packet-0003.md",
     "docs/migration-approval-packet-0004.md",
 )
 
+#: The three documents this repository owns outright — as opposed to the two UNSENT
+#: EXTERNAL PACKAGES, which are maintained as prose for a reader outside the project.
+OWNED_COVERAGE_DOCUMENTS: tuple[str, ...] = (
+    "CLAUDE.md",
+    "docs/migration-approval-packet-0003.md",
+    "docs/migration-approval-packet-0004.md",
+)
+
+#: The two external packages. Both are Dean's to read, and BOTH are checked: the same
+#: false sentence appended to either used to pass, including in the file this module's
+#: own docstring calls the place the claim "mattered most".
+EXTERNAL_COVERAGE_PACKAGES: tuple[str, ...] = (
+    "docs/dean-handoff-consolidated-2026-08-18.md",
+    "docs/dean-operator-addendum-2026-08-25.md",
+)
+
+
+def _flatten_markdown(raw: str) -> str:
+    """Blockquote markers stripped, emphasis stripped, whitespace collapsed.
+
+    So a line wrap, a bold marker, or a ``>`` continuation inside a sentence cannot
+    hide it. The ``>`` rule was added after a corrected sentence in packet 0003
+    wrapped mid-phrase and the search missed it.
+    """
+    import re
+
+    return re.sub(
+        r"\s+", " ", re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw).replace("*", "")
+    )
+
+
+def _strike_spans(text: str) -> list[tuple[int, int]]:
+    """Character spans covered by a ``~~ ... ~~`` strikethrough.
+
+    Markers are paired in order, so a claim is "inside a strikethrough" no matter how
+    far back the strike OPENED. The previous check looked only 12 characters behind the
+    claim, which rejected a sentence genuinely inside a long strikethrough — loudly
+    rather than silently, but it would still mislead a triager after an innocent
+    reflow. Every document in :data:`COVERAGE_DOCUMENTS` was measured to hold an even
+    number of markers, so pairing in order is well defined for them; an odd count would
+    make the LAST marker unpaired and simply leave it out of every span, which fails
+    towards demanding a strike rather than inventing one.
+    """
+    import re
+
+    marks = [m.start() for m in re.finditer(r"~~", text)]
+    return list(zip(marks[0::2], [m + 2 for m in marks[1::2]]))
+
 
 def test_no_document_credits_a_real_RUN_with_the_branch_file_s_coverage():
-    """41 IS A PROPERTY OF THE WORKFLOW FILE; 27 IS WHAT A REAL POSTGRESQL HAS RUN.
+    """EVERY NUMBER HERE BELONGS TO A NAMED RUN, AND THE SEQUENCE IS KEPT LEGIBLE.
 
-    THE DEFECT THIS CLOSES, measured by an independent review and re-derived by the
-    test below. `CLAUDE.md` said the `postgres-migration` job *"has since run and
-    passed on `main` at `fe374c0` (Actions run `32099627898`) ... exercising 41 of the
-    46 declared constraints"*. It cannot have::
+    THE ORIGINAL DEFECT, measured by an independent review. `CLAUDE.md` said the
+    `postgres-migration` job *"has since run and passed on `main` at `fe374c0` (Actions
+    run `32099627898`) ... exercising 41 of the 46 declared constraints"*. It cannot
+    have::
 
         git show fe374c0:.github/workflows/ci.yml   ->  27 declared names blamed
-        git show HEAD:.github/workflows/ci.yml      ->  41
 
-    The fourteen extra cases arrived in `77de2db` (2026-08-19), which is NOT in `main`
-    — `git merge-base --is-ancestor 77de2db origin/main` reports so — and whose own
-    commit message says *"CI is the first execution."*
+    The fourteen extra cases arrived in `77de2db` (2026-08-19), which was NOT in `main`
+    at the time, and whose own commit message says *"CI is the first execution."*
+
+    WHAT CHANGED ON 2026-08-25, AND WHY THIS GUARD GREW A SECOND GENERATION RATHER
+    THAN LOSING ITS FIRST. `77de2db` merged to `main` via `c153ec9` (PR #171), and
+    Actions run `32800763199` — job `97660962127`, step *"Prove every 0003 and 0004
+    constraint rejects what it claims to reject"*, conclusion `success` — executed the
+    41 against a real `postgres:18`. Confirmed twice over, from the workflow file and
+    from the run's own output: the step prints one ``refused as designed by <object>``
+    line per case, and intersecting the 58 distinct objects those 67 OUTPUT lines name
+    with the 46 constraints declared in `0003`+`0004` gives exactly 41::
+
+        git merge-base --is-ancestor 77de2db origin/main   ->  now exits 0
+        git show fe374c0:.github/workflows/ci.yml          ->  27
+        .github/workflows/ci.yml (== origin/main)          ->  41
+
+    THE TWO SUPPORTING FIGURES IN THAT SENTENCE WERE RE-MEASURED 2026-08-25 AND BOTH
+    WERE WRONG. It said "the 57 distinct objects those 70 lines name". 70 is every line
+    containing the phrase, three of which are Actions echoing the ``run:`` block's own
+    shell source (``echo "refused as designed by $3: $1"``), so the OUTPUT count is 67.
+    And 57 reproduces under no counting at all: a truncating regex (``[A-Za-z0-9_.]*``)
+    collapsed the three ``column "…"`` objects into one and captured the EMPTY STRING
+    from each echoed line, so an empty string was counted as a blamed object
+    (53 + 4 = 57). The figure is 58. `41` is untouched by either error — it is an
+    intersection with the declared set — and 41 is the only one of the three this test
+    asserts. `docs/dean-operator-addendum-2026-08-25.md` already carried 67 correctly,
+    which is how the discrepancy surfaced.
+
+    So the number went 41 (false) -> 27 (true) -> 41 (true, by a DIFFERENT run), and
+    both corrections are pinned. `_RUN_CREDITED_WITH_FILE_COVERAGE` stays forbidden
+    forever: crediting run `32099627898` with 41 is false no matter what a later run
+    did, because a run's coverage is a property of the run.
+    `_CORRECTION_RETIRED_BY_THE_C153EC9_RUN` is forbidden as a LIVE statement while
+    remaining required as a visible correction — a figure overtaken by a later
+    measurement is not a figure that was wrong, and a reader must be able to see that.
 
     IT MATTERED MOST WHERE IT WAS REPEATED. `docs/dean-handoff-consolidated-2026-08-18
     .md` is an UNSENT EXTERNAL PACKAGE and the operator's evidence basis for applying
-    `0003`/`0004` to the hosted database. Inflating that evidence inflates the basis of
-    a decision an agent may not make and cannot undo.
+    `0003`/`0004` to the hosted database. Mis-stating that evidence in either direction
+    distorts the basis of a decision an agent may not make and cannot undo.
 
     THE RULE IS THE REPOSITORY'S OWN REMEDY RATHER THAN A PROSE JUDGEMENT: "does this
     paragraph imply a run" is not decidable mechanically, so each retired sentence is
@@ -689,28 +832,131 @@ def test_no_document_credits_a_real_RUN_with_the_branch_file_s_coverage():
     correction fails here; one that rewords a sentence entirely does not, which is
     correct — the pinned numbers are guarded by the test below.
     """
-    import re
+    # THE TUPLES ARE PINNED BY LENGTH FIRST, and this is not decoration. Emptying
+    # either tuple to `()` used to leave every assertion in this file passing: the only
+    # length reference compared a tuple against itself, so the counts were pinned
+    # nowhere and a slice could delete the whole ban and stay green.
+    assert len(_RUN_CREDITED_WITH_FILE_COVERAGE) == 7, (
+        "the generation-1 ban has changed size. Those seven sentences credited run "
+        "32099627898 with the workflow FILE's coverage and are forbidden PERMANENTLY; "
+        "shrinking the tuple is how the ban gets removed without anyone deciding to "
+        "remove it."
+    )
+    assert len(_CORRECTION_RETIRED_BY_THE_C153EC9_RUN) == 13, (
+        "the generation-2 ban has changed size. Those thirteen sentences are the "
+        "2026-08-24 correction, retired by the c153ec9 run and required to survive as "
+        "visible strikethroughs."
+    )
+    # AND THE DOCUMENT SET IS PINNED THE SAME WAY. Both external packages must be in
+    # scope: the ban used to cover three documents, and the same false line appended to
+    # either package Dean actually reads would have passed.
+    assert set(EXTERNAL_COVERAGE_PACKAGES) <= set(COVERAGE_DOCUMENTS), (
+        "an external package has been dropped from the scanned set. Those two files are "
+        "the ones sent OUT of the project; exempting them is exactly backwards."
+    )
+    assert set(OWNED_COVERAGE_DOCUMENTS) | set(EXTERNAL_COVERAGE_PACKAGES) == set(
+        COVERAGE_DOCUMENTS
+    ), "COVERAGE_DOCUMENTS no longer equals owned + external; one list has drifted."
 
     root = Path(sstore.__file__).resolve().parents[3]
     for relative in COVERAGE_DOCUMENTS:
         raw = (root / relative).read_text(encoding="utf-8")
-        # Emphasis removed, blockquote markers removed, whitespace collapsed — so a
-        # line wrap, a bold marker, or a `>` continuation inside the sentence cannot
-        # hide it. The `>` rule was added after a corrected sentence in packet 0003
-        # wrapped mid-phrase and the search missed it, which is the same near-miss
-        # this whole family of guards keeps having.
-        flat = re.sub(r"\s+", " ", re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw).replace("*", ""))
+        flat = _flatten_markdown(raw)
+        spans = _strike_spans(flat)
         for claim in RETIRED_COVERAGE_CLAIMS:
             index = flat.find(claim)
             while index != -1:
-                window = flat[max(0, index - 12) : index]
-                assert "~~" in window, (
+                # INSIDE a strikethrough, however far back it opened. THE OLD TEST
+                # WAS "a `~~` occurs within 12 characters before the claim", and it
+                # was wrong in BOTH directions, which is why it is replaced rather
+                # than widened. Too strict: a claim genuinely inside a long
+                # strikethrough was rejected, loudly, after nothing worse than a
+                # reflow. Too loose, and this one was live — in packet 0004 the
+                # sentence reads `~~"…unchanged"~~ and ~~"An operator should weigh
+                # 27."~~`, so DELETING the second pair still left the FIRST pair's
+                # CLOSING marker inside the 12-character window and the un-struck
+                # claim passed. Measured by mutation, not reasoned about. Span
+                # membership has neither failure: it is exactly the question being
+                # asked. Verified span-only over all five documents: 0 failures.
+                struck = any(start <= index < end for start, end in spans)
+                assert struck, (
                     f"{relative} asserts a retired coverage claim as its own statement "
-                    f"rather than striking it: {claim!r}. 41 is what the workflow FILE "
-                    "declares on this branch; 27 is what run 32099627898 executed on "
-                    "`main` at fe374c0."
+                    f"rather than striking it: {claim!r}. Each number belongs to a "
+                    "named run: run 32099627898 (at fe374c0) blamed 27, and run "
+                    "32800763199 (at c153ec9) blamed 41. Neither figure may be "
+                    "restated as a live claim about the other run, and neither "
+                    "correction may be deleted."
                 )
                 index = flat.find(claim, index + 1)
+
+    # AND THE ATTRIBUTION THAT CAN NEVER BECOME TRUE, CHECKED STRUCTURALLY RATHER THAN
+    # BY SENTENCE. Run 32099627898 blamed 27. A later run blaming 41 does not
+    # retroactively widen it.
+    #
+    # REBUILT 2026-08-25, because the first version was the repository's own recorded
+    # `git grep -E '\b'` trap inverted: a plain substring test on a line. WHAT IT USED
+    # TO DO WRONG, each measured rather than imagined:
+    #
+    #   * `"41" in line` matched `414`, `0.41`, `9b41ac2`, `ci.yml:41`, `2041` and
+    #     `runs/32800763141` — so it would have refused legitimate future sentences.
+    #   * `"~~" in line` accepted ANY strikethrough on the line, including one on an
+    #     unrelated clause, so the escape hatch was wider than the ban.
+    #
+    # WHAT IT NOW DOES, and this list is also the list of what it CANNOT catch:
+    #
+    #   * the run id is matched as a whole token, in the raw line;
+    #   * `41` is matched as a standalone number in the line's PROSE, with inline code
+    #     spans and URLs blanked first — which is what removes `ci.yml:41`, `9b41ac2`
+    #     and `runs/32800763141`, while leaving "41 of 46" fully visible;
+    #   * the line passes only if a strikethrough SPAN actually covers the run id or
+    #     one of the `41` occurrences (a correction quoting the old error), or if the
+    #     line also names run `32800763199` — which is exactly the shape of a sentence
+    #     that keeps the two runs apart, and is why the two live lines that pair them
+    #     legitimately are allowed rather than special-cased.
+    #
+    # LIMITS, STATED RATHER THAN IMPLIED. This is LINE-SCOPED, so a claim split across
+    # two lines is not caught here — `CLAUDE.md` wraps at ~100 columns and three live
+    # cross-line pairings already exist. That is deliberate: proximity over the
+    # flattened text was measured and produced false positives on seven correct
+    # sentences, because a document that discusses both runs necessarily puts both
+    # numbers near each other. The SENTENCE-LEVEL scan above is the real coverage for
+    # wrapped prose — it flattens whitespace precisely so a line break cannot hide a
+    # banned claim — and this check is the backstop for a NEW sentence nobody has
+    # written yet. And a claim phrased with the number inside backticks
+    # (`run 32099627898 blamed \`41\` of 46`) is invisible to it by construction.
+    #
+    # ALL FIVE DOCUMENTS, not three. The two external packages were previously exempt
+    # "because they are maintained separately", which is exactly backwards: they are
+    # the ones Dean reads.
+    ban_run = re.compile(r"(?<![\w])32099627898(?![\w])")
+    ok_run = re.compile(r"(?<![\w])32800763199(?![\w])")
+    bare_41 = re.compile(r"(?<![\w.])41(?![\w.])")
+    code_or_url = re.compile(r"`[^`]*`|https?://\S+")
+    for relative in COVERAGE_DOCUMENTS:
+        for lineno, line in enumerate(
+            (root / relative).read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if not ban_run.search(line):
+                continue
+            prose = code_or_url.sub(lambda m: " " * len(m.group(0)), line)
+            positions = [m.start() for m in bare_41.finditer(prose)]
+            if not positions:
+                continue
+            spans_here = _strike_spans(line)
+            covered = any(
+                start <= at < end
+                for at in positions + [m.start() for m in ban_run.finditer(line)]
+                for start, end in spans_here
+            )
+            if covered or ok_run.search(line):
+                continue
+            raise AssertionError(
+                f"{relative}:{lineno} names run 32099627898 and the standalone number "
+                f"41 in one line, with neither inside a strikethrough nor run "
+                f"32800763199 named to keep them apart: {line.strip()[:160]!r}. That "
+                "run blamed 27 of the 46 declared constraints; 41 belongs to run "
+                "32800763199 at c153ec9."
+            )
 
 
 def test_the_retired_coverage_claims_are_actually_still_findable():
@@ -721,20 +967,50 @@ def test_the_retired_coverage_claims_are_actually_still_findable():
     one that never existed — the failure mode CLAUDE.md's own convention exists to
     prevent. So at least one retired claim must still be PRESENT somewhere, struck.
     """
-    import re
-
     root = Path(sstore.__file__).resolve().parents[3]
     found = 0
     for relative in COVERAGE_DOCUMENTS:
-        raw = (root / relative).read_text(encoding="utf-8")
-        flat = re.sub(
-            r"\s+", " ", re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw).replace("*", "")
-        )
+        flat = _flatten_markdown((root / relative).read_text(encoding="utf-8"))
         found += sum(1 for claim in RETIRED_COVERAGE_CLAIMS if claim in flat)
     assert found >= len(RETIRED_COVERAGE_CLAIMS), (
         f"only {found} of {len(RETIRED_COVERAGE_CLAIMS)} retired coverage claims are "
         "still visible as corrections. A struck sentence that is deleted leaves a "
         "reader unable to tell a corrected claim from one that never drifted."
+    )
+
+    # PER-CLAIM FOR GENERATION 1 TOO, ADDED 2026-08-25. The aggregate above tolerates
+    # one claim appearing twice while another vanishes, and the per-claim control that
+    # already existed covered only generation 2 — so the seven sentences that are
+    # forbidden PERMANENTLY were the ones whose deletion nothing detected. Generation 1
+    # is scanned across ALL FIVE documents, because its members are spread over the
+    # owned files and both external packages.
+    everywhere = "\n".join(
+        _flatten_markdown((root / relative).read_text(encoding="utf-8"))
+        for relative in COVERAGE_DOCUMENTS
+    )
+    gone = [c for c in _RUN_CREDITED_WITH_FILE_COVERAGE if c not in everywhere]
+    assert not gone, (
+        f"{len(gone)} of the {len(_RUN_CREDITED_WITH_FILE_COVERAGE)} permanently "
+        "forbidden sentences have been deleted rather than kept struck, so the ban now "
+        f"guards text no document contains: {gone!r}"
+    )
+
+    # PER-CLAIM, FOR THE 2026-08-25 GENERATION. The aggregate count above can be
+    # satisfied by one claim appearing twice while another vanishes. Every sentence in
+    # `_CORRECTION_RETIRED_BY_THE_C153EC9_RUN` was placed by this repository in one of
+    # the three documents it owns outright, so each can be required individually
+    # without coupling the suite to the state of the external hand-off package. This is
+    # the control that makes the "41 (false) -> 27 (true) -> 41 (true)" sequence
+    # something a reader can actually see rather than something a docstring asserts.
+    blob = "\n".join(
+        _flatten_markdown((root / relative).read_text(encoding="utf-8"))
+        for relative in OWNED_COVERAGE_DOCUMENTS
+    )
+    missing = [c for c in _CORRECTION_RETIRED_BY_THE_C153EC9_RUN if c not in blob]
+    assert not missing, (
+        f"{len(missing)} of the {len(_CORRECTION_RETIRED_BY_THE_C153EC9_RUN)} sentences "
+        "retired on 2026-08-25 have been deleted rather than struck in place, so the "
+        f"correction history is no longer legible: {missing!r}"
     )
 
 
@@ -748,6 +1024,24 @@ def test_the_two_constraint_numbers_are_each_still_the_measured_ones():
 
     `fe374c0` is read out of git rather than out of the working tree, because the claim
     being guarded is about a commit that has already run.
+
+    EXTENDED 2026-08-25, and the extension is the interesting part. Until `77de2db`
+    reached `main`, 41 was a property of a BRANCH FILE and the documents had to say so.
+    It is now a property of a run — `32800763199`, at `c153ec9` — and the three facts
+    that make that sentence honest are each derivable OFFLINE from a FULL CLONE, which
+    is why they are asserted here instead of being taken on trust from a CI URL — and
+    each degrades to an explicit skip in a shallow one, which CI's is:
+
+    * the fourteen extra cases are in `main` (`git merge-base --is-ancestor`);
+    * the workflow this tree measures is byte-identical to `main`'s, so "41 on `main`"
+      and "41 here" are the same claim rather than two hopeful ones;
+    * `fe374c0` still measures 27, so the earlier correction reads as overtaken rather
+      than as an error.
+
+    What this test deliberately does NOT do is contact GitHub. The run id, job id and
+    conclusion are recorded in the documents and were verified once, by hand, against
+    the job's own ``refused as designed by <object>`` output; a test that needed the
+    network to pass would be a test that fails for reasons unrelated to the claim.
     """
     import re
     import subprocess
@@ -768,6 +1062,35 @@ def test_the_two_constraint_numbers_are_each_still_the_measured_ones():
             if m is not None and m.group(1) in declared
         }
 
+    # THE ONE ASSERTION THAT RUNS EVERYWHERE COMES FIRST, AND THE ORDER IS THE FIX.
+    # Every other assertion in this test needs git history, and CI has none (see the
+    # note below). Because the `fe374c0` read used to come first, a shallow checkout
+    # skipped the whole test — so in CI this test asserted NOTHING, and the 41 was
+    # enforced only by its sibling
+    # `test_the_packets_do_not_overstate_CI_constraint_coverage`. It is now enforced
+    # here too, before anything can skip.
+    current = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert len(blamed(current.splitlines())) == 41, (
+        "the number of declared constraints the workflow blames today is no longer 41."
+    )
+
+    # WHAT FOLLOWS IS NOT ENFORCED IN CI, AND SAYING SO IS THE POINT. Every
+    # `actions/checkout@v5` in `.github/workflows/ci.yml` runs at the default
+    # `fetch-depth: 1` — the file sets `fetch-depth` nowhere — so the `fe374c0` blob,
+    # the `77de2db` object and the `origin/main` remote-tracking ref do not exist in a
+    # CI checkout and each assertion below degrades to a SKIP there. A skip is not a
+    # pass, and `CLAUDE.md` no longer says these numbers are "guarded so neither can
+    # move": 41 is enforced everywhere, 27 and the byte-identity are enforced in a full
+    # clone (a developer machine, or any run of the full suite locally) and reported as
+    # skipped in CI. Deepening the checkout would arm them, and is deliberately NOT
+    # done in this change: `.github/workflows/ci.yml` is one of the 200 entries in the
+    # committed served-content manifest, so editing it drifts
+    # `apps/api/isaac_api/data/memory-snapshot.json`, and whether the deepened checkout
+    # actually arms the assertion is only observable by running CI.
+    _shallow = (
+        "not enforced here: this needs git history that a `fetch-depth: 1` CI "
+        "checkout does not have. Enforced in a full clone. Detail: "
+    )
     try:
         historic = subprocess.run(
             ["git", "show", "fe374c0:.github/workflows/ci.yml"],
@@ -777,17 +1100,83 @@ def test_the_two_constraint_numbers_are_each_still_the_measured_ones():
             check=True,
         ).stdout
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        pytest.skip(f"fe374c0 is not readable from this checkout: {exc}")
+        pytest.skip(f"{_shallow}fe374c0 is not readable from this checkout: {exc}")
 
     assert len(blamed(historic.splitlines())) == 27, (
         "the number of declared constraints CI blamed at `fe374c0` is no longer 27. "
         "That is the figure an operator acts on, and it is quoted in CLAUDE.md, the "
         "Dean handoff and both approval packets."
     )
-    current = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert len(blamed(current.splitlines())) == 41, (
-        "the number of declared constraints the workflow blames today is no longer 41."
+
+    # 41 IS NOW A CLAIM ABOUT A RUN, NOT ABOUT A BRANCH FILE — and these are the two
+    # offline facts that entitle the documents to say so.
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, text=True
+        )
+
+    ancestry = _git("merge-base", "--is-ancestor", "77de2db", "origin/main")
+    if ancestry.returncode not in (0, 1):
+        pytest.skip(
+            f"{_shallow}77de2db/origin/main not resolvable here: {ancestry.stderr!r}"
+        )
+    assert ancestry.returncode == 0, (
+        "`git merge-base --is-ancestor 77de2db origin/main` no longer holds, so the "
+        "fourteen widened constraint cases are not in `main` and every document "
+        "claiming 41 has been EXECUTED there is overstating its evidence again. This "
+        "is the exact defect the 2026-08-24 correction fixed; do not re-open it by "
+        "rewriting history under this branch."
     )
+
+    on_main = _git("show", "origin/main:.github/workflows/ci.yml")
+    if on_main.returncode != 0:
+        pytest.skip(
+            f"{_shallow}origin/main workflow not readable here: {on_main.stderr!r}"
+        )
+    # NARROWED 2026-08-25, and the original form is kept in the comment because the
+    # narrowing is a real weakening that a reader must be able to see.
+    #
+    # THIS USED TO BE `assert on_main.stdout == current`. That is the strongest form
+    # and it still runs, unchanged, whenever the two files match. But byte-identity
+    # to `origin/main` is not a property a BRANCH can have while it is editing the
+    # workflow, and editing the workflow is a normal thing for a branch to do — the
+    # `--through` slice added a `postgres-migration` step and this assertion failed
+    # for that reason alone, with a message telling the author to re-state documents
+    # whose claim their change had not touched. An assertion that fires on every
+    # legitimate edit stops being read as evidence and starts being read as an
+    # obstacle, which is how a real drift eventually gets waved through.
+    #
+    # WHAT THE 41 CLAIM ACTUALLY NEEDS, stated narrowly: that this tree blames the
+    # same declared constraints as `main`, and that the STEP whose execution the
+    # documents cite is byte-identical. Both are asserted below. What is NO LONGER
+    # asserted, and is the honest cost: an unrelated change elsewhere in the job —
+    # a different service-container image, say — could move the engine the proof
+    # runs against without failing here. `postgres:18` is pinned in the workflow
+    # and read by other tests; it is not re-read here.
+    if on_main.stdout != current:
+        assert blamed(on_main.stdout.splitlines()) == blamed(current.splitlines()), (
+            "this tree blames a different set of declared constraints than "
+            "`origin/main` does, so 41 is once again a property of a branch file "
+            "rather than of run 32800763199. Either re-measure and re-state the "
+            "documents with their new vantage point, or do not claim the number has "
+            "been executed on `main`."
+        )
+        import yaml
+
+        proof_step = "Prove every 0003 and 0004 constraint rejects what it claims to reject"
+
+        def _the_proof_step(text: str):
+            job = yaml.safe_load(text)["jobs"]["postgres-migration"]["steps"]
+            found = [s for s in job if s.get("name") == proof_step]
+            assert len(found) == 1, f"{proof_step!r} is not a single step any more"
+            return found[0]
+
+        assert _the_proof_step(on_main.stdout) == _the_proof_step(current), (
+            f"this tree's {proof_step!r} step differs from `origin/main`'s. That step "
+            "IS the 41-constraint proof the documents cite by run, job and step "
+            "number, so a change to it means the cited run did not execute what this "
+            "tree contains. Re-measure and re-state the documents."
+        )
 
 
 # =============================================================================

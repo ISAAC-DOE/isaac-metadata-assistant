@@ -109,8 +109,29 @@ Two, and they **do not nest**.
 
 | Scope | Grants |
 |---|---|
-| `isaac:read` | the six read tools |
-| `isaac:draft.write` | *in addition to* `isaac:read`, the two draft-write tools |
+| `isaac:read` | the **seven** read tools — ~~six~~ |
+| `isaac:draft.write` | *in addition to* `isaac:read`, the **three** draft-write tools (`isaac_create_run`, `isaac_update_draft`, `isaac_answer_questions`) — ~~two~~ |
+
+> **COUNTS CORRECTED 2026-08-25**, and struck rather than edited because this table was
+> otherwise the ONE place that got the scope semantics right. Re-derived:
+>
+> ```
+> PYTHONPATH=apps/api:src python -c "import isaac_api.mcp.tools as t; \
+>   o=t._tools(); r=[x for x in o if x.scope.name=='READ']; \
+>   print(len(o), len(r), len(o)-len(r))"
+> -> 10 7 3
+> ```
+>
+> `isaac_answer_questions` is the write the old "two" omitted — the one that CLOSES a
+> blocking question, and therefore the one a reader most needs counted. The same omission
+> is recorded in `mcp/tools.py`'s module docstring, which is why that file now states the
+> PROPERTY and lets `policy.PERMITTED_TOOL_NAMES` be the enumeration.
+>
+> **The semantics in this table were never wrong, and that is the finding worth keeping.**
+> *"in addition to `isaac:read`"* and (below) *"a grant with no usable tool at all"* are
+> exactly right — while `Settings -> Connect Your Agent` told a scientist the opposite until
+> it was corrected in this same change. **The truthful copy existed in the docs and never
+> reached the UI.**
 
 `isaac_create_run` and `isaac_update_draft` require **both**, because both return the
 record state they produced. So `ISAAC_MCP_LOCAL_SCOPES=isaac:draft.write` alone is a

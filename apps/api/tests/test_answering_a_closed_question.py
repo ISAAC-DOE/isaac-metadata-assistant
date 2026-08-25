@@ -338,9 +338,35 @@ def test_a_bare_descriptor_label_is_not_refused_and_names_no_edit_route(client):
     assert refused.json()["error"] == "unrecognized_field"
 
 
-def test_an_unrecognised_key_is_still_ignored_rather_than_refused(client):
+def test_a_body_that_names_ONLY_an_unrecognised_key_is_now_refused(client):
+    """INVERTED 2026-08-25. ~~`test_an_unrecognised_key_is_still_ignored_rather_than_refused`~~
+
+    It was a true statement about a silent drop, and the drop is what made a mistyped key
+    indistinguishable from an accepted one: the resulting `200` explained itself as *"the
+    submitted value was identical"* about a key the record had never held. `/answers` now
+    adopts the rule `/edit` already had — a body that names nothing it can act on is
+    `422 unrecognized_field` rather than a no-op.
+
+    A RIDE-ALONG unrecognised key beside a recognised one is STILL dropped, on both
+    operations, and the test below is its negative control. Refusing every unrecognised
+    key was implemented, measured and rejected; the argument is in
+    `routes._refuse_a_body_that_names_nothing_answerable`.
+    """
     exp_id = _record_with_answers(client)
-    assert _answer(client, exp_id, {"totally_made_up_field": "x"}).status_code == 200
+    refused = _answer(client, exp_id, {"totally_made_up_field": "x"})
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"] == "unrecognized_field", refused.json()
+    assert refused.json()["keys"] == ["totally_made_up_field"], refused.json()
+
+
+def test_a_ride_along_unrecognised_key_is_still_dropped_but_claims_nothing(client):
+    """NEGATIVE CONTROL for the refusal above not being widened past its argument."""
+    exp_id = _record_with_answers(client)
+    landed = _answer(
+        client, exp_id, {"totally_made_up_field": "x", "descriptor_label": "relabel"}
+    )
+    assert landed.status_code == 200, landed.text
+    assert "identical" not in landed.json()["invalidation"]["reason"], landed.json()
 
 
 def test_a_run_level_key_on_a_record_with_runs_still_gets_the_run_level_refusal(client):
@@ -434,21 +460,30 @@ def test_the_refusal_is_declared_in_the_published_contract(client):
 # --- known limit, asserted rather than left unsaid ----------------------------
 
 
-def test_an_unusable_value_on_a_closed_question_is_a_documented_known_limit(client):
-    """NOT FIXED BY THIS SLICE, and pinned so it cannot be mistaken for fixed.
+def test_an_unusable_value_on_a_closed_question_is_now_refused_too(client):
+    """INVERTED 2026-08-25 — this test named its own expiry and the slice arrived.
 
+    ~~NOT FIXED BY THIS SLICE, and pinned so it cannot be mistaken for fixed.
     `apply_corrections` declines a value it cannot store, so the probe sees no change
-    and the request proceeds to the old `200`. This is the route's unusable-value
-    doctrine (`_correction_is_storable` / `invalid_field_value`), a different rule at a
-    different layer; adopting it here would also change what an unusable answer to an
-    OPEN question does, where the returned `pending` list already tells the caller the
-    answer did not land.
+    and the request proceeds to the old `200`. … If a later slice closes it, THIS TEST
+    SHOULD GO RED and be inverted — which is this repository's established remedy for a
+    test that pins a defect.~~
 
-    If a later slice closes it, THIS TEST SHOULD GO RED and be inverted — which is this
-    repository's established remedy for a test that pins a defect.
+    That is exactly what happened. The reasoning for leaving it open was that *"the
+    returned `pending` list already tells the caller the answer did not land"* — true of
+    an OPEN question and true of the list, and false of the sentence beside it: the same
+    response's `invalidation.reason` said the submitted value was identical. An
+    independent MCP verification followed that pair into a closed loop.
+
+    The old assertions are kept below the new ones, as facts rather than as the
+    contract: nothing was written and the stored verdict is untouched, which is what the
+    `200` got right and the `422` still gets right.
     """
     exp_id = _record_with_answers(client)
-    absorbed = _answer(client, exp_id, {"qc": {"status": "not-an-enum-value"}})
-    assert absorbed.status_code == 200, absorbed.text
-    assert absorbed.json()["invalidation"]["changed"] is False
+    refused = _answer(client, exp_id, {"qc": {"status": "not-an-enum-value"}})
+    assert refused.status_code == 422, refused.text
+    body = refused.json()
+    assert body["error"] == "invalid_field_value", body
+    assert body["keys"] == ["qc"], body
+    assert "identical" not in body["message"], body["message"]
     assert ws.load_experiment(exp_id).draft["qc"]["status"] == "valid"

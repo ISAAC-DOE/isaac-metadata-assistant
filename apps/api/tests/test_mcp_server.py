@@ -735,6 +735,115 @@ def test_answering_a_run_owned_question_on_the_record_surfaces_the_refusal_intac
     assert "series" in {q["id"] for q in questions(writer, PARTIAL_ID)}
 
 
+#: Values the record cannot store at their key. Every one of these was measured, over
+#: MCP, coming back as a `200` whose `invalidation.reason` said *"the submitted value was
+#: identical; nothing was invalidated"* — about a value that had never been stored.
+#:
+#: `SPECTRUM` above is a list of dicts, so EVERY existing `series` test in this file
+#: travels the ACCEPTING branch and no MCP test ever sent a value the guard rejects.
+#: That is why the defect was invisible here.
+UNSTORABLE_ANSWERS = [
+    pytest.param({"qc": "valid"}, "qc", id="qc=bare-verdict-string"),
+    pytest.param({"qc": {"verdict": "valid"}}, "qc", id="qc=wrong-key"),
+    pytest.param({"qc": {"status": "ok"}}, "qc", id="qc=off-enum"),
+    pytest.param({"series": []}, "series", id="series=empty"),
+    pytest.param({"series": [[8979.0, 0.11]]}, "series", id="series=list-of-pairs"),
+    pytest.param({"descriptor": "e0 = 8979 eV"}, "descriptor", id="descriptor=string"),
+]
+
+
+@pytest.mark.parametrize("answers,key", UNSTORABLE_ANSWERS)
+def test_a_value_the_record_cannot_store_reaches_the_agent_as_a_REFUSAL(writer, answers, key):
+    """THE DEFECT AN END-TO-END VERIFICATION OF THIS SURFACE FOUND.
+
+    It was a `200` with `changed: false` and *"the submitted value was identical"*, and a
+    compliant agent that reads that as "already stored" follows the tool's own documented
+    remedy — `correcting: true` — into `422 not_yet_answered` pointing back at this same
+    call. A closed loop in which no message said the value's SHAPE was rejected.
+
+    The refusal is now the product, exactly as it is for `belongs_to_a_run`: this layer
+    passes it through and the agent can act on it.
+    """
+    before = {q["id"] for q in questions(writer, PARTIAL_ID)}
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers=answers,
+    )
+    assert result["isError"] is True, result["structuredContent"]
+    refusal = result["structuredContent"]
+    assert refusal["status"] == 422, refusal
+    body = refusal["data"]
+    assert body["error"] == "invalid_field_value", body
+    assert body["keys"] == [key], body
+    assert "identical" not in body["message"], body["message"]
+    # NOTHING WRITTEN, read from the RECORD rather than from the refusal, which
+    # deliberately carries no question list. The whole set is compared rather than one
+    # key's membership: `PARTIAL_ID` raises `series` and `descriptor` only, so a `qc`
+    # refusal has no `qc` question to still be open, and asserting the set is unchanged
+    # is the stronger claim in both cases.
+    assert {q["id"] for q in questions(writer, PARTIAL_ID)} == before
+
+
+def test_a_mistyped_key_reaches_the_agent_as_a_REFUSAL_naming_it(writer):
+    """The other half of the same closed loop, and the more ordinary mistake.
+
+    `answers` is declared `{"type": "object", "minProperties": 1}` with no inner
+    properties — it CANNOT declare them, because an asset key is the asset's own URI — so
+    argument validation cannot catch a mistyped key and the route has to. It used to drop
+    it and explain the no-op as an identical value.
+    """
+    result = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"sample.material.nmae": "Fe2O3"},
+    )
+    assert result["isError"] is True, result["structuredContent"]
+    refusal = result["structuredContent"]
+    assert refusal["status"] == 422, refusal
+    body = refusal["data"]
+    assert body["error"] == "unrecognized_field", body
+    assert body["keys"] == ["sample.material.nmae"], body
+    assert "identical" not in body["message"], body["message"]
+
+
+def test_an_identical_resubmission_over_MCP_is_still_a_SUCCESS(writer):
+    """NEGATIVE CONTROL. `isaac_answer_questions` declares `idempotentHint: true`.
+
+    A retry of a call an agent is unsure landed must stay safe, and the tool's own
+    description promises it. The two refusals above must not have made a repeat call an
+    error.
+    """
+    first = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )["data"]
+    settled = first["rev"]
+
+    again = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=PARTIAL_ID,
+        if_match=etag_of(writer, PARTIAL_ID),
+        confirmed_by_user=True,
+        answers={"series": SPECTRUM},
+    )["data"]
+    assert again["invalidation"]["changed"] is False, again["invalidation"]
+    assert again["rev"] == settled, again
+    # And HERE the identical-value sentence is simply true, so it is still served.
+    assert "identical" in again["invalidation"]["reason"], again["invalidation"]
+
+
 def test_answer_questions_answers_a_record_with_no_runs_at_the_record_level(writer):
     """The zero-run case, which is the one a freshly created record is in."""
     body = payload(

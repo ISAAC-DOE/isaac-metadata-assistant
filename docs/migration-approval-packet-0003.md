@@ -38,8 +38,9 @@
 > **`0003_revisions` and `0004_submissions` are ONE decision, and must be applied together or not at all.**
 > `0004_submissions` declares a foreign key into a table `0003_revisions` creates, so 0003 without
 > 0004 leaves the application unable to record a submission, and 0004 without 0003 cannot be applied
-> at all. `db_migrate` orders them lexicographically, so a single `--apply` does both in the right
-> order. Read both packets before approving either.
+> at all. `db_migrate` orders them lexicographically, so the single bounded command in §9
+> (`--apply --through 0004_submissions`) does both in the right order and stops there. Read both
+> packets before approving either.
 
 ## Authorization basis
 
@@ -338,10 +339,21 @@ psql -Atc "select current_database()"
 # 2. Confirm what is already applied. Expect exactly two rows: 0001_experiments, 0002_runs.
 psql -Atc "select version from isaac_schema_migrations order by version"
 
-# 3. See what WOULD be applied. Expect: pending: 0003_revisions, 0004_submissions
+# 3. See what WOULD be applied, UNBOUNDED — i.e. what the runner can see at all.
+#    EXPECT: pending: 0003_revisions, 0004_submissions, 0005_run_projection
+#    That third name is EXPECTED and is not a problem: 0005 is committed but not
+#    owner-approved, and §9's command is bounded so it cannot reach it. If this
+#    line names 0002_runs, or names anything you do not recognise, STOP.
 #    Applies no MIGRATION — but it is NOT read-only: `pending_versions` opens a
 #    transaction and ensures the bookkeeping table exists.
 python scripts/db_migrate.py --plan
+
+# 3b. The BOUNDED plan — this is the one §9 tells you to diff, and it is the same
+#     selection §9's apply carries out.
+#     EXPECT, exactly two lines:
+#       pending through 0004_submissions: 0003_revisions, 0004_submissions
+#       withheld by --through 0004_submissions: 0005_run_projection
+python scripts/db_migrate.py --plan --through 0004_submissions
 
 # 4. THE COUNT THAT MATTERS. Record it; postcheck 1 compares against it.
 psql -Atc "select count(*) from records"
@@ -363,18 +375,74 @@ psql -Atc "select count(*) from pg_locks l join pg_class c on c.oid = l.relation
 psql -Atc "select version()"
 ```
 
-## 9. The exact command
+## 9. The exact command — bounded to these two migrations
+
+**Two invocations. Run the first, read its output against the block below, then run the second.**
 
 ```bash
-python scripts/db_migrate.py --apply
+python scripts/db_migrate.py --plan --through 0004_submissions
 ```
 
-It applies **both** `0003_revisions` and `0004_submissions`, in that order, one transaction each.
-Expected output, exactly:
+Expected output, exactly — two lines:
 
 ```
-applied: 0003_revisions, 0004_submissions
+pending through 0004_submissions: 0003_revisions, 0004_submissions
+withheld by --through 0004_submissions: 0005_run_projection
 ```
+
+```bash
+python scripts/db_migrate.py --apply --through 0004_submissions
+```
+
+Expected output, exactly — two lines:
+
+```
+applied through 0004_submissions: 0003_revisions, 0004_submissions
+withheld by --through 0004_submissions: 0005_run_projection
+```
+
+**If either invocation prints anything else, STOP and report what it printed.** In particular, a
+first line naming `0002_runs` means the database is not where precheck 2 said it was, and a first
+line naming `0005_run_projection` means the bound was not applied — neither is a state to proceed
+from.
+
+Each migration gets its own transaction, in lexical order. The second line is a fact about the
+committed migration files, not about your database: it names what this invocation deliberately left
+alone, so *"`0005` was not applied"* is something you read rather than something you infer.
+
+> **CORRECTED 2026-08-25 (second correction, same section) — the instruction above is now a
+> BOUNDED command, and the two corrections are kept in order because they are different defects.**
+>
+> **The first correction** retired a false "exactly". §9 used to read: ~~*"It applies **both**
+> `0003_revisions` and `0004_submissions`, in that order, one transaction each. Expected output,
+> exactly: `applied: 0003_revisions, 0004_submissions`"*~~. That was true when written and stopped
+> being true when `0005_run_projection.sql` was committed, so an operator who acted on the old
+> "exactly" would have applied an unapproved migration to a database holding 30 production-derived
+> records. That strike stands.
+>
+> **The first correction left the section honest and the ask impossible**, and it said so: it
+> replaced the command with a bare `--apply` plus a table of states, one of whose rows was
+> *"**STOP.** `0005` is not approved. Do not run `--apply` in this state"* — and that row is the
+> state the hosted database is actually in. So §9's own instruction could not be carried out. The
+> operator addendum recorded that as **BLOCKED** rather than pending, which was the right call and is
+> now discharged: ~~*"`scripts/db_migrate.py` exposes `--plan` and `--apply` and **no `--only
+> <version>`**"*~~ — **the runner now takes `--through VERSION`**, which applies every pending
+> migration up to and including that version and nothing after it. It bounds `--plan` identically, so
+> the plan you read above is the apply you get.
+>
+> **What `--through` is, and is not.** *Up to and including* is its only shape: there is no
+> per-version pick and no way to skip one, because `0004` declares a foreign key into a table `0003`
+> creates and a runner that could apply one without the other would be a runner for breaking a
+> schema. It is **not a rollback** — it selects a prefix of the forward set, drops nothing, and
+> deletes no bookkeeping row; it cannot even be pointed at a `*.rollback.sql` file, because the
+> loader excludes those by suffix and an unrecognised version is a refusal. **A misspelled version
+> refuses loudly, before any connection is opened**, and never falls back to applying everything or
+> to applying nothing. And **every statement still passes `db_write.WriteStatementPolicy`** — that is
+> why this is the resolution and "apply the SQL by hand with psql" was not.
+>
+> **Nothing about the bytes being approved changed.** The four digests in the STATUS block and in
+> §"The bytes being approved" are unchanged; this is a change to the operator command, not to the
+> migration.
 
 ## 10. Postchecks — what would prove it worked
 
@@ -413,8 +481,13 @@ psql -Atc "select (select count(*) from isaac_experiment_revisions),
                   (select count(*) from isaac_run_revisions),
                   (select count(*) from isaac_revision_changes)"
 
-# 8. Idempotence: a second run applies nothing.
-python scripts/db_migrate.py --apply     # -> nothing to apply (every migration is already recorded)
+# 8. Idempotence: a second run applies nothing. KEEP THE BOUND ON. Without it
+#    this postcheck would itself apply 0005_run_projection — the exact outcome
+#    §9 exists to prevent, arriving through a check meant to prove nothing moved.
+python scripts/db_migrate.py --apply --through 0004_submissions
+#    EXPECT, exactly two lines:
+#      nothing to apply through 0004_submissions (every migration up to it is already recorded)
+#      withheld by --through 0004_submissions: 0005_run_projection
 
 # 9. The engine build string again, so it is on the record either side.
 psql -Atc "select version()"
@@ -485,7 +558,7 @@ psql -c "\copy (SELECT * FROM isaac_revision_changes) TO 'changes.csv' CSV HEADE
 | The change kinds, the revision reason and the three trust bases agree between Python and SQL | same | **yes** |
 | The application's write path against a connection double: one transaction, deterministic rollback, nothing written on any refusal | same | **yes** |
 | **The SQL is valid PostgreSQL** | `.github/workflows/ci.yml` → `postgres-migration` | **YES — see 12B** |
-| **Every constraint THAT STEP NAMES rejects what it claims to reject — 27 of the 46 declared** | same, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* | **YES, for the 27.** The other 19 are declared and unexercised — see §12B |
+| **Every constraint THAT STEP NAMES rejects what it claims to reject — 41 of the 46 declared** | same, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"* | **YES, for the 41** (run `32800763199`, job `97660962127`, at `c153ec9`). ~~"**YES, for the 27.** The other 19 are declared and unexercised"~~ was true of run `32099627898` at `fe374c0` and was overtaken on 2026-08-25 — see §12B. **5** remain unexercised, 3 of them unprovably so |
 | **The submission lifecycle works end to end against a real engine** | same, step *"Exercise the submission lifecycle against the real engine"* | **YES** |
 | **The rollbacks return the database to its prior table set** | same, incl. the wrong-order refusal | **YES** |
 
@@ -516,31 +589,72 @@ pending/applied plan at each step, ran the submission lifecycle end to end, and 
 order — including that `0003`'s rollback **fails** while `isaac_submissions` still references it, and
 that the failed attempt destroys nothing.
 
-### RE-MEASURED 2026-08-19 — the WORKFLOW FILE now declares 41 of 46; a real PostgreSQL has run 27
+### RE-MEASURED 2026-08-25 — a real PostgreSQL has now EXECUTED 41 of 46 on `main`
 
-> **READ THE HEADING PRECISELY.** An earlier revision of it — ~~"coverage improved from 27 to 41 of
-> 46"~~ — sat directly under "What a real PostgreSQL HAS executed" and was read as though a run had
-> produced 41. It had not, and still has not. The fourteen extra cases arrived in commit `77de2db`
-> (2026-08-19), which **is not in `main`** — `git merge-base --is-ancestor 77de2db origin/main`
-> reports so — and whose own message says *"CI is the first execution."* Run `32099627898`, at
-> `fe374c0`, is the only execution against a real PostgreSQL this repository can point to, and it
-> blamed **27**. The table below is a property of the workflow FILE. **An operator weighing this
-> packet's evidence should read 27.**
+**The run.** GitHub Actions run
+[`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199), job
+`97660962127` *"migration and durable repository against a real PostgreSQL"*, **conclusion
+`success`**, on `main` at commit `c153ec9` (the PR #171 merge, 2026-08-24 19:16 -0700). Its step
+*"Prove every 0003 and 0004 constraint rejects what it claims to reject"* prints one `refused as
+designed by <object>` line per case; that job emitted **67** such OUTPUT lines naming **58** distinct
+objects (the set spans `0002`, `0003`/`0004` and `0005`), and intersecting them with the **46**
+constraints declared across the two forward files gives exactly **41** — the same 41, and the same
+five absences, that the file-based measurement gives.
 
-**The seventeen that were declared and never exercised are now exercised, and the correction below
-is kept in place rather than deleted because it records how the number moved and why three of the
-seventeen still cannot be counted.**
+> **THE TWO SUPPORTING FIGURES WERE WRONG AND ARE CORRECTED HERE, IN THE PACKET AN OPERATOR WEIGHS.**
+> This paragraph read ~~"**70** such lines naming **57** distinct objects"~~. Re-derived on 2026-08-25
+> from `gh api repos/ISAAC-DOE/isaac-metadata-assistant/actions/jobs/97660962127/logs`:
+>
+> ```
+> lines containing "refused as designed by"                        : 70
+>   of which are Actions echoing the run: block's own shell source :  3
+> genuine OUTPUT lines                                             : 67
+> distinct objects over those 67                                   : 58
+> intersect(the 46 declared by 0003+0004, those objects)           : 41
+> ```
+>
+> **70** counted the three lines where Actions echoes `echo "refused as designed by $3: $1"` as
+> though they were results. **57** reproduces under neither counting: it came from a truncating
+> regex (`[A-Za-z0-9_.]*`) that collapsed the three `column "…"` objects into one and captured the
+> **empty string** from each of the three echoed lines — so an empty string was counted as a blamed
+> object (53 + 4 = 57). **41 is unaffected**, because it is an intersection with the declared set and
+> neither error reached it. The same correction is applied in `CLAUDE.md` and in
+> `apps/api/tests/test_submission_store.py`; `docs/dean-operator-addendum-2026-08-25.md` §1 already
+> carried **67** correctly, which is how the discrepancy was found.
+
+> **THIS HEADING HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS. BOTH CORRECTIONS ARE KEPT, BECAUSE THE
+> SEQUENCE — 41 (false) → 27 (true) → 41 (true, by a different run) — is what tells an operator that
+> the number is measured rather than drifting.**
+>
+> **(i)** ~~"coverage improved from 27 to 41 of 46"~~ (2026-08-19) sat directly under "What a real
+> PostgreSQL HAS executed" and was read as though a run had produced 41. It had not.
+>
+> **(ii)** ~~"the WORKFLOW FILE now declares 41 of 46; a real PostgreSQL has run 27"~~ (2026-08-24)
+> was the CORRECT reading of the evidence then available, and it is **retired by events, not by
+> error.** The fourteen extra cases arrived in commit `77de2db` (2026-08-19), which was not in `main`
+> when (ii) was written; it **merged on 2026-08-25 via `c153ec9`**, and
+> `git merge-base --is-ancestor 77de2db origin/main` now exits 0. Likewise ~~"Run `32099627898`, at
+> `fe374c0`, is the only execution against a real PostgreSQL this repository can point to"~~ — there
+> are now two, and the later one is the one this packet cites. And ~~"An operator weighing this
+> packet's evidence should read 27."~~ — **an operator should now read 41.**
+>
+> **27 IS STILL EXACTLY RIGHT FOR RUN `32099627898` AT `fe374c0`**, and nothing here should be read as
+> retracting it. A figure that is superseded by a later measurement is not a figure that was wrong.
+
+**The seventeen that were declared and never exercised have now been exercised BY A REAL POSTGRESQL
+(run `32800763199`), and the correction below is kept in place rather than deleted because it records
+how the number moved and why three of the seventeen still cannot be counted.**
 
 Measured with the same rule the guard test applies — a constraint is *blamed* only when it is the
 third argument of a `refuse()` call, which is the object PostgreSQL must be shown to blame:
 
-| | Then (2026-08-17), **and what has RUN** | **Now, in the workflow file** |
+| | Then — `fe374c0`, run `32099627898` | **Now — `c153ec9`, run `32800763199`** |
 |---|---|---|
 | declared across the two forward files | 46 | **46** |
 | blamed by a `refuse()` call | 27 | **41** |
 | not blamed | 19 | **5** |
 | named nowhere in the workflow | 17 | **3** |
-| executed against a real PostgreSQL | **27** | **27 — unchanged** |
+| executed against a real PostgreSQL | **27** | **41** — ~~"**27 — unchanged**"~~, retired 2026-08-25 when `77de2db` reached `main` |
 
 **FOURTEEN of the seventeen are now proved individually.** Each new case differs from an accepted row
 in exactly one column, so the constraint it names is the only thing left to blame — which is the
@@ -598,6 +712,15 @@ data-correctness-critical. That class is genuinely proven for
 `isaac_experiment_revisions_id_shape` and for the two signature columns, and **generalised to the rest
 without being run**. Nothing suggests the unexercised constraints are wrong; the point is that this
 packet may not be cited as evidence that they behave.
+
+> **THAT LAST SENTENCE EXPIRED ON 2026-08-25 FOR FOURTEEN OF THE SEVENTEEN, and the paragraph above is
+> left standing because it is the record of a real overstatement and of the vantage point that made it
+> one.** Fourteen of the seventeen are now blamed by an individual `refuse()` call that a real
+> PostgreSQL executed (run `32800763199`, at `c153ec9`), so this packet MAY now be cited as evidence
+> that they behave. The three `isaac_submission_runs` shape CHECKs still may not be cited
+> individually — see the subsumption argument above — and that limitation is permanent rather than
+> pending.
+
 
 **The still-unproven class, which CI does not touch and which is the whole reason the operator's act
 is separate.** The service container is an **empty** `postgres:18` with a two-row synthetic stand-in

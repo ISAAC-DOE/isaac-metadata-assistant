@@ -28,12 +28,20 @@ this branch ADDED the ingress and gave it the weaker screen of the two.
 WHAT THE FIX IS, and what it deliberately is not. One route-level screen
 (``routes._refuse_unstorable_answer``) on both answering paths, sharing
 ``routes._value_fits_the_store`` with the correction screen so the 8 MiB bound has one
-definition. It applies size, depth and renderability ONLY. It does NOT apply the shape
-predicates: a wrong-TYPED answer keeps taking the existing "not applied -> the blocker
-stays open" path, which ``test_answers_wrong_type.py`` pins and which the record
-``/edit`` route's own comment names as the reason it did not extend its screen here.
-That negative control is in this file too, because a fix that quietly widened the screen
-would pass everything above it and change a documented behaviour.
+definition.
+
+~~It applies size, depth and renderability ONLY. It does NOT apply the shape predicates:
+a wrong-TYPED answer keeps taking the existing "not applied -> the blocker stays open"
+path … That negative control is in this file too, because a fix that quietly widened the
+screen would pass everything above it and change a documented behaviour.~~ — **WIDENED
+DELIBERATELY 2026-08-25, and the negative control is INVERTED rather than deleted, which
+is why the old text stays visible.** The screen now also asks ``_correction_is_storable``
+for ``series``, ``qc`` and ``descriptor``, over the RAW body. The reasoning the old
+paragraph rested on ("the blocker stays open" is visible to the caller) was true of the
+``pending`` list and false of ``invalidation.reason`` beside it, which said the submitted
+value was already stored — and an independent MCP verification followed that pair into a
+closed loop. ``descriptor_label`` and ``edge`` are still outside the screen, and a test
+below names them.
 
 NO TRUTH-CORE CHANGE. ``src/isaac_records`` is untouched: the condition is an ingress
 condition, and a depth guard inside ``apply_answers`` would change what every caller
@@ -176,11 +184,22 @@ def test_the_message_says_the_question_is_still_open_and_names_no_cause(client):
     cause, for the reason the `/edit` refusal's own comment gives at length — a
     cause-naming sentence was measured being served verbatim about a key it did not
     describe.
+
+    THE OPEN-QUESTION HALF IS NOW CONDITIONALLY WORDED, and that is a correction rather
+    than a weakening. ~~"so nothing was written and the question is still open"~~ was
+    true of every case this refusal originally covered — a value too big or too deep for
+    an OPEN question — and became false when the refusal was widened on 2026-08-25 to
+    cover a wrong-SHAPED value, which can arrive at a key whose question is already
+    CLOSED. Telling that caller their question is still open would be a second false
+    claim inside a refusal added to remove one. So the assertion is on the property, in
+    both directions: it still promises nothing was written, it still promises the open
+    question is open, and it still refuses to say why.
     """
     response = _answer(client, PARTIAL, {"series": [{"mu": _TOO_BIG}]})
     assert response.status_code == 422
     message = response.json()["message"]
-    assert "the question is still open" in message
+    assert "nothing was written" in message
+    assert "is still open" in message
     assert "The stored value is unchanged" not in message
     for cause in ("bytes", "deep", "large", "8 MiB", "depth"):
         assert cause not in message, message
@@ -336,18 +355,51 @@ def test_a_LARGE_but_legal_series_is_still_accepted(client):
     assert "series" not in _pending_ids(client, PARTIAL)
 
 
-def test_a_wrong_TYPED_answer_still_takes_the_stays_pending_path(client):
-    """THE SCREEN WAS NOT WIDENED TO SHAPE, AND THIS IS THE ASSERTION THAT SAYS SO.
+def test_a_wrong_TYPED_answer_IS_NOW_REFUSED_TOO(client):
+    """INVERTED 2026-08-25. ~~`test_a_wrong_TYPED_answer_still_takes_the_stays_pending_path`~~
 
-    A wrong-typed answer is dropped by the core and its blocker is reported STILL OPEN in
-    a `200` — the behaviour `test_answers_wrong_type.py` pins and that the record
-    `/edit` route's own comment names as the reason it deliberately did not extend its
-    screen to `/answers`. If a future change reaches for `_correction_is_storable` here
-    instead of `_value_fits_the_store`, this goes red before that file does.
+    ~~THE SCREEN WAS NOT WIDENED TO SHAPE, AND THIS IS THE ASSERTION THAT SAYS SO. A
+    wrong-typed answer is dropped by the core and its blocker is reported STILL OPEN in a
+    `200` … If a future change reaches for `_correction_is_storable` here instead of
+    `_value_fits_the_store`, this goes red before that file does.~~
+
+    It did, and this is that change — arriving deliberately rather than by accident,
+    which is what the sentence above was there to distinguish. The screen now asks
+    `_correction_is_storable` for `series`, `qc` and `descriptor`, over the RAW body
+    (an off-enum `qc` never reaches `apply_shape` at all).
+
+    WHY THE OLD BEHAVIOUR WAS NOT SAFE, which the old docstring's reasoning missed. It
+    rested on the blocker being "reported STILL OPEN in a `200`" — true of the `pending`
+    list and false of the sentence beside it: the same response's `invalidation.reason`
+    read *"the submitted value was identical; nothing was invalidated"*. One response
+    said both that the question was open and that its answer was already stored, and an
+    independent MCP verification followed that pair into a closed loop.
+
+    THE PROPERTY THE OLD TEST WAS PROTECTING IS STILL ASSERTED, below: nothing is
+    written and the question stays open. Only the status changed.
     """
+    before = _pending_ids(client, PARTIAL)
     response = _answer(client, PARTIAL, {"series": "0" * 64})
-    assert response.status_code == 200, response.text
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_field_value"
+    assert response.json()["keys"] == ["series"]
+    assert _pending_ids(client, PARTIAL) == before
     assert "series" in _pending_ids(client, PARTIAL)
+
+
+def test_the_shape_screen_covers_three_keys_and_names_the_two_it_does_not(client):
+    """The boundary of the widening, asserted rather than described.
+
+    `descriptor_label` and `edge` have no shape guard in `complete.apply_answers` — a
+    non-string label and a non-scalar edge are STORED, not declined — so refusing them
+    here would be a NEW refusal of a value that currently lands, not a corrected report
+    of one that does not. That is a separate change with its own argument to make.
+    """
+    from isaac_api import routes
+
+    assert routes._SHAPE_SCREENED_ANSWER_KEYS == ("series", "qc", "descriptor")
+    assert "descriptor_label" not in routes._SHAPE_SCREENED_ANSWER_KEYS
+    assert "edge" not in routes._SHAPE_SCREENED_ANSWER_KEYS
 
 
 def test_the_two_screens_share_one_definition_of_the_size_bound():
@@ -378,4 +430,7 @@ def test_the_published_contract_describes_the_new_refusal():
     ):
         description = schema["paths"][path]["post"]["responses"]["422"]["description"]
         assert "invalid_field_value" in description, path
-        assert "the question is still open" in description, path
+        # ~~"the question is still open"~~ — the served sentence is now conditional,
+        # because the refusal covers a key whose question may already be CLOSED. See
+        # `test_the_message_says_the_question_is_still_open_and_names_no_cause`.
+        assert "is still open" in description, path

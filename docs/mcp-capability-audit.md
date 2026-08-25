@@ -126,8 +126,43 @@ Read the boundary precisely, because "the transport exists" is easy to over-read
   credential, no outbound call, no billing, and no hosted connection exists or is authorized. The
   two reserved binding names remain unimplemented, and selecting one still resolves to the
   unconfigured binding.
-* No product screen mentions MCP (verified: `apps/web/src` contains no reference), so nothing
-  implies a connection exists — `ai-integration-decision-packet.md` §6.1 and §9 are intact.
+* ~~"No product screen mentions MCP (verified: `apps/web/src` contains no reference)"~~ —
+  **CORRECTED 2026-08-25, AND IT WAS FALSE ON THE DAY IT WAS COMMITTED.** Re-running the check the
+  sentence itself offers:
+
+  ```
+  git grep -ic mcp 6baadc8 -- apps/web/src
+  → 151 matching lines across 9 files, including
+    apps/web/src/screens/settings/ConnectYourAgent.tsx        (43)
+    apps/web/src/lib/mcpConnectContent.ts                     (18)
+    apps/web/src/screens/SettingsPage.tsx                      (8)
+    apps/web/src/__tests__/connect-your-agent.test.tsx        (70)
+    apps/web/src/lib/routes.ts, settingsContent.ts,
+    transcriptCaptureContent.ts, ConnectAnAgent.tsx,
+    __tests__/upload-claim-parity.test.tsx
+  ```
+
+  `mcpConnectContent.ts` was added in `a1b8ee0` on **2026-08-13**; this bullet was added in
+  `b4b5e9f` on **2026-08-16** (`git log --diff-filter=A -- apps/web/src/lib/mcpConnectContent.ts`
+  and `git log -S "No product screen mentions" -- docs/mcp-capability-audit.md` — deliberately
+  searching a PREFIX of the retired sentence rather than the whole of it, because the guard named
+  below refuses an unstruck copy of the full claim even inside a citation, and a guard that has to be
+  worked around by the document it protects is a guard nobody trusts). So the screen had shipped
+  three days before the audit said no screen mentioned MCP.
+
+  **THE CONCLUSION IS UNCHANGED AND IS NOT WHAT WENT WRONG.** `Connect Your Agent` states that
+  organization configuration is required and shows no connection it cannot verify, so nothing
+  implies a connection exists and `ai-integration-decision-packet.md` §6.1 and §9 remain intact —
+  §9 forbids implying a CONNECTION exists, not describing a capability that does. What went wrong is
+  the **evidence**: a parenthetical citing a command nobody re-ran, in a document read as an audit.
+
+  **THIS IS THE SAME SENTENCE `docs/mcp-local-transport.md` ALREADY STRUCK ON 2026-08-24**, with the
+  note that *"a claim that carried its own falsifier is worth remembering: the sentence was
+  self-checking and nobody re-ran it"* — and that sweep **missed this copy**, which is the same
+  enumeration failure `CLAUDE.md` §15 records for the `isaac_run_projection` correction: the fix
+  landed in the document somebody was already editing, and the duplicate went unlooked-for. The two
+  are now pinned together by `apps/web/src/__tests__/connect-your-agent.test.tsx`, so neither can be
+  corrected alone again.
 
 ---
 

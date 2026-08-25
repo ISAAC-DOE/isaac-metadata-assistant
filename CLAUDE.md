@@ -557,7 +557,39 @@ Current state:
     packet's STATUS block). **Hosted application remains NOT DONE and is not an agent's act.** A test
     that had been *requiring* the false literal *"No PostgreSQL has ever executed this file"* was
     corrected to pin the invariant instead — CI has executed both migrations against `postgres:18`.
-    **Constraint coverage is 41 of 46 DECLARED IN THE WORKFLOW; 27 of 46 is what a real PostgreSQL has actually executed on `main`** (at `fe374c0`, run `32099627898`). ~~"41 of 46 declared (re-measured 2026-08-19, up from 27)"~~ read as though a run had produced 41; the fourteen extra cases arrived in `77de2db`, which is not in `main` and whose own message says *"CI is the first execution"*. Both numbers are guarded by a test so neither can move without the workflow moving. Three of the five unblamed at HEAD are STRUCTURALLY unprovable in isolation — `isaac_submission_runs`' equality CHECKs subsume its shape CHECKs, so no row violates exactly one of them; they are proved refused with the blame ambiguous by design. See §15 for the full split.
+    **Constraint coverage is 41 of 46 declared, and a real PostgreSQL has now EXECUTED all 41 on
+    `main`** — Actions run
+    [`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199),
+    head `c153ec9` (the PR #171 merge), job `97660962127` *"migration and durable repository against a
+    real PostgreSQL"*, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"*,
+    conclusion `success`. **THIS ONE NUMBER HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND BOTH
+    CORRECTIONS ARE KEPT SO A READER SEES THE SEQUENCE RATHER THAN ONLY THE LATEST NUMBER: 41 (false)
+    → 27 (true) → 41 (true, by a different run).** (i) ~~"41 of 46 declared (re-measured 2026-08-19,
+    up from 27)"~~ read as though a run had produced 41, when the fourteen extra cases sat in
+    `77de2db`, which was not in `main` and whose own message says *"CI is the first execution"*.
+    (ii) ~~"Constraint coverage is 41 of 46 DECLARED IN THE WORKFLOW; 27 of 46 is what a real
+    PostgreSQL has actually executed on `main`"~~ was the RIGHT correction on 2026-08-24 and has since
+    been **overtaken, not refuted**: `77de2db` merged to `main` on 2026-08-25 via `c153ec9`, and the 41
+    then ran. **27 remains exactly right for run `32099627898` at `fe374c0`** and must never be
+    re-described as an error. Re-derive rather than quoting: `git merge-base --is-ancestor 77de2db
+    origin/main` (now exits 0), and the blamed-name count over `git show
+    fe374c0:.github/workflows/ci.yml` (**27**) versus the working tree (**41**, byte-identical to
+    `origin/main` — `git diff origin/main -- .github/workflows/ci.yml` is empty). ~~"Both numbers are
+    guarded by a test so neither can move without the workflow moving."~~ **CORRECTED 2026-08-25 —
+    only ONE of them is guarded in CI, and the other read as a guarantee while being green-by-skip.**
+    `41` is enforced everywhere, by `test_the_packets_do_not_overstate_CI_constraint_coverage` and
+    (since 2026-08-25) as the first assertion of
+    `test_the_two_constraint_numbers_are_each_still_the_measured_ones`, both of which read only the
+    working tree. `27` and the `origin/main` byte-identity reach their evidence through
+    `git show fe374c0:…`, `git show origin/main:…` and `git merge-base --is-ancestor 77de2db
+    origin/main` — and **every `actions/checkout@v5` in `.github/workflows/ci.yml` runs at the default
+    `fetch-depth: 1`** (the file sets `fetch-depth` nowhere, at any of its four checkout sites), so in
+    CI none of those objects exists and each assertion degrades to a `pytest.skip`. **They are
+    enforced in a full clone and reported as skipped in CI.** The skip messages now say so rather than
+    reading as a pass. The **5** still unblamed are
+    unchanged, and three of them are STRUCTURALLY unprovable in isolation — `isaac_submission_runs`'
+    equality CHECKs subsume its shape CHECKs, so no row violates exactly one of them; they are proved
+    refused with the blame ambiguous by design. See §15 for the full split.
   - **Explicit conflict resolution exists** (`apps/api/isaac_api/conflict_resolution.py` + two
     operations). It closes a real defect this file had only described in prose: a scientist who fixed a
     typo owned a permanent conflict no surface could clear. Decisions **supersede without deleting**
@@ -961,9 +993,12 @@ Out of scope unless explicitly approved:
   claim.** Both packets' §12B asserted *"No PostgreSQL has ever executed this file"*, and
   `test_the_packets_do_not_claim_a_hosted_application` **required that literal to be present**. The
   sentence named its own expiry condition (*"until the `postgres-migration` job runs"*); that job has
-  since run and passed on `main` at `fe374c0` (Actions run `32099627898`), applying `0001`–`0004`
-  forward against a `postgres:18` container against input each should reject, and proving the rollback
-  order.
+  since run and passed on `main` **twice over**, applying `0001`–`0004` forward against a `postgres:18`
+  container against input each should reject, and proving the rollback order: at `fe374c0` (Actions run
+  [`32099627898`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32099627898)), and
+  again at `c153ec9` (Actions run
+  [`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199), job
+  `97660962127`, conclusion `success`) — which is the run that matters for the numbers below.
 
   **THE CONSTRAINT NUMBER IS TWO NUMBERS, AND THIS BULLET CONFLATED THEM.**
   ~~"exercising **41 of the 46 declared constraints** (27 when that sentence was written)"~~ — struck
@@ -971,21 +1006,48 @@ Out of scope unless explicitly approved:
   paragraph an operator reads before applying a migration. Adopt the split
   [`docs/migration-approval-packet-0003.md`](docs/migration-approval-packet-0003.md) §12B already uses:
 
-  | | Number | Re-derived 2026-08-24 by |
+  The table below had TWO rows on 2026-08-24 and has THREE now — the third supersedes the second
+  without deleting it, because the second was a correct reading of the evidence that then existed:
+
+  | | Number | Re-derived by (2026-08-24, third row 2026-08-25) |
   |---|---:|---|
   | **What a real PostgreSQL HAS executed**, at `fe374c0` on `main` | **27 of 46** | `git show fe374c0:.github/workflows/ci.yml`, counting the distinct declared names a `refuse()` call blames |
-  | **Declared in the workflow and NOT YET RUN on `main`**, at this branch's HEAD | **41 of 46** | the same measurement over the working tree / `git show HEAD:.github/workflows/ci.yml` |
+  | ~~"**Declared in the workflow and NOT YET RUN on `main`**, at this branch's HEAD"~~ — **RETIRED 2026-08-25, see the row below** | ~~41 of 46~~ | the same measurement over the working tree / `git show HEAD:.github/workflows/ci.yml` |
+  | **What a real PostgreSQL HAS executed**, at `c153ec9` on `main` — the row that supersedes the one above | **41 of 46** | the same measurement over the working tree, which `git diff origin/main -- .github/workflows/ci.yml` shows is byte-identical to `main` |
 
-  The fourteen extra constraints arrived in **`77de2db`** (2026-08-19), which
-  **`git merge-base --is-ancestor 77de2db origin/main` reports is NOT in `main`**, and whose own commit
-  message says *"CI is the first execution."* The `refuse`/`refuse_by_the_table` call count moved 43 →
-  67 over the same span. So `fe374c0` could only ever have exercised 27, and **41 is a property of the
-  workflow file, not of any run this repository can point to.**
+  ~~"The fourteen extra constraints arrived in **`77de2db`** (2026-08-19), which **`git merge-base
+  --is-ancestor 77de2db origin/main` reports is NOT in `main`**"~~ — **the commit is now IN `main`**
+  (that same command exits 0), having merged on 2026-08-25 via `c153ec9`, so the fourteen have run. The
+  `refuse`/`refuse_by_the_table` mention count moved 53 → 86 over the same span (`git show
+  fe374c0:.github/workflows/ci.yml` vs. the working tree). So ~~"`fe374c0` could only ever have
+  exercised 27, and **41 is a property of the workflow file, not of any run this repository can point
+  to**"~~ — the first half is permanently true and is why 27 must keep its vantage point; the second
+  half **expired the moment `c153ec9` merged**, and the run this repository can now point to is
+  `32800763199`. **Confirmed from that run's own output, not merely from the file**: its step prints one
+  `refused as designed by <object>` line per case, and intersecting the **58** distinct objects those
+  **67** OUTPUT lines name with the 46 declared in `0003`+`0004` gives exactly **41**, and exactly the
+  same five absent names. ~~"the 57 distinct objects those 70 lines name"~~ — **RE-MEASURED 2026-08-25
+  and both figures were wrong**, in a sentence whose whole point was that the number came from the run
+  rather than the file. **70** is every line containing the phrase; **3 of those are Actions echoing
+  the `run:` block's own shell source** (`echo "refused as designed by $3: $1"`), so the OUTPUT count
+  is **67**. And **57** reproduces under no counting at all: it came from a truncating regex
+  (`[A-Za-z0-9_.]*`) that collapsed the three `column "…"` objects and captured the **empty string**
+  for the three echoed lines, so an empty string was counted as an object (53 + 4 = 57). The correct
+  figure is **58**. Re-derive rather than quoting:
+
+  ```bash
+  gh api repos/ISAAC-DOE/isaac-metadata-assistant/actions/jobs/97660962127/logs > /tmp/job.log
+  # then split on the FIRST ": " after the phrase, and drop lines carrying the unexpanded `$3`
+  ```
+
+  **41 is unchanged and is the figure that matters** — it is an intersection with the declared set,
+  and neither miscount touched it.
 
   ~~"17 declared constraint names appear nowhere in the workflow"~~ — also stale, and the same edit
   left it standing beside a "41 of 46" that implies **5**. Both figures are now stated with their
   vantage point: at `fe374c0`, **17** declared names appeared nowhere in the workflow and **19** were
-  unblamed; at HEAD, **3** appear nowhere (`isaac_submission_runs`' `unit_id_shape`, `record_id_shape`
+  unblamed; at `c153ec9` on `main` (and at this branch's HEAD, which carries the identical workflow),
+  **3** appear nowhere (`isaac_submission_runs`' `unit_id_shape`, `record_id_shape`
   and `run_id_shape`, proved refused through the deliberately weaker `refuse_by_the_table` because the
   table's equality CHECKs subsume them) and **5** are unblamed (those three plus
   `isaac_revision_changes_revision_fk` and `isaac_submissions_experiment_fk`, which are named for other
@@ -1072,7 +1134,7 @@ amended §2 for exactly what is and is not permitted.
 | **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. **Do not read this row as covering the 2026-08-07 lift**: that authorizes storing experiments THIS APPLICATION CREATES in its own new tables. It authorizes no repository over `records`, no record loading, and no upload write. |
 | **Create Experiment durable persistence** (`isaac_experiments`) | **authorized 2026-08-07**, narrowly — see the scope note above. Implementation and local/CI testing only; **applying the migration to the hosted database is the owner's act, not the agent's.** Dean applied `0001_experiments` to the hosted database on **2026-08-09** ([evidence](docs/evidence/hosted-0001-verification-2026-08-09.md)) — which changes nothing about gate **G2**, gate **G3**, or the prohibition on an agent connecting to that database. ~~which changes nothing about `0002` (still unapplied and unauthorized for hosted application)~~ — **superseded 2026-08-12, see the next row.** |
 | **`0002_runs`** (the `isaac_runs` table) | **APPLIED TO THE HOSTED DATABASE BY DEAN, 2026-08-12 00:30 UTC** ([evidence](docs/evidence/hosted-0002-verification-2026-08-12.md); packet [`docs/migration-approval-packet-0002.md`](docs/migration-approval-packet-0002.md), STATUS + §12C). Both SHA-256 digests Dean reported were **recomputed here and MATCH** the committed files, so the bytes applied are the bytes Krish approved on 2026-08-11. Verified from the hosted server: table, PK, FK, five CHECKs, the index, no `ON DELETE`/`CASCADE`, row count **0**, idempotent re-run, app health OK / `postgres` / `durable`. **Operator testimony, not a captured artifact** — no agent connected to that database. **NOT reported, and named as gaps:** the `records` and `isaac_experiments` before/after counts (packet postchecks 1 and 2) and the hosted engine build string. **The table existing is NOT permission to write it** — the run write path is a later, separately-reviewed slice, and `db_write.OWNED_TABLES` listing `isaac_runs` "grants nothing on its own". |
-| **`0003_revisions` + `0004_submissions`** (the five submission-lifecycle tables) | **APPROVED BY THE PROJECT OWNER 2026-08-17; NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.** Two different people's acts — see the paragraph above and each packet's STATUS block. They are ONE decision (`0004` declares a foreign key into a table `0003` creates) and must be applied together or not at all. Proven forward, rollback and wrong-order-refusal against a `postgres:18` container in CI; ~~"**41 of the 46 declared constraints** are exercised there (27 until 2026-08-19)"~~ — corrected 2026-08-24, because it credited a run with a file's coverage: the workflow now DECLARES cases blaming **41 of the 46** constraints, of which **27** are what a real PostgreSQL has executed on `main` (`fe374c0`, run `32099627898`) — the other fourteen arrived in `77de2db`, which is not in `main` and has never run there. Three of the five unblamed at HEAD cannot be blamed individually because the table's equality CHECKs subsume its shape CHECKs. **An operator weighing this evidence should read 27, not 41.** Applying them is the operator's act, and no agent may do it. |
+| **`0003_revisions` + `0004_submissions`** (the five submission-lifecycle tables) | **APPROVED BY THE PROJECT OWNER 2026-08-17; NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.** Two different people's acts — see the paragraph above and each packet's STATUS block. They are ONE decision (`0004` declares a foreign key into a table `0003` creates) and must be applied together or not at all. Proven forward, rollback and wrong-order-refusal against a `postgres:18` container in CI; **a real PostgreSQL has now executed cases blaming 41 of the 46 declared constraints on `main`** — run `32800763199`, job `97660962127`, at `c153ec9`, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"*. **THREE LAYERS OF CORRECTION SIT ON THIS ONE FIGURE AND ALL THREE ARE KEPT, because the sequence is the point: 41 (false) → 27 (true) → 41 (true, by a different run).** (i) ~~"**41 of the 46 declared constraints** are exercised there (27 until 2026-08-19)"~~ credited a run with a file's coverage. (ii) The 2026-08-24 correction — the workflow DECLARES 41, of which **27** had been executed on `main` (`fe374c0`, run `32099627898`), the other fourteen sitting in `77de2db` which was not in `main` — was right, and its instruction ~~"**An operator weighing this evidence should read 27, not 41.**"~~ is **RETIRED 2026-08-25**: `77de2db` merged to `main` via `c153ec9` (`git merge-base --is-ancestor 77de2db origin/main` now exits 0) and run `32800763199` executed the 41. **An operator should now read 41, and 27 remains the correct figure for run `32099627898` at `fe374c0` — that correction was overtaken, not wrong.** Three of the five still-unblamed cannot be blamed individually because the table's equality CHECKs subsume its shape CHECKs. Applying them is the operator's act, and no agent may do it. |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
 Two separate **questions**, which Dean's guide is explicit about not conflating: **writing** to this

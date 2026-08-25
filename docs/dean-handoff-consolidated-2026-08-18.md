@@ -1,5 +1,26 @@
 # Consolidated operator handoff — 2026-08-18
 
+> **POINTER, added 2026-08-25 — this package is NOT superseded, but it has a dated successor.**
+> [`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md) carries only what
+> is new or corrected since this one was sent. Two items in it bear on this document directly: the
+> `0003`/`0004` constraint evidence is now **41 of 46 executed by a real PostgreSQL on `main`** (§1 of
+> the addendum), and `0005`'s **forward** digest in §1A changed after an independent review (§3 of the
+> addendum). The `0003`/`0004` digests, the ask, and every "do not apply `0005`" statement below are
+> unchanged.
+>
+> **CORRECTED 2026-08-25.** This pointer said the addendum's figure applied *"rather than the 27 quoted
+> below"*, which left the body of this document asserting 27-executed as a live figure in three more
+> places — in the package you actually read, while the addendum's own §1 wrongly reported that only
+> `CLAUDE.md` and the two packets needed correcting. **The body is now corrected in place**, at §1's
+> table, §1's "evidence supporting your decision" paragraph, §1's accounting sentence, and the closing
+> summary. **One more thing the addendum adds that this document does not yet reflect anywhere: the
+> command that applies `0003`/`0004` ~~has no per-version option and would take
+> `0005_run_projection` with it~~ — corrected again 2026-08-25: it now takes `--through VERSION`, and
+> the command to run is `python scripts/db_migrate.py --apply --through 0004_submissions`.** The
+> unbounded `--apply` would still take `0005` with it, so the hazard the strike describes is real and
+> only the remedy has changed. Read the addendum's §0 before running anything; it records that
+> conflict as **resolved**, having recorded it as **BLOCKED** when it was.
+
 **For:** Dean (SLAC infrastructure / database operator), via Krish.
 **From:** the ISAAC Metadata Assistant repository. **Not sent by an agent** — this is a ready-to-send
 package for Krish to review and forward.
@@ -23,8 +44,13 @@ yours. Do not apply it.
 
 `0003_revisions` and `0004_submissions` are **ONE decision** — `0004` declares a foreign key into a
 table `0003` creates, so 0003-without-0004 leaves the application unable to record a submission and
-0004-without-0003 cannot be applied at all. `db_migrate` orders them lexicographically, so a single
-`--apply` does both in the right order.
+0004-without-0003 cannot be applied at all. `db_migrate` orders them lexicographically, so one
+bounded command — `python scripts/db_migrate.py --apply --through 0004_submissions` — does both in
+the right order and applies nothing after them. **Corrected 2026-08-25:** this used to read *"a
+single `--apply`"*, which stopped being safe when `0005_run_projection.sql` was committed, because an
+unbounded `--apply` would have taken that unapproved migration along too. See
+[`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md) §0 and
+[`docs/migration-approval-packet-0003.md`](migration-approval-packet-0003.md) §9.
 
 | | `0003_revisions` | `0004_submissions` |
 |---|---|---|
@@ -70,10 +96,16 @@ lifecycle end to end, and proves the rollback order — including that `0003`'s 
 1. **Constraint coverage is partial — and the number has TWO vantage points, which an earlier
    revision of this package conflated. Read both.**
 
+   > **UPDATED 2026-08-25 — the second row's caveat has EXPIRED, and the table is corrected in place
+   > rather than rewritten, because the sequence is what shows the number is measured.** The branch
+   > merged and a different run executed the 41. Full account: §1 of
+   > [`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md).
+
    | | Constraints | What it means |
    |---|---:|---|
-   | **Executed by a real PostgreSQL** — GitHub Actions run `32099627898`, on `main` at `fe374c0` | **27 of 46** | evidence you can act on |
-   | **Declared in `.github/workflows/ci.yml` today** — on branch `feat/qc-answerable-and-server-stamped-attribution` | **41 of 46** | written, reviewed, **not yet run on `main`** |
+   | **Executed by a real PostgreSQL** — GitHub Actions run `32099627898`, on `main` at `fe374c0` | **27 of 46** | correct for that run, permanently; **superseded as the figure to act on** |
+   | **Executed by a real PostgreSQL** — run `32800763199`, job `97660962127`, on `main` at `c153ec9`, `success` | **41 of 46** | **the evidence you can act on today** |
+   | ~~**Declared in `.github/workflows/ci.yml` today** — on branch `feat/qc-answerable-and-server-stamped-attribution` — **41 of 46**, written, reviewed, **not yet run on `main`**~~ | — | struck: `77de2db` merged via `c153ec9` and the 41 then ran |
 
    ~~"CI's constraint step now blames **41** of them, up from 27"~~ is struck rather than deleted,
    because it was read as a statement about a run and it is a statement about a FILE. The fourteen
@@ -83,10 +115,15 @@ lifecycle end to end, and proves the rollback order — including that `0003`'s 
    constraint is *blamed* only when it is the third argument of a `refuse()` call, which is the
    object PostgreSQL must be shown to blame.
 
-   **So the evidence supporting your decision today is 27 of 46**, exactly as it was when this package
-   was first written. The fourteen additional cases are real, reviewed and committed on a branch; they
-   become evidence when that branch merges and the `postgres-migration` job runs on `main`. Nothing
-   about the four migration digests changes either way.
+   ~~**So the evidence supporting your decision today is 27 of 46**, exactly as it was when this
+   package was first written. The fourteen additional cases are real, reviewed and committed on a
+   branch; they become evidence when that branch merges and the `postgres-migration` job runs on
+   `main`.~~ **SUPERSEDED 2026-08-25: the branch merged and the job ran, so the evidence supporting
+   your decision today is 41 of 46.** The condition that sentence named — *"when that branch merges
+   and the `postgres-migration` job runs on `main`"* — is exactly what happened, which is why it is
+   struck as expired rather than corrected as wrong. **Nothing about the four migration digests
+   changes either way**, and more constraints being exercised raises the evidence behind a decision
+   you already have; it does not move the decision.
 
    At `fe374c0`, 17 declared names appeared nowhere in the workflow and 19 were unblamed. At the
    branch HEAD, 3 appear nowhere and 5 are unblamed. The paragraphs below describe the branch HEAD.
@@ -103,10 +140,12 @@ lifecycle end to end, and proves the rollback order — including that `0003`'s 
    The remaining two — `isaac_revision_changes_revision_fk` and `isaac_submissions_experiment_fk` —
    appear in the workflow for other reasons without a refusal blamed on them.
 
-   So, **of what the branch file declares**: **41 of 46 individually blamed; 3 more proved refused
-   with the blame ambiguous by construction; 2 named without a refusal.** **Of what has actually run
-   against a real PostgreSQL on `main`: 27 of 46.** `0003`'s packet §12B carries the accounting and
-   the reasoning. **None of this changes the bytes you would apply** — the four digests are unchanged
+   So, **of the 46 declared**: **41 individually blamed; 3 more proved refused with the blame
+   ambiguous by construction; 2 named without a refusal** — and, since 2026-08-25, that is a statement
+   about a RUN (`32800763199`, at `c153ec9`) and not only about a file. ~~**Of what has actually run
+   against a real PostgreSQL on `main`: 27 of 46.**~~ Struck: 27 remains exactly right for run
+   `32099627898` at `fe374c0`, and is no longer the figure to act on. `0003`'s packet §12B carries the
+   accounting and the reasoning. **None of this changes the bytes you would apply** — the four digests are unchanged
    and re-verified below.
 2. **The container is empty**, with a two-row synthetic stand-in for `records`. *"Is this valid,
    idempotent SQL whose constraints behave"* is answered. *"Does it behave against the real data,
@@ -248,11 +287,15 @@ production-derived records: the application now creates records of its own, so "
 display per-record content" has a second, cleaner answer available — app-created records are not
 production-derived and carry no visibility question at all.
 
-**Constraint coverage: 27 of 46 is what a real `postgres:18` has executed; 41 of 46 is what the
-workflow now declares and has not yet run.** ~~"Constraint coverage moved 27 → 41 of 46, validated
-against a real `postgres:18` in CI"~~ — struck in place, because it credited a real execution with
-coverage that has not executed, in the sentence you would weigh before applying. See §1. **The number
-to act on is 27.**
+**Constraint coverage: 41 of 46 is what a real `postgres:18` has executed on `main`** — run
+`32800763199`, job `97660962127`, at `c153ec9`, `success`. Two earlier sentences are kept struck,
+because the number has now been wrong in both directions and the sequence is what makes it credible:
+~~"Constraint coverage moved 27 → 41 of 46, validated against a real `postgres:18` in CI"~~ was
+FALSE when written — it credited run `32099627898` with coverage that run could not have produced —
+and ~~"27 of 46 is what a real `postgres:18` has executed; 41 of 46 is what the workflow now declares
+and has not yet run … The number to act on is 27"~~ was TRUE and has been OVERTAKEN by the merge that
+shipped the extra cases. See §1 and §1 of the 2026-08-25 addendum. **The number to act on is 41; 27
+keeps its own vantage point and must never be re-described as an error.**
 
 **A third migration now exists and is NOT in the ask.** `0005_run_projection` — see §1A. It is
 mentioned here as well as there because the one thing this package must never do is let a new

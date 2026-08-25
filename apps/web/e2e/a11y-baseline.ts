@@ -462,8 +462,60 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * and cut to its width) rather than recorded in `e2e/layout-baseline.ts`. A
        * defect on a surface this branch is adding does not get a baseline entry.
        */
-      'evidence@desktop-1280x800': { darwin: 70, linux: 99 },
-      'evidence@laptop-1024x768': { darwin: 70, linux: 99 },
+      /*
+       * ── EVIDENCE TRAIL NO LONGER EMPTY, 2026-08-25: +3 on `evidence`, +1/+2 on
+       * ── `evidence-graph`, at every viewport. A KNOWN DEFECT'S COUNT, NOT A NEW ONE.
+       *
+       * WHY THE COUNTS MOVED, and it is a product FIX rather than a regression. An
+       * independent verification measured that a record completed through
+       * `POST /api/experiments` had an EMPTY evidence trail — 0 entries beside
+       * `official.ok: true` and `ready_to_export` — because
+       * `evidence_trail_from_draft` walked `fields`, `implicit` and `assets` and never
+       * `block_evidence` or `descriptors_outputs`, which is exactly where the four
+       * blocking answers are written. `GET /evidence` now composes a second reader.
+       * Measured on the seeded scenarios: ~~**+3/+3/+5/+5/+5 entries**~~ — corrected
+       * 2026-08-25, **ON THE WIRE IT IS +3/+3/+5/+5/+0**. The fifth seed is EXPORTED,
+       * so `GET /evidence` serves it from the sidecar branch and the new draft reader
+       * never runs for it: its served total is unchanged at 36. `+5` is that seed's
+       * DRAFT-SIDE figure — what `confirmed_block_trail_from_draft(exp.draft)` returns
+       * — and quoting it here read as a served delta, which is the figure this file is
+       * about. Measured per seed (old walker / new draft-side / SERVED): 28/3/31,
+       * 31/3/34, 31/5/36, 31/5/36, and 31/5/**36 unchanged**. This suite scans seed
+       * `…SEED0000000002`, which gained **+3** — that half was right and is why the
+       * node counts below still hold.
+       *
+       * SO THE SCREEN RENDERS THREE MORE EVIDENCE ROWS, AND EACH ONE INSTANTIATES THE
+       * SAME PRE-EXISTING TOKEN DEFECT the block above already documents:
+       * `--text-tertiary` #8a94a0 at 3.03:1 and `--text-quaternary` #9aa4af at 2.53:1
+       * against WCAG AA's 4.50:1. 99 nodes were already failing on this surface; three
+       * more rows make 102. No new rule fires, no new selector class appears, and no
+       * page whose trail did not grow moved — which is what distinguishes "the same
+       * defect, more instances" from a defect this change introduced.
+       *
+       * `evidence-graph` moves by +1 at desktop and +2 elsewhere rather than uniformly,
+       * because the graph renders the new entries as nodes whose label wrapping differs
+       * by width. The asymmetry is TRANSCRIBED, not smoothed: a uniform delta would
+       * have been the tell that these were derived rather than read.
+       *
+       * THE QUEUED DESIGN-SYSTEM SLICE STILL OWNS THE FIX, and this raises what it will
+       * recover. The note above already says the two tokens have 274 usages across 40
+       * files and that THIS NUMBER IS EXPECTED TO DROP when they are raised; it will now
+       * drop by more. Do not fix the palette inside a slice about evidence honesty,
+       * where it would hide.
+       *
+       * LINUX ONLY. Transcribed line by line from the `browser accessibility and
+       * responsive baseline` job of the CI run on this branch's head `60b5ebb`, which
+       * failed with exactly these fourteen GREW messages and no others. **The darwin
+       * halves are carried forward UNMEASURED** — this file's own R1b note says not to
+       * assume the two platforms move together, and the extra-DOM-node argument that an
+       * earlier note used to infer darwin would predict a move here, so a darwin run may
+       * well disagree. If one does, transcribe its figure; do not derive it. The
+       * `evidence-graph` keys are SCALARS, which assert darwin too — that is how this
+       * file is forced to write a one-platform reading, because its guard rejects a pair
+       * whose halves are equal, and the header already records the compromise.
+       */
+      'evidence@desktop-1280x800': { darwin: 70, linux: 102 },
+      'evidence@laptop-1024x768': { darwin: 70, linux: 102 },
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
       // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
       // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
@@ -474,9 +526,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
       // `.record-file`. The element was always painted; only measurement
       // changed. Linux is the authority and may differ.
-      'evidence@tablet-768x1024': { darwin: 70, linux: 99 },
-      'evidence@mobile-375x812': { darwin: 68, linux: 97 },
-      'evidence@zoom-200': { darwin: 68, linux: 97 },
+      'evidence@tablet-768x1024': { darwin: 70, linux: 102 },
+      'evidence@mobile-375x812': { darwin: 68, linux: 100 },
+      'evidence@zoom-200': { darwin: 68, linux: 100 },
       /*
        * ── `evidence-graph`, MEASURED: 24 nodes at desktop, 2026-08-16 ────────────
        *
@@ -508,13 +560,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * the header and several notes below already record. If a darwin run
        * disagrees, split the key and correct the total; never loosen the assertion.
        */
-      'evidence-graph@desktop-1280x800': 24,
-      'evidence-graph@laptop-1024x768': 28,
-      'evidence-graph@tablet-768x1024': 28,
-      'evidence-graph@mobile-375x812': 27,
-      'evidence-graph@zoom-200': 27,
-      'evidence-graph@width-390': 27,
-      'evidence-graph@width-320': 27,
+      'evidence-graph@desktop-1280x800': 25,
+      'evidence-graph@laptop-1024x768': 30,
+      'evidence-graph@tablet-768x1024': 30,
+      'evidence-graph@mobile-375x812': 29,
+      'evidence-graph@zoom-200': 29,
+      'evidence-graph@width-390': 29,
+      'evidence-graph@width-320': 29,
       /*
        * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
        * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
@@ -1538,8 +1590,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Every number MEASURED on BOTH platforms on the same commit and merged by
          `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
          run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': { darwin: 68, linux: 97 },
-      'evidence@width-390': { darwin: 68, linux: 97 },
+      'evidence@width-320': { darwin: 68, linux: 100 },
+      'evidence@width-390': { darwin: 68, linux: 100 },
       'experiments-example@width-320': 9,
       'experiments-example@width-390': 9,
       'experiments@width-320': 2,
@@ -2520,7 +2572,30 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // second 26-minute browser run — which is the whole point of
   // `e2e/invariants/baseline-aggregate.invariant.test.ts`, doing its job on its
   // first real use.
-  darwin: 2551,
+  //
+  // ── EVIDENCE TRAIL NO LONGER EMPTY, 2026-08-25: darwin 2551 -> 2564 (+13). ──
+  //
+  // **NOT A DARWIN MEASUREMENT. NOT ONE OF THE FOURTEEN CELLS WAS MEASURED ON DARWIN.**
+  // The seven `evidence-graph@*` keys are SCALARS, and a scalar asserts BOTH columns —
+  // so raising them from a linux reading necessarily moves the darwin total, whether or
+  // not darwin agrees. That is the compromise this file's header already records: the
+  // guard rejects a pair whose halves are equal, so a one-platform reading has no other
+  // way to be written.
+  //
+  //   evidence-graph @ desktop      +1
+  //   evidence-graph @ 6 viewports  +2 each  = +12
+  //                                   net      = +13   (2551 -> 2564)
+  //
+  // The seven `evidence@*` keys are PAIRS, so their +21 lands on linux ALONE and darwin
+  // is genuinely untouched there. **A FIRST DRAFT OF THIS CHANGE MOVED ONLY THE LINUX
+  // TOTAL AND ASSERTED "darwin does not move"** — false, and for the scalar half of its
+  // own change. `baseline-aggregate.invariant.test.ts` caught it (`darwin = 2551, entries
+  // sum to 2564`), which is what that invariant is for: it sums the cells independently
+  // and does not care what the note beside them claims.
+  //
+  // So if a darwin run disagrees with any of the seven, split that key and correct this
+  // total; do not derive it.
+  darwin: 2564,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -2644,7 +2719,28 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   //
   // TRANSCRIBED from CI job 96347581055's IMPROVED messages. All three COLLAPSE to
   // scalars — darwin already held the lower number in each — so darwin does not move.
-  linux: 2801,
+  //
+  // ── EVIDENCE TRAIL NO LONGER EMPTY, 2026-08-25: linux 2801 -> 2835 (+34). ──
+  //
+  // Fourteen cells, one cause: `GET /evidence` stopped returning an empty trail for a
+  // record built through the product, so the Evidence screen renders three more rows and
+  // the graph two more nodes, each instantiating the SAME pre-existing token contrast
+  // defect. Per-cell reasoning at the `evidence@desktop-1280x800` note above.
+  //
+  //   evidence         @ 7 viewports   +3 each   = +21
+  //   evidence-graph   @ desktop       +1
+  //   evidence-graph   @ 6 viewports   +2 each   = +12
+  //                                      net       = +34   (2801 -> 2835)
+  //
+  // TRANSCRIBED from the fourteen GREW messages of the CI run on head `60b5ebb`, and
+  // the arithmetic is stated so the total can be checked against the cells rather than
+  // trusted. ~~darwin does not move: not one of the fourteen was measured there.~~
+  // **CORRECTED before merge:** the first half is true and the CONCLUSION was false. None
+  // of the fourteen was measured on darwin — but the seven `evidence-graph` keys are
+  // scalars, which assert darwin too, so the darwin total moves by +13 as a matter of
+  // arithmetic rather than of evidence. See the darwin note for why that is unavoidable
+  // in this file. The `evidence@*` pairs are the half that genuinely leaves darwin alone.
+  linux: 2835,
 };
 
 /**

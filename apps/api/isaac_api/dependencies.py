@@ -206,12 +206,25 @@ def _labels(step_ids: list[str]) -> str:
     return ", ".join(CANONICAL_LABELS.get(sid, sid) for sid in step_ids)
 
 
+#: The ``changed=False`` reason that NAMES A CAUSE. Servable only when the caller has
+#: established that cause; see :func:`build_invalidation`.
+NO_OP_IDENTICAL_REASON = (
+    "No change — the submitted value was identical; nothing was invalidated."
+)
+
+#: The ``changed=False`` reason that names NO cause, because the caller could not
+#: establish one. It is the DEFAULT, so a caller that forgets to say what it knows
+#: gets the claim-free sentence rather than the confident one.
+NO_OP_UNKNOWN_REASON = "No change — nothing was written, so nothing was invalidated."
+
+
 def build_invalidation(
     *,
     changed: bool,
     changed_fields: list[str],
     pre_steps: list[dict],
     post_exp,
+    identical: bool | None = None,
 ) -> dict:
     """The downstream-invalidation summary for a mutation, at the post-mutation rev.
 
@@ -219,13 +232,56 @@ def build_invalidation(
     Deterministic and honest: a no-op reports ``changed=False`` with empty
     ``changed_fields``/``reopened_steps``; a real change reports which downstream
     steps (if any) reopened and whether the exported artifact is now stale.
+
+    ``identical`` IS THE CALLER'S ANSWER TO "DID YOU ACTUALLY COMPARE THE VALUES?", AND
+    IT EXISTS BECAUSE THIS FUNCTION USED TO ANSWER IT FOR EVERYBODY, ALWAYS YES.
+    ~~``if not changed: reason = "No change — the submitted value was identical; nothing
+    was invalidated."``~~ — that single line attributed EVERY ``changed=False`` outcome
+    to one cause, and ``routes.py`` had already recorded in three places that it "cannot
+    tell 'the caller resubmitted the identical value' from 'we dropped what the caller
+    sent', so it says the first about both". The old line is struck rather than deleted
+    because the sentence itself is not wrong — it is only unearned, and the fix is to
+    make the caller earn it.
+
+    What it cost, measured over HTTP and over MCP on the two routes a scientist's client
+    calls to answer a question::
+
+        POST .../answers {"qc": "valid"}        <- the bare string the question suggests
+          -> 200, changed=False, changed_fields=[]
+             reason: "No change — the submitted value was identical; nothing was
+                      invalidated."
+             pending before ['descriptor','qc','series'] / after unchanged
+
+    A compliant client reads that as "already stored", follows the documented remedy
+    (``correcting: true``), and is answered ``422 not_yet_answered`` pointing back at the
+    operation it just called — a closed loop in which no message anywhere says the
+    value's SHAPE was rejected.
+
+    THREE VALUES, AND THE DEFAULT IS THE HUMBLE ONE:
+
+    * ``True`` — the caller established that every value it forwarded is one the store
+      already holds. ``routes._resubmission_was_identical`` is how the answering and
+      correcting routes establish it, and the argument for why it is sound lives there.
+    * ``False`` — the caller established that it did NOT compare, or that at least one
+      forwarded value is not one the store could hold.
+    * ``None`` (the default) — the caller has no opinion. The export self-heal is the
+      honest instance: nothing was submitted to it at all, so "the submitted value" names
+      nothing. ``test_export_recovery`` used to assert the identical-value sentence there
+      under a comment calling it "KNOWN, documented, NOT fixed here"; it is fixed here,
+      by the default rather than by a special case.
+
+    ``False`` and ``None`` produce the same sentence deliberately: a reason that names no
+    cause is the right answer to both "I compared and they differ" (which cannot reach a
+    ``changed=False`` on the answering path any more — it is now a typed refusal) and "I
+    did not compare". Distinguishing them in prose would invite a claim neither caller
+    is entitled to make.
     """
     post_workflow = _post_workflow(post_exp)
     reopened = reopened_steps(pre_steps, post_workflow["ordered_steps"])
     artifact = artifact_state(post_exp)
 
     if not changed:
-        reason = "No change — the submitted value was identical; nothing was invalidated."
+        reason = NO_OP_IDENTICAL_REASON if identical else NO_OP_UNKNOWN_REASON
     elif reopened:
         reason = f"Updated {len(changed_fields)} field(s); reopened: {_labels(reopened)}."
     else:

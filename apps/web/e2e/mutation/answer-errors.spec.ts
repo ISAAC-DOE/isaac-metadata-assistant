@@ -195,9 +195,18 @@ test.describe('R4 · answers that must be refused', () => {
       `a wrong-typed answer returned ${statuses[0]} — malformed input must be refused or ` +
         `ignored, never raise out of the truth core`
     ).toBeLessThan(500);
+    // AND IT IS THE REFUSAL, not the absorbed 200. Asserted exactly rather than left at
+    // "< 500", because "< 500" was satisfied by the 200 this test was written against and
+    // would be satisfied again if that behaviour came back.
+    expect(statuses[0], 'a value the record cannot store must be refused by name').toBe(422);
 
-    // NOTHING WAS WRITTEN and the blocker is still open. `_answers_to_apply_shape`
-    // drops what it cannot interpret, so the honest outcome is a no-op, not an answer.
+    // NOTHING WAS WRITTEN and the blocker is still open. ~~`_answers_to_apply_shape`
+    // drops what it cannot interpret, so the honest outcome is a no-op, not an answer.~~
+    // Since 2026-08-25 the honest outcome is a typed REFUSAL, not a no-op: the drop was
+    // silent and the `200` beside it said "the submitted value was identical", so one
+    // response asserted both that the question was open and that its answer was already
+    // stored. The two state assertions below are unchanged and are the point — what
+    // changed is which of them the SCREEN learns from.
     const after = await server.read(SEED.partial);
     expect(after.rev, 'a value the core could not interpret must not count as a write').toBe(
       before.rev
@@ -217,7 +226,21 @@ test.describe('R4 · answers that must be refused', () => {
     // to 1 / 3, and re-rendered the same `series` question as "Question 2 of 3". Now
     // that the claim follows the server's report, the pre-reload state is assertable and
     // is asserted here, which is where the regression would first show.
-    await expect(page.getByText(/That answer was not applied\./)).toBeVisible();
+    // ~~`That answer was not applied.`~~ — that note is `answerNotApplied`, which is set
+    // only on a `200` the client had to interpret. A refused answer now takes the error
+    // path, and the copy it lands on is asserted rather than assumed: the GENERIC notice
+    // ends "try again", which is false advice for a value that will be refused every
+    // time, so `GuidedCompletion` has its own branch for `invalid_field_value` on this
+    // path — worded for an answer rather than borrowing the correction path's "this
+    // field still holds the value it held before", which is false when the field never
+    // held one.
+    const notice = page.getByTestId('answer-unstorable-notice');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('nothing was invented in its place');
+    await expect(notice).toContainText('still');
+    await expect(notice, 'no cause may be named that the response does not carry').not.toContainText(
+      /identical|malformed|wrong type/i
+    );
     await expect(page.locator('.answered-row')).toHaveCount(0);
     await expect(page.getByText('Confirmed by You')).toHaveCount(0);
     await expect(
