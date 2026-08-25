@@ -338,7 +338,11 @@ psql -Atc "select current_database()"
 # 2. Confirm what is already applied. Expect exactly two rows: 0001_experiments, 0002_runs.
 psql -Atc "select version from isaac_schema_migrations order by version"
 
-# 3. See what WOULD be applied. Expect: pending: 0003_revisions, 0004_submissions
+# 3. See what WOULD be applied. THIS IS THE CHECK THAT DECIDES WHETHER §9 IS SAFE
+#    TO RUN AT ALL — read §9's table before acting on the output.
+#    EXPECT (safe):     pending: 0003_revisions, 0004_submissions
+#    IF IT ALSO NAMES 0005_run_projection, STOP: `--apply` has no per-version
+#    option and would apply it too, and 0005 is NOT owner-approved.
 #    Applies no MIGRATION — but it is NOT read-only: `pending_versions` opens a
 #    transaction and ensures the bookkeeping table exists.
 python scripts/db_migrate.py --plan
@@ -363,18 +367,36 @@ psql -Atc "select count(*) from pg_locks l join pg_class c on c.oid = l.relation
 psql -Atc "select version()"
 ```
 
-## 9. The exact command
+## 9. The exact command — and it applies EVERY pending migration, not just these two
 
 ```bash
 python scripts/db_migrate.py --apply
 ```
 
-It applies **both** `0003_revisions` and `0004_submissions`, in that order, one transaction each.
-Expected output, exactly:
+**READ THE OUTPUT BEFORE AND AFTER, because the runner cannot be pointed at a version.**
+`scripts/db_migrate.py` exposes `--plan` and `--apply` and **no `--only <version>`**, and
+`apps/api/isaac_api/db_migrate.py::load_migrations` globs **every** `*.sql` in the migrations
+directory. So this command applies every migration not already recorded, in lexical order.
 
-```
-applied: 0003_revisions, 0004_submissions
-```
+> **CORRECTED 2026-08-25 — the previous wording was FALSE, and it was false in the sentence an
+> operator acts on.** It read: ~~*"It applies **both** `0003_revisions` and `0004_submissions`, in
+> that order, one transaction each. Expected output, exactly: `applied: 0003_revisions,
+> 0004_submissions`"*~~. That was true when written and stopped being true when
+> `0005_run_projection.sql` was committed. **`0005` is NOT owner-approved and must NOT be applied**
+> (see `docs/dean-operator-addendum-2026-08-25.md` §0 and §2), so an operator who ran this command on
+> the strength of the old "exactly" would have applied an unapproved migration to a database holding
+> 30 production-derived records.
+
+**What to expect, by state — and precheck 3 (`--plan`) tells you which state you are in before
+anything is applied:**
+
+| `--plan` says | then `--apply` prints | do |
+|---|---|---|
+| `pending: 0003_revisions, 0004_submissions` | `applied: 0003_revisions, 0004_submissions` | proceed — this is the ask |
+| `pending: 0003_revisions, 0004_submissions, 0005_run_projection` | `applied: 0003_revisions, 0004_submissions, 0005_run_projection` | **STOP.** `0005` is not approved. Do not run `--apply` in this state |
+| anything else | — | **STOP** and report what it said |
+
+Each migration gets its own transaction, in lexical order.
 
 ## 10. Postchecks — what would prove it worked
 
@@ -521,12 +543,33 @@ that the failed attempt destroys nothing.
 **The run.** GitHub Actions run
 [`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199), job
 `97660962127` *"migration and durable repository against a real PostgreSQL"*, **conclusion
-`success`**, on `main` at commit `c153ec9` (the PR #171 merge, 2026-08-25). Its step *"Prove every
-0003 and 0004 constraint rejects what it claims to reject"* prints one `refused as designed by
-<object>` line per case; that job emitted **70** such lines naming **57** distinct objects (the set
-spans `0002`, `0003`/`0004` and `0005`), and intersecting them with the **46** constraints declared
-across the two forward files gives exactly **41** — the same 41, and the same five absences, that the
-file-based measurement gives.
+`success`**, on `main` at commit `c153ec9` (the PR #171 merge, 2026-08-24 19:16 -0700). Its step
+*"Prove every 0003 and 0004 constraint rejects what it claims to reject"* prints one `refused as
+designed by <object>` line per case; that job emitted **67** such OUTPUT lines naming **58** distinct
+objects (the set spans `0002`, `0003`/`0004` and `0005`), and intersecting them with the **46**
+constraints declared across the two forward files gives exactly **41** — the same 41, and the same
+five absences, that the file-based measurement gives.
+
+> **THE TWO SUPPORTING FIGURES WERE WRONG AND ARE CORRECTED HERE, IN THE PACKET AN OPERATOR WEIGHS.**
+> This paragraph read ~~"**70** such lines naming **57** distinct objects"~~. Re-derived on 2026-08-25
+> from `gh api repos/ISAAC-DOE/isaac-metadata-assistant/actions/jobs/97660962127/logs`:
+>
+> ```
+> lines containing "refused as designed by"                        : 70
+>   of which are Actions echoing the run: block's own shell source :  3
+> genuine OUTPUT lines                                             : 67
+> distinct objects over those 67                                   : 58
+> intersect(the 46 declared by 0003+0004, those objects)           : 41
+> ```
+>
+> **70** counted the three lines where Actions echoes `echo "refused as designed by $3: $1"` as
+> though they were results. **57** reproduces under neither counting: it came from a truncating
+> regex (`[A-Za-z0-9_.]*`) that collapsed the three `column "…"` objects into one and captured the
+> **empty string** from each of the three echoed lines — so an empty string was counted as a blamed
+> object (53 + 4 = 57). **41 is unaffected**, because it is an intersection with the declared set and
+> neither error reached it. The same correction is applied in `CLAUDE.md` and in
+> `apps/api/tests/test_submission_store.py`; `docs/dean-operator-addendum-2026-08-25.md` §1 already
+> carried **67** correctly, which is how the discrepancy was found.
 
 > **THIS HEADING HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS. BOTH CORRECTIONS ARE KEPT, BECAUSE THE
 > SEQUENCE — 41 (false) → 27 (true) → 41 (true, by a different run) — is what tells an operator that

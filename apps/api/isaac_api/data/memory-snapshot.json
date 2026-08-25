@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "4b9c273da8c00e2829a59c7b811b48c6878de60a1744049958f043d791360da8"
+        "sha256": "38757be008ed3072751b7d3a61669923771c79bb0e8c6e9cba156d096b0b0ad5"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "efae70469a1b113839e34fe3045a3e29d0af37cb5a81e8b33cf75ee08c767df4"
+        "sha256": "891f550dd6c61f7b7c164048c128eb8f8ac45166245410d4bce10bae012b8c3c"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "e4a23c0af35257319936fc777521f54aa568d31e8ff1990dbbaac11ea5823027"
+        "sha256": "dd590d59e83ef9ba6ec6294f9daa6b32587557cbf20ac1af8e89b3ca3aff132d"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "a36e8971938eb041bb70a7ec69b1ebc7d18104ce52d2ec72bfc2e11a88ac6efd"
+        "sha256": "23884aceaa5cbde5cc82e66c961df951b20a6bcf6fece0a91bf4fcf77fb08fe4"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "72230f9ef86d9653f3c4382e3ecacc99f701f28b00ae7672eb1b0e65be85583d"
+    "served_manifest_fingerprint": "5b7e6b2676d63edd3215992f98fe61e4885432564695f2ee4427d5156230b767"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

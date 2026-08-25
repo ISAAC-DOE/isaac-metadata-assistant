@@ -182,14 +182,25 @@ hosted database**, so against the real hosted database this one command would ap
 migrations, two of which have their own packets and their own operator step.
 
 That is not a hidden hazard — precheck 1 is what catches it, and it is why the precheck comes
-first. Two acceptable sequences, and no third:
+first. Two sequences were listed here; **the second is now marked NOT AUTHORIZED and the
+correction is left visible, because it conflicted with the operator addendum in the operator's
+own instruction.**
 
 1. **Apply `0003` and `0004` first**, from their own packets; confirm precheck 1 reads
    `0001, 0002, 0003, 0004`; then run the command below and expect exactly
-   `applied: 0005_run_projection`.
-2. **Apply all three together, deliberately**, having read all three packets, and expect
+   `applied: 0005_run_projection`. **This is the only shape that is authorized — and it is
+   currently unreachable with the shipped runner**, because `--apply` has no per-version option
+   and would take `0005` along with `0003`/`0004`. See
+   [`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md) §0, which
+   records that conflict as **BLOCKED** and names the three candidate resolutions. None of them
+   is an operator's to choose.
+2. ~~**Apply all three together, deliberately**, having read all three packets, and expect
    `applied: 0003_revisions, 0004_submissions, 0005_run_projection`. Report the postchecks for
-   all three.
+   all three.~~ **NOT AUTHORIZED, struck 2026-08-25.** It presupposes an owner approval of `0005`
+   that **does not exist** — this packet's own STATUS block says so — and an operator cannot
+   supply one. Offering it as *"acceptable"* directly contradicted the addendum's **DO NOT apply
+   `0005_run_projection`** row. If Krish reviews and approves `0005`, this becomes the clean
+   resolution; until then it is not a choice on the table.
 
 What is NOT acceptable is running the command because this packet said to and discovering
 afterwards that three migrations landed.
@@ -313,9 +324,30 @@ are what the claim is about, and the claim is written in the same transaction as
 to the document on any mismatch; the contract's §2.1 four-state table is what it must
 implement.
 
-**A CI step that runs both of these against a real `postgres:18` was added on 2026-08-24
+~~**A CI step that runs both of these against a real `postgres:18` was added on 2026-08-24
 and HAS NOT YET RUN.** Until it does, nothing in this packet claims either query has ever
-executed anywhere. See §9A, which records how they came to have no engine evidence at all.
+executed anywhere.~~ **SUPERSEDED 2026-08-25 — IT HAS RUN.** Struck rather than deleted because
+the sentence was the honest state for one day and a reader should see that it expired rather than
+that it never existed. Both queries executed **verbatim** against PostgreSQL 18.6 in run
+[`32800763199`](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/32800763199),
+job `97660962127`, step *"Prove the Stage-2b gate queries detect what the packet says they
+detect"*, conclusion `success`, on `main` at `c153ec9`. Job output, quoted:
+
+```
+baseline: never_projected=0 stale=1
+accepted and committed as designed: projector = backfill
+after: never_projected=1 stale=3
+backfill|3
+0005 §8A: both gate queries executed against a real engine and named the right rows
+```
+
+The counts are asserted as **deltas** against a baseline taken immediately before, because the
+queries are unscoped by design and the step must not rewrite the query you would actually run;
+the step also asserts **by id** which experiments each query names, with the current claim in
+neither result set, so neither can pass by being vacuously empty. Source: the job log, fetched
+read-only with `gh api repos/ISAAC-DOE/isaac-metadata-assistant/actions/jobs/97660962127/logs`.
+**This says nothing about the hosted database** — the gate is still a query an operator runs
+there. See §9A, which records how these came to have no engine evidence at all.
 
 ## 9. Evidence, and what remains unproven — read this before approving
 
@@ -372,7 +404,7 @@ deleted until the claim is deleted first.** That is the design (the alternative,
 `ON DELETE CASCADE`, is declined in §3), and it means any operational script that removes
 experiments needs one more statement.
 
-### 9A. DECLARED IN THE WORKFLOW AND NOT YET RUN — added 2026-08-24
+### 9A. DECLARED IN THE WORKFLOW AND NOT YET RUN — added 2026-08-24; **RUN 2026-08-25, see §8A**
 
 **Read this section as "written and reviewed", not as "observed".** The repository has
 already had one packet assert proof for a step that had never executed (the paragraph
@@ -386,7 +418,12 @@ had ever executed anywhere**; and **no row with `projector = 'backfill'` had eve
 committed to any engine** — the CHECK's *acceptance* of that value was inferred from reading
 the CHECK, while every case that had run tested its *refusals*.
 
-One new step and three cases added to an existing one now cover it. **Neither has run**:
+One new step and three cases added to an existing one now cover it. ~~**Neither has run**~~ —
+**BOTH HAVE RUN, 2026-08-25**, in run `32800763199`, job `97660962127`, on `main` at `c153ec9`,
+every step `success`. The heading of this section is kept, and this claim struck rather than
+deleted, because the section exists to record the interval in which coverage was written but
+unobserved — deleting the interval would make the two indistinguishable. The quoted job output is
+in §8A above:
 
 - *"Prove the Stage-2b gate queries detect what the packet says they detect"* — commits a
   `projector = 'backfill'` claim and reads it back; builds one experiment stale **by rev**,
