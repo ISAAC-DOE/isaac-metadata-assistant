@@ -930,6 +930,53 @@ def evidence_trail_from_draft(draft: dict) -> list[dict]:
     return entries
 
 
+#: EVERY NAMESPACE ``draft["block_evidence"]`` CAN CARRY, frozen, because
+#: :func:`confirmed_block_trail_from_draft` walks the map's keys and therefore serves
+#: whatever is in it.
+#:
+#: IT EXISTS BECAUSE THE READER SHIPPED SERVING A NAMESPACE NONE OF ITS THREE
+#: DESCRIPTIONS NAMED. This endpoint's OpenAPI description, ``isaac_inspect_evidence``'s
+#: tool description and this function's own docstring all enumerated *"the ``qc:``,
+#: ``series:`` and ``descriptors:`` keys recorded when a scientist confirms a verdict, a
+#: spectrum or a descriptor"*. Measured across the five seeded worked examples, the
+#: reader also serves ``attribution:`` — two entries per record, the MAJORITY of what
+#: this reader added on the two seeds that gained nothing else — and they are not
+#: scientist confirmations at all but spreadsheet citations written by
+#: ``extract.draft_builder``. *"It described two cases and there were three"* is this
+#: module's own words about a withdrawn sentence; that was the same defect.
+#:
+#: WHERE EACH ONE IS WRITTEN, so the roster can be checked rather than trusted:
+#:
+#: * ``qc`` — ``complete.apply_answers``/``apply_corrections`` (``qc:status``), and
+#:   ``extract.draft_builder`` when the source sheet supplied a verdict.
+#: * ``series`` — ``complete.apply_answers``/``apply_corrections``, keyed per
+#:   ``series_id``.
+#: * ``descriptors`` — NOT a ``block_evidence`` key at all: it is this function's own
+#:   key for a ``descriptors_outputs`` entry, matching ``export.build_sidecar``'s. It is
+#:   in the roster because it is a namespace this reader SERVES, which is what the
+#:   descriptions have to cover.
+#: * ``attribution`` — ``extract.draft_builder``, ``attribution:<name>|<role>``, a
+#:   contributor's spreadsheet provenance.
+#: * ``links`` — ``draft_validator`` requires ``links:<rel>|<target>|<basis>`` for every
+#:   cross-record link and ``workspace._merge_block_evidence`` merges it. **No fixture
+#:   in this repository produces one**, which is precisely why it is listed: an
+#:   observation-driven guard could not have caught it, and it would have reached a
+#:   scientist's trail undescribed.
+#:
+#: IT IS A DOCUMENTATION RATCHET, NOT A SERVING FILTER, and the distinction is the whole
+#: design. ``_DB_RECON_*_KEYS`` projects its output ONTO its allowlist so an unlisted key
+#: is withheld — correct there, where an unlisted key would carry production-derived
+#: content past a visibility gate. Here the same mechanism would be exactly wrong:
+#: withholding an unlisted namespace would silently drop a scientist's own evidence from
+#: their own record's trail, which is the defect this reader was built to fix,
+#: reintroduced through the fix. So nothing is filtered; a new namespace still reaches
+#: the trail, and ``test_evidence_trail_of_a_record_you_built.py`` fails until somebody
+#: says what it is.
+BLOCK_EVIDENCE_NAMESPACES: frozenset[str] = frozenset(
+    {"qc", "series", "descriptors", "attribution", "links"}
+)
+
+
 def confirmed_block_trail_from_draft(draft: dict) -> list[dict]:
     """The trail entries for a draft's CONFIRMED BLOCKS — the ones
     :func:`evidence_trail_from_draft` does not walk.
@@ -943,7 +990,16 @@ def confirmed_block_trail_from_draft(draft: dict) -> list[dict]:
 
     ``evidence_trail_from_draft`` walks ``fields``, ``implicit`` and ``assets``, and
     ``complete.apply_answers`` writes the confirmations for ``series``, ``qc`` and the
-    descriptor block into ``block_evidence`` and ``descriptors_outputs`` instead. The
+    descriptor block into ``block_evidence`` and ``descriptors_outputs`` instead.
+
+    WHAT IT SERVES IS FIVE NAMESPACES, NOT THREE, and the first version of this
+    docstring said three. It walks EVERY key in ``block_evidence``, so the entries are
+    the ``qc:``, ``series:`` and ``descriptors:`` confirmations a scientist writes AND
+    the ``attribution:`` and ``links:`` citations a source document writes — the second
+    pair are provenance, not confirmations, and calling them confirmations was measured
+    false against the seeded worked examples, where ``attribution:`` is the largest
+    single namespace this reader adds. :data:`BLOCK_EVIDENCE_NAMESPACES` is the frozen
+    roster and carries where each one comes from. The
     seeds only looked right because their ``fields`` map comes from a fixture sheet; a
     created record has an empty ``fields`` map, so its trail was ALWAYS empty — beside
     ``ready_to_export``, and beside a tool description promising "each official path, its

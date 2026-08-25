@@ -473,8 +473,16 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * `evidence_trail_from_draft` walked `fields`, `implicit` and `assets` and never
        * `block_evidence` or `descriptors_outputs`, which is exactly where the four
        * blocking answers are written. `GET /evidence` now composes a second reader.
-       * Measured on the seeded scenarios: **+3/+3/+5/+5/+5 entries**, and this suite
-       * scans seed `…SEED0000000002`, which gained **+3**.
+       * Measured on the seeded scenarios: ~~**+3/+3/+5/+5/+5 entries**~~ — corrected
+       * 2026-08-25, **ON THE WIRE IT IS +3/+3/+5/+5/+0**. The fifth seed is EXPORTED,
+       * so `GET /evidence` serves it from the sidecar branch and the new draft reader
+       * never runs for it: its served total is unchanged at 36. `+5` is that seed's
+       * DRAFT-SIDE figure — what `confirmed_block_trail_from_draft(exp.draft)` returns
+       * — and quoting it here read as a served delta, which is the figure this file is
+       * about. Measured per seed (old walker / new draft-side / SERVED): 28/3/31,
+       * 31/3/34, 31/5/36, 31/5/36, and 31/5/**36 unchanged**. This suite scans seed
+       * `…SEED0000000002`, which gained **+3** — that half was right and is why the
+       * node counts below still hold.
        *
        * SO THE SCREEN RENDERS THREE MORE EVIDENCE ROWS, AND EACH ONE INSTANTIATES THE
        * SAME PRE-EXISTING TOKEN DEFECT the block above already documents:

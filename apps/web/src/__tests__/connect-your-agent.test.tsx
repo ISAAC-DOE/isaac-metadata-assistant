@@ -718,14 +718,46 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
    * must agree with it. Deriving rather than hard-coding is what makes this
    * catch the next divergence instead of pinning today's sentence.
    */
-  /** Every tool name in `tools.py` with the scope it declares. */
+  /**
+   * Every tool name in `tools.py` with the scope it declares.
+   *
+   * THE FIRST VERSION OF THIS PARSER WAS `/name="(isaac_[a-z_]+)"[\s\S]*?scope=Scope\.([A-Z_]+)/g`,
+   * AND THE LAZY UNBOUNDED GAP MADE THE WHOLE BLOCK BELOW FORGEABLE BY A COMMENT.
+   * Measured: inserting ONE comment line after `name="isaac_create_run",` whose text
+   * happens to contain `scope=Scope.READ` reclassifies that tool as READ — the parse
+   * still returns 10 tools with 10 correct names, so the anti-vacuity block below
+   * passed, and the guard then asserted that a read-only principal may create a run.
+   * Both suites stayed green.
+   *
+   * SO IT IS LINE-ANCHORED AND PAIRED, and it THROWS rather than guessing when the
+   * structure surprises it. A comment cannot satisfy `^[ \t]*(name=|scope=)`, because
+   * a comment line begins with `#`. If `tools.py` is ever reformatted so a tool's name
+   * and scope no longer sit on their own lines, this raises instead of silently
+   * reclassifying — a parser that cannot read its input must say so, not answer anyway.
+   */
   function declaredTools(): { name: string; scope: string }[] {
     const source = readFileSync(join(REPO_ROOT, 'apps/api/isaac_api/mcp/tools.py'), 'utf8');
+    const tokens = source.matchAll(
+      /^[ \t]*(?:name="(isaac_[a-z_]+)"|scope=Scope\.([A-Z_]+))\s*,[ \t]*$/gm,
+    );
     const out: { name: string; scope: string }[] = [];
-    const pattern = /name="(isaac_[a-z_]+)"[\s\S]*?scope=Scope\.([A-Z_]+)/g;
-    for (const match of source.matchAll(pattern)) {
-      out.push({ name: match[1], scope: match[2] });
+    let pendingName: string | null = null;
+    for (const token of tokens) {
+      const [, name, scope] = token;
+      if (name !== undefined) {
+        if (pendingName !== null) {
+          throw new Error(`two tool names before a scope: ${pendingName} then ${name}`);
+        }
+        pendingName = name;
+      } else {
+        if (pendingName === null) {
+          throw new Error(`a scope=${scope} declaration precedes any tool name`);
+        }
+        out.push({ name: pendingName, scope: scope! });
+        pendingName = null;
+      }
     }
+    if (pendingName !== null) throw new Error(`tool ${pendingName} declares no scope`);
     return out;
   }
 
@@ -741,13 +773,28 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     return source.includes('return frozenset({Scope.READ, self.scope})');
   }
 
-  /** The tools a principal holding EXACTLY `scope` can call. */
+  /**
+   * The tools a principal holding EXACTLY `scope` can call.
+   *
+   * `cost.size === 1 && cost.has(scope)` WAS THE OLD TEST, AND IT NEVER CONSULTED THE
+   * TOOL LIST FOR THE CASE THE BLOCK BELOW IS ABOUT: with `alsoRead` true, `cost` is
+   * `{'READ', own}`, whose size is 1 only when `own === 'READ'`, so the DRAFT_WRITE
+   * answer was `[]` by arithmetic — `[]` for an empty parse, `[]` for a broken regex,
+   * `[]` for a `tools.py` that had been emptied. It measured nothing.
+   *
+   * It is now the real subset check: a principal holding `{scope}` can call a tool iff
+   * every scope that tool costs is held. Same answer, arrived at from the data — and
+   * the assertions below pin the READ side and the DRAFT_WRITE inventory, so `[]` now
+   * has to be `[]` DESPITE three write tools existing rather than because nothing was
+   * read.
+   */
   function callableWithOnly(scope: 'READ' | 'DRAFT_WRITE'): string[] {
     const alsoRead = everyToolAlsoCostsRead();
+    const held = new Set<string>([scope]);
     return declaredTools()
       .filter(({ scope: own }) => {
-        const cost = new Set(alsoRead ? ['READ', own] : [own]);
-        return cost.size === 1 && cost.has(scope);
+        const cost = alsoRead ? ['READ', own] : [own];
+        return cost.every((required) => held.has(required));
       })
       .map((t) => t.name)
       .sort();
@@ -759,12 +806,47 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     expect(declared.map((t) => t.name).sort()).toEqual(permittedToolNames());
     expect(declared.some((t) => t.scope === 'DRAFT_WRITE')).toBe(true);
     expect(everyToolAlsoCostsRead()).toBe(true);
+
+    // THE SPLIT, NOT JUST THE INVENTORY. The four assertions above all survive a
+    // parse that gets every NAME right and every SCOPE wrong, which is exactly what
+    // the old lazy regex did when one comment line moved: 10 names, 10 correct, and
+    // `isaac_create_run` silently reclassified from DRAFT_WRITE to READ. Pinning the
+    // counts is what kills that — and pinning the NAMES as well means a tool that
+    // changes scope for a real reason has to say so here.
+    const byScope = (scope: string) =>
+      declared
+        .filter((t) => t.scope === scope)
+        .map((t) => t.name)
+        .sort();
+    expect(byScope('DRAFT_WRITE')).toEqual([
+      'isaac_answer_questions',
+      'isaac_create_run',
+      'isaac_update_draft',
+    ]);
+    expect(byScope('READ')).toHaveLength(declared.length - 3);
+    // No third scope: a tool carrying one would be invisible to both lists above.
+    expect(new Set(declared.map((t) => t.scope))).toEqual(new Set(['READ', 'DRAFT_WRITE']));
   });
 
   it('draft-write alone permits NOTHING, and the copy for it says so', () => {
     // Derived, not asserted: every tool costs READ, so a draft-write-only
     // principal reaches zero of them.
+    //
+    // AND THE EMPTINESS IS EARNED RATHER THAN ARITHMETIC. `[]` on its own is what a
+    // broken parser returns too, so the two lines beneath it are what make this an
+    // assertion about `tools.py`: three tools DO declare DRAFT_WRITE, and the READ
+    // holder reaches a non-empty set through the same function. Without them the whole
+    // block passed over an empty `tools.py`.
+    const declared = declaredTools();
     expect(callableWithOnly('DRAFT_WRITE')).toEqual([]);
+    expect(declared.filter((t) => t.scope === 'DRAFT_WRITE')).toHaveLength(3);
+    expect(callableWithOnly('READ')).toEqual(
+      declared
+        .filter((t) => t.scope === 'READ')
+        .map((t) => t.name)
+        .sort(),
+    );
+    expect(callableWithOnly('READ').length).toBeGreaterThan(0);
 
     const draftWrite = MCP_PERMISSIONS.find((p) => p.id === 'draft-write');
     expect(draftWrite, 'the draft-write permission row is gone').toBeDefined();

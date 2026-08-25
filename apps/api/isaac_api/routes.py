@@ -2659,7 +2659,7 @@ def _answer_asset_uris(draft: dict, *, edit_only: bool) -> set:
 
     ONE DEFINITION, TWO CALLERS, for the reason :func:`_value_fits_the_store` gives at
     length: :func:`_answers_to_apply_shape` decides which URI keys it FORWARDS and
-    :func:`_refuse_unrecognised_answer_keys` decides which it RECOGNISES, and those two
+    :func:`_refuse_a_body_that_names_nothing_answerable` decides which it RECOGNISES, and those two
     sets must be the same set or a URI is refused as unknown by one and accepted by the
     other. The ``edit_only`` narrowing (and the argument for it) stays documented in
     ``_answers_to_apply_shape``, which is where the measured defect was.
@@ -2705,7 +2705,7 @@ def _refuse_a_body_that_names_nothing_answerable(
     rather than invented"*. That promise is narrowed: a body in which NOTHING is
     recognised is now refused by name. Every surface that stated the old rule states the
     new one (this route's body description, the run route's description,
-    :data:`_R_ALREADY_ANSWERED`, and the MCP tool).
+    :data:`_R_ANSWER_REFUSED`, and the MCP tool).
 
     THE DEFECT THIS CLOSES, measured over HTTP at both levels and over MCP, with the
     most ordinary mistake a client can make — a mistyped key::
@@ -2823,7 +2823,8 @@ def _resubmission_was_identical(apply_shape: dict) -> bool:
       was blank. Nothing was submitted, so there is nothing that could have been
       identical, and this returns ``False``.
     * the shape carries at least one answer key, every one of which the store can hold
-      (``_refuse_unrecognised_answer_keys`` removed the keys it cannot act on and
+      (``_refuse_a_body_that_names_nothing_answerable`` removed the keys it cannot act
+      on and
       :func:`_refuse_unstorable_answer` removed the values it cannot keep). For an OPEN
       question ``apply_answers`` writes unconditionally once it enters the branch — the
       ``qc`` branch even APPENDS a confirmation to ``block_evidence`` — so a byte-stable
@@ -2836,6 +2837,17 @@ def _resubmission_was_identical(apply_shape: dict) -> bool:
     resubmission. ``changed`` itself comes from ``save_versioned``'s comparison of the
     authoritative signature, which is a real comparison of real bytes — the claim is
     grounded there, not here.
+
+    ONE MEASURED RESIDUE, NAMED RATHER THAN GLOSSED, because "every key was compared" is
+    not what this function can actually establish. ``apply_corrections`` compares only
+    the ``(status, note)`` pair of a ``qc`` block, so ``{"qc": {"status": "valid",
+    "evidence": "ok", "bogus": 123}}`` against a CLOSED ``qc`` holding that status and
+    note is a ``200`` reporting the value identical, while ``bogus`` was discarded
+    uncompared. It is weaker than the ``descriptor_label`` case below — the two keys the
+    caller is likely to care about WERE compared, and no shipped surface sends an extra
+    key — and closing it would require this function to know how each block's writer
+    compares, which is precisely what the paragraph above refuses to do. Closing it
+    belongs to a slice that can put the comparison basis where the comparison is.
 
     ON THE CORRECTING PATH the same reading holds for a simpler reason: ``/edit``
     already refuses an unrecognised body, an unstorable value and an unanswered
@@ -2859,13 +2871,37 @@ def _resubmission_was_identical(apply_shape: dict) -> bool:
     # sentence this function exists to stop serving, one key over.
     if not any(k in _WRITING_ANSWER_KEYS for k in named) and not shas:
         return False
+    # ...AND NO KEY WHOSE VALUE NOTHING COMPARED, WHICH IS THE SAME ARGUMENT ONE KEY
+    # OVER. The check above stops a BARE `descriptor_label` from earning the sentence;
+    # it does nothing about one RIDING ALONG with a key that CAN write, because
+    # `any(...)` is then satisfied by the other key. Measured on a completed record
+    # whose stored label is `user_supplied`, on BOTH ingresses:
+    #
+    #     POST /answers {"series": <byte-identical>, "descriptor_label": "A BRAND NEW LABEL"}
+    #       -> 200 changed=False, "the submitted value was identical",
+    #          stored label AFTER: user_supplied
+    #     POST /edit    {"series": <identical>, "descriptor_label": "NEW LABEL 2"} -> same
+    #
+    # So the label was neither identical, nor stored, nor compared — and the ride-along
+    # UNRECOGNISED key, one key further over, is correctly suppressed by `and not
+    # dropped` at the call sites. This is that half's blind spot: a RECOGNISED inert key
+    # never enters `dropped`. `descriptor` present alongside is the boundary and is
+    # deliberately still allowed to claim the comparison, because then the label IS
+    # written onto the block the descriptor builds, so a byte-stable document really
+    # does mean the submitted values were the stored ones.
+    if "descriptor_label" in named and "descriptor" not in named:
+        return False
     return all(_correction_is_storable(k, apply_shape[k]) for k in named) and all(
         _correction_is_storable(uri, sha) for uri, sha in shas.items()
     )
 
 
 def _refuse_unstorable_answer(
-    apply_shape: dict, answers_by_id: dict | None = None
+    apply_shape: dict,
+    answers_by_id: dict | None = None,
+    *,
+    size: bool = True,
+    shape: bool = True,
 ) -> JSONResponse | None:
     """``422 invalid_field_value`` for an ANSWER the store cannot keep, or ``None``.
 
@@ -2932,6 +2968,45 @@ def _refuse_unstorable_answer(
     reason no longer claims the value was identical, because
     :func:`_resubmission_was_identical` asks the same predicate and answers ``False``.
 
+    ``size``/``shape`` SELECT THE HALVES, AND THEY EXIST BECAUSE THE RECORD ROUTE MUST
+    RUN THEM ON EITHER SIDE OF A DIFFERENT REFUSAL. Adding the shape half made this
+    function fire where only the size half used to, and it PREEMPTED
+    :func:`_refuse_run_level_on_the_record` for the same keys. Measured on a record with
+    one run, over HTTP::
+
+        {"series": "nope"}      before: 409 belongs_to_a_run (names the run + answer_at)
+                                 after: 422 invalid_field_value, no answer_at
+        {"descriptor": "nope"}  before: 409                     after: 422
+        {"series": <valid>}     both:   409   (control)
+
+    That is a regression the slice adding the shape half argued AGAINST in its own
+    words: it chose the narrow unrecognised-key rule precisely because *"a refusal that
+    misdirects is worse than one that says nothing"*, citing this very ``409`` for these
+    very keys — and then preempted it from the other side.
+
+    SO THE RECORD ROUTE ORDERS THEM ``size`` -> ``409`` -> ``shape``, and each position
+    is argued:
+
+    * the SIZE half stays first. A value that can be stored at NO level must not be
+      answered with "send it to the run", because the run refuses it with this same
+      ``422``; and it is the one refusal that must precede anything that WALKS the
+      value, since ``apply_answers`` deep-copies it (the measured ``RecursionError``).
+    * the ``409`` comes next. For a run-owned key on a record that has runs, "this
+      belongs to run X, answer it there" is strictly more useful than "that value is
+      the wrong shape for a level that no longer owns it".
+    * the SHAPE half comes last, so it answers only for a key the ``409`` did not claim.
+
+    ``qc`` IS THE ONE KEY THIS ORDERING DOES NOT MOVE, and it is stated rather than left
+    to be discovered: an off-enum ``qc`` never reaches ``apply_shape`` at all
+    (``_answers_to_apply_shape`` screens it out on the answering path), so
+    ``_run_level_keys_in`` — which reads the SHAPE — cannot see it and the ``409``
+    cannot fire for it wherever the halves run. The shape half reads the RAW body, which
+    is exactly why it still can. So on one record a malformed ``series`` is redirected
+    and a malformed ``qc`` is refused. Teaching the ``409`` to read the raw body would
+    change what ``belongs_to_a_run`` means and is its own slice.
+
+    The RUN route keeps both halves in one call: it has no ``409`` to preserve.
+
     THE ERROR CODE IS ``/edit``'s, and that is a decision rather than convenience: it is
     the same condition on the same field set, and a client that already branches on
     ``invalid_field_value`` should not need a second code to learn that a value it sent
@@ -2941,7 +3016,7 @@ def _refuse_unstorable_answer(
     needs to know and is exactly what the refusal guarantees.
     """
     offending: list[str] = []
-    for key in [
+    for key in ([
         key
         for key, value in apply_shape.items()
         if key not in ("timestamp", "asset_sha256") and not _value_fits_the_store(value)
@@ -2949,14 +3024,14 @@ def _refuse_unstorable_answer(
         uri
         for uri, sha in (apply_shape.get("asset_sha256") or {}).items()
         if not _value_fits_the_store(sha)
-    ]:
+    ] if size else []):
         if key not in offending:
             offending.append(key)
     # THE SHAPE HALF, over the RAW answers. Deduplicated against the size half above
     # because `_correction_is_storable` asks `_value_fits_the_store` first, so an
     # oversized AND wrong-shaped value would otherwise be named twice in `keys` — and
     # `keys` is a list a client is told names every offending key, not a bag.
-    for key in _SHAPE_SCREENED_ANSWER_KEYS:
+    for key in _SHAPE_SCREENED_ANSWER_KEYS if shape else ():
         value = (answers_by_id or {}).get(key)
         if value in (None, ""):
             continue  # a blank answer is not an answer; it is dropped, as it always was
@@ -3079,7 +3154,7 @@ def _answers_to_apply_shape(
             out[key] = value
         # A key outside `_NAMED_ANSWER_KEYS` and outside `asset_uris` is dropped here —
         # never invented into the draft. On the two ANSWERS routes it no longer reaches
-        # this point: `_refuse_unrecognised_answer_keys` has already refused it by name.
+        # this point: `_refuse_a_body_that_names_nothing_answerable` has already refused it by name.
         # On the two EDIT routes the drop is still the live behaviour, deliberately (see
         # that refusal's docstring for why the asymmetry is scoped rather than accidental).
     return out
@@ -3202,8 +3277,15 @@ _ANSWERS_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/an
 _EDIT_OPERATION_RECORD = "POST /api/experiments/{experiment_id}/edit"
 _EDIT_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/edit"
 
-#: The ``422`` BOTH answers operations serve for an answer that would REPLACE a
-#: confirmed value.
+#: The ``422`` BOTH answers operations serve. RENAMED FROM ``_R_ALREADY_ANSWERED``, whose
+#: name had outlived its scope: it described ONE of the refusals in it, and the block now
+#: describes FIVE — ``confirmation_required``, ``no_derivation_to_confirm``,
+#: ``unrecognized_field``, ``invalid_field_value`` and ``already_answered``, plus the
+#: framework's own body-validation shape. A constant named after its first member is how
+#: the next refusal gets added without anyone noticing the name stopped covering the
+#: contents; ``_R_CORRECTION_REFUSED`` — whose own note records "the record's ``422``
+#: enumerated three refusals while the route performed four" — is the sibling this now
+#: matches.
 #:
 #: THE SCHEMA REF IS PART OF THE CONSTANT for the reason :data:`_R_NOT_YET_ANSWERED`
 #: states: FastAPI skips generating its own ``422`` the moment a route declares one,
@@ -3220,7 +3302,7 @@ _EDIT_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/edit"
 #: sentence would repeat exactly the gap :data:`_R_CORRECTION_REFUSED` was written to
 #: close, where "the record's ``422`` enumerated three refusals while the route performed
 #: four".
-_R_ALREADY_ANSWERED: dict = {
+_R_ANSWER_REFUSED: dict = {
     422: {
         "description": (
             "Either the request body failed framework validation (the "
@@ -3238,7 +3320,18 @@ _R_ALREADY_ANSWERED: dict = {
             "and they silently dropped it — which made a mistyped key indistinguishable "
             "from an accepted one, because the resulting `200` explained itself as "
             "*\"the submitted value was identical\"* about a key the record had never "
-            "held. A key is now either acted on or refused by name. A BLANK value "
+            "held. ~~A key is now either acted on or refused by name.~~ "
+            "**OVERSTATED, AND SCOPED HERE RATHER THAN DELETED** \u2014 a key is acted "
+            "on, refused by name, or, WHEN AT LEAST ONE OTHER KEY IN THE SAME BODY WAS "
+            "RECOGNISED, dropped on a `200` that does not name it. Measured: `{\"qc\": "
+            "<valid>, \"sample.material.nmae\": \"Fe2O3\"}` answers `200` with "
+            "`changed_fields: [\"qc\"]`, and the mistyped key appears nowhere in the "
+            "response. What IS guaranteed for that key, and is the half this change "
+            "actually built: **the `200` withholds the identical-value reason whenever "
+            "anything was dropped**, so no sentence in it can be read as acknowledging "
+            "the key that vanished. Naming dropped keys in the body needs a new response "
+            "field, which is the frontend's contract too, so it belongs to a slice that "
+            "can change both. A BLANK value "
             "(`null` or `\"\"`) is still dropped at any key, recognised or not: a blank "
             "answer is not an answer. The correction operations are deliberately "
             "unchanged and still tolerate a ride-along key.\n\n"
@@ -3404,7 +3497,7 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
         # described in the published contract — the same gap `_R_NOT_YET_ANSWERED`
         # records for its own refusal, which "reached no generated OpenAPI document,
         # and therefore no machine client that reads the contract before calling it."
-        **_R_ALREADY_ANSWERED,
+        **_R_ANSWER_REFUSED,
     },
 )
 def post_answers(
@@ -3480,7 +3573,10 @@ def post_answers(
         if refusal is not None:
             return refusal
         apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
-        # FIRST OF THE THREE REFUSALS, AND THE ORDER IS ARGUED RATHER THAN INHERITED.
+        # FIRST OF THE REFUSALS, AND ONLY ITS SIZE HALF — the SHAPE half runs after the
+        # `409` below, because it preempted it. See `_refuse_unstorable_answer`.
+        #
+        # THE ORDER IS ARGUED RATHER THAN INHERITED.
         # `belongs_to_a_run` below sends a run-owned key to the run's own operation, which
         # is the more useful answer for a value that could be stored SOMEWHERE. This one
         # is for a value that can be stored NOWHERE — too big, too deep, or unrenderable
@@ -3489,10 +3585,23 @@ def post_answers(
         # the three and the only one that must run before anything WALKS the value:
         # `apply_answers` deep-copies it, which is where the measured `RecursionError`
         # came from.
-        refusal = _refuse_unstorable_answer(apply_shape, body.get("answers") or {})
+        refusal = _refuse_unstorable_answer(apply_shape, shape=False)
         if refusal is not None:
             return refusal
         refusal = _refuse_run_level_on_the_record(exp, apply_shape)
+        if refusal is not None:
+            return refusal
+        # THE SHAPE HALF, DELIBERATELY AFTER THE `409`, and the split is the fix for an
+        # ordering regression this branch introduced. Running both halves together made
+        # `{"series": "nope"}` on a record with one run answer `422 invalid_field_value`
+        # where it used to answer `409 belongs_to_a_run` naming the run and the operation
+        # that CAN take the answer — a refusal that misdirects, replacing one that helps.
+        # `_refuse_unstorable_answer`'s docstring carries the measurement and the argument
+        # for each of the three positions, including why an off-enum `qc` stays a `422`
+        # here no matter what this ordering does.
+        refusal = _refuse_unstorable_answer(
+            apply_shape, body.get("answers") or {}, size=False
+        )
         if refusal is not None:
             return refusal
         # `edge` IS EXEMPT FROM THE REFUSAL ABOVE AND IS SCREENED BY THIS ONE INSTEAD.
@@ -6603,7 +6712,14 @@ def post_run_override_clear(
         "than invented, exactly as on the record~~ — it is now REFUSED with `422 "
         "unrecognized_field`, exactly as on the record, because dropping it silently "
         "produced a `200` claiming the submitted value was identical to one this run "
-        "had never held. A `series`, `qc` or `descriptor` value the run cannot hold is "
+        "had never held. **THAT REFUSAL IS NARROWER THAN ~~\"either acted on or "
+        "refused by name\"~~, AND THE SCOPE IS STATED RATHER THAN LEFT TO BE "
+        "DISCOVERED:** it "
+        "fires only where NOTHING in the body is recognised. An unrecognised key "
+        "travelling beside a recognised one is still dropped on a `200` that does not "
+        "name it \u2014 what that `200` may no longer do is claim the submitted value "
+        "was identical, because the reason is withheld entirely whenever anything was "
+        "dropped. A `series`, `qc` or `descriptor` value the run cannot hold is "
         "likewise refused with `422 invalid_field_value` rather than declined in "
         "silence. And a recognised key whose question "
         "on THIS run is already CLOSED is refused with `422 already_answered` and "
@@ -6623,7 +6739,7 @@ def post_run_override_clear(
         # DECLARED, because it was not, and this operation's `422` previously carried
         # only the framework's "Validation Error" — the same gap its sibling `/edit`
         # had, recorded in that route's own `responses` note.
-        **_R_ALREADY_ANSWERED,
+        **_R_ANSWER_REFUSED,
     },
 )
 def post_run_answers(
@@ -12747,14 +12863,24 @@ def post_warnings(scope: TutorialScopeDep, experiment_id: ExperimentId):
         "evidence envelopes, which are the sidecar's own source. Read-only.\n\n"
         "TWO KINDS OF ENTRY, AND ONLY THE FIRST CARRIES A VALUE. A dotted official "
         "path, an `assets:` key and an `implicit:` key resolve their value. A "
-        "BLOCK-LEVEL confirmation — the `qc:`, `series:` and `descriptors:` keys "
-        "recorded when a scientist confirms a verdict, a spectrum or a descriptor — "
-        "carries its support with `value: null`, exactly as the exported sidecar's "
-        "own trail does, so the same record reads the same way before and after "
-        "export. Those entries were MISSING from the draft trail until 2026-08-25: "
-        "a record created through this API and completed to `ready_to_export` "
-        "served an empty trail, because its confirmations live in blocks the draft "
-        "reader did not walk."
+        "BLOCK-LEVEL entry — a `qc:`, `series:`, `descriptors:`, `attribution:` or "
+        "`links:` key — carries its support with `value: null`, exactly as the "
+        "exported sidecar's own trail does, so the same record reads the same way "
+        "before and after export. Those entries were MISSING from the draft trail "
+        "until 2026-08-25: a record created through this API and completed to "
+        "`ready_to_export` served an empty trail, because its confirmations live in "
+        "blocks the draft reader did not walk.\n\n"
+        "**FIVE BLOCK NAMESPACES, NOT THREE, AND THEY ARE NOT ALL CONFIRMATIONS.** "
+        "This paragraph named `qc:`, `series:` and `descriptors:` and called them "
+        "*\"recorded when a scientist confirms a verdict, a spectrum or a "
+        "descriptor\"*. Measured across the five seeded worked examples, the trail "
+        "also carries `attribution:<name>|<role>` — two entries per record, the "
+        "largest single namespace this reader added — and those are SPREADSHEET "
+        "CITATIONS extracted from a source document, not confirmations anybody "
+        "gave. `links:<rel>|<target>|<basis>` is the fifth; no fixture in this "
+        "repository produces one, and it is named here rather than discovered "
+        "later. `assets:` and `implicit:` come from a different reader and DO "
+        "resolve a value, as the paragraph above says."
     ),
     response_description=(
         "One evidence entry per field carrying a value, plus one per block-level "
