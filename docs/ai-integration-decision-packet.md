@@ -212,12 +212,21 @@ find . -iname '*mcp*' -not -path './.git/*' -not -path './.venv/*' \
 on what you ask: **10** by the command as written above; **9** if the `mcp/` package *directory* is
 excluded and only files counted; **16** git-TRACKED paths whose basename contains `mcp`
 (`git ls-files | grep -ic mcp`), since `find -iname` matches basenames and so reports the package
-directory once instead of its seven modules. And the command **exactly as the original sentence wrote
-it** — `find . -iname '*mcp*'`, unfiltered — returns **63** in this working tree, most of them
+directory once instead of its seven modules. ~~"And the command **exactly as the original sentence
+wrote it** — `find . -iname '*mcp*'`, unfiltered — returns **63** in this working tree, most of them
 `__pycache__` entries and per-agent worktrees under `.claude/worktrees/`; drop only `__pycache__` and
-it is **37**. A frozen command output is a poor claim precisely because four defensible readings of
-one command give 9, 10, 37 and 63. **The number will keep moving**: the
-tenth result, `test_mcp_publishes_the_pending_bound.py`, landed on 2026-08-25 in `249f8e3`.
+it is **37**."~~ **STRUCK 2026-08-25: those two figures are NOT REPRODUCIBLE and should never have
+been written down.** Both count untracked build artefacts — `.venv/`, `node_modules/`,
+`__pycache__/` and per-agent worktrees — so they are a property of one machine's disk at one moment,
+not of the repository. Re-run in this checkout the same day: **81** unfiltered and **54** dropping
+only `__pycache__`; an independent review measured **18** and **12** in a git worktree of the same
+commit. **The two stable figures are the ones above** — **10** by the filtered command as written,
+**9** counting files only — because the filter is exactly what removes the untracked noise; add the
+**16** tracked paths whose basename contains `mcp` and those three are re-derivable anywhere. The
+point the struck sentence was reaching for survives without them: **a frozen command output is a poor
+claim**, because three defensible readings of one filtered command give 9, 10 and 16, and an
+unfiltered one gives whatever happens to be on disk. **The number will keep moving**: the tenth
+filtered result, `test_mcp_publishes_the_pending_bound.py`, landed on 2026-08-25 in `249f8e3`.
 
 > **SUPERSEDED 2026-08-24: capability A is IMPLEMENTED** (10 tools, 13 operations, a Connect Your Agent surface) **and UNREACHABLE** (no hosted endpoint; `POST /api/mcp` → 404 by default). Those are different claims and only the second still holds.
 

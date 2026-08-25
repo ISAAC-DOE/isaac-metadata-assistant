@@ -574,8 +574,19 @@ Current state:
     re-described as an error. Re-derive rather than quoting: `git merge-base --is-ancestor 77de2db
     origin/main` (now exits 0), and the blamed-name count over `git show
     fe374c0:.github/workflows/ci.yml` (**27**) versus the working tree (**41**, byte-identical to
-    `origin/main` — `git diff origin/main -- .github/workflows/ci.yml` is empty). Both numbers are
-    guarded by a test so neither can move without the workflow moving. The **5** still unblamed are
+    `origin/main` — `git diff origin/main -- .github/workflows/ci.yml` is empty). ~~"Both numbers are
+    guarded by a test so neither can move without the workflow moving."~~ **CORRECTED 2026-08-25 —
+    only ONE of them is guarded in CI, and the other read as a guarantee while being green-by-skip.**
+    `41` is enforced everywhere, by `test_the_packets_do_not_overstate_CI_constraint_coverage` and
+    (since 2026-08-25) as the first assertion of
+    `test_the_two_constraint_numbers_are_each_still_the_measured_ones`, both of which read only the
+    working tree. `27` and the `origin/main` byte-identity reach their evidence through
+    `git show fe374c0:…`, `git show origin/main:…` and `git merge-base --is-ancestor 77de2db
+    origin/main` — and **every `actions/checkout@v5` in `.github/workflows/ci.yml` runs at the default
+    `fetch-depth: 1`** (the file sets `fetch-depth` nowhere, at any of its four checkout sites), so in
+    CI none of those objects exists and each assertion degrades to a `pytest.skip`. **They are
+    enforced in a full clone and reported as skipped in CI.** The skip messages now say so rather than
+    reading as a pass. The **5** still unblamed are
     unchanged, and three of them are STRUCTURALLY unprovable in isolation — `isaac_submission_runs`'
     equality CHECKs subsume its shape CHECKs, so no row violates exactly one of them; they are proved
     refused with the blame ambiguous by design. See §15 for the full split.
@@ -1013,9 +1024,24 @@ Out of scope unless explicitly approved:
   to**"~~ — the first half is permanently true and is why 27 must keep its vantage point; the second
   half **expired the moment `c153ec9` merged**, and the run this repository can now point to is
   `32800763199`. **Confirmed from that run's own output, not merely from the file**: its step prints one
-  `refused as designed by <object>` line per case, and intersecting the 57 distinct objects those 70
-  lines name with the 46 declared in `0003`+`0004` gives exactly **41**, and exactly the same five
-  absent names.
+  `refused as designed by <object>` line per case, and intersecting the **58** distinct objects those
+  **67** OUTPUT lines name with the 46 declared in `0003`+`0004` gives exactly **41**, and exactly the
+  same five absent names. ~~"the 57 distinct objects those 70 lines name"~~ — **RE-MEASURED 2026-08-25
+  and both figures were wrong**, in a sentence whose whole point was that the number came from the run
+  rather than the file. **70** is every line containing the phrase; **3 of those are Actions echoing
+  the `run:` block's own shell source** (`echo "refused as designed by $3: $1"`), so the OUTPUT count
+  is **67**. And **57** reproduces under no counting at all: it came from a truncating regex
+  (`[A-Za-z0-9_.]*`) that collapsed the three `column "…"` objects and captured the **empty string**
+  for the three echoed lines, so an empty string was counted as an object (53 + 4 = 57). The correct
+  figure is **58**. Re-derive rather than quoting:
+
+  ```bash
+  gh api repos/ISAAC-DOE/isaac-metadata-assistant/actions/jobs/97660962127/logs > /tmp/job.log
+  # then split on the FIRST ": " after the phrase, and drop lines carrying the unexpanded `$3`
+  ```
+
+  **41 is unchanged and is the figure that matters** — it is an intersection with the declared set,
+  and neither miscount touched it.
 
   ~~"17 declared constraint names appear nowhere in the workflow"~~ — also stale, and the same edit
   left it standing beside a "41 of 46" that implies **5**. Both figures are now stated with their
