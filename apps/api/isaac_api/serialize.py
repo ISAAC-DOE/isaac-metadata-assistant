@@ -332,6 +332,198 @@ def pending_to_list(
     return {"pending": pending}
 
 
+# --- bounding the pending list ------------------------------------------------
+#
+# THE MEASURED DEFECT. `pending_to_list` serialises EVERY open blocking question of
+# the whole record, and a record's question count is `3 x runs`. Measured over HTTP
+# on `c153ec9`, in-process, against a record created through `POST /api/experiments`
+# with N runs each carrying the three seeded run-level questions:
+#
+#      runs   GET /pending B   entries   POST /runs/{id}/answers B   entries
+#        25           44,236        75                     44,840        74
+#       100          176,989       300                    177,592       299
+#       250          442,939       750                    443,542       749
+#       500          886,189     1,500                    886,792     1,499
+#      1000        1,772,692     3,000                  1,773,294     2,999
+#
+# 627 bytes per entry, flat, and 71% of them are `inferability` + `question` — three
+# fixed question templates repeated once per run.
+#
+# THE WORSE HALF IS THE SECOND COLUMN, and it is the half the original scale work
+# missed. `POST /answers`, `POST /edit`, `POST /runs/{run_id}/answers` and
+# `POST /runs/{run_id}/edit` all return that same whole-record list, so a scientist
+# answering ONE question on ONE run downloaded ~1.77 MB per submission on the WRITE
+# path, repeatedly, for a response whose only per-field statement they read is
+# whether the one question they just answered is still open.
+#
+# WHAT IS AND IS NOT BOUNDED HERE, because the two are different decisions:
+#
+#   * `GET /pending` WITHOUT PARAMETERS IS UNCHANGED — same keys, same bytes. A
+#     client asking "what is unresolved on this record?" gets the truth, and a
+#     consumer that does not know to page is never handed a page it might read as
+#     the whole set. Bounding is opt-in there (`run_id`, `offset`, `limit`).
+#   * THE MUTATION RESPONSES ARE BOUNDED BY POLICY, and that is a contract change.
+#     They always carry `pending_page`, so the response states whether `pending` is
+#     the whole set even when it is.
+#
+# NOTHING IS EVER SILENTLY TRUNCATED. Both shapes carry `pending_page`, which states
+# the total, how many were returned, and how many were WITHHELD — so a page cannot be
+# mistaken for the set. `pending_count`, `status` and `export_ready` continue to be
+# derived from `Experiment.pending()` in full and are untouched by any of this; the
+# bounding happens strictly at serialization, after every verdict is computed.
+#
+# WHAT WAS CONSIDERED AND REJECTED: DEDUPLICATING THE REPEATED CATALOG.
+#
+# 71% of the payload is `question` + `inferability`, byte-identical per blocker KIND,
+# so a keyed `{kind: {question, inferability}}` map beside a stripped list is a real
+# and large saving. MEASURED rather than argued, by building that exact shape from a
+# served response — `GET /pending?limit=50` on a 1,000-run record:
+#
+#     bounded as served   29,590 B
+#     bounded deduplicated 10,794 B      (64% smaller)
+#
+# IT IS STILL NOT DONE, and the reasons are properties of THIS change rather than
+# objections to the idea. First, what it saves is now a CONSTANT FACTOR on a payload
+# that is already O(1) in the run count: 64% of 29 KB, against the 1.77 MB the bound
+# itself removed. Second, it is a response-shape change for EVERY consumer of the
+# list — including the unbounded default, whose byte-identical shape is the thing this
+# slice most deliberately preserved — and a client-side join can MISS, which renders
+# an entry with no question text: a surface answering less than it claims, the exact
+# failure class this module's `unavailable` handling exists to prevent.
+#
+# So it is a legitimate future optimisation, it is worth roughly 19 KB per bounded
+# request, and it is deliberately NOT smuggled in here.
+
+#: How many open questions a MUTATION response carries back before it starts
+#: withholding. Not a tuning knob and deliberately not caller-settable: `GET /pending`
+#: is where a client asks for the shape it wants, and a second way to ask is a second
+#: thing to keep honest.
+#:
+#: 50 is chosen so that NO EXISTING RECORD'S RESPONSE CHANGES. The five canonical
+#: walkthrough records carry at most five open questions and a record created through
+#: `POST /api/experiments` carries three per run, so a response is only ever truncated
+#: past ~17 runs — a state that today costs 30 KB and climbs linearly. It is also far
+#: above the 3-or-4 questions a single unit can owe, which is what makes the anchoring
+#: guarantee below cost nothing in practice.
+PENDING_WINDOW = 50
+
+
+def _matches_run(entry, run_id) -> bool:
+    """Does this entry belong to ``run_id`` (``None`` meaning the record itself)?
+
+    A NON-DICT ENTRY MATCHES NOTHING. ``Experiment.pending()`` deliberately passes a
+    malformed persisted entry through as-is ("this is a derived view, not a place to
+    start repairing documents") and ``pending_count`` counts it, so it must keep being
+    counted in the totals below — but it carries no owner, so it can neither satisfy a
+    ``run_id`` filter nor anchor a window.
+    """
+    return isinstance(entry, dict) and entry.get("run_id") == run_id
+
+
+def _page_block(*, total: int, returned: int, offset: int, limit: int | None,
+                run_id: str | None, record_total: int) -> dict:
+    """The self-description that makes a bounded list safe to read.
+
+    ``withheld`` and ``complete`` are both derivable from the other three, and they are
+    served anyway because they are the two statements the bound has to make out loud:
+    how many questions this response is NOT showing, and whether it is showing all of
+    them. A client that reads only ``complete`` cannot mistake a page for the set, and
+    a client that reads only ``withheld`` cannot report "nothing left" over withheld
+    work. Everything else a pager needs is arithmetic on ``offset + returned``, and is
+    not served — see this module's note on the ``inferences`` block for why a key with
+    no reader is removed rather than guarded.
+
+    ``record_total`` is separate from ``total`` and is NOT redundant: under a ``run_id``
+    filter ``total`` is that run's count, and a screen that rendered it as "N still to
+    confirm" would understate the record. Unfiltered they are equal by construction.
+    """
+    withheld = max(total - offset - returned, 0)
+    return {
+        "total": total,
+        "returned": returned,
+        "offset": offset,
+        "limit": limit,
+        "withheld": withheld,
+        "complete": withheld == 0 and offset == 0,
+        "run_id": run_id,
+        "record_total": record_total,
+    }
+
+
+def pending_slice(entries: list, *, run_id: str | None = None, offset: int = 0,
+                  limit: int | None = None) -> tuple[list, dict]:
+    """A contiguous, optionally run-filtered page of ``entries``, plus its page block.
+
+    THE READ path's bounding, and it is a plain slice on purpose: a client that asks
+    for ``offset``/``limit`` is paging, and paging over anything but a stable order in
+    stable positions cannot reach every element. ``Experiment.pending()``'s order is
+    the record's own questions followed by each run's in ``sorted_runs()`` order, which
+    is a function of the stored document rather than of the request.
+    """
+    matching = entries if run_id is None else [e for e in entries if _matches_run(e, run_id)]
+    window = matching[offset:] if limit is None else matching[offset : offset + limit]
+    return window, _page_block(
+        total=len(matching),
+        returned=len(window),
+        offset=offset,
+        limit=limit,
+        run_id=run_id,
+        record_total=len(entries),
+    )
+
+
+def pending_mutation_window(entries: list, *, unit_run_id: str | None,
+                            limit: int = PENDING_WINDOW) -> tuple[list, dict]:
+    """The head of ``entries``, ANCHORED so it always contains the written unit's own
+    open questions, plus its page block.
+
+    THE ANCHOR IS THE WHOLE REASON THIS IS NOT `pending_slice(entries, limit=...)`,
+    and dropping it would reintroduce a defect this repository has already had to fix
+    once. `GuidedCompletion.answerWasApplied` reads the recomputed list to decide
+    whether the question it just answered is still open::
+
+        const stillOpen = resp.pending.some((p) => (p.blocker_key ?? p.id) === blockerKey);
+        return resp.invalidation.changed === true && !stillOpen;
+
+    A plain head-of-list window on a 1000-run record would not contain run 900's
+    questions at all, so an answer the core REFUSED (a wrong-typed series, an off-enum
+    qc — `apply_answers` leaves those unapplied and puts the blocker straight back)
+    would read as absent-from-the-list, i.e. as APPLIED. The screen would put a
+    "Confirmed by You" chip over a value the record does not hold. That is strictly
+    worse than the payload it would have saved.
+
+    So the guarantee this function makes, and that a test pins: **every still-open
+    question of the unit that was just written is in the returned window**, whatever
+    the record's size. A unit owes at most three or four questions and ``limit`` is 50,
+    so on every record that exists today the anchor selects nothing the head did not
+    already contain — it is a guarantee, not a cost.
+
+    ``unit_run_id`` is ``None`` for a record-level write, which selects the record's
+    own entries. Those already sort first, so the anchor is a no-op there too; it is
+    expressed as the same rule rather than special-cased so that a future change to
+    ``Experiment.pending()``'s order cannot quietly break the guarantee.
+
+    THE WINDOW IS NOT REORDERED. Indices are taken as a set and walked in ascending
+    order, so the returned entries are in exactly the order ``entries`` had them —
+    a client's "next question" cannot jump because a different unit was written.
+    """
+    head = set(range(min(limit, len(entries))))
+    anchored = {i for i, e in enumerate(entries) if _matches_run(e, unit_run_id)}
+    chosen = sorted(head | anchored)
+    return [entries[i] for i in chosen], _page_block(
+        total=len(entries),
+        returned=len(chosen),
+        offset=0,
+        # The window is anchored rather than sliced, so `returned` can exceed this by
+        # the number of anchored entries beyond the head. `limit` reports the policy
+        # that was applied; `returned` reports what came back. They are different
+        # facts and collapsing them would make one of the two a lie.
+        limit=limit,
+        run_id=None,
+        record_total=len(entries),
+    )
+
+
 # --- evidence trail -----------------------------------------------------------
 
 

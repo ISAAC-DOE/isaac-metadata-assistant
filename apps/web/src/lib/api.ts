@@ -56,6 +56,8 @@ import type {
   ApiNotesResponse,
   ApiNoteState,
   ApiOpenApiResponse,
+  ApiPendingItem,
+  ApiPendingPage,
   ApiPendingResponse,
   ApiProviderCapabilities,
   ApiProviderRefusal,
@@ -980,8 +982,50 @@ export const api = {
     return (await getJson<ApiDraftResponse>(`/experiments/${enc(id)}/draft`)).groups;
   },
 
+  /*
+   * THE COMPLETE LIST, AND IT SENDS NO QUERY PARAMETERS — that is the whole contract.
+   *
+   * `GET /pending` answers completely by default and bounding is opt-in, so this reader
+   * gets every open question of the record and its runs, exactly as it always has. It
+   * is what the Review Record and Export Readiness bundles use, because those screens
+   * report what is unresolved and a page would understate it. `getPendingPage` below is
+   * for a caller that has decided to bound what it asks for.
+   */
   async getPending(id: string) {
     return (await getJson<ApiPendingResponse>(`/experiments/${enc(id)}/pending`)).pending;
+  },
+
+  /*
+   * A BOUNDED page of the same list, plus the block that says it is one.
+   *
+   * A record's questions grow with its runs (measured: 3,000 entries / 1.77 MB at
+   * 1,000 runs), and the guided completion screen walks them ONE AT A TIME — so it
+   * asks for a window rather than downloading a set it renders 50 rows of.
+   *
+   * `page` is `undefined` only if the server answered without a `pending_page` block,
+   * which by contract means the response is COMPLETE. The caller must treat that as
+   * "the list is the set" rather than as "unknown": absence is a statement here, and
+   * inventing a page block to fill the gap would be asserting a bound nobody applied.
+   */
+  async getPendingPage(
+    id: string,
+    opts: { limit?: number; offset?: number; runId?: string } = {},
+  ): Promise<{ pending: ApiPendingItem[]; page?: ApiPendingPage }> {
+    const params = new URLSearchParams();
+    if (opts.runId) params.set('run_id', opts.runId);
+    if (opts.offset) params.set('offset', String(opts.offset));
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    /* THE PATH LITERAL IS THE SAME ONE `getPending` WRITES, and the query is appended
+       to it rather than interpolated inside it. `backend-down-state.test.tsx` derives
+       its per-record sub-read inventory by regex over this file's template literals; a
+       nested template (`…/pending${query ? `?${query}` : ''}`) parses as a NEW sub-read
+       suffix and a segment with no product word behind it, so the down-state panel's
+       own coverage guard would have gone red over a route it already covers. Keeping
+       the literal identical is also just true: this is the same endpoint. */
+    const query = params.toString();
+    const path = `/experiments/${enc(id)}/pending`;
+    const body = await getJson<ApiPendingResponse>(query ? `${path}?${query}` : path);
+    return { pending: body.pending, page: body.pending_page };
   },
 
   // S4 — apply a confirmed answer to one blocker. The user has explicitly

@@ -689,7 +689,16 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // verdict, a descriptor and an asset hash are per-Run, and the record-level route
     // refuses them with `409 belongs_to_a_run` once runs exist. Two functions, one new
     // literal each. Read out of this test's own failure output, not derived.
-    expect(experimentPathLiterals.length).toBe(39);
+    // 39 -> 40: `getPendingPage`, the BOUNDED read of the open-question list. It
+    // writes the SAME `/experiments/${…}/pending` literal `getPending` writes and
+    // appends the query to it as a separate string, so this array — which counts
+    // OCCURRENCES — gains one while `SUB_READ_SUFFIXES` and `SUB_READ_SEGMENTS` do not
+    // move at all. That identical-literal shape is deliberate and is commented at the
+    // call site: a nested template would have registered a sub-read suffix and a
+    // segment with no product word behind it, and the two guards below would have gone
+    // red over a route this panel already covers. Read out of this test's own failure
+    // output, not derived by adding a delta.
+    expect(experimentPathLiterals.length).toBe(40);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this

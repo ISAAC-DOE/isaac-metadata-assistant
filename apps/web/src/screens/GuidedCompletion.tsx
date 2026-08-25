@@ -33,6 +33,42 @@ import type {
 } from '../lib/types';
 
 /**
+ * HOW MANY OPEN QUESTIONS THIS SCREEN ASKS FOR AT A TIME.
+ *
+ * It walks questions ONE AT A TIME — `currentItem` is a single `find`, and the
+ * upcoming list is a preview — so it has never needed the whole set at once. It used
+ * to fetch it anyway: measured in-process over HTTP on `c153ec9`, `GET /pending` was
+ * 44,236 bytes at 25 runs and 1,772,692 bytes over 3,000 entries at 1,000 runs, and
+ * this screen rendered one `.upcoming-row` per entry plus one `.progress-seg` per
+ * question.
+ *
+ * 50 matches the window the server volunteers on a mutation response
+ * (`serialize.PENDING_WINDOW`), so the list this screen holds does not change shape
+ * when an answer comes back. Every record that exists today owes fewer questions than
+ * this, so on all of them the screen fetches, and renders, exactly what it did before.
+ *
+ * NOTHING IS HIDDEN BY IT. `pendingTotal` comes from the server's own `pending_page`,
+ * so every count on this screen speaks for the whole record; the withheld questions
+ * are named and reachable through "Show more questions"; and `GET /pending` without
+ * parameters still answers completely for the Review Record screen beside this one.
+ */
+const PENDING_PAGE = 50;
+
+/**
+ * HOW MANY SEGMENTS THE PROGRESS BAR DRAWS, at most.
+ *
+ * The bar drew ONE `<span>` per question, which is 3,000 DOM nodes on a 1,000-run
+ * record — the same unbounded-by-run-count defect as the payload, one layer up. It is
+ * a progress INDICATOR (`role="img"` with an exact `aria-label`), not a list, so
+ * capping the segments withholds nothing a reader is told: the label still reads
+ * `{answered} of {total} answered` with the record's real totals.
+ *
+ * At or below the cap the arithmetic is the identity — `Math.round(a / t * t) === a`
+ * — so every record that exists today renders a byte-identical bar.
+ */
+const PROGRESS_SEGMENTS_MAX = 60;
+
+/**
  * S4 · Complete Missing Fields — guided, one-question-at-a-time completion of the
  * `draft.pending[]` blockers, live from the backend. Forms-first. Confirming an
  * answer POSTs `{answers, confirmed_by_user:true}` and the backend returns the
@@ -44,9 +80,17 @@ export function GuidedCompletion() {
   const { id = '' } = useParams();
   const load = useFetch(
     () =>
-      Promise.all([api.getExperiment(id), api.getPending(id)]).then(([detail, pending]) => ({
+      /* A BOUNDED READ, because this screen asks one question at a time. `page` is
+         absent only when the server answered without a `pending_page` block, which by
+         contract means the response was complete — so `pending.length` IS the total
+         there, and nothing is invented to fill the gap. */
+      Promise.all([
+        api.getExperiment(id),
+        api.getPendingPage(id, { limit: PENDING_PAGE }),
+      ]).then(([detail, first]) => ({
         detail,
-        pending,
+        pending: first.pending,
+        pendingTotal: first.page ? first.page.total : first.pending.length,
       })),
     [id],
   );
@@ -132,6 +176,7 @@ export function GuidedCompletion() {
       id={id}
       detail={load.data.detail}
       initialPending={load.data.pending}
+      initialPendingTotal={load.data.pendingTotal}
       reload={load.reload}
       staged={staged}
     />
@@ -239,12 +284,17 @@ function LoadedCompletion({
   id,
   detail,
   initialPending,
+  initialPendingTotal,
   reload,
   staged,
 }: {
   id: string;
   detail: ApiExperimentDetail;
+  /** The first PAGE of open questions, not necessarily all of them. */
   initialPending: ApiPendingItem[];
+  /** How many open questions the RECORD has. The counters speak for this, never for
+      the page — see `total`/`remaining` below. */
+  initialPendingTotal: number;
   reload: () => void;
   /** Staged answers keyed by blocker id, held by the parent so a `reload` — which
    *  unmounts this component — cannot destroy what the reader typed. */
@@ -252,6 +302,40 @@ function LoadedCompletion({
 }) {
   const navigate = useNavigate();
   const [pending, setPending] = useState<ApiPendingItem[]>(initialPending);
+  /*
+   * THE RECORD'S OPEN-QUESTION COUNT, SEPARATE FROM THE PAGE THIS SCREEN HOLDS.
+   *
+   * `pending` used to BE the whole set, so `pending.length` was both the window and
+   * the truth. It is now a page, and every counter on this screen — the heading, the
+   * `N of M` chip, the progress bar, the status bar — is a statement about the RECORD.
+   * Reading them off the page would have understated the work outstanding by however
+   * much was withheld, which is exactly the silent truncation the bounded contract
+   * exists to prevent. The server reports this on every response that bounds anything
+   * (`pending_page.total`), so it is adopted rather than derived here.
+   */
+  const [pendingTotal, setPendingTotal] = useState(initialPendingTotal);
+  /*
+   * WHERE THE NEXT UNFETCHED QUESTION STARTS — and it is NOT `pending.length`.
+   *
+   * IT WOULD HAVE SKIPPED QUESTIONS, and the reason is worth stating because it is
+   * invisible from the client's side of the wire. A MUTATION returns an ANCHORED
+   * window: the first 50 of the record's list PLUS the written unit's own still-open
+   * questions, which on a 1,000-run record are pulled in from index ~2,700 (see
+   * `serialize.pending_mutation_window` for why the anchor is not optional). So the
+   * held list can be 52 entries covering offsets 0-49 and two far-away ones — and
+   * asking for `offset=52` would have walked straight past offsets 50 and 51.
+   *
+   * The page block says exactly how to compute it: the CONTIGUOUS head is `limit`
+   * entries (or `returned`, whichever is smaller, for a list shorter than one page).
+   * The anchored extras are held and displayed; they are simply not counted as walked.
+   */
+  const [walked, setWalked] = useState(initialPending.length);
+  /** Set while "Show more questions" is in flight, so the control cannot double-fire. */
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  /** The contiguous prefix a `pending_page` covers — see `walked`. */
+  const contiguousHead = (page: { limit: number | null; returned: number }) =>
+    page.limit === null ? page.returned : Math.min(page.limit, page.returned);
   const [answered, setAnswered] = useState<Answered[]>([]);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
@@ -295,8 +379,13 @@ function LoadedCompletion({
   });
   const degraded = session.syncDegraded;
 
-  const total = answered.length + pending.length;
-  const remaining = pending.length;
+  /* THE RECORD'S TOTALS, NOT THE PAGE'S — see `pendingTotal`. A question answered in
+     this visit has left `pendingTotal`, so it has to be added back to state how many
+     there were; a question that is merely WITHHELD has not, so it is already counted. */
+  const total = answered.length + pendingTotal;
+  const remaining = pendingTotal;
+  /** Open questions the record has that this screen is not currently showing. */
+  const notShown = Math.max(pendingTotal - pending.length, 0);
   /* `pending` holds the RAW `ApiPendingItem`s, whose identity key is `blocker_key`.
      The adapted `PendingBlocker` exposes the same value as `key`; both fall back to
      `id`, which is correct for a record with no runs (the two are equal there) and
@@ -341,7 +430,15 @@ function LoadedCompletion({
       .then((resp) => {
         // Server-reported state first, unconditionally: the recomputed question list
         // and the fresh If-Match token are facts either way.
+        //
+        // BOTH HALVES, and the second is not optional. `resp.pending` is a WINDOW
+        // (`serialize.pending_mutation_window`), so adopting it without
+        // `pending_page.total` would silently reset every counter on this screen to
+        // the size of a page. The window is anchored on the unit this write addressed,
+        // which is what keeps `answerWasApplied`'s membership test below sound.
         setPending(resp.pending);
+        setPendingTotal(resp.pending_page.total);
+        setWalked(contiguousHead(resp.pending_page));
         setCurrentVersion(resp.version); // adopt the fresh token for the next submit
         if (answerWasApplied(resp, blocker.key)) {
           // APPLIED, so the staged copy has done its job. Kept only until the record
@@ -442,7 +539,10 @@ function LoadedCompletion({
       .then((token) => api.editField(id, { [blocker.id]: value }, token, blocker.runId))
       .then((resp) => {
         setCurrentVersion(resp.version);
+        // The window AND the record's total — see the note on the answer path above.
         setPending(resp.pending);
+        setPendingTotal(resp.pending_page.total);
+        setWalked(contiguousHead(resp.pending_page));
         if (!editWasApplied(resp)) {
           // Nothing was written, so nothing here may move: the summary row keeps the
           // value the server last confirmed, the editor stays mounted with what was
@@ -480,6 +580,45 @@ function LoadedCompletion({
     // submit they just abandoned, so it must not be waiting for them if they come
     // back to it via "Answer Now".
     setAnswerNotApplied((prev) => (prev === blockerId ? null : prev));
+  };
+
+  /*
+   * FETCH THE NEXT PAGE OF QUESTIONS, appending rather than replacing.
+   *
+   * WHY THIS CONTROL HAS TO EXIST. The page refills itself on the normal path: every
+   * answer removes a question and the server recomputes the window from what is left,
+   * so a reader who answers their way down never runs out. The one state that does
+   * dead-end is skipping — "I don't know" sends nothing and leaves the question open,
+   * so a reader who skips all 50 shown questions on a 1,000-run record has an empty
+   * queue and 2,950 questions they cannot reach from this screen. Constraint: no
+   * blocker may become undiscoverable.
+   *
+   * APPEND, NOT REPLACE, and the offset comes from `walked` rather than from
+   * `pending.length` — see `walked` for the anchored-window reason those two differ.
+   *
+   * DEDUPED ON THE IDENTITY KEY, and it is doing real work rather than being belt and
+   * braces. The anchored extras a mutation pulled in from deep in the list are already
+   * held, so a later page WILL hand some of them back; and offset paging is not stable
+   * across a concurrent write either, since a question resolved elsewhere between two
+   * reads shifts the window. A duplicate would collide on React's key and be
+   * answerable twice; dropping it loses nothing, because the row is already on screen.
+   */
+  const loadMore = () => {
+    setLoadingMore(true);
+    api
+      .getPendingPage(id, { offset: walked, limit: PENDING_PAGE })
+      .then((next) => {
+        setPending((prev) => {
+          const held = new Set(prev.map(itemKey));
+          return [...prev, ...next.pending.filter((p) => !held.has(itemKey(p)))];
+        });
+        if (next.page) {
+          setPendingTotal(next.page.total);
+          setWalked((prev) => prev + next.page!.returned);
+        }
+      })
+      .catch((err: ApiError) => setSubmitError(err))
+      .finally(() => setLoadingMore(false));
   };
 
   const answerLater = (blockerId: string) => {
@@ -960,15 +1099,25 @@ function LoadedCompletion({
         </span>
       </div>
 
+      {/* CAPPED AT `PROGRESS_SEGMENTS_MAX`, and the `aria-label` is untouched. This
+          drew one `<span>` per question — 3,000 nodes on a 1,000-run record, the same
+          unbounded-by-run-count defect as the payload. It is an indicator, not a list:
+          the label still states the record's real `{answered} of {total}`. At or below
+          the cap `segments === total` and `filled === answered.length`, so every record
+          that exists today renders exactly the DOM it did before. */}
       <div className="progress" role="img" aria-label={`${answered.length} of ${total} answered`}>
-        {Array.from({ length: total }).map((_, i) => (
-          <span
-            key={i}
-            className={`progress-seg${
-              i < answered.length ? ' answered' : i === answered.length && blocker ? ' current' : ''
-            }`}
-          />
-        ))}
+        {Array.from({ length: Math.min(total, PROGRESS_SEGMENTS_MAX) }).map((_, i) => {
+          const segments = Math.min(total, PROGRESS_SEGMENTS_MAX);
+          const filled = total === 0 ? 0 : Math.round((answered.length / total) * segments);
+          return (
+            <span
+              key={i}
+              className={`progress-seg${
+                i < filled ? ' answered' : i === filled && blocker ? ' current' : ''
+              }`}
+            />
+          );
+        })}
       </div>
 
       {answeredRows}
@@ -1009,6 +1158,31 @@ function LoadedCompletion({
         </div>
       ))}
 
+      {/* THE WITHHELD QUESTIONS, NAMED AND REACHABLE. This screen holds a page of the
+          record's open questions, and a page that did not say so would be exactly the
+          silent truncation the bounded contract exists to prevent. The count is the
+          server's (`pending_page.total` minus what is held), and the button fetches the
+          next page — so nothing on this record becomes unreachable from this screen.
+          `GET /pending` without parameters still answers completely for the Review
+          Record screen beside this one. */}
+      {notShown > 0 && (
+        <div className="upcoming-more" role="status">
+          <span className="upcoming-more-text">
+            {notShown === 1
+              ? '1 more open question is not shown here.'
+              : `${notShown} more open questions are not shown here.`}
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={loadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? 'Loading…' : 'Show more questions'}
+          </button>
+        </div>
+      )}
+
       {/* R1b — the title used to read "You've reviewed every question · N left
           honestly missing", which presented SESSION state as a durable review
           outcome. The skip decision lives only in the `skipped` useState above:
@@ -1017,7 +1191,14 @@ function LoadedCompletion({
           the set is gone on refresh and on navigating away. Persisting it needs a
           new backend field, which is out of scope here, so the copy states the
           scope it can actually keep. */}
-      {!blocker && skippedItems.length > 0 && (
+      {/* `notShown === 0` IS A NEW CONDITION AND IT IS LOAD-BEARING. This panel says
+          "Every question reviewed this visit" and "a reload brings all N back", and
+          both were true only while `pending` held the WHOLE record. With a page held,
+          `!blocker` means every question ON THIS PAGE is skipped — so on a 1,000-run
+          record the panel would have claimed the reader had reviewed everything with
+          2,950 questions never shown to them. The disclosure above carries the truth
+          in that state, and its button is how the reader gets to the rest. */}
+      {!blocker && skippedItems.length > 0 && notShown === 0 && (
         <div className="completion-allskipped" role="note">
           {/* KEPT NO LONGER THAN THE COPY IT REPLACED, and that is a hard constraint,
               not a style preference. The first scoping draft ran several lines longer;
