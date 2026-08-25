@@ -721,18 +721,48 @@ test.describe('the .sr-only escape (F1)', () => {
     ).toBeLessThanOrEqual(after.docClientWidth + 1);
   });
 
-  test('@responsive S2: no catalogued surface lets an .sr-only escape to the document', async ({ page, app }) => {
-    /*
-     * THE GENERAL GUARD, stated honestly: it passes today on every catalogued
-     * surface and passed before the fix too, because the ONE surface that
-     * exhibited the defect is not in the catalogue. It is here so the class
-     * cannot come back on a surface that IS catalogued — the sweep's per-region
-     * overflow probe never looked at where an absolutely-positioned element
-     * resolves, so nothing else in this suite asks this question.
-     */
-    const escapes: string[] = [];
-    for (const width of [390, 320]) {
-      for (const surface of SURFACES) {
+  /*
+   * THE GENERAL GUARD, stated honestly: it passes today on every catalogued
+   * surface and passed before the fix too, because the ONE surface that
+   * exhibited the defect is not in the catalogue. It is here so the class
+   * cannot come back on a surface that IS catalogued — the sweep's per-region
+   * overflow probe never looked at where an absolutely-positioned element
+   * resolves, so nothing else in this suite asks this question.
+   *
+   * ── ONE TEST PER (width, surface), and why it is not one test ─────────────
+   *
+   * This was a SINGLE test whose body was
+   * `for (const width of [390, 320]) for (const surface of SURFACES)` — 46 full
+   * `app.open()` page loads sharing ONE 60s budget (`playwright.config.ts` →
+   * `timeout: 60_000`). It exhausted that budget on `ubuntu-latest` and failed
+   * as `Test timeout of 60000ms exceeded` on both the first attempt and the
+   * retry, dying in a DIFFERENT place each time: once inside the loading-panel
+   * wait (`div.fetch-state[role=status]`), once waiting for the `Evidence
+   * Graph` heading. A death point that moves between runs is the signature of
+   * budget exhaustion rather than of a product regression — and a test that
+   * fails as a timeout tells the next reader nothing about which surface broke.
+   *
+   * Raising the timeout was REJECTED: it would have kept exactly the property
+   * that made the failure unreadable. Declaring one test per (width, surface)
+   * pair costs the same 46 page loads, gives each pair its own budget and its
+   * own NAME, lets the workers run them in parallel (`fullyParallel: true`),
+   * and makes a genuinely slow surface fail as ITSELF.
+   *
+   * The `@responsive` tag has to stay in EVERY generated title. The read-only
+   * config collects every `*.spec.ts` under `e2e/`, and the per-project `grep`
+   * over the TITLE is the only thing that keeps a spec in the right suite — an
+   * untagged title would be collected and then matched by no project at all.
+   *
+   * The widths are 390 and 320 — the two at which the escape was measured on
+   * Compare Runs (see the header of this describe block).
+   */
+  for (const width of [390, 320]) {
+    for (const surface of SURFACES) {
+      test(`@responsive S2 ${surface.id} @ ${width}: no .sr-only escapes to the document`, async ({
+        page,
+        app,
+      }) => {
+        const escapes: string[] = [];
         await page.setViewportSize({ width, height: 812 });
         await app.open(surface);
         await page.setViewportSize({ width, height: 812 });
@@ -757,17 +787,17 @@ test.describe('the .sr-only escape (F1)', () => {
           return out;
         });
         for (const f of found) escapes.push(`${surface.id}@width-${width}: ${f}`);
-      }
+        expect(
+          escapes,
+          `An \`.sr-only\` span resolved against \`body\` while sitting outside the viewport, so it is ` +
+            `part of the DOCUMENT's horizontal overflow — the page scrolls sideways to an empty strip. ` +
+            `The fix is \`position: relative\` on the nearest scrolling/clipping container, NOT hiding ` +
+            `the span (it carries the only accessible name distinguishing one control from ` +
+            `another):\n${escapes.join('\n')}`
+        ).toEqual([]);
+      });
     }
-    expect(
-      escapes,
-      `An \`.sr-only\` span resolved against \`body\` while sitting outside the viewport, so it is ` +
-        `part of the DOCUMENT's horizontal overflow — the page scrolls sideways to an empty strip. ` +
-        `The fix is \`position: relative\` on the nearest scrolling/clipping container, NOT hiding ` +
-        `the span (it carries the only accessible name distinguishing one control from ` +
-        `another):\n${escapes.join('\n')}`
-    ).toEqual([]);
-  });
+  }
 });
 
 /**

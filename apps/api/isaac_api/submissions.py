@@ -153,8 +153,11 @@ def unit_payloads(units: Sequence[Any]) -> list[dict]:
 
     THEY ARE NO LONGER THE WHOLE OF WHAT THE SIGNATURE COVERS, and this sentence used
     to say they were. :func:`content_signature` adds the record's conflict decisions
-    as a component of its own; that component publishes no byte and is covered
-    because a submission row DISCLOSES it. See that function for the argument.
+    as a component of its own; that component publishes no byte, and it is there
+    because a submission row discloses THAT a conflict was decided. It is covered
+    **verbatim**, which is broader than that disclosure — see that function, whose
+    rule paragraph states the coverage and argues why the broader side is the safe
+    one.
 
     Sorted by ``unit_id`` rather than left in ``sorted_runs()`` order on purpose:
     ``sorted_runs`` orders on ``(ordinal, created_utc, id)``, so REORDERING two runs
@@ -246,10 +249,57 @@ def content_signature(experiment_id: str, units: Sequence[Any]) -> str:
     and no route republishes an immutable record — so if a submission were only its
     published records, this would be a duplicate. It is not: a submission row also
     carries ``conflict_summary``, and two rows that disagree about whether a human
-    settled a conflicting field are not two copies of one declaration. **The rule
-    this digest now follows is: it covers what a submission DISCLOSES about itself —
-    the records it publishes and the conflict state it reports — and nothing else.**
-    That is what keeps the exclusions below from looking arbitrary.
+    settled a conflicting field are not two copies of one declaration.
+
+    ~~**The rule this digest now follows is: it covers what a submission DISCLOSES
+    about itself — the records it publishes and the conflict state it reports — and
+    nothing else.**~~ **THAT SENTENCE WAS NARROWER THAN THIS FUNCTION, and it is
+    struck rather than deleted because the reasoning either side of it is still the
+    reasoning that decides identity.** :func:`conflict_decisions` returns the stored
+    decisions **VERBATIM** — ``rationale``, ``recorded_utc`` and the whole ``history``
+    tuple included — and :func:`conflict_summary` reports none of those three: it
+    discloses addresses, counts, and four fixed state words, and says in its own
+    docstring that it carries "no value, no rationale text, no subject". So the digest
+    is strictly BROADER than what a submission discloses, and describing it as the
+    disclosure was a claim about a projection this function does not perform.
+
+    **THE TRUE RULE: the digest covers what a submission PUBLISHES — each unit's id
+    and fully resolved draft — plus the record's stored conflict decisions AS STORED,
+    not a summary of them, and nothing else.** Over-inclusion is the safe direction
+    here, and the two consequences it has are CHOSEN rather than incidental. Both were
+    measured over HTTP and both are pinned by
+    ``apps/api/tests/test_the_signature_covers_a_decision_verbatim.py``:
+
+    * A **RATIONALE-ONLY** revision moves the digest. ``submit#3`` is accepted
+      ``200``, revisions read ``[1, 2, 3]``, and submission 2's and submission 3's
+      ``conflict_summary`` are byte-identical — the digest moved on something no
+      disclosure column mentions.
+    * **REVISE-THEN-REVERT** does not restore the earlier digest; it produces a THIRD
+      distinct value, and revisions read ``[1, 2, 3, 4]``. The mechanism is
+      ``conflict_resolution.revise_resolution``: it compares ``rationale`` when
+      deciding whether an act changed anything, and any act that did APPENDS an
+      ``ACTION_REVISE`` transition — so ``ConflictResolution.to_state()`` can never
+      re-enter a value it has already had. A monotonically growing audit trail cannot
+      be un-grown.
+
+    WHY NARROWING THE DIGEST TO THE DISCLOSED SUMMARY WOULD BE WORSE, which is the
+    argument for leaving it broad rather than an apology for it. Both consequences
+    above fail **OPEN**: one extra submission row, no exported byte rewritten, nothing
+    lost, and the row's own claims are all true. A digest over only
+    ``conflict_summary``'s projection would fail **CLOSED**. A scientist who corrected
+    the reason they had given, or who changed their mind and then changed it back,
+    would get ``409 already_submitted`` — a refusal asserting the record is unchanged
+    while the persisted document has moved, which is the exact defect the widening was
+    made to fix, reintroduced one layer further in. Worse, a submission is the only
+    durable declaration this application writes: the reconsideration would live in the
+    decision's ``history`` and **no submission on file would ever attest that it
+    happened**. Losing the record of a change of mind is the direction that hurts;
+    writing an extra row that is true is not.
+
+    That is also what keeps the exclusions below from looking arbitrary, on the
+    corrected rule rather than the struck one: they are excluded because they are
+    neither the published content nor a recorded decision — not because some
+    disclosure column happens not to mention them.
 
     THE ONE THING THAT RULE MUST NOT BE READ AS SAYING, because a revision row does
     hold more than its disclosure columns: ``isaac_experiment_revisions.state``

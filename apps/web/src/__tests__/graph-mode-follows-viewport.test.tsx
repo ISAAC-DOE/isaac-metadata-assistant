@@ -124,6 +124,79 @@ function installViewport(initiallyNarrow: boolean) {
   };
 }
 
+/**
+ * THE SAME STUB WITH THE MODERN API REMOVED — `addListener`/`removeListener`
+ * only, as older WebKit exposes.
+ *
+ * REVIEW FINDING, 2026-08-25: `MemoryGraphCard`'s legacy branch was UNREACHABLE
+ * from this file, because `installViewport` always supplies `addEventListener`,
+ * so `typeof mql.addEventListener === 'function'` was true on every render and
+ * the fallback's cleanup had no coverage at all. A subscription that is never
+ * released is exactly the leak the modern path is tested against; the fallback
+ * deserves the same test.
+ *
+ * This is COVERAGE, not a fix — the fallback was correct before this stub
+ * existed, and these tests pass in both directions. What they close is the
+ * possibility of the fallback rotting unnoticed.
+ */
+function installLegacyViewport(initiallyNarrow: boolean) {
+  const listeners = new Set<(e: MediaQueryListEvent) => void>();
+  const state = { narrow: initiallyNarrow, removed: 0 };
+
+  const mql = {
+    get matches() {
+      return state.narrow;
+    },
+    media: NARROW_GRAPH_VIEWPORT_QUERY,
+    // DELIBERATELY ABSENT: addEventListener / removeEventListener.
+    addListener: (fn: (e: MediaQueryListEvent) => void) => listeners.add(fn),
+    removeListener: (fn: (e: MediaQueryListEvent) => void) => {
+      state.removed += 1;
+      listeners.delete(fn);
+    },
+    onchange: null,
+    dispatchEvent: () => true,
+  };
+
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => {
+      if (query === NARROW_GRAPH_VIEWPORT_QUERY) return mql as unknown as MediaQueryList;
+      if ((PASSTHROUGH_QUERIES as readonly string[]).includes(query)) {
+        return {
+          matches: false,
+          media: query,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          onchange: null,
+          dispatchEvent: () => true,
+        } as unknown as MediaQueryList;
+      }
+      throw new Error(`unexpected media query ${JSON.stringify(query)}`);
+    })
+  );
+
+  return {
+    resizeTo(narrow: boolean) {
+      state.narrow = narrow;
+      act(() => {
+        for (const fn of [...listeners]) fn({ matches: narrow } as MediaQueryListEvent);
+      });
+    },
+    get listenerCount() {
+      return listeners.size;
+    },
+    get removeCount() {
+      return state.removed;
+    },
+    get hasModernApi() {
+      return typeof (mql as { addEventListener?: unknown }).addEventListener === 'function';
+    },
+  };
+}
+
 function renderGraphTab(initialEntry = '/memory?tab=graph') {
   const view = render(
     <MemoryRouter
@@ -268,5 +341,111 @@ describe('a resize is not a navigational act', () => {
     // an applied Assistant proposal). Dragging a window must not push a history
     // entry, or Back would "undo" a resize.
     expect(window.location.search).not.toContain('gmode');
+  });
+});
+
+describe('the legacy addListener fallback subscribes and releases too', () => {
+  it('the stub really has no modern API, or this suite proves nothing', () => {
+    const vp = installLegacyViewport(false);
+    expect(
+      vp.hasModernApi,
+      'if the stub grows addEventListener, these tests silently exercise the modern path — ' +
+        'which is exactly the gap this file had'
+    ).toBe(false);
+  });
+
+  it('coerces Explore → Browse through addListener, and removes the listener on unmount', async () => {
+    const vp = installLegacyViewport(false);
+    stubFetchRoutes(graphRoutes);
+    const view = renderGraphTab();
+    await view.findByText('Graph', { selector: 'h2' });
+
+    expect(vp.listenerCount, 'the fallback must subscribe exactly once').toBe(1);
+    expect(selectedMode(view)).toBe('Explore');
+
+    vp.resizeTo(true);
+    expect(selectedMode(view), 'the fallback must coerce exactly as the modern path does').toBe(
+      'Browse'
+    );
+
+    view.unmount();
+    expect(vp.listenerCount, 'a subscription that outlives the component is the leak').toBe(0);
+    expect(vp.removeCount).toBeGreaterThan(0);
+  });
+});
+
+describe('the coercion ANNOUNCES itself, and does not leave a stale line describing Explore', () => {
+  /*
+   * REVIEW FINDING, 2026-08-25. The coercion called `setState` directly rather
+   * than going through `dispatch`, and `applyGraphAction`'s `setMode` case
+   * attaches no notice and CLEARS none — so the mode changed under the reader
+   * with nothing said, and any line the previous command had put in the polite
+   * live region stayed there describing a view that no longer existed.
+   *
+   * THE DECISION, argued rather than assumed: a NOTICE, not documented silence.
+   * The mode is a control the reader can operate, and this is the one case where
+   * something other than the reader operates it — silently overriding a
+   * deliberate act is the class of defect this repository has spent several
+   * sessions removing. The announcement goes in the SAME single polite region
+   * (`memory-graph-live`), in the lowest-precedence `commandOutcome` slot, whose
+   * stated purpose is a terse outcome the reducer left no notice on. No second
+   * live region is created — the render site forbids it.
+   *
+   * WHAT STAYS SILENT, and why that is not inconsistent: no URL write and no
+   * COMMAND-HISTORY entry. `?gmode=` is written by navigational acts only, or
+   * Back would "undo" a resize; and the history list is a list of COMMANDS, so
+   * a row for something nobody typed would misdescribe itself. Announcing an
+   * event and recording it as a user action are different claims.
+   */
+  const liveRegion = (view: RenderResult): string =>
+    view.container.querySelector('.memory-graph-live')?.textContent?.trim() ?? '';
+
+  it('says a narrow viewport moved the reader to Browse', async () => {
+    const vp = installViewport(false);
+    stubFetchRoutes(graphRoutes);
+    const view = renderGraphTab();
+    await view.findByText('Graph', { selector: 'h2' });
+    expect(liveRegion(view), 'nothing has happened yet').toBe('');
+
+    vp.resizeTo(true);
+
+    expect(selectedMode(view)).toBe('Browse');
+    const announced = liveRegion(view);
+    expect(
+      announced,
+      'the mode changed without the reader asking; the polite live region must say so'
+    ).not.toBe('');
+    expect(announced).toMatch(/Browse/);
+    // The threshold is named, so the announcement explains itself rather than
+    // just reporting that something moved.
+    expect(announced).toMatch(/860/);
+  });
+
+  it('and clears the line a previous command left behind', async () => {
+    const vp = installViewport(false);
+    stubFetchRoutes(graphRoutes);
+    const view = renderGraphTab();
+    await view.findByText('Graph', { selector: 'h2' });
+
+    const input = view.getByRole('combobox', { name: 'Graph command' });
+    // A REAL verb, so this exercises the `commandOutcome` slot rather than the
+    // `commandError` one. `find` is one of the seven verbs whose only
+    // announcement IS that slot.
+    fireEvent.change(input, { target: { value: 'find export' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(selectedMode(view)).toBe('Explore');
+    const afterCommand = liveRegion(view);
+    expect(afterCommand, 'the command must have announced something to make this test mean anything').not.toBe('');
+
+    vp.resizeTo(true);
+
+    expect(selectedMode(view)).toBe('Browse');
+    expect(
+      liveRegion(view),
+      'the previous command described a view the reader no longer has — leaving it standing is ' +
+        'the honesty defect, not merely untidy'
+    ).not.toBe(afterCommand);
+    expect(liveRegion(view)).toMatch(/Browse/);
   });
 });

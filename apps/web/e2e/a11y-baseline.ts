@@ -731,11 +731,49 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // change: it would move counts on many surfaces at once.
       'guided-completion@mobile-375x812': 7,
       'guided-completion@zoom-200': 7,
-      'load@desktop-1280x800': 3,
-      'load@laptop-1024x768': 3,
-      'load@tablet-768x1024': 3,
-      'load@mobile-375x812': 2,
-      'load@zoom-200': 2,
+      /*
+       * ── THE REFLOW FIX MADE A PRE-EXISTING AA FAILURE MEASURABLE, 2026-08-25 ──
+       *
+       * `load` goes 3 -> 2 at the three wide viewports and 2 -> 1 at the two narrow
+       * ones, and `load@width-390` below goes linux 2 -> 1. **Six cells, all DOWNWARD,
+       * all transcribed from CI — none derived.**
+       *
+       * WHY A FIX LOWERED A COUNT BY REMOVING A DEFECT AND RAISING ONE FIRST. The
+       * `.onramps` grid was `1fr 1fr` unconditionally (`runner.css` had no `@media` rule
+       * at all), so at 320px the second on-ramp was a 15px sliver — and axe could not
+       * resolve `.drop-target`'s background against a sliver, so it filed the node
+       * `incomplete` rather than a violation. Reflowing to one column made it
+       * MEASURABLE, which took `load@width-320/390` from 1 to 2: a real WCAG 1.4.3
+       * failure that had been hiding behind a layout defect.
+       *
+       * THE COLOUR WAS FIXED RATHER THAN THE BASELINE RAISED, following the verbatim
+       * precedent for `.onramp-tagline` in `runner.css` — *"Fixing the colour is the
+       * right response; raising the baseline was not"*. `--text-tertiary` #78838f
+       * (3.85:1 on `--surface` #ffffff) -> `--text-muted` #5b6570 (5.93:1, computed;
+       * axe independently reported 3.85 for the old one). That restored width-320/390
+       * to 1 AND removed the node from the five project counts, which had been carrying
+       * it all along.
+       *
+       * So the sequence is: a layout defect concealed a contrast defect; fixing the
+       * layout exposed it; fixing the contrast cleared it everywhere it had been
+       * counted. **No baseline was raised at any point.**
+       *
+       * `load@width-390` COLLAPSES to a scalar: it was `{darwin: 1, linux: 2}`, linux
+       * has come down to 1, and the well-formedness guard rejects a pair whose halves
+       * are equal. `load@width-320` was already 1 and does not move — which is the
+       * check that the two narrow cells behaved identically, as one cause predicts.
+       *
+       * TRANSCRIBED from the six IMPROVED messages of the `browser accessibility and
+       * responsive baseline` job on this branch's head `d4ac207`, which failed with
+       * exactly those six and one unrelated timeout. **An IMPROVED message is a FAILURE
+       * in this suite on purpose**: a stale high number re-admits the defect it was
+       * meant to catch.
+       */
+      'load@desktop-1280x800': 2,
+      'load@laptop-1024x768': 2,
+      'load@tablet-768x1024': 2,
+      'load@mobile-375x812': 1,
+      'load@zoom-200': 1,
       'memory@desktop-1280x800': 18,
       'memory@laptop-1024x768': 18,
       'memory@tablet-768x1024': 18,
@@ -1605,7 +1643,10 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'guided-completion@width-320': 7,
       'guided-completion@width-390': 7,
       'load@width-320': 1,
-      'load@width-390': { darwin: 1, linux: 2 },
+      // COLLAPSED to a scalar 2026-08-25: linux 2 -> 1 joined darwin's 1, and the
+      // guard rejects a pair whose halves are equal. See the `load@desktop-1280x800`
+      // note for the layout-concealing-a-contrast-defect sequence.
+      'load@width-390': 1,
       'memory-graph@width-320': 14,
       'memory-graph@width-390': 16,
       'memory@width-320': 17,
@@ -2595,7 +2636,19 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   //
   // So if a darwin run disagrees with any of the seven, split that key and correct this
   // total; do not derive it.
-  darwin: 2564,
+  //
+  // ── THE REFLOW/CONTRAST SEQUENCE, 2026-08-25: darwin 2564 -> 2559 (-5). ──
+  //
+  // Five of the six moved cells are SCALARS (`load@desktop`, `@laptop`, `@tablet`,
+  // `@mobile-375`, `@zoom-200`), and a scalar asserts BOTH columns — so darwin comes
+  // down by five as a matter of arithmetic, not because darwin was re-measured. The
+  // sixth, `load@width-390`, was `{darwin: 1, linux: 2}`; only its linux half moved, so
+  // it contributes nothing here.
+  //
+  // A darwin browser run DID independently measure five failures on `load` before the
+  // colour fix and two after on the narrow sweep, which agrees in direction — but the
+  // authoritative figures are CI's, and these five are transcribed from CI.
+  darwin: 2559,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -2740,7 +2793,26 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // scalars, which assert darwin too, so the darwin total moves by +13 as a matter of
   // arithmetic rather than of evidence. See the darwin note for why that is unavoidable
   // in this file. The `evidence@*` pairs are the half that genuinely leaves darwin alone.
-  linux: 2835,
+  //
+  // ── THE REFLOW/CONTRAST SEQUENCE, 2026-08-25: linux 2835 -> 2829 (-6). ──
+  //
+  //   load @ desktop-1280x800   3 -> 2
+  //   load @ laptop-1024x768    3 -> 2
+  //   load @ tablet-768x1024    3 -> 2
+  //   load @ mobile-375x812     2 -> 1
+  //   load @ zoom-200           2 -> 1
+  //   load @ width-390          2 -> 1   (the pair, collapsed to a scalar)
+  //                               net     = -6   (2835 -> 2829)
+  //
+  // One cause: a `1fr 1fr` grid with no media query concealed an unresolvable
+  // `.drop-target` background; reflowing exposed it and raising the token cleared it
+  // everywhere it had been counted. Per-cell reasoning at `load@desktop-1280x800`.
+  //
+  // TRANSCRIBED from the six IMPROVED messages of the job on head `d4ac207`, and the
+  // arithmetic is written out so the total can be checked against the cells rather
+  // than trusted. `load@width-320` does NOT appear: it was already 1 and did not move,
+  // which is the check that both narrow cells behaved as one cause predicts.
+  linux: 2829,
 };
 
 /**

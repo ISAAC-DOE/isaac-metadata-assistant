@@ -87,9 +87,40 @@ const stripComments = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '');
 
 const ALL_RULES: Rule[] = Object.entries(cssFiles).flatMap(([path, src]) => extractRules(src, path));
 
+/**
+ * THE AT-RULE SCOPE A DECLARATION MUST BE IN TO COUNT — and it is REQUIRED,
+ * because it used to be optional and that made four of these five suites blind.
+ *
+ * REVIEW FINDING I5, MEASURED: `declaredValue`'s third argument was
+ * `inAtRule?: RegExp`, and only F4 ever passed it. So F1, F2, F3 and F5 counted
+ * a declaration nested inside ANY `@media` as though it were top-level. Proof,
+ * reproduced against the real stylesheets: revert `components/runner.css`'s
+ * `.onramps` grid to the defective `1fr 1fr` and put the `repeat(auto-fit, …)`
+ * fix inside `@media (min-width: 3000px)` — a band no user is ever in — and this
+ * file went **24/24 green with the defect fully restored in the product**.
+ *
+ * `TOP_LEVEL` is the honest question for F1/F2/F3/F5: every declaration they
+ * pin is one that must apply AT EVERY WIDTH, and all of them are in fact
+ * top-level today (measured across the whole `src/**\/*.css` glob). A RegExp
+ * scope is the honest question for F4, whose whole contract is "inside
+ * `@media (max-width: 1024px)` and nowhere else".
+ *
+ * There is deliberately NO "any context" option here. Absence assertions — the
+ * only place any-context is the STRICTER question — get their own named
+ * function, `declaredAnywhere`, so a presence assertion cannot reach the lax
+ * lookup by passing a sentinel.
+ */
+const TOP_LEVEL = Symbol('top-level: applies at every width');
+type Scope = RegExp | typeof TOP_LEVEL;
+
+const inScope = (rule: Rule, scope: Scope): boolean =>
+  scope === TOP_LEVEL
+    ? rule.atRules.length === 0
+    : rule.atRules.some((a) => (scope as RegExp).test(a));
+
 /** Every rule whose selector list contains `selector` as a comma-separated part. */
-function rulesFor(selector: string): Rule[] {
-  return ALL_RULES.filter((r) =>
+function rulesFor(selector: string, rules: Rule[] = ALL_RULES): Rule[] {
+  return rules.filter((r) =>
     r.selector
       .split(',')
       .map((s) => s.trim())
@@ -97,17 +128,41 @@ function rulesFor(selector: string): Rule[] {
   );
 }
 
-/** The last winning value of `prop` across every rule matching `selector`. */
-function declaredValue(selector: string, prop: string, inAtRule?: RegExp): string | null {
-  const matches = rulesFor(selector).filter(
-    (r) => inAtRule === undefined || r.atRules.some((a) => inAtRule.test(a))
-  );
+const lastValue = (matches: Rule[], prop: string): string | null => {
   let value: string | null = null;
   for (const rule of matches) {
     const re = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`, 'g');
     for (const m of rule.body.matchAll(re)) value = m[1].trim();
   }
   return value;
+};
+
+/**
+ * The last winning value of `prop` across every rule matching `selector` **that
+ * sits in `scope`**. `scope` is required; see the note on {@link TOP_LEVEL}.
+ */
+function declaredValue(
+  selector: string,
+  prop: string,
+  scope: Scope,
+  rules: Rule[] = ALL_RULES
+): string | null {
+  return lastValue(
+    rulesFor(selector, rules).filter((r) => inScope(r, scope)),
+    prop
+  );
+}
+
+/**
+ * The last winning value of `prop` in ANY at-rule context.
+ *
+ * FOR ABSENCE ASSERTIONS ONLY. "This declaration exists nowhere" is a stronger
+ * claim than "it exists nowhere at top level", so any-context is the correct —
+ * and stricter — lookup for a `toBeNull()`. Never use it to assert a value is
+ * PRESENT: that is exactly the blindness I5 measured.
+ */
+function declaredAnywhere(selector: string, prop: string, rules: Rule[] = ALL_RULES): string | null {
+  return lastValue(rulesFor(selector, rules), prop);
 }
 
 describe('F1 · Compare Runs no longer makes the whole page scroll sideways', () => {
@@ -130,11 +185,11 @@ describe('F1 · Compare Runs no longer makes the whole page scroll sideways', ()
    * overflow, it is not moved.
    */
   it('.rc-tablewrap establishes a containing block for its absolute descendants', () => {
-    expect(declaredValue('.rc-tablewrap', 'position')).toBe('relative');
+    expect(declaredValue('.rc-tablewrap', 'position', TOP_LEVEL)).toBe('relative');
   });
 
   it('and still scrolls, so the fix did not trade the overflow for a clip', () => {
-    expect(declaredValue('.rc-tablewrap', 'overflow-x')).toBe('auto');
+    expect(declaredValue('.rc-tablewrap', 'overflow-x', TOP_LEVEL)).toBe('auto');
   });
 
   it('the accessible-name spans are still rendered — hiding them was the rejected fix', () => {
@@ -159,13 +214,13 @@ describe('F2 · Load Materials reflows to one column instead of scrolling sidewa
    * 1.4.10 Reflow.
    */
   it('.onramps no longer hard-codes two columns', () => {
-    const tracks = declaredValue('.onramps', 'grid-template-columns');
+    const tracks = declaredValue('.onramps', 'grid-template-columns', TOP_LEVEL);
     expect(tracks).not.toBeNull();
     expect(tracks).not.toBe('1fr 1fr');
   });
 
   it('and states a minimum readable card width, so the track count follows the container', () => {
-    const tracks = declaredValue('.onramps', 'grid-template-columns')!;
+    const tracks = declaredValue('.onramps', 'grid-template-columns', TOP_LEVEL)!;
     expect(tracks).toMatch(/repeat\(\s*auto-fit\s*,\s*minmax\(/);
     const floor = /minmax\(\s*(\d+)px/.exec(tracks);
     expect(floor).not.toBeNull();
@@ -190,11 +245,11 @@ describe('F3 · the Governance & Safety banner wraps instead of shrinking to one
    * A load-bearing honesty disclosure rendering as a 1,125px ribbon.
    */
   it('.gov-banner wraps', () => {
-    expect(declaredValue('.gov-banner', 'flex-wrap')).toBe('wrap');
+    expect(declaredValue('.gov-banner', 'flex-wrap', TOP_LEVEL)).toBe('wrap');
   });
 
   it('.gov-body has a real flex basis, not the zero basis that let it be crushed', () => {
-    const flex = declaredValue('.gov-banner .gov-body', 'flex');
+    const flex = declaredValue('.gov-banner .gov-body', 'flex', TOP_LEVEL);
     expect(flex).not.toBeNull();
     // `flex: 1` is `1 1 0%`. The third component must be a real length.
     const basis = /^\s*\d+\s+\d+\s+(\d+)px\s*$/.exec(flex!);
@@ -206,7 +261,7 @@ describe('F3 · the Governance & Safety banner wraps instead of shrinking to one
     // The banner's content box measured 208px at a 320px viewport. The icon
     // costs 18px and one 12px gap, so a basis above 178px would push the
     // paragraph onto its own line and orphan the icon.
-    const basis = Number(/(\d+)px/.exec(declaredValue('.gov-banner .gov-body', 'flex')!)![1]);
+    const basis = Number(/(\d+)px/.exec(declaredValue('.gov-banner .gov-body', 'flex', TOP_LEVEL)!)![1]);
     expect(basis).toBeLessThanOrEqual(178);
   });
 });
@@ -238,11 +293,19 @@ describe('F4 · the fixed Assistant trigger no longer sits on top of the status 
 
     // And NOT at every width: an unconditional reserve would put dead space
     // under the card on the desktop layout, where the trigger is `display: none`.
-    expect(declaredValue(':root', '--assistant-trigger-reserve')).toBe(reserve);
+    // Asked two ways on purpose — the token must not resolve at top level, and no
+    // top-level `:root` rule may so much as mention it.
+    expect(
+      declaredValue(':root', '--assistant-trigger-reserve', TOP_LEVEL),
+      'the reserve must exist ONLY inside the narrow band, never unconditionally'
+    ).toBeNull();
     const unconditional = rulesFor(':root').filter(
       (r) => r.atRules.length === 0 && /--assistant-trigger-reserve/.test(r.body)
     );
     expect(unconditional).toEqual([]);
+    // The value the narrow band declares is also the last one declared anywhere,
+    // so no wider band silently overrides the one this suite measured.
+    expect(declaredAnywhere(':root', '--assistant-trigger-reserve')).toBe(reserve);
   });
 
   it('.screen-card leaves that much room after itself', () => {
@@ -291,7 +354,7 @@ describe('F5 · pointer targets clear the WCAG 2.5.8 floor of 24px', () => {
 
   for (const [selector, measured] of FLOORED) {
     it(`${selector} has a 24px floor (measured ${measured})`, () => {
-      const value = declaredValue(selector, 'min-height');
+      const value = declaredValue(selector, 'min-height', TOP_LEVEL);
       expect(value, `no min-height reaches ${selector}`).not.toBeNull();
       expect(Number(/(\d+(?:\.\d+)?)px/.exec(value!)![1])).toBeGreaterThanOrEqual(24);
     });
@@ -318,11 +381,11 @@ describe('F5 · pointer targets clear the WCAG 2.5.8 floor of 24px', () => {
      * and add `summary` to the floor above.
      */
     expect(
-      declaredValue('summary', 'padding-block'),
+      declaredAnywhere('summary', 'padding-block'),
       'if a `summary` floor is being added, the Endpoint Explorer contrast nodes it exposes ' +
         'have to be dealt with in the same change — see the comment in styles/base.css'
     ).toBeNull();
-    expect(declaredValue('summary', 'min-height')).toBeNull();
+    expect(declaredAnywhere('summary', 'min-height')).toBeNull();
 
     const base = Object.entries(cssFiles).find(([p]) => p.endsWith('styles/base.css'))![1];
     expect(base).toContain('FOUR MEASURED VIOLATIONS DELIBERATELY LEFT OPEN');
@@ -336,7 +399,7 @@ describe('F5 · pointer targets clear the WCAG 2.5.8 floor of 24px', () => {
     // stops applying that silently, which would turn a target-size fix into
     // content loss on exactly the label `layout-widths.spec.ts` case T1 exists
     // to protect.
-    const display = declaredValue('.record-title-link', 'display');
+    const display = declaredAnywhere('.record-title-link', 'display');
     expect(display === null || !/flex|grid/.test(display)).toBe(true);
   });
 
@@ -344,7 +407,110 @@ describe('F5 · pointer targets clear the WCAG 2.5.8 floor of 24px', () => {
     // Measured 1.0 x 1.0. Giving these a 24px floor would put a visible box
     // where the design deliberately has none.
     for (const selector of ['.csv-recon-visually-hidden', '.rec-val-visually-hidden']) {
-      expect(declaredValue(selector, 'min-height')).toBeNull();
+      expect(declaredAnywhere(selector, 'min-height')).toBeNull();
     }
+  });
+});
+
+/*
+ * ── I5's NEGATIVE CONTROL: the guard must be able to go RED ──────────────────
+ *
+ * Every assertion above is a `toBe`/`not.toBe` over source text, so it can be
+ * satisfied by a declaration that never applies to a real viewport. That is not
+ * hypothetical — it is exactly what an independent review MEASURED on this file:
+ * with `declaredValue`'s at-rule filter optional and unused by F1/F2/F3/F5,
+ * moving `.onramps`'s reflow fix into `@media (min-width: 3000px)` and restoring
+ * `1fr 1fr` at top level left all 24 assertions GREEN with the defect fully
+ * restored in the product.
+ *
+ * The control below rebuilds that exact stylesheet as a string and asserts both
+ * halves: the scoped lookup this file now uses REPORTS THE DEFECT (so the suite
+ * would fail), and the unscoped lookup — the old behaviour — reports the fix (so
+ * the failure mode is reproduced rather than merely described).
+ *
+ * It runs on a synthetic stylesheet rather than by mutating a real one, because
+ * a test that edits `components/runner.css` would race every other suite reading
+ * it through the same `import.meta.glob`.
+ */
+describe("I5 · the at-rule filter is required, and a fix hidden in an unreachable @media reads as the defect", () => {
+  const UNREACHABLE = `
+    .onramps { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+    .rc-tablewrap { overflow-x: auto; position: static; }
+    .gov-banner { display: flex; flex-wrap: nowrap; }
+    .btn { padding: 6px 10px; }
+    @media (min-width: 3000px) {
+      .onramps { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .rc-tablewrap { position: relative; }
+      .gov-banner { flex-wrap: wrap; }
+      .btn { min-height: 24px; }
+    }
+  `;
+  const rules = extractRules(UNREACHABLE, 'synthetic/unreachable.css');
+
+  const CASES: readonly [string, string, string, string][] = [
+    // selector, property, the defect at top level, the fix hidden in the @media
+    ['.onramps', 'grid-template-columns', '1fr 1fr', 'repeat(auto-fit, minmax(240px, 1fr))'],
+    ['.rc-tablewrap', 'position', 'static', 'relative'],
+    ['.gov-banner', 'flex-wrap', 'nowrap', 'wrap'],
+  ];
+
+  for (const [selector, prop, defect, hiddenFix] of CASES) {
+    it(`${selector} { ${prop} } — TOP_LEVEL sees the defect, the unscoped lookup sees the fix`, () => {
+      expect(
+        declaredValue(selector, prop, TOP_LEVEL, rules),
+        'the scoped lookup must report what a real viewport gets — the defect'
+      ).toBe(defect);
+      expect(
+        declaredAnywhere(selector, prop, rules),
+        'and the unscoped lookup must report the hidden fix, which is the blindness I5 measured'
+      ).toBe(hiddenFix);
+    });
+  }
+
+  it('a min-height that exists only above 3000px does not satisfy the 2.5.8 floor', () => {
+    // The F5 shape. `declaredAnywhere` would find `24px` and pass; the scoped
+    // lookup finds nothing, which is the truth for every user.
+    expect(declaredValue('.btn', 'min-height', TOP_LEVEL, rules)).toBeNull();
+    expect(declaredAnywhere('.btn', 'min-height', rules)).toBe('24px');
+  });
+
+  it("the reviewer's reproduction, on the REAL stylesheet's bytes and without touching disk", () => {
+    /*
+     * The synthetic cases above are the mechanism. This one is the actual
+     * finding: `components/runner.css` as committed, with its `.onramps` fix
+     * MOVED into `@media (min-width: 3000px)` by a string transform. Nothing is
+     * written — mutating the file on disk would race every other suite reading
+     * the same `import.meta.glob`, and would race the Playwright job reading it
+     * through the dev server.
+     */
+    const [, runner] = Object.entries(cssFiles).find(([path]) =>
+      path.endsWith('components/runner.css')
+    )!;
+    const FIX = 'repeat(auto-fit, minmax(240px, 1fr))';
+    // The DECLARATION, not the comment above it that quotes the same string.
+    const DECLARED = `grid-template-columns: ${FIX};`;
+    expect(runner, 'the committed fix must be present for this transform to mean anything').toContain(
+      DECLARED
+    );
+    const sabotaged =
+      runner.replace(DECLARED, 'grid-template-columns: 1fr 1fr;') +
+      `\n@media (min-width: 3000px) { .onramps { grid-template-columns: ${FIX}; } }\n`;
+    const rules3000 = extractRules(sabotaged, 'components/runner.css');
+
+    // What F2 asks now: RED, because a real viewport gets two hard columns.
+    expect(declaredValue('.onramps', 'grid-template-columns', TOP_LEVEL, rules3000)).toBe('1fr 1fr');
+    // What F2 asked before I5: GREEN, on a product with the defect restored.
+    expect(declaredAnywhere('.onramps', 'grid-template-columns', rules3000)).toBe(FIX);
+  });
+
+  it('and a fix in a band users ARE in is still seen, so the filter is not just a blanket refusal', () => {
+    const reachable = extractRules(
+      '.onramps { grid-template-columns: 1fr 1fr; }\n' +
+        '@media (max-width: 640px) { .onramps { grid-template-columns: 1fr; } }',
+      'synthetic/reachable.css'
+    );
+    expect(declaredValue('.onramps', 'grid-template-columns', /max-width:\s*640px/, reachable)).toBe(
+      '1fr'
+    );
   });
 });

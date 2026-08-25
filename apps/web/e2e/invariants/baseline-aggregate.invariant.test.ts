@@ -355,6 +355,62 @@ describe('the a11y baseline file is well-formed', () => {
   });
 });
 
+describe('no layout baseline entry tolerates nothing on either platform', () => {
+  /*
+   * REVIEW FINDING, 2026-08-25. `fixedOnDarwin` in `e2e/layout-baseline.ts` was
+   * fully variadic, so `fixedOnDarwin()` typechecked and produced
+   * `{darwin: [], linux: []}` — a key that tolerates nothing anywhere. That is
+   * not "fixed on darwin"; it is a dead key that reads as a recorded finding, and
+   * nothing rejected it. The helper's first argument is now REQUIRED, which closes
+   * the helper route. This closes the OTHER route: a pair written out by hand.
+   *
+   * Note what an empty pair is NOT: `darwin: []` beside a non-empty `linux` is
+   * the whole point of `fixedOnDarwin` and is legal. Only empty on BOTH sides is
+   * a dead key.
+   */
+  const emptyOnBothPlatforms = (finding: LayoutFinding, key: string): boolean => {
+    const instances = finding.instances[key];
+    if (Array.isArray(instances)) return instances.length === 0;
+    const perPlatform = instances as Record<(typeof BASELINE_PLATFORMS)[number], readonly string[]>;
+    return BASELINE_PLATFORMS.every((platform) => perPlatform[platform].length === 0);
+  };
+
+  it('the committed LAYOUT_BASELINE has no such entry', () => {
+    const dead: string[] = [];
+    for (const finding of LAYOUT_BASELINE) {
+      for (const key of Object.keys(finding.instances)) {
+        if (emptyOnBothPlatforms(finding, key)) dead.push(`${finding.id} / ${key}`);
+      }
+    }
+    expect(
+      dead,
+      'an entry that tolerates nothing on either platform excuses nothing and asserts nothing — ' +
+        'delete the key instead of recording an empty one:\n' +
+        dead.join('\n')
+    ).toEqual([]);
+  });
+
+  it('and the check rejects one, so the empty result above means something', () => {
+    const synthetic = {
+      ...LAYOUT_BASELINE[0],
+      instances: { 'record-detail@width-320': { darwin: [], linux: [] } },
+    } as unknown as LayoutFinding;
+    expect(emptyOnBothPlatforms(synthetic, 'record-detail@width-320')).toBe(true);
+    // A bare empty array is the same defect written the other way.
+    const bare = {
+      ...LAYOUT_BASELINE[0],
+      instances: { 'record-detail@width-320': [] },
+    } as unknown as LayoutFinding;
+    expect(emptyOnBothPlatforms(bare, 'record-detail@width-320')).toBe(true);
+    // And `darwin: []` beside a real linux list is legal, not a defect.
+    const fixedOnDarwinShape = {
+      ...LAYOUT_BASELINE[0],
+      instances: { 'record-detail@width-320': { darwin: [], linux: ['div.screen-card'] } },
+    } as unknown as LayoutFinding;
+    expect(emptyOnBothPlatforms(fixedOnDarwinShape, 'record-detail@width-320')).toBe(false);
+  });
+});
+
 describe('every baseline key names a real surface and a real scan project', () => {
   const surfaceIds = new Set(SURFACES.map((s) => s.id));
   // The two grids, kept apart on purpose — see `a11yBaselineKeys` for why a

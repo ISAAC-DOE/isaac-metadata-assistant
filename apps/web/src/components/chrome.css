@@ -550,7 +550,40 @@
      is `1 1 0%`, and a zero basis is what let the paragraph be shrunk to 83px
      while the 83px action kept its width. `min-width: 0` stays explicit so the
      basis governs LINE BREAKING without becoming a hard floor that could push
-     the body past the container's edge. */
+     the body past the container's edge.
+
+     ── THE IMPROVEMENT IS BAND-LIMITED, AND THE BAND IS RECORDED RATHER THAN
+     CLAIMED AWAY (2026-08-25). ──
+
+     A review measured `.gov-body` at 414px as 177 x 488, identical to pre-PR,
+     and it is right. Re-measured here across the whole range, in headless
+     Chromium on Load Materials (`bodyW x bodyH`, lines at a 1.5 line-height):
+
+       320 -> 178 x 488  26 lines      480 -> 243 x 338  18 lines
+       375 -> 233 x 338  18 lines      540 -> 303 x 263  14 lines
+       390 -> 248 x 319  17 lines      640 -> 403 x 206  11 lines
+       414 -> 177 x 488  26 lines      768 -> 531 x 150   8 lines
+       430 -> 193 x 413  22 lines     1024 -> 787 x  94   5 lines
+
+     THE SHAPE IS NON-MONOTONIC ON PURPOSE, and that is the whole finding: from
+     ~414 to ~470 the banner is just wide enough for the ~83px action to stay on
+     line 1 beside a 160px-basis body, so the body is squeezed to ~180px —
+     narrower than it gets at 390, where the action wraps to its own line and
+     leaves the body 248px. So 414 is UNCHANGED by this PR rather than regressed
+     by it, and it is the widest point at which the paragraph still reads as a
+     ribbon.
+
+     NOTHING MEASURES IT: `LAYOUT_SWEEP_WIDTHS` in `e2e/layout-baseline.ts` is
+     [1280, 1024, 768, 640, 390, 375, 320], and 414 is not in it.
+
+     WIDENING THE SWEEP WAS REJECTED, and the reason is cost rather than
+     disinterest: adding a width adds a `surfaceId@width-414` key for every
+     surface in `e2e/surfaces.ts`, and this environment cannot measure the linux
+     column for any of them — so it would trade one known, disclosed band for a
+     whole column of baseline entries asserted from darwin alone. The honest
+     alternative is to record the band, which is what this is. Fixing it means
+     making the action wrap below ~470px rather than ~414px, which is a design
+     decision about the banner and not a defect closure. */
   flex: 1 1 160px;
   min-width: 0;
   font-size: 12.5px;
@@ -564,11 +597,20 @@
      taken the slack); once the body's 160px basis pushes it onto its own line
      this parks it at the end of the banner rather than under the icon. */
   margin-left: auto;
-  /* Centres the label inside the 24px WCAG 2.5.8 floor that `styles/base.css`
-     puts on this control (measured 82.9 x 17.0 before it). Declared here, with
-     the rest of the rule, because a second `.gov-banner .gov-action` block in
-     base.css would have the same 0-2-0 specificity and the winner would be
-     decided by import order. */
+  /* ~~"Centres the label inside the 24px WCAG 2.5.8 floor that `styles/base.css`
+     puts on this control"~~ — **A MEASURED NO-OP, corrected in place
+     2026-08-25.** This control is a `<button type="button">`
+     (`components/GovernanceBanner.tsx`), and Chromium's UA button layout already
+     centres a button's content at any `display`. Stripping all three of these
+     declarations in the running app at 1280px left the box at 24 x 82.9 with
+     top/bottom gaps 4.5/4.5 and left/right 6/6 — byte-identical to keeping them.
+     Kept anyway: `margin-left: auto` above IS load-bearing, and deleting a
+     harmless declaration to make a point is not worth the risk of finding out it
+     mattered in a browser this environment cannot measure. The reason it lives
+     here rather than in base.css is unchanged and still right: a second
+     `.gov-banner .gov-action` block in base.css would have the same 0-2-0
+     specificity, so the winner would be decided by import order. The 24px floor
+     itself is real and comes from base.css (measured 82.9 x 17.0 before it). */
   display: inline-flex;
   align-items: center;
   justify-content: center;

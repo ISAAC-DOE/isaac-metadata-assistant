@@ -268,6 +268,40 @@ has no filesystem fallback. And **the M4 stability exception above is unaffected
 decision is not written by materialisation, so the "stable across materialisation"
 property is exactly as strong as it was.
 
+**AND THE SQL FILE'S OWN PROSE NOW SAYS SOMETHING FALSE — DISCLOSED HERE BECAUSE IT
+CANNOT BE CORRECTED.** `0003_revisions.sql:122-123` documents the column as *"computed
+by `submissions.content_signature` over the export units' ids and drafts **ONLY**"*.
+That `ONLY` is now wrong, in exactly the way the table row above was wrong before it was
+struck: the digest also covers the record's stored conflict decisions. **The comment is
+not correctable, and the reason is the approval rather than the effort.** §"The bytes
+being approved" pins this file's sha256; `git log --follow` shows the SQL has had exactly
+one version ever (commit `0896b07`, never since touched); and the project owner approved
+**those exact bytes** on 2026-08-17. Changing one comment character changes the digest,
+so it would invalidate an owner approval of a migration whose operator step is still
+outstanding. Re-opening an approval to reword a comment is the wrong trade; leaving the
+staleness undisclosed is not an option either, so the staleness is recorded here instead
+of being fixed.
+
+**What a reader of that comment should treat as authoritative instead**, in this order:
+the corrected `content_signature` row in the table above, and
+`submissions.content_signature`'s own docstring, which states the coverage as the
+experiment id, each export unit's id and fully resolved draft, and the record's stored
+conflict decisions — and carries the measured defect that widened it. The scope is also
+served rather than only documented: `submissions.SIGNATURE_SCOPE` reads
+`export_unit_ids_drafts_and_conflict_decisions` and moved when the coverage moved. The
+rest of that SQL comment — the exclusions of `rev`, `updated_utc`, `record_id` and every
+server timestamp, the stability-across-materialisation property, and the M4 degraded
+exception — is unchanged and still accurate; the single stale term is `ONLY`.
+
+**Nothing about the migration changed, and this note changes nothing about it.** No SQL
+byte, no column type, no CHECK, no UNIQUE constraint, no index, no digest in this packet
+and no approval was altered — what widened is the application's computation of the value
+the column stores, which the migration deliberately does not constrain.
+`0004_submissions.sql:70-71` carries the same stale `only` about the same digest, and
+[`docs/migration-approval-packet-0004.md`](migration-approval-packet-0004.md) §2
+discloses it there in the same terms, because that is the packet for the table whose
+`UNIQUE (experiment_id, content_signature)` actually uses the column.
+
 ### 2.1 What a change row means, stated narrowly
 
 `submissions.address_changes` compares, for every export unit, the **`value` of each entry under
