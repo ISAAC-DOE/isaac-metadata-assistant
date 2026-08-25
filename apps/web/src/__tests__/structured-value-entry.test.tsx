@@ -27,10 +27,12 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 
 import { GuidedPrompt } from '../components/GuidedPrompt';
 import {
+  descriptorDraftFrom,
   descriptorIsComplete,
   descriptorPayload,
   EMPTY_DESCRIPTOR,
   seriesParseError,
+  seriesTextFrom,
   typedValue,
 } from '../components/StructuredValueEntry';
 import { pendingItemToBlocker } from '../lib/adapt';
@@ -46,7 +48,15 @@ const base = (kind: 'series' | 'descriptor'): PendingBlocker => ({
   inputType: 'structured',
 });
 
-function renderEntry(kind: 'series' | 'descriptor', overrides: Partial<PendingBlocker> = {}) {
+/* `props` was added for the I4 tests at the foot of this file: an EDIT opens the same
+   component with the confirmed value handed back through `initialValue`, and there was
+   no way to express that here — which is part of why the editor shipped opening blank.
+   Optional and spread last, so every existing call is unchanged. */
+function renderEntry(
+  kind: 'series' | 'descriptor',
+  overrides: Partial<PendingBlocker> = {},
+  props: { initialValue?: unknown; initialStaged?: boolean } = {},
+) {
   const onConfirm = vi.fn();
   const onStagedChange = vi.fn();
   render(
@@ -57,6 +67,7 @@ function renderEntry(kind: 'series' | 'descriptor', overrides: Partial<PendingBl
       onConfirm={onConfirm}
       onDontKnow={vi.fn()}
       onStagedChange={onStagedChange}
+      {...props}
     />,
   );
   return { onConfirm, onStagedChange };
@@ -344,5 +355,164 @@ describe('per-question state is keyed by the unique key, not by the kind', () =>
     const only = pendingItemToBlocker({ id: 'qc', kind: 'qc', question: 'q' });
     expect(only.key).toBe('qc');
     expect(only.runId).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I4 — the inverses, and the editor that had none
+// ---------------------------------------------------------------------------
+
+/**
+ * A CONFIRMED STRUCTURED VALUE COULD NOT BE EDITED, AND THE SCREEN SAID IT COULD.
+ *
+ * `GuidedCompletion` renders a confirmed answer read-only with an Edit button and its
+ * own comment promises the editor opens "prefilled with the current value". For a
+ * `series` or `descriptor` on a record with NO worked example — every record a
+ * scientist creates, which is the only case in which these controls render — the value
+ * was never passed down, and `initialStaged` does not cover it: `entering` is
+ * `structured && demo === undefined`, and on that branch `canConfirm` is `entryReady`,
+ * computed from the form and never from `staged`. Measured:
+ *
+ *     SERIES     editor value = ""                          SAVE DISABLED = true
+ *     DESCRIPTOR Name="" Kind="" Source="" Value="" Unit="" SAVE DISABLED = true
+ *
+ * So one wrong digit in a descriptor cost the whole value, with a dead Save button and
+ * nothing on screen saying why.
+ */
+describe('descriptorDraftFrom is the inverse descriptorPayload never had', () => {
+  it('round-trips a payload back through the form unchanged', () => {
+    const draft = {
+      ...EMPTY_DESCRIPTOR,
+      name: 'inflection_point_energy',
+      kind: 'absolute',
+      source: 'manual',
+      value: '9001.2',
+      unit: 'eV',
+      sigma: '0.01',
+      sigmaUnit: 'eV',
+      basis: 'reported',
+    };
+    // payload -> draft -> payload is the identity, which is the property that makes it
+    // safe to hand a confirmed value back to the control that produced it.
+    expect(descriptorDraftFrom(descriptorPayload(draft))).toEqual(draft);
+    expect(descriptorPayload(descriptorDraftFrom(descriptorPayload(draft)))).toEqual(
+      descriptorPayload(draft),
+    );
+  });
+
+  it('does NOT throw on the payload shape — the trap a cast would have fallen into', () => {
+    /*
+     * `rawValue` for a descriptor is `descriptorPayload(...)`: `value` is a NUMBER when
+     * the text read as one, there is no `sigma` key, and σ is nested under
+     * `uncertainty`. `GuidedPrompt` used to cast `initialValue as DescriptorDraft` on
+     * `'name' in initialValue`, so simply passing the confirmed value down would have
+     * put a number where `descriptorIsComplete` calls `.trim()` and `undefined` where
+     * it reads `d.sigma` — turning a blank form into a crash on open, which is worse.
+     */
+    const payload = { name: 'edge', kind: 'absolute', source: 'auto', value: 8979, uncertainty: { sigma: null } };
+    const draft = descriptorDraftFrom(payload);
+    expect(() => descriptorIsComplete(draft)).not.toThrow();
+    expect(draft.value).toBe('8979'); // the text that produced the number
+    expect(draft.sigma).toBe(''); // `sigma: null` means none was REPORTED
+    expect(descriptorIsComplete(draft)).toBe(true);
+  });
+
+  it('degrades to a blank form rather than to a half-populated one', () => {
+    // A blank field the reader must fill is honest. A field silently holding the wrong
+    // thing is not — and this control's whole purpose is that nothing is filled in for
+    // you unless you put it there.
+    for (const notADescriptor of [undefined, null, 'text', 42, [], {}, { status: 'valid' }]) {
+      expect(descriptorDraftFrom(notADescriptor)).toEqual(EMPTY_DESCRIPTOR);
+    }
+    // A nested object where a scalar belongs has no text form `typedValue` would turn
+    // back into it, so the field is left blank rather than stringified.
+    expect(descriptorDraftFrom({ name: 'x', value: { a: 1 } }).value).toBe('');
+  });
+
+  it('reads a mid-edit DRAFT as well as a confirmed PAYLOAD', () => {
+    // `onStagedChange` reports the DRAFT shape — flat `sigma`, every field a string —
+    // and that is what survives a Refresh. Both shapes satisfy `'name' in value`, which
+    // is exactly why a cast could not tell them apart.
+    const inFlight = { ...EMPTY_DESCRIPTOR, name: 'edge', sigma: '0.5', sigmaUnit: 'eV' };
+    expect(descriptorDraftFrom(inFlight)).toEqual(inFlight);
+  });
+});
+
+describe('seriesTextFrom returns the spectrum to the box that produced it', () => {
+  it('re-serialises a confirmed (parsed) array', () => {
+    const value = [{ series_id: 'averaged_spectrum', channels: [1, 2] }];
+    expect(JSON.parse(seriesTextFrom(value))).toEqual(value);
+    // Pretty-printed, because a scientist has to read and correct it.
+    expect(seriesTextFrom(value)).toContain('\n');
+  });
+
+  it('returns RAW TEXT untouched, half-written JSON included', () => {
+    // A staged series survives as text on purpose: half-written JSON is still the
+    // reader's work, and reparsing it to restore it would lose exactly the state a
+    // Refresh most needs to preserve.
+    expect(seriesTextFrom('[{"series_id": "half')).toBe('[{"series_id": "half');
+  });
+
+  it('gives an empty box rather than a wrong one for anything else', () => {
+    for (const notASeries of [undefined, null, 42, { series_id: 'x' }]) {
+      expect(seriesTextFrom(notASeries)).toBe('');
+    }
+  });
+});
+
+describe('the entry editor opens on the value it is editing', () => {
+  it('a descriptor payload prefills every field and arms Confirm', () => {
+    const payload = descriptorPayload({
+      ...EMPTY_DESCRIPTOR,
+      name: 'inflection_point_energy',
+      kind: 'absolute',
+      source: 'manual',
+      value: '9001.2',
+      unit: 'eV',
+      sigma: '0.01',
+      sigmaUnit: 'eV',
+      basis: 'reported',
+    });
+    const { onConfirm } = renderEntry('descriptor', {}, { initialValue: payload });
+
+    expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(
+      'inflection_point_energy',
+    );
+    expect((screen.getByLabelText(/^Kind/) as HTMLSelectElement).value).toBe('absolute');
+    expect((screen.getByLabelText(/^Source/) as HTMLSelectElement).value).toBe('manual');
+    expect((screen.getByLabelText(/^Value/) as HTMLInputElement).value).toBe('9001.2');
+    expect((screen.getByLabelText(/^Unit/) as HTMLInputElement).value).toBe('eV');
+    expect((screen.getByLabelText(/Uncertainty \(σ\)/) as HTMLInputElement).value).toBe('0.01');
+
+    // ARMED — the half a prefill alone would not fix, because `canConfirm` reads the
+    // form on this branch and a blank form is a dead button.
+    expect(confirmButton()).not.toBeDisabled();
+    // And confirming without touching anything returns the SAME value, not a
+    // reconstruction of it.
+    fireEvent.click(confirmButton());
+    expect(onConfirm).toHaveBeenCalledWith(payload);
+  });
+
+  it('a confirmed series prefills the box and arms Confirm', () => {
+    const value = [{ series_id: 'averaged_spectrum', channels: [1, 2] }];
+    const { onConfirm } = renderEntry('series', {}, { initialValue: value });
+
+    const box = screen.getByLabelText(/series json/i) as HTMLTextAreaElement;
+    expect(JSON.parse(box.value)).toEqual(value);
+    expect(confirmButton()).not.toBeDisabled();
+    fireEvent.click(confirmButton());
+    expect(onConfirm).toHaveBeenCalledWith(value);
+  });
+
+  it('NEGATIVE CONTROL — no initial value still opens blank, with Confirm dead', () => {
+    /*
+     * The fix passes a value down unconditionally, and getting that wrong would
+     * recreate the worst defect this screen has shipped: one run's scientific value
+     * pre-filled into another run's identical question, one click from being confirmed.
+     */
+    renderEntry('descriptor');
+    expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText(/^Value/) as HTMLInputElement).value).toBe('');
+    expect(confirmButton()).toBeDisabled();
   });
 });

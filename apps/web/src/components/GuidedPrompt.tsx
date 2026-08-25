@@ -7,12 +7,12 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import { QC_VERDICTS } from '../lib/types';
 import {
   DescriptorForm,
-  EMPTY_DESCRIPTOR,
   SeriesEntry,
+  descriptorDraftFrom,
   descriptorIsComplete,
   descriptorPayload,
   seriesParseError,
-  type DescriptorDraft,
+  seriesTextFrom,
 } from './StructuredValueEntry';
 import type { PendingBlocker, QcAnswer, QcVerdict } from '../lib/types';
 
@@ -114,24 +114,50 @@ export function GuidedPrompt({
      resolved to whichever came first and `aria-describedby` was ambiguous. An
      independent review measured all three, and a duplicate id is an axe violation as
      well as a broken control. */
+  /* NARROWED to the verdict blocker itself. It used to accept ANY object, which was
+     harmless while `GuidedCompletion` passed `rawValue` down only for a verdict; that
+     screen now passes a structured answer too, so a descriptor payload and a parsed
+     series both reach here as objects. Neither carries `status`/`evidence`, so the
+     old test would have produced `undefined` and the same empty controls — but it
+     would have been reading a spectrum for a QC verdict to get there, and a guard
+     that is right by accident is one refactor from being wrong. */
   const initialVerdict =
-    initialValue && typeof initialValue === 'object' ? (initialValue as QcAnswer) : undefined;
+    blocker.inputType === 'verdict' && initialValue && typeof initialValue === 'object'
+      ? (initialValue as QcAnswer)
+      : undefined;
   const [verdict, setVerdict] = useState<QcVerdict | ''>(initialVerdict?.status ?? '');
   const [verdictNote, setVerdictNote] = useState(initialVerdict?.evidence ?? '');
 
   /* ENTERED structured values, for a record that has no worked example to confirm.
      Held here beside `text` and `verdict` for the same reason they are: the owner's
-     surviving copy is fed back through `initialValue`, and every write is reported. */
-  const [descriptor, setDescriptor] = useState<DescriptorDraft>(
-    initialValue && typeof initialValue === 'object' && 'name' in (initialValue as object)
-      ? (initialValue as DescriptorDraft)
-      : EMPTY_DESCRIPTOR,
-  );
-  const [seriesText, setSeriesText] = useState(
+     surviving copy is fed back through `initialValue`, and every write is reported.
+
+     BOTH ARE NOW PREFILLED FROM A CONFIRMED VALUE, and the previous version was NOT —
+     which made this screen's own claim that an edit opens "prefilled with the current
+     value" false for exactly the two blockers a created record cannot finish without.
+     `initialStaged` looks like it covered it and does not: `entering` is `structured &&
+     demo === undefined`, and on that branch `canConfirm` is `entryReady`, computed from
+     these two states and never from `staged`. So on a record with no worked example the
+     editor opened blank AND Save was permanently disabled — measured, both blockers:
+
+         SERIES     editor value = ""                          SAVE DISABLED = true
+         DESCRIPTOR Name="" Kind="" Source="" Value="" Unit="" SAVE DISABLED = true
+
+     The inverses live in `StructuredValueEntry` beside the functions they invert, and
+     they are FUNCTIONS rather than the casts that used to be here because two shapes
+     reach this point — a mid-edit `DescriptorDraft`/raw text from `onStagedChange`, and
+     a confirmed `descriptorPayload`/parsed array from `rawValue`. The old
+     `initialValue as DescriptorDraft` cast on `'name' in initialValue` would THROW on
+     the second (numeric `value`, no `sigma` key); see `descriptorDraftFrom`. */
+  const [descriptor, setDescriptor] = useState(() => descriptorDraftFrom(initialValue));
+  const [seriesText, setSeriesText] = useState(() =>
     /* A staged series survives as the RAW TEXT the reader typed, not as parsed JSON:
        half-written JSON is still their work, and reparsing it to restore it would lose
-       exactly the state a Refresh most needs to preserve. */
-    typeof initialValue === 'string' && blocker.kind === 'series' ? initialValue : '',
+       exactly the state a Refresh most needs to preserve. A CONFIRMED one arrives
+       parsed, because `handleConfirm` submitted `JSON.parse(seriesText)`, and is
+       re-serialised — `seriesTextFrom` takes both. Still gated on the blocker's kind,
+       so a hash or free-text answer can never land in a spectrum box. */
+    blocker.kind === 'series' ? seriesTextFrom(initialValue) : '',
   );
 
   /* EVERY WRITE GOES THROUGH HERE, for the same reason `setText` does — and it was

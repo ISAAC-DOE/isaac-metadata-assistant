@@ -530,6 +530,53 @@ describe('voice capture', () => {
     await screen.findByText(/No transcription provider is configured\. Speech is not transcribed/);
   });
 
+  it('I9 — the seam line still renders when the capability report never arrives', async () => {
+    /*
+     * THE DISCLOSURE WAS CONDITIONAL ON THE VERY THING IT DISCLOSES. The seam line was
+     * guarded by `transcription !== null`, and `transcription` is `null` in three
+     * reachable states: the capabilities fetch has not resolved (every first paint after
+     * the panel opens), it rejected, or the report names no such seam. In all three the
+     * voice section rendered with NO statement about whether this deployment can
+     * transcribe at all.
+     *
+     * WHY THAT IS LOAD-BEARING RATHER THAN COSMETIC. `docs/ai-integration-decision-packet.md`'s
+     * D6 supersession justifies shipping a recorder against an unconfigured seam on the
+     * grounds that "the mitigation is disclosure, not prevention — the seam's status
+     * renders ABOVE the controls, before any recording starts". That argument is false
+     * for exactly as long as the fetch has not resolved, which is the window in which a
+     * reader decides whether to press Start.
+     *
+     * The failure is simulated the way it actually happens — the capabilities request
+     * rejects — and the assertion is that the panel says UNKNOWN. It must not say "not
+     * configured": the panel's own rule is that a string in this bundle describes the
+     * build the browser came from, not the deployment it is talking to, which is why the
+     * `.catch` leaves the report absent rather than defaulting it.
+     */
+    stubFetchRoutes({ ...BASE_ROUTES, [CAPS]: { status: 503, body: { detail: 'no' } } } as never);
+    const { container } = await renderPanel();
+
+    const seam = await waitFor(() => {
+      const el = container.querySelector('.capture-seam');
+      if (!el) throw new Error('no seam line rendered');
+      return el as HTMLElement;
+    });
+    expect(seam.getAttribute('data-configured')).toBe('unreported');
+    expect(seam.textContent).toMatch(/not reported/i);
+    // It states the consequence for the reader…
+    expect(seam.textContent).toMatch(/treat turning a recording into text as unavailable/i);
+    // …and the audio claim, which is true either way and is what matters most when the
+    // rest is unknown.
+    expect(seam.textContent).toMatch(/nothing is sent anywhere/i);
+    // AND IT DOES NOT OVERSTATE. Unknown is not "not configured" — a client cannot
+    // assert a fact about the server it failed to read.
+    expect(seam.textContent).not.toMatch(/no transcription provider is configured/i);
+
+    // THE POSITION IS THE ARGUMENT: the status is above the controls, before any
+    // recording starts. `voiceHeading` opens the section the line belongs to.
+    const voice = container.querySelector('.capture-voice') as HTMLElement;
+    expect(voice.contains(seam)).toBe(true);
+  });
+
   it('the refusal is rendered from the server’s own words, with what is missing', async () => {
     stubFetchRoutes({
       ...BASE_ROUTES,

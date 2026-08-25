@@ -93,6 +93,33 @@ function seriesQuestion(runId: string, runLabel: string) {
   };
 }
 
+/** One run-owned DESCRIPTOR question. `descriptor`'s `id` is the KIND, like `series`.
+ *
+ *  `demo_answer: null` is the whole point, here as everywhere in this file: a record a
+ *  scientist CREATED has no worked example, which is the only case in which
+ *  `StructuredValueEntry`'s form renders at all. A fixture that supplied one would
+ *  exercise the confirm-the-example path and prove nothing about entry or re-entry. */
+function descriptorQuestion(runId: string, runLabel: string) {
+  return {
+    id: 'descriptor',
+    blocker_key: `${runId}:descriptor`,
+    run_id: runId,
+    run_label: runLabel,
+    kind: 'descriptor',
+    question: 'What is the XANES inflection-point energy and its uncertainty?',
+    about: 'required_for_evidence_record',
+    demo_answer: null,
+    inferability: {
+      field: 'descriptor',
+      state: 'needs_user_input' as const,
+      explanation: 'A descriptor value comes out of your analysis and no rule derives it.',
+      value: null,
+      provenance: null,
+      detail: {},
+    },
+  };
+}
+
 /** One run-owned QC question. `qc`'s `id` is the KIND, like `series`. */
 function qcQuestion(runId: string, runLabel: string) {
   return {
@@ -432,6 +459,14 @@ describe('the completion screen with questions two different runs own', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Edit/ }));
     const editor = screen.getByText('Save').closest('section') as HTMLElement;
+    // I4 — WHAT IT OPENED WITH, asserted before it is overwritten. This test and its
+    // sibling above both reached this state and immediately typed, so a blank editor
+    // with a dead Save button was indistinguishable from a working one. See the
+    // `editing a structured answer opens on the value being edited` block below for
+    // the full statement of the defect.
+    expect(
+      (within(editor).getByLabelText(/series json/i) as HTMLTextAreaElement).value,
+    ).not.toBe('');
     fireEvent.change(within(editor).getByLabelText(/series json/i), {
       target: { value: CORRECTED_SERIES },
     });
@@ -637,5 +672,157 @@ describe('the completion screen with questions two different runs own', () => {
       .map(([url]) => String(url));
     expect(posted.some((u) => u.includes(`/runs/${RUN_ONE}/answers`))).toBe(true);
     expect(posted.some((u) => u.endsWith('/experiments/demo/answers'))).toBe(false);
+  });
+});
+
+/**
+ * I4 — WHAT THE EDIT FORM OPENS WITH, which nothing asserted.
+ *
+ * `GuidedCompletion` renders every confirmed answer read-only with an Edit button, and
+ * its own comment says an edit "swaps that row for an inline GuidedPrompt prefilled
+ * with the current value". For a `series` or `descriptor` answer on a record with no
+ * worked example — every record a scientist creates, and the only case in which
+ * `StructuredValueEntry` renders at all — that was FALSE in both halves: the value was
+ * never passed down, so the editor opened blank, and because `entering` makes
+ * `canConfirm` read `entryReady` (the form) rather than `staged`, Save was disabled with
+ * nothing on screen explaining why. Measured on this very screen:
+ *
+ *     SERIES     editor value = ""                          SAVE DISABLED = true
+ *     DESCRIPTOR Name="" Kind="" Source="" Value="" Unit="" SAVE DISABLED = true
+ *
+ * So correcting one field of a descriptor meant retyping all of it, and until it was
+ * complete the only enabled control was Cancel.
+ *
+ * WHY THE TWO EXISTING EDIT TESTS ABOVE MISSED IT. Both reach exactly this state and
+ * both immediately `fireEvent.change` a fresh value into the box — so the editor's
+ * OPENING state was overwritten before anything looked at it, and a blank form that
+ * accepts a retyped value behaves identically to a prefilled one. Asserting what the
+ * editor opened with is the whole difference.
+ */
+describe('editing a structured answer opens on the value being edited', () => {
+  /** The routes both tests need: one answered question, one still pending. */
+  function afterOneAnswer(pendingAfter: unknown) {
+    const answered = {
+      pending: [pendingAfter],
+      status: 'needs_attention',
+      version: '1.1',
+      rev: 1,
+      workflow: DETAIL_WORKFLOW,
+      invalidation: { ...INVALIDATION },
+    };
+    return {
+      'POST /api/experiments/demo/runs/01RUNAAAAAAAAAAAAAAAAAAAA0/answers': { body: answered },
+      'POST /api/experiments/demo/runs/01RUNAAAAAAAAAAAAAAAAAAAA0/edit': { body: answered },
+      'GET /api/experiments/demo/runs/01RUNAAAAAAAAAAAAAAAAAAAA0': {
+        body: { run: { id: RUN_ONE, version: 'run-one.1', fields: {}, inherited: {} } },
+      },
+    };
+  }
+
+  it('a SERIES editor opens holding the spectrum, with Save armed', async () => {
+    stubFetchRoutes(routes(afterOneAnswer(twoRunsPending().pending[1])));
+    const screen = renderComplete();
+    await screen.findByText('300 K');
+
+    fireEvent.change(screen.getByLabelText(/series json/i), { target: { value: PASTED_A } });
+    fireEvent.click(screen.getByText('Confirm'));
+    await screen.findByText(/^you answered /);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Edit/ }));
+    const editor = screen.getByText('Save').closest('section') as HTMLElement;
+    const box = within(editor).getByLabelText(/series json/i) as HTMLTextAreaElement;
+
+    // THE VALUE IS THERE. Re-serialised rather than byte-identical, because the
+    // confirmed answer is the PARSED array — `handleConfirm` submits
+    // `JSON.parse(seriesText)` — so `seriesTextFrom` stringifies it back. The
+    // scientist's own whitespace does not survive a confirm; the values do, and an
+    // empty box was the alternative.
+    expect(box.value).not.toBe('');
+    expect(JSON.parse(box.value)).toEqual(JSON.parse(PASTED_A));
+
+    // AND SAVE IS ARMED, which is the half a prefill alone would not fix: `entering`
+    // computes `canConfirm` from the form, so a blank box meant a dead button.
+    const save = screen.getByText('Save').closest('button') as HTMLButtonElement;
+    expect(save).not.toBeDisabled();
+  });
+
+  it('a DESCRIPTOR editor opens holding every field, with Save armed', async () => {
+    /*
+     * THE CASE THE REVIEWER WARNED WOULD THROW ON A NAIVE FIX. `rawValue` for a
+     * descriptor is `descriptorPayload(...)` — `value` is a NUMBER when the text read
+     * as one, there is no `sigma` key, and σ lives inside `uncertainty` — while
+     * `GuidedPrompt` used to cast `initialValue as DescriptorDraft` on
+     * `'name' in initialValue`. That cast puts a number where `descriptorIsComplete`
+     * calls `.trim()`, so simply passing the value down would have turned a blank form
+     * into a crash on open. `descriptorDraftFrom` is the typed inverse, and this test
+     * is what proves the round trip.
+     */
+    stubFetchRoutes({
+      ...routes(afterOneAnswer(descriptorQuestion(RUN_TWO, '400 K'))),
+      'GET /api/experiments/demo/pending': {
+        body: {
+          pending: [
+            descriptorQuestion(RUN_ONE, '300 K'),
+            descriptorQuestion(RUN_TWO, '400 K'),
+          ],
+        },
+      },
+    });
+    const screen = renderComplete();
+    await screen.findByText('300 K');
+
+    const fill = (label: RegExp, value: string) =>
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fill(/^Name/, 'inflection_point_energy');
+    fill(/^Kind/, 'absolute');
+    fill(/^Source/, 'manual');
+    fill(/^Value/, '9001.2');
+    fill(/^Unit/, 'eV');
+    fill(/Uncertainty \(σ\)/, '0.4');
+
+    fireEvent.click(screen.getByText('Confirm'));
+    await screen.findByText(/^you answered /);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Edit/ }));
+    const editor = screen.getByText('Save').closest('section') as HTMLElement;
+    const field = (label: RegExp) =>
+      (within(editor).getByLabelText(label) as HTMLInputElement | HTMLSelectElement).value;
+
+    expect(field(/^Name/)).toBe('inflection_point_energy');
+    expect(field(/^Kind/)).toBe('absolute');
+    expect(field(/^Source/)).toBe('manual');
+    // A NUMBER COMES BACK AS THE TEXT THAT PRODUCED IT. `typedValue('9001.2')` stored
+    // `9001.2`; the box is a text input, so the inverse has to stringify it — and this
+    // is the assertion that fails outright (not merely blank) on the naive cast.
+    expect(field(/^Value/)).toBe('9001.2');
+    expect(field(/^Unit/)).toBe('eV');
+    // σ was nested into `uncertainty` on the way out and is read back out of it.
+    expect(field(/Uncertainty \(σ\)/)).toBe('0.4');
+
+    const save = screen.getByText('Save').closest('button') as HTMLButtonElement;
+    expect(save).not.toBeDisabled();
+  });
+
+  it('an unanswered structured question still opens BLANK — the prefill must not spread', async () => {
+    /*
+     * THE NEGATIVE CONTROL, and it is not decorative: the fix passes `rawValue` down
+     * unconditionally, and the failure mode of getting that wrong is the single worst
+     * defect this screen has ever shipped — one run's scientific value pre-filled into
+     * another run's identical question, one click from being confirmed as its own.
+     * A fresh question has no answer to restore, and must show none.
+     */
+    stubFetchRoutes(routes(afterOneAnswer(twoRunsPending().pending[1])));
+    const screen = renderComplete();
+    await screen.findByText('300 K');
+
+    fireEvent.change(screen.getByLabelText(/series json/i), { target: { value: PASTED_A } });
+    fireEvent.click(screen.getByText('Confirm'));
+    await screen.findByText(/^you answered /);
+
+    // Run two's question is now current, and it is a different question about a
+    // different measurement.
+    const next = screen.getByLabelText(/Question \d+ of/) as HTMLElement;
+    expect((within(next).getByLabelText(/series json/i) as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByText('Confirm').closest('button') as HTMLButtonElement)).toBeDisabled();
   });
 });

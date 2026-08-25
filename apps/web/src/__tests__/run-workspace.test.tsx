@@ -1926,6 +1926,48 @@ describe('Check Run names WHICH document it read (review finding)', () => {
     expect(card.textContent ?? '').not.toMatch(/schema error|invalid against/i);
   });
 
+  it('a NO-VERDICT unit names no source and no document, one inch below its own chip', async () => {
+    /*
+     * THE EDGE THE `dry_run` FIX MISSED, IN THE FILE THE FIX REWROTE.
+     *
+     * `_validate_unit`'s materialised-unreadable branch returns
+     *
+     *     { ok: false, dry_run: false, unavailable: true,
+     *       errors: [{ path: "$", message: "Validation could not be completed." }] }
+     *
+     * under its own comment "no verdict, not a schema violation". The heading branched
+     * on `dry_run` ALONE, so `false` matched the strongest branch there is and the card
+     * read "Official schema (the record already written)" — naming a source AND a
+     * specific document for a check that never ran, and for a flag that is set
+     * precisely because that document could NOT be read.
+     *
+     * The self-contradiction is what makes it worse than a mislabel: this same
+     * component already reads `unavailable` for its chip and renders "Could Not Be
+     * Checked" an inch above. The existing test below pins the chip and asserts
+     * nothing about the heading, which is exactly how the defect survived the rewrite.
+     */
+    const card = await check({
+      ok: false,
+      dry_run: false,
+      unavailable: true,
+      errors: [{ path: '$', message: 'Validation could not be completed.' }],
+    });
+    expect(card.textContent).toContain(
+      'What the check reported — no verdict, and not a schema failure',
+    );
+    // The server's own sentence is still rendered verbatim. Withholding the
+    // attribution must never withhold what the check reported.
+    expect(card.textContent).toContain('Validation could not be completed.');
+    // NO SOURCE and NO DOCUMENT — neither of the two claims the `dry_run` branches make.
+    expect(card.textContent).not.toContain('Official schema');
+    expect(card.textContent).not.toContain('already written');
+    expect(card.textContent).not.toContain('candidate record');
+    expect(card.textContent ?? '').not.toMatch(/schema error|invalid against/i);
+    // AND THE CHIP STILL AGREES WITH IT. The pairing is the point: the two claims sit
+    // centimetres apart on one card and used to contradict each other.
+    expect(card.textContent).toContain('Could Not Be Checked');
+  });
+
   it('a dry-run PASS may name the official schema, and names ISAAC’s gate too', async () => {
     /*
      * THE ASYMMETRY THIS SUITE HAS TO PIN, or the fixes above read as "never name

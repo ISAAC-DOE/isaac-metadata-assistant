@@ -525,9 +525,18 @@ describe('evidence graph · derivation from stored state', () => {
     expect(edge.label).toBe('Candidate-record check — source not named');
     // Every string the node and its edge carry, checked at once — the attribution
     // must not survive anywhere, including in `why`.
+    //
+    // `node.producer` WAS NOT IN THIS LIST, and that omission is why the correction
+    // above shipped directly beneath the uncorrected claim it contradicts.
+    // `NODE_PRODUCERS.validation_finding` read "… blockers, draft errors,
+    // official-schema errors", and `EvidenceGraphPanel.tsx:1228` renders it verbatim
+    // under the heading "Where this came from" — on the SAME details pane as
+    // `Reported by`. A guard that joins four of the five strings a pane shows is a
+    // guard that says nothing about the fifth, and the fifth is where the defect was.
     const all = [
       ...node.detail.map((d) => `${d.term}: ${d.value}`),
       node.label,
+      node.producer,
       edge.label ?? '',
       edge.why,
     ].join(' | ');
@@ -554,6 +563,66 @@ describe('evidence graph · derivation from stored state', () => {
       'Official schema check',
     );
     expect(edge.label).toBe('Official schema check');
+  });
+
+  it('a NO-VERDICT unit is attributed to no validator at all', () => {
+    /*
+     * THE CASE THIS MODULE COULD NOT SEE. `findingOriginLabel` took `(key, dryRun)` —
+     * two parameters — so `unavailable` was unreachable from it, and
+     * `_validate_unit`'s materialised-unreadable branch carries `dry_run: false`
+     * beside `unavailable: true` under its own comment "no verdict, not a schema
+     * violation". The `false` branch therefore matched, and every node and edge read
+     *
+     *     Official schema check on Run 1 (run version ra.0): Validation could not be
+     *     completed.
+     *
+     * — the server's refusal to produce a verdict, rendered as the official ISAAC
+     * schema having produced one. There was no `unavailable` case in this file at all,
+     * which is how a module that had just been given a `dry_run` branch shipped
+     * without the branch that outranks it.
+     */
+    const { node, edge } = officialFinding({
+      ok: false,
+      dry_run: false,
+      unavailable: true,
+      errors: [{ path: '$', message: 'Validation could not be completed.' }],
+    });
+    expect(node.detail.find((d) => d.term === 'Reported by')?.value).toBe(
+      'No verdict — not a schema failure',
+    );
+    expect(edge.label).toBe('No verdict — not a schema failure');
+    // The `Dry run` row is on the same pane and must not re-state the claim the label
+    // just withheld: `dry_run: false` here means NO DRY RUN HAPPENED, not that a
+    // written record was read.
+    expect(node.detail.find((d) => d.term === 'Dry run')?.value).toBe(
+      'neither — no verdict could be produced for this run',
+    );
+    const all = [
+      ...node.detail.map((d) => `${d.term}: ${d.value}`),
+      node.label,
+      node.producer,
+      edge.label ?? '',
+      edge.why,
+    ].join(' | ');
+    expect(all).not.toContain('Official schema');
+    expect(all).not.toContain('already written');
+    // And the finding itself survives, as on every other branch.
+    expect(all).toContain('Validation could not be completed.');
+  });
+
+  it('the producer names WHERE the lists came from, never which validator spoke', () => {
+    /*
+     * I5 — the `Reported by` line was corrected and `node.producer`, rendered on the
+     * same pane under "Where this came from", was not. It is a constant, so one
+     * assertion covers every branch: it must name the response's own keys and no
+     * validator. The `Reported by` label is the ONLY place in this module allowed to
+     * name the official schema, and only on the one branch that earns it.
+     */
+    expect(NODE_PRODUCERS.validation_finding).not.toContain('official-schema');
+    expect(NODE_PRODUCERS.validation_finding).not.toContain('Official schema');
+    expect(NODE_PRODUCERS.validation_finding).toContain('official.errors');
+    expect(NODE_PRODUCERS.validation_finding).toContain('draft.errors');
+    expect(NODE_PRODUCERS.validation_finding).toContain('blockers');
   });
 
   it('claims neither source nor document when dry_run is absent', () => {

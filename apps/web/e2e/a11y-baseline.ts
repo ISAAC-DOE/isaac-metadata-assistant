@@ -1610,17 +1610,36 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // TRANSCRIBED FROM CI job 96326516774, read off its own GREW/IMPROVED
       // messages, and never from a macOS run — the file header's rule.
       //
-      // ONE CAUSE, TWO DIRECTIONS, and the opposite signs are the reason this is
-      // not a regression and not a fix. The Endpoint Explorer renders every
-      // operation the live contract exposes, and this branch adds one:
-      // `POST /api/assistant/ask`. `.api-browser-list` is a CLIPPED SCROLL
-      // CONTAINER, and axe scans only what is visible — so a taller list pushes
-      // rows OUT of the scanned rectangle as often as it adds them. At 320px the
-      // new row's own failing node lands inside the rectangle (+1); at 390px, where
-      // each row is shorter, adding it displaces two failing nodes past the clip
-      // (-2). The block above `settings-explorer@desktop-1280x800` predicted
-      // exactly this — "ANY FUTURE SLICE THAT ADDS ROUTES WILL MOVE THIS SURFACE
-      // TOO", and "these figures are expected to FALL".
+      // ONE TRIGGER, TWO DIRECTIONS. The trigger is not in doubt: the Endpoint
+      // Explorer renders every operation the live contract exposes, and this branch
+      // adds one, `POST /api/assistant/ask`. The block above
+      // `settings-explorer@desktop-1280x800` predicted the surface would move —
+      // "ANY FUTURE SLICE THAT ADDS ROUTES WILL MOVE THIS SURFACE TOO".
+      //
+      // ~~"`.api-browser-list` is a CLIPPED SCROLL CONTAINER, and axe scans only
+      // what is visible — so a taller list pushes rows OUT of the scanned rectangle
+      // as often as it adds them. At 320px the new row's own failing node lands
+      // inside the rectangle (+1); at 390px, where each row is shorter, adding it
+      // displaces two failing nodes past the clip (-2)."~~ — STRUCK, and struck IN
+      // PLACE because the numbers beside it are measured and only the explanation
+      // is not. The mechanism was refuted on the very next run, one day later: see
+      // the `settings-explorer@tablet-768x1024` block above, 2026-08-20. The
+      // container really is clipped (`max-height: 520px; overflow-y: auto` at 320px
+      // narrow, `screens.css`), but every rule counted here is `color-contrast`,
+      // and axe-core does NOT viewport-cull it — children of an `overflow-y: auto`
+      // box all have layout boxes, so a row scrolled out of view is still scanned.
+      // Under that model adding one operation row cannot remove a violation at all,
+      // in either direction.
+      //
+      // WHAT IS ASSERTED IS ONLY WHAT WAS OBSERVED: after this branch added one
+      // operation, this cell went UP by one at 320px and DOWN by two at 390px. The
+      // opposite signs are why it is neither a regression nor a fix, and that much
+      // stands without the story. Do NOT quote the clipping story as the cause here
+      // either, and do not read the -2 as an accessibility improvement — no
+      // violation was fixed by this branch, and if the cause is that nodes stopped
+      // being scanned then the lower number is MASKING and this aggregate
+      // under-counts real defects. Resolving it needs an axe run on the linux face
+      // with per-node output, which this environment cannot produce.
       //
       // The -2 is recorded rather than left, and the suite is why: an IMPROVED
       // message is a FAILURE here, deliberately, because a stale high number
@@ -1628,9 +1647,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // was darkened, and #78838f / #9aa4af remain the documented shortfall.
       //
       // width-390 SPLITS because darwin's 59 is carried forward UNMEASURED. It has
-      // very probably moved too — the clipping mechanism is platform-independent —
-      // but a fresh number nobody measured cannot be caught, while a stale one that
-      // says where it came from can be corrected by the next darwin run.
+      // very probably moved too — whatever the mechanism is, nothing about it is
+      // platform-specific: the added row is in the contract, not in the renderer,
+      // and the same operation moved four other linux cells. (~~"the clipping
+      // mechanism is platform-independent"~~ — struck with the rest of the clipping
+      // story above; the expectation survives it, the named cause does not.) A
+      // fresh number nobody measured cannot be caught, while a stale one that says
+      // where it came from can be corrected by the next darwin run.
       'settings-explorer@width-320': 57,
       'settings-explorer@width-390': { darwin: 59, linux: 57 },
       'settings-privacy@width-320': 8,
@@ -2588,8 +2611,15 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // ── move, because both cells that changed are linux-only readings.
   //
   // ARITHMETIC, so a reviewer can check it without a run. Two cells, opposite
-  // signs, one cause — the Endpoint Explorer's clipped scroll container gaining a
-  // row for `POST /api/assistant/ask`:
+  // signs, one TRIGGER — the Endpoint Explorer gaining a row for
+  // `POST /api/assistant/ask`. ~~"the Endpoint Explorer's clipped scroll container
+  // gaining a row"~~ — the CAUSE clause is struck, in place: the clipping story was
+  // refuted the next day (see `settings-explorer@tablet-768x1024` above, 2026-08-20
+  // — axe-core does not viewport-cull `color-contrast`, so a row scrolled out of an
+  // `overflow-y: auto` box is still scanned and a taller list cannot remove a
+  // violation). The arithmetic below is transcribed measurement and is unaffected;
+  // only the explanation of the -2 was ever inferred, and it is now recorded as
+  // unexplained rather than as understood:
   //
   //   settings-explorer@width-320   56 -> 57   (+1)
   //   settings-explorer@width-390   59 -> 57   (-2)

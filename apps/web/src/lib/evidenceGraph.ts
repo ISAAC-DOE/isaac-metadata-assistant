@@ -228,8 +228,31 @@ export const NODE_PRODUCERS: Readonly<Record<EvidenceNodeKind, string>> = Object
     'one stored evidence entry — run.fields[address].evidence[] for a run, GET /api/experiments/{id}/evidence for the experiment',
   evidence_source:
     'the source recorded ON an evidence entry: its source_file, its derivation rule, or your own confirmation',
+  /*
+   * THE THIRD CHANNEL IS NAMED BY ITS POSITION IN THE RESPONSE, NOT BY A VALIDATOR.
+   * ~~"blockers, draft errors, official-schema errors"~~ — STRUCK, because this line
+   * made the exact attribution the `Reported by` line beside it had just been
+   * corrected for, on the SAME details pane. `EvidenceGraphPanel.tsx:1228` renders
+   * this string verbatim under the heading "Where this came from", so on a dry-run
+   * exactness finding the pane read:
+   *
+   *     Reported by:          Candidate-record check — source not named
+   *     Where this came from: … blockers, draft errors, official-schema errors
+   *
+   * — the correction and the defect one line apart. `check.official.errors` is not
+   * known to be the official schema's: `_validate_unit`'s dry-run branch returns
+   * `export_draft`'s result, which falls back to the NO-GUESSING report's errors —
+   * including an anchored-pattern exactness refusal, which `export.py` folds into it
+   * — whenever `validate_official` was never reached. `CLAUDE.md` §12: no surface may
+   * report an exactness refusal as an official-schema error.
+   *
+   * The producer now names WHERE each list came from, which is what a producer is for
+   * and is true on every branch: three keys of one response. Which validator spoke is
+   * `findingOriginLabel`'s answer, made per finding from `dry_run` and `unavailable`,
+   * and it is the only place in this module that may name the schema at all.
+   */
   validation_finding:
-    'one finding of the run check (POST /api/experiments/{id}/runs/{runId}/check) — blockers, draft errors, official-schema errors',
+    'one finding of the run check (POST /api/experiments/{id}/runs/{runId}/check) — its `blockers`, `draft.errors` and `official.errors` lists',
 });
 
 /**
@@ -1403,13 +1426,30 @@ const FINDING_ORIGINS = [
  * neither the source nor the document, because an absent flag is evidence of
  * neither. The `blocker` and `draft` labels are unchanged: those two channels have
  * one producer each and never carried a claim about the schema.
+ *
+ * `unavailable` IS TESTED BEFORE `dry_run`, AND WAS NOT — the defect the first
+ * version of this function shipped while fixing its neighbour.
+ * `_validate_unit`'s materialised-unreadable branch returns `{ok: false, dry_run:
+ * false, unavailable: true, errors: [{path: "$", message: "Validation could not be
+ * completed."}]}` under its own comment "no verdict, not a schema violation".
+ * `dry_run: false` there does NOT mean a written record was checked; it is returned
+ * precisely because that record could not be READ. Taking the `false` branch made
+ * every node and every edge read "Official schema check on Run 1 …: Validation could
+ * not be completed." — the server's refusal to give a verdict, rendered as the
+ * official schema having given one. This function took only two parameters and so
+ * could not see the flag at all; that is why it is a parameter now.
+ *
+ * The register is `ValidateReview`'s and `RunFindings`' again ("no verdict", "not a
+ * schema failure"), rather than a fourth phrasing of the same idea.
  */
 function findingOriginLabel(
   key: (typeof FINDING_ORIGINS)[number]['key'],
   dryRun: boolean | undefined,
+  unavailable: boolean | undefined,
 ): string {
   if (key === 'blocker') return 'Blocker';
   if (key === 'draft') return 'Draft check';
+  if (unavailable === true) return 'No verdict — not a schema failure';
   if (dryRun === false) return 'Official schema check';
   if (dryRun === true) return 'Candidate-record check — source not named';
   return 'Check finding — source not named';
@@ -1438,9 +1478,14 @@ function addFindings(
 
   for (const origin of FINDING_ORIGINS) {
     // Derived per channel, from the SAME response the findings came from, so a
-    // dry-run finding can never be attributed to the official schema. See
+    // dry-run finding can never be attributed to the official schema — and a
+    // NO-VERDICT unit can never be attributed to any validator. See
     // `findingOriginLabel`.
-    const originLabel = findingOriginLabel(origin.key, check.official?.dry_run);
+    const originLabel = findingOriginLabel(
+      origin.key,
+      check.official?.dry_run,
+      check.official?.unavailable,
+    );
     lists[origin.key].forEach((finding, index) => {
       // `runFindingText` returns null for an element carrying no describable
       // text. A null is RENDERED as the honest sentence, never dropped — the
@@ -1462,11 +1507,20 @@ function addFindings(
         detail.push({
           term: 'Dry run',
           value:
-            check.official?.dry_run === undefined
-              ? 'the server did not say'
-              : check.official.dry_run
-                ? 'yes — a candidate record was checked'
-                : 'no — the record already written was checked',
+            /* THE NO-VERDICT CASE FIRST, for the same reason the label branches on it
+               first: `unavailable` carries `dry_run: false`, and reading that as "the
+               record already written was checked" states the one thing the server
+               explicitly could not do — it set the flag BECAUSE the written record
+               could not be read. Rendering the corrected heading above this line while
+               this line kept the old reading would put the contradiction back on the
+               same pane, one row down. */
+            check.official?.unavailable === true
+              ? 'neither — no verdict could be produced for this run'
+              : check.official?.dry_run === undefined
+                ? 'the server did not say'
+                : check.official.dry_run
+                  ? 'yes — a candidate record was checked'
+                  : 'no — the record already written was checked',
         });
       }
       const id = b.addNode({

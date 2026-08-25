@@ -765,16 +765,32 @@ function LoadedCompletion({
              Refresh mid-edit restores what the reader had rewritten rather than
              snapping back to the stored value. Namespaced `edit:` so an edit and a
              fresh answer to the same blocker cannot overwrite one another. */
-          /* `rawValue` is passed through for a STRUCTURED answer too now. It used to be
-             gated on `typeof === 'string'`, so a `qc` row's edit form opened with blank
-             radios and a blank note — contradicting this screen's own claim that an
-             edit is "prefilled with the current value". A series/descriptor value is
-             still not prefilled into a text box: it is confirmed via `initialStaged`. */
-          initialValue={
-            staged.current[`edit:${ans.id}`] ??
-            (ans.blocker.inputType === 'verdict' ? ans.rawValue : undefined) ??
-            (typeof ans.rawValue === 'string' ? ans.rawValue : undefined)
-          }
+          /* `rawValue` IS PASSED THROUGH FOR EVERY ANSWER NOW, and the clause that used
+             to sit here was false about the one case it described.
+             ~~"A series/descriptor value is still not prefilled into a text box: it is
+             confirmed via `initialStaged`."~~ — STRUCK. `initialStaged` is INERT on the
+             entry path: `GuidedPrompt` computes `entering = structured && demo ===
+             undefined`, and on that branch `canConfirm` is `entryReady`, which reads the
+             form and never reads `staged`. A record a scientist created has no
+             `demo_answer`, so EVERY such edit took the entry path. Measured, for both
+             structured blockers on such a record:
+
+                 SERIES     editor value = ""                          SAVE DISABLED = true
+                 DESCRIPTOR Name="" Kind="" Source="" Value="" Unit="" SAVE DISABLED = true
+
+             So correcting one field of a descriptor meant retyping the whole value, and
+             until it was complete Save was dead with nothing on screen explaining why —
+             on the very screen whose comment above says an edit opens "prefilled with the
+             current value". The `qc` half of this defect was found and fixed; this is the
+             other half.
+
+             The three-way `??` chain is gone with it. It existed to keep a non-string
+             `rawValue` out of a text box, and that job now belongs to `GuidedPrompt`,
+             which types each control's own initial state (`descriptorDraftFrom`,
+             `seriesTextFrom`, and the `typeof === 'string'` guard on `text`). Keeping a
+             second copy of the rule here is how the two drifted apart in the first
+             place. */
+          initialValue={staged.current[`edit:${ans.id}`] ?? ans.rawValue}
           onTextChange={(value) => {
             staged.current[`edit:${ans.id}`] = value;
           }}

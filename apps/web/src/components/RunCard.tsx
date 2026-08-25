@@ -1220,14 +1220,38 @@ function CheckResult({ check }: { check: CheckState }) {
         of neither document — and, because the source may only be named on the
         `false` branch, of no source either. It now says both, where it used to say
         "Official schema" unqualified.
+
+        AND `unavailable` IS TESTED FIRST, because branching on `dry_run` ALONE put
+        the fix's own strongest claim on the one payload that supports no claim at
+        all. `_validate_unit`'s materialised-unreadable branch returns
+
+            { ok: false, dry_run: false, unavailable: true,
+              errors: [{ path: "$", message: "Validation could not be completed." }] }
+
+        under its own comment "no verdict, not a schema violation" — `dry_run: false`
+        there means NO DRY RUN HAPPENED, not that a written record was read; it is
+        returned precisely BECAUSE that record could not be read. So the first branch
+        above matched, and this heading named the official ISAAC schema and a specific
+        document for a check that never ran — an inch below a chip this same component
+        already renders correctly as "Could Not Be Checked" from the very same flag
+        (`:1112`, `:1158`). Two contradictory claims a centimetre apart, which is the
+        pattern `CLAUDE.md` §11 records for the F4 correction.
+
+        The wording is `ValidateReview`'s and `RunFindings`' ("no verdict … not a
+        schema failure"), not a fourth phrasing of the same idea — see
+        `ValidateReview.tsx:640` and `RunFindings.tsx:227`. Those two surfaces suppress
+        the document line entirely on this branch and let their caption carry the whole
+        statement; this one has no such caption, so the heading has to say it.
       */}
       <FindingList
         title={
-          data.official?.dry_run === false
-            ? 'Official schema (the record already written)'
-            : data.official?.dry_run === true
-              ? 'Findings on this candidate record — source not named'
-              : 'Findings — neither the source nor the document named'
+          unavailable
+            ? 'What the check reported — no verdict, and not a schema failure'
+            : data.official?.dry_run === false
+              ? 'Official schema (the record already written)'
+              : data.official?.dry_run === true
+                ? 'Findings on this candidate record — source not named'
+                : 'Findings — neither the source nor the document named'
         }
         findings={officialErrors}
       />

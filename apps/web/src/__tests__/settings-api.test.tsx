@@ -1728,8 +1728,32 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // from `create_app().openapi()`, not adjusted by the length of the new text, and
     // `test_contract_description_parity.py` proves the captured copy matches what the
     // server serves rather than leaving it asserted here.
-    expect(total).toBe(84757);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(185);
+    // 84,757 -> 86,556 (+1,799): TWO operation descriptions were corrected in one
+    // pass — `POST .../validate` and `POST .../runs/{run_id}/check`. Both said the
+    // `official` block carries "the official-schema verdict" unqualified, and an
+    // independent truthfulness review measured that false: `_validate_unit`'s dry-run
+    // branch returns `export_draft`'s result, and `export.py` returns
+    // `official_report=None` on TWO paths BEFORE `validate_official` is called — a
+    // failed no-guessing report, and ISAAC's own anchored-pattern exactness gate,
+    // whose findings it folds into `draft_report`. The route then stamps
+    // `official["schema"] = "ISAAC v1.05"` over them. Measured on a run whose
+    // descriptor name carries a trailing newline: `draft {"ok": true, "errors": []}`
+    // beside `official {"ok": false, "dry_run": true, "schema": "ISAAC v1.05"}` whose
+    // sole error is the exactness gate's own text. CLAUDE.md §12: "the gate is
+    // ISAAC's, not upstream's". Both now say the verdict is the official schema's
+    // WHERE THE OFFICIAL VALIDATOR RAN, name the exactness gate, note that `schema`
+    // is stamped unconditionally and is not a provenance claim, and point at
+    // `POST /api/validate/record`, which reports the two gates separately.
+    // Re-measured from `create_app().openapi()`, not adjusted by the length of the
+    // new text, and `test_contract_description_parity.py` proves the captured copy
+    // matches what the server serves.
+    expect(total).toBe(86556);
+    // 185 -> 187 (+2): the same two corrected descriptions each gained one
+    // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
+    // operation that separates the gates. No other description moved, and
+    // `test_contract_description_parity.py` proves that rather than leaving it
+    // asserted here.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(187);
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

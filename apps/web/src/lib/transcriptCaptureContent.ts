@@ -96,6 +96,37 @@ export const CAPTURE_COPY = {
     'server and does not follow you to another device.',
 
   voiceHeading: 'Voice capture',
+  /*
+   * THE DISCLOSURE'S OWN FAILURE STATE, and it had none — which made the disclosure
+   * conditional on the very thing it discloses.
+   *
+   * `TranscriptCapturePanel` rendered the seam line only for `transcription !== null`,
+   * and `transcription` is `null` in THREE reachable states: the capabilities fetch
+   * has not resolved yet (every first paint after the panel opens), it rejected, or
+   * the report carries no `transcription` seam. In all three the recording controls
+   * rendered underneath with NO statement about whether this deployment can transcribe
+   * at all — the one qualification the recorder's whole justification rests on.
+   *
+   * WHY THAT IS WORSE THAN A COSMETIC GAP. `docs/ai-integration-decision-packet.md`'s
+   * D6 supersession argues the mitigation for shipping a recorder against an
+   * unconfigured seam is DISCLOSURE, not prevention — "the seam's status renders ABOVE
+   * the controls, before any recording starts". That argument is false for as long as
+   * the fetch has not resolved, which is exactly the window in which a reader decides
+   * whether to press Start.
+   *
+   * IT FAILS CLOSED WITHOUT OVERSTATING. It does not say "not configured": the panel's
+   * own rule is that a string in this bundle describes the build the browser came from
+   * and not the deployment it is talking to, and the `.catch` deliberately leaves the
+   * report ABSENT rather than defaulting it for the same reason. Unknown is reported as
+   * unknown. The audio claim beside it is unaffected and is restated here because it is
+   * the thing a reader most needs when the rest is uncertain: nothing is sent either way.
+   */
+  voiceSeamUnreported:
+    'Transcription: not reported. This deployment has not told the page whether a ' +
+    'transcription provider is configured — the capability report has not been read, ' +
+    'or does not mention this seam — so treat turning a recording into text as ' +
+    'unavailable until it does. Recording still keeps the audio in this tab, and ' +
+    'nothing is sent anywhere.',
   voiceUnsupported:
     'This browser does not offer audio recording, so the voice controls are not ' +
     'shown. Typing or pasting a transcript below does the same work.',

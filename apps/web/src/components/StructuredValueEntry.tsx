@@ -39,7 +39,30 @@ import {
  * same shape rule the server applies rather than against a second copy of it.
  */
 
-/** Mirrors `complete.is_series_shaped`: a NON-EMPTY list of objects. */
+/**
+ * A NON-EMPTY list of objects.
+ *
+ * ~~"Mirrors `complete.is_series_shaped`"~~ — STRUCK, because it claimed parity this
+ * function does not have, and an independent review measured the gap. The server's
+ * guard has a THIRD clause this one does not: `complete.is_series_shaped` also
+ * refuses an item whose `series_id` is present and not hashable, because
+ * `[{"series_id": {"a": 1}}]` was admitted once, written, and then raised
+ * `TypeError: unhashable type: 'dict'` out of `draft_validator`, leaving the record
+ * permanently unreadable (`complete.py:324-336`).
+ *
+ * So the honest description is that this is STRICTLY WEAKER than the server's rule:
+ * `[{"series_id": {"a": 1}}]` arms Confirm here and is refused on submit. That is
+ * the safe direction of the two — a client guard that under-refuses ends in the
+ * server's refusal, which `GuidedCompletion` already renders honestly ("this field
+ * still holds the value it held before, and nothing was written"), whereas one that
+ * over-refuses would block a value the record would have accepted and no server
+ * response could correct it.
+ *
+ * The USER-FACING copy was already honest and is unchanged; only the comment
+ * claimed a parity that was never implemented. Restating the server's hashability
+ * rule here would create the second definition `complete.py:342-345` warns about —
+ * "copying IS restating" — for a case the server already handles end to end.
+ */
 export function seriesShapeError(parsed: unknown): string | null {
   if (!Array.isArray(parsed)) return 'The value must be a list of series objects.';
   if (parsed.length === 0) {
@@ -91,7 +114,23 @@ export const EMPTY_DESCRIPTOR: DescriptorDraft = {
   basis: '',
 };
 
-/** The four the schema marks required, plus a value that is not blank. */
+/**
+ * The four a PERSON has to type, plus a value that is not blank.
+ *
+ * ~~"The four the schema marks required"~~ — STRUCK. The behaviour is right and the
+ * stated reason was wrong, which is the more dangerous of the two failures because
+ * the next reader would have trusted the count. Measured against the vendored
+ * schema at `/properties/descriptors/properties/outputs/items/properties/descriptors/items`:
+ *
+ *     required: ['name', 'kind', 'source', 'value', 'uncertainty']   ← FIVE
+ *
+ * The fifth, `uncertainty`, is not in this test because nobody has to type it:
+ * `descriptorPayload` ALWAYS emits an `uncertainty` object, with `sigma: null` when
+ * no σ was given — deliberately, because "no uncertainty was reported" and "this
+ * descriptor has none" are different claims and only the first is true of a blank
+ * field. So the form can be complete without it and the payload can still satisfy
+ * the schema. The count is corrected rather than the check.
+ */
 export function descriptorIsComplete(d: DescriptorDraft): boolean {
   return (
     d.name.trim() !== '' && d.kind !== '' && d.source !== '' && d.value.trim() !== ''
@@ -118,6 +157,113 @@ export function descriptorPayload(d: DescriptorDraft): Record<string, unknown> {
   };
   if (d.unit.trim() !== '') out.unit = d.unit.trim();
   return out;
+}
+
+/**
+ * The INVERSE of {@link descriptorPayload} — a confirmed descriptor value back into
+ * the form that produced it.
+ *
+ * WHY IT HAD TO EXIST, and what shipped without it. `GuidedCompletion` renders every
+ * confirmed answer read-only with an Edit button, and its own comment says an edit
+ * "swaps that row for an inline GuidedPrompt prefilled with the current value". For a
+ * `descriptor` or `series` answer on a record with NO worked example — i.e. every
+ * record a scientist creates, which is the case this whole module exists for — the
+ * value was never passed down at all, so the editor opened BLANK and, because
+ * `entryReady` is computed from the form and not from `initialStaged`, Save was
+ * disabled with nothing on screen saying why. Measured:
+ *
+ *     SERIES     editor value = ""                              SAVE DISABLED = true
+ *     DESCRIPTOR Name="" Kind="" Source="" Value="" Unit=""     SAVE DISABLED = true
+ *
+ * Correcting one field of a descriptor therefore meant retyping all of it. The `qc`
+ * half of the same defect was fixed by passing `rawValue` through for a verdict; this
+ * is the other half.
+ *
+ * WHY IT IS A FUNCTION AND NOT A CAST — the trap an independent review flagged before
+ * anyone fell into it. `GuidedPrompt` used to reach for `initialValue as
+ * DescriptorDraft` on `'name' in initialValue`, and TWO different shapes satisfy that
+ * test:
+ *
+ *   * a `DescriptorDraft` — every field a string, `sigma`/`sigmaUnit`/`basis` present.
+ *     This is what `onStagedChange` reports mid-edit, so it is what survives a Refresh.
+ *   * a `descriptorPayload` — `value` is a NUMBER when it read as one, there is no
+ *     `sigma` key at all, and the σ lives inside `uncertainty`.
+ *
+ * Casting the second to the first puts a number where `descriptorIsComplete` calls
+ * `.trim()` and an `undefined` where it reads `d.sigma`, so the editor would THROW on
+ * open — a worse failure than the blank form it replaced. Every field is therefore
+ * read defensively and stringified, and anything unrecognised degrades to
+ * {@link EMPTY_DESCRIPTOR} rather than to a half-populated form: a blank field the
+ * reader must fill is honest, a field silently holding the wrong thing is not.
+ *
+ * NOTHING IS INVENTED HERE. A key the payload does not carry becomes an empty field,
+ * which is exactly what it meant — `unit` omitted means no unit was given, and
+ * `sigma: null` means no uncertainty was reported. Round-tripping a payload through
+ * this and back through `descriptorPayload` restores the same payload, which is the
+ * property `structured-value-entry.test.tsx` pins.
+ */
+export function descriptorDraftFrom(value: unknown): DescriptorDraft {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return EMPTY_DESCRIPTOR;
+  }
+  const src = value as Record<string, unknown>;
+  if (!('name' in src)) return EMPTY_DESCRIPTOR;
+
+  /* A scalar becomes the text a person would have typed for it; anything else — an
+     object, a list, a null — becomes blank, because there is no text form of it that
+     `typedValue` would turn back into the same thing. */
+  const asText = (v: unknown): string =>
+    typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
+
+  /* The DRAFT shape reports σ in three flat fields; the PAYLOAD shape nests them. Both
+     are read, in that order, so a mid-edit draft and a confirmed payload both restore. */
+  const nested =
+    src.uncertainty !== null && typeof src.uncertainty === 'object' && !Array.isArray(src.uncertainty)
+      ? (src.uncertainty as Record<string, unknown>)
+      : {};
+
+  return {
+    name: asText(src.name),
+    kind: asText(src.kind),
+    source: asText(src.source),
+    value: asText(src.value),
+    unit: asText(src.unit),
+    sigma: asText('sigma' in src ? src.sigma : nested.sigma),
+    sigmaUnit: asText('sigmaUnit' in src ? src.sigmaUnit : nested.unit),
+    basis: asText('basis' in src ? src.basis : nested.basis),
+  };
+}
+
+/**
+ * The INVERSE of the `series` entry control — a confirmed spectrum back into the text
+ * box that produced it. The other half of {@link descriptorDraftFrom}'s defect.
+ *
+ * TWO SHAPES ARRIVE HERE, for the same reason they do above. Mid-edit, the staged copy
+ * is the RAW TEXT the reader typed — kept as text on purpose, because half-written JSON
+ * is still their work and reparsing it to restore it would lose exactly the state a
+ * Refresh most needs to preserve. After confirmation, `rawValue` is the PARSED array,
+ * because `handleConfirm` submits `JSON.parse(seriesText)`.
+ *
+ * A parsed array is re-serialised with two-space indentation rather than reproduced
+ * byte-for-byte, and that is a real loss stated rather than hidden: the reader's own
+ * whitespace and key order do not survive a confirm. The VALUES do — `JSON.stringify`
+ * of a parsed document is the same document — and the alternative was an empty box.
+ * Anything else returns '', which leaves the reader where they were before this change
+ * rather than putting a `[object Object]` in a field the record will store verbatim.
+ */
+export function seriesTextFrom(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      /* A circular structure cannot come off the wire, so this is defensive only —
+         but an exception thrown while OPENING an editor is the failure mode this
+         whole function exists to prevent, so it is caught rather than assumed away. */
+      return '';
+    }
+  }
+  return '';
 }
 
 interface DescriptorFormProps {

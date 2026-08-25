@@ -798,4 +798,60 @@ describe('the write permission describes the reach it actually has', () => {
     expect(add!.detail).toMatch(/do NOT move/);
     expect(add!.detail).toMatch(/dropped from a record exported per run/i);
   });
+
+  it('M7 — the withheld set is named by its members, not by a category two of them are not in', () => {
+    /*
+     * "THE INSTRUMENT AND DETECTOR SETTINGS" UNDER-STATED WHAT IS DROPPED. The
+     * unclassified namespace has SIX members (`extract/structured.FIELD_MAP`), and
+     * `proposal_id` and `session_id` are ADMINISTRATIVE identifiers — not settings of
+     * an instrument or a detector, and not something a reader would picture under that
+     * phrase. They are exactly what somebody reconciling a run against a beamtime
+     * schedule looks for, and they are dropped from a record exported per run.
+     *
+     * `workspace.field_level`'s own docstring records the same undercount being found
+     * and corrected there — "SIX fields, not the five this list used to name" — by
+     * enumerating the map rather than reading the prose. This copy was the next copy
+     * of the same mistake, in the surface a reader uses to decide what to grant.
+     */
+    const add = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'add-run');
+    expect(add, 'the add-run capability row is gone; re-read this test').toBeDefined();
+    expect(add!.detail).not.toMatch(/The instrument and detector settings do NOT move/);
+    for (const named of [/detector model/i, /monochromator/i, /spectrometer/i, /scan count/i]) {
+      expect(add!.detail).toMatch(named);
+    }
+    // The two that are NOT instrument settings, named as such.
+    expect(add!.detail).toMatch(/proposal and session identifiers/i);
+    expect(add!.detail).toMatch(/administrative rather than instrument settings/i);
+    // The count is stated, so a future edit that drops one is visible.
+    expect(add!.detail).toMatch(/Six fields do NOT move/);
+    expect(add!.detail).toMatch(/all six are dropped/i);
+  });
+
+  it('I2 — the check-run row names all three gates, so none is reached by elimination', () => {
+    /*
+     * "THE NO-GUESSING DRAFT CHECK AND THE OFFICIAL ISAAC SCHEMA" reads as an
+     * exhaustive pair, so an agent meeting an unfamiliar finding concludes it is the
+     * schema's. `export.py` runs `check_exactness` on the assembled record BETWEEN
+     * those two (`:339`) and folds a refusal into `draft_report` (`:339-343`), returning
+     * `official_report=None` — so a finding this tool surfaces may belong to a gate
+     * neither named validator owns, and the reply carries no discriminator.
+     *
+     * `CLAUDE.md` §12: the exactness gate is ISAAC's, not upstream's, and §1 makes the
+     * schema not ours to speak for. Reaching that attribution by omission is the same
+     * claim made quietly, which is why the fix is naming the third rather than
+     * softening the other two.
+     */
+    const check = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'check-run');
+    expect(check, 'the check-run capability row is gone; re-read this test').toBeDefined();
+    expect(check!.detail).not.toMatch(
+      /no-guessing draft check and the official ISAAC schema say/,
+    );
+    expect(check!.detail).toMatch(/no-guessing draft check/i);
+    expect(check!.detail).toMatch(/anchored-pattern exactness gate/i);
+    expect(check!.detail).toMatch(/official ISAAC schema/);
+    // And it says the reply does not label which of the three spoke.
+    expect(check!.detail).toMatch(/does not label which of the three/i);
+    // The read-only claim is untouched.
+    expect(check!.detail).toMatch(/writes nothing and changes nothing/i);
+  });
 });

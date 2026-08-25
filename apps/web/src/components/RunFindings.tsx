@@ -239,6 +239,26 @@ export function RunFindings({
                   wire. So the dry-run caption names neither validator rather than
                   claiming the wrong one.
 
+                  M1 — IT NAMED TWO CANDIDATE SOURCES AND THERE ARE THREE, which
+                  made a list that reads as exhaustive silently exclude the one
+                  ISAAC owns. `export.py` runs `check_exactness` on the assembled
+                  record between the no-guessing report and `validate_official`
+                  (`:339`) and FOLDS a refusal into `draft_report` (`:339-343`), so
+                  an anchored-pattern exactness finding arrives in this same
+                  undifferentiated list. A reader told the source was "the
+                  no-guessing checks or the official ISAAC schema" would conclude
+                  by elimination that an unfamiliar finding came from the schema —
+                  the exact attribution `CLAUDE.md` §12 forbids, reached by
+                  omission instead of by assertion.
+
+                  `ValidateReview` already had both halves and this file had only
+                  one: its heading applies the same `dry_run` rule (`:648-651`),
+                  and a standing note above the list enumerates all THREE sources
+                  (`:412-420`, "Beyond the official schema, ISAAC applies one gate
+                  of its own (anchored-pattern exactness)"). This component renders
+                  without that note, so the third source has to be named in the
+                  caption itself or it is named nowhere on the surface.
+
                   Both captions end in a colon, so both are guarded on there being
                   something after it. `{ok: false, errors: []}` is not reachable
                   today — `export_draft` returns `official_report=None` only when
@@ -247,7 +267,7 @@ export function RunFindings({
               {state === 'fail' && run.errors.length > 0 && (
                 <p className="run-finding-caption">
                   {run.dry_run
-                    ? 'Findings reported for this run’s candidate record. This check does not record which findings came from the no-guessing checks and which came from the official ISAAC schema, so neither is claimed:'
+                    ? 'Findings reported for this run’s candidate record. This check does not record which findings came from the no-guessing checks, which from ISAAC’s own anchored-pattern exactness gate, and which from the official ISAAC schema, so none is claimed:'
                     : 'Official ISAAC schema errors reported for this run’s written record:'}
                 </p>
               )}

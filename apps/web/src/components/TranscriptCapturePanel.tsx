@@ -574,10 +574,30 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
           could transcribe at all. Those are two different facts about two
           different things, and the reader is entitled to both.
         */}
-        {transcription !== null && (
+        {/*
+          AND IT IS RENDERED ON BOTH BRANCHES NOW. The `!== null` guard meant the
+          disclosure was conditional on the very thing it discloses: `transcription` is
+          `null` while the capabilities fetch is in flight, after it rejects, and when
+          the report names no such seam — and in all three the controls below rendered
+          with nothing said about whether this deployment can transcribe. The D6
+          supersession's whole argument is that the mitigation here is disclosure rather
+          than prevention, "the seam's status renders ABOVE the controls, before any
+          recording starts"; that was false in the exact window in which a reader
+          decides whether to press Start.
+
+          `data-configured="unreported"` rather than `"false"`: the three states are not
+          the same claim, and a test that could not tell them apart would let a
+          regression rename one into the other. See `voiceSeamUnreported` for why this
+          says UNKNOWN and not "not configured".
+        */}
+        {transcription !== null ? (
           <p className="capture-seam" data-configured={String(transcription.configured)}>
             <span className="capture-seam-label">Transcription:</span>{' '}
             {transcription.reason}
+          </p>
+        ) : (
+          <p className="capture-seam" data-configured="unreported">
+            {CAPTURE_COPY.voiceSeamUnreported}
           </p>
         )}
         {voice === 'unsupported' ? (

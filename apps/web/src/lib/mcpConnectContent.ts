@@ -258,11 +258,31 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
      * application has no evidence for. Both halves are stated, because "it starts
      * empty" and "it inherits everything" are each half-false and a scientist
      * reading either one alone would be misled about what Add Run just did.
+     *
+     * M7 — AND THE WITHHELD SET WAS UNDER-STATED BY ITS OWN NAME. The copy called it
+     * "the instrument and detector settings", which reads as one coherent category a
+     * scientist can picture. Measured against `extract/structured.FIELD_MAP`, the
+     * unclassified `system.configuration.*` namespace has SIX members, and the last
+     * two are not settings of anything:
+     *
+     *     detector_model · monochromator_crystal · spectrometer_geometry · n_scans
+     *     proposal_id · session_id                     ← ADMINISTRATIVE identifiers
+     *
+     * `workspace.field_level`'s own docstring records the same undercount being found
+     * and corrected there ("SIX fields, not the five this list used to name"), by
+     * enumerating the map rather than reading the prose — and the prose here was the
+     * next copy of it. A reader who accepted "instrument and detector settings" would
+     * not expect the proposal a record belongs to, or the beamtime session it was
+     * taken in, to be dropped from a record exported per run; those are exactly the
+     * fields somebody looks for when reconciling a run against a beamtime schedule.
+     * The reason for withholding is unchanged and still honest — the contract assigns
+     * the whole namespace to neither level, and guessing would be the unevidenced
+     * inference `CLAUDE.md` §5 forbids — so what changes is the naming, not the rule.
      */
     id: 'add-run',
     action: 'Add a run',
     detail:
-      'Add one measurement condition to a record. The first run carries across most of what the record already holds — its spectrum, QC verdict, descriptors, asset hashes, conditions and acquisition times move onto the run, because that is where an exported record reads them from. The instrument and detector settings do NOT move, because whether two runs of one experiment may legitimately differ in them is an open scientific question, and copying them would answer it by accident; the cost is that they are dropped from a record exported per run. Every run after the first starts empty: nothing is copied from one run to another, because that would assert two runs measured the same thing. No value is ever invented.',
+      'Add one measurement condition to a record. The first run carries across most of what the record already holds — its spectrum, QC verdict, descriptors, asset hashes, conditions and acquisition times move onto the run, because that is where an exported record reads them from. Six fields do NOT move — the detector model, monochromator crystal, spectrometer geometry and scan count, and also the proposal and session identifiers, which are administrative rather than instrument settings. Whether two runs of one experiment may legitimately differ in any of them is an open question this application has no answer to, and copying them would answer it by accident; the cost is that all six are dropped from a record exported per run. Every run after the first starts empty: nothing is copied from one run to another, because that would assert two runs measured the same thing. No value is ever invented.',
     tools: ['isaac_create_run'],
   },
   {
@@ -321,10 +341,26 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     tools: ['isaac_answer_questions'],
   },
   {
+    /*
+     * I2 — TWO SOURCES NAMED WHERE THERE ARE THREE, which is the same conflation four
+     * product screens carried and this row inherited. `isaac_check_run` reaches
+     * `post_run_check`, whose dry-run branch returns `export_draft`'s result — and
+     * `export.py` runs `check_exactness` on the assembled record BETWEEN the
+     * no-guessing report and `validate_official` (`:339`), folding a refusal into
+     * `draft_report` and returning `official_report=None` (`:339-343`). So a finding
+     * this tool surfaces may come from a gate neither of the two named validators
+     * owns, and the response carries no discriminator.
+     *
+     * The correction here is deliberately smaller than the screens': this row
+     * describes what the tool ASKS, not what it reports, so naming the third gate is
+     * enough — an agent reading the row must not conclude by elimination that an
+     * unfamiliar finding is the official schema's. `CLAUDE.md` §12: the exactness gate
+     * is ISAAC's, not upstream's, and §1 makes the schema not ours to speak for.
+     */
     id: 'check-run',
     action: 'Check a run',
     detail:
-      'Ask what the no-guessing draft check and the official ISAAC schema say about the record a run would produce. It writes nothing and changes nothing.',
+      'Ask what the no-guessing draft check, ISAAC’s own anchored-pattern exactness gate and the official ISAAC schema say about the record a run would produce. On a candidate record the reply does not label which of the three a finding came from, so none is claimed. It writes nothing and changes nothing.',
     tools: ['isaac_check_run'],
   },
   {
