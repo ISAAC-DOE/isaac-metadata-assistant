@@ -43,7 +43,7 @@ def _canonical(obj: dict) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False)
 
 
-def artifact_state(exp) -> dict:
+def artifact_state(exp, *, units=None) -> dict:
     """Derived freshness of an experiment's exported official record.
 
     Returns ``{"state": "none"|"current"|"stale", "reason": str|None}``:
@@ -72,9 +72,15 @@ def artifact_state(exp) -> dict:
     not a faithful projection of the current record. That warns rather than
     reassures, which is the right direction for a signal about whether exported
     output can be trusted.
+
+    ``units`` IS AN ALREADY-COMPOSED ``export_units()`` LIST, threaded in by a caller
+    that needs several unit-dependent derivations for ONE response (``routes._detail``,
+    via ``routes._shared_units``) — never a cache, for the reason set out in the
+    composition-cost note in ``workspace``'s fan-out section header. It reaches only the
+    fan-out branch; the single-record branch below composes nothing and ignores it.
     """
     if getattr(exp, "runs", None):
-        return _fan_out_artifact_state(exp)
+        return _fan_out_artifact_state(exp, units=units)
 
     if not exp.exported():
         return {"state": "none", "reason": None}
@@ -116,7 +122,7 @@ _INCOMPLETE_REASON = (
 )
 
 
-def _fan_out_artifact_state(exp) -> dict:
+def _fan_out_artifact_state(exp, *, units=None) -> dict:
     """:func:`artifact_state` for an experiment with runs. Same labels, N artifacts.
 
     Compares each run's WRITTEN record against what exporting that run now would
@@ -139,7 +145,8 @@ def _fan_out_artifact_state(exp) -> dict:
     still compares faithfully; see that function for what this can and cannot detect.
     """
     try:
-        units = exp.export_units()
+        if units is None:
+            units = exp.export_units()
     except Exception:  # pragma: no cover - defensive; composition is read-only
         return {"state": "stale", "reason": MISSING_REASON}
 
@@ -181,7 +188,7 @@ def reopened_steps(pre_steps: list[dict], post_steps: list[dict]) -> list[str]:
     ]
 
 
-def _post_workflow(post_exp) -> dict:
+def _post_workflow(post_exp, *, units=None) -> dict:
     """Derive the post-mutation workflow from the SAME signals ``_detail`` uses.
 
     ``exported`` is ``all_units_exported()`` (review item C5). It used to be
@@ -192,11 +199,15 @@ def _post_workflow(post_exp) -> dict:
     false ``reopened_steps`` is a claim about work the scientist did not have undone.
 
     For an experiment with no runs the two are the same function of the same field.
+
+    ``units`` is threaded in by :func:`build_invalidation`, which needs both this and
+    :func:`artifact_state` for one response. Same rule as everywhere else: an argument,
+    never a cache, and ``None`` means "compose your own".
     """
     return derive_workflow(
         pending_count=post_exp.pending_count(),
-        draft_ok=post_exp.draft_ok(),
-        ready=post_exp.export_ready(),
+        draft_ok=post_exp.draft_ok(units=units),
+        ready=post_exp.export_ready(units=units),
         exported=post_exp.all_units_exported(),
         rev=post_exp.rev,
     )
@@ -276,9 +287,14 @@ def build_invalidation(
     did not compare". Distinguishing them in prose would invite a claim neither caller
     is entitled to make.
     """
-    post_workflow = _post_workflow(post_exp)
+    # ONE COMPOSITION FOR THE TWO DERIVATIONS BELOW. Both are functions of the same
+    # unit list of the same post-mutation experiment, computed back to back with no
+    # write between them, so composing it twice was doing the same work twice. Threaded
+    # rather than memoised, for the reason in ``workspace``'s composition-cost note.
+    units = post_exp.export_units()
+    post_workflow = _post_workflow(post_exp, units=units)
     reopened = reopened_steps(pre_steps, post_workflow["ordered_steps"])
-    artifact = artifact_state(post_exp)
+    artifact = artifact_state(post_exp, units=units)
 
     if not changed:
         reason = NO_OP_IDENTICAL_REASON if identical else NO_OP_UNKNOWN_REASON
