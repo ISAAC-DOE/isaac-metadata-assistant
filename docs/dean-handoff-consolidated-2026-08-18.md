@@ -67,13 +67,32 @@ lifecycle end to end, and proves the rollback order — including that `0003`'s 
 
 **Two limits, stated because they are the reason your step is separate:**
 
-1. **Constraint coverage is partial — and better than when this package was first written.**
-   RE-MEASURED 2026-08-19: the two files declare **46** named constraints and CI's constraint step
-   now blames **41** of them, up from 27. The seventeen that were declared and never exercised are
-   now exercised, fourteen of them individually.
+1. **Constraint coverage is partial — and the number has TWO vantage points, which an earlier
+   revision of this package conflated. Read both.**
 
-   **Three of the seventeen cannot be blamed individually, and that is a property of the schema
-   rather than a gap in the testing.** `isaac_submission_runs` carries `record_id = unit_id` and
+   | | Constraints | What it means |
+   |---|---:|---|
+   | **Executed by a real PostgreSQL** — GitHub Actions run `32099627898`, on `main` at `fe374c0` | **27 of 46** | evidence you can act on |
+   | **Declared in `.github/workflows/ci.yml` today** — on branch `feat/qc-answerable-and-server-stamped-attribution` | **41 of 46** | written, reviewed, **not yet run on `main`** |
+
+   ~~"CI's constraint step now blames **41** of them, up from 27"~~ is struck rather than deleted,
+   because it was read as a statement about a run and it is a statement about a FILE. The fourteen
+   extra cases arrived in commit `77de2db` (2026-08-19), which is **not in `main`** — verified with
+   `git merge-base --is-ancestor 77de2db origin/main` — and whose own message says *"CI is the first
+   execution."* Both figures were re-derived on 2026-08-24 with the rule the guard test applies: a
+   constraint is *blamed* only when it is the third argument of a `refuse()` call, which is the
+   object PostgreSQL must be shown to blame.
+
+   **So the evidence supporting your decision today is 27 of 46**, exactly as it was when this package
+   was first written. The fourteen additional cases are real, reviewed and committed on a branch; they
+   become evidence when that branch merges and the `postgres-migration` job runs on `main`. Nothing
+   about the four migration digests changes either way.
+
+   At `fe374c0`, 17 declared names appeared nowhere in the workflow and 19 were unblamed. At the
+   branch HEAD, 3 appear nowhere and 5 are unblamed. The paragraphs below describe the branch HEAD.
+
+   **Three of the seventeen cannot be blamed individually — and this, and the paragraph after it,
+   describe the BRANCH file, not run `32099627898`.** `isaac_submission_runs` carries `record_id = unit_id` and
    `run_id IS NULL OR run_id = unit_id`, so any row violating `unit_id_shape`, `record_id_shape` or
    `run_id_shape` violates an equality CHECK at the same time, and PostgreSQL reports only the first
    constraint it happens to check. There is no assignment of those three columns that violates
@@ -84,9 +103,10 @@ lifecycle end to end, and proves the rollback order — including that `0003`'s 
    The remaining two — `isaac_revision_changes_revision_fk` and `isaac_submissions_experiment_fk` —
    appear in the workflow for other reasons without a refusal blamed on them.
 
-   So: **41 of 46 individually blamed; 3 more proved refused with the blame ambiguous by
-   construction; 2 named without a refusal.** `0003`'s packet §12B carries the accounting and the
-   reasoning. **None of this changes the bytes you would apply** — the four digests are unchanged
+   So, **of what the branch file declares**: **41 of 46 individually blamed; 3 more proved refused
+   with the blame ambiguous by construction; 2 named without a refusal.** **Of what has actually run
+   against a real PostgreSQL on `main`: 27 of 46.** `0003`'s packet §12B carries the accounting and
+   the reasoning. **None of this changes the bytes you would apply** — the four digests are unchanged
    and re-verified below.
 2. **The container is empty**, with a two-row synthetic stand-in for `records`. *"Is this valid,
    idempotent SQL whose constraints behave"* is answered. *"Does it behave against the real data,
@@ -228,7 +248,11 @@ production-derived records: the application now creates records of its own, so "
 display per-record content" has a second, cleaner answer available — app-created records are not
 production-derived and carry no visibility question at all.
 
-**Constraint coverage moved 27 → 41 of 46**, validated against a real `postgres:18` in CI. See §1.
+**Constraint coverage: 27 of 46 is what a real `postgres:18` has executed; 41 of 46 is what the
+workflow now declares and has not yet run.** ~~"Constraint coverage moved 27 → 41 of 46, validated
+against a real `postgres:18` in CI"~~ — struck in place, because it credited a real execution with
+coverage that has not executed, in the sentence you would weigh before applying. See §1. **The number
+to act on is 27.**
 
 **A third migration now exists and is NOT in the ask.** `0005_run_projection` — see §1A. It is
 mentioned here as well as there because the one thing this package must never do is let a new

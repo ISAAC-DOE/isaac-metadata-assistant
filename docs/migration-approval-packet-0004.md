@@ -373,7 +373,11 @@ connection double**; the `postgres-migration` job proves the SQL and the constra
 `postgres:18`, and **HAS NOW RUN — successfully.** See §12B for the exact run and for the class of
 risk it still does not remove.
 
-**Its constraint coverage is PARTIAL, and IMPROVED on 2026-08-19 from 27 to 41 of 46.** 0003's packet
+**Its constraint coverage is PARTIAL. The WORKFLOW FILE declares cases blaming 41 of 46 as of
+2026-08-19; what a real PostgreSQL has EXECUTED is 27 of 46, unchanged.** ~~"IMPROVED on 2026-08-19
+from 27 to 41 of 46"~~ is struck rather than deleted because it read as a statement about a run: the
+fourteen extra cases are in commit `77de2db`, which is not in `main` and has never run there.
+**An operator should weigh 27.** 0003's packet
 §12B carries the re-measurement, including the three constraints of `isaac_submission_runs` that
 CANNOT be blamed individually — the table's own equality CHECKs subsume its shape CHECKs, so no row
 violates exactly one of them. Read that section for the exact accounting.

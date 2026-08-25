@@ -67,11 +67,34 @@ repository cannot make for itself. Nothing here asks for code approval; the code
 settled and recorded elsewhere.
 
 **Status of this document.** It is a decision packet, not a plan and not a capability claim.
-**No AI, model, MCP or voice capability is implemented in this repository.** That is measured,
-not assumed — see §7 and §8.
+
+~~**No AI, model, MCP or voice capability is implemented in this repository.** That is measured,
+not assumed — see §7 and §8.~~
+
+> **SUPERSEDED 2026-08-24 — READ §7's SUPERSESSION BLOCK, WHICH THIS SENTENCE CONTRADICTED.**
+> It was the FIRST status claim a reader met, and it stood while the same document said, further
+> down, *"capability A is IMPLEMENTED (10 tools, 13 operations, a Connect Your Agent surface)"*.
+> Struck in place, not deleted, because the scope note below is what makes it readable as a
+> corrected claim rather than a drifting one.
+>
+> **What is implemented:** the MCP server (10 tools behind 13 policy operations, with
+> `Settings → Connect Your Agent` as its surface), the native-assistant seam
+> (`POST /api/assistant/ask`) and the transcription seam (`POST /api/transcription`).
+>
+> **What is NOT, and is the half the sentence was reaching for:** no hosted MCP endpoint
+> (`POST /api/mcp` → **404** in the default environment, loopback binding off by default), and
+> **no production model provider, credential, network path or charge anywhere** — both seams
+> answer **`501 no_provider_configured`** in every deployment. D1–D9 remain deferred by Dean and
+> **no D-row may be recorded as approved.** *Implementation complete* and *production provider
+> configured* are different milestones; this document exists to keep them apart, which is why
+> collapsing them into one status line was the wrong sentence even when it was true.
 
 **Commit this was written and verified against:** `669b60c`. Every `file:line` citation below was
-opened at that commit. Where a file is likely to grow, the citation names a heading or quotes a
+opened at that commit. **That pin partially scopes the struck sentence above and is the reason it
+is struck rather than called a falsehood: it was accurate AT `669b60c`, and the citations under it
+are still citations to that commit.** It stopped being accurate as the implementation landed, and a
+status line that ages out of truth without saying so reads to the next reader exactly like one that
+was never true. Where a file is likely to grow, the citation names a heading or quotes a
 phrase instead of trusting a line number, because this repository has already broken its own
 citations that way (an instance is recorded in §8, M7).
 
@@ -372,7 +395,7 @@ rg --text -n -i 'MediaRecorder|SpeechRecognition|webkitSpeech|getUserMedia|Audio
    navigator\.mediaDevices' -g '!node_modules' -g '!.git' .
 → 2 hits, BOTH prose in docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md
   (:407 and :420). ~~Zero in any source file.~~ **RE-MEASURED 2026-08-24: NOT zero.** The same command now
-  reports **42** hits — `MediaRecorder` and `getUserMedia` both ship in
+  reports **45** hits across **6** files (re-measured at `905c706`; ~~42~~ corrected 2026-08-24 by an independent truthfulness review, which found no commit on this branch yields 42 — the parent gives 41 and this branch gives 45) — `MediaRecorder` and `getUserMedia` both ship in
   `apps/web/src/components/TranscriptCapturePanel.tsx`. No audio leaves the browser and no ASR client
   exists; see the D6 supersession in the capture spec.
 ```
@@ -535,7 +558,7 @@ different passage; this document restated D6 against the wrong line range from t
 ~~**None of D6 is implemented** (§3's measurement 3: zero audio APIs in any source file).~~
 **SUPERSEDED 2026-08-24:** D6's transcript path and its recorder BOTH ship (`TranscriptCapturePanel`,
 mounted at `RecordWorkbench.tsx:687`); the provider seams are still unconfigured and answer `501`. The
-parenthetical measurement is stale — re-measured **42** hits, not zero.
+parenthetical measurement is stale — re-measured **45** hits across **6** files (re-measured at `905c706`; ~~42~~ corrected 2026-08-24 by an independent truthfulness review, which found no commit on this branch yields 42 — the parent gives 41 and this branch gives 45), not zero.
 
 ### 4.1 The browser `SpeechRecognition` risk — a RISK, not an established fact
 
@@ -880,7 +903,7 @@ and the capture spec's §9 gate table does not name them individually.
 - **Today without it:** ~~no recorder, no ASR client, no audio capture anywhere (measured, §3
   measurement 3 — the two hits in the whole tree are prose in the spec). **Per DECISION D6 the
   recorder is not offered at all — not offered-and-broken.**~~ **CORRECTED 2026-08-24.** There IS a recorder
-  and there IS audio capture (`MediaRecorder`, `getUserMedia`); re-measured **42** hits, not two.
+  and there IS audio capture (`MediaRecorder`, `getUserMedia`); re-measured **45** hits across **6** files (re-measured at `905c706`; ~~42~~ corrected 2026-08-24 by an independent truthfulness review, which found no commit on this branch yields 42 — the parent gives 41 and this branch gives 45), not two.
   **No ASR client still holds**, and no audio leaves the browser — the wire carries a blob COUNT
   (`held-in-tab:<n>`), never a `Blob`. The recorder is offered and its transcription button returns
   `501`, i.e. precisely the "offered-and-broken" state D6 forbade; that departure is recorded, with
@@ -996,7 +1019,7 @@ of capability B, not a nicety.
 | MCP server | ~~**NOT IMPLEMENTED** — specified + audited only~~ → **IMPLEMENTED 2026-08-24**: 10 tools, 7 read / 3 write, behind 13 policy operations. **Still NO HOSTED ENDPOINT** (`POST /api/mcp` → 404 by default), so no scientist's agent can connect; D1/D2 remain deferred | measured — ~~`rg … 'mcp'` → exit 1~~; the same `rg` now → **487 matches**; `len(TOOLS)` → **10** |
 | `Requires organization configuration` display state | ~~**NOT IMPLEMENTED** — specified only~~ → **IMPLEMENTED 2026-08-16** as Settings → Connect Your Agent (`?tab=mcp`). It reports a state and offers no action; D1/D2 are still deferred and there is still no endpoint | measured — ~~`rg …` → exit 1~~; the same `rg` now → **exit 0, 9 files**. See §6.1's supersession note |
 | Native model-backed assistant | **NOT IMPLEMENTED.** A **production provider** remains out of scope by project rule and is **DEFERRED by Dean** (2026-08-12). **Implementation against a deterministic fake provider is authorized by the project owner** — see the head-of-document block; that authorization covers code, the provider abstraction and tests, and covers no real endpoint, credential or outbound call | measured (no provider, no outbound call site) + `CLAUDE.md:695-698` + owner decision 2026-08-12 |
-| Voice capture / recorder / ASR | ~~**NOT IMPLEMENTED** — DECISION D6 specified only~~ → **RECORDER IMPLEMENTED 2026-08-24** (`TranscriptCapturePanel`); **ASR still NOT implemented** — no client, no provider, `POST /api/transcription` → `501`. Manual transcript works with no ASR (`200`) | measured — ~~zero audio APIs in any source file~~; re-measured **42** hits in **1** source file |
+| Voice capture / recorder / ASR | ~~**NOT IMPLEMENTED** — DECISION D6 specified only~~ → **RECORDER IMPLEMENTED 2026-08-24** (`TranscriptCapturePanel`); **ASR still NOT implemented** — no client, no provider, `POST /api/transcription` → `501`. Manual transcript works with no ASR (`200`) | measured — ~~zero audio APIs in any source file~~; re-measured **45** hits in **6** files, **4** of them source (`TranscriptCapturePanel.tsx` 10, `transcript-capture.test.tsx` 16, `transcriptCaptureContent.ts` 1, `test_provenance.py` 1); ~~42 hits in 1 source file~~ was wrong in BOTH numbers |
 | Audio `source_type` | **NOT IMPLEMENTED**, and a **truth-core change** if pursued | measured — `models.py:29-37` (7, closed); 3 total maps + 2 enumerations |
 | Transcript persistence in `state` jsonb | **SPECIFIED, needs no migration** | from-doc — `…-capture-data-contract.md:471-473` (`from_state` is legacy-tolerant; adding optional keys needs no migration) |
 | MCP connector actually working end-to-end | **BLOCKED** on D1 + D2 | from-doc — `docs/mcp-capability-audit.md` §3, §6 |
@@ -1016,7 +1039,7 @@ is quoted it is **`rg`'s own**, not a pipeline's.
 
 | # | Claim | Command / citation |
 |---|---|---|
-| **M1** | ~~No audio-capture API exists in any source file~~ → **FALSE as of 2026-08-24** | ~~→ 2 hits, both prose in the capture spec~~; re-measured **42** hits — `MediaRecorder` + `getUserMedia` in `apps/web/src/components/TranscriptCapturePanel.tsx`. Command unchanged: `rg --text -n -i 'MediaRecorder\|SpeechRecognition\|webkitSpeech\|getUserMedia\|AudioContext\|navigator\.mediaDevices' -g '!node_modules' -g '!.git' .` |
+| **M1** | ~~No audio-capture API exists in any source file~~ → **FALSE as of 2026-08-24** | ~~→ 2 hits, both prose in the capture spec~~; re-measured **45** hits in **6** files — `MediaRecorder` + `getUserMedia` in `apps/web/src/components/TranscriptCapturePanel.tsx`, plus its test file, `transcriptCaptureContent.ts` and `test_provenance.py`. **13 of the 45 are in THIS DOCUMENT**, quoting the pattern back at itself, which is why the total moves whenever this row is edited and why the FILE LIST is the durable half of the claim. Command unchanged: `rg --text -n -i 'MediaRecorder\|SpeechRecognition\|webkitSpeech\|getUserMedia\|AudioContext\|navigator\.mediaDevices' -g '!node_modules' -g '!.git' .` |
 | **M2** | No model or ASR SDK; one prose false positive | the vendor-token sweep in §3; the only non-doc hit is `apps/web/src/styles/tokens.css:111` (`depth is a whisper`) |
 | **M3** | No outbound HTTP call site in the runtime backend or truth core | `rg --text -n -e 'httpx' -e 'requests\.post' -e 'requests\.get' -e 'aiohttp' -e 'urllib\.request' apps/api/isaac_api src/isaac_records` → **exit 1** |
 | **M4** | `httpx` is a declared dependency with no call site | `pyproject.toml:23`; only occurrence is a comment, `apps/api/tests/test_deploy_config.py:117` |

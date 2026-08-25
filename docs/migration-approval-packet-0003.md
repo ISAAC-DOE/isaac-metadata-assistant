@@ -516,7 +516,16 @@ pending/applied plan at each step, ran the submission lifecycle end to end, and 
 order — including that `0003`'s rollback **fails** while `isaac_submissions` still references it, and
 that the failed attempt destroys nothing.
 
-### RE-MEASURED 2026-08-19 — coverage improved from 27 to 41 of 46
+### RE-MEASURED 2026-08-19 — the WORKFLOW FILE now declares 41 of 46; a real PostgreSQL has run 27
+
+> **READ THE HEADING PRECISELY.** An earlier revision of it — ~~"coverage improved from 27 to 41 of
+> 46"~~ — sat directly under "What a real PostgreSQL HAS executed" and was read as though a run had
+> produced 41. It had not, and still has not. The fourteen extra cases arrived in commit `77de2db`
+> (2026-08-19), which **is not in `main`** — `git merge-base --is-ancestor 77de2db origin/main`
+> reports so — and whose own message says *"CI is the first execution."* Run `32099627898`, at
+> `fe374c0`, is the only execution against a real PostgreSQL this repository can point to, and it
+> blamed **27**. The table below is a property of the workflow FILE. **An operator weighing this
+> packet's evidence should read 27.**
 
 **The seventeen that were declared and never exercised are now exercised, and the correction below
 is kept in place rather than deleted because it records how the number moved and why three of the
@@ -525,11 +534,13 @@ seventeen still cannot be counted.**
 Measured with the same rule the guard test applies — a constraint is *blamed* only when it is the
 third argument of a `refuse()` call, which is the object PostgreSQL must be shown to blame:
 
-| | Then (2026-08-17) | **Now** |
+| | Then (2026-08-17), **and what has RUN** | **Now, in the workflow file** |
 |---|---|---|
 | declared across the two forward files | 46 | **46** |
 | blamed by a `refuse()` call | 27 | **41** |
 | not blamed | 19 | **5** |
+| named nowhere in the workflow | 17 | **3** |
+| executed against a real PostgreSQL | **27** | **27 — unchanged** |
 
 **FOURTEEN of the seventeen are now proved individually.** Each new case differs from an accepted row
 in exactly one column, so the constraint it names is the only thing left to blame — which is the

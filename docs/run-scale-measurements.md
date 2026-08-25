@@ -20,7 +20,9 @@
 > |---|---:|
 > | `needsyou-item` / `needsyou-num` / `needsyou-q` / `needsyou-about` / `mono` | **3,002 each** |
 > | `run-card` | 50 |
-> | everything else together | under 700 |
+> | everything else together | ~~under 700~~ **~1,074** |
+>
+> *(`under 700` CORRECTED 2026-08-24 by an independent truthfulness review. It contradicted this table's own arithmetic: 16,134 − (3,002 × 5 = 15,010) − 50 = **1,074**. The document's post-fix figure corroborates it — 16,134 − (2,992 × 5) = 1,174, against the 1,175 reported — implying a non-banner baseline of ~1,125. The five-nodes-per-item markup is confirmed at `RecordWorkbench.tsx:552-577`. It is NOT independently re-measurable: the per-class DOM probe was never committed — `run-scale.bench.ts:243` records only `getElementsByTagName('*').length` — so this correction is arithmetic over the table's own published numbers, not a fresh measurement, and is labelled as such.)*
 >
 > `RecordWorkbench`'s "Fields Need Your Confirmation" banner rendered **every** blocking question:
 > 1000 runs × 3 run-level questions + 2 record-level = 3,002 list items at five nodes each. ~15,000
