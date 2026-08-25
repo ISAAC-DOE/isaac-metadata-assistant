@@ -1174,6 +1174,63 @@ button.assistant-source-chip-nav:focus-visible {
   background: var(--assist-tint);
 }
 
+/* ---- The dock stops sticking when it CANNOT fit ---------------------
+ *
+ * WHAT WAS MEASURED (headless Chromium, this dev build, /record/<id>, the
+ * ≤1024px slide-over drawer, DARWIN — CI's Linux column is the authority for
+ * any number a baseline file records; none of these are in one):
+ *
+ *   viewport            dock height   "What Can I Ask?" trigger, unscrolled
+ *   1280x800  DPR1          483.5     430.5..455.5   in view
+ *   320x568   DPR1          425.8     251.5..276.5   in view
+ *   640x400   DPR2          339.0     189..214       in view
+ *   1440x400  DPR1          355.5     282..307       in view
+ *   384x512   DPR2          391.3     227.7..252.7   in view
+ *   160x284   DPR2          545.9     321..359       BELOW THE FOLD
+ *
+ * 160x284 is 320x568 at 200% browser zoom, emulated the way
+ * `playwright.config.ts` documents: halve the layout viewport, double the DPR.
+ * A 545.9px dock cannot fit a 284px viewport, so something in it is always off
+ * screen — that part is arithmetic, not a bug, and it is pre-existing.
+ *
+ * THE BUG IS WHICH PART, AND WHETHER SCROLLING REACHES IT. Sweeping the drawer's
+ * whole scroll range (0..430) in 41 steps:
+ *
+ *   with `position: sticky`   the trigger is fully visible only for scrollTop
+ *                             75..312, and at the BOTTOM of the scroll — the
+ *                             resting position "scroll to the end" lands on —
+ *                             it is clipped at -22.9..15.1.
+ *   without it                fully visible for scrollTop 194..430, INCLUDING
+ *                             the bottom of the scroll: 1..39.
+ *
+ * So sticky drags the dock up by a clamped 110px and holds its tail off the top
+ * edge exactly where a reader stops scrolling. Dropping it hands the tail back.
+ * The composer is unaffected at rest (it is in view at scrollTop 0 in both).
+ *
+ * WHY THIS AND NOT SOMETHING ELSE. Collapsing the no-model claim behind a
+ * control is the `voiceSeamUnreported` defect the parity guard's §1 pins
+ * against; shortening it is refused by §2 (92 characters is the minimum pair,
+ * both clauses load-bearing); moving the trigger above the composer is a
+ * control-order change with a far wider blast radius. Raising
+ * `.record-right .assistant`'s `max-height` was measured and is WORSE — it
+ * grows the panel to 1046px and pushes the trigger to 799 unscrolled.
+ *
+ * WHY BOTH BOUNDS. `max-height` alone is the condition that matters, but the
+ * dock is only tall enough to overflow because it is NARROW: the 92-character
+ * claim wraps to 6 lines at the 140.8px drawer and 2 lines at 367px. Requiring
+ * both keeps the rule off every Playwright project (800/768/1024/812 tall, and
+ * zoom-200 is 640 wide), so it cannot move a recorded baseline; and both bounds
+ * were measured inert at 187x406, the closest neighbour inside the band.
+ *
+ * `relative`, not `static`: `bottom: 0` becomes a no-op under relative
+ * positioning, while `z-index: 1` keeps applying — the dock's background is
+ * opaque on purpose and its paint order is not a thing to hand to source order. */
+@media (max-width: 480px) and (max-height: 480px) {
+  .assistant-foot {
+    position: relative;
+  }
+}
+
 /* P29.4b — the UNCONFIRMED staged-proposal card. Advisory-tinted, never a
    verdict color; a candidate/unknown/conflicting variant is icon+text distinct. */
 .agent-proposal {
