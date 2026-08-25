@@ -249,8 +249,15 @@ def derive_lifecycle(
         reasons.append(
             {
                 "code": "submitted_for_current_content",
+                # NOT "for exactly this content" — the comparison is
+                # `submissions.content_signature`, which covers the published content
+                # and the record's conflict decisions and deliberately excludes the
+                # title, the notes and the captured transcript. The old sentence made
+                # this banner assert whole-document identity, which is the same
+                # overclaim the `already_submitted` refusal used to make.
                 "message": (
-                    "A submission is on record for exactly this content."
+                    "A submission is on record for this record's published content "
+                    "and its conflict decisions."
                 ),
             }
         )

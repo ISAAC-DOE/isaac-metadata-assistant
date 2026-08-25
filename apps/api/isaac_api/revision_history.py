@@ -306,7 +306,10 @@ class PostgresRevisionReader:
 
         ``current_submission`` is the submission whose ``content_signature`` equals
         the one the caller computed from the record AS IT IS NOW — i.e. the answer to
-        "has exactly this content been submitted". It reuses
+        "has this been submitted", over exactly the scope
+        ``submissions.SIGNATURE_SCOPE`` names and no wider (the published unit drafts
+        and the record's conflict decisions; not the title, the notes or the
+        transcript). It reuses
         ``submission_store.Q_SUBMISSION_BY_SIGNATURE``, which is the statement the
         WRITE path already refuses a duplicate submission on, so the read surface and
         the write surface answer that question from one query rather than two that
