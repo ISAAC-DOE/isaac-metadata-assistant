@@ -347,37 +347,66 @@ describe('Validate & Review · a failing run is distinguished, and owns its erro
    * That is false for a dry-run unit: `_validate_unit` returns
    * `export_draft(...)`'s result, and when the export never reached the official
    * validator (`official_report is None`) the errors it returns are the
-   * NO-GUESSING DRAFT report's. Both arrive as `{path, message}`, so the wire
-   * carries no discriminator — which means the source can only be named for a
-   * MATERIALISED unit, where `validate_official` is what ran.
+   * NO-GUESSING DRAFT report's.
+   *
+   * ~~"Both arrive as `{path, message}`, so the wire carries no discriminator — which
+   * means the source can only be named for a MATERIALISED unit"~~ — **SUPERSEDED, and
+   * the assertions below are REWRITTEN rather than deleted because the polarity is
+   * what matters and it has not changed.** `official_validator_ran` is on the wire
+   * now, so the rule is no longer "name it only for a materialised unit" — it is
+   * "name it exactly where the server says it ran". The old rule was conservative in
+   * ONE direction (it refused to name the schema for a dry run the schema really did
+   * produce) and this test enforced that conservatism; enforcing it now would forbid
+   * the truth.
+   *
+   * THREE CASES, because there are now three answers rather than two.
    */
   it('names the official schema as the source ONLY where the server’s own field allows it', () => {
     const written: RunVerdict = { ...FAILING, dry_run: false };
-    const dry: RunVerdict = { ...FAILING, dry_run: true };
+    // A DRY RUN THE OFFICIAL VALIDATOR REALLY DID PRODUCE. Measured over HTTP: a
+    // record whose `tags[0]` is " x" fails the vendored schema's own `^\S(.*\S)?$`
+    // pattern, so `validate_official` ran and rejected it — `dry_run: true`,
+    // `official_validator_ran: true`. The old rule called this "source not named".
+    const dryFromSchema: RunVerdict = {
+      ...FAILING,
+      dry_run: true,
+      official_validator_ran: true,
+    } as RunVerdict;
+    // A DRY RUN IT NEVER SAW — the exactness gate refused first.
+    const dryFromIsaac: RunVerdict = {
+      ...FAILING,
+      dry_run: true,
+      official_validator_ran: false,
+    } as RunVerdict;
+    // A LEGACY RESPONSE carrying neither, which is what the whole defect lived in.
+    const dryUnknown: RunVerdict = { ...FAILING, dry_run: true };
 
-    const writtenCaption = groupFor(
-      renderFindings([written]).container as HTMLElement,
-      'Run 2',
-    ).querySelector('.run-finding-caption')!.textContent!;
-    const dryCaption = groupFor(
-      renderFindings([dry]).container as HTMLElement,
-      'Run 2',
-    ).querySelector('.run-finding-caption')!.textContent!;
+    const captionOf = (verdict: RunVerdict) =>
+      groupFor(renderFindings([verdict]).container as HTMLElement, 'Run 2').querySelector(
+        '.run-finding-caption',
+      )!.textContent!;
 
     // dry_run: false — `validate_official` ran, so the source is named.
-    expect(writtenCaption).toMatch(/Official ISAAC schema errors/);
-    // dry_run: true — the source is UNKNOWN from the response, and the copy says
-    // so instead of asserting one. This is the polarity that matters: the guard
-    // must fail if the caption ever hard-codes the official schema again.
-    expect(dryCaption).not.toMatch(/^Official ISAAC schema errors/);
-    expect(dryCaption).toMatch(/does not record which findings came from/);
+    expect(captionOf(written)).toMatch(/official ISAAC schema reported/i);
+    // …and so it is here, which the old rule could not say.
+    expect(captionOf(dryFromSchema)).toMatch(/official ISAAC schema reported/i);
+    // THE POLARITY THAT MATTERS, unchanged: where the schema did not run, the caption
+    // must not name it as the producer. It now says whose the findings ARE.
+    expect(captionOf(dryFromIsaac)).not.toMatch(/official ISAAC schema reported/i);
+    expect(captionOf(dryFromIsaac)).toMatch(/ISAAC’s own export gate refused/);
+    expect(captionOf(dryFromIsaac)).toMatch(/not the schema’s/);
+    // …and with no discriminator at all, nothing is asserted.
+    expect(captionOf(dryUnknown)).not.toMatch(/official ISAAC schema reported/i);
+    expect(captionOf(dryUnknown)).toMatch(/does not record which findings came from/);
     // …in the screen's own vocabulary. "The response" is API vocabulary on a
-    // product screen (CLAUDE.md §11) and the earlier draft used it here.
-    expect(dryCaption).not.toMatch(/\bthe response\b/i);
-    // …and the findings themselves are still shown verbatim in both cases.
-    expect(groupFor(renderFindings([dry]).container as HTMLElement, 'Run 2').textContent).toContain(
-      "'series' is a required property",
-    );
+    // product screen (CLAUDE.md §11) and an earlier draft used it here.
+    expect(captionOf(dryUnknown)).not.toMatch(/\bthe response\b/i);
+    // …and the findings themselves are still shown verbatim in every case.
+    for (const verdict of [written, dryFromSchema, dryFromIsaac, dryUnknown]) {
+      expect(
+        groupFor(renderFindings([verdict]).container as HTMLElement, 'Run 2').textContent,
+      ).toContain("'series' is a required property");
+    }
   });
 
   it('M1 — the dry-run caption names THREE candidate sources, not two', () => {
@@ -408,6 +437,32 @@ describe('Validate & Review · a failing run is distinguished, and owns its erro
     expect(dryCaption).toMatch(/ISAAC’s own anchored-pattern exactness gate/);
     // And it still claims none of them.
     expect(dryCaption).toMatch(/none is claimed/);
+
+    /*
+     * M1 SURVIVES THE DISCRIMINATOR, and this half is added rather than replacing the
+     * half above. `official_validator_ran` makes the unnamed branch above reachable
+     * only by a LEGACY response — and legacy responses are exactly where an
+     * elimination attack still works, so the enumeration must stay there.
+     *
+     * On the branch the server now sends, the property is satisfied a stronger way:
+     * the caption does not enumerate candidates and then decline to choose, it says
+     * outright that the official schema did NOT produce these findings. Nothing can be
+     * concluded by elimination from a list of two when the third has been excluded by
+     * name. It still declines to say WHICH of ISAAC's two gates refused, because
+     * `export.py` folds those together and the wire cannot tell them apart — naming
+     * one would be the same defect one level finer.
+     */
+    const isaacCaption = groupFor(
+      renderFindings([
+        { ...FAILING, dry_run: true, official_validator_ran: false } as RunVerdict,
+      ]).container as HTMLElement,
+      'Run 2',
+    ).querySelector('.run-finding-caption')!.textContent!;
+
+    expect(isaacCaption).toMatch(/not the schema’s/);
+    expect(isaacCaption).toMatch(/no-guessing checks/);
+    expect(isaacCaption).toMatch(/anchored-pattern exactness gate/);
+    expect(isaacCaption).toMatch(/does not record which/);
   });
 });
 

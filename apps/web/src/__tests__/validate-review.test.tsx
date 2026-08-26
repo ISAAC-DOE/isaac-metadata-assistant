@@ -576,8 +576,17 @@ describe('an ISAAC gate is never reported as an official-schema error', () => {
     press();
     await screen.findByText(/1 run checked/);
     const heading = unitEl('RUN-1').querySelector('.vr-group-title')!;
-    expect(heading.textContent).toContain('official ISAAC schema error');
+    // ~~`toContain('official ISAAC schema error')`~~ — the heading is now composed by
+    // `lib/officialAttribution.ts` so this screen and the four other renderers of the
+    // same payload cannot word one claim five ways, and its noun is "findings". The
+    // POLARITY is what this test is for and it is unchanged: the official schema is
+    // named here, and is not named on the dry-run twin above.
+    expect(heading.textContent).toContain('Official ISAAC schema findings');
     expect(heading.textContent).not.toContain('source not named');
+    // Still a blocking finding, still counted — withholding or granting an
+    // attribution must never change what the screen says is standing in the way.
+    expect(heading.textContent).toContain('Blocks export');
+    expect(heading.textContent).toContain('1 finding');
   });
 
   it('the screen states, once, that it cannot separate the schema from ISAAC’s gate', async () => {

@@ -1841,7 +1841,40 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // adds `record_total` to the reported keys, and carries the `complete` IS RELATIVE TO
     // THE FILTER qualification `serialize.py` says it needs. Re-measured from
     // `create_app().openapi()`, not adjusted by the length of the new text.
-    expect(total).toBe(93478);
+    // 93,478 -> 94,872 (+1,394), operations UNCHANGED at 69 and post-lead paragraphs
+    // UNCHANGED at 195: the two operations that report an official verdict — `POST
+    // .../validate` and `POST .../runs/{run_id}/check` — now name the wire field a
+    // caller branches on.
+    //
+    // The wire gained `official_validator_ran`: whether `isaac_records.official.
+    // validate_official` produced the `errors` beside the verdict. `export.py` returns
+    // `official_report=None` on the two paths that precede it, so a failing verdict
+    // was not by itself evidence the official schema rejected anything — and `dry_run`
+    // does not answer it, because a dry-run PASS does require the validator while a
+    // dry-run FAILURE may never have reached it. The same slice added `unavailable` at
+    // the TOP LEVEL of `POST .../validate` (it was on the run entries only), because
+    // `official_validator_ran: false` is equally true of "ISAAC's gate refused" and of
+    // "nothing ran at all", and those are different statements to make to a scientist.
+    // Both descriptions say so; a disclosure that does not name the field to branch on
+    // leaves the caller where they started, which is what five surfaces did.
+    //
+    // THE PARAGRAPH COUNT NOT MOVING IS THE TELL, and it is asserted separately below
+    // rather than inferred from this number: every edit was written INTO an existing
+    // paragraph. An appended paragraph would move both.
+    //
+    // MEASURED two independent ways, never incremented by the length of the new text:
+    //
+    //   · the splitPurpose rule transcribed into Python over `create_app().openapi()`,
+    //     over all 69 served operations: total 94,872, post-lead paragraphs 195;
+    //   · the same rule over the transcribed array (this assertion): the same numbers;
+    //   · internal consistency: raw sum of `description.length` = 95,262, minus 2 per
+    //     `\n\n` separator (195 x 2 = 390) = 94,872.
+    //
+    // Both entries were RE-TRANSCRIBED from `create_app().openapi()` by script and
+    // never hand-edited — that has broken twice, once on an escaped em-dash and once
+    // on a doubled brace — and `test_contract_description_parity.py` proves the copy
+    // matches what the server serves.
+    expect(total).toBe(94872);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
