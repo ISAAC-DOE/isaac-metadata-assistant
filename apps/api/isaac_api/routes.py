@@ -6632,6 +6632,145 @@ def _override_address(body: dict) -> tuple[str, str, str] | None:
     return address, kind, name
 
 
+#: The question text stored on a contributor's ``user_confirmation`` evidence entry.
+#:
+#: IT NAMES THE OPERATION AND REFUSES TO NAME THE PERSON. What this application can
+#: honestly assert is that a request arrived at ONE named operation carrying
+#: ``confirmed_by_user: true`` and this contributor in its payload. WHO sent it is not
+#: recorded, because no trusted authentication boundary exists to read an identity from
+#: (``CLAUDE.md`` §15; the same reason ``draft_validator`` refuses
+#: ``attribution.uploaded_by`` outright). An entry naming a person would be exactly the
+#: unverifiable claim that refusal exists to prevent, and the operation's own
+#: description already promises "WHO recorded it is NOT" stored.
+_ATTRIBUTION_CONFIRMATION_QUESTION = (
+    "Who contributed to this run, and in what role? Confirmed by whoever sent POST "
+    "/api/experiments/{experiment_id}/runs/{run_id}/overrides for block:attribution "
+    "with confirmed_by_user: true. This application receives no verified user "
+    "identity, so WHO confirmed it is deliberately not recorded."
+)
+
+
+def _attribution_evidence_key(name: str, role: str) -> str:
+    """The ``block_evidence`` key ``draft_validator`` looks a contributor up under.
+
+    SPELT ONCE. The validator builds ``f"attribution:{name}|{role}"`` and asks whether
+    ``block_evidence`` covers it; a second hand-written copy of that format anywhere is
+    a silent coverage failure the moment either side changes.
+    """
+    return f"attribution:{name}|{role}"
+
+
+def _attribution_confirmations(payload: object, timestamp: str) -> dict[str, list[dict]]:
+    """The ``block_evidence`` entries a confirmed ``block:attribution`` payload earns.
+
+    **THE DEFECT THIS CLOSES, measured over HTTP.** An override at ``block:attribution``
+    carrying one contributor was accepted with ``200``, and the export then refused at
+    the DRAFT validator with ``official_report: null`` and
+    ``attribution.contributors[0]: "contributor has no evidence; attribution must cite
+    its source or be user-confirmed"``. The route wrote the block and no
+    ``block_evidence``, and ``block:attribution`` is the ONLY write path this build
+    offers for a contributor — so a contributor set through the only available route
+    could never be exported, by any subsequent request.
+
+    **NO EVIDENCE REQUIREMENT IS WEAKENED, AND THAT IS THE POINT.** The
+    ``attribution:<name>|<role>`` coverage rule lives in ``draft_validator`` — a truth-
+    plane file under ``CLAUDE.md`` §13 — and is not touched. ``tags`` is exempt from
+    coverage BY DESIGN ("authorship IS the confirmation") and attribution deliberately
+    is not; that stays true. What changed is that the write now RECORDS the evidence it
+    actually has instead of discarding it and then failing a gate for its absence.
+
+    **THE ENTITLEMENT, AND THE COMMITTED PRECEDENT FOR IT.** The claim recorded is "a
+    request carrying ``confirmed_by_user: true`` supplied this contributor at this
+    operation" — nothing more. That is the SAME basis, on the SAME flag, that
+    :func:`_apply_run_field` already mints a ``user_confirmation`` entry on for a run
+    field value, using the same ``models.user_confirmation`` helper and therefore the
+    same four-key shape ``complete.py`` writes for ``qc:status`` and each
+    ``series:<id>``. This is that representation reused, not a second one invented. The
+    route refuses the request with ``422 confirmation_required`` before reaching here
+    when the flag is absent.
+
+    **ONLY A CONTRIBUTOR THIS APPLICATION CAN KEY, and the rest stay refused.** ``name``
+    and ``role`` must both be non-empty ``str``. ``_refuse_override_payload`` applies no
+    contributor shape check at all (its docstring records this, measured), so
+    ``{"contributors": [{}]}`` and ``{"contributors": [{"name": ["a"], "role": "b"}]}``
+    are both stored with ``200``. Minting an entry keyed off a list-valued name would
+    let a contributor whose shape the official schema cannot hold pass the coverage gate
+    and reach an exported record. So none is minted, the run check and the export gate go
+    on refusing those, and the refusal is fail-closed.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    contributors = payload.get("contributors")
+    if not isinstance(contributors, list):
+        return {}
+    entries: dict[str, list[dict]] = {}
+    for contributor in contributors:
+        if not isinstance(contributor, dict):
+            continue
+        name, role = contributor.get("name"), contributor.get("role")
+        if not (isinstance(name, str) and name and isinstance(role, str) and role):
+            continue
+        entries[_attribution_evidence_key(name, role)] = [
+            user_confirmation(
+                _ATTRIBUTION_CONFIRMATION_QUESTION, f"{name} | {role}", timestamp
+            )
+        ]
+    return entries
+
+
+def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dict]]) -> None:
+    """Make the RUN's own ``attribution:`` block evidence exactly ``entries``.
+
+    **REPLACE, NOT MERGE, and the direction matters twice.** An override REPLACES the
+    run's whole ``attribution`` block, so a contributor dropped from the payload is gone
+    from the record — and leaving their confirmation behind would put a provenance entry
+    for a person the record no longer names into ``export.build_sidecar``'s output. It
+    would also mean a stale key could cover a contributor re-added later without anyone
+    confirming them again. Passing ``{}`` (which the clear operation does) removes them
+    all, and ``_merge_block_evidence`` then lets the EXPERIMENT's own entries show
+    through again, which is exactly what "this run inherits again" means.
+
+    **THE RUN'S OWN ``block_evidence``, never the experiment's.** The override is the
+    run's, so its evidence is the run's; writing to the experiment would attach one
+    run's confirmation to every sibling that never received it.
+
+    **IDEMPOTENT BY CONSTRUCTION, which is a requirement here rather than a nicety.**
+    The operation's published contract says recording the same override twice is a no-op
+    that does not restamp or move the run's revision, and ``save_versioned`` keeps that
+    promise by comparing the authoritative signature. An entry carries a timestamp, so
+    an unconditional rewrite would break it. An existing entry whose question and answer
+    already match is therefore KEPT with its original timestamp, and only a genuinely
+    new confirmation is stamped.
+    """
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    run.draft = draft
+    existing = draft.get("block_evidence")
+    existing = existing if isinstance(existing, dict) else {}
+
+    def _same(kept, fresh) -> bool:
+        return (
+            isinstance(kept, list)
+            and len(kept) == 1
+            and isinstance(kept[0], dict)
+            and kept[0].get("source_type") == fresh[0]["source_type"]
+            and kept[0].get("question") == fresh[0]["question"]
+            and kept[0].get("answer") == fresh[0]["answer"]
+        )
+
+    rebuilt = {
+        key: value
+        for key, value in existing.items()
+        if not (isinstance(key, str) and key.startswith("attribution:"))
+    }
+    for key, fresh in entries.items():
+        prior = existing.get(key)
+        rebuilt[key] = prior if _same(prior, fresh) else fresh
+    if rebuilt:
+        draft["block_evidence"] = rebuilt
+    else:
+        draft.pop("block_evidence", None)
+
+
 @router.post(
     "/experiments/{experiment_id}/runs/{run_id}/overrides",
     tags=[TAG_EXPERIMENTS],
@@ -6752,6 +6891,23 @@ def post_run_override(
         except ValueError:
             return _not_overridable(address)
 
+        # THE CONFIRMATION THIS REQUEST EARNED IS RECORDED, not discarded and then
+        # missed at the export gate. `confirmed_by_user is not True` was refused above,
+        # so by this line a person has said "store this"; for `block:attribution` that
+        # is the only thing that can ever satisfy `draft_validator`'s coverage rule for
+        # a contributor, and without it a contributor set through the only write path
+        # this build offers could never be exported. See `_attribution_confirmations`
+        # for the entitlement and for the shapes it deliberately declines to key.
+        #
+        # IT IS DONE HERE RATHER THAN IN `set_run_override` because the fact being
+        # recorded is the ROUTE's: the domain model was not told about the flag and
+        # should not have to be, and nothing that reaches the model by another path
+        # then mints a confirmation nobody made.
+        if address == ws.block_address("attribution"):
+            _rewrite_run_attribution_evidence(
+                run, _attribution_confirmations(body.get("payload"), _now_iso())
+            )
+
         # The client's validator is the RUN's, so it is deliberately NOT passed to
         # `_save_versioned` — see `patch_run` for why echoing a run version as a
         # record conflict's `expected_version` would be two things wearing one name.
@@ -6842,6 +6998,18 @@ def post_run_override_clear(
             cleared = exp.clear_run_override(run, address)
         except ValueError:
             return _not_overridable(address)
+
+        # AND THE CONFIRMATIONS THAT OVERRIDE EARNED GO WITH IT. The run holds no
+        # attribution block of its own any more, so a stored confirmation for one of
+        # its contributors is provenance for a claim this run no longer makes — it
+        # would reach `export.build_sidecar` naming somebody the record does not.
+        # `_merge_block_evidence` then lets the EXPERIMENT's own entries show through
+        # again, which is what "the run inherits again" has to mean for evidence too.
+        # Unconditional, exactly as the save below is: on a clear that removed nothing
+        # there is nothing to remove here either, and `save_versioned` still writes
+        # nothing because the signature did not move.
+        if address == ws.block_address("attribution"):
+            _rewrite_run_attribution_evidence(run, {})
 
         # SAVED UNCONDITIONALLY, INCLUDING THE NO-OP, and the no-op still does not move
         # the run: `save_versioned` persists only when the authoritative signature
@@ -7624,6 +7792,53 @@ NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
 )
 
 
+#: THE MAPPABLE PATHS SOME WRITE OPERATION IN THIS BUILD WILL ACCEPT A VALUE AT.
+#:
+#: **IT EXISTS BECAUSE A COPY CLAIM WAS FALSE FOR 7 OF THE 25.** After mapping a note,
+#: ``UnmappedNotesPanel`` told the scientist *"It does not write a value — a value
+#: still has to be entered and confirmed on the field itself"*, and this operation's
+#: description and the ``review`` operation's said the same thing in prose. The first
+#: half is true of all 25. The second half describes an ACTION, and for seven of them
+#: no request can perform it. Measured over HTTP on a record created through ``POST
+#: /api/experiments``, with one run, against every write route this application has —
+#: ``POST .../answers``, ``POST .../edit``, ``POST .../runs/{id}/answers``, ``PATCH
+#: .../runs/{id}`` and ``POST .../runs/{id}/overrides`` — the six
+#: ``system.configuration.*`` paths and ``timestamps.created_utc`` are refused by ALL
+#: FIVE (``422 unrecognized_field`` from the four field routes, ``422
+#: not_overridable`` from the override route). The sentence pointed at a locked door,
+#: on the one screen whose purpose is to stop captured content being thrown away.
+#:
+#: WHY THOSE SEVEN ARE NOT SIMPLY GIVEN A WRITE ROUTE, which would be the better fix
+#: if it were this slice's to make. ``system.configuration`` is a DESIGNATED OPEN
+#: namespace in the vendored schema (it declares no ``properties``), ``field_level``
+#: deliberately leaves it unclassified, and ``CLAUDE.md`` §15 records the six
+#: ``system.configuration.*`` fields as ``unclassified, verified`` pending an external
+#: answer — so classifying them here would be deciding an open question rather than
+#: reporting a fact. ``timestamps.created_utc`` is likewise unclassified. Widening
+#: either is a product decision and is deliberately not made here.
+#:
+#: DERIVED FROM THE TWO SETS THAT ENFORCE IT, never listed by hand — the discipline
+#: its inputs already keep. :data:`RUN_WRITABLE_FIELD_PATHS` is exactly what ``PATCH
+#: .../runs/{run_id}`` accepts; :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` is exactly
+#: what ``POST .../runs/{run_id}/overrides`` accepts. A path leaving either set leaves
+#: this one, in the same import, so the served answer and the enforced answer cannot
+#: drift. ``test_note_value_writability_is_measured_not_asserted`` re-derives it the
+#: only way that actually proves it: by sending a write at every one of the 25 paths
+#: to every one of the five routes and comparing the observed statuses to this set.
+#:
+#: TWO THINGS IT DOES NOT PROMISE, and both matter to the copy built on it. It does
+#: not promise the value will be ACCEPTED — a closed enum, a required sibling
+#: property or the no-guessing rules may still refuse the particular value. And every
+#: one of these routes is a RUN's, so a record with no runs yet can write none of
+#: them; membership means "a route exists", not "you can do it right now".
+NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT: frozenset[str] = frozenset(
+    path
+    for path in NOTE_MAPPABLE_FIELD_PATHS
+    if path in RUN_WRITABLE_FIELD_PATHS
+    or ws.field_address(path) in EXPERIMENT_OVERRIDABLE_ADDRESSES
+)
+
+
 #: The largest one note's text may serialise to. A REFUSAL, NEVER A TRUNCATION.
 #:
 #: "Never truncated" is a promise about what is STORED, and it is kept by refusing
@@ -7790,6 +8005,14 @@ def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
         # set the route actually enforces. These are one expression, so the control a
         # client offers and the request the server accepts cannot disagree.
         "mappable_field_paths": sorted(NOTE_MAPPABLE_FIELD_PATHS),
+        # AND THE SERVER'S OWN ANSWER TO "AND MAY I THEN ENTER ITS VALUE?", which is a
+        # DIFFERENT question and has a different answer for 7 of the 25. Served for
+        # exactly the reason the line above is: the panel tells a person what to do
+        # next after mapping, and the only alternative to being told is transcribing
+        # the two write routes' admissible sets into the frontend, where they are free
+        # to drift from what the routes enforce. See
+        # `NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT` for the measurement.
+        "value_writable_field_paths": sorted(NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT),
         "sources": sorted(notes.NOTE_SOURCES),
         "experiment_version": exp.version_token(),
     }
@@ -7829,6 +8052,19 @@ _NOTE_LIST_DESC = (
         "from it may still be a real schema field, and a refusal against this "
         "list says what this application can map a note to rather than what the "
         "official schema defines.\n\n"
+        "`value_writable_field_paths` is the SUBSET of those paths that some "
+        "write operation in this build accepts a value at — `PATCH "
+        "/api/experiments/{experiment_id}/runs/{run_id}` for a run's own field, "
+        "`POST /api/experiments/{experiment_id}/runs/{run_id}/overrides` for a "
+        "record-level one. MAPPING A NOTE AND ENTERING ITS VALUE ARE DIFFERENT "
+        "ACTS, and for 7 of the 25 mappable paths the second one has no route at "
+        "all: every write operation refuses them. Mapping to such a path is still "
+        "correct and still keeps the content on the record in full — this key "
+        "says only that no request can then put a value there, so a client must "
+        "not tell a person to go and do it. It promises nothing about a value "
+        "being ACCEPTED: a closed enum, a required sibling property or the "
+        "no-guessing rules may still refuse the particular value. Both routes are "
+        "a run's, so a record with no runs can write none of them yet.\n\n"
         "`unreadable_entries` counts stored entries this build cannot present as "
         "notes. There are two kinds and the count does not separate them: an "
         "entry the note model refused, and an entry whose id another note already "
@@ -8072,9 +8308,15 @@ def get_note(
         "to, and requires `field_path` to be one of the paths `GET .../notes` "
         "reports under `mappable_field_paths`. IT WRITES NO VALUE. Deriving a "
         "value from prose would mean deciding what the value is, which this "
-        "application makes a person do through the confirmed-edit path that "
-        "already exists; a mapped note says where the content belongs, not what "
-        "the field should hold.\n\n"
+        "application makes a person do through a separate confirmed write; a "
+        "mapped note says where the content belongs, not what the field should "
+        "hold. WHETHER SUCH A WRITE EXISTS FOR THE MAPPED PATH IS A SEPARATE "
+        "QUESTION, and for 7 of the 25 mappable paths the answer is no — `GET "
+        ".../notes` reports `value_writable_field_paths`, the subset some write "
+        "operation accepts a value at. Mapping outside it is still a correct and "
+        "useful act and the content stays on the record in full, but no request "
+        "in this build can then put a value there, and nothing here implies one "
+        "can.\n\n"
         "`edit` stores a corrected wording BESIDE the verbatim capture and never "
         "replaces it, and leaves the review state alone — fixing a typo is not a "
         "triage decision. `keep` records that this content is prose about the "

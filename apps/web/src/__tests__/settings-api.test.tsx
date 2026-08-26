@@ -1841,7 +1841,18 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // adds `record_total` to the reported keys, and carries the `complete` IS RELATIVE TO
     // THE FILTER qualification `serialize.py` says it needs. Re-measured from
     // `create_app().openapi()`, not adjusted by the length of the new text.
-    expect(total).toBe(93478);
+    // 93,478 -> 94,773 (+1,295): TWO notes operations were corrected, in one change.
+    // `GET .../notes` and `POST .../notes/{note_id}/review` both told a scientist that
+    // after mapping a note "a value still has to be entered and confirmed on the field
+    // itself" — measured over HTTP against every write route the API has, that is FALSE
+    // for 7 of the 25 mappable paths (the six `system.configuration.*` and
+    // `timestamps.created_utc`), each of which is refused by all five with a typed 422.
+    // The listing operation gained the paragraph describing the new
+    // `value_writable_field_paths` key; the review operation's `map` paragraph was
+    // corrected IN PLACE. Both were re-transcribed from `create_app().openapi()` by
+    // script rather than hand-edited, and `test_contract_description_parity.py` proves
+    // the copy matches the served document.
+    expect(total).toBe(94773);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1856,11 +1867,17 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `POST .../runs/{run_id}/answers` was written INTO an existing paragraph and
     // therefore must not move this count — which is why it is asserted separately from
     // the character total rather than inferred from it.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(195);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(196);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here.
+    // 195 -> 196 (+1): TWO notes descriptions were corrected and the count moves by
+    // exactly ONE, which is the tell this assertion exists for. `GET .../notes`
+    // APPENDED a paragraph for the new `value_writable_field_paths` key (+1); the
+    // `map` correction in `POST .../notes/{note_id}/review` was written INTO an
+    // existing paragraph and therefore must not move it (+0). A change that moved this
+    // by two would mean the review correction had been appended rather than woven in.
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the
