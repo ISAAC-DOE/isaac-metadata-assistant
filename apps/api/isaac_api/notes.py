@@ -92,12 +92,28 @@ MAPPING RECORDS A TARGET; IT DOES NOT WRITE A VALUE
 :func:`map_note` stores the field path a scientist says this note belongs to. It
 writes no draft field, mints no evidence and confirms nothing. That is not
 timidity: turning note text into a field value requires deciding what the value IS,
-and deriving one from prose is precisely the guess this project refuses. The path
-that turns a value into a confirmed field already exists and is unchanged —
-``POST /experiments/{id}/answers`` / ``POST /experiments/{id}/edit`` with
+and deriving one from prose is precisely the guess this project refuses. A mapped
+note says "this belongs there"; a person still says what the value is.
+
+**WHICH ROUTE THAT PERSON USES — AND WHETHER ONE EXISTS — WAS STATED WRONG HERE, IN
+BOTH HALVES, AND IS CORRECTED RATHER THAN DELETED.** This paragraph read: *"The path
+that turns a value into a confirmed field already exists and is unchanged — ``POST
+/experiments/{id}/answers`` / ``POST /experiments/{id}/edit`` with
 ``confirmed_by_user: true`` and a matching ``If-Match``, recorded as
-``user_confirmation`` evidence. A mapped note says "this belongs there"; a person
-still says what the value is.
+``user_confirmation`` evidence."* Measured over HTTP against a record created through
+``POST /api/experiments``, at every one of the 25 mappable paths, those two routes
+accept **none of them** — both answer ``422 unrecognized_field`` for all 25, because
+they are keyed to a record's open blocking questions and to fields the draft already
+holds, not to official field paths. The two routes that DO accept these paths are a
+RUN's: ``PATCH /api/experiments/{id}/runs/{run_id}`` for the 5 run-level paths, and
+``POST /api/experiments/{id}/runs/{run_id}/overrides`` for 13 record-level ones. The
+remaining **7** — the six ``system.configuration.*`` paths and
+``timestamps.created_utc`` — are accepted by no write route in this build at all.
+
+The per-path answer is derived and served rather than described in prose, at
+``routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT`` and on the wire as
+``value_writable_field_paths``, so a surface can be true about the path in front of
+the reader instead of true on average.
 """
 
 from __future__ import annotations
@@ -590,7 +606,27 @@ def map_note(note: Note, *, field_path: str, at: str) -> Note:
 
     Writes no value anywhere. See the module docstring: turning prose into a field
     value means deciding what the value is, and this application makes a person do
-    that through the confirmed-edit path that already exists.
+    that through a separate confirmed write.
+
+    ~~"through the confirmed-edit path that already exists"~~ — CORRECTED, and kept
+    struck rather than deleted because the old sentence was the source the surfaces
+    copied. **For 7 of the 25 mappable paths NO SUCH PATH EXISTS.** Measured over HTTP
+    against every write route this application has, on a created record with one run:
+    the six ``system.configuration.*`` paths and ``timestamps.created_utc`` are refused
+    by all five — ``422 unrecognized_field`` from the record/run answer and edit routes
+    and from ``PATCH .../runs/{run_id}``, ``422 not_overridable`` from ``POST
+    .../runs/{run_id}/overrides``. A sentence that is true of 18 paths out of 25 is not
+    "true on average" in the one place a scientist reads before choosing a target; it
+    is false for the path they chose. Which paths do have a route is served per path as
+    ``value_writable_field_paths`` — see
+    ``routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT``, which derives it from the
+    two sets those routes enforce rather than restating it.
+
+    **MAPPING IS UNAFFECTED IN EVERY CASE, and that is why this is a copy fix and not a
+    gate.** A note whose field can take no value is still correctly filed, its content
+    still stays on the record in full, and refusing the mapping would throw away a
+    scientist's own judgement about where their prose belongs in order to avoid saying
+    one honest sentence.
 
     IDEMPOTENT: re-mapping to the path already recorded returns the same note, so a
     double-click does not add a second audit row or move the experiment's revision.

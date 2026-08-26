@@ -984,3 +984,101 @@ describe('a refused review is recoverable, and no gesture destroys what was type
     expect(screen.getByLabelText('Corrected wording')).toHaveValue(revised);
   });
 });
+
+// --- 11. the value hint is true of the path in front of the reader ------------
+
+/*
+ * D1. This hint used to read, for all 25 mappable paths: "This records where the
+ * content belongs. It does not write a value — a value still has to be entered and
+ * confirmed on the field itself." Measured over HTTP against every write route the
+ * API has, SEVEN of the 25 — the six `system.configuration.*` paths and
+ * `timestamps.created_utc` — are refused by all of them. So the panel whose whole
+ * purpose is to stop captured content being thrown away told the scientist to go and
+ * perform an action the product refuses, and the only thing they could conclude on
+ * finding the door locked is that the note has no home.
+ *
+ * The server now answers per path in `value_writable_field_paths`. These tests assert
+ * BOTH polarities, because a hint hard-coded to either sentence would pass a test
+ * that only checked one.
+ */
+describe('the value hint is per path, not on average', () => {
+  const MIXED = {
+    mappable_field_paths: ['sample.material.name', 'system.configuration.detector_model'],
+    value_writable_field_paths: ['sample.material.name'],
+  };
+
+  async function openMap() {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()], MIXED) } });
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    return (await screen.findByLabelText('Field this note belongs to')) as HTMLSelectElement;
+  }
+
+  it('says nothing about entering a value until a field is chosen', async () => {
+    await openMap();
+    // The half that is true of every path, and no more. Naming a place to enter a
+    // value before a path is chosen would be a claim about a field nobody picked.
+    const hint = screen.getByText(/It does not write a value\.$/);
+    expect(hint.textContent).toContain('This records where the content belongs');
+    expect(hint.textContent).not.toContain('on a run of this record');
+    expect(hint.textContent).not.toContain('nowhere to enter one');
+  });
+
+  it('for a path a write route accepts, names WHERE the value is entered', async () => {
+    const select = await openMap();
+    fireEvent.change(select, { target: { value: 'sample.material.name' } });
+
+    const hint = screen.getByText(/It does not write a value/);
+    // "on a run of this record" — not "on the field itself", which named no screen.
+    // Both accepting routes are a run's.
+    expect(hint.textContent).toContain('entered and confirmed on a run of this record');
+    expect(hint.textContent).not.toContain('nowhere to enter one');
+  });
+
+  it('for a path NO write route accepts, says so instead of sending them nowhere', async () => {
+    const select = await openMap();
+    fireEvent.change(select, { target: { value: 'system.configuration.detector_model' } });
+
+    const hint = screen.getByText(/It does not write a value/);
+    expect(hint.textContent).toContain('this version has nowhere to enter one for this field');
+    // And it says what mapping DID achieve, so the outcome does not read as a failure.
+    expect(hint.textContent).toContain('keeps its text on the record in full');
+    // The promise that was false for this path must not survive anywhere in it.
+    expect(hint.textContent).not.toContain('on a run of this record');
+  });
+
+  it('mapping is still offered and still performed for a path with no write route', async () => {
+    const select = await openMap();
+    fireEvent.change(select, { target: { value: 'system.configuration.detector_model' } });
+
+    const map = screen.getByRole('button', { name: 'Map This Note' }) as HTMLButtonElement;
+    // The honest sentence is a DISCLOSURE, not a new gate: refusing the mapping would
+    // discard a scientist's own judgement about where their prose belongs.
+    expect(map.disabled).toBe(false);
+  });
+
+  it('the hint the client renders comes from the SERVER, never from a client-side list', async () => {
+    // NEGATIVE CONTROL ON THE SOURCE. The server is the only thing that knows which
+    // paths a write route accepts; a client that decided for itself would be free to
+    // drift the moment either route's admissible set changed. Here the server calls a
+    // path writable that a hard-coded client list could not possibly know about.
+    stubFetchRoutes({
+      [NOTES]: {
+        body: notesPage([noteFixture()], {
+          mappable_field_paths: ['system.configuration.detector_model'],
+          value_writable_field_paths: ['system.configuration.detector_model'],
+        }),
+      },
+    });
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    const select = (await screen.findByLabelText(
+      'Field this note belongs to',
+    )) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'system.configuration.detector_model' } });
+
+    expect(screen.getByText(/It does not write a value/).textContent).toContain(
+      'entered and confirmed on a run of this record',
+    );
+  });
+});
