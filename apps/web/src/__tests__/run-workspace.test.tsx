@@ -64,6 +64,54 @@ import {
  */
 configure({ asyncUtilTimeout: 5_000 });
 
+/*
+ * THE HARNESS DEADLINE, RAISED SO THE BUDGET ABOVE CAN ACTUALLY BE SPENT.
+ *
+ * The block above raises testing-library's `asyncUtilTimeout` to 5,000 ms.
+ * `vite.config.ts` declares no `testTimeout`, so vitest's own per-test deadline was
+ * ALSO 5,000 ms — the two budgets were equal, which made the raised one unreachable:
+ * a `findBy*` here could never spend its five seconds, because the harness killed the
+ * test at the same instant. The failure then read `Test timed out in 5000ms`, which
+ * names neither the query nor the DOM — so the legible failure the raise existed to
+ * produce was exactly the thing it could not produce.
+ *
+ * MEASURED, NOT ASSUMED. Each of these 53 tests mounts the whole app plus a
+ * sixteen-endpoint record bundle. Run alone the file takes ~27 s and its slowest test
+ * (`a save REFUSED while the card was unmounted …`) takes 669 ms; in a full
+ * `vitest run` the same test takes 1,940 ms, and in CI the file took 47,219 ms
+ * (Actions run 32926966992). Across six full local runs this file failed three times,
+ * in three DIFFERENT tests and never in the same one twice — and the split matters, so
+ * it is stated rather than rounded off: TWO were `Test timed out in 5000ms`
+ * (`… does NOT dispose an entry still holding an edit`, and `Check Run > renders a
+ * finding it cannot describe …`), and the THIRD was an assertion
+ * (`the card SAYS unsent changes are tab-only …`, its first `not.toMatch(note)`) in the
+ * one run deliberately contaminated with four extra concurrent vitest processes. THIS
+ * LINE DOES NOT CLAIM TO FIX THAT THIRD ONE; it was observed once, at roughly three
+ * times the machine's core count, and is not diagnosed here. Eleven concurrent whole-file
+ * runs reproduced the timeout on the slowest test, 11 of 11.
+ *
+ * The timeouts are a deadline being crossed under parallel-worker contention, not a
+ * race inside any one test: everything AFTER `vi.useFakeTimers()` in this file is
+ * driven by explicit `advanceTimersByTimeAsync` inside `act`, so no assertion in that
+ * region can be decided by wall-clock. (The observed assertion failure sits BEFORE its
+ * own test installs fake timers, which is why it is a different question and is left
+ * open above rather than folded in here.)
+ *
+ * SCALED PROOF, so the claim is checkable without waiting for a slow runner:
+ * `npx vitest run src/__tests__/run-workspace.test.tsx --testTimeout=600` failed the
+ * slowest test in 8 of 10 runs before this line and 0 of 10 after it — `vi.setConfig`
+ * is file-scoped and wins over the CLI value.
+ *
+ * 30,000 ms is the number this repository already uses for its other mount-heavy
+ * suites (`experiment-graph`, `evidence-graph`, `graph-real-artifact`,
+ * `memory-status`), and `experiment-graph.test.tsx` records the same symptom for the
+ * same reason. It is a HARNESS limit, NOT a performance claim: at six times the query
+ * budget above, a genuinely stuck query now reports testing-library's error and its
+ * DOM dump instead of a bare number, and the strict 5,000 ms default still stands in
+ * every other file of the suite.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 const ID = 'demo';
 const BASE = `/api/experiments/${ID}`;
 
