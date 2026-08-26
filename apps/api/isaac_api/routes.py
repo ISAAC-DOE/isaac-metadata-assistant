@@ -627,13 +627,52 @@ TutorialScopeDep = Annotated[str | None, Depends(tutorial_scope)]
 
 #: The path parameter naming an experiment. One description, used by every route
 #: that takes it, so the wording cannot drift between operations.
+#: The MAXIMUM LENGTH of the ``experiment_id`` path segment, and it is a number this
+#: repository already published rather than one invented here.
+#:
+#: THE DEFECT IT CLOSES, measured over HTTP on ``1ad1f8f``. The segment becomes a
+#: filesystem path component (``ws.load_experiment`` builds
+#: ``scope_root / experiment_id / "experiment.json"`` and calls ``.exists()``), and on a
+#: filesystem whose per-component limit is 255 bytes ``Path.exists()`` RAISES
+#: ``OSError: [Errno 63] File name too long`` rather than answering ``False``:
+#:
+#:     ===========  ====================================================
+#:     ``len``      ``GET /{id}``, ``GET /{id}/evidence``, ``POST /{id}/answers``
+#:     ===========  ====================================================
+#:     254, 255     ``404`` — the honest answer
+#:     256, 300     **500**
+#:     4096         **500**
+#:     ===========  ====================================================
+#:
+#: A refusal at the boundary is one line and covers every operation that takes the
+#: parameter at once, which is the reason it is here and not in ``load_experiment``.
+#:
+#: WHY 128 AND NOT 26 OR 255. A record id is a 26-character ULID, so 26 is the tightest
+#: bound the product's own ids need — and it is the wrong one to publish, because it
+#: would turn this length check into an id-FORMAT check on a parameter whose 404 is the
+#: only thing entitled to say "no such record", and it would refuse the canonical
+#: worked-example ids' shape by accident if they ever changed length. 255 is a property
+#: of one filesystem, not of this API. **128 is what this application ALREADY publishes
+#: for this exact identifier**: ``mcp/tools._EXPERIMENT_ID`` declares
+#: ``{"type": "string", "minLength": 1, "maxLength": 128}`` and
+#: ``mcp/client._render_path`` independently refuses anything longer — its own note
+#: records that "ADDING VALIDATION TO THE HTTP ROUTE IS A PRODUCT CHANGE AND IS NOT MADE
+#: HERE". This is that change, and it adopts the number rather than choosing one: after
+#: it, an id the MCP boundary would reject is one the HTTP boundary rejects too, which is
+#: the same two-independent-gates posture the MCP layer already has for itself.
+_EXPERIMENT_ID_MAX_LENGTH = 128
+
 ExperimentId = Annotated[
     str,
     Path(
+        max_length=_EXPERIMENT_ID_MAX_LENGTH,
         description=(
             "The id of an experiment in this workspace, as returned by "
-            "`GET /api/experiments`."
-        )
+            "`GET /api/experiments`. At most "
+            f"{_EXPERIMENT_ID_MAX_LENGTH} characters — a longer segment is refused "
+            "with `422` rather than looked up, because it cannot name a record this "
+            "workspace holds."
+        ),
     ),
 ]
 
@@ -2832,6 +2871,71 @@ def _answer_asset_uris(draft: dict, *, edit_only: bool) -> set:
     } | stored
 
 
+def _refuse_answers_that_are_not_an_object(
+    raw: object, identifiers: dict
+) -> JSONResponse | None:
+    """``422 invalid_body`` when ``answers`` is present and is not an object, else ``None``.
+
+    THE DEFECT, MEASURED OVER HTTP ON ``1ad1f8f``. All four write operations that take
+    an ``answers`` map read it as ``(body.get("answers") or {}).items()``, and ``or {}``
+    IS NOT A TYPE GUARD — it catches ``None`` and every wrong type here is truthy. So::
+
+        POST /api/experiments/{id}/answers          {"confirmed_by_user": true,
+        POST /api/experiments/{id}/edit              "answers": <not an object>}
+        POST /api/experiments/{id}/runs/{rid}/answers
+        POST /api/experiments/{id}/runs/{rid}/edit
+
+    answered **500** for every one of ``"str"``, ``5``, ``1.5``, ``True``, ``[1]`` and
+    ``[{"a": 1}]`` — 24 measured 500s, four operations by six values. This is the same
+    ``or {}``-is-not-a-guard family as ``workspace._as_str``, reached from the request
+    side rather than from a persisted document.
+
+    IT IS A ``422``, NOT A DEGRADATION, and that is the distinction ``CLAUDE.md`` §11
+    draws for its sibling: *"a malformed value arriving in a REQUEST can be refused,
+    because the caller sent it and a 422 names what to fix; a malformed value already
+    PERSISTED cannot be refused to the reader"*. This value arrives in a request.
+
+    ``None``/ABSENT IS STILL ACCEPTED, UNCHANGED, and it is worth being exact about what
+    that means because it is not obvious: a body of ``{"confirmed_by_user": true}`` with
+    no ``answers`` key, and one with ``"answers": null``, and one with ``"answers": {}``,
+    all answer **200** with the record's question list untouched — measured before and
+    after this change, on both. That is not a refusal this function should introduce;
+    ``_refuse_a_body_that_names_nothing_answerable`` refuses a body that names something
+    unanswerable, not one that names nothing at all.
+
+    A FALSY WRONG TYPE IS REFUSED TOO, AND THAT PART IS A BEHAVIOUR CHANGE RATHER THAN A
+    BUG FIX — stated separately because it is not covered by the 500s above. ``0``,
+    ``""``, ``False`` and ``[]`` never 500'd; ``or {}`` read all four as the empty map
+    and each answered **200**. They now answer ``422``. Refusing them is the same rule
+    applied to the same mistake — a client that sent ``"answers": ""`` did not send an
+    empty map, and being told so costs it one corrected request instead of a silent
+    no-op that looks like success. ``{}`` is an object and is untouched.
+
+    WHY IT CANNOT BE FOUND BY A NAIVE FUZZ SWEEP, recorded because it was nearly missed:
+    all four operations refuse a body without ``confirmed_by_user: true`` BEFORE they
+    look at ``answers``, so a generated body that omits the confirmation never reaches
+    the line that raises.
+    """
+    if raw is None or isinstance(raw, dict):
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "invalid_body",
+            **identifiers,
+            # ECHOES NEITHER THE VALUE NOR ITS TYPE. The value is client-supplied
+            # content of unknown size and unknown nesting, and echoing it back is how a
+            # refusal becomes a reflection surface — the same reason
+            # `_refuse_unstorable_answer` names `key`/`keys` and never a value. The
+            # client sent the body; it does not need to be told what was in it.
+            "message": (
+                "`answers` must be a JSON object mapping an answer key to its value. "
+                "Nothing was written and no question moved."
+            ),
+        },
+    )
+
+
 def _dropped_answer_keys(answers_by_id: dict, draft: dict, *, edit_only: bool) -> list[str]:
     """The non-blank keys :func:`_answers_to_apply_shape` will DROP, in submission order.
 
@@ -3707,6 +3811,15 @@ def post_answers(
                     "message": "confirmed_by_user must be true to apply answers.",
                 },
             )
+        # BEFORE THE PRECONDITION, deliberately: a body this operation cannot read is a
+        # `422` whether or not the caller's `If-Match` happens to be current — the same
+        # ordering `post_note` argues for its own inputs. It is AFTER the confirmation
+        # check, which is unchanged and is pinned by test.
+        refusal = _refuse_answers_that_are_not_an_object(
+            body.get("answers"), {"experiment_id": exp.id}
+        )
+        if refusal is not None:
+            return refusal
         err = _check_if_match(if_match, exp)
         if err is not None:
             return err
@@ -4500,6 +4613,14 @@ def post_edit(
                     "message": "confirmed_by_user must be true to correct a field.",
                 },
             )
+        # Same guard, same position, same reason as `post_answers` — see
+        # `_refuse_answers_that_are_not_an_object`. Both ingresses get one rule, which
+        # is what this module keeps asking for.
+        refusal = _refuse_answers_that_are_not_an_object(
+            body.get("answers"), {"experiment_id": exp.id}
+        )
+        if refusal is not None:
+            return refusal
         err = _check_if_match(if_match, exp)
         if err is not None:
             return err
@@ -7032,6 +7153,16 @@ def _apply_to_run(
                     ),
                 },
             )
+        # ONE HANDLER SERVES BOTH RUN OPERATIONS (`correcting` selects which), so this
+        # single guard covers the run-level `/answers` AND `/edit` — two of the four
+        # measured 500s. `run_id` travels in the body because a run refusal that named
+        # only the experiment would be a false statement about which thing was refused,
+        # which is the rule `_precondition_identity` states for the same pair of ids.
+        refusal = _refuse_answers_that_are_not_an_object(
+            body.get("answers"), {"experiment_id": exp.id, "run_id": run.id}
+        )
+        if refusal is not None:
+            return refusal
         precondition = _check_if_match(if_match, _RunPrecondition(run, exp.id))
         if precondition is not None:
             return precondition
@@ -7945,7 +8076,16 @@ def post_note(
         if text_refusal is not None:
             return text_refusal
         source = body.get("source")
-        if source not in notes.NOTE_SOURCES:
+        # `isinstance(source, str)` FIRST, AND IT IS NOT REDUNDANT WITH THE `in`. A
+        # `frozenset` membership test HASHES its operand, so a `dict` or a `list` raised
+        # `TypeError: unhashable type` — measured **500** over HTTP on `1ad1f8f` for
+        # `{}`, `[]`, `{"a": 1}` and `[1]` — two lines above a correct typed refusal that
+        # was already sitting here and already anticipated a non-string (`source=source
+        # if isinstance(source, str) else None`). The control is what makes it a defect
+        # rather than a design: `"invented"` and `5` both returned the intended `422`.
+        # The fix is to let the wrong TYPE reach the refusal that exists, not to write a
+        # second one.
+        if not isinstance(source, str) or source not in notes.NOTE_SOURCES:
             return _note_refusal(
                 "unknown_note_source",
                 (
@@ -8136,7 +8276,13 @@ def post_note_review(
         if refused is not None:
             return refused
         action = body.get("action")
-        if action not in notes.NOTE_ACTIONS - {notes.ACTION_CAPTURE}:
+        # The same unhashable-operand defect as `post_note`'s `source`, on the same
+        # shape of closed set, with the same typed refusal already below it. Measured
+        # **500** over HTTP on `1ad1f8f`; the set difference is computed before the
+        # membership test, so the raise is the `in`, not the `-`.
+        if not isinstance(action, str) or action not in notes.NOTE_ACTIONS - {
+            notes.ACTION_CAPTURE
+        }:
             return _note_refusal(
                 "unknown_note_action",
                 (
