@@ -19,6 +19,12 @@ import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
 import { ROUTES } from '../lib/routes';
+import {
+  officialCheckedDocument,
+  officialCleanSentence,
+  officialExportBlockedSentence,
+  officialFindingSource,
+} from '../lib/officialAttribution';
 import { LABELS } from '../lib/labels';
 import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
@@ -643,10 +649,13 @@ function LoadedExport({
                 silence look like evasion rather than precision.
               */}
               <p className="preexport-text">
-                All blockers are resolved, and on an in-memory candidate record the no-guessing
-                checks, ISAAC&rsquo;s own anchored-pattern exactness gate and the official ISAAC
-                schema all pass. Exporting runs the real, gated validation and writes the official
-                record + evidence sidecar. There is no override and no portal submission.
+                All blockers are resolved.{' '}
+                {officialCleanSentence(
+                  officialFindingSource(validate),
+                  officialCheckedDocument(validate),
+                )}{' '}
+                Exporting runs the real, gated validation and writes the official record +
+                evidence sidecar. There is no override and no portal submission.
               </p>
               <button
                 type="button"
@@ -689,19 +698,25 @@ function LoadedExport({
                 upstream's — §1 makes the schema not ours to speak for, so no surface may
                 report an exactness refusal as an official-schema error."
 
-                THE DISCRIMINATOR IS `ValidateReview`'s, reused exactly as `RunCard` now
-                reuses it rather than restated a fourth way: name the official ISAAC
-                schema ONLY where `dry_run === false`; otherwise report the findings and
-                say plainly that the source is not named. The gate sentence keeps its full
-                force either way — what is withheld is the attribution, never the
-                refusal. The Standalone Validator on Governance & Safety is the one
-                surface that reports `schema_ok`, `exactness_errors` and `ok` separately,
-                and it is named so the reader has somewhere to go.
+                ~~"THE DISCRIMINATOR IS `ValidateReview`'s ... name the official ISAAC
+                schema ONLY where `dry_run === false`"~~ — SUPERSEDED. That rule was the best
+                available while the wire carried nothing to branch on, and it was conservative
+                in ONE direction: it refused to name the official schema for EVERY dry run,
+                including the ones the schema really did produce. The server now says which
+                (`official_validator_ran`), and the copy comes from
+                `lib/officialAttribution.ts` so this screen and the other renderers of this
+                payload cannot drift — the reason this was the FOURTH screen to make the claim
+                is that there were four independent copies of one rule.
+
+                The gate sentence keeps its full force on every branch — what is withheld is
+                the attribution, never the refusal — and the Standalone Validator is still
+                named so the reader has somewhere to go.
               */}
               <p className="preexport-text">
-                {validate.dry_run === false
-                  ? 'The record already written does not pass the official ISAAC schema, so export stays gated. Nothing was written. Resolve these in the draft, then return.'
-                  : 'A candidate record assembled from this draft did not pass. Export stays gated and nothing was written. This check does not record which findings came from the no-guessing checks, which from ISAAC’s own anchored-pattern exactness gate, and which from the official ISAAC schema, so none is claimed — the Standalone Validator on Governance & Safety reports those separately. Resolve these in the draft, then return.'}
+                {officialExportBlockedSentence(
+                  officialFindingSource(validate),
+                  officialCheckedDocument(validate),
+                )}
               </p>
               <ul className="preexport-errors mono">
                 {validate.errors.map((e, i) => (
