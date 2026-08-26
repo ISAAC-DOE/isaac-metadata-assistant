@@ -10468,7 +10468,7 @@
       },
       {
         "path": "apps/web/src/components/SourcePreview.tsx",
-        "sha256": "98817ec0ce051f61187e1a790dc26d3c811e984be132b5ed29012606bdc13d19"
+        "sha256": "d89d8ec16af1b0ca0c1bab54758c48e9e5c98cd809c8bfb88d13179d0d2ab868"
       },
       {
         "path": "apps/web/src/components/StagedRunner.tsx",
@@ -10556,7 +10556,7 @@
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
-        "sha256": "bde0e5f0b55f1f45056415412183cf5a3e7abd353110381806f74f85fc26e84f"
+        "sha256": "4c0370822cc886ee942a1271aa1e34540394345f1198fbd06badf94baf9d77bd"
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "3ac1b29e763952f7029d36947af71dd72de2bd193f4cc452d2bbc7b522db745d"
+    "served_manifest_fingerprint": "3d2ead409e0ce3c75341f2c3b053581f258e303bdb547efa282231fc968605e5"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
