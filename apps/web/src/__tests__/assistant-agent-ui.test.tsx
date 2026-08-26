@@ -367,6 +367,95 @@ describe('P29.4b unconfirmed proposal card', () => {
     expect(msgTexts(container).some((t) => /reload the record/i.test(t))).toBe(false);
   });
 
+  /*
+   * THE THIRD `/edit` OUTCOME: THE SERVER SAYS WHERE THE ANSWER SHOULD HAVE GONE.
+   *
+   * Every proposal in this block names `sample.material`, which is NOT in `ctx().pending`,
+   * so the confirm takes the EDIT route exactly as it does in the product. On a large
+   * record that guess is routinely wrong — the AgentContext holds a 50-entry window, so a
+   * question below it reads as "already answered" — and `422 not_yet_answered` is what the
+   * server answers, naming the operation that can take it. See
+   * `assistant-answer-routing.test.ts` for the routing itself; these two are about what
+   * the READER is told.
+   */
+  const NOT_YET_ANSWERED = (answerAt: string | null) =>
+    Object.assign(new Error('open'), {
+      status: 422,
+      body: {
+        error: 'not_yet_answered',
+        experiment_id: EXP,
+        keys: ['sample.material'],
+        ...(answerAt ? { answer_at: answerAt } : {}),
+        message: answerAt
+          ? 'Each of these is still an open question. Nothing was written.'
+          : 'Each of these is still an open question, so there is no confirmed value to ' +
+            'correct. No operation on this record can answer it: the record has runs. ' +
+            'Nothing was written.',
+      },
+    });
+
+  it('a wrong-route guess is corrected by the server and the answer LANDS, once', async () => {
+    const edit = vi
+      .spyOn(api, 'editField')
+      .mockRejectedValue(NOT_YET_ANSWERED('POST /api/experiments/{experiment_id}/answers'));
+    const submit = vi
+      .spyOn(api, 'submitAnswer')
+      .mockResolvedValue({ version: 'gen.6', pending: [] } as never);
+    const onRefresh = vi.fn();
+    const { getByRole, container } = panel({
+      proposal: pendingProposal({ field: 'sample.material', value: 'CuO2' }),
+      onRefresh,
+    });
+
+    fireEvent.click(getByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    expect(edit).toHaveBeenCalledTimes(1); // the hint
+    expect(submit).toHaveBeenCalledTimes(1); // the correction — and no more
+    // The reader is told it was confirmed, because it was. Before this routing the same
+    // click produced `422 unrecognized_field` and a message naming the wrong cause.
+    expect(msgTexts(container).some((t) => /Your value was sent to the record/i.test(t))).toBe(
+      true,
+    );
+    expect(msgTexts(container).some((t) => /could not be confirmed/i.test(t))).toBe(false);
+  });
+
+  it('a refusal naming NO operation is reported with the record\'s own reason, and nothing else', async () => {
+    const edit = vi.spyOn(api, 'editField').mockRejectedValue(NOT_YET_ANSWERED(null));
+    const submit = vi.spyOn(api, 'submitAnswer');
+    const onRefresh = vi.fn();
+    const { getByRole, container } = panel({
+      proposal: pendingProposal({ field: 'sample.material', value: 'CuO2' }),
+      onRefresh,
+    });
+
+    fireEvent.click(getByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    // NO route is guessed from the other templates. The server omitted `answer_at`
+    // because none of them would accept the request.
+    expect(submit).not.toHaveBeenCalled();
+    const note = await waitFor(
+      () => msgTexts(container).find((t) => /could not be confirmed/i.test(t))!,
+    );
+    // The claim this refusal supports — and it is the server's own guarantee, not an
+    // inference from the status.
+    expect(note).toMatch(/nothing was written/i);
+    // The server's sentence, verbatim rather than restated.
+    expect(note).toContain('No operation on this record can answer it');
+    // NOT the 412 wording: the record did not move, and saying it did would send the
+    // reader to re-evaluate against a revision that is already current.
+    expect(note).not.toMatch(/changed since it was proposed/i);
+    // NOT the unknown-outcome wording either: this outcome is known.
+    expect(note).not.toMatch(/reload the record/i);
+    expect(msgTexts(container).some((t) => /Your value was sent to the record/i.test(t))).toBe(
+      false,
+    );
+    // The proposal is left staged — the record did not move, so it is not stale.
+    expect(container.querySelector('.agent-proposal')!.className).not.toMatch(/stale/);
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
   it('Cancel performs no mutation and clears the proposal', () => {
     const submit = vi.spyOn(api, 'submitAnswer');
     const edit = vi.spyOn(api, 'editField');

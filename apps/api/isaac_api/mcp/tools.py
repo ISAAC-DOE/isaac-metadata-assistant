@@ -73,6 +73,7 @@ from .policy import (
     PERMITTED_TOOL_NAMES,
     Scope,
     forbidden_tool_reason,
+    pending_query_parameters,
     run_list_query_parameters,
 )
 
@@ -512,9 +513,18 @@ async def _list_questions(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutc
     a record has runs. ``isaac_get_experiment`` carries a pending COUNT and not the
     questions, and ``isaac_check_run`` carries one run's. Neither answers "what is
     this record waiting for", which is the question an agent actually starts with.
+
+    **THE DEFAULT IS STILL COMPLETE.** ``run_id``/``offset``/``limit`` are forwarded ONLY
+    when the caller sent them — the same shape ``_list_runs`` has — so a client that never
+    learned to page is handed exactly what it was always handed, with no ``pending_page``
+    block to interpret. Bounding is something a caller ASKS for here, never something
+    imposed on one that does not know to ask, which is the route's own rule.
     """
+    query = {k: v for k, v in args.items() if k != "experiment_id"}
     result = await ctx.client.call(
-        "list_questions", path_params={"experiment_id": args["experiment_id"]}
+        "list_questions",
+        path_params={"experiment_id": args["experiment_id"]},
+        query=query,
     )
     return _settle("list_questions", result)
 
@@ -608,17 +618,22 @@ async def _inspect_evidence(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOu
 # The registry
 # --------------------------------------------------------------------------
 
-def _run_list_schema() -> dict:
-    """``isaac_list_runs``'s schema, with the filters the ROUTE actually has.
+def _query_schema(parameters, *, base: dict | None = None) -> dict:
+    """An ``experiment_id`` schema plus whatever query parameters the ROUTE actually has.
 
-    See ``policy.run_list_query_parameters`` for why this is derived rather than
-    written down. The practical consequence: a filter that lands on the run-list
-    route (and passes the allowlist review gate) is exposed here with the route's
-    own description, and one that has not landed yet is not advertised — so the
-    tool never claims a filter it would silently drop.
+    See ``policy._query_parameters`` for why the set is derived rather than written down.
+    The practical consequence: a parameter that lands on the route (and passes its
+    allowlist review gate) is exposed here with the route's own description, and one that
+    has not landed yet is not advertised — so the tool never claims a filter it would
+    silently drop. Only ``experiment_id`` is ever required; every derived parameter is
+    optional, because the routes' defaults are the complete answer.
+
+    ONE BUILDER FOR EVERY GATED TOOL. It was ``_run_list_schema`` alone until
+    ``isaac_list_questions`` needed the same thing, and a second copy of the
+    enum/minimum/maximum rendering is a second place it can drift.
     """
-    properties: dict[str, Any] = {"experiment_id": dict(_EXPERIMENT_ID)}
-    for parameter in run_list_query_parameters():
+    properties: dict[str, Any] = {"experiment_id": dict(_EXPERIMENT_ID), **(base or {})}
+    for parameter in parameters:
         spec: dict[str, Any] = {
             "type": parameter.json_type,
             "description": parameter.description or f"The route's {parameter.name} parameter.",
@@ -636,6 +651,21 @@ def _run_list_schema() -> dict:
             spec["maximum"] = parameter.maximum
         properties[parameter.name] = spec
     return _object_schema(properties, ["experiment_id"])
+
+
+def _run_list_schema() -> dict:
+    """``isaac_list_runs``'s schema, with the filters the ROUTE actually has."""
+    return _query_schema(run_list_query_parameters())
+
+
+def _list_questions_schema() -> dict:
+    """``isaac_list_questions``'s schema, with the bounds the ROUTE actually has.
+
+    The route answers COMPLETELY without any of them; they are how a caller working on
+    ONE run of a 1,000-run record asks for that run's questions instead of the 1.78 MB
+    the whole set measures.
+    """
+    return _query_schema(pending_query_parameters())
 
 
 def _tools() -> tuple[Tool, ...]:
@@ -891,13 +921,28 @@ def _tools() -> tuple[Tool, ...]:
                 "For the built-in worked examples a question may carry a clearly "
                 "labelled `demo_answer`. It is a suggestion for a person to read and "
                 "is never applied automatically — sending it back is asserting that "
-                "the scientist confirmed it. Read-only; writes nothing."
+                "the scientist confirmed it. Read-only; writes nothing.\n\n"
+                "**SEND NOTHING BUT `experiment_id` AND THE ANSWER IS COMPLETE** — every "
+                "open question on the record, its runs' included, in one `pending` list "
+                "with no page block to interpret. A record's question count grows with "
+                "its runs, so `run_id`, `offset` and `limit` are there for a caller that "
+                "wants LESS: pass `run_id` to get one run's questions, `offset`/`limit` "
+                "to walk the set a page at a time. A `run_id`, a NON-ZERO `offset`, or a "
+                "`limit` bounds the read, and the response then gains a `pending_page` "
+                "block reporting `total`, `returned`, `withheld`, `complete` and "
+                "`record_total`. **`offset: 0` ON ITS OWN BOUNDS NOTHING** — it is the "
+                "route's default, so a call sending only it gets the complete unpaged "
+                "answer and NO `pending_page` to act on; send `limit` if you mean to "
+                "page. Read `pending_page.record_total` for the WHOLE record's open "
+                "count, so a page you asked for can never be mistaken for the record's "
+                "state, and read `complete` AS RELATIVE TO THE FILTER: under a `run_id` "
+                "it means \"this run has nothing further\", never \"this record has "
+                "nothing further\". An unknown `run_id` is REFUSED, not answered "
+                "with an empty list."
             ),
             scope=Scope.READ,
             operation_ids=("list_questions",),
-            input_schema=_object_schema(
-                {"experiment_id": dict(_EXPERIMENT_ID)}, ["experiment_id"]
-            ),
+            input_schema=_list_questions_schema(),
             handler=_list_questions,
             read_only=True,
             idempotent=True,

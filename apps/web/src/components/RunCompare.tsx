@@ -355,7 +355,54 @@ export function RunCompare({
                   object or a list, and this table has no one-line rendering for one.
                 </p>
               )}
-              <CompareFindings experimentId={experimentId} runA={runA!} runB={runB!} />
+              {/*
+                KEYED ON WHICH RUNS AND WHICH VERSIONS, and it was not.
+
+                `CompareFindings` holds the two check responses in local state
+                with no eviction of any kind, and this element carried no `key`,
+                so React preserved that state across every prop change. Two
+                measured consequences, both of them a stale verdict presented as
+                a current one:
+
+                  · save a run after "Check both runs" and the old verdicts stay
+                    on screen. `RunsSection.replaceRun` substitutes a NEW run
+                    object with a NEW `version`, so the table above recomputes
+                    and the verdicts below it do not;
+                  · change ONE of the two compared runs and the verdicts fetched
+                    for the previous pair are re-rendered under the NEW runs'
+                    labels — `FindingsResult` takes `labelA`/`labelB` from the
+                    current props while `check.a`/`check.b` are the old
+                    responses. That is a mislabelling, not merely staleness.
+
+                The only thing that stopped either being silent is the
+                `Read-only check of run version {res.checked_run_version}` line
+                beside each verdict, which named a version the reader had to
+                notice for themselves.
+
+                The key resets the panel to `idle` — the reader is offered the
+                check again — which is the same discipline the Evidence Graph
+                already applies through `readRunCheck`: a cached verdict whose
+                run version has moved is not served, it is evicted
+                (`lib/evidenceGraph.ts`, RunCheckStore). Two surfaces in one
+                product should not disagree about whether a stale verdict may be
+                displayed.
+
+                WHAT THE KEY OMITS, NAMED RATHER THAN LEFT TO BE REDISCOVERED:
+                `experimentId`. Two experiments would have to hold runs with the
+                SAME id AND the same version for the stale state to survive a
+                change of record, and run ids are ULIDs minted per run — so it
+                is not reachable in this product as built. It is written down
+                because the reasoning is an argument about id generation rather
+                than a property of this component, and the next surface that
+                keys on a run identity should not have to re-derive it. Adding
+                it costs one interpolation if that ever stops holding.
+              */}
+              <CompareFindings
+                key={`${runA!.id}@${runA!.version}|${runB!.id}@${runB!.version}`}
+                experimentId={experimentId}
+                runA={runA!}
+                runB={runB!}
+              />
             </>
           )}
         </section>

@@ -1830,7 +1830,18 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // Both entries were RE-TRANSCRIBED from `create_app().openapi()` by script, never
     // hand-edited, and `test_contract_description_parity.py` proves the copy matches
     // the served document.
-    expect(total).toBe(92916);
+    // 92,916 -> 93,478 (+562): `GET .../pending`'s description was corrected, in ONE
+    // operation. It said "Send any of the three and the response gains a `pending_page`
+    // block" — false for `offset: 0`, which is the route's own default, so a request
+    // sending only it is the UNBOUNDED read and carries no page block. An independent
+    // review measured it over the real MCP dispatch: `{'offset': 0}` -> no `pending_page`,
+    // `{'offset': 1}` -> yes. Not a truncation lie (the response really is complete), but
+    // an agent told to page will plausibly open with `offset: 0` and find no
+    // `record_total`/`withheld` to act on. The replacement names the non-zero condition,
+    // adds `record_total` to the reported keys, and carries the `complete` IS RELATIVE TO
+    // THE FILTER qualification `serialize.py` says it needs. Re-measured from
+    // `create_app().openapi()`, not adjusted by the length of the new text.
+    expect(total).toBe(93478);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1845,7 +1856,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `POST .../runs/{run_id}/answers` was written INTO an existing paragraph and
     // therefore must not move this count — which is why it is asserted separately from
     // the character total rather than inferred from it.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(194);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(195);
+    // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
+    // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
+    // description moved, and `test_contract_description_parity.py` proves that rather
+    // than leaving it asserted here.
 
     // 45,974 -> 49,238 and 47 -> 48 operations, 96 -> 105 post-lead paragraphs: the
     // backend now publishes `POST /api/experiments/{experiment_id}/submit`, the

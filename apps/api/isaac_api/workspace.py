@@ -1572,12 +1572,46 @@ def _authoritative_signature(exp: "Experiment") -> str:
 # produce. The 7 on the listing is 5 (this experiment) + 2 (the seeds that reach
 # their dry-run branch).
 #
-# Two amplifiers a future slice should address together rather than separately:
+# ~~"Two amplifiers a future slice should address together rather than separately:
 # ``status()`` and ``export_ready()`` each dry-run every unit independently, and
 # ``export_units()`` itself now reads one JSON file per MATERIALISED unit (the C1
 # sibling-link fix). A per-request memoisation of ``export_units()`` would remove
 # most of both; it is not added here because it introduces a cache into a module
-# whose correctness argument is "recomputed on every read, never stored".
+# whose correctness argument is 'recomputed on every read, never stored'."~~
+#
+# --- ADDRESSED 2026-08-25, AND NOT BY THE MEMOISATION THAT PARAGRAPH IMAGINED ----
+#
+# The paragraph above is struck rather than deleted because its DIAGNOSIS was right and
+# its PROPOSED REMEDY was the unsafe one. A per-request memo has no safe home on the
+# instance: ``routes`` mutates an ``Experiment`` and then re-reads its derived state in
+# the same request (answer -> recompute status/workflow), so a ``cached_property`` or an
+# instance dict would serve a stale composition after a write, and the correctness
+# argument this module rests on — "recomputed on every read, never stored" — is exactly
+# what would have to be given up to make it work.
+#
+# What was done instead: ``draft_ok``, ``_all_units_pass_dry_run``, ``status`` and
+# ``export_ready`` each take an OPTIONAL already-composed ``units`` list, and the ONE
+# caller that needs several of them for one response (``routes._detail``, via
+# ``routes._shared_units``) composes it once and threads it. Nothing is stored, nothing
+# is invalidated, and every other call site is byte-for-byte the code it was.
+#
+# MEASURED over HTTP on the record-detail route, ``resolved_run_draft`` entries per
+# request (``cProfile`` ncalls, and the same numbers asserted by
+# ``apps/api/tests/test_detail_route_composes_each_run_once.py``):
+#
+#     record still owing questions      3 x runs  ->  1 x runs   (3 unit lists -> 1)
+#     fully answered, not exported      5 x runs  ->  1 x runs   (5 unit lists -> 1)
+#     fully exported fan-out            4 x runs  ->  1 x runs   (4 unit lists -> 1)
+#
+# The 5x is the worst case and it is the one a scientist reaches at the END of the
+# work: ``status()`` and ``export_ready()`` stop short-circuiting the moment
+# ``pending_count()`` hits 0, which is why the 3x figure in the scale envelope was
+# taken on a record that still owed questions.
+#
+# STILL TRUE, and deliberately not changed: ``export_units()`` reads one JSON file per
+# materialised unit, and ``pending()`` still returns one dict per open question per run.
+# Both are linear in the run count by contract. Threading removes the MULTIPLE, not the
+# linearity — see ``docs/evidence/scale-envelope-2026-08-25.md`` §3 for what remains.
 #
 # --- WHAT EVERY OTHER SURFACE DOES FOR A FAN-OUT ------------------------------
 #
@@ -3599,19 +3633,33 @@ class Experiment:
     def exported(self) -> bool:
         return self.record_id is not None
 
-    def draft_ok(self) -> bool:
+    def draft_ok(self, *, units: "list[ExportUnit] | None" = None) -> bool:
         """Whether EVERY unit's draft passes the no-guessing checks.
 
         Run-aware for the same reason :meth:`pending` is. With runs, ``self.draft``
         alone is not a thing that gets exported — it holds only the experiment-level
         half — so validating it in isolation would answer a question nobody asked
         and would usually answer it ``False`` (no ``series``, no ``qc``).
+
+        ``units`` IS THREADED IN, NOT CACHED, and the distinction is the whole design
+        (see the composition-cost note in this module's fan-out section header). A
+        caller that needs several of these derivations for ONE response composes the
+        unit list once and hands it to each; a caller that does not pass anything gets
+        exactly the code that ran before the parameter existed. Nothing is stored on
+        the instance, so there is no invalidation to get wrong when a route mutates an
+        experiment and re-reads its derived state in the same request.
+
+        THE ZERO-RUN BRANCH RETURNS BEFORE LOOKING AT ``units``. That path's whole
+        correctness argument is that it is the SAME CALL the pre-fan-out code made, and
+        it stays that whatever it is handed.
         """
         if not self.runs:
             return validate_draft(self.draft).ok
-        return all(validate_draft(unit.draft).ok for unit in self.export_units())
+        if units is None:
+            units = self.export_units()
+        return all(validate_draft(unit.draft).ok for unit in units)
 
-    def _all_units_pass_dry_run(self) -> bool:
+    def _all_units_pass_dry_run(self, *, units: "list[ExportUnit] | None" = None) -> bool:
         """Dry-run the export gate over every unit. Writes nothing, never raises.
 
         ``export_draft`` is called WITHOUT ``record_id``, exactly as the pre-fan-out
@@ -3619,13 +3667,33 @@ class Experiment:
         passing an id would additionally fail any experiment or run whose id is not a
         ULID — a real possibility for hand-built fixtures, and a change in behaviour
         for the zero-run path this slice promised not to touch.
+
+        ``units`` is threaded exactly as :meth:`draft_ok`'s is. The composition THIS
+        METHOD performs — the ``units is None`` fallback — is taken inside the ``try``
+        because ``export_units`` reads one JSON file per materialised unit, so composing
+        it is one of the things that can raise here.
+
+        ~~"moving it outside the guard would turn a defensive ``False`` into an exception
+        on a read"~~ **— THE CODE AND THIS SENTENCE NOW DISAGREE, and the sentence is
+        struck in place rather than deleted because the disagreement is the thing worth
+        seeing.** Both threading call sites compose the list OUTSIDE any guard and hand
+        it in: ``routes._shared_units`` on the detail read, and
+        ``dependencies.build_invalidation`` on the mutation path. For a threaded caller
+        the composition has therefore already happened before this ``try`` is entered,
+        and this guard cannot cover it. **Nothing about today's behaviour moves** — the
+        composition raising is defensive-only (the ``except`` below is
+        ``# pragma: no cover``) and no test or observation has produced it — but the
+        stated invariant is no longer general, and a later slice must not read this
+        comment as evidence that every composition on this path is guarded.
         """
         try:
-            return all(export_draft(unit.draft, REPO_ROOT).ok for unit in self.export_units())
+            if units is None:
+                units = self.export_units()
+            return all(export_draft(unit.draft, REPO_ROOT).ok for unit in units)
         except Exception:  # pragma: no cover - defensive, keeps the check non-throwing
             return False
 
-    def status(self) -> str:
+    def status(self, *, units: "list[ExportUnit] | None" = None) -> str:
         """Derive status deterministically; never stored, always recomputed.
 
         pending > 0                 -> needs_attention
@@ -3644,15 +3712,21 @@ class Experiment:
 
         A zero-run experiment answers exactly as it always did, because its single
         unit IS its own draft.
+
+        ``units`` is threaded exactly as :meth:`draft_ok`'s is, and reaches only the
+        dry-run branch — the two branches above it answer from ``Run.record_id`` and
+        from :meth:`pending_count`, neither of which composes anything. So on a record
+        that still owes questions this parameter changes nothing at all, which is
+        precisely why the scale envelope's workload never entered here.
         """
         if self.all_units_exported():
             return DONE
         if self.pending_count() > 0:
             return NEEDS_ATTENTION
         # Dry-run only: export_draft returns an ExportResult and writes nothing.
-        return READY_TO_EXPORT if self._all_units_pass_dry_run() else IN_REVIEW
+        return READY_TO_EXPORT if self._all_units_pass_dry_run(units=units) else IN_REVIEW
 
-    def export_ready(self) -> bool:
+    def export_ready(self, *, units: "list[ExportUnit] | None" = None) -> bool:
         """True iff a dry-run export of EVERY unit passes (pending==0 AND the export
         gate succeeds for each), independent of whether anything was already exported.
 
@@ -3660,10 +3734,12 @@ class Experiment:
         exported), this reflects the CURRENT drafts' export-readiness — so an
         exported record edited back to pending>0 is correctly NOT export-ready.
         Read-only dry-run, exactly as ``status()`` uses ``export_draft``.
+
+        ``units`` is threaded exactly as :meth:`draft_ok`'s is.
         """
         if self.pending_count() > 0:
             return False
-        return self._all_units_pass_dry_run()
+        return self._all_units_pass_dry_run(units=units)
 
 
 # --- store operations ---------------------------------------------------------

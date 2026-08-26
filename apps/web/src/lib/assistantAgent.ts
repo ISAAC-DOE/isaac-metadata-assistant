@@ -28,6 +28,16 @@
  * computed against (`sourceRev`), and `confirmProposal` refuses to touch the api
  * if the record has advanced (stale) — revalidation is required. A 412 from the
  * backend marks the proposal stale with NO retry and NO merge.
+ *
+ * ONE THING IS NOT A RETRY AND MUST NOT BE READ AS ONE. `confirmProposal` may issue a
+ * SECOND write when — and only when — the first was refused `422 already_answered` or
+ * `422 not_yet_answered`, two refusals that write nothing and name the operation that
+ * can take the request. It follows that name ONCE, to the operation the server named,
+ * with the If-Match token of the level the server named. It is a redirect, not a retry:
+ * nothing is re-sent to an operation that has already refused it, and no other status
+ * — not a 412, not a `409 belongs_to_a_run`, not a 403, not a 500 — is followed at all.
+ * See `confirmProposal` for why the alternative (deciding the route from a pre-fetched
+ * list) had to go.
  */
 
 import { hasVerdictLanguage } from './assistant';
@@ -79,6 +89,23 @@ export type AgentContext = {
     ordered_steps: WorkflowStep[];
   };
   evidence: EvidenceView[];
+  /**
+   * The record's open questions, FROM THE HEAD, and NOT NECESSARILY ALL OF THEM.
+   *
+   * `useRecordSession` fills this from a bounded page rather than the complete list: a
+   * record's question count is `3 x runs`, and at 1,000 runs the complete list is
+   * 1,772,692 bytes fetched again after every accepted answer. It is a PREFIX from
+   * offset 0, so "the first entry" and "empty means none are open" are both exactly as
+   * true as they were; "this is every open question" never was a promise this field
+   * made, and is now measurably false on a large record.
+   *
+   * NO CONSUMER MAY COUNT IT, TOTAL IT, OR TREAT AN ABSENT ENTRY AS "ANSWERED".
+   * `confirmProposal` used to do the last of those and that is what kept the read
+   * unbounded; it now treats membership as a hint and lets the server decide. The
+   * property is pinned rather than asserted: `assistant-agent-pending-window.test.ts`
+   * runs every registered intent against a full list and against a one-entry window of
+   * it and requires byte-identical output.
+   */
   pending: PendingItem[];
   /** True when the current record state could not be verified (e.g. version
    *  check failed). Any dataset-specific intent then refuses to answer. */
@@ -165,6 +192,194 @@ export interface ConfirmApi {
 
 /** The exact honest message returned when the record state cannot be verified. */
 export const DEGRADED_MESSAGE = 'I cannot verify the current record state right now.';
+
+/**
+ * THE TWO SERVER REFUSALS THAT NAME WHERE THE ANSWER SHOULD HAVE GONE.
+ *
+ * `POST /answers` against a CLOSED question answers `422 already_answered`; `POST /edit`
+ * against an OPEN one answers `422 not_yet_answered`. Both guarantee that NOTHING was
+ * written, and both carry `answer_at` — the operation at the level that can actually take
+ * the request. They are the reason this module no longer decides `submitAnswer` vs
+ * `editField` from membership in a pre-fetched list; see `confirmProposal`.
+ */
+export type AnswerRoutingError = 'already_answered' | 'not_yet_answered';
+
+/** The parsed form of one of those refusals. `answerAt`/`runId` are `null` when the
+ *  body does not say — ABSENCE IS A STATEMENT here and is never filled in. */
+export type RoutingRefusal = {
+  error: AnswerRoutingError;
+  /** The operation TEMPLATE the server named, verbatim, or `null` when it named none. */
+  answerAt: string | null;
+  /** The concrete run id the refusal was raised at, or `null` on the record path. */
+  runId: string | null;
+  /** The server's own sentence, or `null` when the body carries none. */
+  message: string | null;
+};
+
+/**
+ * Is this thrown error one of the two routing refusals? `null` for anything else.
+ *
+ * Duck-typed and fail-closed for the reasons every discriminator in `lib/mutationErrors`
+ * is: a transport failure, a rejected `fetch` and a test double all arrive at a `catch`
+ * as something that may or may not carry a `status` and a parsed `body`. Anything that
+ * does not have the expected shape returns `null`, which routes the caller to "I cannot
+ * tell you what happened" rather than to a redirect it cannot justify.
+ *
+ * THE `error` CODE IS READ, NOT THE STATUS ALONE. `422` from these two operations has
+ * at least six other causes — `confirmation_required`, `no_derivation_to_confirm`,
+ * `unrecognized_field`, `invalid_field_value`, the framework's own body validation, and
+ * whatever a future validation adds — and none of them says where the request should
+ * have gone. Widening this to "any 422" would turn an unrelated refusal into a blind
+ * second write.
+ */
+export function answerRoutingRefusal(err: unknown): RoutingRefusal | null {
+  if (typeof err !== 'object' || err === null) return null;
+  if ((err as { status?: unknown }).status !== 422) return null;
+  const body = (err as { body?: unknown }).body;
+  if (typeof body !== 'object' || body === null) return null;
+  const code = (body as { error?: unknown }).error;
+  if (code !== 'already_answered' && code !== 'not_yet_answered') return null;
+  const answerAt = (body as { answer_at?: unknown }).answer_at;
+  const runId = (body as { run_id?: unknown }).run_id;
+  const message = (body as { message?: unknown }).message;
+  return {
+    error: code,
+    answerAt: typeof answerAt === 'string' && answerAt !== '' ? answerAt : null,
+    runId: typeof runId === 'string' && runId !== '' ? runId : null,
+    message: typeof message === 'string' && message !== '' ? message : null,
+  };
+}
+
+/** The two write methods this module will ever call. Named once so the allowlist's
+ *  values and the guard that re-checks them cannot drift apart. */
+type WriteOperation = 'answers' | 'edit';
+
+/** Which of the two write methods an operation is, and whether it is run-level. */
+type WriteTarget = { operation: WriteOperation; runId?: string };
+
+/** Is this an operation `write()` can dispatch? A POSITIVE check, not "not undefined".
+ *  `write()` branches `=== 'answers' ? submitAnswer : editField`, so ANY other value —
+ *  `undefined` above all — silently selects `editField`; and `redirectTargetFor`'s
+ *  self-redirect guard compares operations, so an `undefined` one never equals the one
+ *  just attempted and the guard passes. Both failure modes are closed by refusing to
+ *  build a target whose operation is not one of these two. */
+function isWriteOperation(value: unknown): value is WriteOperation {
+  return value === 'answers' || value === 'edit';
+}
+
+/**
+ * EVERY `answer_at` THIS CLIENT WILL FOLLOW, matched as an EXACT literal.
+ *
+ * An ALLOWLIST rather than a parser, and that is the whole safety property. The four
+ * strings are `routes.py`'s own `_ANSWERS_OPERATION_RECORD` / `_ANSWERS_OPERATION_RUN` /
+ * `_EDIT_OPERATION_RECORD` / `_EDIT_OPERATION_RUN` constants — which exist there for the
+ * same reason this exists here: *"two copies of a URL is how one of them ends up stale"*.
+ * A template this map does not know is NOT interpolated, NOT pattern-matched and NOT
+ * guessed at; it is treated as "no route I can follow", which lands on the same honest
+ * branch an absent `answer_at` does.
+ *
+ * A URL is deliberately never built from the pieces. The client already owns typed
+ * methods for all four operations (`submitAnswer`/`editField` × record/run), so the
+ * template is used only to CHOOSE one of them; the ids come from the refusal's own
+ * body, which is the convention the server documents ("the ids to substitute into it
+ * are in this same body").
+ *
+ * ── THE PROTOTYPE CHAIN, AND WHY THIS IS NOT AN OBJECT LITERAL ────────────────────
+ *
+ * IT USED TO BE ONE, AND THE PARAGRAPH ABOVE WAS FALSE FOR FIVE STRINGS. An object
+ * literal inherits from `Object.prototype`, and `Object.freeze` freezes the object
+ * without severing what it inherits from. So `ANSWER_AT_OPERATIONS['toString']` — and
+ * `constructor`, `__proto__`, `valueOf`, `hasOwnProperty` — resolved to a TRUTHY
+ * inherited value, `spec === undefined` was false, and a target was built whose
+ * `operation` was `undefined`: record-level (so the record's If-Match went to a run's
+ * question), dispatched to `editField` (because `write()` branches
+ * `=== 'answers' ? … : …`), and waved through the self-redirect guard (because
+ * `undefined === 'edit'` is false). An independent review measured TWO `editField`
+ * calls for each of the five keys against a control's one.
+ *
+ * `Object.create(null)` is what makes the sentence true rather than aspirational: the
+ * map has NO prototype, so a key it was not given resolves to `undefined` and nothing
+ * else. `isWriteOperation` in `redirectTargetFor` is the second, independent guard —
+ * belt and braces, because it is the one that makes the TARGET well-formed by
+ * construction rather than by the map being clean.
+ *
+ * NOT REACHABLE AGAINST TODAY'S SERVER: the shipped backend emits only the four
+ * constants below, verified over HTTP. It took a non-conforming server, a rewriting
+ * proxy, or a future backend change. It is fixed anyway because this map is written as
+ * a fail-closed allowlist tolerant of hostile input, and a fail-closed allowlist that
+ * is only closed against inputs the current server happens not to send is decoration.
+ */
+const ANSWER_AT_OPERATIONS: Readonly<Record<string, { operation: WriteOperation; run: boolean }>> =
+  Object.freeze(
+    Object.assign(
+      Object.create(null) as Record<string, { operation: WriteOperation; run: boolean }>,
+      {
+        'POST /api/experiments/{experiment_id}/answers': { operation: 'answers', run: false },
+        'POST /api/experiments/{experiment_id}/runs/{run_id}/answers': {
+          operation: 'answers',
+          run: true,
+        },
+        'POST /api/experiments/{experiment_id}/edit': { operation: 'edit', run: false },
+        'POST /api/experiments/{experiment_id}/runs/{run_id}/edit': {
+          operation: 'edit',
+          run: true,
+        },
+      } as const,
+    ),
+  );
+
+/**
+ * The ONE operation this client will follow a refusal to, or `null` to surface it.
+ *
+ * `null` — meaning "say what the server said and stop" — for every case in which a
+ * redirect would be a guess rather than an instruction:
+ *
+ *  - **no `answer_at`.** The server omits the key rather than emitting one it would
+ *    refuse: on a record with runs, a spectrum, a QC verdict, a descriptor and an asset
+ *    hash belong to the run that measured them, so no operation on the RECORD can answer
+ *    one. Absence is the honest output there and inventing a route from the other three
+ *    templates would walk straight into the second refusal the server was avoiding.
+ *  - **an `answer_at` this client does not know.** See `ANSWER_AT_OPERATIONS` — and
+ *    read its prototype-chain note, because "unknown behaves exactly like absent" was
+ *    a claim this function did not honour for five inherited keys until the map lost
+ *    its prototype and the guard below started checking the operation POSITIVELY.
+ *  - **a run-level template with no `run_id` in the body.** The id is taken from the
+ *    refusal, never from the guess that produced it — a redirect that reuses the run
+ *    we happened to try is how a value lands on the wrong run, which is the defect
+ *    `Proposal.blockerKey` was added for.
+ *  - **the operation we just called.** Impossible under the published contract (each
+ *    refusal names the OTHER member of its pair at the same level), so reaching it means
+ *    the server contradicted itself — and repeating a call that just failed is the one
+ *    shape of "follow it once" that could look like a loop.
+ *
+ *    THE STRUCTURAL REFUSAL IS ONLY STRUCTURAL FOR A WELL-FORMED TARGET, which this
+ *    function used to take for granted. The comparison is `target.operation ===
+ *    attempted.operation`; an inherited-prototype hit produced `operation: undefined`,
+ *    which is equal to neither `'answers'` nor `'edit'`, so the guard passed and a
+ *    second write went out at the wrong level — the exact thing this bullet promises
+ *    cannot happen. It is a structural refusal again because `isWriteOperation` rejects
+ *    the target BEFORE the comparison, so there is no value that can reach it and be
+ *    equal to nothing.
+ */
+function redirectTargetFor(refusal: RoutingRefusal, attempted: WriteTarget): WriteTarget | null {
+  if (refusal.answerAt === null) return null;
+  const spec = ANSWER_AT_OPERATIONS[refusal.answerAt];
+  // Two independent refusals, either of which suffices. The map has no prototype, so an
+  // unknown template is `undefined` and nothing else; and the operation is checked
+  // POSITIVELY, so a target is only ever built out of a value `write()` can dispatch.
+  if (typeof spec !== 'object' || spec === null) return null;
+  if (!isWriteOperation(spec.operation) || typeof spec.run !== 'boolean') return null;
+  // A run operation with no run named in the body has nothing to substitute, and the run
+  // that was attempted is not a substitute for the run the server meant.
+  if (spec.run && refusal.runId === null) return null;
+  const target: WriteTarget = spec.run
+    ? { operation: spec.operation, runId: refusal.runId as string }
+    : { operation: spec.operation };
+  if (target.operation === attempted.operation && target.runId === attempted.runId) {
+    return null;
+  }
+  return target;
+}
 
 /**
  * Structural verdict guard. Every rendered text passes through here so a PASS/FAIL
@@ -541,19 +756,77 @@ export function proposeForField(
  * Guard 1 (staleness): if the proposal was grounded in an older revision than the
  * current context, refuse without touching the api — revalidation is required.
  *
- * Otherwise mutate exactly once, sending the current `version` as If-Match (the
- * api client adds the header). A pending field routes to `submitAnswer` (fills a
- * blocker); an already-answered field routes to `editField` (overwrites).
+ * Otherwise mutate, sending the version as If-Match (the api client adds the header).
  *
  * Guard 2 (concurrency): a 412 (`err.status === 412`) marks the proposal stale
  * and is returned as a conflict — NO silent retry, NO auto-merge. Other errors
  * propagate unchanged.
+ *
+ * ── THE OPEN/ANSWERED DECISION IS THE SERVER'S, AND USED NOT TO BE ─────────────────
+ *
+ * `submitAnswer` fills an OPEN question; `editField` corrects an ALREADY-ANSWERED one,
+ * and each refuses the other's job. This function used to choose between them by asking
+ * whether the proposal's question appeared in `ctx.pending` — a list fetched before the
+ * click, by a different component, for a different purpose.
+ *
+ * THAT MADE A READ'S COMPLETENESS INTO A WRITE'S CORRECTNESS CONDITION, which is why
+ * the list could not be bounded. A record's question count is `3 x runs`; the completion
+ * screen pages past 50; and with a 50-entry context a reader who paged to question 900
+ * and staged it took `isPending: false` and the EDIT route. Measured over HTTP against
+ * that route on an unanswered question: `422 unrecognized_field`, *"No editable field
+ * was recognized in the request."* A legitimate first answer refused, with a reason
+ * naming the wrong cause — the field was recognised perfectly well; only its STATE was
+ * other than the client had assumed.
+ *
+ * SO THE LIST IS NOW A HINT AND THE SERVER IS THE AUTHORITY. The hinted route is
+ * attempted; if it was the wrong one, the server says so in the one vocabulary that
+ * cannot drift from its own behaviour:
+ *
+ *   `POST /answers` on a CLOSED question   -> 422 `already_answered`,  answer_at: …/edit
+ *   `POST /edit`    on an OPEN   question  -> 422 `not_yet_answered`,  answer_at: …/answers
+ *
+ * Both refusals guarantee that nothing was written, and both were proved actionable
+ * rather than plausibly so — `_refuse_answering_an_already_answered_key` refuses a key
+ * only if `apply_corrections` would write it, so `/edit` is guaranteed to accept what it
+ * redirects; a security review followed all six `answer_at` values over HTTP and every
+ * target returned `200`.
+ *
+ * ── WHAT "FOLLOW IT ONCE" MEANS, EXACTLY ──────────────────────────────────────────
+ *
+ *  - **ONE redirect, structurally.** The second attempt's failure is never inspected for
+ *    an `answer_at`; there is no loop to bound because there is no cycle to enter. A
+ *    target equal to the one just attempted is refused by `redirectTargetFor` as well,
+ *    so even a self-contradicting server cannot produce a repeated call.
+ *  - **ONLY those two codes.** A 412, a `409 belongs_to_a_run`, a 403, a 500, an
+ *    `invalid_field_value`, a transport failure: none is retried, and none ever was.
+ *    The `error` code is read, not the status.
+ *  - **The CAS token follows the REDIRECT, not the guess.** A run write takes the RUN's
+ *    version and a record write takes the record's; sending the wrong one is a 412 the
+ *    reader would be told to fix by refreshing something that was never stale. The token
+ *    is therefore re-derived from the target (`tokenFor`), so a redirect that crosses
+ *    levels re-fetches rather than reusing what the first attempt happened to hold.
+ *  - **An ABSENT `answer_at` is obeyed as an answer.** It means nothing on this record
+ *    can resolve the condition, so no route is guessed and the server's own sentence is
+ *    returned for the caller to show (`status: 'refused'`).
+ *
+ * `proposal.runId` keeps its existing role throughout: it is recorded at STAGE time and
+ * is what makes the first attempt run-routed at all. The redirect does not read it —
+ * it reads the refusal's `run_id` — so a mis-recorded run cannot be carried into the
+ * second write.
  */
 export async function confirmProposal(
   proposal: Proposal,
   ctx: AgentContext,
   api: ConfirmApi,
-): Promise<{ status: 'ok' | 'stale' | 'conflict'; proposal?: Proposal; result?: unknown }> {
+): Promise<{
+  status: 'ok' | 'stale' | 'conflict' | 'refused';
+  proposal?: Proposal;
+  result?: unknown;
+  /** Present only on `refused`: the SERVER's own sentence, verbatim. */
+  message?: string;
+  /** Present only on `refused`: which of the two refusals it was. */
+  error?: AnswerRoutingError;
+}> {
   // Defense-in-depth (client-side, on top of the backend byte-exact If-Match):
   // only a PENDING proposal against a VERIFIED (non-degraded), CURRENT-rev context
   // may write. A stale/already-confirmed proposal, or an unverifiable (degraded)
@@ -575,7 +848,15 @@ export async function confirmProposal(
   /* MATCHED ON THE IDENTITY KEY WHEN THE PROPOSAL CARRIES ONE. `field` is the kind and
      is not unique across runs; see `Proposal.blockerKey`. Falling back to `field` keeps a
      caller that has no key working exactly as before, which is correct for a record with
-     no runs — there the two are equal. */
+     no runs — there the two are equal.
+
+     THIS IS A HINT, NOT THE DECISION. `ctx.pending` may be a bounded window of the
+     record's questions (`useRecordSession` reads a page, not the set), so an absent entry
+     means "not in the window", which is a weaker statement than "already answered". Being
+     wrong here now costs ONE extra round trip and never a wrong outcome — the server
+     refuses the wrong route without writing and names the right one. Keeping the hint at
+     all is what keeps that round trip rare: it is correct for every question inside the
+     window, which is every question on every record that exists today. */
   const open = proposal.blockerKey
     ? ctx.pending.find((p) => (p.blocker_key ?? p.id) === proposal.blockerKey)
     : ctx.pending.find((p) => p.id === proposal.field);
@@ -601,21 +882,83 @@ export async function confirmProposal(
      the edit path has it without reconstructing anything. The live entry is preferred
      when there is one, because a run could have been renamed or removed since. */
   const runId = open?.run_id ?? proposal.runId;
-  let token = ctx.version;
-  if (runId && api.getRun) {
-    token = (await api.getRun(ctx.experimentId, runId)).run.version;
-  }
+
+  /* THE If-Match TOKEN FOR ONE TARGET, DERIVED FROM THAT TARGET. A run write takes the
+     RUN's version; a record write takes the record's. This is a function of the target
+     rather than a variable computed once, which is the whole reason the redirect below
+     can cross levels safely: it asks again instead of reusing what the first attempt
+     held. A caller with no `getRun` keeps the previous behaviour exactly — the record's
+     token is used, which is what it has always sent. */
+  const tokenFor = async (target: WriteTarget): Promise<string> => {
+    if (target.runId && api.getRun) {
+      return (await api.getRun(ctx.experimentId, target.runId)).run.version;
+    }
+    return ctx.version;
+  };
+
+  /* ONE write, at one named operation. `runId` is passed through as `undefined` for a
+     record-level target, which is what routes `api.submitAnswer`/`api.editField` at the
+     record — nothing is parsed out of a key to get there. */
+  const write = async (target: WriteTarget): Promise<unknown> => {
+    const token = await tokenFor(target);
+    return target.operation === 'answers'
+      ? api.submitAnswer(ctx.experimentId, answers, token, target.runId)
+      : api.editField(ctx.experimentId, answers, token, target.runId);
+  };
+
+  const attempted: WriteTarget = {
+    operation: isPending ? 'answers' : 'edit',
+    ...(runId ? { runId } : {}),
+  };
 
   try {
-    const result = isPending
-      ? await api.submitAnswer(ctx.experimentId, answers, token, runId)
-      : await api.editField(ctx.experimentId, answers, token, runId);
-    return { status: 'ok', result };
+    return { status: 'ok', result: await write(attempted) };
   } catch (err) {
     if (statusOf(err) === 412) {
       // Stale write detected by the backend — mark stale, no retry, no merge.
       return { status: 'conflict', proposal: { ...proposal, confirmationState: 'stale' } };
     }
-    throw err;
+    const refusal = answerRoutingRefusal(err);
+    // Not one of the two routing refusals -> this function has nothing to add. Rethrown
+    // unchanged so the caller's own handling (which claims LESS about what happened than
+    // a redirect would) is what the reader sees.
+    if (refusal === null) throw err;
+    const target = redirectTargetFor(refusal, attempted);
+    if (target === null) {
+      // Nothing to follow. The server established that nothing was written and said why;
+      // that sentence is returned rather than a route invented to replace it.
+      return refusalOutcome(refusal, err);
+    }
+    try {
+      return { status: 'ok', result: await write(target) };
+    } catch (again) {
+      /* THE SECOND ATTEMPT IS THE LAST ONE, AND THAT IS ENFORCED BY STRUCTURE RATHER
+         THAN BY A COUNTER: this block does not call `redirectTargetFor`, so there is no
+         edge back into the redirect and no cycle to bound. A 412 here is the same
+         conflict it would have been on the first attempt (still no retry, still no
+         merge); a routing refusal here means the pair contradicted itself, and is
+         surfaced rather than acted on; anything else propagates. */
+      if (statusOf(again) === 412) {
+        return { status: 'conflict', proposal: { ...proposal, confirmationState: 'stale' } };
+      }
+      const second = answerRoutingRefusal(again);
+      if (second === null) throw again;
+      return refusalOutcome(second, again);
+    }
   }
+}
+
+/**
+ * A routing refusal the client will not act on, rendered as an outcome the caller can
+ * show. The server's sentence is carried VERBATIM — it is the only description of the
+ * refusal that cannot drift from the behaviour producing it. A refusal that carries no
+ * sentence is rethrown instead of being narrated, because the alternative is this client
+ * composing prose about a condition it did not observe.
+ */
+function refusalOutcome(
+  refusal: RoutingRefusal,
+  err: unknown,
+): { status: 'refused'; message: string; error: AnswerRoutingError } {
+  if (refusal.message === null) throw err;
+  return { status: 'refused', message: refusal.message, error: refusal.error };
 }

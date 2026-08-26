@@ -304,6 +304,18 @@ export interface EvidenceGraphPanelProps {
   /** The runs actually LOADED — a bounded page, never "all runs". */
   runs: ApiRunView[];
   runsMeta: EvidenceGraphRunsMeta;
+  /**
+   * The record version the RUN ROWS were successfully read at, when the caller
+   * tracks it.
+   *
+   * Omitted (or equal to `detail.version`) means the ordinary case: everything
+   * drawn came from one read of one version, and the freshness sentence says so
+   * unqualified. A DIFFERENT value is the case this prop exists for — the runs
+   * are a separate fetch from the bundle, so `/runs` can fail while the version
+   * poll succeeds, and the panel would otherwise print the NEW version over rows
+   * read at the old one. See the qualified branch of `.evgraph-freshness`.
+   */
+  runsVersion?: string;
   /** The workspace scope the data was READ in (null = ordinary workspace). */
   readInScope: string | null;
   /** The workspace scope the surface is addressing NOW. */
@@ -328,6 +340,7 @@ export function EvidenceGraphPanel({
   classification,
   runs,
   runsMeta,
+  runsVersion,
   readInScope,
   currentScope,
   focusRunId,
@@ -393,6 +406,9 @@ export function EvidenceGraphPanel({
       key={freshnessKey}
       experimentId={experimentId}
       graph={result.graph}
+      staleRunsVersion={
+        runsVersion !== undefined && runsVersion !== detail.version ? runsVersion : null
+      }
       runs={runs}
       store={store}
       focusRunId={focusRunId}
@@ -406,6 +422,7 @@ export function EvidenceGraphPanel({
 function LoadedEvidenceGraph({
   experimentId,
   graph,
+  staleRunsVersion,
   runs,
   store,
   focusRunId,
@@ -415,6 +432,9 @@ function LoadedEvidenceGraph({
 }: {
   experimentId: string;
   graph: EvidenceGraph;
+  /** The older version the drawn run rows were read at, or `null` when they are
+   *  the same version everything else here is. See `EvidenceGraphPanelProps`. */
+  staleRunsVersion: string | null;
   runs: ApiRunView[];
   store: RunCheckStore;
   focusRunId: string | null;
@@ -747,9 +767,37 @@ function LoadedEvidenceGraph({
         <p className="evgraph-counts" data-testid="evgraph-counts">
           {drawnLabel}
         </p>
+        {/* THE SENTENCE USED TO BE UNCONDITIONAL, AND ON ONE PATH IT WAS FALSE.
+            The runs are a SEPARATE fetch from the bundle the version comes from,
+            so `/runs` can fail while the version poll succeeds: `reloadSilent`
+            keeps the old rows and raises `refreshFailed`, and this line then
+            printed the NEW version over rows read at the OLD one — the exact
+            claim the fix that introduced the re-read was written to remove,
+            surviving on the failure path. The `LiveSyncNote` above says a
+            refresh failed, but it sits BESIDE this sentence rather than
+            correcting it, and a reader who believes a version token does not
+            get to un-believe it because a neighbouring note is worried.
+
+            So the qualified branch names BOTH versions rather than swapping one
+            for the other: the evidence, classification and validation findings
+            here really ARE at `graph.freshnessKey`'s version, and printing the
+            runs' older token alone would trade one false statement for another.
+            When the two agree — every mount that does not track the runs'
+            version, and every successful refresh — the sentence is byte-identical
+            to what it always was. */}
         <p className="evgraph-freshness" data-testid="evgraph-freshness">
           Built from this record at version <code>{graph.freshnessKey.split('|').pop()}</code>.
-          Nothing here is cached across a version change.
+          {staleRunsVersion === null ? (
+            ' Nothing here is cached across a version change.'
+          ) : (
+            <>
+              {' '}
+              The run rows are OLDER: they were read at version{' '}
+              <code data-testid="evgraph-freshness-runs">{staleRunsVersion}</code> and a
+              re-read has not landed since. Nothing here is cached across a version
+              change.
+            </>
+          )}
         </p>
       </header>
 

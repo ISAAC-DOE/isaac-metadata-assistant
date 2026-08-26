@@ -1174,6 +1174,142 @@ button.assistant-source-chip-nav:focus-visible {
   background: var(--assist-tint);
 }
 
+/* ---- The dock stops sticking when it CANNOT fit ---------------------
+ *
+ * WHAT WAS MEASURED (headless Chromium, this dev build, /record/<id>, the
+ * ≤1024px slide-over drawer, DARWIN — CI's Linux column is the authority for
+ * any number a baseline file records; none of these are in one):
+ *
+ *   viewport            dock height   "What Can I Ask?" trigger, unscrolled
+ *   1280x800  DPR1          483.5     430.5..455.5   in view
+ *   320x568   DPR1          425.8     251.5..276.5   in view
+ *   640x400   DPR2          339.0     189..214       in view
+ *   1440x400  DPR1          355.5     282..307       in view
+ *   384x512   DPR2          391.3     227.7..252.7   in view
+ *   160x284   DPR2          545.9     321..359       BELOW THE FOLD
+ *
+ * 160x284 is 320x568 at 200% browser zoom, emulated the way
+ * `playwright.config.ts` documents: halve the layout viewport, double the DPR.
+ * A 545.9px dock cannot fit a 284px viewport, so something in it is always off
+ * screen — that part is arithmetic, not a bug, and it is pre-existing.
+ *
+ * THE BUG IS WHICH PART, AND WHETHER SCROLLING REACHES IT. Sweeping the drawer's
+ * whole scroll range (0..430) in 41 steps:
+ *
+ *   with `position: sticky`   the trigger is fully visible only for scrollTop
+ *                             75..312, and at the BOTTOM of the scroll — the
+ *                             resting position "scroll to the end" lands on —
+ *                             it is clipped at -22.9..15.1.
+ *   without it                fully visible for scrollTop 194..430, INCLUDING
+ *                             the bottom of the scroll: 1..39.
+ *
+ * So sticky drags the dock up by a clamped 110px and holds its tail off the top
+ * edge exactly where a reader stops scrolling. Dropping it hands the tail back.
+ * The composer is unaffected at rest (it is in view at scrollTop 0 in both).
+ *
+ * WHY THIS AND NOT SOMETHING ELSE. Collapsing the no-model claim behind a
+ * control is the `voiceSeamUnreported` defect the parity guard's §1 pins
+ * against; shortening it is refused by §2 (92 characters is the minimum pair,
+ * both clauses load-bearing); moving the trigger above the composer is a
+ * control-order change with a far wider blast radius. Raising
+ * `.record-right .assistant`'s `max-height` was measured and is WORSE — it
+ * grows the panel to 1046px and pushes the trigger to 799 unscrolled.
+ *
+ * WHY BOTH BOUNDS. `max-height` alone is the condition that matters, but the
+ * dock is only tall enough to overflow because it is NARROW: the 92-character
+ * claim wraps to 6 lines at the 140.8px drawer and 2 lines at 367px. Requiring
+ * both keeps the rule off every Playwright project (800/768/1024/812 tall, and
+ * zoom-200 is 640 wide), so it cannot move a recorded baseline; and both bounds
+ * were measured inert at 187x406, the closest neighbour inside the band.
+ *
+ * `relative`, not `static`: `bottom: 0` becomes a no-op under relative
+ * positioning, while `z-index: 1` keeps applying — the dock's background is
+ * opaque on purpose and its paint order is not a thing to hand to source order. */
+@media (max-width: 480px) and (max-height: 480px) {
+  .assistant-foot {
+    position: relative;
+  }
+  /* ---- …AND THE TRIGGER IS PINNED RATHER THAN SCROLLED PAST ------------
+   *
+   * RELEASING THE DOCK WAS NECESSARY AND NOT SUFFICIENT, and CI proved it.
+   * With `position: relative` alone the trigger lands at 1..39 on darwin and
+   * at -17.5..22.5 on Linux — red in the `zoom-200` project. The 16.5px is not
+   * noise: this app ships no webfont, so the 92-character claim wraps at a
+   * different word under DejaVu/Liberation, and the extra line lands BELOW the
+   * trigger. What it is arithmetic ON (darwin, this dev build, the ≤1024px
+   * drawer, /record/<id>, all measured):
+   *
+   *   drawer scrollport   284.0   (fixed top:0/bottom:0, clientHeight)
+   *   scrollHeight        714.0   -> max scrollTop 430
+   *   `.assistant-foot`   545.9   ending EXACTLY at the scrollport bottom
+   *   trigger              38.0
+   *   BELOW the trigger   245.0   = agent actions 90.9 + 2 + caption 142 + 10
+   *
+   * At the end of the scroll the last content pixel is the viewport's last
+   * pixel, so the trigger's top sits at `284 - 38 - tail`. On darwin that is
+   * 284-38-245 = 1. ONE PIXEL. It is a coincidence, not a fix, and the Linux
+   * wrap spends it.
+   *
+   * NOTHING ABOUT THE SCROLL RANGE IS SHORT — the first hypothesis, and
+   * measurably wrong. `.assistant-foot`'s bottom is 283.9 in a 284px
+   * scrollport at max scroll: the container already scrolls its content fully.
+   * `padding-bottom` in this band makes it WORSE (scrollHeight and max
+   * scrollTop grow together, so the tail still ends at the bottom edge and
+   * every box above it moves further up), and shrinking the tail is a content
+   * change — the claim is pinned at 92 characters, and the caption and the
+   * agent controls are two things a reader at this size needs.
+   *
+   * ── A 546px DOCK IN A 284px VIEWPORT IS A TRADE, AND THIS IS THE TRADE ──
+   *
+   * The trigger and its 245-262px tail cannot both be fully visible in 284px.
+   * That is arithmetic. So the trigger is not scrolled PAST: sticky at the top
+   * edge pins it once its natural position would leave the scrollport, for as
+   * long as its containing block (`.assistant-foot`, whose bottom IS the
+   * scrollport bottom at max scroll) has room. At the end of the scroll it is
+   * therefore at 16..54 of 284 — 16 being the drawer's own top padding, where
+   * `top: 0` pins — and that holds for ANY tail height. The only quantity in it
+   * is the trigger's own 38px against the viewport's 284, so no font metric
+   * participates. THAT is the part CI is red on, and the part this fixes.
+   *
+   * WHAT IT COSTS, MEASURED RATHER THAN WAVED AT. A pinned box is displaced
+   * DOWNWARD out of flow, so it overlays what follows it. At max scroll on
+   * darwin that is 13px of `.assistant-agent-actions`, of which 12 are the
+   * block's own top padding and 1 touches its "Agent Actions" eyebrow. With
+   * the tail inflated 40px to stand in for a wider face, 53px — the eyebrow,
+   * and none of the buttons, which start 61.6px down. Like any sticky header
+   * it is recoverable: scrolling up a few px un-pins it and the tail is whole.
+   * A control that is unreachable at the resting position is not recoverable
+   * by anything.
+   *
+   * `bottom: 0` would not do it: a bottom-sticky box is held off the BOTTOM
+   * edge, and this control leaves through the TOP. `top: 55vh` WAS measured —
+   * it pins the trigger at 172.2..210.2 and leaves room above for the
+   * popover — and is rejected because a larger inset means a larger
+   * displacement: it overlays the advisory caption mid-sentence instead of an
+   * eyebrow. Minimum displacement is the whole point of `top: 0`.
+   *
+   * THE BACKGROUND IS NOT DECORATION, and an earlier revision of this comment
+   * argued it away on the theory that nothing is painted behind the pin. That
+   * was measured false, and the measurement is the overlay above — the tail is
+   * behind it. The tint is the dock's own, so at rest the declaration is
+   * invisible and while pinned it is what stops two texts printing over each
+   * other.
+   *
+   * ONE THING THIS DOES NOT MAKE WORSE, since it looks like it should: the
+   * popover. It opens UPWARD, and at the end of the scroll there has never
+   * been room for it — from the unpinned trigger at 1 it renders at
+   * -101.5..-5, entirely off screen, and from the pinned 16 it is off screen
+   * too. Using it requires scrolling up either way. (Under Playwright, which
+   * scrolls an element into view before clicking it, the pinned case measures
+   * -15.5..81 against 93.5..190 unpinned; the clipped strip is the top of the
+   * catalog, which is its own scroll region.) */
+  .assistant-capabilities {
+    position: sticky;
+    top: 0;
+    background: var(--assist-tint);
+  }
+}
+
 /* P29.4b — the UNCONFIRMED staged-proposal card. Advisory-tinted, never a
    verdict color; a candidate/unknown/conflicting variant is icon+text distinct. */
 .agent-proposal {

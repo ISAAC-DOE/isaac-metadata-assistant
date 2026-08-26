@@ -43,6 +43,15 @@ async function flush() {
 describe('useRecordSession — shared authoritative record state', () => {
   beforeEach(() => {
     clearAllSessions();
+    /* THE BOUNDED READER, because that is the one the hook calls. `getPending` — the
+       UNBOUNDED one — is spied too and asserted unused: it is still the right reader for
+       the Review Record and Export Readiness bundles, so it must keep existing, and a
+       silent regression back to it here is exactly the 1.77 MB-per-answer read that was
+       removed. The page block is omitted, which by the `getPendingPage` contract means
+       the response was complete. */
+    vi.spyOn(api, 'getPendingPage').mockResolvedValue({
+      pending: pendingResponse.pending,
+    } as never);
     vi.spyOn(api, 'getPending').mockResolvedValue(pendingResponse.pending as never);
     vi.spyOn(api, 'getEvidenceClassification').mockResolvedValue(
       evidenceClassificationResponse as never,
@@ -71,6 +80,14 @@ describe('useRecordSession — shared authoritative record state', () => {
     expect(ctx.pending.length).toBe(pendingResponse.pending.length);
     expect(ctx.evidence.length).toBe(evidenceClassificationResponse.field_results.length);
     expect(result.current.degraded).toBe(false);
+
+    /* AND IT ASKED FOR A WINDOW, NOT THE SET. This effect is keyed on `version`, which
+       the completion screen adopts from every accepted answer, so an unbounded read here
+       is not a mount cost — it is 1,772,692 bytes fetched again after every submission on
+       a 1,000-run record. The limit is asserted rather than merely the method, because
+       `getPendingPage` with no `limit` sends no parameters and IS the unbounded read. */
+    expect(api.getPendingPage).toHaveBeenCalledWith(EXP_ID, { limit: 50 });
+    expect(api.getPending).not.toHaveBeenCalled();
   });
 
   it('a manual edit that bumps the version updates the shared context the assistant reads', async () => {
@@ -144,9 +161,9 @@ describe('useRecordSession — shared authoritative record state', () => {
     // Record A holds its extras fetch open; record B resolves first. When A's
     // late response finally lands it must be dropped by the stale guard.
     let resolveA: (v: unknown) => void = () => {};
-    (api.getPending as unknown as Mock).mockImplementation((id: string) => {
+    (api.getPendingPage as unknown as Mock).mockImplementation((id: string) => {
       if (id === 'A') return new Promise((res) => (resolveA = res));
-      return Promise.resolve([{ id: 'b-pending', kind: 'asset', question: 'B?' }]);
+      return Promise.resolve({ pending: [{ id: 'b-pending', kind: 'asset', question: 'B?' }] });
     });
     (api.getEvidenceClassification as unknown as Mock).mockImplementation((id: string) =>
       Promise.resolve({
@@ -171,7 +188,7 @@ describe('useRecordSession — shared authoritative record state', () => {
 
     // A's superseded response lands late — it must NOT overwrite B's state.
     await act(async () => {
-      resolveA([{ id: 'a-pending', kind: 'asset', question: 'A?' }]);
+      resolveA({ pending: [{ id: 'a-pending', kind: 'asset', question: 'A?' }] });
       await Promise.resolve();
     });
     expect(result.current.context!.experimentId).toBe('B');
@@ -197,7 +214,7 @@ describe('useRecordSession — shared authoritative record state', () => {
   it('a still-pending inputs fetch is LOADING, not degraded; degraded only after it FAILS', async () => {
     // Hold the AgentContext inputs in-flight — a healthy slow network.
     let rejectPending: (e: unknown) => void = () => {};
-    (api.getPending as unknown as Mock).mockImplementation(
+    (api.getPendingPage as unknown as Mock).mockImplementation(
       () => new Promise((_res, rej) => (rejectPending = rej)),
     );
 

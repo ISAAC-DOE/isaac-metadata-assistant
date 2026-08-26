@@ -160,8 +160,16 @@ def test_a_tool_that_returns_a_complete_list_does_not_claim_a_bound(name):
     """THE NEGATIVE CONTROL, and it is the half that keeps the fix honest.
 
     ``isaac_list_questions`` reaches ``GET /pending``, which answers COMPLETELY by
-    default — bounding there is opt-in and this tool sends no parameters. A tool that
-    told an agent its complete list was a window would be the mirror-image lie, and it
-    would also make the statement above meaningless by making it universal.
+    default — bounding there is opt-in. A tool that told an agent its complete list was a
+    window would be the mirror-image lie, and it would also make the statement above
+    meaningless by making it universal.
+
+    ~~"and this tool sends no parameters"~~ — **corrected 2026-08-25, and struck rather
+    than deleted because it named the wrong reason.** The tool now DOES expose the route's
+    ``run_id``/``offset``/``limit`` and forwards them when a caller sends them
+    (``test_mcp_list_questions_is_boundable.py``). What holds, and is what this assertion
+    ever depended on, is that the DEFAULT is complete: send only ``experiment_id`` and
+    there is no ``pending_page`` block and nothing was withheld. The four operations above
+    are bounded whether the caller asked or not, which is why only they must say so.
     """
     assert _MARKER not in TOOLS[name].description

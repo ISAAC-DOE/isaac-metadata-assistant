@@ -53,38 +53,50 @@ import type {
  * are named and reachable through "Show more questions"; and `GET /pending` without
  * parameters still answers completely for the Review Record screen beside this one.
  *
- * THIS SCREEN IS NOT END-TO-END BOUNDED, AND THE RESIDUE IS BIGGER THAN THIS COMMENT
- * USED TO IMPLY. `LoadedCompletion` mounts `useRecordSession`, whose AgentContext
- * effect reads `api.getPending(id)` — UNBOUNDED — and that effect is keyed on
- * `[id, version, active, refreshNonce]`. `version` is adopted from every accepted
- * answer (`setCurrentVersion(resp.version)`), so **the unbounded read fires again after
- * EVERY SUBMISSION**, not only on mount. The measurement, and it is the honest
- * headline for this flow rather than the one the branch's own commit message gives:
+ * THIS SCREEN IS NOW END-TO-END BOUNDED, AND THE SENTENCE THAT USED TO STAND HERE IS
+ * KEPT AS A MEASUREMENT RATHER THAN DELETED. `LoadedCompletion` mounts
+ * `useRecordSession`, whose AgentContext effect read `api.getPending(id)` — UNBOUNDED —
+ * from an effect keyed on `[id, version, active, refreshNonce]`. `version` is adopted
+ * from every accepted answer (`setCurrentVersion(resp.version)`), so **the unbounded
+ * read fired again after EVERY SUBMISSION**, not only on mount:
  *
- *   at 1,000 runs, per accepted answer
- *     before   POST 1,773,294 B + unbounded GET 1,772,692 B  =  ~3.55 MB
- *     after    POST    31,968 B + unbounded GET 1,772,692 B  =  ~1.80 MB
+ *   at 1,000 runs, the two pending payloads of one accepted answer
+ *     originally    POST 1,773,294 B + unbounded GET 1,772,692 B  =  3,545,986 B
+ *     mutation bound only
+ *                   POST    31,968 B + unbounded GET 1,772,692 B  =  1,804,660 B  (49.1%)
+ *     both bounded  POST    31,968 B + bounded  GET     29,590 B  =     61,558 B  (98.3%)
  *
- * A **49% reduction on this flow**, not the ~98% the mutation figures alone suggest.
- * The mutation half is genuinely flat; the read half is untouched and repeats.
+ * So the "49% reduction, not the ~98% the mutation figures alone suggest" that this
+ * comment reported was true of the intermediate state and is no longer true of this one.
+ * The bounded GET figure is measured, not divided down: `ISAAC_PERF_BENCH=1 .venv/bin/
+ * pytest apps/api/tests/test_pending_reads_are_boundable.py -q -s -k benchmark` prints
+ * the `GET ?limit=50` column, which is 29,590 B at 1,000 runs and 29,584 B at 25 — flat,
+ * which is the property that matters, and 18 bytes off what per-entry arithmetic would
+ * have predicted. These are the two PENDING payloads only; the same submission also
+ * re-reads `evidence-classification` and the record detail, unchanged by this work.
  *
- * ~~the residue is a per-screen, on-mount one~~ — that is how it was first described,
+ * ~~the residue is a per-screen, on-mount one~~ — that is how it was FIRST described,
  * in this comment and in `pending-is-bounded.test.tsx`, and it was wrong about the
- * frequency. The control whose absence hid it now exists:
- * `it('the unbounded AgentContext read REPEATS after every submission')`.
+ * frequency; the control whose absence hid it is now inverted in that file and still
+ * counts the same call.
  *
- * WHY IT IS NOT BOUNDED HERE, measured rather than asserted. `useRecordSession`'s
- * `pending` is what `assistantAgent.confirmProposal` searches to decide whether a
+ * WHY IT COULD NOT BE BOUNDED UNTIL NOW, measured rather than asserted, because the
+ * reason is a live constraint on anyone changing either side. `useRecordSession`'s
+ * `pending` was what `assistantAgent.confirmProposal` searched to decide whether a
  * staged proposal answers a still-OPEN question (`submitAnswer`) or corrects an
  * already-answered one (`editField`). The proposal is staged from THIS screen's list,
- * which pages deeper than 50 — so a reader who clicks "Show more" to reach question
- * 900 and stages it would, with a 50-entry context, get `isPending: false` and the
+ * which pages deeper than 50 — so a reader who clicked "Show more" to reach question
+ * 900 and staged it would, with a 50-entry context, get `isPending: false` and the
  * EDIT route. Measured over HTTP against that route on an unanswered question:
  * `422 unrecognized_field`, "No editable field was recognized in the request." A
- * legitimate first answer refused, with a reason naming the wrong cause. Bounding this
- * read therefore requires moving the open/answered decision out of the pre-fetched
- * list — a change to the assistant's write routing, with its own review — and is
- * deliberately not smuggled in behind a byte saving.
+ * legitimate first answer refused, with a reason naming the wrong cause.
+ *
+ * THAT DECISION NOW BELONGS TO THE SERVER, which is what made the bound safe rather
+ * than merely cheaper. `confirmProposal` attempts the hinted route and, on a `422
+ * already_answered` / `not_yet_answered` — two refusals that write nothing and name the
+ * operation that can take the request — follows the named `answer_at` exactly once,
+ * with the If-Match token of the level it names. A question outside the window costs one
+ * extra round trip and lands correctly; it no longer lands wrongly.
  */
 const PENDING_PAGE = 50;
 

@@ -64,6 +64,7 @@ __all__ = [
     "Scope",
     "forbidden_tool_reason",
     "parse_scope",
+    "pending_query_parameters",
     "run_list_query_parameters",
 ]
 
@@ -212,6 +213,26 @@ class Operation:
 #: depends entirely on whether the route in THIS checkout has them.
 RUN_LIST_QUERY_ALLOWLIST = frozenset({"limit", "offset", "q", "overrides", "exported"})
 
+#: Pending-list query parameters this package is permitted to expose, reviewed the same
+#: way the run-list set is and for the same reason: the derivation below reads the ROUTE,
+#: and this frozenset is the REVIEW GATE on what the route is allowed to teach the tool.
+#:
+#: WHAT WAS REVIEWED, because "it is only paging" is not a review. All three BOUND a read
+#: that the route answers COMPLETELY by default. `run_id` is a filter on a value the
+#: agent already holds — `isaac_list_questions` returns `run_id` on every entry, and
+#: `isaac_list_runs` lists them — so it selects nothing the caller could not already see,
+#: and an UNKNOWN run is refused by the route rather than answered with an empty page, so
+#: it cannot be used to probe for ids. `offset`/`limit` carry no record content at all.
+#: None of the three can widen a response, name a field, or select on scientific content:
+#: the route's own `pending_page.record_total` keeps reporting the WHOLE record's open
+#: question count, so a bounded read can never be mistaken for the record's state.
+#:
+#: `q` IS DELIBERATELY ABSENT. The pending route does not have it today; listing it
+#: pre-emptively (as the run-list set does) would be pre-approving a free-text selector
+#: over question text, and that is a different question from paging — it is the one this
+#: gate exists to stop being answered by accident.
+PENDING_QUERY_ALLOWLIST = frozenset({"run_id", "offset", "limit"})
+
 
 @dataclass(frozen=True)
 class QueryParameter:
@@ -267,20 +288,24 @@ def _json_type_for(annotation: object) -> tuple[str, tuple[str, ...] | None] | N
     return None
 
 
-def run_list_query_parameters() -> tuple[QueryParameter, ...]:
-    """The run-list route's own query parameters, read off its signature.
+def _query_parameters(
+    route, allowlist: frozenset[str], what: str
+) -> tuple[QueryParameter, ...]:
+    """One route's own query parameters, read off its signature and gated by ``allowlist``.
+
+    ONE READER FOR EVERY GATED ROUTE, and it is shared rather than copied for exactly the
+    reason the derivation exists at all: a second copy of this walk is a second place the
+    ``Annotated``/``Query``/``Literal`` handling can drift, and the copy that drifts is the
+    one publishing a wrong schema to an external agent.
 
     Raises ``RuntimeError`` when the route carries a parameter that is not in
-    :data:`RUN_LIST_QUERY_ALLOWLIST`, or one whose type this reader cannot render
-    as a JSON Schema type. Both are refusals to guess: exposing a parameter whose
-    meaning has not been reviewed, or one whose schema would be wrong, is worse
-    than not exposing it.
+    ``allowlist``, or one whose type this reader cannot render as a JSON Schema type. Both
+    are refusals to guess: exposing a parameter whose meaning has not been reviewed, or
+    one whose schema would be wrong, is worse than not exposing it.
     """
-    from ..routes import list_runs  # local: keeps module import order flexible
-
     found: list[QueryParameter] = []
-    hints = typing.get_type_hints(list_runs, include_extras=True)
-    for name, parameter in inspect.signature(list_runs).parameters.items():
+    hints = typing.get_type_hints(route, include_extras=True)
+    for name, parameter in inspect.signature(route).parameters.items():
         annotation = hints.get(name, parameter.annotation)
         # `__metadata__` rather than `get_origin(...) is Annotated`: what
         # `get_origin` returns for an `Annotated[...]` alias has changed between
@@ -294,16 +319,16 @@ def run_list_query_parameters() -> tuple[QueryParameter, ...]:
         )
         if query is None:
             continue
-        if name not in RUN_LIST_QUERY_ALLOWLIST:
+        if name not in allowlist:
             raise RuntimeError(
-                f"the run-list route exposes an unreviewed query parameter {name!r}; "
-                "add it to RUN_LIST_QUERY_ALLOWLIST only after deciding it is safe "
+                f"the {what} route exposes an unreviewed query parameter {name!r}; "
+                f"add it to the {what} allowlist only after deciding it is safe "
                 "for an agent to filter on"
             )
         rendered = _json_type_for(base)
         if rendered is None:
             raise RuntimeError(
-                f"cannot render run-list query parameter {name!r} as a JSON Schema "
+                f"cannot render {what} query parameter {name!r} as a JSON Schema "
                 f"type (annotation {base!r})"
             )
         json_type, enum = rendered
@@ -319,6 +344,31 @@ def run_list_query_parameters() -> tuple[QueryParameter, ...]:
             )
         )
     return tuple(found)
+
+
+def run_list_query_parameters() -> tuple[QueryParameter, ...]:
+    """The run-list route's own query parameters, gated by
+    :data:`RUN_LIST_QUERY_ALLOWLIST`."""
+    from ..routes import list_runs  # local: keeps module import order flexible
+
+    return _query_parameters(list_runs, RUN_LIST_QUERY_ALLOWLIST, "run-list")
+
+
+def pending_query_parameters() -> tuple[QueryParameter, ...]:
+    """The pending-list route's own query parameters, gated by
+    :data:`PENDING_QUERY_ALLOWLIST`.
+
+    WHY THIS EXISTS. ``isaac_list_questions`` exposed the UNBOUNDED read only, while the
+    route it calls had grown ``run_id``, ``offset`` and ``limit``. A record's question set
+    grows with its runs — at 1,000 runs ``GET /pending`` measured **1.78 MB** — so an
+    agent working on ONE run had no way to ask for one run's questions and was forced to
+    download the whole record's set to find them. The tool is not made bounded by this;
+    the route's default is unchanged and still complete. What changes is that the client
+    can now ASK, which is the same distinction the HTTP route draws.
+    """
+    from ..routes import get_pending  # local: keeps module import order flexible
+
+    return _query_parameters(get_pending, PENDING_QUERY_ALLOWLIST, "pending-list")
 
 
 def _bounds(query: object) -> tuple[int | None, int | None]:
@@ -344,6 +394,10 @@ def _bounds(query: object) -> tuple[int | None, int | None]:
 
 def _run_list_query_names() -> frozenset[str]:
     return frozenset(p.name for p in run_list_query_parameters())
+
+
+def _pending_query_names() -> frozenset[str]:
+    return frozenset(p.name for p in pending_query_parameters())
 
 
 # --------------------------------------------------------------------------
@@ -448,6 +502,7 @@ def _operations() -> tuple[Operation, ...]:
                 "The record's open blocking questions, each with the key an answer "
                 "is submitted under and the run that owns it."
             ),
+            query_parameters=_pending_query_names(),
         ),
         Operation(
             id="answer_record_question",

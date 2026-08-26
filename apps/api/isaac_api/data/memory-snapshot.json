@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "be38c631eb75725e955e0b8033800c06b86ff159ade28f62d2ff9a545af93448"
+        "sha256": "1a0ac44034da361125f1c0061a1bf6824d0cd9a3d82f45b09e5409c0a518c3ed"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "6cbaf7e4e4b8911cb6430c085d79daccff4d79a3f8f5378b5f1e37a0876d80c2"
+        "sha256": "a59b93975cd991f5e24779991322a93092d2fc1167c8f616361647f39b9b1138"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "35a96ec87c9ec3778b91cb233064bf1275efcf21416c7922dd113b2566ec61c1"
+        "sha256": "43ac8cb6b8cb52a2a28eeb24b5074ce186130a3dceb6cbfbd79df34620868f09"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10536,7 +10536,7 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "9e7a41cbe0f5c23a1a875e4e669caee4cd2caf8a79e03fbf9fbd44e703c991ec"
+        "sha256": "58a05a79dcc505ed70a7b8b45dfca9479509f4b29372b362b1761f7fab7ec0c1"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "3e5e8f72f58eaba68ce913fb721be3062af46953a119b9861ae144153ffc2e8f"
+        "sha256": "c847192415f91efbfff3dfdd744c4da58f68292ec5fbfd8b161da1c8c58b1407"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "3876fb74f0311071764033e00eb226883ec36dd35fceeb6fe98c7c708a27c20c"
+        "sha256": "f75d9f43aa0b11596198d4e0408761eeda78c4106d8044102736c215961d68e1"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "1c72ffe7621e4d5b3cbed23a9dcb5a16a46088ae3eb895d7e73f8f3b7900f670"
+    "served_manifest_fingerprint": "d12f7e6278c146606287f2837c98bb2b9429be83b0ff7767c72596edbca4b44b"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

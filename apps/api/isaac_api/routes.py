@@ -79,7 +79,7 @@ from . import version_contract as vc
 from . import workspace as ws
 from .identity import require_human_actor
 from .workflow import derive_lifecycle, derive_workflow
-from .workspace import REPO_ROOT, Experiment, atomic_write_text
+from .workspace import REPO_ROOT, Experiment, ExportUnit, atomic_write_text
 
 router = APIRouter(prefix="/api")
 
@@ -925,7 +925,9 @@ def _export_step_detail(result) -> str:
     )
 
 
-def _summary(exp: Experiment) -> dict:
+def _summary(exp: Experiment, *, units: list[ExportUnit] | None = None) -> dict:
+    """One summary row. ``units`` is an already-composed ``export_units()`` list, used
+    only by ``status()`` and only on its dry-run branch — see :func:`_shared_units`."""
     return {
         "id": exp.id,
         "title": exp.title,
@@ -938,7 +940,7 @@ def _summary(exp: Experiment) -> dict:
         # (Invariance alone would NOT be enough: an invariant present-tense state
         # description over a mutating record is guaranteed to go false.)
         "scenario": ws.scenario_label(exp.id),
-        "status": exp.status(),
+        "status": exp.status(units=units),
         "created_utc": exp.created_utc,
         "pending_count": exp.pending_count(),
         # KNOWN LIMIT, disclosed rather than fixed here (review item, and the C9
@@ -983,8 +985,60 @@ FAN_OUT_ARTIFACT_REASON = (
 )
 
 
+def _shared_units(exp: Experiment) -> list[ExportUnit]:
+    """The ONE composed unit list a single detail response is built from.
+
+    **THE MEASURED DEFECT THIS CLOSES.** ``GET /api/experiments/{id}`` is flat in payload
+    (~1.5 KB at any run count) and was linear in TIME — 3.0 ms at 25 runs, 83.2 ms at
+    1,000 (`docs/evidence/scale-envelope-2026-08-25.md` §3). ``cProfile`` put
+    ``copy.deepcopy`` at ~49% cumulative, driven by ``Experiment.resolved_run_draft`` at
+    **3,000 calls on a 1,000-run record** — exactly 3x the run count, because
+    ``export_units()`` composes every run's draft and :func:`_detail` reached it three
+    times: ``_workflow_for`` -> ``draft_ok``, the response's own ``draft_ok``, and
+    ``dependencies.artifact_state`` -> ``_fan_out_artifact_state``. On a record with no
+    open questions it is FIVE, because ``status()`` and ``export_ready()`` stop
+    short-circuiting past ``_all_units_pass_dry_run``. Document parsing was never the
+    cost: ``json.decoder.raw_decode`` was 1 call per request.
+
+    **THREADED, NOT MEMOISED, AND THIS FUNCTION IS THE SEAM RATHER THAN A CACHE.** A
+    per-instance memo would be unsafe: this module mutates an ``Experiment`` and then
+    re-reads its derived state in the same request (answer -> recompute status/workflow),
+    so a ``cached_property`` or an instance dict would serve a stale composition after a
+    write. This composes once per RESPONSE, hands the list to each consumer as an
+    argument, and stores nothing anywhere. Every consumer's ``units=None`` default is
+    still the code that ran before, which is what lets
+    ``test_detail_route_composes_each_run_once.py`` reproduce the pre-change path by
+    patching this one function to return ``None`` and compare the two responses byte for
+    byte.
+
+    Composing it here is safe because :func:`_detail` WRITES NOTHING between the
+    composition and the last consumer of it, and because the three consumers read their
+    drafts without writing them (``validate_draft``, ``export_draft`` and ``transform``
+    all build a new object) — asserted, not assumed, by that file's no-mutation test.
+    A zero-run experiment gets a list too: its single unit carries ``exp.draft`` ITSELF
+    rather than a composition, so there is nothing to save on the composition.
+    ~~"and one ``export_units()`` call to save on the dry run"~~ — **TRUE ONLY WHEN THE
+    RECORD HAS NO OPEN QUESTIONS, and corrected in place because as written it claimed a
+    saving on the common case.** Measured over the HTTP surface on a zero-run record,
+    ``export_units`` calls per detail read, un-threaded -> threaded:
+
+    * ``pending_count() > 0``: **0 -> 1**. The dry run is never reached (``status()``
+      short-circuits on pending and ``export_ready()`` returns before it), so this
+      function strictly ADDS one call. It is a cheap one — a zero-run unit list is one
+      unit wrapping ``exp.draft`` with nothing composed — and the read still nets a
+      saving in the work that matters: ``validate_draft`` goes 2 -> 1, because
+      ``draft_ok`` is now derived once for the whole response.
+    * ``pending_count() == 0``: **2 -> 1**, which is the saving the struck sentence
+      described.
+    """
+    return exp.export_units()
+
+
 def _detail(exp: Experiment) -> dict:
-    detail = _summary(exp)
+    # ONE COMPOSITION FOR THE WHOLE RESPONSE — see `_shared_units` for the measurement
+    # and for why this is an argument rather than a cache.
+    units = _shared_units(exp)
+    detail = _summary(exp, units=units)
     record_path = exp.record_path()
     sidecar_path = exp.sidecar_path()
     # `_workflow_for` is the ONE derivation (review item C5). It used to be inlined
@@ -992,7 +1046,15 @@ def _detail(exp: Experiment) -> dict:
     # mutation response — passed `all_units_exported()`, so a fully-exported fan-out
     # got `export: 'completed'` from the export response and `export: 'current'` from
     # the very next detail GET.
-    workflow = _workflow_for(exp)
+    # AND ONE `draft_ok` FOR THE WHOLE RESPONSE. Sharing the unit list stopped the
+    # RE-COMPOSITION, but `draft_ok` was still being DERIVED twice from it — once for
+    # the workflow's `complete_metadata`/`review_evidence` steps and once for the
+    # response's own key — which is `validate_draft` over every unit, twice. Measured
+    # on a 1,000-run record: 2,000 `validate_draft` calls per request, exactly 2x runs.
+    # It is the same experiment at the same revision in the same read, so the second
+    # derivation could only ever agree with the first.
+    draft_ok = exp.draft_ok(units=units)
+    workflow = _workflow_for(exp, units=units, draft_ok=draft_ok)
     fan_out = bool(exp.runs)
     artifact_refs = {
         "record_filename": record_path.name if exp.exported() and record_path else None,
@@ -1002,7 +1064,7 @@ def _detail(exp: Experiment) -> dict:
         artifact_refs["reason"] = FAN_OUT_ARTIFACT_REASON
     detail.update(
         {
-            "draft_ok": exp.draft_ok(),
+            "draft_ok": draft_ok,
             # P30.6 — SAFE basename only, never the absolute server/mount path
             # (CLAUDE.md path-boundary rules). The client labels + names the
             # download from the filename; JSON content comes from /artifacts.
@@ -1010,13 +1072,18 @@ def _detail(exp: Experiment) -> dict:
             "source_files": (exp.source or {}).get("files") or [],
             "workflow": workflow,
             # Derived exported-artifact freshness (P28.2): none | current | stale.
-            "artifact": dependencies.artifact_state(exp),
+            "artifact": dependencies.artifact_state(exp, units=units),
         }
     )
     return detail
 
 
-def _workflow_for(exp: Experiment) -> dict:
+def _workflow_for(
+    exp: Experiment,
+    *,
+    units: list[ExportUnit] | None = None,
+    draft_ok: bool | None = None,
+) -> dict:
     """Derive the workflow from an experiment's current signals (same call as
     ``_detail``). Used to capture the pre-mutation step states and to surface the
     post-mutation workflow on a mutation response.
@@ -1027,11 +1094,27 @@ def _workflow_for(exp: Experiment) -> dict:
     stays ``None`` for such an experiment, so ``exported()`` would report the step
     unsatisfied forever. For an experiment with no runs the two are the same
     function of the same field, so nothing about today's behaviour moves.
+
+    ``units`` AND ``draft_ok`` ARE OPTIONAL, AND THEY ARE OPTIONAL BECAUSE OF THE BLAST
+    RADIUS. This function is called by EVERY mutation response as well as by
+    :func:`_detail` — **fifteen call sites in this module, counted rather than estimated
+    (``grep -n '_workflow_for(' routes.py``); the commit that introduced the parameters
+    said "a dozen" and that was wrong by three** — and each of the other fourteen has
+    exactly one derivation to make and nothing to share it with. So they are untouched
+    and keep deriving their own; only :func:`_detail`, which needs four unit-dependent
+    facts for one response, passes anything. See :func:`_shared_units`.
+
+    ``draft_ok`` is a BOOLEAN THE CALLER ALREADY DERIVED, not a way to assert one. It is
+    only ever passed the value ``exp.draft_ok(units=units)`` returned for this same
+    experiment at this same revision inside the same read — pinned by
+    ``test_detail_route_composes_each_run_once.py``, which compares the whole response
+    against the un-threaded derivation byte for byte. It is deliberately NOT plumbed
+    through to any route that could take it from a request.
     """
     return derive_workflow(
         pending_count=exp.pending_count(),
-        draft_ok=exp.draft_ok(),
-        ready=exp.export_ready(),
+        draft_ok=exp.draft_ok(units=units) if draft_ok is None else draft_ok,
+        ready=exp.export_ready(units=units),
         exported=exp.all_units_exported(),
         rev=exp.rev,
     )
@@ -2356,8 +2439,9 @@ _PENDING_RUN_ID_DESC = (
     "Return only the questions owned by this run — the common case of a scientist "
     "working one measurement. Refused with `404 run_not_found` when the record holds "
     "no such run, rather than answered with an empty list that reads as 'this run has "
-    "nothing left'. AN EMPTY VALUE (`?run_id=`) IS A RUN ID THE RECORD DOES NOT HOLD "
-    "AND IS REFUSED THE SAME WAY, naming `\"\"` as the id that was not found; it is "
+    "nothing left'. AN EMPTY VALUE IS A RUN ID THE RECORD DOES NOT HOLD AND IS REFUSED "
+    "THE SAME WAY — over HTTP that is `?run_id=`, and to an MCP tool it is `run_id: "
+    "\"\"` — naming `\"\"` as the id that was not found; it is "
     "not treated as if the parameter were absent, because a caller that interpolated "
     "nothing into a run filter would otherwise be handed the WHOLE record and read it "
     "as that run's questions. `pending_page.record_total` still reports the WHOLE "
@@ -2380,9 +2464,17 @@ _PENDING_RUN_ID_DESC = (
         "record, its runs' included. A record's question count grows with its runs, "
         "so `run_id`, `offset` and `limit` let a client bound what it asks for — but "
         "bounding is something a client asks for, never something imposed on one that "
-        "does not know to page. Send any of the three and the response gains a "
-        "`pending_page` block reporting `total`, `returned`, `withheld` and whether "
-        "the list is `complete`, so a page can never be mistaken for the whole set."
+        "does not know to page. A `run_id`, a NON-ZERO `offset`, or a `limit` bounds "
+        "the read, and the response then gains a `pending_page` block reporting "
+        "`total`, `returned`, `withheld`, `record_total` and whether the list is "
+        "`complete`, so a page can never be mistaken for the whole set.\n\n"
+        "**`offset=0` ON ITS OWN BOUNDS NOTHING** — it is this route's default, so a "
+        "request sending only it is the unbounded read and carries no `pending_page`. "
+        "An earlier revision said \"send any of the three\", which was false for "
+        "exactly that case, and a client told to page will plausibly open with it. "
+        "And `complete` is RELATIVE TO THE FILTER: under a `run_id` it says that run "
+        "has nothing further, never that the record has — `record_total` is the "
+        "record's own count and is why it travels beside `total`."
     ),
     response_description="The open blocking questions, with the current `ETag`.",
     responses={

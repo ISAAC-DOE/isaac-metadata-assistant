@@ -1,5 +1,5 @@
 import './screens.css';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
@@ -202,6 +202,9 @@ function LoadedEvidence({
             classification={classification}
             focusRunId={focusRunId}
             onFocusRun={selectFocusRun}
+            degraded={degraded}
+            refreshFailed={refreshFailed}
+            onManualRefresh={onManualRefresh}
           />
         </div>
       </AppShell>
@@ -504,6 +507,49 @@ function EvidenceViewTabs({
  * The scope pair enforces tutorial isolation at the model boundary: the scope
  * the data was READ in is captured at mount and compared with the scope the
  * surface is addressing now.
+ *
+ * ── FRESHNESS: the runs follow the version they are LABELLED with ───────────
+ *
+ * `EvidenceGraphPanel` prints "Built from this record at version <rev>. Nothing
+ * here is cached across a version change." That version is `detail.version`,
+ * which the shared poller DOES refresh (the screen's `onChange` calls
+ * `bundle.reloadSilent()`). The runs below were fetched with deps `[id]` and so
+ * refreshed NEVER — measured, not supposed. The consequence was a specific
+ * false statement rather than a general staleness: after a run was edited or
+ * removed from another surface, the poll advanced `detail.version`, the panel's
+ * `key={freshnessKey}` remounted and evicted every run check, and the rebuilt
+ * graph printed the NEW version over the OLD run rows — including a run node,
+ * its whole subtree and its `has_run` edge for a run the server had deleted.
+ * The sentence about the cache was true; the number over the rows was not.
+ *
+ * So a moved version silently refetches the runs. `reloadSilent`, NOT the deps
+ * array: putting `detail.version` in the deps flips `useFetch` back to
+ * `status: 'loading'`, which would blank this whole surface to a LoadingPanel on
+ * every detected change — exactly the blanking `reloadSilent` exists to avoid on
+ * a read-only screen.
+ *
+ * ── …and when the refresh does NOT land, this surface now says so ────────────
+ *
+ * The graph branch rendered no `LiveSyncNote`, so a degraded poller (>= 3
+ * consecutive failures) and a failed silent refetch were both invisible HERE
+ * while being stated one tab away on the evidence list. A surface that asserts
+ * the version it was built from is the last surface that should keep that quiet,
+ * and it was the only one with no manual recourse on screen.
+ *
+ * ── …AND THE NOTE SAT BESIDE THE FALSE SENTENCE RATHER THAN CORRECTING IT ───
+ *
+ * The re-read above closed the SUCCESS path and left the FAILURE path open, and
+ * an independent review measured the residue: the version ref advanced BEFORE
+ * the await, `reloadSilent` keeps the old rows and raises `refreshFailed`, and
+ * the panel printed `detail.version` unconditionally. So when `/runs` failed
+ * while the version poll succeeded the screen showed version 2.0 over rows read
+ * at 1.0, with the refresh-failed note beside it — strictly better than no note,
+ * and still a sentence asserting the new version over the old rows.
+ *
+ * The fix is the two-version split below: `requestedRunsVersion` (what a re-read
+ * was ISSUED for) and `loadedRunsVersion` (what the rows on screen were READ
+ * at), with the second passed to the panel so the freshness sentence can name
+ * both when they differ. See `EvidenceGraphPanelProps.runsVersion`.
  */
 function EvidenceGraphView({
   id,
@@ -512,6 +558,9 @@ function EvidenceGraphView({
   classification,
   focusRunId,
   onFocusRun,
+  degraded,
+  refreshFailed,
+  onManualRefresh,
 }: {
   id: string;
   detail: EvidenceBundle['detail'];
@@ -519,10 +568,79 @@ function EvidenceGraphView({
   classification: EvidenceBundle['classification'];
   focusRunId: string | null;
   onFocusRun: (runId: string | null) => void;
+  degraded: boolean;
+  refreshFailed: boolean;
+  onManualRefresh: () => void;
 }) {
   const runs = useFetch(() => api.listRuns(id, { limit: RUNS_PAGE_SIZE }), [id]);
   const currentScope = useWorkspaceScope();
   const readInScope = useRef(currentScope);
+
+  /*
+   * TWO VERSIONS, AND CONFLATING THEM IS WHAT LEFT THE HEADLINE FALSE.
+   *
+   * `requestedRunsVersion` is the version a re-read was ISSUED for. It advances
+   * BEFORE the request, which is exactly right for its one job — deciding
+   * whether this version has already been asked for, so the effect fires once
+   * per distinct version and never loops.
+   *
+   * It is NOT a statement about what is drawn, and it was being used as one.
+   * `reloadSilent` keeps the old data and raises `refreshFailed` when the read
+   * fails, so on that path the ref said 2.0, the rows were still the ones read
+   * at 1.0, and `EvidenceGraphPanel` printed "Built from this record at version
+   * 2.0" over them — the same false statement the re-read was added to remove,
+   * surviving on the failure path. The `LiveSyncNote` below is a real
+   * mitigation and is not a correction: it sits beside the sentence.
+   *
+   * `loadedRunsVersion` is the version the rows on screen were actually READ
+   * at. It advances only when a new payload lands — `useFetch` replaces
+   * `data` with a fresh object on success and leaves it untouched on failure,
+   * so a change of identity IS the success signal, and no change to the shared
+   * hook is needed to observe it. While a re-read is in flight it correctly
+   * still reads the old version, which is what the graph is still drawing.
+   */
+  const requestedRunsVersion = useRef(detail.version);
+  const [loadedRunsVersion, setLoadedRunsVersion] = useState(detail.version);
+  const reloadRunsSilent = runs.reloadSilent;
+  useEffect(() => {
+    if (requestedRunsVersion.current === detail.version) return;
+    requestedRunsVersion.current = detail.version;
+    reloadRunsSilent();
+  }, [detail.version, reloadRunsSilent]);
+
+  const runsPayload = runs.status === 'data' ? runs.data : undefined;
+  useEffect(() => {
+    if (runsPayload === undefined) return;
+    setLoadedRunsVersion(requestedRunsVersion.current);
+  }, [runsPayload]);
+
+  // ONE note for both fetches on this branch. A failed refresh of EITHER the
+  // bundle (detail/evidence/classification) or the runs means the graph is not
+  // the freshly-read state the header claims, and the reader gets the same
+  // sentence and the same recourse either way. Refresh reloads both, blanking
+  // deliberately — it is an explicit action, and `onManualRefresh` is the
+  // screen's own blanking `bundle.reload`.
+  //
+  // Rendered BARE, not inside `.main-inset`. That wrapper is specified to hold
+  // only the two transient notices as a DIRECT child of main, and
+  // `evidence-hierarchy.test.tsx` pins both facts; this branch is inside a
+  // tabpanel under main's padded preset, whose 28px gutter already aligns the
+  // note with the view tabs and the graph panel. A second inset would indent it.
+  //
+  // (Do not name that preset with its literal attribute here. The same test
+  // counts `mainPad=` attribute occurrences in this file's SOURCE against the
+  // number of shells, and its regex does not skip comments — a comment quoting
+  // the attribute makes the counts disagree.)
+  const syncNote = (
+    <LiveSyncNote
+      degraded={degraded}
+      refreshFailed={refreshFailed || runs.refreshFailed}
+      onRefresh={() => {
+        onManualRefresh();
+        runs.reload();
+      }}
+    />
+  );
 
   if (runs.status === 'loading') {
     return <LoadingPanel label="Loading this experiment's runs from the ISAAC API…" />;
@@ -532,23 +650,27 @@ function EvidenceGraphView({
   }
 
   return (
-    <EvidenceGraphPanel
-      experimentId={id}
-      detail={detail}
-      evidence={evidence}
-      classification={classification}
-      runs={runs.data.runs}
-      runsMeta={{
-        total: runs.data.total,
-        matched: runs.data.matched,
-        returned: runs.data.returned,
-        offset: runs.data.offset,
-      }}
-      readInScope={readInScope.current}
-      currentScope={currentScope}
-      focusRunId={focusRunId}
-      onFocusRun={onFocusRun}
-      onRequestRunCheck={(runId) => api.checkRun(id, runId)}
-    />
+    <>
+      {syncNote}
+      <EvidenceGraphPanel
+        experimentId={id}
+        detail={detail}
+        evidence={evidence}
+        classification={classification}
+        runs={runs.data.runs}
+        runsMeta={{
+          total: runs.data.total,
+          matched: runs.data.matched,
+          returned: runs.data.returned,
+          offset: runs.data.offset,
+        }}
+        runsVersion={loadedRunsVersion}
+        readInScope={readInScope.current}
+        currentScope={currentScope}
+        focusRunId={focusRunId}
+        onFocusRun={onFocusRun}
+        onRequestRunCheck={(runId) => api.checkRun(id, runId)}
+      />
+    </>
   );
 }
