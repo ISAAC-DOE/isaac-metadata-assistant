@@ -511,6 +511,39 @@ export const LABELS = {
   createExperimentTitleRequired: 'Give the experiment a title to create it.',
 
   /*
+   * RENAME — correcting the one thing a scientist could previously never correct.
+   *
+   * `title` was written once, at creation, and no operation could change it. On a
+   * deployment with a durable database that made every typo permanent.
+   *
+   * THE COPY NAMES THE TITLE AND ONLY THE TITLE, and that is a contract, not
+   * brevity. The create form beside it also takes a free-text note, and the rename
+   * operation deliberately refuses that field — the server stores it at
+   * `source.description`, which it also reads as the provenance marker deciding
+   * whether a record belongs to the managed example dataset. Copy that said "name
+   * and note" would promise an edit this build refuses with a 422, so it does not.
+   *
+   * `renameStale` IS THE ONE NAMED FAILURE. It is not a guess about the cause: the
+   * server answers 412 only when the validator this client held is no longer
+   * current, which means somebody or something else changed the record first. Every
+   * other failure falls to `renameFailed`, which claims nothing about why.
+   */
+  actionRenameExperiment: 'Rename',
+  renameFormTitle: 'Rename this experiment',
+  renameTitleLabel: 'Experiment title',
+  renameHint: 'Only the name changes. Nothing about the record’s scientific content is touched.',
+  renameSubmit: 'Save name',
+  renameCancel: 'Cancel',
+  /** Shown when the box is empty. States the fix, not the failure. */
+  renameTitleRequired: 'An experiment needs a title. Type one, or cancel.',
+  /** Announced after a successful rename, so the act is confirmed and not merely done. */
+  renameSaved: 'Name saved.',
+  renameStale:
+    'This record changed somewhere else while you were typing, so the new name was not saved. ' +
+    'Reload the record to see the current version, then rename it again. Nothing you typed has been lost.',
+  renameFailed: 'The name could not be saved.',
+
+  /*
    * MY EXPERIMENTS, EMPTY — an invitation to act, not a report of absence.
    *
    * THE SENTENCE THIS REPLACES WAS "This deployment cannot yet create or import a

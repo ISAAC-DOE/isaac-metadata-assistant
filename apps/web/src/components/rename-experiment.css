@@ -1,0 +1,113 @@
+/*
+ * RENAME — the inline form inside the record screen's "Experiment Name" section.
+ *
+ * WHY THIS FILE EXISTS RATHER THAN REUSING `.create-experiment-*`. Those rules are
+ * declared in `queue.css`, which is imported by `ExperimentQueue` / `ExperimentRow`
+ * and therefore reaches the DOM only on screens that mount the queue. This panel
+ * lives on the record screen, which mounts neither, so borrowing the class names
+ * would have made this form's appearance depend on whether the reader happened to
+ * visit My Experiments first in the same session. Same declarations, same tokens,
+ * own names — not a second visual language, just an owned copy of one.
+ *
+ * NO NEW TOKENS AND NO NEW COLOURS. Every value below is an existing custom
+ * property from `styles/tokens.css`.
+ */
+
+.rename-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 42ch;
+}
+
+.rename-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rename-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.rename-input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  color: var(--text-strong);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+}
+
+.rename-input:focus-visible {
+  border-color: var(--action);
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+/*
+ * The hint and the remaining-characters line.
+ *
+ * `--text-secondary`, NOT `--text-tertiary`. The tertiary token is `#78838f`, which
+ * measures 3.86:1 against this surface and is the open contrast item `CLAUDE.md`
+ * records; adding a new instance of a known defect to close a different one is not
+ * a trade worth making. The in-repo precedent for the narrow fix is the darker
+ * token, and this uses it from the start.
+ */
+.rename-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/*
+ * Over the limit the line takes the failure colour — and the TEXT says so too, so
+ * the colour is a second signal and never the only one.
+ */
+.rename-count[data-over='true'] {
+  color: var(--fail-text);
+}
+
+.rename-error {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fail-text);
+}
+
+/*
+ * The status line is ALWAYS in the DOM, empty when there is nothing to say. A
+ * live region inserted together with its content is announced unreliably, and this
+ * is the one place the reader is told the rename actually landed.
+ */
+.rename-status {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--pass-text);
+}
+
+.rename-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.rename-current {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-strong);
+}
+
+.rename-current-name {
+  font-weight: 600;
+  color: var(--text-heading);
+}
