@@ -544,10 +544,28 @@ Current state:
     `POST /api/demo/reset`. The mode chip reads **"Example workspace"** and its *accessible name*
     carries the three claims the word "Synthetic" used to carry. `/api/health`'s
     `mode: synthetic-only` is UNCHANGED — presentation moved, contract did not.
-  - **STILL OPEN**: backend-sourced jargon on product screens (`MANAGED_SOURCE_DESCRIPTION` feeds
-    `classify_experiment`, so it is a behaviour change to the destructive path); axe scans at
-    390/320 px; evidence/confirmation/validation mutation specs; tutorial browser specs; the
-    screenshot sweep; `.section-tab` contrast (pre-existing, now documented in the a11y baseline).
+  - **STILL OPEN — RE-MEASURED 2026-08-26, and FOUR OF THE SIX WERE ALREADY CLOSED.** The list is
+    corrected in place rather than replaced, because a stale "still open" list is worse than no
+    list: it sends a future session to build what exists, and it makes the two real items look
+    like five. Measured at `1ad1f8f`:
+    - ~~axe scans at 390/320 px~~ — **DONE.** `apps/web/e2e/specs/a11y-narrow.spec.ts` exists;
+      `NARROW_WIDTHS = [390, 320]` (`e2e/a11y-baseline.ts:133`); **54** `width-390` and **67**
+      `width-320` baseline references, several carrying `{darwin, linux}` splits transcribed from
+      Linux CI — a split no local run could have invented.
+    - ~~evidence/confirmation/validation mutation specs~~ — **DONE.** `e2e/mutation/evidence.spec.ts`,
+      `validation.spec.ts`, `answers.spec.ts`.
+    - ~~tutorial browser specs~~ — **DONE.** `e2e/specs/tutorial.spec.ts` +
+      `e2e/mutation/tutorial-lifecycle.spec.ts`.
+    - ~~the screenshot sweep~~ — **DONE.** `e2e/specs/visual-sweep.spec.ts`.
+    - **`.section-tab` contrast — STILL OPEN**, and now quantified: `screens.css` uses
+      `--text-tertiary #78838f` at 12.5px/500 for **3.86:1**. The narrow fix has in-repo precedent
+      (`--text-muted #5b6570`, 5.93:1). It needs a Linux-CI round-trip to re-transcribe ~35 cells,
+      which is why it is not a one-line change.
+    - **backend-sourced jargon on product screens — UNCERTAIN, and the named exemplar is wrong.**
+      `MANAGED_SOURCE_DESCRIPTION` reaches **no** frontend file: `rg "Synthetic XANES campaign"
+      apps/web/` returns **0** hits. So the example this item rested on no longer supports it.
+      Whether other backend jargon reaches a screen is UNMEASURED. Do not treat the item as
+      closed, and do not treat the old example as evidence.
   - **HOSTED QA PENDING (Krish)** for every image from this phase. `/krish` returns `302` here.
     Manual sequence: `docs/krish-manual-verification-checklist.md`.
 - **Session of 2026-08-18 — an honesty-defect sweep, conflict resolution, and two external packages.**
@@ -604,19 +622,41 @@ Current state:
   - **Repository hygiene:** local branches 141 → 8, with three superseded ones renamed `preserve/*`
     rather than deleted; seven merged worktrees removed. All deletions were preceded by a mechanical
     `git rev-list --count origin/main..<branch>` = 0 proof.
-  - **Two external packages are ready and UNSENT:** `docs/dean-handoff-consolidated-2026-08-18.md`
+  - ~~**Two external packages are ready and UNSENT:** `docs/dean-handoff-consolidated-2026-08-18.md`
     (migrations, external configuration, open gates) and the re-measured
-    `docs/run-scope-decision-packet.md`. The six `system.configuration.*` fields remain
+    `docs/run-scope-decision-packet.md`.~~ **BOTH HALVES ARE NOW FALSE, corrected 2026-08-26 and kept
+    struck because "unsent" is the kind of claim a future session acts on.** The 2026-08-18 package
+    **HAS been sent** — its own pointer block says the successor "carries only what is new or
+    corrected since this one **was sent**", and
+    `docs/dean-operator-addendum-2026-08-25.md` addresses Dean about what "the sent package" told him.
+    And `docs/run-scope-decision-packet.md` is **SUPERSEDED AS THE DOCUMENT TO SEND** (its own §1,
+    2026-08-25) by `docs/angel-scope-questions-2026-08-25.md`; it is not withdrawn — it keeps the
+    engineering detail the successor omits — but it is not the thing to forward. **STILL UNSENT, as
+    far as this repository can witness:** the 2026-08-25 addendum and the Angel question list. Whether
+    either has been forwarded is **only Krish's to say**; an agent cannot observe it, and the honest
+    entry is that the repository records preparation, not delivery. The six `system.configuration.*` fields remain
     **`unclassified`, verified** — and nothing in the programme is blocked on Angel's answer.
-  - **Not done, and named rather than implied:** `isaac_runs` Stage 2 (its blocker is measured — no
-    completeness marker and no backfill, so a read cutover cannot distinguish "zero runs" from "never
-    projected"); actor stamping (authorized by Dean, blocked in practice — no trusted boundary
+  - **Not done, and named rather than implied:** `isaac_runs` Stage 2 — ~~"its blocker is measured —
+    no completeness marker and no backfill"~~ **corrected 2026-08-26, and the correction matters
+    because §15 of this same file has contradicted this sentence since 2026-08-19.** BOTH exist:
+    `isaac_run_projection` (`0005_run_projection`) IS the completeness marker, and
+    `scripts/db_backfill_runs.py` IS the backfill. The reason a read cutover still cannot distinguish
+    "zero runs" from "never projected" is unchanged and is the reason both were built — but the
+    blocker is now an EXECUTION, not an absence: the backfill **has never been run anywhere**, `0005`
+    is **not owner-approved**, and Stage 2b additionally needs the operator's two completeness queries
+    (`docs/migration-approval-packet-0005.md` §8A) both returning 0. Kept struck rather than edited so
+    a future session sees that §11 was the stale half of the contradiction, not §15; actor stamping (authorized by Dean, blocked in practice — no trusted boundary
     exists, and the seam stays unset); ~~the native assistant, MCP and voice product surfaces beyond
     their existing seams~~ — **narrowed 2026-08-24: true of the ASSISTANT only.** `TranscriptCapturePanel`
     had already shipped in `72e2206` (2026-08-17) and so was a product surface on the day this was
     written, and `Settings → Connect Your Agent` is MCP's; the accurate claim is that no product
     screen advertises the assistant seam. Left struck rather than edited because the three were never
-    in the same state and pairing them is the error worth remembering; and the scale/concurrency benchmarks.
+    in the same state and pairing them is the error worth remembering; and ~~the scale/concurrency
+    benchmarks~~ — **struck 2026-08-26: they exist at HEAD.** `docs/run-scale-measurements.md`,
+    `docs/evidence/scale-envelope-2026-08-25.md`, `apps/api/tests/test_lifecycle_concurrency.py`,
+    `test_concurrent_write_pairs_lose_no_update.py` and `test_handler_concurrency.py` are all
+    committed. What is NOT measured is a HOSTED figure of any kind, which is a different claim and is
+    the one to make going forward.
 - **Session of 2026-08-19 — the product could not capture a record, and now can.** PR #171
   (`819568e`, `42dee80`, `bed331b`, `bb2095c`). Read this before planning any further feature
   work, because it changes what "substantially implemented" means for everything downstream.
@@ -695,6 +735,107 @@ Current state:
   the decision record this contradicted; `isaac_runs` Stage 2, the Evidence
   Graph / Compare Runs cross-feature work, the scale and concurrency benchmarks, and every hosted
   QA are unchanged by this session.
+- **Session of 2026-08-25/26 — seven PRs (#171–#177), and the recurring finding was that a
+  surface returned 200 or a green check for work it had not done.** Org `main` at `1ad1f8f`,
+  image `v0.0.167`, every CI check green on the exact head SHA of each merge. Backend tests
+  **4,714 → 5,368**; frontend **4,113 → 4,390**. Nothing about the hosted deployment, the
+  external authorizations, gates **G2**/**G3**, or Dean's **D1–D9** deferral changed, and no
+  agent touched a database. What a future session must not re-derive or silently reverse:
+
+  **THE WRITE PATH RETURNED THE WHOLE RECORD ON EVERY ANSWER, and the fix needed a server-side
+  decision first.** `POST .../answers` echoed every open blocking question back — measured
+  1,772,692 B over 3,000 entries at 1,000 runs, twice per accepted answer. Bounding it was
+  blocked by a real coupling, not by caution: the frontend's `confirmProposal` decided
+  `submitAnswer` vs `editField` from MEMBERSHIP in that list, so a question outside a window
+  read as "already answered" and took the edit route — **`422 unrecognized_field` on a
+  legitimate first answer.** The route now tells the client which operation to use
+  (`answer_at`), which is what made the bound safe rather than merely cheap. Per accepted
+  answer at 1,000 runs: **3,545,986 B → 61,558 B (98.3%)**. `PENDING_WINDOW = 50`, and the
+  window is ANCHORED — head plus every still-open question of the unit just written — so the
+  answer you just gave is never withheld from you. `api.getPending` (unbounded, no parameters)
+  **still exists and is still correct twice**, for Review Record and Export Readiness, which
+  would UNDERSTATE outstanding work from a page. Do not "fix" those two.
+
+  **THE DETAIL ROUTE COMPOSED EVERY RUN FIVE TIMES, AND DRY-RAN EVERY UNIT TWICE.** Threading
+  one `export_units()` list through the response (`routes._shared_units`) took
+  `resolved_run_draft` from 5× to 1× the run count; it left `export_draft` at **2×**, which an
+  independent review measured as roughly HALF the request against ~3% for the composition. That
+  is why the fully-answered gain was ~1.28× and not the 2.4× headline. `Experiment.dry_run_verdict`
+  closes it (`routes._shared_dry_run`), and **the gate is the design**: it answers `None` while
+  `pending_count() > 0`, which is exactly the union of `status()`'s and `export_ready()`'s
+  short-circuits, because on a record that still owes questions the dry run is entered ZERO
+  times and a naive "compute it once up front" would have turned 0 into N — making the common
+  case slower to speed up the rare one. Both seams are **threaded, not memoised**: this module
+  mutates an `Experiment` and re-reads its derived state in the same request, so nothing may be
+  stored on the instance. Responses byte-identical across all 21 shapes;
+  `test_detail_route_composes_each_run_once.py::_disable_threading` reverts all three seams and
+  **silently failed to revert each new one until extended** — twice.
+
+  **FOUR SURFACES CLAIMED SOMETHING THEY HAD NOT DONE, and CI passed all four.** An answer the
+  record could not store returned **200** and reported the value "identical"; a conflict decision
+  could never be recorded, so a scientist who fixed a typo owned a permanent conflict no surface
+  could clear; the Assistant panel said nothing about whether a model was involved, in a build
+  where every provider answers `501`; and the memory graph kept showing a deleted run. Each was
+  found by independent review, not by a test.
+
+  **`0003`+`0004` COULD NOT BE APPLIED WITHOUT `0005`, WHICH NOBODY HAD APPROVED.** `--apply`
+  globbed every migration on disk, so the operator ask that `docs/dean-handoff-consolidated-2026-08-18.md`
+  makes was **mechanically impossible** to satisfy. `scripts/db_migrate.py --through VERSION`
+  fixes it, proven against a real `postgres:18` in CI. **This changes nothing about the hard
+  stop:** applying any migration to the hosted environment is the operator's act, and no agent
+  may do it.
+
+  **TWO READ-PATH 500s, AND THE SECOND ONE TOOK DOWN THE WHOLE LIST SCREEN.** A persisted
+  non-iterable `draft["pending"]` (e.g. `7`) made BOTH `GET /api/experiments/{id}` and
+  `GET /api/experiments` return **500** — one malformed run draft took My Experiments down for
+  every record. A wrong-typed top-level draft container (`assets: "not a list"`) did the same
+  through `validate_draft`. Both are now **read, not refused**, and the distinction is the whole
+  design: *a malformed value in a REQUEST can be refused, because the caller sent it and a typed
+  422 names what to fix; a malformed value already PERSISTED cannot be refused to the reader, who
+  did nothing wrong and whose record would simply vanish.* So the §11 "typed 422" precedent for
+  the ANSWER path deliberately does **not** transfer to the READ path. `pending: 7` becomes one
+  unreadable entry and the record stays blocked — truthful, because a document whose blocker list
+  cannot be read must not be certified exportable. Nothing is coerced, parsed, or walked:
+  `enumerate("abc")` would invent three per-position claims the draft never made.
+
+  **AND THE §13 DISCLOSURE FOR THAT CHANGE WAS ITSELF FALSE FOR ONE COMMIT.** It said all ten
+  top-level containers raised. **Eight** did; **`qc`** raised only when a series was present (and
+  the guard is inside that same `if series:`, so `qc` is unchanged); **`block_evidence`** raised
+  only when a series, link, contributor or the qc gate looked it up — so a draft with none of
+  those **validated clean**, and that is the ONE verdict this change moves (PASS → FAIL). The
+  false enumeration is what concealed it. It is a flip toward refusal on a document that could
+  never have exported anyway (`export.build_sidecar` does
+  `(draft.get("block_evidence") or {}).items()`), so **nothing that previously exported stops
+  exporting** — and that third crash is now a clean refusal too. Four claim sites corrected in
+  place, marked as corrections. **The pattern to remember: a table-driven test whose fixture makes
+  every row reachable cannot see which rows were reachable before**, and it reads as an eleventh
+  confirmation rather than as a missing case.
+
+  **`attribution.uploaded_by` is server-stamped and still absent everywhere** — unchanged from
+  2026-08-19, and re-verified: the stamp requires `trust_basis == verified_edge_assertion`, and
+  **no verifier in this build mints that**, because no trusted authentication boundary exists
+  (Dean reconfirmed the ClusterIP bypass, 2026-08-12). The seam stays unset.
+
+  **Named rather than implied, and still not done:** `isaac_runs` Stage 2b (gated on the
+  operator's two completeness queries, `docs/migration-approval-packet-0005.md` §8A); the
+  campaign-sheet capture fields (technique, facility, sample, contributors — a record can be
+  finished but not richly described); an apply route for `POST /ingestion/csv/preview`; the
+  Evidence Graph / Compare Runs cross-feature work; the `.section-tab` contrast item (3.86:1 at
+  12.5px/500, and the narrow fix has in-repo precedent); the human responsive / 200%-zoom
+  visual sign-off; personal-deploy retirement; and **every hosted QA of every image from this
+  session** — `/krish` sits behind an Authentik edge this environment cannot authenticate to, so
+  the honest status is `HOSTED QA PENDING (Krish)`. `docs/dean-operator-addendum-2026-08-25.md`
+  and `docs/angel-scope-questions-2026-08-25.md` are **prepared and UNSENT**; nothing in the
+  programme is blocked on Angel's answer.
+
+  **Two flaky frontend tests were found by CI and fixed, and both had the same shape as the
+  honesty defects above: a test asserting more than it had established.** One sampled a counter
+  of two independent effects after awaiting only one (`expected 1 to be 2` in Actions, green
+  locally — reproduced on demand with a 120 ms probe, then fixed with `waitFor`). The other had
+  raised testing-library's `asyncUtilTimeout` to 5,000 ms while vitest's own per-test deadline
+  was **also** 5,000 ms, so the raised budget was unreachable and the failure read `Test timed
+  out in 5000ms`, naming neither the query nor the DOM.
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
