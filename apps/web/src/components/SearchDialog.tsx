@@ -288,7 +288,22 @@ export function SearchDialog() {
   );
 
   return (
-    <div role="search" className="topbar-search-region">
+    /*
+      FINDING A11Y-06 fix — and note WHERE the name goes. The A11Y-02 fix below
+      put `aria-label="Search"` on the BUTTON, which names the control and does
+      nothing for the landmark: `role="search"` IS a landmark, and a landmark is
+      named only by `aria-label`/`aria-labelledby` ON THE LANDMARK ELEMENT. On
+      Settings → Endpoint Explorer this region coexists with a second
+      `role="search"` (`screens/settings/ApiDocs.tsx`), and two same-role
+      landmarks with no names are indistinguishable in a screen reader's
+      landmark list — axe `landmark-unique`.
+
+      "Site search" rather than "Search": the name has to separate this landmark
+      from the endpoint filter's, and a name identical to the role carries no
+      information. Like the button's name it is an `aria-label`, so it cannot be
+      switched off by a media query — the same reason recorded for A11Y-02 below.
+    */
+    <div role="search" aria-label="Site search" className="topbar-search-region">
       {/*
         FINDING A11Y-02 (A1) fix. The accessible name must NOT depend on CSS.
         `chrome.css`'s `max-width: 640px` block hides `.topbar-search-label` and

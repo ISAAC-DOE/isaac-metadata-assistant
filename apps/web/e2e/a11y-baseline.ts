@@ -1783,83 +1783,52 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
    * rather than zeroing: 346 nodes of recorded debt came off the total below,
    * and the suite now proves the fix on every run.
    */
-  {
-    rule: 'scrollable-region-focusable',
-    impact: 'serious',
-    note:
-      'FINDING A11Y-04. `div.preview-lines.scroll-x` (Evidence source-file preview) and ' +
-      'a `<pre>` code sample on API Access scroll horizontally but are not keyboard ' +
-      'focusable, so a keyboard-only user cannot scroll them. Genuinely ' +
-      'width-conditional: whether the content overflows depends on the column width, so ' +
-      'it fires on Evidence at 1280 and at 375 but NOT at 1024/768/640, and on API ' +
-      'Access only at 375. The earlier `projects: "*"` scoping claimed all ten pairs; ' +
-      'only these three were ever real.',
-    targetPattern: '^(\\.preview-lines|pre)$',
-    // 3 nodes across 3 (surface, project) pairs.
-    counts: {
-      'evidence@desktop-1280x800': 1,
-      'evidence@mobile-375x812': 1,
-      'settings-api@mobile-375x812': 1,
-    
-      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (1 node per pair).
-
-         Every number MEASURED on BOTH platforms on the same commit and merged by
-         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
-         run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': 1,
-      'evidence@width-390': 1,
-      'settings-api@width-320': 1,
-    },
-  },
-  {
-    rule: 'page-has-heading-one',
-    impact: 'moderate',
-    note:
-      'FINDING A11Y-05. `/load` (Load Materials) renders no `<h1>`. Every other routed ' +
-      'surface has one. axe reports this against `html`, so it is one node per scan.',
-    targetPattern: '^html$',
-    // 5 nodes across 5 (surface, project) pairs.
-    counts: {
-      'load@desktop-1280x800': 1,
-      'load@laptop-1024x768': 1,
-      'load@tablet-768x1024': 1,
-      'load@mobile-375x812': 1,
-      'load@zoom-200': 1,
-    
-      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (1 node).
-
-         Every number MEASURED on BOTH platforms on the same commit and merged by
-         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
-         run rather than guessing the other. Nobody retyped a count. */
-      'load@width-320': 1,
-      'load@width-390': 1,
-    },
-  },
-  {
-    rule: 'landmark-unique',
-    impact: 'moderate',
-    note:
-      'FINDING A11Y-06. Two `role="search"` landmarks coexist with no distinguishing ' +
-      'accessible name: the TopBar trigger (`SearchDialog.tsx:290`) and the endpoint ' +
-      'filter (`settings/ApiDocs.tsx:333`). Both are reported, so the count is 2.',
-    targetPattern: '^(\\.card|\\.topbar-search-region)$',
-    // 10 nodes across 5 (surface, project) pairs.
-    counts: {
-      'settings-explorer@desktop-1280x800': 2,
-      'settings-explorer@laptop-1024x768': 2,
-      'settings-explorer@tablet-768x1024': 2,
-      'settings-explorer@mobile-375x812': 2,
-      'settings-explorer@zoom-200': 2,
-    
-      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (2 nodes), so purely width-invariant.
-
-         Every number MEASURED on BOTH platforms on the same commit and merged by
-         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
-         run rather than guessing the other. Nobody retyped a count. */
-      'settings-explorer@width-320': 2,
-      'settings-explorer@width-390': 2,
-    },
-  },
+  /*
+   * ── A11Y-04, A11Y-05 and A11Y-06 DELETED, 2026-08-26 — the defects are GONE ──
+   *
+   * Same rule as the deletions above: an absent entry expects ZERO nodes on
+   * every pair, so if any of the three regresses it reads as `new` and fails
+   * the sweep. Zeroing an entry would have tolerated it silently.
+   *
+   * All three fixes are STRUCTURAL — an attribute added to an element — so the
+   * post-fix count is 0 on BOTH platforms by construction, not by measurement.
+   * That is why these three could be deleted from a machine that cannot run the
+   * Linux face: font metrics can move a wrap boundary and therefore a text-node
+   * count, but they cannot make a focusable element unfocusable, an `<h1>`
+   * absent, or a named landmark unnamed. Contrast the `color-contrast` entry
+   * above, where every number is a per-platform measurement.
+   *
+   *   * `scrollable-region-focusable` (FINDING A11Y-04, 6 nodes across 6 pairs:
+   *     `evidence@desktop-1280x800`, `evidence@mobile-375x812`,
+   *     `evidence@width-320`, `evidence@width-390`,
+   *     `settings-api@mobile-375x812`, `settings-api@width-320`). The two
+   *     offending elements — `div.preview-lines.scroll-x`
+   *     (`src/components/SourcePreview.tsx`) and `pre.api-samples-code`
+   *     (`src/screens/settings/ApiDocs.tsx`) — now carry `tabIndex={0}` with
+   *     `role="group"` and an `aria-label`, following `.rc-tablewrap` in
+   *     `src/components/RunCompare.tsx`. `role="group"` and not `region`: a
+   *     region is a landmark, and an extra landmark here would re-create
+   *     A11Y-06 while closing A11Y-04.
+   *   * `page-has-heading-one` (FINDING A11Y-05, 5 nodes across 5 pairs plus
+   *     `load@width-320` and `load@width-390`, 7 in total). `/load` renders
+   *     `<h1 class="sr-only">Load Materials</h1>`
+   *     (`src/screens/LoadMaterials.tsx`), the same pattern four other screens
+   *     already use. `sr-only` text is not `isVisibleOnScreen`, so axe's
+   *     `color-contrast` rule does not evaluate it and no `load@*` contrast
+   *     count moves. `surfaces.ts` drops `expectH1: false` in the same change,
+   *     which is what `specs/structure.spec.ts` instructs.
+   *   * `landmark-unique` (FINDING A11Y-06, 14 nodes across 7 pairs at 2 each).
+   *     The name now sits ON each landmark rather than on the button inside
+   *     one of them: `aria-label="Site search"` on the TopBar region
+   *     (`src/components/SearchDialog.tsx`) and `aria-labelledby` pointing at
+   *     the existing visible "Search endpoints" label on the endpoint filter
+   *     (`src/screens/settings/ApiDocs.tsx`).
+   *
+   * 27 nodes of recorded debt come off both totals below: darwin 2559 -> 2532,
+   * linux 2829 -> 2802. The subtraction is exact rather than estimated because
+   * every one of the 20 deleted keys was a SCALAR, i.e. asserted the identical
+   * number on both platforms.
+   */
 ];
 
 /**
@@ -2648,7 +2617,29 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // A darwin browser run DID independently measure five failures on `load` before the
   // colour fix and two after on the narrow sweep, which agrees in direction — but the
   // authoritative figures are CI's, and these five are transcribed from CI.
-  darwin: 2559,
+  //
+  // ── A11Y-04 / A11Y-05 / A11Y-06 CLOSURE, 2026-08-26: darwin 2559 -> 2532 (-27). ──
+  //
+  // Three whole entries deleted, 20 keys, all SCALARS — so the identical -27
+  // applies to both columns as arithmetic over the deleted cells, not as a guess
+  // about a platform this environment cannot run. Per-entry breakdown at the
+  // deletion comment inside `A11Y_BASELINE`:
+  //
+  //   scrollable-region-focusable   6 cells x 1 node   = -6
+  //   page-has-heading-one          7 cells x 1 node   = -7
+  //   landmark-unique               7 cells x 2 nodes  = -14
+  //                                                net = -27
+  //
+  // These three are the only kind of a11y delta a laptop may write into the linux
+  // column: each fix adds an ATTRIBUTE, and no font metric can make a focusable
+  // element unfocusable, an `<h1>` absent, or a named landmark unnamed. The
+  // `.section-tab` contrast fix that ships alongside them is the opposite case —
+  // it moves `color-contrast` TEXT-NODE counts on roughly forty cells, none of
+  // which is transcribed here because none of them has been measured. The
+  // `browser-a11y` job will report those as `improved` with exact figures; that
+  // is the transcription source, and this constant must be corrected again from
+  // it in the same change as the cells.
+  darwin: 2532,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -2812,7 +2803,13 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // arithmetic is written out so the total can be checked against the cells rather
   // than trusted. `load@width-320` does NOT appear: it was already 1 and did not move,
   // which is the check that both narrow cells behaved as one cause predicts.
-  linux: 2829,
+  //
+  // ── A11Y-04 / A11Y-05 / A11Y-06 CLOSURE, 2026-08-26: linux 2829 -> 2802 (-27). ──
+  //
+  // Same 20 deleted scalar keys as the darwin note above; see it for the per-entry
+  // arithmetic and for why a structural fix is the one case where this environment
+  // may move the linux column without a CI run.
+  linux: 2802,
 };
 
 /**

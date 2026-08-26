@@ -86,8 +86,12 @@ export const SURFACES: readonly Surface[] = [
     // surface in a session.
     scope: 'ordinary',
     ready: { role: 'button', name: 'Run the Worked Example' },
-    // FINDING A11Y-05: this surface renders no <h1>. Recorded, not waived.
-    expectH1: false,
+    // FINDING A11Y-05 is CLOSED (2026-08-26). `LoadMaterials.tsx` renders
+    // `<h1 class="sr-only">Load Materials</h1>`, so `expectH1: false` is gone
+    // and `specs/structure.spec.ts` now holds this surface to the same
+    // exactly-one-<h1> rule as every other. The `page-has-heading-one` entry in
+    // `a11y-baseline.ts` was deleted in the same change, which is what
+    // structure.spec's own failure message instructs.
   },
   {
     id: 'record-detail',

@@ -11,8 +11,11 @@ defect it found was recorded as a finding with a tracking entry rather than fixe
 (`button-name`) and **A11Y-03** (`aria-allowed-attr` / `aria-allowed-role`) — in
 `apps/web/src/components/SearchDialog.tsx` and `apps/web/src/components/EvidenceTrailPanel.tsx`,
 and **deleted** their baseline entries so the suite now proves the fix on every run (§6). The
-remaining findings — A11Y-01, A11Y-04, A11Y-05, A11Y-06, LAYOUT-01, LAYOUT-02 — are **still open
-and still baselined**, deliberately: see §6 and the Baseline Completion Matrix §3B.
+**A second closure slice (2026-08-26) fixed A11Y-04, A11Y-05 and A11Y-06** and deleted their
+baseline entries the same way — 27 nodes off both platform totals. The remaining findings —
+A11Y-01, LAYOUT-01, LAYOUT-02 — are **still open and still baselined**, deliberately: see §6 and
+the Baseline Completion Matrix §3B. A11Y-01 is a palette decision the owner has to make and is
+explicitly not a slice's to take (`styles/tokens.css:3-5`).
 
 ---
 
@@ -441,9 +444,9 @@ defect is gone *and* its baseline entry was deleted, so a regression fails the s
 | **A11Y-01** | `color-contrast` | serious | **OPEN** | every surface, every viewport — **1,610 nodes** | **Not one palette decision — three distinct causes**, measured across 43 (foreground, background, size) combinations spanning **1.56:1 – 4.25:1** and **11** distinct rendered foregrounds. (1) `--text-disabled #c0c8d0`, which `tokens.css:34` intends for disabled chevrons, is rendered as *text* by `evidence.css:239` for preview line numbers at 11.5px → **1.56:1**, the worst in the app. (2) Genuinely low tokens: `#78838f`, `#9aa4af`, `#2f7d78` on the `#e6f1f0` chip tint. (3) **Five failures are `opacity` composites of tokens that pass at full strength** — e.g. `--text-muted #5b6570` is 5.93:1 but composites to `#777f89` under `queue.css:63 .exp-row.done { opacity: .82 }`; `--advisory-text #8a6420` was deliberately darkened for AA in P23C and still composites to `#9b793d`. **Darkening tokens will not fix group (3); the `opacity` has to go.** `#8e98a2`, named in an earlier draft of this table as a token, appears nowhere in `apps/web/src` — it is one of these composites. |
 | **A11Y-02** | `button-name` | **critical** | **FIXED** | was: every surface, at `mobile-375x812` and `zoom-200` — **36 nodes** | Below the 640px breakpoint `chrome.css:503` sets `.topbar-search-label, .topbar-search-kbd { display: none }`. The only remaining content of `<button class="topbar-search">` was an `aria-hidden` SVG and there was no `aria-label`, so the global search trigger had **no accessible name at all** at phone widths and at 200% zoom. **Fix:** `aria-label="Search"` on the trigger in `apps/web/src/components/SearchDialog.tsx`. **No CSS changed** — the name no longer depends on `chrome.css` leaving the label visible, which is why the fix holds at every width rather than only at the two that failed. |
 | **A11Y-03** | `aria-allowed-attr` / `aria-allowed-role` | **critical** / minor | **FIXED** | was: `evidence`, all viewports — 31 nodes per rule per project, **310 nodes** | The 31 Evidence Trail entries rendered as `<button role="listitem" aria-pressed="…">`. `role="listitem"` overrode the implicit button role, and `aria-pressed` is not allowed on `listitem` — so the selected/unselected state was not exposed at all. **Fix:** in `apps/web/src/components/EvidenceTrailPanel.tsx` the `role="listitem"` moved onto a wrapper `<div class="trail-item">`, leaving a plain `<button>` with its implicit role and a now-valid `aria-pressed`. |
-| **A11Y-04** | `scrollable-region-focusable` | serious | **OPEN** | 3 pairs only: `evidence` at desktop and mobile, `settings-api` at mobile | `div.preview-lines.scroll-x` (source-file preview) and, at narrow widths, a code sample on API Access scroll horizontally but are not keyboard focusable. |
-| **A11Y-05** | `page-has-heading-one` | moderate | **OPEN** | `load` | `/load` renders no `<h1>`. Every other routed surface has one. |
-| **A11Y-06** | `landmark-unique` | moderate | **OPEN — and explicitly *not* closed by the A11Y-02 fix** | `settings-explorer` | Two `role="search"` landmarks with no distinguishing accessible name: the TopBar trigger (`SearchDialog.tsx:290`) and the endpoint filter (`settings/ApiDocs.tsx:333`). **The `aria-label="Search"` added for A11Y-02 sits on the `<button>`, not on the `role="search"` wrapper `<div>`, so it does not name the landmark.** Naming a landmark needs `aria-label`/`aria-labelledby` on the landmark element itself. This finding is untouched and its baseline entry (10 nodes) is unchanged. |
+| **A11Y-04** | `scrollable-region-focusable` | serious | **FIXED** (2026-08-26) | was: 6 pairs — `evidence` at desktop, mobile, 320 and 390; `settings-api` at mobile and 320 | `div.preview-lines.scroll-x` (source-file preview) and `pre.api-samples-code` (API Access) scrolled but took no focus, so a keyboard-only reader could see text running past the right edge with no way to move the box. **Fix:** `tabIndex={0}` + `role="group"` + `aria-label` on both, and on the three sibling scroll containers in the same two components that axe has never scanned because their tab or `<details>` is closed during the sweep. `role="group"` and not `region`: a region is a landmark, and an extra landmark would have re-created A11Y-06 while closing this. Follows `.rc-tablewrap` in `RunCompare.tsx`. |
+| **A11Y-05** | `page-has-heading-one` | moderate | **FIXED** (2026-08-26) | was: `load`, 7 pairs | `/load` rendered no heading of any level, so a screen-reader user got an empty heading list and the page announced no name of its own. **Fix:** `<h1 class="sr-only">Load Materials</h1>` in `screens/LoadMaterials.tsx`, the pattern four other screens already use — visually hidden so the on-ramp's design is unchanged, and not `isVisibleOnScreen`, so no `load@*` `color-contrast` count moves. `expectH1: false` is dropped from `e2e/surfaces.ts` in the same change, exactly as `specs/structure.spec.ts`'s failure message instructs. |
+| **A11Y-06** | `landmark-unique` | moderate | **FIXED** (2026-08-26) | was: `settings-explorer`, 7 pairs × 2 = 14 nodes | Two `role="search"` landmarks with no distinguishing accessible name: the TopBar trigger (`SearchDialog.tsx`) and the endpoint filter (`settings/ApiDocs.tsx`). The `aria-label="Search"` added for A11Y-02 sat on the `<button>` INSIDE the first, which names the control and not the landmark. **Fix:** `aria-label="Site search"` on the TopBar region and `aria-label="Endpoint search"` on the filter — both on the landmark element itself. Recorded because the first attempt looked tidier and was wrong: `aria-labelledby` pointing at the filter's own visible "Search endpoints" label made one string the name of both the region and the input, and three existing tests failed with `Found multiple elements with the text of: Search endpoints`. |
 
 ### Responsive layout
 
@@ -503,8 +506,11 @@ Read this section before citing the suite as evidence of anything.
   now that two findings are closed: A11Y-02 and A11Y-03 were exactly the kind a screen-reader pass
   would have surfaced more vividly — **and their fixes are verified only in the accessibility tree
   too.** A green `button-name` and a valid `aria-pressed` do not prove VoiceOver announces "Search,
-  button" or the pressed state audibly. A11Y-06 (unnamed `role="search"` landmarks) is still open
-  and is another of the same kind.
+  button" or the pressed state audibly. **A11Y-06 (unnamed `role="search"` landmarks) has since
+  been fixed and inherits the same limit**: two landmarks now carry distinct names in the tree,
+  and nothing here has heard a screen reader read them out. The same caveat applies to A11Y-04's
+  new tab stops — that an element is focusable and named is a tree fact, not a proof that
+  arrowing through it reads sensibly.
 * **Automated contrast only.** axe measures computed foreground/background pairs. It cannot judge
   text over images or gradients, and it cannot tell you whether "red means bad" is comprehensible
   — the colour-only check here is explicitly best-effort (it verifies that status-like elements

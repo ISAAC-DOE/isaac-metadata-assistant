@@ -151,6 +151,22 @@ export function LoadMaterials() {
       mainPad="centered"
     >
       <div className="centered-col">
+        {/*
+          FINDING A11Y-05 fix. This screen rendered NO heading of any level, so
+          a screen-reader user arriving here had nothing to orient by: the
+          heading list was empty and "jump to the top heading" went nowhere.
+
+          `sr-only` rather than a visible title, following the five screens that
+          already do this (`RecordWorkbench`, `EvidenceExplorer`,
+          `ExportReadiness`, `GuidedCompletion`). The visual design of this
+          on-ramp is deliberate and a new visible title would change it; the
+          document outline is what was missing, and that is what this adds. It
+          also paints no new text, so it moves no `color-contrast` count.
+
+          `LABELS.screenLoad` is the name this surface already carries in
+          navigation, so the outline and the nav agree.
+        */}
+        <h1 className="sr-only">{LABELS.screenLoad}</h1>
         <GovernanceBanner onReadPolicy={() => navigate(ROUTES.governance)} />
 
         <div className="onramps">
