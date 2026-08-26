@@ -670,6 +670,77 @@ def blocker_is_run_level(entry: object) -> bool:
     return block is not None and block_level(block) == LEVEL_RUN
 
 
+def _blocker_entries(raw: object) -> list:
+    """A persisted ``pending`` value read AS A LIST OF ENTRIES, without repairing it.
+
+    **WHY THIS EXISTS.** Both derivations of the open-question list did ``list(raw)`` on
+    whatever was stored, so a NON-ITERABLE ``pending`` raised ``TypeError: 'int' object
+    is not iterable`` on a GET. Measured over HTTP on ``721238a`` with
+    ``draft["pending"] = 7`` written into the persisted state: ``GET
+    /api/experiments/{id}`` **500**, and — the row that decides the severity — ``GET
+    /api/experiments`` **500** as well. One malformed run draft took My Experiments down
+    for the whole workspace.
+
+    **NOT A TYPED ERROR, AND THAT IS THE DESIGN DECISION.** ``CLAUDE.md`` §11 records
+    the sibling family — a wrong-typed structured answer used to 500 out of the truth
+    core, and a typed 422 was the deliberate follow-up — and this programme built that
+    refusal for the ANSWER path. This is the same shape on the READ path, where the
+    difference is decisive: a malformed value arriving in a REQUEST can be refused,
+    because the caller sent it and a typed refusal names what to fix; a malformed value
+    already PERSISTED cannot be refused to the reader, who did nothing wrong and whose
+    record would simply vanish.
+
+    **THE DEGRADATION IS THIS MODULE'S EXISTING POSTURE, NOT A NEW ONE.**
+    :meth:`Experiment.pending` passes a non-dict ENTRY through as-is — "this is a
+    derived view, not a place to start repairing documents" — and
+    :meth:`Experiment.pending_count` counts it as one. A non-iterable ``pending`` is
+    exactly one value this module cannot read, so it becomes exactly one entry: the
+    stored value itself, unwrapped and uninterpreted. Nothing is invented, and the
+    record stays blocked — which is the truthful answer, because a document whose
+    blocker list cannot be read must not be certified export-ready.
+
+    **THREE ALTERNATIVES REJECTED**, each because it tells the reader something false:
+    ``[]`` ("nothing is pending") moves the record to ``in_review``, files it as needing
+    nothing and unblocks the export gate on a document nobody could read; a typed error
+    on the read hides the record from its owner; and coercing/parsing/wrapping the value
+    turns a broken document into a plausible one, which ``CLAUDE.md`` §5 exists to
+    prevent.
+
+    **THE ITERABLE CASES ARE UNTOUCHED, DELIBERATELY.** A stored dict still yields its
+    KEYS and a string its CHARACTERS — pinned by
+    ``test_pending_count_is_not_materialised.py::test_a_non_list_pending_document_counts_the_same_way_the_list_does``.
+    Those keys become non-dict entries, which every surface already treats as unreadable,
+    so this is not the fabricated per-position claim ``serialize.py``'s per-item
+    isolation note warns about; it is a decision this repository already took, and only
+    the non-iterable case — which had no behaviour at all, because it raised — is given
+    one. A falsy value keeps its long-standing ``or []`` normalisation for the same
+    reason.
+
+    Returns a COPY, as ``list(...)`` always did: ``routes._apply_to_run`` materialises
+    what :func:`run_questions` returns into a run's draft before writing, and
+    ``complete.apply_answers`` then mutates it.
+    """
+    if not raw:
+        return []
+    try:
+        return list(raw)
+    except TypeError:
+        return [raw]
+
+
+def _blocker_entry_count(raw: object) -> int:
+    """``len(_blocker_entries(raw))`` without building the list for the common case.
+
+    The ``isinstance`` fast path is the reason :func:`run_question_count` and
+    :meth:`Experiment.pending_count` exist at all; the fallback delegates to
+    :func:`_blocker_entries` rather than re-deriving the rule, so the two cannot drift
+    on the one input least able to survive two disagreeing derivations.
+    """
+    if isinstance(raw, list):
+        return len(raw)
+    return len(_blocker_entries(raw))
+
+
 #: The run-level blank-draft template, derived ONCE per process, as
 #: ``(entries, json_payload_or_None)``. Built lazily by :func:`_run_level_template`
 #: because ``experiment_repository`` imports this module, so it cannot be imported at
@@ -768,7 +839,7 @@ def run_questions(run: "Run") -> list:
     """
     draft = run.draft if isinstance(run.draft, dict) else {}
     if "pending" in draft:
-        return list(draft.get("pending") or [])
+        return _blocker_entries(draft.get("pending"))
     entries, payload = _run_level_template()
     if payload is not None:
         # A FRESH TREE, SHARING NOTHING — see :func:`_run_level_template` for why a
@@ -800,13 +871,22 @@ def run_question_count(run: "Run") -> int:
     by (``CLAUDE.md`` §7).
 
     THE TWO BRANCHES MIRROR :func:`run_questions` EXACTLY, INCLUDING ITS BEHAVIOUR ON
-    A MALFORMED DOCUMENT. ``run_questions`` returns ``list(draft["pending"] or [])``,
-    so a persisted ``pending`` that is not a list still yields *some* length (a dict
-    yields its key count) and a non-iterable still raises ``TypeError`` — this counts
-    the same way rather than special-casing the malformed case into a different
-    answer. A derived count that disagrees with the derived list on a broken document
-    would be a second source of truth for exactly the input least able to survive
-    one.
+    A MALFORMED DOCUMENT — both now read the stored value through
+    :func:`_blocker_entries`, so the rule is stated once and cannot drift. A persisted
+    ``pending`` that is not a list still yields *some* length (a dict yields its key
+    count); a NON-ITERABLE yields **one**, the stored value passed through unrepaired.
+
+    ~~"and a non-iterable still raises ``TypeError``"~~ **— STRUCK 2026-08-25, because
+    that behaviour was a measured HTTP 500 and is gone.** With ``draft["pending"] = 7``
+    persisted, ``GET /api/experiments/{id}`` AND ``GET /api/experiments`` both returned
+    500 on ``721238a`` — one malformed run draft took My Experiments down for the whole
+    workspace. The sentence is kept struck rather than edited because it read as a
+    considered position ("counts the same way rather than special-casing") when the
+    behaviour it described was a crash nobody had chosen. See :func:`_blocker_entries`
+    for the design and for the three alternatives rejected.
+
+    A derived count that disagrees with the derived list on a broken document would be
+    a second source of truth for exactly the input least able to survive one.
 
     The invariant ``Experiment.pending_count() == len(Experiment.pending())`` is what
     makes this safe to have at all, and it is PINNED — see
@@ -816,8 +896,7 @@ def run_question_count(run: "Run") -> int:
     """
     draft = run.draft if isinstance(run.draft, dict) else {}
     if "pending" in draft:
-        raw = draft.get("pending") or []
-        return len(raw) if isinstance(raw, list) else len(list(raw))
+        return _blocker_entry_count(draft.get("pending"))
     return len(_run_level_template()[0])
 
 
@@ -1607,6 +1686,35 @@ def _authoritative_signature(exp: "Experiment") -> str:
 # work: ``status()`` and ``export_ready()`` stop short-circuiting the moment
 # ``pending_count()`` hits 0, which is why the 3x figure in the scale envelope was
 # taken on a record that still owed questions.
+#
+# --- AND THE DRY RUN IS SHARED TOO, 2026-08-25 -------------------------------
+#
+# ~~"A per-request memoisation of ``export_units()`` would remove most of both"~~ is
+# struck above because it named the unsafe remedy. It also named TWO amplifiers, and the
+# threading closed only ONE of them. The other — ``status()`` and ``export_ready()`` each
+# dry-running every unit independently — survived, and an independent review measured it
+# as the LARGER of the two on the workload that matters. Re-measured over HTTP on a
+# **fully answered, unexported 200-run** record, one process, arms interleaved:
+#
+#                              resolved_run_draft  export_units  validate_draft  export_draft
+#     before any threading           1,000 (5x)         5           400 (2x)      400 (2x)
+#     after the unit-list threading     200 (1x)         1           200 (1x)      400 (2x)
+#     after this                        200 (1x)         1           200 (1x)      200 (1x)
+#
+# i.e. the composition sharing left ``export_draft`` untouched at 2x the run count, which
+# was roughly HALF the request against ~3% for the composition it did remove. That is why
+# the fully-answered gain was ~1.28x while the pending workload's was 2.4x, and it is the
+# gap this closes: 3,321 ms -> 1,914 ms best-of-seven at 200 runs for this seam alone,
+# 5,311 ms -> 1,929 ms cumulative. (Absolutes contaminated by concurrent load; the ratios
+# and the counts are the finding. Byte-identical responses across all 21 shapes.)
+#
+# ``dry_run_verdict`` is the seam, threaded exactly as ``units`` is and storing nothing.
+# THE GATE IS THE DESIGN: it answers ``None`` while ``pending_count() > 0``, which is
+# precisely the union of the two callers' short-circuits, because on a record that still
+# owes questions the dry run is entered ZERO times today and an eager "compute it once up
+# front" would have turned 0 into N — making the COMMON case slower to speed up the rare
+# one. Measured cost of the gate itself: one extra ``pending_count()`` per detail read,
+# 0.047 ms at 500 runs against an ~18 ms request.
 #
 # STILL TRUE, and deliberately not changed: ``export_units()`` reads one JSON file per
 # materialised unit, and ``pending()`` still returns one dict per open question per run.
@@ -3505,7 +3613,7 @@ class Experiment:
         record-detail route wanted only the integer and four times per request; the two
         derivations are deliberately parallel and the equality is pinned by test.
         """
-        own = list(self.draft.get("pending") or [])
+        own = _blocker_entries(self.draft.get("pending"))
         if not self.runs:
             return own
         # ONCE A RUN EXISTS, THE RECORD'S OWN RUN-LEVEL QUESTIONS ARE WITHHELD.
@@ -3612,9 +3720,10 @@ class Experiment:
         place this deliberately does NOT mirror :meth:`pending`, and it is safe for a
         reason that is a property of addition rather than of this code.
         """
-        own = self.draft.get("pending") or []
+        raw = self.draft.get("pending")
         if not self.runs:
-            return len(own) if isinstance(own, list) else len(list(own))
+            return _blocker_entry_count(raw)
+        own = _blocker_entries(raw)
         return sum(1 for entry in own if not blocker_is_run_level(entry)) + sum(
             run_question_count(run) for run in self.runs
         )
@@ -3693,7 +3802,48 @@ class Experiment:
         except Exception:  # pragma: no cover - defensive, keeps the check non-throwing
             return False
 
-    def status(self, *, units: "list[ExportUnit] | None" = None) -> str:
+    def dry_run_verdict(self, *, units: "list[ExportUnit] | None" = None) -> "bool | None":
+        """The dry-run verdict, or ``None`` when NEITHER derivation would reach it.
+
+        THE ``None`` IS THE WHOLE POINT, AND IT IS A GATE RATHER THAN AN ABSENCE.
+        :meth:`status` and :meth:`export_ready` each dry-run every unit independently,
+        which on a fully answered record is ``export_draft`` over 2x the run count —
+        measured at 200 runs as **400 calls per detail read**, roughly half the request,
+        against ~3% for the composition the ``units`` threading removed
+        (``docs/evidence/scale-envelope-2026-08-25.md`` §3A). Sharing the composition
+        was never going to touch it, and this is the seam that does.
+
+        **A NAIVE "compute it once up front" WOULD MAKE THE COMMON CASE SLOWER**, which
+        is exactly the trap. Both callers short-circuit past the dry run while anything
+        is pending — :meth:`status` answers ``NEEDS_ATTENTION`` and :meth:`export_ready`
+        returns ``False`` — so on a record that still owes questions the dry run is
+        ENTERED ZERO TIMES today. Computing it eagerly would turn 0 into 1. The
+        ``pending_count() > 0`` gate below is precisely the union of the two
+        short-circuits, so this returns ``None`` exactly when neither caller would have
+        reached the dry run, and computes exactly when at least one would.
+
+        Note the union is :meth:`export_ready`'s condition alone, and that is not an
+        accident of writing: :meth:`status`'s extra ``all_units_exported()``
+        short-circuit means it sometimes skips the dry run when ``pending_count() == 0``,
+        but :meth:`export_ready` never does, so on a fully exported fan-out the verdict
+        is still needed once and is still computed once. There is no reachable state in
+        which this composes a verdict nobody asked for.
+
+        ``None`` therefore means the same thing to a consumer as ``units=None`` does:
+        "derive your own" — and a consumer that receives it will not derive anything,
+        because it short-circuits first. Nothing is stored; see :meth:`draft_ok` for why
+        a cache is the unsafe shape here.
+        """
+        if self.pending_count() > 0:
+            return None
+        return self._all_units_pass_dry_run(units=units)
+
+    def status(
+        self,
+        *,
+        units: "list[ExportUnit] | None" = None,
+        dry_run_ok: "bool | None" = None,
+    ) -> str:
         """Derive status deterministically; never stored, always recomputed.
 
         pending > 0                 -> needs_attention
@@ -3718,15 +3868,30 @@ class Experiment:
         from :meth:`pending_count`, neither of which composes anything. So on a record
         that still owes questions this parameter changes nothing at all, which is
         precisely why the scale envelope's workload never entered here.
+
+        ``dry_run_ok`` IS A VERDICT THE CALLER ALREADY DERIVED, not a way to assert
+        one — the same rule as ``routes._workflow_for``'s ``draft_ok``. It is only ever
+        passed what :meth:`dry_run_verdict` returned for this same experiment at this
+        same revision inside the same read, and it is deliberately not plumbed through
+        to any route that could take it from a request. ``None`` means "derive your
+        own", which is the code that ran before the parameter existed, and it is what
+        every caller outside ``routes._detail`` still does.
         """
         if self.all_units_exported():
             return DONE
         if self.pending_count() > 0:
             return NEEDS_ATTENTION
         # Dry-run only: export_draft returns an ExportResult and writes nothing.
-        return READY_TO_EXPORT if self._all_units_pass_dry_run(units=units) else IN_REVIEW
+        if dry_run_ok is None:
+            dry_run_ok = self._all_units_pass_dry_run(units=units)
+        return READY_TO_EXPORT if dry_run_ok else IN_REVIEW
 
-    def export_ready(self, *, units: "list[ExportUnit] | None" = None) -> bool:
+    def export_ready(
+        self,
+        *,
+        units: "list[ExportUnit] | None" = None,
+        dry_run_ok: "bool | None" = None,
+    ) -> bool:
         """True iff a dry-run export of EVERY unit passes (pending==0 AND the export
         gate succeeds for each), independent of whether anything was already exported.
 
@@ -3735,11 +3900,14 @@ class Experiment:
         exported record edited back to pending>0 is correctly NOT export-ready.
         Read-only dry-run, exactly as ``status()`` uses ``export_draft``.
 
-        ``units`` is threaded exactly as :meth:`draft_ok`'s is.
+        ``units`` is threaded exactly as :meth:`draft_ok`'s is, and ``dry_run_ok``
+        exactly as :meth:`status`'s is.
         """
         if self.pending_count() > 0:
             return False
-        return self._all_units_pass_dry_run(units=units)
+        if dry_run_ok is None:
+            return self._all_units_pass_dry_run(units=units)
+        return dry_run_ok
 
 
 # --- store operations ---------------------------------------------------------

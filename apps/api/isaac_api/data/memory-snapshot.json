@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "1a0ac44034da361125f1c0061a1bf6824d0cd9a3d82f45b09e5409c0a518c3ed"
+        "sha256": "22b3f04a5ed788f3644235b34fdd21ae74c3477404f19cab8cccf2700236acdd"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "a59b93975cd991f5e24779991322a93092d2fc1167c8f616361647f39b9b1138"
+        "sha256": "533bc1c99bf623bb08bcd244bf941235d42afbf9628b5cc0c820b2abc548bd99"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10824,7 +10824,7 @@
       },
       {
         "path": "src/isaac_records/draft_validator.py",
-        "sha256": "bc15b39495a6154863cf7c36f2346f0afa46197a4c8b1b9fb29c7964e052cd6e"
+        "sha256": "a000e3f37641bba1ab23c5f29040b443adac57a751b6a07edf23b296fdf92674"
       },
       {
         "path": "src/isaac_records/export.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "d12f7e6278c146606287f2837c98bb2b9429be83b0ff7767c72596edbca4b44b"
+    "served_manifest_fingerprint": "15a6e1efb7b15403bccedc30bc734628efdba57b12eaca27568e1c53ed2698ba"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

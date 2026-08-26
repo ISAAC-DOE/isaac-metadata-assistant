@@ -23,9 +23,10 @@ wall-clock numbers are excluded from every verdict for that reason). So the norm
 guards are:
 
 1. **The binding equality** ``pending_count() == len(pending())``, over every workload
-   shape — zero-run, seeded, legacy, mixed, answered, partly answered, and a malformed
-   non-dict entry, which ``pending()`` deliberately passes through as-is and which must
-   therefore be COUNTED as one.
+   shape — zero-run, seeded, legacy, mixed, answered, partly answered, a malformed
+   non-dict entry, and a NON-ITERABLE ``pending`` value (added 2026-08-25, when it
+   stopped raising ``TypeError`` out of both derivations) — all of which ``pending()``
+   deliberately passes through as-is and which must therefore be COUNTED as one each.
 2. **A structural anti-scaling assertion**: the number of ``copy.deepcopy`` calls and
    ``blank_draft()`` builds made by ``pending_count()`` is IDENTICAL for a small and a
    large record. Equality rather than "small", so a future implementation that
@@ -183,6 +184,12 @@ def test_run_question_count_mirrors_run_questions_branch_for_branch():
         ("answered", {"pending": []}),
         ("non-dict draft", None),
         ("dict pending", {"pending": {"a": 1, "b": 2}}),
+        # NON-ITERABLE `pending`, which used to raise `TypeError` out of BOTH sides and
+        # so could not be asserted here at all. It now yields exactly one entry — the
+        # stored value, unrepaired — on both sides; see `ws._blocker_entries` for why
+        # that and not `[]`, and `test_a_malformed_pending_list_is_still_readable.py`
+        # for the HTTP measurement that motivated it.
+        ("non-iterable pending", {"pending": 7}),
     ):
         run = ws.new_run("01EXP", ordinal=1, draft=draft)
         if label == "non-dict draft":

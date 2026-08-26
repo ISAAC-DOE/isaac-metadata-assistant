@@ -3480,12 +3480,24 @@ def test_a_block_override_of_the_wrong_declared_type_is_refused(
 ):
     """NOT cosmetic, and NOT deferred to the export gate.
 
-    A LIST stored at `attribution` reaches a real crash: the draft validator guards its
-    server-stamped-identity check with an `isinstance` and then reads
-    `attribution.get("contributors")` unguarded, so the deterministic core raises
+    ~~"A LIST stored at `attribution` reaches a real crash: the draft validator guards
+    its server-stamped-identity check with an `isinstance` and then reads
+    `attribution.get(\"contributors\")` unguarded, so the deterministic core raises
     `AttributeError` — a 500 out of the truth plane — the moment anything checks that
-    run. The expected type is read from the vendored official schema rather than
-    transcribed, so it follows a schema refresh instead of disagreeing with it.
+    run."~~ **STRUCK 2026-08-25: the crash is gone.** `validate_draft` now files a
+    finding at `attribution` for a wrong-typed top-level container instead of raising
+    (disclosed under §13 in `_DISCLOSED_TRUTH_PATH_CHANGES`), so a stored document of
+    this shape is refused at the gate rather than taking the read down.
+
+    **The gate below is retained, and its reason never depended on the crash.** A
+    wrong-typed block arriving in a REQUEST is something the caller sent and can be told
+    to fix, so a typed 422 that stores nothing is a better answer than storing a
+    knowingly-broken document and refusing it at a later gate. The crash was the loudest
+    argument, not the load-bearing one; it is struck rather than deleted because a
+    reader who remembers only "it 500s" would conclude the gate is now unnecessary.
+
+    The expected type is read from the vendored official schema rather than transcribed,
+    so it follows a schema refresh instead of disagreeing with it.
     """
     run = _create_run(client, experiment_id)
     response = _set_override(client, experiment_id, run["id"], address, payload)
@@ -3497,16 +3509,31 @@ def test_a_block_override_of_the_wrong_declared_type_is_refused(
     assert _stored_run(client, experiment_id, run["id"]).overrides == {}
 
 
-def test_the_wrong_typed_block_override_would_otherwise_500_the_run_check(
+def test_the_wrong_typed_block_the_gate_refuses_is_now_a_FINDING_not_a_crash(
     client, experiment_id
 ):
-    """The crash the gate above prevents, demonstrated through the STORE.
+    """INVERTED, NOT DELETED — and the invitation to invert it is in its own old text.
 
-    Written deliberately as a characterisation of the domain rather than of the route:
-    the route refuses this shape, so the only way to show what it is protecting is to
-    force the document past it. If a later change makes the deterministic core tolerant
-    of a wrong-typed block, this test fails and the gate's justification can be
-    re-examined instead of being taken on trust.
+    ~~``test_the_wrong_typed_block_override_would_otherwise_500_the_run_check``~~. It
+    asserted ``pytest.raises(AttributeError)`` over the composed document, and said of
+    itself: *"If a later change makes the deterministic core tolerant of a wrong-typed
+    block, this test fails and the gate's justification can be re-examined instead of
+    being taken on trust."* That change has now been made, deliberately and disclosed
+    under §13 (see ``_DISCLOSED_TRUTH_PATH_CHANGES``), so this is that re-examination
+    rather than a test bent to fit a diff.
+
+    **THE GATE IS RETAINED, AND ITS JUSTIFICATION IS NOW THE STRONGER ONE.** It never
+    rested only on "otherwise it 500s". A wrong-typed block arriving in a REQUEST is
+    something the caller sent and can be told to fix, so refusing it at the write with a
+    typed 422 and storing nothing is better than storing a knowingly-broken document and
+    refusing it later at a gate — the same reasoning that keeps
+    ``routes._probe_override``'s ``_PROBE_STRUCTURAL_ERRORS`` branches alive. What the
+    core's tolerance changes is only the READ: a document that got past the gate by some
+    other route no longer takes its own record away from the reader.
+
+    ``test_a_block_override_of_the_wrong_declared_type_is_refused`` above is unchanged
+    and still pins the 422 and the empty ``overrides``, so the gate itself is guarded by
+    its own test rather than by this one's side effect.
     """
     from isaac_records.draft_validator import validate_draft
 
@@ -3519,13 +3546,15 @@ def test_the_wrong_typed_block_override_would_otherwise_500_the_run_check(
     )
     exp.save_versioned()
 
-    # Composing is fine — it is the deterministic CHECK over the composition that
-    # raises, which is why the shape has to be refused at the write rather than caught
-    # by a verdict.
     composed = exp.resolved_run_draft(stored)
     assert composed["attribution"] == ["not", "an", "object"]
-    with pytest.raises(AttributeError):
-        validate_draft(composed)
+
+    report = validate_draft(composed)
+    assert not report.ok
+    assert any(where == "attribution" for where, _ in report.errors), report.errors
+    # The stored value is NOT echoed back inside the finding, and the document is NOT
+    # repaired by having been checked.
+    assert composed["attribution"] == ["not", "an", "object"]
 
 
 # --- 11c.6b the payload gate MAY NOT CRASH INSTEAD OF REFUSING --------------------
@@ -4320,6 +4349,42 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "0 on a record `isaac export` refuses. `portal_warnings` remains advisory and "
         "still cannot move the exit code; exactness is the only non-schema input added. "
         "Covered by tests/test_schema_string_gate_exactness.py. Delete once landed."
+    ),
+    "src/isaac_records/draft_validator.py": (
+        "A wrong-typed TOP-LEVEL container is now a FINDING instead of an exception. "
+        "`validate_draft` walked all ten containers it knows about without asking what "
+        "type they were, so a persisted draft whose `assets` was a string reached "
+        "`asset.get(\"sha256\")` and raised `AttributeError`. Measured over HTTP on "
+        "`721238a`, on a record with nothing pending (which is what lets "
+        "`Experiment.export_ready` reach `draft_ok`): `GET /api/experiments/{id}` -> "
+        "500. All ten behaved the same way (`meta`, `fields`, `block_evidence`, `qc`, "
+        "`attribution`, `assets`, `descriptors_outputs`, `implicit`, `series`, "
+        "`links`); the exception class depended only on whether the wrong type happened "
+        "to be iterable. WHY THE TRUTH CORE AND NOT THE ROUTE: `validate_draft` is also "
+        "reached by `isaac validate --draft` and by `workspace.Experiment.draft_ok`, so "
+        "a route-layer pre-check would have left the CLI crashing and would have put a "
+        "second, drifting statement of draft shape outside the module that owns it. "
+        "WHAT CHANGED: a `_container` helper returns the stored value when its type is "
+        "right and otherwise files an error AT the container name and returns an EMPTY "
+        "container of the right type. Nothing is coerced, parsed or repaired, and the "
+        "container is not walked — `enumerate(\"abc\")` would file three per-position "
+        "claims invented out of a string's characters, which serialize.py's per-item "
+        "isolation note calls a fabricated partial success. The long-standing falsy "
+        "normalisation (`draft.get(k) or []` reading 0/\"\"/False as empty) is "
+        "PRESERVED, so no draft nobody reported a defect about moves. NESTED payloads "
+        "still raise on purpose, because `routes._probe_override` catches exactly that "
+        "(`_PROBE_STRUCTURAL_ERRORS`) to answer a malformed REQUEST with a typed 422 — "
+        "a request can be refused, a persisted document cannot be refused to its "
+        "reader. EXPORTED RECORD BEHAVIOUR: UNCHANGED. `export_draft` validates first "
+        "and returns early when the report is not ok, so a malformed container is now a "
+        "clean refusal carrying the finding and `transform` is never reached; nothing "
+        "that previously exported stops, and nothing new starts. OFFICIAL SCHEMA "
+        "COMPLIANCE: UNCHANGED — the schema is not edited (§1) and `validate_official` "
+        "is not touched. Covered by "
+        "tests/test_malformed_draft_containers_are_reported_not_raised.py (26 tests, "
+        "including a negative control that the committed synthetic XANES draft's "
+        "verdict is byte-identical, and two tests pinning what was deliberately NOT "
+        "widened). Delete this entry once landed."
     ),
 }
 

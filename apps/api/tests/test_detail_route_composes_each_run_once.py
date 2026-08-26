@@ -200,24 +200,37 @@ class _Counter:
     def __init__(self) -> None:
         self.resolved_run_draft = 0
         self.export_units = 0
+        self.export_draft = 0
 
     def __repr__(self) -> str:  # pragma: no cover - assertion message only
         return (
             f"resolved_run_draft={self.resolved_run_draft} "
-            f"export_units={self.export_units}"
+            f"export_units={self.export_units} "
+            f"export_draft={self.export_draft}"
         )
 
 
 @pytest.fixture()
 def counted(monkeypatch) -> _Counter:
-    """Count entries into the two methods the profile named, over the real HTTP surface.
+    """Count entries into the three functions the profile named, over the real HTTP
+    surface.
 
-    Patched on the CLASS, so the count is what the route actually did rather than what a
+    Patched on the CLASS (and, for ``export_draft``, on the ``workspace`` module that
+    imported it), so the count is what the route actually did rather than what a
     re-implementation of the route would have done.
+
+    **``export_draft`` WAS NOT COUNTED HERE, AND ITS ABSENCE HID THE LARGER HALF OF THE
+    COST.** The two counters above were enough to prove the composition is shared, and
+    this file said so; but on a fully answered record ``status()`` and ``export_ready()``
+    each dry-ran EVERY unit, so ``export_draft`` ran 2x the run count and no assertion in
+    this file looked at it. An independent review measured it at 200 runs — 400 calls,
+    roughly half the request — while every test here passed. A counter that omits the
+    dominant term reads as coverage of it.
     """
     counter = _Counter()
     real_compose = ws.Experiment.resolved_run_draft
     real_units = ws.Experiment.export_units
+    real_export_draft = ws.export_draft
 
     def spy_compose(self, run):
         counter.resolved_run_draft += 1
@@ -227,8 +240,13 @@ def counted(monkeypatch) -> _Counter:
         counter.export_units += 1
         return real_units(self, *args, **kwargs)
 
+    def spy_export_draft(*args, **kwargs):
+        counter.export_draft += 1
+        return real_export_draft(*args, **kwargs)
+
     monkeypatch.setattr(ws.Experiment, "resolved_run_draft", spy_compose)
     monkeypatch.setattr(ws.Experiment, "export_units", spy_units)
+    monkeypatch.setattr(ws, "export_draft", spy_export_draft)
     return counter
 
 
@@ -259,6 +277,13 @@ def test_a_detail_read_composes_each_runs_draft_exactly_once(client, counted, le
 
     assert counted.resolved_run_draft == n, counted
     assert counted.export_units == 1, counted
+    # THE TRAP GUARD, and it is the reason ``_shared_dry_run`` gates on
+    # ``pending_count()`` rather than computing up front. On THIS workload the dry run
+    # is entered ZERO times — ``status()`` answers ``needs_attention`` and
+    # ``export_ready()`` returns ``False`` before reaching it — and a "compute it once
+    # for the whole response" that ignored that would turn 0 into ``n``, making the
+    # COMMON case slower in order to speed up the rare one. Zero, asserted.
+    assert counted.export_draft == 0, counted
 
 
 def test_a_detail_read_of_a_fully_answered_record_also_composes_once(client, counted):
@@ -268,33 +293,48 @@ def test_a_detail_read_of_a_fully_answered_record_also_composes_once(client, cou
     ``_all_units_pass_dry_run`` stop short-circuiting, so ``_summary``'s ``status()`` and
     ``_workflow_for``'s ``export_ready()`` each reach ``export_units()`` too — FIVE unit
     lists per response, and ``5 * n`` compositions. It must still be one and ``n``.
+
+    **AND ``export_draft`` MUST BE ``n``, NOT ``2 * n``.** Sharing the composed unit list
+    removed the repeated COMPOSITION and left the repeated DRY RUN: ``status()`` and
+    ``export_ready()`` each ran ``export_draft`` over every unit, measured at 200 runs as
+    400 calls per request and roughly half the request's time. ``_shared_dry_run``
+    derives the verdict once and hands it to both.
     """
     store = client_ws(client)
     exp = _fan_out(store, "01DETAILONCEANSWERED000000", ("Run A", "Run B", "Run C"))
-    counted.resolved_run_draft = counted.export_units = 0
+    counted.resolved_run_draft = counted.export_units = counted.export_draft = 0
 
     body = client.get(f"/api/experiments/{exp.id}").json()
     assert body["pending_count"] == 0, body["pending_count"]
 
     assert counted.resolved_run_draft == 3, counted
     assert counted.export_units == 1, counted
+    assert counted.export_draft == 3, counted
 
 
 def test_a_detail_read_of_an_exported_fan_out_also_composes_once(client, counted):
     """And once every run is exported, where ``artifact_state`` additionally reads each
-    written record off disk through the SAME unit list."""
+    written record off disk through the SAME unit list.
+
+    ``export_draft`` is ``n`` here BEFORE the dry-run sharing as well as after, and that
+    is recorded rather than glossed: ``status()`` short-circuits to ``DONE`` on a fully
+    exported record, so only ``export_ready()`` ever reached the dry run on this shape.
+    The equality is asserted anyway — a change that made the DONE branch dry-run again
+    would be a regression this file would otherwise not see.
+    """
     store = client_ws(client)
     exp = _fan_out(
         store, "01DETAILONCEEXPORTED000000", ("Run A", "Run B"), sample_id="SAMPLE-1"
     )
     _export(client, exp.id)
-    counted.resolved_run_draft = counted.export_units = 0
+    counted.resolved_run_draft = counted.export_units = counted.export_draft = 0
 
     body = client.get(f"/api/experiments/{exp.id}").json()
     assert body["artifact"]["state"] == "current", body["artifact"]
 
     assert counted.resolved_run_draft == 2, counted
     assert counted.export_units == 1, counted
+    assert counted.export_draft == 2, counted
 
 
 # --- 2. the structural anti-scaling guard -------------------------------------
@@ -333,6 +373,45 @@ def test_the_composition_work_per_run_does_not_grow_with_the_run_count(client, c
         f"{SMALL} runs -> {small_calls} compositions, {LARGE} runs -> {large_calls}"
     )
     assert small_units == large_units == 1, (small_units, large_units)
+
+
+DRY_SMALL, DRY_LARGE = 3, 24
+
+
+def test_the_dry_run_work_per_run_does_not_grow_with_the_run_count(client, counted):
+    """The same ratio guard for the DRY RUN, on the workload that actually reaches it.
+
+    The test above is taken on records that still owe questions, where ``export_draft``
+    is zero — so it could not have caught the 2x it is written to catch. This one uses
+    fully answered records, where both consumers reach the dry run, and pins
+    ``export_draft`` per run at exactly one. ``LARGE`` is smaller here than above because
+    each run's dry run is a real ``export_draft``, not a composition.
+    """
+    store = client_ws(client)
+    small = _fan_out(
+        store,
+        "01DRYSCALESMALL00000000000",
+        tuple(f"Run {i}" for i in range(DRY_SMALL)),
+    )
+    large = _fan_out(
+        store,
+        "01DRYSCALELARGE00000000000",
+        tuple(f"Run {i}" for i in range(DRY_LARGE)),
+    )
+    assert client.get(f"/api/experiments/{small.id}").json()["pending_count"] == 0
+    assert client.get(f"/api/experiments/{large.id}").json()["pending_count"] == 0
+
+    counted.export_draft = 0
+    client.get(f"/api/experiments/{small.id}")
+    small_dry = counted.export_draft
+
+    counted.export_draft = 0
+    client.get(f"/api/experiments/{large.id}")
+    large_dry = counted.export_draft
+
+    assert small_dry / DRY_SMALL == large_dry / DRY_LARGE == 1, (
+        f"{DRY_SMALL} runs -> {small_dry} dry runs, {DRY_LARGE} runs -> {large_dry}"
+    )
 
 
 # --- 3. byte equality, threaded against un-threaded ---------------------------
@@ -524,7 +603,16 @@ def test_the_shape_set_covers_every_branch_the_derivations_take(client):
 
 
 def _disable_threading(monkeypatch) -> None:
-    """Restore the PRE-CHANGE call pattern in :func:`routes._detail`, both seams of it.
+    """Restore the PRE-CHANGE call pattern in :func:`routes._detail`, all THREE seams.
+
+    **THERE ARE NOW THREE, AND THE COUNT HAS BEEN WRONG ONCE ALREADY** — the paragraph
+    below records it saying "one" when there were two. The third is
+    ``routes._shared_dry_run``: ``_detail`` derives the dry-run verdict once and passes
+    it as ``dry_run_ok`` to both ``_summary``'s ``status()`` and ``_workflow_for``'s
+    ``export_ready()``. Patching the other two does not revert that, so the ``kwargs``
+    filter below drops ``dry_run_ok`` as well — and both are dropped by REMOVING the
+    keyword rather than by passing ``None``, because ``None`` is what the parameter
+    already defaults to and dropping it is what the fourteen unshared call sites do.
 
     **THERE ARE TWO SEAMS, AND THIS FILE USED TO CLAIM THERE WAS ONE.** The docstring
     below said *"``routes._shared_units`` is the single seam"*; it is not.
@@ -551,6 +639,7 @@ def _disable_threading(monkeypatch) -> None:
     """
     real_workflow_for = routes._workflow_for
     monkeypatch.setattr(routes, "_shared_units", lambda exp: None)
+    monkeypatch.setattr(routes, "_shared_dry_run", lambda exp, **kwargs: None)
     monkeypatch.setattr(
         routes, "_workflow_for", lambda exp, **kwargs: real_workflow_for(exp)
     )
@@ -631,9 +720,18 @@ def test_the_threaded_and_unthreaded_derivations_agree_on_every_shape(client):
     for name, exp_id in shapes.items():
         exp = store.load_experiment(exp_id)
         units = exp.export_units()
+        dry_run_ok = exp.dry_run_verdict(units=units)
         assert exp.draft_ok(units=units) == exp.draft_ok(), name
         assert exp.status(units=units) == exp.status(), name
         assert exp.export_ready(units=units) == exp.export_ready(), name
+        # THE THIRD SEAM, at the level it lives on. ``_detail`` does not call
+        # ``status()``/``export_ready()`` with ``units`` alone; it passes the dry-run
+        # verdict it already derived. That configuration is what ships, so that
+        # configuration is what is compared against the un-threaded derivation.
+        assert exp.status(units=units, dry_run_ok=dry_run_ok) == exp.status(), name
+        assert (
+            exp.export_ready(units=units, dry_run_ok=dry_run_ok) == exp.export_ready()
+        ), name
         assert dependencies.artifact_state(exp, units=units) == dependencies.artifact_state(
             exp
         ), name
@@ -643,9 +741,80 @@ def test_the_threaded_and_unthreaded_derivations_agree_on_every_shape(client):
         # derived. That configuration is what ships, so that configuration is what is
         # compared against the un-threaded derivation.
         assert routes._workflow_for(
-            exp, units=units, draft_ok=exp.draft_ok(units=units)
+            exp,
+            units=units,
+            draft_ok=exp.draft_ok(units=units),
+            dry_run_ok=dry_run_ok,
         ) == routes._workflow_for(exp), name
         assert routes._summary(exp, units=units) == routes._summary(exp), name
+        assert routes._summary(
+            exp, units=units, dry_run_ok=dry_run_ok
+        ) == routes._summary(exp), name
+
+
+def test_the_dry_run_verdict_is_none_exactly_when_neither_consumer_would_reach_it(
+    client,
+):
+    """THE GATE, stated as an equivalence rather than as a direction.
+
+    ``dry_run_verdict`` must answer ``None`` on every shape where the dry run is entered
+    zero times today, and a real boolean on every shape where it is entered at all — the
+    first half stops the sharing from making the common (pending) case slower, the second
+    half stops it from silently disabling the sharing. Both are checked over the whole
+    shape set, and the ``None`` half is checked by COUNTING the dry runs the un-threaded
+    derivations actually perform rather than by re-stating the gate's own condition,
+    which would pass by construction.
+    """
+    shapes = _all_shapes(client)
+    assert len(shapes) == _SHAPE_COUNT, sorted(shapes)
+    store = client_ws(client)
+    seen_none = seen_bool = 0
+    for name, exp_id in shapes.items():
+        exp = store.load_experiment(exp_id)
+        units = exp.export_units()
+        verdict = exp.dry_run_verdict(units=units)
+
+        calls = 0
+        real_export_draft = ws.export_draft
+        with pytest.MonkeyPatch.context() as patch:
+            def spy(*args, _real=real_export_draft, **kwargs):
+                nonlocal calls
+                calls += 1
+                return _real(*args, **kwargs)
+
+            patch.setattr(ws, "export_draft", spy)
+            exp.status()
+            exp.export_ready()
+
+        if verdict is None:
+            seen_none += 1
+            assert calls == 0, f"{name}: verdict withheld but {calls} dry run(s) happen"
+        else:
+            seen_bool += 1
+            assert calls > 0, f"{name}: verdict derived but no dry run happens"
+            assert verdict == exp._all_units_pass_dry_run(units=units), name
+    # …and not vacuously: the shape set must contain both kinds.
+    assert seen_none and seen_bool, (seen_none, seen_bool)
+
+
+def test_a_threaded_false_verdict_is_honoured_rather_than_re_derived(client):
+    """``dry_run_ok=False`` MUST NOT BE READ AS "not supplied".
+
+    ``False`` and ``None`` are both falsy, and an implementation written as ``dry_run_ok
+    or self._all_units_pass_dry_run(...)`` would silently re-derive on every negative
+    verdict — restoring the 2x on exactly the records whose dry run FAILS, and doing it
+    invisibly, because re-deriving produces the same answer. So the two consumers are
+    handed a ``False`` that disagrees with the truth and must return the ``False``.
+    """
+    store = client_ws(client)
+    exp = store.load_experiment(_fan_out(store, "01DRYRUNFALSEHONOURED00000", ("A", "B")).id)
+    units = exp.export_units()
+    assert exp.dry_run_verdict(units=units) is True, "fixture must pass the dry run"
+
+    assert exp.status(units=units, dry_run_ok=False) == "in_review"
+    assert exp.status(units=units, dry_run_ok=True) == "ready_to_export"
+    assert exp.export_ready(units=units, dry_run_ok=False) is False
+    assert exp.export_ready(units=units, dry_run_ok=True) is True
 
 
 def test_a_zero_run_experiment_ignores_a_unit_list_for_draft_ok(client):
