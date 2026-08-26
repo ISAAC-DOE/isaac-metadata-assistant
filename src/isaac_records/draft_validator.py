@@ -104,15 +104,29 @@ def _has_derivation(entries: list[dict]) -> bool:
 def _check_envelope(report: DraftReport, where: str, env: dict) -> None:
     status = env.get("status")
     value = env.get("value")
-    entries = [e for e in (env.get("evidence") or []) if isinstance(e, dict)]
+    # `_cited_sources`, NOT `env.get("evidence") or []`. The comprehension ITERATED the
+    # stored value, so `{"evidence": 7}` raised `TypeError` out of the truth core and
+    # became an HTTP 500 on `GET /api/experiments/{id}` (measured on `724ce58`).
+    sources = _cited_sources(report, where, env.get("evidence"))
+    unreadable_evidence = sources is None
+    entries = [e for e in (sources or []) if isinstance(e, dict)]
 
     if status not in ("verified", "inferred", "needs_confirmation", "missing", "rejected"):
         report.err(where, f"invalid status {status!r}")
         return
+    # THE STATUS/VALUE CHECKS STILL RUN over an envelope whose evidence is unreadable:
+    # `status` and `value` were read fine, and withholding a finding they DO support
+    # would hide a real defect behind an unrelated one.
     if status == "missing" and value is not None:
         report.err(where, "status 'missing' but a value is present")
     if status in FINAL_STATUSES and value is None:
         report.err(where, f"status '{status}' but value is null")
+    # THE EVIDENCE-DERIVED CHECKS DO NOT. "has no observed evidence" is a claim about
+    # what the sources say, and this module has just reported that it could not read
+    # them — the same rule `_cited_sources` and the `series`/`qc` gate follow. The
+    # envelope is still refused, by the shape finding filed at this same address.
+    if unreadable_evidence:
+        return
     if status == "verified" and value is not None and not _has_observed(entries):
         report.err(where, "verified field has no observed evidence or user confirmation")
     if status == "inferred" and value is not None:
@@ -175,15 +189,94 @@ def _paths_authoring_uploaded_by(fields) -> list[str]:
     return sorted(offenders)
 
 
-def _claim_covered(entries) -> bool:
-    """A claim is covered iff it cites at least one source (a dict evidence entry)."""
-    return any(isinstance(e, dict) for e in (entries or []))
+def _claim_covered(entries: list) -> bool:
+    """A claim is covered iff it cites at least one source (a dict evidence entry).
+
+    Reached only through :func:`_cited_sources`, which has already established that
+    ``entries`` IS a list. Calling it with anything else is a programming error here,
+    and used to be a live HTTP 500 — see that function's note.
+    """
+    return any(isinstance(e, dict) for e in entries)
+
+
+def _cited_sources(report: DraftReport, where: str, raw) -> list | None:
+    """The sources one claim cites, or ``None`` when the stored value cannot be read.
+
+    **THE MEASURED DEFECT.** ``_claim_covered`` was ``any(isinstance(e, dict) for e in
+    (entries or []))``, which ITERATES whatever it is given. A stored evidence value
+    that is not a list therefore raised out of the truth core rather than being
+    reported. Measured over HTTP on ``724ce58``, one wrong-typed value at a time,
+    written into the persisted state of a record created through ``POST
+    /api/experiments`` — ``GET /api/experiments/{id}`` in every row, with ``GET
+    /api/experiments`` and ``GET /api/experiments/{id}/pending`` answering 200
+    throughout:
+
+    ==================================================  ========  ==================
+    stored value                                        before    raised
+    ==================================================  ========  ==================
+    ``assets[0]["evidence"] = 7``                       **500**   ``TypeError``
+    ``implicit[0]["evidence"] = 7``                     **500**   ``TypeError``
+    ``block_evidence["series:s"] = 7``                  **500**   ``TypeError``
+    ``fields["a.b"]["evidence"] = 7``                   **500**   ``TypeError``
+    ==================================================  ========  ==================
+
+    (``links`` and ``attribution.contributors`` reach the same call and raised the same
+    way; they are reported here for completeness rather than as separate defects.)
+
+    **WHY A SEPARATE FUNCTION RATHER THAN A TOLERANT ``_claim_covered``.** Returning
+    ``False`` for an unreadable value would have been one line, and it would have made
+    this module state something it cannot know: that the claim cites no source. It
+    cites nothing this module could READ, which is a different sentence and the only
+    one the draft supports. So the shape is reported at the claim's own address and the
+    caller is told — by ``None`` — not to add a second finding derived from the value
+    just refused. That is the same rule the ``series``/``qc`` gate below now follows.
+
+    **NOTHING IS WALKED, COERCED OR QUOTED.** A string is refused rather than iterated,
+    for the reason ``_container`` states: ``any(isinstance(e, dict) for e in "abc")``
+    silently answers "no sources" over three characters that were never entries. The
+    stored VALUE never appears in the message — only its JSON shape.
+
+    **VERDICT MOVEMENT.** A truthy non-list value previously either RAISED (no verdict
+    at all) or, for the two iterable non-list shapes JSON can produce — a string and an
+    object — answered ``False`` and produced the caller's "no evidence" error. Both are
+    already FAIL, so no draft that validated clean changes verdict; only the message
+    moves. See the §13 disclosure for the full statement.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    report.err(
+        where,
+        f"evidence must be a list of source entries; this draft stores {_kind(raw)}. "
+        f"The value is refused rather than walked — nothing here can assume what it "
+        f"was meant to cite, and reading positions out of it would invent sources the "
+        f"draft never named.",
+    )
+    return None
 
 
 def _check_claim(report: DraftReport, where: str, entries) -> None:
     """A claim (asset, descriptor, implicit) must cite at least one source."""
-    if not _claim_covered(entries):
+    sources = _cited_sources(report, where, entries)
+    if sources is None:
+        return
+    if not _claim_covered(sources):
         report.err(where, "no evidence — every asset/descriptor/inference must cite a source")
+
+
+def _block_uncited(report: DraftReport, where: str, raw) -> bool:
+    """True iff the caller should file its own block-specific "no evidence" finding.
+
+    False in BOTH the covered case and the unreadable one. In the second,
+    :func:`_cited_sources` has already filed the finding that says what shape was
+    found, and a second finding asserting the block cites nothing would be a claim
+    about a value this module just said it could not read.
+    """
+    sources = _cited_sources(report, where, raw)
+    if sources is None:
+        return False
+    return not _claim_covered(sources)
 
 
 # --- malformed top-level containers -------------------------------------------
@@ -303,22 +396,65 @@ def _container(report: DraftReport, draft: dict, name: str):
     return expected()
 
 
-#: What ONE item of each top-level LIST container has to be, in the reader's words.
-#: Only the five list containers appear: a dict container's items are its VALUES, which
-#: each reader already type-checks for itself (`fields` files "must be a field
-#: envelope", `block_evidence` goes through `_claim_covered`).
+#: What ONE item of a walked LIST has to be, in the reader's words.
+#:
+#: THE FIVE TOP-LEVEL LIST CONTAINERS, PLUS THE TWO NESTED LISTS THIS MODULE WALKS.
+#: ~~"Only the five list containers appear: a dict container's items are its VALUES,
+#: which each reader already type-checks for itself (`fields` files 'must be a field
+#: envelope', `block_evidence` goes through `_claim_covered`)."~~ **That justification
+#: was FALSE for its second example and is kept struck rather than deleted, because the
+#: falsity was a live HTTP 500 rather than a wording slip.** `_claim_covered` was
+#: `any(isinstance(e, dict) for e in (entries or []))` — it ITERATED the value instead
+#: of type-checking it, so `block_evidence = {"series:s": 7}` raised `TypeError: 'int'
+#: object is not iterable` and `GET /api/experiments/{id}` answered **500** (measured on
+#: `724ce58`). The `fields` half was and remains true. Dict containers are now genuinely
+#: covered, by `_cited_sources`, which is the type check the comment claimed existed.
+#:
+#: `descriptors` and `contributors` are NESTED lists, and they are here because the
+#: item guard stopping at the top level left them raising: `{"descriptors_outputs":
+#: [{"descriptors": [7]}]}` reached `d.get("value")` and raised `AttributeError`, also a
+#: 500 on the same route. They are the only two nested lists `validate_draft` walks
+#: position-by-position, so the table is complete for what this module iterates rather
+#: than complete for the draft format.
 _ITEM_NOUNS: dict[str, str] = {
     "assets": "an asset object",
     "descriptors_outputs": "a descriptors-output object",
     "implicit": "an implicit-claim object",
     "series": "a series object",
     "links": "a link object",
+    "descriptors": "a descriptor object",
+    "contributors": "a contributor object",
 }
 
+def _nested_list(report: DraftReport, owner: dict, key: str, where: str) -> list:
+    """A nested list a walker is about to enumerate, or an EMPTY one plus a finding.
 
-def _mapping_items(report: DraftReport, container: list, name: str):
-    """``(index, item)`` for every item of a top-level list container that IS a mapping,
-    with a finding filed at ``name[index]`` for every item that is not.
+    The top-level `_container` guard cannot reach these: `descriptors_outputs[j]
+    ["descriptors"]` and `attribution["contributors"]` are one level down, and
+    `enumerate(7)` raised out of both. A truthy non-list is refused rather than walked,
+    for `_container`'s reason — `enumerate("abc")` would file three per-position
+    findings invented out of a string's characters. The falsy normalisation the rest of
+    this module lives by (`or []` reading `0`/`""`/`False` as empty) is preserved.
+    """
+    raw = owner.get(key)
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    report.err(
+        where,
+        f"must be a list; this draft stores {_kind(raw)}. The value is refused rather "
+        f"than walked — nothing here can assume what it was meant to hold, and reading "
+        f"positions out of it would invent claims the draft never made.",
+    )
+    return []
+
+
+def _mapping_items(report: DraftReport, container: list, name: str, *, where: str | None = None):
+    """``(index, item)`` for every item of a walked list that IS a mapping, with a
+    finding filed at ``where[index]`` (default ``name[index]``) for every item that is
+    not. ``where`` exists only so a NESTED list can file at its real position
+    (``descriptors[0][1]``) while still naming its item type from ``name``.
 
     **THE MEASURED DEFECT.** ``_container`` guards the CONTAINER's type, so
     ``{"assets": "not a list"}`` became a finding — but a well-formed list holding a
@@ -347,23 +483,31 @@ def _mapping_items(report: DraftReport, container: list, name: str):
     per-position claims invented out of a dict's keys or a string's characters that
     ``serialize.py`` measured. The stored VALUE is never quoted — only its shape.
 
-    **NESTED ITEMS STILL RAISE, and that is load-bearing rather than an omission.**
+    **~~NESTED ITEMS STILL RAISE~~ — NARROWED to ONE nested list, and the narrowing is
+    the point rather than a relaxation.** The old absolute is struck because this
+    function now also walks ``descriptors_outputs[j]["descriptors"]``, whose items used
+    to raise ``AttributeError`` and answer HTTP 500 on a persisted document nobody could
+    fix. What is UNCHANGED, deliberately, is ``attribution["contributors"]``:
     ``routes._refuse_override_payload`` probes a client's override payload through
     ``validate_draft`` and catches ``_PROBE_STRUCTURAL_ERRORS`` to answer a typed 422 —
-    the honest answer for a malformed REQUEST, which the caller can fix. Its two
-    measured cases are ``{"fields": {...: {"evidence": 7}}}`` and
-    ``{"attribution": {"contributors": [...]}}``, both nested inside a top-level DICT
-    container, and the only overridable addresses are ``field:<path>``,
-    ``block:attribution`` and ``block:tags`` — so no probe draft can name one of the
-    five list containers above, and this guard cannot make either ``except`` branch
-    dead. Pinned by test, in both directions.
+    the honest answer for a malformed REQUEST, which the caller can fix — and its BLOCK
+    probe filters the report to ``UPLOADED_BY_PATH`` alone. So a finding filed against a
+    contributor index is DISCARDED by that route, and a guard here would turn its 422
+    into a stored malformed override rather than into a better message. Guarding
+    ``contributors`` therefore requires a paired change in ``routes.py`` and is
+    deliberately not made here. (The ``fields.*.evidence`` half of that rationale DID
+    move: ``_cited_sources`` now files its finding at ``fields.<path>``, which is
+    exactly the address that route's FIELD probe collects, so the same payload is still
+    refused ``422 invalid_envelope`` — with the validator's own words instead of a
+    quoted stand-in. Pinned by test over HTTP.)
     """
+    at = where or name
     for index, item in enumerate(container):
         if isinstance(item, dict):
             yield index, item
             continue
         report.err(
-            f"{name}[{index}]",
+            f"{at}[{index}]",
             f"must be {_ITEM_NOUNS[name]}; this draft stores {_kind(item)}. The item "
             f"is refused rather than walked — nothing here can assume what it was "
             f"meant to hold, and reading fields out of it would invent claims the "
@@ -390,6 +534,18 @@ def validate_draft(draft: dict) -> DraftReport:
         sha = asset.get("sha256")
         if not sha:
             report.err(f"assets[{i}]", "asset requires a sha256 (raw data is linked + hashed, not copied)")
+        elif not isinstance(sha, str):
+            # `_SHA256_RE.match(7)` raised `TypeError: expected string or bytes-like
+            # object` — measured as a 500 on `GET /api/experiments/{id}` at `724ce58`.
+            # The SHAPE is named and the stored value is NOT quoted, unlike the digest
+            # branch below: a digest is a fixed-width hex string a reader can compare,
+            # whereas an arbitrary stored value is content this module does not echo.
+            report.err(
+                f"assets[{i}]",
+                f"sha256 must be a string; this draft stores {_kind(sha)}. A digest of "
+                f"another type is refused rather than matched — CLAUDE.md §5 forbids "
+                f"inventing a sha256, and coercing one would do exactly that.",
+            )
         elif not _SHA256_RE.match(sha):
             report.err(f"assets[{i}]", f"sha256 {sha!r} is not a 64-char lowercase hex digest")
         _check_claim(report, f"assets[{i}] ({asset.get('asset_id', '?')})", asset.get("evidence"))
@@ -397,7 +553,16 @@ def validate_draft(draft: dict) -> DraftReport:
     for j, out in _mapping_items(
         report, _container(report, draft, "descriptors_outputs"), "descriptors_outputs"
     ):
-        for k, d in enumerate(out.get("descriptors") or []):
+        # `descriptors` is a NESTED list, so `_container`'s guard never reached it and
+        # `_mapping_items`' did not either: `{"descriptors_outputs": [{"descriptors":
+        # [7]}]}` reached `d.get("value")` and raised `AttributeError` — 500 on `GET
+        # /api/experiments/{id}`, measured at `724ce58`. Both levels are guarded now.
+        for k, d in _mapping_items(
+            report,
+            _nested_list(report, out, "descriptors", f"descriptors[{j}]"),
+            "descriptors",
+            where=f"descriptors[{j}]",
+        ):
             if d.get("value") is None:
                 report.err(f"descriptors[{j}][{k}]", "descriptor value must not be null — it is a scientific claim")
             _check_claim(report, f"descriptor '{d.get('name', '?')}'", d.get("evidence"))
@@ -417,27 +582,63 @@ def validate_draft(draft: dict) -> DraftReport:
     # BOUND ONCE, and read again by the qc gate below, so the finding about an
     # unreadable `series` is filed exactly once and both readers see the same value.
     series = _container(report, draft, "series")
-    for i, s in _mapping_items(report, series, "series"):
+    # THE READABLE SPECTRA, NOT THE STORED LIST — see the qc gate below for why this is
+    # materialised instead of iterated lazily.
+    series_items = list(_mapping_items(report, series, "series"))
+    for i, s in series_items:
         series_id = s.get("series_id")
-        where = f"series[{i}] ({series_id or '?'})"
+        where = f"series[{i}] ({series_id if isinstance(series_id, str) else '?'})"
         if not series_id:
             report.err(where, "series has no series_id — cannot key its evidence")
+            continue
+        if not isinstance(series_id, str):
+            # `series_id in seen_series` raised `TypeError: unhashable type: 'dict'` for
+            # a truthy object or list — measured as a 500 on `GET
+            # /api/experiments/{id}` at `724ce58` with `series_id = {"a": 1}`. (The
+            # review reported the same defect for `series_id = {}`; that value is FALSY
+            # and takes the branch above, so it answers 200. The corrected repro is the
+            # truthy one.) A HASHABLE non-string — `7`, `1.5`, `True` — never raised,
+            # and is refused here too rather than being coerced into the evidence key
+            # `f"series:{series_id}"`: the key is what an evidence entry is filed under,
+            # and str()-ing a number into it invents a name the draft never wrote. That
+            # is the ONE verdict this guard can move on a draft that used to have one,
+            # and the §13 disclosure states it rather than claiming it cannot happen.
+            report.err(
+                where,
+                f"series_id must be a string; this draft stores {_kind(series_id)}. It "
+                f"is the key this spectrum's evidence is filed under, so a value of "
+                f"another type is refused rather than coerced into one.",
+            )
             continue
         if series_id in seen_series:
             report.err(f"series[{i}]", f"duplicate series_id '{series_id}' — evidence key not unique")
             continue
         seen_series.add(series_id)
-        if not _claim_covered(block_evidence.get(f"series:{series_id}")):
+        if _block_uncited(report, where, block_evidence.get(f"series:{series_id}")):
             report.err(where, "series has no evidence; a spectrum must cite its reduction source or be user-confirmed")
 
     # QC: a measurement with series must carry an evidenced qc verdict (no default 'valid').
-    # `series`, NOT `draft.get("series")`. A truthy-but-unreadable value used to
-    # satisfy this gate by truthiness alone, producing a second finding about the QC
-    # verdict of a spectrum that could not be read — a claim this module is in no
-    # position to make, derived from the very value it just refused.
-    if series:
+    #
+    # `series_items`, NOT `series` AND NOT `draft.get("series")`. THE SAME DEFECT HAS NOW
+    # BEEN FOUND TWICE, ONE LEVEL APART, and the comment that used to sit here described
+    # the first as past tense while the second was live. #177 changed `draft.get("series")`
+    # to `series` because a truthy-but-unreadable CONTAINER satisfied this gate by
+    # truthiness alone. An independent review then measured the ITEM case at `724ce58`:
+    # `_container` returns `[7]` unchanged, so `if series:` was still true and
+    # `validate_draft({"series": [7]})` reported errors `['series[0]', 'qc']` — the
+    # second being a claim about the QC verdict of a spectrum this module had just
+    # refused to read, which is exactly what the old comment said no longer happened.
+    #
+    # `series_items` holds only the items that ARE readable spectra, so the gate now
+    # fires when and only when the draft carries at least one spectrum this module could
+    # read. A draft whose every series item is junk gets the per-item findings and no
+    # qc claim; a draft mixing one readable spectrum with one junk item gets both, which
+    # is right — there IS a spectrum, and it does need a verdict.
+    if series_items:
         qc = _container(report, draft, "qc")
-        if not qc.get("status") or not _claim_covered(block_evidence.get("qc:status")):
+        if not qc.get("status"):
+            report.err("qc", "measurement has series but qc verdict has no evidence; confirm or supply provenance (no default 'valid')")
+        elif _block_uncited(report, "qc", block_evidence.get("qc:status")):
             report.err("qc", "measurement has series but qc verdict has no evidence; confirm or supply provenance (no default 'valid')")
 
     # Links: each cross-record link must cite its basis; tuple keys must be unique.
@@ -453,7 +654,7 @@ def validate_draft(draft: dict) -> DraftReport:
             report.err(where, f"duplicate link {rel}|{target}|{basis} — evidence key not unique")
             continue
         seen_links.add(key)
-        if not _claim_covered(block_evidence.get(key)):
+        if _block_uncited(report, where, block_evidence.get(key)):
             report.err(where, "link has no evidence; a cross-record link must cite its basis or be user-confirmed")
 
     # Attribution: `uploaded_by` is refused outright, and each contributor must cite
@@ -489,6 +690,20 @@ def validate_draft(draft: dict) -> DraftReport:
     # `block_evidence` key a user wrote as `implicit:...`). The official record is where a
     # server-stamped identity is asserted, and that is guarded above and in `export`.
     seen_contrib: set[str] = set()
+    # THIS ONE STILL RAISES, AND IT IS THE ONLY WALK IN THIS MODULE THAT DOES.
+    # `{"contributors": 7}` raises `TypeError` out of `enumerate`, and
+    # `{"contributors": ["not-a-dict"]}` raises `AttributeError` out of `c.get`. Both
+    # are ALSO reachable on a persisted document, where they answer HTTP 500 on `GET
+    # /api/experiments/{id}` — so this is a known, named residue, not a case nobody
+    # found. It is left because closing it HERE, alone, would make a live route less
+    # safe: `routes._refuse_override_payload` catches exactly these two
+    # (`_PROBE_STRUCTURAL_ERRORS`) to answer `422 invalid_block_payload` for a
+    # client-authored `block:attribution` override, and its block probe then filters the
+    # report to `UPLOADED_BY_PATH` alone — so a finding filed at
+    # `attribution.contributors[i]` is DISCARDED and the malformed override would be
+    # STORED with 200. The fix is a paired change in `routes.py` (collect the shape
+    # findings, or refuse on report rather than on exception) and belongs in the slice
+    # that owns that file. Until then the raise is the thing keeping the write refused.
     for i, c in enumerate(attribution.get("contributors") or []):
         where = f"attribution.contributors[{i}]"
         name, role = c.get("name"), c.get("role")
@@ -500,7 +715,7 @@ def validate_draft(draft: dict) -> DraftReport:
             report.err(where, f"duplicate contributor {name}|{role} — evidence key not unique")
             continue
         seen_contrib.add(key)
-        if not _claim_covered(block_evidence.get(key)):
+        if _block_uncited(report, where, block_evidence.get(key)):
             report.err(where, "contributor has no evidence; attribution must cite its source or be user-confirmed")
 
     # Tags are user-authored grouping labels — authorship IS the confirmation, so they

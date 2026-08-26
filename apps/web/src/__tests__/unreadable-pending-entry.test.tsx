@@ -250,9 +250,18 @@ describe('the completion screen over an unreadable entry', () => {
     const screen = renderComplete();
 
     await screen.findByText(UNREADABLE.unavailable_reason!);
+    // ~~`/stored question could not be read/i`~~ — the copy is now "cannot be answered
+    // here", and the change is a correction rather than a rewording. "Could not be
+    // read" is true of THIS entry (a stored number) and was being rendered over a
+    // DIFFERENT class the server marks `unavailable`: one whose prose ISAAC read
+    // perfectly well and which is unanswerable only because it names no kind. The
+    // disclosure counts both, so it may only say what is true of both. The
+    // "could not be read" wording survives per-entry, in the server's own reason —
+    // asserted by the `findByText` above, which is this entry's actual reason string.
     expect(
-      screen.getByText(/stored question could not be read/i),
+      screen.getByText(/stored question cannot be answered here/i),
     ).toBeTruthy();
+    expect(screen.getByText(/this record stays blocked/i)).toBeTruthy();
 
     // NO ANSWERABLE PROMPT. `titleCase(String(null))` produced the label "Null" over a
     // free-text input; the record must offer no way to "answer" an entry that has no

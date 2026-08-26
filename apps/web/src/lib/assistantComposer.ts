@@ -23,9 +23,16 @@ import {
   joinCapped,
   technicalPaths,
 } from './assistantPaths';
-import { NO_SERIES_COVERAGE_NOTE, carriesNoMeasurementSeries, toAdvisoryResult } from './adapt';
+import {
+  NO_SERIES_COVERAGE_NOTE,
+  UNREADABLE_BLOCKER_LABEL,
+  carriesNoMeasurementSeries,
+  isAnswerablePendingItem,
+  toAdvisoryResult,
+} from './adapt';
 import { ROUTES } from './routes';
 import type {
+  ApiPendingItem,
   ApiValidateResult,
   AssistantAction,
   AssistantActionKind,
@@ -47,6 +54,29 @@ export { count };
 // never reach rendered output (Fix 6a/6b).
 function isUsableStr(x: unknown): x is string {
   return typeof x === 'string' && x.trim() !== '';
+}
+
+/**
+ * ONE label for one pending entry — the ladder BOTH catalogs use.
+ *
+ * It was written out twice, identically, in `REVIEW_CATALOG.pending_summary` and
+ * `COMPLETE_CATALOG.pending_fields`, and both copies ended at the literal
+ * `'unnamed pending field'`. That literal was measurably the wrong last rung once
+ * `GET /pending` started serving an entry it could not read as a question: the entry
+ * carries `unavailable_reason` — the server's own words for what shape was found, and
+ * the only thing anybody knows about it — and both copies threw it away to say
+ * "unnamed", which describes the entry less accurately than the response already did.
+ *
+ * The reason is the last rung rather than the first because an entry that HAS a
+ * locator or prose is better named by those; and the generic label is the floor, so
+ * this never renders `undefined` and never invents a name.
+ */
+function pendingLabel(p: ApiPendingItem): string {
+  if (isUsableStr(p.about)) return p.about;
+  if (isUsableStr(p.question)) return p.question;
+  if (isUsableStr(p.id)) return p.id;
+  if (isUsableStr(p.unavailable_reason)) return p.unavailable_reason;
+  return UNREADABLE_BLOCKER_LABEL;
 }
 
 /**
@@ -177,14 +207,9 @@ export const REVIEW_CATALOG: GroundedChip[] = [
       }
       // One label per pending item (full-length; never drops an item for
       // lacking `about`). First usable value wins: about → question → id →
-      // literal. joinCapped's "…and K more" is then computed over the FULL
-      // list, so the shown count and the listed labels always agree (Fix 6b).
-      const labels = pending.map((p) => {
-        if (isUsableStr(p.about)) return p.about;
-        if (isUsableStr(p.question)) return p.question;
-        if (isUsableStr(p.id)) return p.id;
-        return 'unnamed pending field';
-      });
+      // the server's own reason. joinCapped's "…and K more" is then computed over the
+      // FULL list, so the shown count and the listed labels always agree (Fix 6b).
+      const labels = pending.map(pendingLabel);
       const verb = pending.length === 1 ? 'needs' : 'need';
       return {
         text: `${count(pending.length, 'field')} still ${verb} you: ${joinCapped(labels)}.`,
@@ -507,18 +532,25 @@ export const COMPLETE_CATALOG: GroundedChip[] = [
           answeredFrom: 'workflow',
         };
       }
-      // Mirror REVIEW_CATALOG.pending_summary's about → question → id ladder so
-      // every item shows a usable label and the shown count always agrees with
-      // the listed labels (joinCapped computes "…and K more" over the FULL list).
-      const labels = pending.map((p) => {
-        if (isUsableStr(p.about)) return p.about;
-        if (isUsableStr(p.question)) return p.question;
-        if (isUsableStr(p.id)) return p.id;
-        return 'unnamed pending field';
-      });
+      // Mirror REVIEW_CATALOG.pending_summary's ladder so every item shows a usable
+      // label and the shown count always agrees with the listed labels (joinCapped
+      // computes "…and K more" over the FULL list).
+      const labels = pending.map(pendingLabel);
       const verb = pending.length === 1 ? 'needs' : 'need';
+      // "CONFIRM OR SKIP EACH BELOW" IS NOT TRUE OF EVERY ENTRY, and it used to be
+      // appended unconditionally. An entry the server marks `unavailable` has no
+      // control on the screen this sentence points at — nothing to confirm and nothing
+      // to skip — so the clause is dropped when the list contains one, and the count
+      // of such entries is stated instead. The FIELD COUNT is unchanged either way:
+      // those entries are pending, they do block the record, and filtering them out of
+      // the count would be the "all resolved" lie the queue disclosure exists to
+      // prevent.
+      const stuck = pending.filter((p) => !isAnswerablePendingItem(p)).length;
+      const closing = stuck
+        ? ` ${count(stuck, 'of these')} cannot be answered here — ISAAC could not read ${stuck === 1 ? 'it' : 'them'} as a question, and ${stuck === 1 ? 'it keeps' : 'they keep'} the record blocked.`
+        : ' Confirm or skip each below.';
       return {
-        text: `${count(pending.length, 'field')} ${verb} you: ${joinCapped(labels)}. Confirm or skip each below.`,
+        text: `${count(pending.length, 'field')} ${verb} you: ${joinCapped(labels)}.${closing}`,
         answeredFrom: 'workflow',
       };
     },
@@ -534,13 +566,48 @@ export const COMPLETE_CATALOG: GroundedChip[] = [
         ? (pending ?? []).find((p) => p.id === selectedPendingId)
         : undefined;
       if (!item) return SELECT_A_PENDING_FIELD;
-      // `question` is the contract-guaranteed subject (ApiPendingItem.question is
-      // non-optional) — not guarded; `about` is optional, so its clause drops
-      // rather than render "about undefined". Terminate the first sentence with a
-      // period only when it doesn't already end in terminal punctuation, so a
-      // dropped about-clause never yields a double "?." (the question already
-      // ends with "?").
-      const lead = `${item.question}${isUsableStr(item.about) ? ` — about ${item.about}` : ''}`;
+      // ~~"`question` is the contract-guaranteed subject (ApiPendingItem.question is
+      // non-optional) — not guarded"~~ — **STRUCK. The premise was deleted by the very
+      // commit that widened the type, and this site was measured rendering the literal
+      // `"null"`.** `{"kind": "qc"}` — a kind with no prose — is a shape the server
+      // serves and `POST /answers` accepts (measured **200**), so it is legitimately
+      // answerable; this line then produced *"null. Answer via propose → stage →
+      // confirm below."* `tsc -b` passed throughout, because a template literal accepts
+      // `null` without complaint. That is the durable lesson: widening a type does not
+      // force a template literal to handle the widening, so a type change is not
+      // evidence that its consumers were updated. `assistant-composer-null-safety.test.ts`
+      // is the evidence.
+      //
+      // THE SUBJECT LADDER mirrors `adapt.pendingSummary`'s, so the assistant and the
+      // queue never name the same field differently: prose → locator → answer key.
+      // Nothing is invented when all three are absent; the entry is described by the
+      // server's own reason instead, below.
+      if (!isAnswerablePendingItem(item)) {
+        // NO CONTROL EXISTS FOR THIS ENTRY, so the closing sentence must not point at
+        // one. "Confirm or skip each below" over an entry with no widget is the same
+        // class of false statement the queue's disclosure was corrected for.
+        const named = isUsableStr(item.question) ? `“${item.question}” ` : '';
+        const because = isUsableStr(item.unavailable_reason)
+          ? ` ISAAC reports: ${item.unavailable_reason}.`
+          : '';
+        return {
+          text: `${named}is a stored question this record still owes, and it cannot be answered here.${because} It keeps the record blocked until the stored document is corrected.`,
+          answeredFrom: 'workflow',
+        };
+      }
+      const subject = isUsableStr(item.question)
+        ? item.question
+        : isUsableStr(item.about)
+          ? item.about
+          : item.id;
+      // `about` is optional, so its clause drops rather than render "about undefined".
+      // Terminate the first sentence with a period only when it doesn't already end in
+      // terminal punctuation, so a dropped about-clause never yields a double "?." (the
+      // question already ends with "?"). The clause is suppressed when `about` IS the
+      // subject, so the sentence never reads "x — about x".
+      const aboutClause =
+        isUsableStr(item.about) && item.about !== subject ? ` — about ${item.about}` : '';
+      const lead = `${subject}${aboutClause}`;
       const terminated = /[.!?]$/.test(lead) ? lead : `${lead}.`;
       return {
         text: `${terminated} Answer via propose → stage → confirm below.`,

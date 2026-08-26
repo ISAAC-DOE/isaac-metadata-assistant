@@ -24,10 +24,10 @@ import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import {
-  UNREADABLE_BLOCKER_LABEL,
   answerValuePreview,
   isAnswerablePendingItem,
   pendingItemToBlocker,
+  pendingSummary,
 } from '../lib/adapt';
 import type {
   ApiAnswerablePendingItem,
@@ -1301,16 +1301,50 @@ function LoadedCompletion({
           Deliberately NOT presented as an error state: nothing the reader did caused
           it, and every other question on the record is still answerable. */}
       {unreadable.length > 0 && (
-        <div className="upcoming-more" role="note">
+        /* `role="status"`, MATCHING ITS SIBLING BELOW — and the mismatch it replaces
+           was not cosmetic. This block is NOT initial-render-only: it appears after
+           "Show more questions" fetches a page containing such an entry, and it can
+           appear after an answer changes the list. Under `role="note"` none of that was
+           announced, so a screen-reader user heard "N more open questions are not shown
+           here" (a live `status` region) and did NOT hear "this record stays blocked",
+           which is the more consequential of the two. The region also had no accessible
+           name; it has one now. */
+        <div
+          className="upcoming-more"
+          role="status"
+          aria-label="Stored questions that cannot be answered here"
+        >
           <span className="upcoming-more-text">
+            {/* THE COPY SAYS ONLY WHAT IS TRUE OF EVERY ENTRY IT COUNTS. It used to
+                read "could not be read", which is true of a stored number or string and
+                FALSE of the other class the server marks `unavailable`: an entry whose
+                prose ISAAC read perfectly well and is showing in the list beside this
+                sentence, which is unanswerable only because it names no kind and so has
+                no answer key. "Cannot be answered here" is true of both, and the
+                per-entry reason below is the server's own words for which one it is. */}
             {unreadable.length === 1
-              ? `1 stored question could not be read (${UNREADABLE_BLOCKER_LABEL.toLowerCase()}), so it cannot be answered here and this record stays blocked.`
-              : `${unreadable.length} stored questions could not be read, so they cannot be answered here and this record stays blocked.`}
+              ? '1 stored question cannot be answered here, so this record stays blocked.'
+              : `${unreadable.length} stored questions cannot be answered here, so this record stays blocked.`}
           </span>
+          {/* THE SCIENTIST'S OWN QUESTION, WHEN THE SERVER SENT ONE — and it used to
+              appear NOWHERE. These entries are excluded from the queue above, so before
+              this the only text on screen about them was the count and the reason;
+              a record whose stored question read "Which detector was used?" showed the
+              reader nothing but "could not be read". `pendingSummary` supplies the
+              prose when there is prose and the generic label when there is not, and the
+              REASON is always the server's, never this screen's interpretation. */}
           <ul className="upcoming-unreadable">
-            {unreadable.map((item, i) => (
-              <li key={`unreadable-${i}`}>{item.unavailable_reason ?? UNREADABLE_BLOCKER_LABEL}</li>
-            ))}
+            {unreadable.map((item, i) => {
+              const summary = pendingSummary(item);
+              return (
+                <li key={`unreadable-${i}`}>
+                  <span className="upcoming-unreadable-label">{summary.label}</span>
+                  {summary.locator && (
+                    <span className="upcoming-unreadable-reason">{summary.locator}</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -1355,7 +1389,17 @@ function LoadedCompletion({
           record the panel would have claimed the reader had reviewed everything with
           2,950 questions never shown to them. The disclosure above carries the truth
           in that state, and its button is how the reader gets to the rest. */}
-      {!blocker && skippedItems.length > 0 && notShown === 0 && (
+      {/* `unreadable.length === 0` IS THE SECOND HALF OF THAT SAME ARGUMENT, AND IT WAS
+          MISSING. The reasoning above rests on `!blocker` accounting for every question
+          on the page — which stopped being true the moment `blocker` and `skippedItems`
+          began deriving from `answerable` rather than from `pending`. Measured: 2
+          answerable questions plus 1 unreadable entry, both answerable ones skipped, a
+          single page (`notShown === 0`) — `!blocker` is true, and the panel claimed
+          "Every question reviewed this visit · 2 you don't know" over a THIRD entry the
+          reader was never shown here and which is still blocking the record. The
+          filtering commit's mutation set targeted "counters filtered too" and missed
+          this, because it is not a counter; it is a premise. */}
+      {!blocker && skippedItems.length > 0 && notShown === 0 && unreadable.length === 0 && (
         <div className="completion-allskipped" role="note">
           {/* KEPT NO LONGER THAN THE COPY IT REPLACED, and that is a hard constraint,
               not a style preference. The first scoping draft ran several lines longer;
