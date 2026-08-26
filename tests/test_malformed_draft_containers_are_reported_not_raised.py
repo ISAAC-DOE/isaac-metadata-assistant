@@ -188,19 +188,55 @@ def test_export_is_refused_rather_than_crashing_and_nothing_new_becomes_exportab
 
 
 def test_a_nested_malformed_payload_still_raises_so_the_route_probe_stays_reachable():
-    """``routes._probe_override`` DEPENDS on this, in two places.
+    """``routes._refuse_override_payload`` DEPENDS on this — in ONE place now, not two.
 
-    It calls ``validate_draft`` on a one-key probe draft and catches
-    ``_PROBE_STRUCTURAL_ERRORS`` to answer a typed 422 — the honest answer for a
-    malformed REQUEST, which the caller can fix. Widening the guard into nested
-    payloads would make both ``except`` branches dead and would replace a refusal the
-    caller can act on with a stored-and-later-refused override. The read-path fix and
-    the request-path refusal are different answers to different questions, on purpose.
+    **THE ORIGINAL CLAIM, AND WHY HALF OF IT IS INVERTED RATHER THAN DELETED.** This
+    test asserted that BOTH nested payloads raise, on the reasoning that "widening the
+    guard into nested payloads would make both ``except`` branches dead and would
+    replace a refusal the caller can act on with a stored-and-later-refused override".
+    That reasoning is exactly right for ``attribution.contributors`` and was WRONG for
+    ``fields.*.evidence``, because the two probes read the report differently:
+
+    * the FIELD probe collects every finding filed at ``fields.<path>``, which is
+      precisely where ``draft_validator._cited_sources`` now files its shape refusal —
+      so the payload is still refused, with the validator's own words instead of the
+      quoted stand-in the ``except`` branch supplies. Proven over HTTP by
+      ``test_the_override_route_still_refuses_a_wrong_typed_evidence_payload``.
+    * the BLOCK probe filters the report to ``UPLOADED_BY_PATH`` alone, so a finding at
+      ``attribution.contributors[i]`` is DISCARDED and the malformed override would be
+      stored with 200. There the raise IS the refusal, and it stays.
+
+    So the surviving assertion is the contributors one, and the ``except`` branch it
+    keeps alive is the BLOCK probe's. The field probe's ``except`` branch is now
+    unreachable from this module — named here rather than removed, because removing it
+    is a ``routes.py`` change and this branch does not own that file.
     """
     with pytest.raises(TypeError):
-        validate_draft({"fields": {"a.b": {"value": 1, "status": "verified", "evidence": 7}}})
-    with pytest.raises(TypeError):
         validate_draft({"attribution": {"contributors": 7}})
+    with pytest.raises(AttributeError):
+        validate_draft({"attribution": {"contributors": ["not-a-dict"]}})
+
+
+def test_a_wrong_typed_evidence_value_is_now_REPORTED_at_the_field_it_belongs_to():
+    """The inverted half of the test above, pinned so it cannot silently revert.
+
+    ``{"evidence": 7}`` used to raise ``TypeError: 'int' object is not iterable`` out of
+    ``_check_envelope``'s ``[e for e in (env.get("evidence") or [])]``. It is now a
+    finding AT the envelope's own address — which is both what a reader needs and what
+    keeps ``routes._refuse_override_payload``'s field probe refusing the payload.
+    """
+    report = validate_draft(
+        {"fields": {"a.b": {"value": 1, "status": "verified", "evidence": 7}}}
+    )
+    at_the_field = [m for at, m in report.errors if at == "fields.a.b"]
+    assert at_the_field, report.errors
+    assert any("evidence must be a list of source entries" in m for m in at_the_field)
+    assert any("this draft stores a number" in m for m in at_the_field)
+    # THE VALUE IS NEVER ECHOED BACK. Only its JSON shape.
+    assert not any("7" in m for m in at_the_field), at_the_field
+    # AND NO SECOND CLAIM IS DERIVED FROM IT. "verified field has no observed evidence"
+    # would be this module describing sources it has just said it could not read.
+    assert not any("no observed evidence" in m for m in at_the_field), at_the_field
 
 
 #: The five TOP-LEVEL LIST containers whose ITEMS are now guarded, and the noun each

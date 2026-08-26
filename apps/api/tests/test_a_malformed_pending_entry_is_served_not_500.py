@@ -289,12 +289,28 @@ def test_a_MAPPING_entry_that_raises_is_also_served(client: TestClient):
     * ``{"kind": "asset", "uri": []}`` raises the same out of the example-answer lookup,
       in EXAMPLE SCOPE ONLY, which is why the scope is exercised here directly rather
       than only through a route.
+
+    **THE FIRST TWO NOW TAKE AN EARLIER BRANCH, AND THE REASON THEY CARRY IS BETTER, SO
+    THE ASSERTION IS NARROWED RATHER THAN DROPPED.** ``pending_to_list`` refuses an
+    entry whose ``kind`` is not a string BEFORE reading it, because the answer key IS
+    the kind and there is no key to submit an answer under — so ``{"kind": {}}`` is
+    reported as naming its kind as an object rather than as an unexplained
+    ``TypeError``. What this test exists to prove is UNCHANGED and still asserted: none
+    of the three is a 500, all three are served ``unavailable``, and the third — the
+    scope-dependent one — still proves the ``except`` branch is not dead, which is the
+    whole reason ``_ITEM_SHAPE_ERRORS`` exists.
     """
     exp_id = _create(client)
     _persist(exp_id, [{"kind": {}}, {"kind": ["a", "list"]}])
     served = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"]
     assert [e["unavailable"] for e in served] == [True, True], served
-    assert all("could not be read (TypeError)" in e["unavailable_reason"] for e in served)
+    assert all(
+        "names its kind as an object" in e["unavailable_reason"]
+        or "names its kind as a list" in e["unavailable_reason"]
+        for e in served
+    ), served
+    # AND THE CONSEQUENCE, which is what the reason is FOR: no answer key is minted.
+    assert all(e["id"] is None and e["blocker_key"] is None for e in served), served
 
     # THE SCOPE-DEPENDENT ONE. `example_scope` is what reaches the fixture lookup, so
     # this shape is readable outside the walkthrough scope and unreadable inside it —
@@ -590,3 +606,135 @@ def test_the_ROUTE_LAYER_still_fails_a_write_on_a_non_iterable_pending(client: T
         headers={"If-Match": _etag(client, exp_id)},
     )
     assert resp.status_code == 500, resp.status_code
+
+
+# --- READ vs. ANSWERABLE: the second class of entry, and what is preserved -----
+#
+# ADDED CLOSING AN INDEPENDENT REVIEW'S C1. A stored ``{"question": "q?"}`` — a mapping
+# with prose and NO ``kind`` — was served ``{"id": "blocker", "kind": null, "question":
+# "q?"}`` with no ``unavailable`` flag at all. Two things were wrong with that, and they
+# pull in opposite directions, which is why the fix separates them:
+#
+#   * ``"blocker"`` IS NOT AN ANSWER KEY. Measured over HTTP at ``724ce58``:
+#     ``POST /answers {"answers": {"blocker": "x"}, "confirmed_by_user": true}`` ->
+#     **422 ``unrecognized_field``**. So the response advertised a key the write path
+#     refuses, which is the fabricated identifier ``_unreadable_blocker`` exists to
+#     avoid.
+#   * THE PROSE WAS REAL. The server read it. The client's predicate (which requires a
+#     string ``kind``) then classed the entry unanswerable and rendered "1 stored
+#     question could not be read" — over a sentence the same response was carrying.
+
+
+def test_a_kindless_entry_is_marked_unanswerable_and_KEEPS_its_prose(client: TestClient):
+    exp_id = _create(client)
+    _persist(exp_id, [{"question": "Which detector was used?"}])
+
+    served = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"]
+    assert len(served) == 1, served
+    entry = served[0]
+
+    # NO FABRICATED ANSWER KEY. This is the half the write path measures.
+    assert entry["id"] is None, entry
+    assert entry["blocker_key"] is None, entry
+    assert entry["kind"] is None, entry
+    # THE DISCRIMINATOR IS THE FIELD, and it says WHY rather than claiming a failed read.
+    assert entry["unavailable"] is True, entry
+    assert "names no kind" in entry["unavailable_reason"], entry
+    assert "could not be read" not in entry["unavailable_reason"], entry
+    # AND THE PROSE SURVIVES. This is the assertion that fails if `_unreadable_blocker`
+    # goes back to nulling `question`, and the reason the client can show the scientist
+    # their own question instead of a generic label.
+    assert entry["question"] == "Which detector was used?", entry
+
+
+def test_the_fabricated_answer_key_really_is_refused_by_the_write_path(client: TestClient):
+    """The measurement the change above rests on, asserted rather than quoted."""
+    exp_id = _create(client)
+    _persist(exp_id, [{"question": "Which detector was used?"}])
+    resp = client.post(
+        f"/api/experiments/{exp_id}/answers",
+        json={"confirmed_by_user": True, "answers": {"blocker": "a value"}},
+        headers={"If-Match": _etag(client, exp_id)},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"] == "unrecognized_field", resp.text
+
+
+@pytest.mark.parametrize(
+    "question", [{"a": 1}, ["a"], 7, True], ids=["object", "list", "number", "boolean"]
+)
+def test_a_non_string_question_on_an_ANSWERABLE_entry_is_never_served(client: TestClient, question):
+    """I8, closed at the boundary that knows what it read.
+
+    ``{"kind": "qc", "question": {"a": 1}}`` IS answerable — measured, ``POST /answers``
+    with key ``qc`` answers **200** — so the client correctly treats it as a question
+    and hands ``question`` to ``<h2>{blocker.question}</h2>``. React throws "Objects are
+    not valid as a React child" and, with no ErrorBoundary anywhere in the application,
+    the whole page blanks: strictly worse than the HTTP 500 this family of fixes
+    replaced. A non-string is dropped rather than stringified — ``str({"a": 1})`` would
+    put a Python repr on a scientist's screen as if it were their own prose.
+    """
+    exp_id = _create(client)
+    _persist(exp_id, [{"kind": "qc", "question": question, "blocker": "measurement.qc.status"}])
+
+    entry = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"][0]
+    assert entry["kind"] == "qc", entry
+    assert entry["id"] == "qc", entry  # still answerable — the kind is readable
+    assert entry.get("unavailable") is None, entry
+    assert entry["question"] is None, entry
+
+
+@pytest.mark.parametrize("locator", [{"a": 1}, ["a"], 7], ids=["object", "list", "number"])
+def test_a_non_string_locator_is_never_served_either(client: TestClient, locator):
+    """``about`` reaches JSX by the same route as ``question``
+    (``{item.about ?? item.kind}``), and ``_blocker_about`` passed the stored
+    ``uri``/``blocker`` through verbatim."""
+    exp_id = _create(client)
+    _persist(exp_id, [{"kind": "qc", "question": "q?", "blocker": locator}])
+    entry = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"][0]
+    assert entry["about"] is None, entry
+
+
+@pytest.mark.parametrize("tag", [{"a": 1}, 7], ids=["object", "number"])
+def test_a_non_string_run_tag_is_never_served_either(client: TestClient, tag):
+    """``_unreadable_blocker`` has always normalised these two; ``_readable_blocker`` did
+    not, so the two served forms disagreed about what a run tag is — and ``blocker_key``
+    was built by ``str()``-ing the value into a key the response reported as null."""
+    exp_id = _create(client)
+    _persist(exp_id, [{"kind": "qc", "question": "q?", "run_id": tag, "run_label": tag}])
+    entry = client.get(f"/api/experiments/{exp_id}/pending").json()["pending"][0]
+    assert entry["run_id"] is None, entry
+    assert entry["run_label"] is None, entry
+    assert entry["blocker_key"] == "qc", entry
+
+
+def test_item_shape_errors_is_exactly_these_five():
+    """The caught set is pinned, because it is what stands between a malformed stored
+    document and an HTTP 500 — and because an independent review found it wider than the
+    two types anyone has reproduced, with nothing asserting its contents.
+
+    Two things this pins, and they pull in opposite directions on purpose:
+
+    * NOTHING NEW ARRIVES UNEXAMINED. A sixth type — above all ``Exception`` — turns
+      every programming error in this module into "your stored question is malformed",
+      which is a false statement about a scientist's record.
+    * NOTHING IS QUIETLY NARROWED EITHER. ``ValueError``/``KeyError``/``IndexError`` are
+      unmeasured on the pending path and ordinary on the evidence-trail walkers this
+      tuple is shared with; dropping one is a measurement, not a tidy-up.
+    """
+    assert serialize._ITEM_SHAPE_ERRORS == (
+        AttributeError,
+        TypeError,
+        ValueError,
+        KeyError,
+        IndexError,
+    ), serialize._ITEM_SHAPE_ERRORS
+    # THE TWO THAT MUST NEVER BE IN IT.
+    assert Exception not in serialize._ITEM_SHAPE_ERRORS
+    assert MemoryError not in serialize._ITEM_SHAPE_ERRORS
+    # AND THE ONE THAT IS DELIBERATELY OUTSIDE IT — a defect in this repository's own
+    # refusal table is not a defect in the reader's document.
+    from isaac_api import inferability
+
+    assert inferability.UnsupportedSuggestion not in serialize._ITEM_SHAPE_ERRORS
+    assert not issubclass(inferability.UnsupportedSuggestion, serialize._ITEM_SHAPE_ERRORS)

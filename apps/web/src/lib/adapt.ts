@@ -467,7 +467,19 @@ export function isAnswerablePendingItem(
   item: ApiPendingItem,
 ): item is ApiAnswerablePendingItem {
   if (item.unavailable) return false;
-  return typeof item.id === 'string' && typeof item.kind === 'string';
+  if (typeof item.id !== 'string' || typeof item.kind !== 'string') return false;
+  // `question` IS still not REQUIRED (see above) — but when it is present it must be
+  // PROSE. An entry the server marks answerable can carry any JSON under `question`,
+  // and every renderer below puts it straight into JSX: `<h2>{blocker.question}</h2>`
+  // in `GuidedPrompt`, `{item.question}` in the upcoming rows. React throws "Objects
+  // are not valid as a React child" on an object, and there is NO ErrorBoundary
+  // anywhere in this application, so the whole page blanks — strictly worse than the
+  // HTTP 500 this family of fixes replaced. `serialize._readable_blocker` now nulls a
+  // non-string `question` at the boundary; this is the client-side half, and the two
+  // are not redundant for the reason the `typeof` checks above are not redundant with
+  // `unavailable`: this is what makes the predicate sound against an older backend or a
+  // recorded fixture.
+  return item.question === null || item.question === undefined || typeof item.question === 'string';
 }
 
 function pathTokenFor(item: ApiAnswerablePendingItem): string {
@@ -629,8 +641,23 @@ export function pendingSummary(item: ApiPendingItem): { label: string; locator: 
   // whose count the reader can see and whose row they cannot. The locator carries the
   // server's own reason: it is the only thing anybody knows about the entry, and it is
   // what an operator needs in order to repair the stored document.
+  //
+  // AND THE SCIENTIST'S OWN PROSE IS SHOWN WHEN THE SERVER SENT IT, which this branch
+  // used to discard. `serialize` serves an entry with prose but no KIND — it read the
+  // question fine, but there is no key an answer can be submitted under (measured: the
+  // fabricated `"blocker"` key is refused `422 unrecognized_field`), so it arrives
+  // `unavailable: true` WITH `question`. Rendering `UNREADABLE_BLOCKER_LABEL` over it
+  // told the reader their question "could not be read" while the response carried it,
+  // and dropped the only text that says what the question was. The label is the prose
+  // when there is prose; the generic label is the fallback for an entry that genuinely
+  // has none. Either way the LOCATOR is the server's own reason, which is what
+  // distinguishes the two cases and what an operator needs to repair the document.
   if (!isAnswerablePendingItem(item)) {
-    return { label: UNREADABLE_BLOCKER_LABEL, locator: item.unavailable_reason ?? null };
+    const prose = typeof item.question === 'string' && item.question.trim() !== '';
+    return {
+      label: prose ? (item.question as string) : UNREADABLE_BLOCKER_LABEL,
+      locator: item.unavailable_reason ?? null,
+    };
   }
   return {
     // A THIRD RUNG, because the second one can be null. A stored entry may carry a kind

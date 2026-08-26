@@ -1841,7 +1841,20 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // adds `record_total` to the reported keys, and carries the `complete` IS RELATIVE TO
     // THE FILTER qualification `serialize.py` says it needs. Re-measured from
     // `create_app().openapi()`, not adjusted by the length of the new text.
-    expect(total).toBe(93478);
+    // 93,478 -> 94,258 (+780): `GET .../pending` again, in ONE operation, closing an
+    // independent review's C4 on the OTHER half of the same contract. The description
+    // said nothing about the entry the route has served since `#179`: one whose `id`,
+    // `kind` and `blocker_key` are `null` and whose `unavailable` flag is the
+    // discriminator. A client reading only this document would take `id` as always
+    // present and submit the answer key it invented — measured over HTTP as **422
+    // `unrecognized_field`**. The added paragraph names the flag, says `id` is `null`,
+    // says the entry is COUNTED rather than dropped (so a shortened list can never read
+    // as a finished record), and says to branch on the field rather than on a pattern of
+    // nulls. The MCP tool description for the same operation gained the equivalent text;
+    // that surface is a SEPARATE published contract (`mcp/tools.py:332-349`) and is not
+    // measured by this number. Re-measured from `create_app().openapi()`, not adjusted by
+    // the length of the new text, and re-transcribed by script — never hand-edited.
+    expect(total).toBe(94258);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1856,7 +1869,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `POST .../runs/{run_id}/answers` was written INTO an existing paragraph and
     // therefore must not move this count — which is why it is asserted separately from
     // the character total rather than inferred from it.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(195);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(196);
+    // 195 -> 196 (+1): the pending description gained ONE more post-lead paragraph — the
+    // `unavailable: true` / `id: null` block described above. It is an INSERTED paragraph
+    // (one added `\n\n`), which is why this moves by exactly one, and no other
+    // description moved.
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

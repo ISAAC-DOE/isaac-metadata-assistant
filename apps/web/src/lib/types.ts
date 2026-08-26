@@ -196,7 +196,16 @@ export interface PendingBlocker {
    * no prose arrives as `null`. Widened rather than defaulted to `''`: the two render
    * identically (React draws nothing for either), and an empty string would be this
    * client asserting the draft holds an empty question when it holds no question at all.
-   * The KIND label above the prose carries the identity in that case.
+   *
+   * ~~"The KIND label above the prose carries the identity in that case."~~ **STRUCK —
+   * measured false, and it was the stated mitigation for the widening.** `label` reaches
+   * exactly ONE render site, `GuidedPrompt.tsx:443`, and it is an `aria-label` on the
+   * input. Nothing VISIBLE above the prose carries it, so a prose-less blocker renders
+   * an empty `<h2 className="guided-question">` on the prompt card. What IS true, and is
+   * a different surface: the QUEUE rows go through `adapt.pendingSummary`, whose
+   * `KIND_LABEL[item.kind] ?? item.question ?? item.id` ladder does name such an entry —
+   * so it is identified in the list and unnamed on the card. Giving the card a visible
+   * label is a `GuidedPrompt.tsx` change and is named as residue rather than made here.
    */
   question: string | null;
   label: string; // short Title Case label for the question
@@ -781,18 +790,34 @@ export interface ApiDemoAnswer {
 /**
  * ONE ENTRY OF `GET /pending`, INCLUDING THE ONE THAT IS NOT A QUESTION.
  *
- * `id`, `kind` and `question` are nullable because the server serves an entry it could
- * NOT read as a question rather than failing the whole request: one stored blocker in,
- * one served entry out, marked `unavailable: true` with an `unavailable_reason` naming
- * the shape that was found. Nothing is invented for it — no kind, no question, no
- * answer key — so every one of those fields is `null`, and the entry stays COUNTED so
- * the record keeps being refused. See `serialize._unreadable_blocker` for the measured
- * 500s this replaced and for the alternatives that were rejected.
+ * `id`, `kind` and `question` are nullable because the server serves an entry it cannot
+ * present as an answerable question rather than failing the whole request: one stored
+ * blocker in, one served entry out, marked `unavailable: true` with an
+ * `unavailable_reason` saying why, and the entry stays COUNTED so the record keeps
+ * being refused. See `serialize._unreadable_blocker` for the measured 500s this
+ * replaced and for the alternatives that were rejected.
+ *
+ * TWO DIFFERENT CASES ARRIVE ON THAT ONE FLAG, and conflating them was a shipped
+ * defect:
+ *
+ *  - **Unreadable.** The stored entry is not a question at all (a number, a string, a
+ *    mapping whose `kind` is unhashable). Nothing is invented — every field is `null`
+ *    — and `unavailable_reason` names the SHAPE that was found.
+ *  - **Readable but unanswerable.** The stored entry carries prose and no `kind`. The
+ *    server read it, so `question` IS present; but the answer key is the kind, so there
+ *    is no key to submit under, and the reason says exactly that. Rendering
+ *    "could not be read" over this entry — while the same response carried the
+ *    scientist's own sentence — is the defect `pendingSummary` was corrected for.
  *
  * A consumer that needs an answerable question uses `adapt.isAnswerablePendingItem`,
  * which narrows to `ApiAnswerablePendingItem` below. Widening these three fields rather
  * than declaring them non-null is deliberate: it makes every consumer decide what it
- * does with an unreadable entry instead of discovering `"Null"` on screen.
+ * does with an unreadable entry instead of discovering `"Null"` on screen. **That claim
+ * was measurably NOT true for one consumer** — `assistantComposer.explain_pending_item`
+ * interpolated `${item.question}` under a comment asserting the field was non-optional,
+ * which the widening commit had itself deleted, and `tsc` passed because a template
+ * literal accepts `null`. Widening a type does not force a template literal to handle
+ * it; only a test does. `assistant-composer-null-safety.test.ts` is that test.
  */
 export interface ApiPendingItem {
   id: string | null; // uri for assets, else kind; `null` when `unavailable`
@@ -824,16 +849,33 @@ export interface ApiPendingItem {
 }
 
 /**
- * A pending entry that IS a question: `id`, `kind` and `question` proved present.
+ * A pending entry that IS a question: `id` and `kind` proved present, and `question`
+ * proved to be prose or absent.
  *
  * Produced only by `adapt.isAnswerablePendingItem`. Everything that renders a prompt,
- * derives an input type, or submits an answer takes this type, so an unreadable entry
- * cannot reach any of them by accident — it is a compile error rather than a `"Null"`
- * label on screen.
+ * derives an input type, or submits an answer takes this type.
+ *
+ * ~~"so an unreadable entry cannot reach any of them by accident — it is a compile
+ * error rather than a `"Null"` label on screen"~~ — **struck, because it was FALSE FOR
+ * `question` in the commit that wrote it, and the falsity was worse than the label it
+ * described.** The narrowing covered `id` and `kind` only, so
+ * `{"kind": "qc", "question": {"a": 1}}` — an entry the API genuinely accepts an answer
+ * for (measured: `POST /answers` with key `qc` answers **200**) — satisfied the
+ * predicate and put an OBJECT into `<h2>{blocker.question}</h2>`. React throws
+ * "Objects are not valid as a React child", there is no ErrorBoundary anywhere in this
+ * application, and the whole page blanks. A `null` label is a bad row; a thrown render
+ * is no application.
+ *
+ * `question` is `string | null` here rather than `string`, and that is deliberate
+ * rather than a leftover: a stored entry may legitimately carry a kind and no prose,
+ * and the server authors none it was not given. What the type now guarantees is that it
+ * is never anything ELSE. `undefined` is admitted for recorded fixtures that omit the
+ * key entirely.
  */
 export type ApiAnswerablePendingItem = ApiPendingItem & {
   id: string;
   kind: BlockerKind;
+  question: string | null;
 };
 
 /**

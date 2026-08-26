@@ -44,7 +44,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import { UNREADABLE_BLOCKER_LABEL } from './adapt';
+import { UNREADABLE_BLOCKER_LABEL, isAnswerablePendingItem } from './adapt';
 import { useRecordSync } from './useRecordSync';
 import {
   invalidateStaleProposals,
@@ -225,12 +225,25 @@ function deriveRev(
  * (`assistantAgent.identify_next_missing_field`). So it is carried, with `id` null —
  * there IS no answer key — and `unreadable: true`, which is the flag that branch reads
  * instead of offering to stage a value nothing could apply.
+ *
+ * **ONE PREDICATE, AND IT IS `adapt.isAnswerablePendingItem`.** ~~`p.unavailable ===
+ * true || p.id === null`~~ was a SECOND, divergent definition of the same question, and
+ * an independent review measured both ways it diverged. (i) For an entry carrying prose
+ * and no kind — which the server marks `unavailable` — the two disagreed, so
+ * `GuidedCompletion` said "cannot be answered" while this hook said `unreadable: false`
+ * and `assistantAgent` offered to stage a value under the answer key `"blocker"`, which
+ * `POST /answers` refuses **422 `unrecognized_field`**: an offer that could never be
+ * fulfilled. (ii) On a truthy-non-boolean `unavailable` the shared predicate fails
+ * CLOSED (`if (item.unavailable) return false`) and `=== true` failed OPEN. And the
+ * `p.id === null` half was an INFERENCE from a pattern of nulls — exactly what
+ * `serialize._unreadable_blocker` serves a wire field to avoid, and what this
+ * repository's post-check-payload rule forbids.
  */
 function toPendingItems(pending: ApiPendingItem[] | undefined): PendingItem[] {
   if (!pending) return [];
   return pending.map((p) => ({
     id: p.id,
-    unreadable: p.unavailable === true || p.id === null,
+    unreadable: !isAnswerablePendingItem(p),
     // The agent renders a human label; prefer the same about → question → id
     // ladder the composer uses so the two never disagree on a field's name.
     // For an unreadable entry every rung is null, so the ladder ends at the server's
