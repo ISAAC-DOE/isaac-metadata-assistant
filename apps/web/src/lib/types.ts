@@ -2203,6 +2203,13 @@ export interface ApiNotesResponse {
   unreadable_entries: number;
   /** The server's own list of paths a note may be mapped to. Never transcribed here. */
   mappable_field_paths: string[];
+  /**
+   * The SUBSET of `mappable_field_paths` some write operation accepts a value at.
+   * Also never transcribed here: 7 of the 25 mappable paths are refused by every
+   * write route, and the panel's "a value still has to be entered on the field
+   * itself" was false for those seven until it started branching on this.
+   */
+  value_writable_field_paths: string[];
   sources: string[];
   /** The EXPERIMENT's version token — the `If-Match` every note write must carry. */
   experiment_version: string;

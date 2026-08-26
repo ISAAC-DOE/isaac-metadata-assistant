@@ -73,7 +73,7 @@ from pathlib import Path
 from isaac_records.complete import apply_answers
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
-from isaac_records.extract.draft_builder import build_draft
+from isaac_records.extract.draft_builder import build_draft, derive_system_domain
 from isaac_records.ids import is_record_id, new_record_id
 from isaac_records.models import derivation
 
@@ -2156,6 +2156,198 @@ def _merge_block_evidence(experiment_draft: dict, run_draft: dict) -> dict | Non
     return merged or None
 
 
+#: The question text stored on a contributor's ``user_confirmation`` evidence entry.
+#:
+#: IT NAMES THE OPERATION AND REFUSES TO NAME THE PERSON. What this application can
+#: honestly assert is that a request arrived at ONE named operation carrying
+#: ``confirmed_by_user: true`` and this contributor in its payload. WHO sent it is not
+#: recorded, because there is no trusted authentication boundary to read an identity
+#: from (``CLAUDE.md`` §15; the same reason ``attribution.uploaded_by`` is refused
+#: outright by ``draft_validator``). An entry naming a person would be the exact defect
+#: the refusal of that field exists to prevent.
+ATTRIBUTION_CONFIRMATION_QUESTION = (
+    "Who contributed to this run, and in what role? Confirmed by the person who sent "
+    "POST /api/experiments/{experiment_id}/runs/{run_id}/overrides for "
+    "block:attribution with confirmed_by_user: true. This application receives no "
+    "verified user identity, so WHO confirmed it is deliberately not recorded."
+)
+
+
+def _attribution_confirmation_evidence(name: str, role: str, timestamp: str) -> dict:
+    """One ``user_confirmation`` evidence entry for one contributor.
+
+    THE SAME SHAPE ``complete._user_confirmation`` WRITES, reused rather than invented:
+    ``{source_type, question, answer, timestamp}``, which is how this repository already
+    represents "a person supplied this" for ``qc:status`` and for each ``series:<id>``.
+    """
+    return {
+        "source_type": "user_confirmation",
+        "question": ATTRIBUTION_CONFIRMATION_QUESTION,
+        "answer": f"{name} | {role}",
+        "timestamp": timestamp,
+    }
+
+
+def _record_attribution_confirmations(run: "Run", payload: object) -> None:
+    """Store the confirmation evidence a ``block:attribution`` override just earned.
+
+    **THE DEFECT THIS CLOSES, measured over HTTP.** An override at
+    ``block:attribution`` carrying one contributor was accepted with ``200``, and the
+    export then refused at the DRAFT validator with ``official_report: null`` and
+    ``attribution.contributors[0]: "contributor has no evidence; attribution must cite
+    its source or be user-confirmed"``. The route wrote the block and no
+    ``block_evidence``, and ``block:attribution`` is the ONLY write path this build
+    offers for a contributor — so a contributor set through the only route available
+    could never be exported, by any subsequent request.
+
+    **NO EVIDENCE REQUIREMENT IS WEAKENED, AND THAT IS THE POINT.**
+    ``draft_validator``'s ``attribution:<name>|<role>`` coverage rule is a truth-plane
+    rule under §13 and is not touched. What changed is that the write now RECORDS the
+    evidence it actually has, instead of discarding it and then failing a gate for its
+    absence. ``tags`` is exempt from coverage by design ("authorship IS the
+    confirmation"); attribution deliberately is not, and it stays that way — the entry
+    below is a real citation of a real act, not an exemption.
+
+    **THE ENTITLEMENT, STATED PRECISELY.** The claim recorded is "a request carrying
+    ``confirmed_by_user: true`` supplied this contributor at this operation". The route
+    refuses the request with ``422 confirmation_required`` before reaching this code
+    when that flag is absent, and ``user_confirmed`` defaults to ``False`` on
+    :meth:`Experiment.set_run_override`, so no other caller mints one silently. The
+    entry claims nothing about WHO — see :data:`ATTRIBUTION_CONFIRMATION_QUESTION`.
+
+    **ONLY A CONTRIBUTOR THIS APPLICATION CAN KEY, and the rest are left refused.**
+    ``name`` and ``role`` must both be non-empty STRINGS. ``_refuse_override_payload``
+    deliberately applies no contributor shape check, so ``{"contributors": [{}]}`` and
+    ``{"contributors": [{"name": ["a"], "role": "b"}]}`` are both stored with ``200``
+    (its docstring records this, measured). Writing an evidence entry keyed off a
+    list-valued name would let a contributor whose shape the schema cannot hold pass
+    the coverage gate and reach an exported record. So it is not written, the run check
+    and the export gate go on refusing those, and the refusal is fail-closed. The
+    message they carry is the coverage one rather than a shape one — a pre-existing
+    imprecision recorded in that same docstring, not introduced here.
+
+    **THE RUN'S OWN ``block_evidence``, not the experiment's.** The override is the
+    RUN's, so its evidence is the run's; ``_merge_block_evidence`` overlays the run's
+    entries onto the experiment's, per key, with the run winning. Writing to the
+    experiment would attach one run's confirmation to every sibling.
+    """
+    if not isinstance(payload, dict):
+        return
+    contributors = payload.get("contributors")
+    if not isinstance(contributors, list):
+        return
+    timestamp = _now_iso()
+    entries: dict[str, list[dict]] = {}
+    for contributor in contributors:
+        if not isinstance(contributor, dict):
+            continue
+        name, role = contributor.get("name"), contributor.get("role")
+        if not isinstance(name, str) or not name or not isinstance(role, str) or not role:
+            continue
+        entries[f"attribution:{name}|{role}"] = [
+            _attribution_confirmation_evidence(name, role, timestamp)
+        ]
+    if not entries:
+        return
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    run.draft = draft
+    block_evidence = draft.get("block_evidence")
+    if not isinstance(block_evidence, dict):
+        block_evidence = {}
+        draft["block_evidence"] = block_evidence
+    block_evidence.update(entries)
+
+
+#: The one official field path the derivation below writes, and the prefix that decides
+#: whether the exported record will carry a ``system`` block at all. Named rather than
+#: spelt inline at four sites, so the field and the block it belongs to cannot drift
+#: apart. ``system.domain`` is already classified experiment-level in
+#: :data:`EXPERIMENT_LEVEL_FIELD_PATHS`; this is the leaf, not a second classification.
+SYSTEM_DOMAIN_PATH = "system.domain"
+_SYSTEM_BLOCK_PREFIX = "system."
+
+
+def _field_reaches_the_record(env: object) -> bool:
+    """Whether this draft field envelope becomes a value in the exported record.
+
+    TRANSCRIBED FROM ``export.transform``, not approximated: it skips an envelope that
+    is not a dict, one whose ``status`` is ``"missing"``, and one whose ``value`` is
+    ``None``. Everything else is written with ``set_path``. The derivation below has to
+    ask exactly the question the transform asks — "will a ``system`` block exist?" —
+    and a looser test would derive a domain onto a record that has no ``system`` block,
+    which is what materialises one and makes ``technique`` required in turn.
+    """
+    return (
+        isinstance(env, dict)
+        and env.get("status") != "missing"
+        and env.get("value") is not None
+    )
+
+
+def _apply_system_domain_derivation(draft: dict) -> None:
+    """Fill a composed draft's ``system.domain`` from its own ``meta``, in place.
+
+    **THE DEFECT THIS CLOSES, measured over HTTP on a record created through ``POST
+    /api/experiments``.** One override at ``field:system.technique`` was accepted with
+    ``200`` and the export then refused with ``system: 'domain' is a required
+    property``; at ``field:system.facility.beamline`` it refused with ``'domain'`` AND
+    ``'technique'``. ``domain`` was reachable by NO write path in the product:
+    ``POST .../runs/{id}/overrides`` answers ``422 not_overridable`` for
+    ``field:system.domain`` (it is absent from the deterministic extractor's
+    ``FIELD_MAP``, which is where the admissible set is derived from), the record and
+    run answer/edit routes answer ``422 unrecognized_field`` for it, and ``PATCH
+    .../runs/{id}`` answers ``422 unrecognized_field`` because it is experiment-level.
+    So the only action that led anywhere was ``overrides/clear`` — undoing the edit.
+    A required property with no write path is a locked door, and the write that walked
+    the scientist into it returned ``200``.
+
+    **WHY DERIVE RATHER THAN REFUSE THE WRITE, OR OPEN THE ADDRESS.** ``CLAUDE.md`` §5
+    permits an inferred field "only by a documented/stored rule", and that rule already
+    exists and is already applied on the OTHER path into this application:
+    ``extract.draft_builder.derive_system_domain``, whose own comment says omitting the
+    field "would make the draft un-exportable". Applying the same stored rule on the
+    created-record path makes the two paths agree instead of leaving one of them
+    walkable and the other not. Refusing the write instead would make
+    ``system.technique`` and every ``system.facility.*`` field permanently unwritable,
+    because ``domain`` cannot be supplied in the same request and no other request can
+    supply it — a recoverable state turned into an unusable field. Making
+    ``field:system.domain`` overridable would ask a person to state what this record's
+    own ``meta.source_type`` already determines, and would mean adding a sheet column
+    to the deterministic extractor's ``FIELD_MAP`` that no sheet has.
+
+    **PER COMPOSED DRAFT, NEVER ON THE EXPERIMENT, and that is not a preference.**
+    ``export.transform`` materialises ``system`` from ANY present ``system.*`` field,
+    and ``system`` then requires ``technique`` too. Writing the derived domain onto the
+    experiment would therefore materialise a ``system`` block on every SIBLING run that
+    holds no ``system.*`` field, and break the export of runs nobody touched. So it is
+    computed here, on the draft one run exports, gated on that draft already carrying a
+    ``system.*`` field that reaches the record.
+
+    **NOTHING IS INVENTED WHEN THE RULE DOES NOT DECIDE.** ``derive_system_domain``
+    returns ``None`` for any ``meta.source_type`` other than ``facility``, and this
+    function then leaves the field absent — so official validation reports ``'domain'
+    is a required property`` and a person answers it, which is the honest outcome and
+    the one §5 requires. An envelope already present and reaching the record is never
+    replaced: a stated value outranks a derived one.
+    """
+    fields = draft.get("fields")
+    if not isinstance(fields, dict):
+        return
+    if _field_reaches_the_record(fields.get(SYSTEM_DOMAIN_PATH)):
+        return
+    if not any(
+        isinstance(key, str)
+        and key != SYSTEM_DOMAIN_PATH
+        and key.startswith(_SYSTEM_BLOCK_PREFIX)
+        and _field_reaches_the_record(env)
+        for key, env in fields.items()
+    ):
+        return
+    derived = derive_system_domain(draft.get("meta"))
+    if derived is not None:
+        fields[SYSTEM_DOMAIN_PATH] = derived
+
+
 @dataclass
 class ExportUnit:
     """ONE thing that becomes ONE official ISAAC record.
@@ -3151,8 +3343,21 @@ class Experiment:
         """
         return resolve_inherited(self.draft, run)
 
-    def set_run_override(self, run: "Run", address: str, payload: object) -> "Override":
+    def set_run_override(
+        self,
+        run: "Run",
+        address: str,
+        payload: object,
+        *,
+        user_confirmed: bool = False,
+    ) -> "Override":
         """Record an explicit run-level override at one inherited address. Does not save.
+
+        ``user_confirmed`` says whether the CALLER has established that a person
+        supplied this payload and asked for it to be stored. It defaults to ``False``,
+        so nothing mints a confirmation it was not told about — see
+        :func:`_attribution_confirmation_evidence` for what the flag entitles, and for
+        the defect that made it necessary.
 
         ``address`` is namespaced — build it with :func:`field_address` or
         :func:`block_address`. Refuses any address that is not experiment-level
@@ -3199,6 +3404,8 @@ class Experiment:
             displaced=copy.deepcopy(_experiment_payload_at(self.draft, kind, name)),
         )
         run.overrides[address] = override
+        if user_confirmed and address == block_address("attribution"):
+            _record_attribution_confirmations(run, payload)
         return override
 
     def resolved_run_draft(self, run: "Run") -> dict:
@@ -3252,6 +3459,12 @@ class Experiment:
         experiment_draft = self.draft if isinstance(self.draft, dict) else {}
         if draft.get("meta") is None and experiment_draft.get("meta") is not None:
             draft["meta"] = copy.deepcopy(experiment_draft["meta"])
+
+        # Layer 3b: `system.domain`, derived from THIS DRAFT's `meta` — see
+        # `_apply_system_domain_derivation` for the whole argument, including why it is
+        # here and not on the experiment. It must run AFTER layer 3, because the rule
+        # reads `meta.source_type` and a run does not usually carry its own `meta`.
+        _apply_system_domain_derivation(draft)
 
         # `inherit` is false for a run that DIVERGES IN VALUE at any experiment-level
         # address — see `_merge_implicit` for why the test is "any divergence" rather

@@ -6747,8 +6747,18 @@ def post_run_override(
         # the typed refusal a client can act on, not an unhandled exception rendered as
         # a 500 with a traceback. `NotOverridable` is a `ValueError`, so the malformed
         # address `parse_address` raises on is caught by the same clause.
+        #
+        # `user_confirmed=True` IS AN ASSERTION THIS ROUTE HAS EARNED, and only here.
+        # `confirmed_by_user is not True` was refused above, so by this line a person
+        # has said "store this". That is what entitles the domain method to record a
+        # `user_confirmation` evidence entry for a `block:attribution` payload, which
+        # is the only way a contributor set through this route can ever satisfy
+        # `draft_validator`'s coverage rule and be exported. It claims nothing about
+        # WHO confirmed it — this application has no verified identity to name.
         try:
-            override = exp.set_run_override(run, address, body.get("payload"))
+            override = exp.set_run_override(
+                run, address, body.get("payload"), user_confirmed=True
+            )
         except ValueError:
             return _not_overridable(address)
 
@@ -7624,6 +7634,49 @@ NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
 )
 
 
+#: THE MAPPABLE PATHS THIS BUILD ALSO HAS A ROUTE THAT ACCEPTS A VALUE AT.
+#:
+#: **A COPY CLAIM WAS FALSE FOR 7 OF THE 25, AND THIS SET IS WHAT MAKES IT CHECKABLE.**
+#: After mapping a note, ``UnmappedNotesPanel`` told the scientist *"It does not write a
+#: value — a value still has to be entered and confirmed on the field itself"*, and this
+#: operation's own description and the ``review`` operation's said the same. Measured
+#: over HTTP against every one of the 25 paths, on a created record with one run: SEVEN
+#: of them — the six ``system.configuration.*`` and ``timestamps.created_utc`` — are
+#: refused by every write route this application has. ``PATCH .../runs/{run_id}`` answers
+#: ``422 unrecognized_field``, ``POST .../overrides`` answers ``422 not_overridable``,
+#: and the three answer/edit routes answer ``422 unrecognized_field``. So the sentence
+#: pointed at a locked door, and "a value still has to be entered" described something
+#: no request could do.
+#:
+#: WHY THOSE SEVEN ARE NOT GIVEN A WRITE ROUTE INSTEAD, which would have been the better
+#: fix if it were ours to make. ``system.configuration`` is a DESIGNATED OPEN namespace
+#: that declares no ``properties``, and ``workspace.field_level`` deliberately leaves it
+#: ``unclassified`` — "not overridable until somebody decides, and it is never guessed
+#: into a level here". ``CLAUDE.md`` §15 records the six ``system.configuration.*``
+#: fields as an open external question, so classifying them here would be deciding it.
+#: ``timestamps.created_utc`` is server-stamped by ``export.transform`` and is not a
+#: value a client should author at all. Widening either is a product decision, and it is
+#: deliberately not made here.
+#:
+#: DERIVED FROM THE TWO SETS THAT ENFORCE IT, never listed by hand — the same discipline
+#: as its two inputs. ``RUN_WRITABLE_FIELD_PATHS`` is what ``PATCH .../runs/{run_id}``
+#: accepts and ``EXPERIMENT_OVERRIDABLE_ADDRESSES`` is what ``POST .../overrides``
+#: accepts, so a path admitted by either really is a path some request can put a value
+#: at. If a future slice widens or narrows either route's set, this moves with it and the
+#: copy the scientist reads moves with it too.
+#:
+#: WHAT IT DELIBERATELY DOES NOT SAY. It does not name WHICH operation, and it does not
+#: promise the value will be ACCEPTED — ``system.technique`` is a closed 37-value enum
+#: and ``'XANES'`` is refused by official validation, measured. It answers exactly one
+#: question: does a route exist that would take a value here at all.
+NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT: frozenset[str] = frozenset(
+    path
+    for path in NOTE_MAPPABLE_FIELD_PATHS
+    if path in RUN_WRITABLE_FIELD_PATHS
+    or ws.field_address(path) in EXPERIMENT_OVERRIDABLE_ADDRESSES
+)
+
+
 #: The largest one note's text may serialise to. A REFUSAL, NEVER A TRUNCATION.
 #:
 #: "Never truncated" is a promise about what is STORED, and it is kept by refusing
@@ -7790,6 +7843,16 @@ def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
         # set the route actually enforces. These are one expression, so the control a
         # client offers and the request the server accepts cannot disagree.
         "mappable_field_paths": sorted(NOTE_MAPPABLE_FIELD_PATHS),
+        # AND THE SERVER'S OWN ANSWER TO "AND CAN I THEN ENTER A VALUE THERE?", for the
+        # same reason and one step further. Mapping is a claim about WHERE content
+        # belongs; a client that goes on to tell a person "now enter the value on the
+        # field" is making a second claim, about a route existing. For 7 of these 25
+        # paths that claim was false — see
+        # `NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT` for the measurement. This is a
+        # SUBSET of `mappable_field_paths`, never a replacement for it: a path that is
+        # mappable but not writable is still a perfectly good home for a note, and
+        # withholding it would take away the one outcome that does work.
+        "value_writable_field_paths": sorted(NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT),
         "sources": sorted(notes.NOTE_SOURCES),
         "experiment_version": exp.version_token(),
     }
@@ -7829,6 +7892,18 @@ _NOTE_LIST_DESC = (
         "from it may still be a real schema field, and a refusal against this "
         "list says what this application can map a note to rather than what the "
         "official schema defines.\n\n"
+        "`value_writable_field_paths` is the SUBSET of those paths that some write "
+        "operation in this build accepts a value at — `PATCH "
+        "/api/experiments/{experiment_id}/runs/{run_id}` for a run's own fields, "
+        "`POST /api/experiments/{experiment_id}/runs/{run_id}/overrides` for a "
+        "record-level one. It is served because mapping a note and entering its "
+        "value are two different acts, and a client that tells a person to do the "
+        "second needs to know whether it is possible: for 7 of the 25 mappable "
+        "paths it is not, and every write route refuses them. Mapping to such a "
+        "path is still correct and still keeps the content on the record — this "
+        "key says only that no request can then write a value there. It promises "
+        "nothing about the value being ACCEPTED: a closed enum, a required "
+        "sibling property or the no-guessing rules may still refuse it.\n\n"
         "`unreadable_entries` counts stored entries this build cannot present as "
         "notes. There are two kinds and the count does not separate them: an "
         "entry the note model refused, and an entry whose id another note already "
@@ -8072,9 +8147,14 @@ def get_note(
         "to, and requires `field_path` to be one of the paths `GET .../notes` "
         "reports under `mappable_field_paths`. IT WRITES NO VALUE. Deriving a "
         "value from prose would mean deciding what the value is, which this "
-        "application makes a person do through the confirmed-edit path that "
-        "already exists; a mapped note says where the content belongs, not what "
-        "the field should hold.\n\n"
+        "application makes a person do through a separate confirmed write; a "
+        "mapped note says where the content belongs, not what the field should "
+        "hold. WHETHER SUCH A WRITE EXISTS FOR THE MAPPED PATH IS A SEPARATE "
+        "QUESTION, and for 7 of the 25 mappable paths the answer is no: `GET "
+        ".../notes` reports `value_writable_field_paths`, the subset a write route "
+        "accepts a value at, and mapping to a path outside it is still a correct "
+        "and useful act — the content stays on the record in full — but no request "
+        "in this build can then put a value there.\n\n"
         "`edit` stores a corrected wording BESIDE the verbatim capture and never "
         "replaces it, and leaves the review state alone — fixing a typo is not a "
         "triage decision. `keep` records that this content is prose about the "

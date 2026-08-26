@@ -59,6 +59,44 @@ def non_oxygen_elements(formula) -> tuple[str, ...]:
     return tuple(dict.fromkeys(non_oxygen))
 
 
+#: The stated rule the ``system.domain`` derivation applies, verbatim, as it is
+#: written into the derivation evidence entry. Named so the rule text has ONE
+#: definition and cannot drift between the two callers of :func:`derive_system_domain`.
+SYSTEM_DOMAIN_RULE = (
+    "system.domain = experimental for a facility-source record "
+    "(meta.source_type=facility ⇒ physical experiment, not computation)"
+)
+
+
+def derive_system_domain(meta) -> dict | None:
+    """The ``system.domain`` envelope ``meta`` DETERMINES, or ``None``.
+
+    A DERIVATION, NOT A GUESS, AND THE DISTINCTION IS ``CLAUDE.md`` §5's. That rule
+    permits an inferred field "only by a documented/stored rule"; this is that rule,
+    stored here, stated in :data:`SYSTEM_DOMAIN_RULE`, and carried into the field as a
+    ``derivation`` evidence entry so the inference travels with its justification into
+    the export sidecar. The official schema's ``system.domain`` is a CLOSED two-value
+    enum (``experimental`` | ``computational``) and a physical facility is never a
+    computation, so a ``facility``-source record has exactly one admissible value.
+
+    ``None`` FOR EVERY OTHER ``source_type``, AND THAT IS THE NO-GUESSING HALF. The
+    schema's ``source_type`` enum has six values, and only ``facility`` makes the
+    domain deterministic: ``laboratory`` and ``industrial`` are physical but this rule
+    does not speak for them, ``computation`` points the other way, and ``literature``
+    and ``database`` describe a record ABOUT work rather than the work. Returning
+    ``None`` leaves the field absent, which makes official validation report
+    ``'domain' is a required property`` — an honest refusal a person can answer, and
+    strictly better than a domain nothing supports.
+    """
+    if not isinstance(meta, dict) or meta.get("source_type") != "facility":
+        return None
+    return {
+        "value": "experimental",
+        "status": "inferred",
+        "evidence": [{"source_type": "derivation", "rule": SYSTEM_DOMAIN_RULE}],
+    }
+
+
 def _absorbing_element(formula):
     """The sole non-oxygen element in ``formula`` (e.g. ``"CuO2" -> "Cu"``).
 
@@ -103,21 +141,16 @@ def build_draft(structured_path, listing_path) -> dict:
     #     enum is experimental|computational and a physical facility is never
     #     computational. Surface it as an inferred field (mirrors the golden draft's
     #     inferred domain) rather than fabricating it or letting export fail.
-    if _META["source_type"] == "facility":
-        fields["system.domain"] = {
-            "value": "experimental",
-            "status": "inferred",
-            "evidence": [
-                {
-                    "source_type": "derivation",
-                    "rule": (
-                        "system.domain = experimental for a facility-source record "
-                        "(meta.source_type=facility ⇒ physical experiment, not "
-                        "computation)"
-                    ),
-                }
-            ],
-        }
+    #
+    #     THE RULE ITSELF MOVED OUT to :func:`derive_system_domain` and is called
+    #     here rather than restated. It has a second caller — the API's run-draft
+    #     composition, which needs it for a record a scientist CREATED rather than
+    #     extracted from a sheet, where the same required property was reachable by
+    #     no write path at all. Two inline copies of one derivation is the drift this
+    #     repository refuses; the output for this path is unchanged.
+    derived_domain = derive_system_domain(_META)
+    if derived_domain is not None:
+        fields["system.domain"] = derived_domain
 
     # Block-level provenance the official record cannot carry per-field lands in
     #   ``block_evidence`` (assistant natural-key map), harvested into the export

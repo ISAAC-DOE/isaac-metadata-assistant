@@ -590,7 +590,20 @@ def map_note(note: Note, *, field_path: str, at: str) -> Note:
 
     Writes no value anywhere. See the module docstring: turning prose into a field
     value means deciding what the value is, and this application makes a person do
-    that through the confirmed-edit path that already exists.
+    that through a confirmed write.
+
+    ~~"through the confirmed-edit path that already exists"~~ — CORRECTED, because for
+    7 of the 25 mappable paths NO SUCH PATH EXISTS. Measured over HTTP against every
+    write route this application has: the six ``system.configuration.*`` paths and
+    ``timestamps.created_utc`` are refused by all of them (``422 unrecognized_field``
+    from the answer/edit/patch routes, ``422 not_overridable`` from the override
+    route). The old sentence read as a promise about the product and was true of 18
+    paths out of 25, which in the one place a scientist reads before choosing a target
+    is not "true on average" but false. Which paths do have a route is served, per
+    path, as ``value_writable_field_paths`` — see
+    ``routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT``. Mapping is unaffected in
+    every case: a note whose field cannot take a value is still correctly filed, and
+    the content stays on the record in full.
 
     IDEMPOTENT: re-mapping to the path already recorded returns the same note, so a
     double-click does not add a second audit row or move the experiment's revision.

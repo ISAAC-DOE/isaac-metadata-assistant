@@ -428,6 +428,7 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
                 <NoteCard
                   note={note}
                   mappablePaths={list.loaded.mappable_field_paths}
+                  valueWritablePaths={list.loaded.value_writable_field_paths}
                   busy={busyNoteId === note.id || version === null}
                   onReview={review}
                 />
@@ -550,14 +551,42 @@ function CaptureNote({
   );
 }
 
+/**
+ * WHAT THIS PANEL MAY PROMISE ABOUT ENTERING THE VALUE, and why it is two sentences
+ * rather than one.
+ *
+ * The hint after choosing a field used to read, for every path: *"It does not write a
+ * value — a value still has to be entered and confirmed on the field itself."* The
+ * first half is true of all 25 mappable paths. The second half was FALSE for 7 of
+ * them, measured over HTTP against every write route this application has: the six
+ * `system.configuration.*` paths and `timestamps.created_utc` are refused by all of
+ * them. "A value still has to be entered" describes an action, and for those seven no
+ * request can perform it — so a scientist was told to go and do something the product
+ * refuses, on the screen whose whole purpose is to stop captured content being thrown
+ * away.
+ *
+ * The server now says which is which, per path, in `value_writable_field_paths`, and
+ * this component branches on the path the reader just chose rather than saying
+ * something true on average. The unwritable branch does NOT read as a dead end,
+ * because it is not one: mapping is still recorded, the note still holds the content
+ * verbatim, and that is a first-class outcome this panel already argues for elsewhere.
+ */
+const VALUE_MUST_BE_ENTERED =
+  'It does not write a value — a value still has to be entered and confirmed on the field itself.';
+
+const NO_WRITE_ROUTE_FOR_THIS_PATH =
+  'It does not write a value, and this version has no screen or request that accepts one at this path — so the value stays in the note, which keeps it on the record in full for whoever reads it next. Recording where it belongs is still worth doing.';
+
 function NoteCard({
   note,
   mappablePaths,
+  valueWritablePaths,
   busy,
   onReview,
 }: {
   note: ApiNote;
   mappablePaths: string[];
+  valueWritablePaths: string[];
   busy: boolean;
   onReview: (
     note: ApiNote,
@@ -823,9 +852,19 @@ function NoteCard({
             they are looking, and the alternative it names is a real one: keeping
             the note is a first-class outcome, not a consolation.
           */}
+          {/*
+            PER PATH, NOT ON AVERAGE. Nothing is claimed until a field is chosen: with
+            no selection this states only what mapping does, because which of the two
+            sentences is true depends on the path and inventing an answer before the
+            reader has picked one is the defect in miniature.
+          */}
           <p className="note-form-hint">
-            This records where the content belongs. It does not write a value — a
-            value still has to be entered and confirmed on the field itself.
+            This records where the content belongs.{' '}
+            {fieldPath === ''
+              ? 'It does not write a value.'
+              : valueWritablePaths.includes(fieldPath)
+                ? VALUE_MUST_BE_ENTERED
+                : NO_WRITE_ROUTE_FOR_THIS_PATH}
           </p>
           <p className="note-form-hint">
             This list is not every field in the ISAAC schema — it is the set this
