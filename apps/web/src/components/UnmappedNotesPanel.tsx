@@ -428,6 +428,7 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
                 <NoteCard
                   note={note}
                   mappablePaths={list.loaded.mappable_field_paths}
+                  valueWritablePaths={list.loaded.value_writable_field_paths}
                   busy={busyNoteId === note.id || version === null}
                   onReview={review}
                 />
@@ -550,14 +551,63 @@ function CaptureNote({
   );
 }
 
+/**
+ * WHAT THIS PANEL MAY PROMISE ABOUT ENTERING THE VALUE — one sentence, chosen per path.
+ *
+ * THE SENTENCE THIS REPLACES WAS FALSE FOR 7 OF THE 25 MAPPABLE PATHS. After choosing a
+ * field the hint read, for every path: *"This records where the content belongs. It does
+ * not write a value — a value still has to be entered and confirmed on the field
+ * itself."* The first half is true everywhere. The second half describes an ACTION, and
+ * for the six `system.configuration.*` paths and `timestamps.created_utc` no request in
+ * this build can perform it — measured over HTTP against all five write routes, every
+ * one of which answers 422. So the screen whose whole purpose is to stop captured
+ * content being thrown away was sending the scientist to a locked door, and the one
+ * thing they could reasonably conclude on finding it locked is that the note has no home.
+ *
+ * IT IS PER PATH, NOT ON AVERAGE, because a hint is read about the field in front of you.
+ * `value_writable_field_paths` is the server's own subset — derived in `routes.py` from
+ * the two admissible-address sets the write routes actually enforce, so the sentence and
+ * the refusal cannot drift. Nothing is transcribed here.
+ *
+ * AND IT SAYS "ON A RUN", which the old copy did not. Both write routes are a run's:
+ * `PATCH .../runs/{run_id}` for a run's own field and `POST .../runs/{run_id}/overrides`
+ * for a record-level one. "On the field itself" pointed at no screen a person could find.
+ *
+ * WHY THE UNWRITABLE SEVEN ARE NOT SIMPLY GIVEN A ROUTE, which would be the better fix:
+ * `system.configuration` is a designated OPEN namespace the vendored schema declares no
+ * properties for, and `CLAUDE.md` §15 records those six fields as an open external
+ * question — classifying them here would be deciding it rather than reporting it. That is
+ * a product decision, and this is the honest sentence until it is made.
+ */
+export function valueWriteHint(fieldPath: string, valueWritablePaths: string[]): string {
+  if (fieldPath === '') {
+    // NOTHING CHOSEN YET, so nothing may be said about a specific field. The half that
+    // is true of every path is said, and no more.
+    return 'This records where the content belongs. It does not write a value.';
+  }
+  return valueWritablePaths.includes(fieldPath)
+    ? 'This records where the content belongs. It does not write a value — a value for ' +
+        'this field is entered and confirmed on a run of this record.'
+    : 'This records where the content belongs. It does not write a value, and this ' +
+        'version has nowhere to enter one for this field — mapping files the note and ' +
+        'keeps its text on the record in full, which is all it can do here.';
+}
+
 function NoteCard({
   note,
   mappablePaths,
+  valueWritablePaths,
   busy,
   onReview,
 }: {
   note: ApiNote;
   mappablePaths: string[];
+  /**
+   * The SERVER's per-path answer to "may a value then be entered here?", served
+   * alongside `mappablePaths` and never re-derived. See `valueWriteHint` for the
+   * false sentence this exists to replace.
+   */
+  valueWritablePaths: string[];
   busy: boolean;
   onReview: (
     note: ApiNote,
@@ -823,10 +873,7 @@ function NoteCard({
             they are looking, and the alternative it names is a real one: keeping
             the note is a first-class outcome, not a consolation.
           */}
-          <p className="note-form-hint">
-            This records where the content belongs. It does not write a value — a
-            value still has to be entered and confirmed on the field itself.
-          </p>
+          <p className="note-form-hint">{valueWriteHint(fieldPath, valueWritablePaths)}</p>
           <p className="note-form-hint">
             This list is not every field in the ISAAC schema — it is the set this
             version can map a note to. If the field you want is missing, that does
@@ -843,7 +890,10 @@ function NoteCard({
                 runReview(
                   'map',
                   { fieldPath },
-                  `Mapped to ${fieldPath}. No value was written.`,
+                  `Mapped to ${fieldPath}. No value was written. ${valueWriteHint(
+                    fieldPath,
+                    valueWritablePaths,
+                  )}`,
                 )
               }
             >
