@@ -14,6 +14,7 @@ import type {
   ApiEvidenceEntry,
   ApiExperimentStatus,
   ApiExperimentSummary,
+  ApiAnswerablePendingItem,
   ApiPendingItem,
   ApiValidateResult,
   ApiWarningsResponse,
@@ -419,7 +420,57 @@ function inputTypeForKind(kind: BlockerKind): CompletionInputType {
   return 'text';
 }
 
-function pathTokenFor(item: ApiPendingItem): string {
+/**
+ * The user-facing statement for a pending entry the SERVER could not read as a
+ * question.
+ *
+ * WHY THE CLIENT NEEDS ONE AT ALL. `GET /pending` serves one entry per stored blocker
+ * even when the stored blocker is not a question — `unavailable: true` plus an
+ * `unavailable_reason` naming the shape that was found, with `id`, `kind` and
+ * `question` all `null` because the server invents none of them (see
+ * `serialize._unreadable_blocker`). Before that the whole request was a 500, so the
+ * entry being served is what makes the record's OTHER questions reachable at all.
+ *
+ * Rendering such an entry through the ordinary path produced `titleCase(String(null))`
+ * — the label **"Null"** — an empty question, and a free-text input for a blocker no
+ * answer can close. So entries are partitioned rather than rendered blind: everything
+ * that is not answerable carries this label and the server's own reason instead.
+ *
+ * The label states what happened and does not guess what the entry meant. It is a
+ * client string only because the server has nothing to name; the REASON shown beside it
+ * is always the server's.
+ */
+export const UNREADABLE_BLOCKER_LABEL = 'A stored question ISAAC could not read';
+
+/**
+ * True when this entry is a question the UI can render and a user can answer.
+ *
+ * `unavailable` — the server's own wire discriminator — is checked FIRST, deliberately:
+ * a consumer that inferred "unreadable" from a combination of nulls would be
+ * re-deriving a decision the response already states, and this repository's rule after
+ * the check-payload defect is that the discriminator is a field, not an inference.
+ *
+ * The two `typeof` checks then narrow the TYPE, and they are not redundant with the
+ * flag: they are what makes this sound against a response that omits `unavailable` (an
+ * older backend, or a fixture), and they are what lets `pendingItemToBlocker` take a
+ * type whose `id`/`kind` cannot be null rather than assert its way past one.
+ *
+ * `question` IS DELIBERATELY NOT REQUIRED HERE, and requiring it was the first version
+ * of this predicate. A stored entry may legitimately carry a kind and no question prose
+ * — the server serves `question: null` for it, because it authors no sentence the draft
+ * did not have — and that entry IS answerable: the answer key is its kind, and
+ * `POST /answers` takes it. Treating it as unreadable would have made the client refuse
+ * a question the API accepts, and would have shown the reader "could not read" over an
+ * entry the server never called unreadable.
+ */
+export function isAnswerablePendingItem(
+  item: ApiPendingItem,
+): item is ApiAnswerablePendingItem {
+  if (item.unavailable) return false;
+  return typeof item.id === 'string' && typeof item.kind === 'string';
+}
+
+function pathTokenFor(item: ApiAnswerablePendingItem): string {
   if (item.kind === 'asset') return item.about || item.id; // the asset uri
   if (item.kind === 'series') return 'measurement.series';
   if (item.kind === 'descriptor') return 'descriptors';
@@ -491,7 +542,12 @@ function hasConfidenceKey(node: unknown, depth = 0): boolean {
  * — `detail` cannot carry a value past the server's own type checks, and
  * duplicating a five-state key map here would be a third copy to keep in step.
  */
-export function sanitizeInferability(inf: Inferability | undefined): Inferability | undefined {
+export function sanitizeInferability(
+  inf: Inferability | null | undefined,
+): Inferability | undefined {
+  // `null` joins `undefined` here rather than being handled separately: the server
+  // sends it for an entry whose inferability it deliberately did not decide, and "no
+  // decision" and "no field" are the same thing to every consumer of this value.
   if (!inf) return undefined;
   const p = inf.provenance;
   const evidenceSpeaksAboutThisRecord = (e: { source_type?: string }) =>
@@ -523,7 +579,7 @@ export function sanitizeInferability(inf: Inferability | undefined): Inferabilit
 }
 
 /** Map one live /pending item onto the render blocker the GuidedPrompt consumes. */
-export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
+export function pendingItemToBlocker(item: ApiAnswerablePendingItem): PendingBlocker {
   const hasExample = !!item.demo_answer;
   return {
     id: item.id,
@@ -568,8 +624,22 @@ export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
  * Pure: it does not mutate the item, and the underlying question is unchanged.
  */
 export function pendingSummary(item: ApiPendingItem): { label: string; locator: string | null } {
+  // AN UNREADABLE ENTRY IS NAMED, NOT BLANKED. `KIND_LABEL[null] ?? item.question` is
+  // `null` for one, which rendered an EMPTY row in the "Needs You" list — a blocker
+  // whose count the reader can see and whose row they cannot. The locator carries the
+  // server's own reason: it is the only thing anybody knows about the entry, and it is
+  // what an operator needs in order to repair the stored document.
+  if (!isAnswerablePendingItem(item)) {
+    return { label: UNREADABLE_BLOCKER_LABEL, locator: item.unavailable_reason ?? null };
+  }
   return {
-    label: KIND_LABEL[item.kind] ?? item.question,
+    // A THIRD RUNG, because the second one can be null. A stored entry may carry a kind
+    // and no question prose, and the server serves `question: null` rather than
+    // authoring a sentence — so the old two-rung ladder produced a blank row for an
+    // unlabelled kind. `id` is the blocker's own name (its kind, or an asset URI),
+    // which is the same about → question → id ladder `useRecordSession.toPendingItems`
+    // uses, so the two surfaces cannot disagree about what a field is called.
+    label: KIND_LABEL[item.kind] ?? item.question ?? item.id,
     locator: item.about ?? null,
   };
 }

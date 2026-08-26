@@ -203,18 +203,116 @@ def test_a_nested_malformed_payload_still_raises_so_the_route_probe_stays_reacha
         validate_draft({"attribution": {"contributors": 7}})
 
 
-def test_a_wrong_typed_ITEM_inside_a_well_formed_list_still_raises():
-    """FOUND AND DELIBERATELY NOT FIXED, recorded here so it is not mistaken for covered.
+#: The five TOP-LEVEL LIST containers whose ITEMS are now guarded, and the noun each
+#: item's finding uses. Derived from the module's own table rather than retyped, so a
+#: sixth list container cannot be added without this test noticing.
+_LIST_CONTAINERS = tuple(
+    sorted(n for n, t in _TOP_LEVEL_CONTAINERS.items() if t is list)
+)
 
-    ``{"assets": [7]}`` is a per-ITEM malformation, not a container one, and it still
-    raises ``AttributeError``. Closing it correctly means deciding what a per-item
-    degradation SAYS — ``serialize.py`` answers that with ``unavailable`` +
-    ``unavailable_reason`` on a served entry, which is a larger design decision with a
-    response contract attached. This test pins the current behaviour so the gap is
-    visible; invert it when that decision is made.
+
+def test_the_declared_list_containers_are_exactly_the_five_this_file_covers():
+    """A SIXTH list container would silently escape every test below. Pinned."""
+    assert _LIST_CONTAINERS == (
+        "assets",
+        "descriptors_outputs",
+        "implicit",
+        "links",
+        "series",
+    ), _LIST_CONTAINERS
+
+
+@pytest.mark.parametrize("name", _LIST_CONTAINERS)
+def test_a_wrong_typed_ITEM_inside_a_well_formed_list_is_reported_not_raised(name: str):
+    """**INVERTED, and this is the decision the old test asked for.**
+
+    It used to read ``test_a_wrong_typed_ITEM_inside_a_well_formed_list_still_raises``
+    and said: "This test pins the current behaviour so the gap is visible; invert it
+    when that decision is made." The decision is made — a per-item degradation is a
+    FINDING at the item's own position, filed by ``_mapping_items`` — so the test is
+    inverted rather than deleted, which is this repository's established remedy.
+
+    Measured before, on ``1ad1f8f``, each of these raised ``AttributeError`` out of
+    ``validate_draft``; over HTTP, on a record with nothing else pending, that was a
+    **500** on ``GET /api/experiments/{id}`` (``Experiment.draft_ok`` reaches this
+    validator). The 500 is pinned in
+    ``apps/api/tests/test_a_malformed_pending_entry_is_served_not_500.py``, beside the
+    ``pending`` sibling, because that is the symptom a scientist reports.
     """
-    with pytest.raises(AttributeError):
-        validate_draft({"assets": [7]})
+    for bad in (7, 1.5, True, "a string", ["a", "list"]):
+        report = validate_draft({**_base_draft(), name: [bad]})  # must not raise
+        assert isinstance(report, DraftReport), (name, bad)
+        assert not report.ok, f"{name}=[{bad!r}] was accepted as valid"
+        assert any(where == f"{name}[0]" for where, _ in report.errors), (
+            f"{name}=[{bad!r}] produced no finding filed at {name}[0]: {report.errors}"
+        )
+
+
+@pytest.mark.parametrize("name", _LIST_CONTAINERS)
+def test_the_item_finding_names_the_position_and_never_quotes_the_stored_value(name):
+    """The reader is told WHERE and WHAT SHAPE — never handed the content back.
+
+    The container-level finding took this decision first (see
+    :func:`test_the_finding_names_the_shape_and_never_quotes_the_stored_value`); an item
+    finding is the same statement one level down, and a stored string interpolated into
+    a message is arbitrary content rendered as though it were the validator's own words.
+    """
+    secret = "SENSITIVE-VALUE-THAT-MUST-NOT-BE-ECHOED"
+    report = validate_draft({**_base_draft(), name: [secret]})
+    messages = [m for where, m in report.errors if where == f"{name}[0]"]
+    assert messages, (name, report.errors)
+    assert not any(secret in m for m in messages), messages
+
+
+@pytest.mark.parametrize("name", _LIST_CONTAINERS)
+def test_the_readable_items_beside_an_unreadable_one_are_still_walked(name: str):
+    """ONE bad item does not cost the reader the findings about the good ones.
+
+    This is the per-item isolation ``serialize.py`` describes ("one malformed entry
+    destroyed the WHOLE trail"), applied here. The good item chosen for each container
+    is one that produces its own DISTINCT finding, so the assertion cannot be satisfied
+    by the junk item's finding alone.
+    """
+    good_and_its_finding = {
+        # an asset with no sha256
+        "assets": ({"asset_id": "a"}, "assets[1]"),
+        # a descriptors-output whose descriptor has a null value
+        "descriptors_outputs": ({"descriptors": [{"name": "d", "value": None}]},
+                                "descriptors[1][0]"),
+        # an implicit claim with no evidence
+        "implicit": ({"about": "edge", "value": "L3"}, "implicit 'edge'"),
+        # a series with no series_id
+        "series": ({"mu": 0.1}, "series[1] (?)"),
+        # a link missing rel/target/basis
+        "links": ({"rel": "derived_from"}, "links[1]"),
+    }[name]
+    good, expected_where = good_and_its_finding
+    report = validate_draft({**_base_draft(), name: [7, good]})
+    wheres = [w for w, _ in report.errors]
+    assert f"{name}[0]" in wheres, report.errors
+    assert expected_where in wheres, (expected_where, report.errors)
+
+
+def test_a_wrong_typed_ITEM_does_not_stop_the_draft_being_walked_to_the_end():
+    """The walk CONTINUES past the bad item — findings from LATER containers still land.
+
+    ``_mapping_items`` is a generator, so a ``return`` where a ``continue`` belonged
+    would end the loop at the first junk item and, worse, would look like a pass on
+    every check after it. ``meta`` findings are filed before the list walks and
+    ``attribution`` after, so requiring both proves the pass reached the end.
+    """
+    report = validate_draft(
+        {
+            "meta": {},  # -> three meta.* findings, filed BEFORE the list containers
+            "series": [{"series_id": "s1"}],
+            "assets": [7, 7],
+            "attribution": {"uploaded_by": "someone"},  # -> filed AFTER them
+        }
+    )
+    wheres = [w for w, _ in report.errors]
+    assert "meta.record_type" in wheres, report.errors
+    assert wheres.count("assets[0]") == 1 and wheres.count("assets[1]") == 1, report.errors
+    assert "attribution.uploaded_by" in wheres, report.errors
 
 
 # --- the one verdict this change moves ---------------------------------------

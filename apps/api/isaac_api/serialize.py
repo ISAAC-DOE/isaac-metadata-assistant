@@ -240,6 +240,98 @@ def _blocker_about(entry: dict):
     return entry.get("uri") or entry.get("blocker")
 
 
+def _unreadable_blocker(entry, reason: str) -> dict:
+    """ONE served entry for a stored blocking question this module cannot read.
+
+    **THE MEASURED DEFECT.** :func:`pending_to_list` read every entry's keys with no
+    shape check, so a single malformed entry took the whole question list down.
+    Measured over HTTP on ``1ad1f8f``, with the value written into the persisted state
+    (see the reachability note below), on a record created through
+    ``POST /api/experiments``:
+
+    ==============================================  ========  =======
+    stored ``draft["pending"]``                     before    after
+    ==============================================  ========  =======
+    ``[7]``                                         **500**   200
+    ``7``                                           **500**   200
+    ``[{"kind": "qc", "question": "q?"}, 7]``        **500**   200
+    ``["a string"]``                                **500**   200
+    ``[None]``                                       **500**   200
+    ==============================================  ========  =======
+
+    Every row was 500 on ``GET /api/experiments/{id}/pending`` — bounded
+    (``?limit=5``) and unbounded alike — and on ``POST
+    /api/experiments/{id}/assistant/query``, which serialises the same list. ``7`` and
+    ``[7]`` reached the identical failure because ``workspace._blocker_entries`` turns
+    the non-iterable into ``[7]``; that convergence is asserted in
+    ``test_a_malformed_pending_list_is_still_readable.py`` and is preserved here.
+
+    **WHY THE ENTRY IS SERVED RATHER THAN DROPPED OR REFUSED.** Three alternatives,
+    each rejected because it tells the reader something false:
+
+    * **Dropping it** shortens the question list silently. The record's
+      ``pending_count`` is derived independently from :meth:`Experiment.pending`, so a
+      drop would make the count and the list disagree, and — worse — a record whose
+      ONLY entry is unreadable would present an empty question list, which the
+      completion screen reads as "all blockers resolved · ready to export".
+    * **A typed error on the read** hides the record from the owner, who did nothing
+      wrong. ``workspace._blocker_entries`` records the same reasoning at length: a
+      malformed value in a REQUEST can be refused; one already PERSISTED cannot.
+    * **Coercing, parsing or wrapping the stored value** turns a broken document into
+      a plausible one, which ``CLAUDE.md`` §5 exists to prevent. Nothing here repairs
+      the document, and nothing here writes.
+
+    **NOTHING IS INVENTED — that is what every ``None`` below is for.** An unreadable
+    entry acquires no ``kind``, no ``question``, no ``about``, no example answer and no
+    ``inferability`` decision: this module is in no position to state any of them, and
+    a fabricated ``id``/``blocker_key`` would be worse than a missing one because it is
+    the key an answer is submitted under and the key a client uses for identity. The
+    reader is told the SHAPE that was found, never handed the stored value back —
+    the same decision ``_JSON_KIND`` and ``draft_validator``'s container findings take,
+    for the same reason.
+
+    **WHAT IS PRESERVED IS ONLY WHAT WAS ACTUALLY READABLE**, which is this module's
+    existing rule for the evidence trail ("still carries its own identity and whatever
+    else about it IS readable"): a mapping entry's ``run_id``/``run_label``, and only
+    when they are strings. That is the one fact that makes the document fixable — it
+    names WHICH run holds the junk entry — and passing through a tag that is really
+    there is not inventing one. A non-mapping entry has no readable anything, so it
+    gets nothing.
+
+    **IT STAYS COUNTED.** One stored entry in, one served entry out, so
+    ``len(pending)`` is unchanged and the export gate stays shut: a document whose
+    blocker list cannot be read must never be certified export-ready.
+
+    **REACHABILITY, stated rather than implied.** No shipped write path produces such
+    an entry — ``complete.apply_answers`` assigns a list it built itself,
+    ``routes._seed_for_new_run`` deep-copies template entries, ``blank_draft`` is
+    literals. The reachable producers are an operator editing the persisted state (the
+    workspace JSON, or ``isaac_experiments.state`` JSONB) and any future importer or
+    migration.
+    """
+    run_id = entry.get("run_id") if isinstance(entry, dict) else None
+    run_label = entry.get("run_label") if isinstance(entry, dict) else None
+    return {
+        "id": None,
+        "kind": None,
+        "question": None,
+        "about": None,
+        "demo_answer": None,
+        "inferability": None,
+        "run_id": run_id if isinstance(run_id, str) else None,
+        "run_label": run_label if isinstance(run_label, str) else None,
+        "blocker_key": None,
+        # THE DISCRIMINATOR IS A WIRE FIELD, not something a consumer infers from
+        # `id === null`. `unavailable` + `unavailable_reason` are the pair this module
+        # already serves for a per-item degradation on the evidence trail, so a client
+        # that learned the posture once handles both surfaces; and a machine client
+        # reading the response has one key to branch on rather than a rule about which
+        # combination of nulls means "unreadable".
+        "unavailable": True,
+        "unavailable_reason": reason,
+    }
+
+
 def pending_to_list(
     draft: dict,
     demo_answers: dict,
@@ -289,47 +381,86 @@ def pending_to_list(
     """
     pending = []
     for entry in (draft.get("pending") if entries is None else entries) or []:
-        demo = _demo_answer_for(entry, demo_answers, example_scope=example_scope)
-        pending.append(
-            {
-                "id": blocker_id(entry),
-                "kind": entry.get("kind"),
-                "question": entry.get("question"),
-                "about": _blocker_about(entry),
-                "demo_answer": demo,
-                "inferability": inferability.blocker_inferability(
-                    entry, example_available=demo is not None
-                ).to_dict(),
-                # Carried through when present. `Experiment.pending()` tags a
-                # run-sourced entry so a caller can address the question to the run
-                # that owns it; dropping the tag here would leave a client unable to
-                # tell whose question it is answering.
-                "run_id": entry.get("run_id"),
-                "run_label": entry.get("run_label"),
-                # A KEY THAT IS UNIQUE ACROSS OWNERS, because `id` is NOT.
-                #
-                # `id` is the blocker KIND (or an asset URI) and it is the key a caller
-                # puts in the `answers` BODY, so it cannot be made unique without
-                # breaking the write contract. But three runs each needing a spectrum
-                # produce three entries whose `id`, `question` and `about` are
-                # byte-identical, and an independent review measured what a client does
-                # with that: the completion screen keys staged input, the skip set, its
-                # React keys and its "was this applied?" test off `id`, so answering one
-                # run's verdict was reported as NOT APPLIED (another run's identical
-                # entry was still in the list), one typed value was shared by every run's
-                # question, and skipping one skipped all of them.
-                #
-                # So: `id` stays the ANSWER key, `blocker_key` is the IDENTITY key. A
-                # record-level question's two values are equal, which keeps a zero-run
-                # record's payload semantically unchanged.
-                "blocker_key": (
-                    f"{entry.get('run_id')}:{blocker_id(entry)}"
-                    if entry.get("run_id")
-                    else blocker_id(entry)
-                ),
-            }
-        )
+        # PER-ENTRY ISOLATION, the same rule the evidence trail below already lives by:
+        # one stored entry this module cannot read becomes ONE served entry that says
+        # so, never a failed read of the whole list. See `_unreadable_blocker`.
+        if not isinstance(entry, dict):
+            pending.append(
+                _unreadable_blocker(
+                    entry,
+                    f"this stored blocking question is {_kind(entry)}, not a question",
+                )
+            )
+            continue
+        try:
+            served = _readable_blocker(entry, demo_answers, example_scope=example_scope)
+        except _ITEM_SHAPE_ERRORS as exc:
+            # A MAPPING IS NOT ENOUGH, and this branch is not defensive decoration: an
+            # entry whose `kind` is unhashable raises `TypeError: unhashable type` out of
+            # `inferability._BLOCKER_REFUSALS.get(kind)`, and an `asset` entry whose `uri`
+            # is unhashable raises the same out of the example-answer lookup — measured
+            # in-process on `1ad1f8f` for `{"kind": {}}`, `{"kind": []}` and (in example
+            # scope only) `{"kind": "asset", "uri": []}`. An `isinstance` guard alone
+            # would have left those three 500ing while every test naming the defect
+            # passed.
+            #
+            # `inferability.UnsupportedSuggestion` is deliberately NOT caught. It is
+            # raised when the refusal TABLE declares a state no blocker may have, which
+            # is a defect in this repository's own code — reporting it to a scientist as
+            # "your stored question is malformed" would be a false statement about
+            # their record. Same reasoning as `_ITEM_SHAPE_ERRORS`' own note.
+            served = _unreadable_blocker(
+                entry,
+                f"this stored blocking question could not be read ({type(exc).__name__})",
+            )
+        pending.append(served)
     return {"pending": pending}
+
+
+def _readable_blocker(entry: dict, demo_answers: dict, *, example_scope: bool) -> dict:
+    """The served form of ONE well-formed ``pending[]`` entry.
+
+    Split out of :func:`pending_to_list` unchanged, so the loop can isolate a single
+    unreadable entry without a half-built dict ever reaching the response.
+    """
+    demo = _demo_answer_for(entry, demo_answers, example_scope=example_scope)
+    return {
+        "id": blocker_id(entry),
+        "kind": entry.get("kind"),
+        "question": entry.get("question"),
+        "about": _blocker_about(entry),
+        "demo_answer": demo,
+        "inferability": inferability.blocker_inferability(
+            entry, example_available=demo is not None
+        ).to_dict(),
+        # Carried through when present. `Experiment.pending()` tags a
+        # run-sourced entry so a caller can address the question to the run
+        # that owns it; dropping the tag here would leave a client unable to
+        # tell whose question it is answering.
+        "run_id": entry.get("run_id"),
+        "run_label": entry.get("run_label"),
+        # A KEY THAT IS UNIQUE ACROSS OWNERS, because `id` is NOT.
+        #
+        # `id` is the blocker KIND (or an asset URI) and it is the key a caller
+        # puts in the `answers` BODY, so it cannot be made unique without
+        # breaking the write contract. But three runs each needing a spectrum
+        # produce three entries whose `id`, `question` and `about` are
+        # byte-identical, and an independent review measured what a client does
+        # with that: the completion screen keys staged input, the skip set, its
+        # React keys and its "was this applied?" test off `id`, so answering one
+        # run's verdict was reported as NOT APPLIED (another run's identical
+        # entry was still in the list), one typed value was shared by every run's
+        # question, and skipping one skipped all of them.
+        #
+        # So: `id` stays the ANSWER key, `blocker_key` is the IDENTITY key. A
+        # record-level question's two values are equal, which keeps a zero-run
+        # record's payload semantically unchanged.
+        "blocker_key": (
+            f"{entry.get('run_id')}:{blocker_id(entry)}"
+            if entry.get("run_id")
+            else blocker_id(entry)
+        ),
+    }
 
 
 # --- bounding the pending list ------------------------------------------------
@@ -476,10 +607,18 @@ def _matches_run(entry, run_id) -> bool:
     that names no owner — but the sentence claimed more than the code does, so it is
     corrected here rather than left to be read as a guarantee.
 
-    KNOWN AND DELIBERATELY NOT FIXED HERE: the UNBOUNDED read raises on such a record,
+    ~~KNOWN AND DELIBERATELY NOT FIXED HERE: the UNBOUNDED read raises on such a record,
     because :func:`pending_to_list` reads each entry's keys without a shape check. That
     is unchanged from ``main`` — it is pre-existing rather than a regression of the
-    bound — and repairing it is a separate slice with its own blast radius.
+    bound — and repairing it is a separate slice with its own blast radius.~~
+    **CLOSED, and struck rather than deleted because the paragraph above depends on
+    knowing which half moved.** That separate slice happened: the unbounded read now
+    answers **200** and serves the junk entry marked ``unavailable`` (see
+    :func:`_unreadable_blocker`, which carries the measured before/after). The
+    FILTER's behaviour is unchanged — a non-dict entry still matches no ``run_id``, so
+    the ``total: 3`` vs. four-questions divergence recorded above still holds exactly as
+    written, and it is still the defensible answer for the same reason: an entry that
+    names no owner cannot be claimed by a filter.
     """
     return isinstance(entry, dict) and entry.get("run_id") == run_id
 

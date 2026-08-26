@@ -189,7 +189,16 @@ export interface DemoAnswer {
 export interface PendingBlocker {
   id: string; // uri for assets, else kind
   kind: BlockerKind;
-  question: string; // verbatim from draft.pending[]
+  /**
+   * Verbatim from `draft.pending[]` — and `null` when the stored entry carries none.
+   *
+   * The server authors no question text it was not given, so an entry with a kind and
+   * no prose arrives as `null`. Widened rather than defaulted to `''`: the two render
+   * identically (React draws nothing for either), and an empty string would be this
+   * client asserting the draft holds an empty question when it holds no question at all.
+   * The KIND label above the prose carries the identity in that case.
+   */
+  question: string | null;
   label: string; // short Title Case label for the question
   path: string; // JSON path token
   about?: string;
@@ -769,20 +778,63 @@ export interface ApiDemoAnswer {
   provenance?: ExampleAnswerProvenance;
 }
 
+/**
+ * ONE ENTRY OF `GET /pending`, INCLUDING THE ONE THAT IS NOT A QUESTION.
+ *
+ * `id`, `kind` and `question` are nullable because the server serves an entry it could
+ * NOT read as a question rather than failing the whole request: one stored blocker in,
+ * one served entry out, marked `unavailable: true` with an `unavailable_reason` naming
+ * the shape that was found. Nothing is invented for it — no kind, no question, no
+ * answer key — so every one of those fields is `null`, and the entry stays COUNTED so
+ * the record keeps being refused. See `serialize._unreadable_blocker` for the measured
+ * 500s this replaced and for the alternatives that were rejected.
+ *
+ * A consumer that needs an answerable question uses `adapt.isAnswerablePendingItem`,
+ * which narrows to `ApiAnswerablePendingItem` below. Widening these three fields rather
+ * than declaring them non-null is deliberate: it makes every consumer decide what it
+ * does with an unreadable entry instead of discovering `"Null"` on screen.
+ */
 export interface ApiPendingItem {
-  id: string; // uri for assets, else kind
-  kind: BlockerKind;
-  question: string;
+  id: string | null; // uri for assets, else kind; `null` when `unavailable`
+  kind: BlockerKind | null;
+  question: string | null;
   about?: string | null;
   // Example-scope records ONLY. `null`/absent on every ordinary record.
   demo_answer?: ApiDemoAnswer | null;
-  inferability?: Inferability;
+  // `null` on an unreadable entry: no inferability decision is made about a blocker
+  // this server could not read, and asserting one would be inventing a refusal about a
+  // field nobody can name. Every other entry carries the real decision.
+  inferability?: Inferability | null;
   // Present when a RUN owns this question. `null` for a record-level one.
   run_id?: string | null;
   run_label?: string | null;
   // Unique across owners; `id` is not. See `PendingBlocker.key`.
-  blocker_key?: string;
+  blocker_key?: string | null;
+  /**
+   * THE SERVER'S DISCRIMINATOR for an entry it could not read as a question. Optional
+   * because it is absent on every ordinary entry — its presence, not a pattern of
+   * nulls, is what a consumer branches on.
+   */
+  unavailable?: boolean;
+  /**
+   * The server's own words for WHAT SHAPE was found — never the stored value, which is
+   * arbitrary content and is deliberately never echoed back.
+   */
+  unavailable_reason?: string | null;
 }
+
+/**
+ * A pending entry that IS a question: `id`, `kind` and `question` proved present.
+ *
+ * Produced only by `adapt.isAnswerablePendingItem`. Everything that renders a prompt,
+ * derives an input type, or submits an answer takes this type, so an unreadable entry
+ * cannot reach any of them by accident — it is a compile error rather than a `"Null"`
+ * label on screen.
+ */
+export type ApiAnswerablePendingItem = ApiPendingItem & {
+  id: string;
+  kind: BlockerKind;
+};
 
 /**
  * THE SELF-DESCRIPTION A BOUNDED QUESTION LIST CARRIES.

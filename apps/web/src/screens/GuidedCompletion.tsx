@@ -23,8 +23,14 @@ import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
-import { answerValuePreview, pendingItemToBlocker } from '../lib/adapt';
+import {
+  UNREADABLE_BLOCKER_LABEL,
+  answerValuePreview,
+  isAnswerablePendingItem,
+  pendingItemToBlocker,
+} from '../lib/adapt';
 import type {
+  ApiAnswerablePendingItem,
   ApiAnswersResponse,
   ApiExperimentDetail,
   ApiInvalidation,
@@ -474,13 +480,37 @@ function LoadedCompletion({
      `id`, which is correct for a record with no runs (the two are equal there) and
      degrades to the pre-existing collision only where the server itself did not
      distinguish the owners. */
-  const itemKey = (p: ApiPendingItem) => p.blocker_key ?? p.id;
-  const currentItem = useMemo(
-    () => pending.find((p) => !skipped.has(itemKey(p))),
-    [pending, skipped],
+  const itemKey = (p: ApiAnswerablePendingItem) => p.blocker_key ?? p.id;
+  /*
+   * THE QUEUE HOLDS ONLY THE ENTRIES A PERSON CAN ANSWER; THE COUNTERS STILL HOLD ALL
+   * OF THEM. That split is the whole point and getting it wrong inverts an honesty
+   * guarantee, so it is written out rather than left to a reader of `filter`.
+   *
+   * `GET /pending` serves one entry per stored blocker, and a blocker the server could
+   * not read as a question arrives with `unavailable: true` and `id`/`kind`/`question`
+   * all null (`serialize._unreadable_blocker`). Rendered through the prompt path it
+   * became a question labelled "Null" with a free-text box that no submission could
+   * close, and — because `itemKey` was null for every such entry — skipping one skipped
+   * all of them.
+   *
+   * `remaining`, `total`, `notShown` and the "all resolved" branch keep reading
+   * `pendingTotal`, which is the SERVER's count and includes the unreadable entries. So
+   * a record whose only open blocker is unreadable can never reach "All blockers
+   * resolved · ready to export": there is nothing to answer here and the record is
+   * still, truthfully, not finished. Filtering the counters too would have produced
+   * exactly that false claim, which is why the filter is applied here and nowhere else.
+   */
+  const answerable = useMemo(() => pending.filter(isAnswerablePendingItem), [pending]);
+  const unreadable = useMemo(
+    () => pending.filter((p) => !isAnswerablePendingItem(p)),
+    [pending],
   );
-  const skippedItems = pending.filter((p) => skipped.has(itemKey(p)));
-  const upcomingItems = pending.filter(
+  const currentItem = useMemo(
+    () => answerable.find((p) => !skipped.has(itemKey(p))),
+    [answerable, skipped],
+  );
+  const skippedItems = answerable.filter((p) => skipped.has(itemKey(p)));
+  const upcomingItems = answerable.filter(
     (p) => itemKey(p) !== (currentItem ? itemKey(currentItem) : null) && !skipped.has(itemKey(p)),
   );
 
@@ -698,8 +728,22 @@ function LoadedCompletion({
       .getPendingPage(id, { offset: walked, limit: PENDING_PAGE })
       .then((next) => {
         setPending((prev) => {
-          const held = new Set(prev.map(itemKey));
-          return [...prev, ...next.pending.filter((p) => !held.has(itemKey(p)))];
+          // DEDUPED ON WHAT HAS AN IDENTITY, AND AN UNREADABLE ENTRY HAS NONE.
+          // `itemKey` is `blocker_key ?? id`, and both are null for an entry the server
+          // could not read — so a single `Set` over the raw list would key every such
+          // entry as `null` and drop all but the first. Two outcomes were available and
+          // this is the less dishonest one: a duplicated unreadable row is redundant
+          // (it is not answerable, so it cannot be answered twice), whereas dropping
+          // one would hide a blocker the record is still refused for. The disclosure
+          // below counts what is held, so the redundancy is visible rather than
+          // silently changing a number.
+          const held = new Set(prev.filter(isAnswerablePendingItem).map(itemKey));
+          return [
+            ...prev,
+            ...next.pending.filter(
+              (p) => !isAnswerablePendingItem(p) || !held.has(itemKey(p)),
+            ),
+          ];
         });
         if (next.page) {
           setPendingTotal(next.page.total);
@@ -1246,6 +1290,30 @@ function LoadedCompletion({
           <span className="upcoming-path">{item.about ?? item.kind}</span>
         </div>
       ))}
+
+      {/* THE ENTRIES THAT ARE NOT QUESTIONS, DISCLOSED RATHER THAN DROPPED.
+          The queue above holds only what a person can answer, so without this the
+          reader would see a count they could not account for — or, on a record whose
+          only blocker is unreadable, an empty screen over a record that is still
+          refused. The REASON is the server's own words (`unavailable_reason`); this
+          screen adds no interpretation of what the stored value was meant to be, and
+          offers no control, because no answer submitted here could close it.
+          Deliberately NOT presented as an error state: nothing the reader did caused
+          it, and every other question on the record is still answerable. */}
+      {unreadable.length > 0 && (
+        <div className="upcoming-more" role="note">
+          <span className="upcoming-more-text">
+            {unreadable.length === 1
+              ? `1 stored question could not be read (${UNREADABLE_BLOCKER_LABEL.toLowerCase()}), so it cannot be answered here and this record stays blocked.`
+              : `${unreadable.length} stored questions could not be read, so they cannot be answered here and this record stays blocked.`}
+          </span>
+          <ul className="upcoming-unreadable">
+            {unreadable.map((item, i) => (
+              <li key={`unreadable-${i}`}>{item.unavailable_reason ?? UNREADABLE_BLOCKER_LABEL}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* THE WITHHELD QUESTIONS, NAMED AND REACHABLE. This screen holds a page of the
           record's open questions, and a page that did not say so would be exactly the

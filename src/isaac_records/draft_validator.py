@@ -303,6 +303,74 @@ def _container(report: DraftReport, draft: dict, name: str):
     return expected()
 
 
+#: What ONE item of each top-level LIST container has to be, in the reader's words.
+#: Only the five list containers appear: a dict container's items are its VALUES, which
+#: each reader already type-checks for itself (`fields` files "must be a field
+#: envelope", `block_evidence` goes through `_claim_covered`).
+_ITEM_NOUNS: dict[str, str] = {
+    "assets": "an asset object",
+    "descriptors_outputs": "a descriptors-output object",
+    "implicit": "an implicit-claim object",
+    "series": "a series object",
+    "links": "a link object",
+}
+
+
+def _mapping_items(report: DraftReport, container: list, name: str):
+    """``(index, item)`` for every item of a top-level list container that IS a mapping,
+    with a finding filed at ``name[index]`` for every item that is not.
+
+    **THE MEASURED DEFECT.** ``_container`` guards the CONTAINER's type, so
+    ``{"assets": "not a list"}`` became a finding — but a well-formed list holding a
+    wrong-typed ITEM still reached ``asset.get("sha256")`` and raised. Measured on
+    ``1ad1f8f``, one truthy wrong-typed item at a time, ``validate_draft`` raising
+    rather than reporting: ``{"assets": [7]}``, ``{"descriptors_outputs": [7]}``,
+    ``{"implicit": [7]}``, ``{"series": [7]}``, ``{"links": [7]}`` — all
+    ``AttributeError``. ``test_a_wrong_typed_ITEM_inside_a_well_formed_list_still_raises``
+    pinned that and said to invert it "when that decision is made"; this is the
+    decision, and the test is inverted rather than deleted.
+
+    **THE ANSWER IS A REPORT, for the same reason ``_container``'s is.** This module is
+    asked "is this draft fit to become an official record, and if not, where is it
+    wrong". For an item of the wrong type the answer is *no, here* — and raising denies
+    the reader the answer their own record's validator was asked for, which on the read
+    path is an HTTP 500 over a document they did not write.
+
+    **THE ITEM IS NOT WALKED.** Nothing here can assume what a number or a string was
+    meant to hold, and deriving per-field claims from it would invent findings the draft
+    never made — ``serialize.py``'s per-item note calls that "a fabricated partial
+    success, which is worse than the failure it replaced". It is not repaired either:
+    this function reads and reports, and never writes to ``draft``.
+
+    **THE POSITION IS REAL, so it is used.** ``name[index]`` locates the item inside a
+    container that genuinely IS a list, which is what distinguishes this from the
+    per-position claims invented out of a dict's keys or a string's characters that
+    ``serialize.py`` measured. The stored VALUE is never quoted — only its shape.
+
+    **NESTED ITEMS STILL RAISE, and that is load-bearing rather than an omission.**
+    ``routes._refuse_override_payload`` probes a client's override payload through
+    ``validate_draft`` and catches ``_PROBE_STRUCTURAL_ERRORS`` to answer a typed 422 —
+    the honest answer for a malformed REQUEST, which the caller can fix. Its two
+    measured cases are ``{"fields": {...: {"evidence": 7}}}`` and
+    ``{"attribution": {"contributors": [...]}}``, both nested inside a top-level DICT
+    container, and the only overridable addresses are ``field:<path>``,
+    ``block:attribution`` and ``block:tags`` — so no probe draft can name one of the
+    five list containers above, and this guard cannot make either ``except`` branch
+    dead. Pinned by test, in both directions.
+    """
+    for index, item in enumerate(container):
+        if isinstance(item, dict):
+            yield index, item
+            continue
+        report.err(
+            f"{name}[{index}]",
+            f"must be {_ITEM_NOUNS[name]}; this draft stores {_kind(item)}. The item "
+            f"is refused rather than walked — nothing here can assume what it was "
+            f"meant to hold, and reading fields out of it would invent claims the "
+            f"draft never made.",
+        )
+
+
 def validate_draft(draft: dict) -> DraftReport:
     report = DraftReport()
 
@@ -318,7 +386,7 @@ def validate_draft(draft: dict) -> DraftReport:
             continue
         _check_envelope(report, f"fields.{path}", env)
 
-    for i, asset in enumerate(_container(report, draft, "assets")):
+    for i, asset in _mapping_items(report, _container(report, draft, "assets"), "assets"):
         sha = asset.get("sha256")
         if not sha:
             report.err(f"assets[{i}]", "asset requires a sha256 (raw data is linked + hashed, not copied)")
@@ -326,13 +394,15 @@ def validate_draft(draft: dict) -> DraftReport:
             report.err(f"assets[{i}]", f"sha256 {sha!r} is not a 64-char lowercase hex digest")
         _check_claim(report, f"assets[{i}] ({asset.get('asset_id', '?')})", asset.get("evidence"))
 
-    for j, out in enumerate(_container(report, draft, "descriptors_outputs")):
+    for j, out in _mapping_items(
+        report, _container(report, draft, "descriptors_outputs"), "descriptors_outputs"
+    ):
         for k, d in enumerate(out.get("descriptors") or []):
             if d.get("value") is None:
                 report.err(f"descriptors[{j}][{k}]", "descriptor value must not be null — it is a scientific claim")
             _check_claim(report, f"descriptor '{d.get('name', '?')}'", d.get("evidence"))
 
-    for m, imp in enumerate(_container(report, draft, "implicit")):
+    for m, imp in _mapping_items(report, _container(report, draft, "implicit"), "implicit"):
         _check_claim(report, f"implicit '{imp.get('about', '?')}'", imp.get("evidence"))
 
     # Block-level provenance coverage. The official record cannot carry per-field
@@ -347,7 +417,7 @@ def validate_draft(draft: dict) -> DraftReport:
     # BOUND ONCE, and read again by the qc gate below, so the finding about an
     # unreadable `series` is filed exactly once and both readers see the same value.
     series = _container(report, draft, "series")
-    for i, s in enumerate(series):
+    for i, s in _mapping_items(report, series, "series"):
         series_id = s.get("series_id")
         where = f"series[{i}] ({series_id or '?'})"
         if not series_id:
@@ -372,7 +442,7 @@ def validate_draft(draft: dict) -> DraftReport:
 
     # Links: each cross-record link must cite its basis; tuple keys must be unique.
     seen_links: set[str] = set()
-    for i, link in enumerate(_container(report, draft, "links")):
+    for i, link in _mapping_items(report, _container(report, draft, "links"), "links"):
         where = f"links[{i}]"
         rel, target, basis = link.get("rel"), link.get("target"), link.get("basis")
         if not (rel and target and basis):
