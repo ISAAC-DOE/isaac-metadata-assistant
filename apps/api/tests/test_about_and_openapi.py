@@ -361,7 +361,21 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # assistant?" is answered by the server rather than by a string compiled into
     # the browser bundle. It is not `POST /api/assistant/memory/query`, which is the
     # shipped deterministic Q&A and involves no provider.
-    assert checked == 69, f"expected 69 documented operations, found {checked}"
+    #
+    # 69 -> 70: `PATCH /api/experiments/{experiment_id}`, the rename. It is the first
+    # operation that lets a scientist correct anything about a record they created:
+    # `title` had been written exactly once, by `POST /api/experiments`, and the note
+    # beside it was written once and published by NO operation at all. With
+    # `0001_experiments` applied to the hosted database, a typo in either was
+    # permanent. It writes only those two fields, neither of which is a scientific
+    # claim or reaches an exported record.
+    #
+    # THERE IS DELIBERATELY NO `DELETE` BESIDE IT. A scientist still cannot remove an
+    # experiment, and that is an authorization boundary rather than an omission — see
+    # the comment above the route and the slice report. Do not read this count moving
+    # by one as evidence that only half the work was done carelessly; the other half
+    # is a decision that is not an agent's to make.
+    assert checked == 70, f"expected 70 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -562,6 +576,25 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # has no `If-Match` to be malformed or omitted.
     ("/api/experiments", "post"): ["201", "401", "404", "409", "412", "422", "503"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422", "503"],
+    # THE RENAME. `428`/`412`/`400` are the record-level `If-Match` contract, exactly
+    # as every other record mutation declares it. `409` is the worked-example refusal,
+    # mirroring `POST /api/experiments` — the built-in examples are fixed teaching
+    # material and a reset would revert a rename anyway.
+    #
+    # THERE IS NO `delete` ROW HERE, and that is a decision rather than a gap: no
+    # committed sentence authorises removing an experiment row, and the four foreign
+    # keys into `isaac_experiments` carry no `ON DELETE`. See the route's own comment.
+    ("/api/experiments/{experiment_id}", "patch"): [
+        "200",
+        "400",
+        "401",
+        "404",
+        "409",
+        "412",
+        "422",
+        "428",
+        "503",
+    ],
     # 409: `belongs_to_a_run`. An independent review found all three of these routes
     # emitting a live 409 that this table did not list — so the guard that exists to
     # pin the contract was certifying one that omitted a status a client will see.
@@ -769,6 +802,17 @@ EXPECTED_COMPONENT_SCHEMAS: dict[str, dict] = {
     "CreateExperimentRequest": {
         "properties": ["description", "title"],
         "required": ["title"],
+    },
+    # The rename's request model, and `required: []` IS THE ASSERTION HERE rather
+    # than a weakness. Neither field is required, because omitting one means "leave it
+    # alone" and requiring either would make a title-only correction impossible
+    # without also re-sending a note the client may never have been shown. The route
+    # refuses a body that names NEITHER — a 422, not a 200 that changed nothing — so
+    # "both optional" does not mean "an empty body is accepted". `extra="forbid"` is
+    # what keeps the property list to exactly these two.
+    "RenameExperimentRequest": {
+        "properties": ["description", "title"],
+        "required": [],
     },
     "HTTPValidationError": {"properties": ["detail"], "required": []},
     "ValidationError": {

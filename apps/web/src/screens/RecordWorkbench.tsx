@@ -9,6 +9,7 @@ import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
+import { RecordNamePanel } from '../components/RecordNamePanel';
 import { RunsSection } from '../components/RunsSection';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
@@ -749,6 +750,18 @@ function LoadedWorkbench({
         reason — but rewriting four unrelated specs to keep a placement that was
         already the weaker of the two would have been collateral churn.
       */}
+      {/* NAME AND NOTE, mounted FIRST of the three footer sections and the only one of
+          them that is not collapsed. It carries the screen's one non-scientific write,
+          and an action behind a chevron is not a reachable affordance — see the
+          panel's own header for why it departs from its neighbours here.
+
+          `onSaved` is the bundle reload, not a local state update: the rename changes
+          the record's `rev` and therefore its `version`, which every other write on
+          this screen sends as `If-Match`. A panel that patched only its own copy of
+          the title would leave the rest of the screen holding a validator the server
+          has already moved past, and the reader's next answer would be refused with a
+          412 they did nothing to cause. */}
+      <RecordNamePanel detail={detail} onSaved={onManualRefresh} />
       <RecordInfoPanel detail={detail} groups={bundle.groups} artifacts={bundle.artifacts} />
       <RecordLinksPanel artifacts={bundle.artifacts} />
         </div>

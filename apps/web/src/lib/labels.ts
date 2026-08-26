@@ -511,6 +511,45 @@ export const LABELS = {
   createExperimentTitleRequired: 'Give the experiment a title to create it.',
 
   /*
+   * RENAME — correcting the name and the note AFTER creation.
+   *
+   * IT EXISTS BECAUSE A TYPO USED TO BE PERMANENT. `title` was written exactly once,
+   * by the create form above, and the note beside it was written once and shown
+   * nowhere; where this deployment stores experiments durably, a misspelling was a
+   * permanent property of the record. So the heading is about correcting, not about
+   * naming: a reader arriving here already named it.
+   *
+   * NEITHER FIELD IS A SCIENTIFIC CLAIM, and `renameRecordHint` is the one place
+   * that is stated on this surface. It matters more here than on the create form: a
+   * reader editing an EXPORTED record has every reason to fear that touching it
+   * invalidates the exported artifact, and it does not — the server's freshness
+   * check compares record content, and neither of these fields reaches a record.
+   * Saying so is what stops a correction from feeling risky.
+   */
+  renameRecordSection: 'Name and note',
+  renameRecordHint:
+    'Neither is a scientific value and neither appears in the exported record, so ' +
+    'correcting them never asks you to export again.',
+  renameRecordNameLabel: 'Experiment title',
+  renameRecordNoteLabel: 'Note (optional)',
+  /** Shown in place of the note when the record carries none. Never a blank line. */
+  renameRecordNoteEmpty: 'No note',
+  /** The server sent no `description` key at all — an older deployment. NOT "no
+   *  note": absence of an answer is not an answer, so the edit control is withheld
+   *  rather than offering to overwrite a value we were never shown. */
+  renameRecordNoteUnknown: 'This deployment does not report the note.',
+  actionRenameRecord: 'Edit name and note',
+  renameRecordSubmit: 'Save',
+  renameRecordCancel: 'Cancel',
+  /** Shown when the title has been emptied. States the fix, not the failure, and
+   *  says what the alternative is — because "leave it alone" is a real option here
+   *  in a way it is not on the create form. */
+  renameRecordTitleRequired:
+    'An experiment needs a title. Type one, or cancel to leave the current one.',
+  /** After a successful save. Announced, so a keyboard user is told it landed. */
+  renameRecordSaved: 'Saved. The name and note now read as shown.',
+
+  /*
    * MY EXPERIMENTS, EMPTY — an invitation to act, not a report of absence.
    *
    * THE SENTENCE THIS REPLACES WAS "This deployment cannot yet create or import a

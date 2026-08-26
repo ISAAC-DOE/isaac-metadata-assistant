@@ -1710,7 +1710,16 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `validate_provider_config_or_raise` refuses to boot an application that names
     // the test double. Its own description says so in those terms, which is the
     // reason the paragraph count moves by five rather than by one.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(69);
+    //
+    // 69 -> 70 operations: the backend now publishes
+    // `PATCH /api/experiments/{experiment_id}`, the RENAME. It is the first operation
+    // that lets a scientist correct anything about a record they created — `title` was
+    // written once by the create form and the note beside it was written once and
+    // published by NO read at all, so with `0001_experiments` applied to the hosted
+    // database a typo in either was permanent. The three numbers below are re-measured
+    // from the array, never incremented: see the header of `apiFixtures.ts`, where a
+    // count raised by arithmetic over a corrupt array is the recorded failure.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(70);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -1841,7 +1850,12 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // adds `record_total` to the reported keys, and carries the `complete` IS RELATIVE TO
     // THE FILTER qualification `serialize.py` says it needs. Re-measured from
     // `create_app().openapi()`, not adjusted by the length of the new text.
-    expect(total).toBe(93478);
+    // 93,478 -> 95,152 (+1,674) and 195 -> 201 post-lead paragraphs: the rename's own
+    // description, in ONE new operation. NO existing description changed, and
+    // `test_contract_description_parity.py` proves that rather than leaving it asserted
+    // here. Both numbers were re-measured from `create_app().openapi()` via the
+    // transcription script, not adjusted by the length of the new text.
+    expect(total).toBe(95152);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1856,7 +1870,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `POST .../runs/{run_id}/answers` was written INTO an existing paragraph and
     // therefore must not move this count — which is why it is asserted separately from
     // the character total rather than inferred from it.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(195);
+    // 195 -> 201 (+6): the rename's six post-lead paragraphs, in ONE new operation.
+    // Asserted separately from the character total rather than inferred from it,
+    // because the two move independently — a correction written INTO an existing
+    // paragraph moves the characters and not this count.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(201);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

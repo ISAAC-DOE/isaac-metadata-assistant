@@ -12,6 +12,11 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
+import {
+  CharacterCount,
+  DESCRIPTION_MAX_LENGTH,
+  TITLE_MAX_LENGTH,
+} from '../components/CharacterCount';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Compass, LayoutList, Plus, ShieldCheck } from '../components/icons';
@@ -658,52 +663,21 @@ function EmptyExperiments({
 }
 
 /*
- * THE TWO LIMITS THE SERVER DECLARES, mirrored here so they can be STATED rather than
- * enforced invisibly.
+ * THE TWO LIMITS AND THE COUNTER ARE NOW SHARED, and the move is the point.
  *
- * They are the `max_length` values on `CreateExperimentRequest`
- * (`apps/api/isaac_api/routes.py`): the server remains the authority and still refuses
- * an over-long value with a typed 422. These constants exist so the form can tell the
- * reader where the limit is BEFORE they hit it, and refuse in words if they pass it —
- * which is what `maxLength` on the controls could not do. See the note in `submit`.
+ * They lived here — `TITLE_MAX_LENGTH`, `DESCRIPTION_MAX_LENGTH` and
+ * `CharacterCount` — while the create form was the only surface with a length cap.
+ * The RENAME form (`RecordNamePanel`) has the same two caps on the same two fields,
+ * so a second copy would have been a second answer to "where is the limit, and how is
+ * it communicated", free to drift in wording, in the colour rule, and in whether the
+ * text says what the colour says. Hoisted rather than copied, exactly as
+ * `mutationErrors.statusOf` was when its second caller appeared.
+ *
+ * The server remains the authority: these mirror the `max_length` values on
+ * `CreateExperimentRequest` and `RenameExperimentRequest`, which still refuse an
+ * over-long value with a typed 422. They exist so a form can STATE the limit before
+ * the reader reaches it, which is what `maxLength` on the control could not do.
  */
-const TITLE_MAX_LENGTH = 200;
-const DESCRIPTION_MAX_LENGTH = 1000;
-
-/**
- * The remaining-characters line under one box.
- *
- * IT IS NOT A LIVE REGION, and that is deliberate: announcing a new number on every
- * keystroke is noise, and the two facts a screen-reader user needs — that there is a
- * limit, and where they are in it — are delivered by `aria-describedby` on focus and by
- * the `role="alert"` refusal on submit. It states the LIMIT as well as the count,
- * because a bare "163" is not information.
- *
- * OVER THE LIMIT IT SAYS SO IN WORDS, not in colour alone: the overage is in the text,
- * so the state survives a reader who cannot distinguish the two colours.
- */
-function CharacterCount({
-  id,
-  length,
-  limit,
-}: {
-  id: string;
-  length: number;
-  limit: number;
-}) {
-  const over = length - limit;
-  return (
-    <span
-      className="create-experiment-hint create-experiment-count"
-      id={id}
-      data-over={over > 0 ? 'true' : undefined}
-    >
-      {over > 0
-        ? `${length} characters — ${over} over the ${limit}-character limit. Nothing has been cut; shorten it to create the experiment.`
-        : `${length} of ${limit} characters`}
-    </span>
-  );
-}
 
 /**
  * CREATE EXPERIMENT — the button, the form it expands into, and the one call.

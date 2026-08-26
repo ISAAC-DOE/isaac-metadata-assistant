@@ -1,0 +1,104 @@
+/*
+ * NAME AND NOTE — the read state of `RecordNamePanel`.
+ *
+ * Deliberately small. The FORM in this panel is the create form's, class for class
+ * (`queue.css`), because it is the same two fields and two visual languages for one
+ * pair of inputs would read as two different kinds of thing. What is left here is the
+ * always-visible read state and one correction to a borrowed class.
+ */
+
+/*
+ * `.fg-header` is written for a disclosure BUTTON and paints a hover background. This
+ * header discloses nothing, so that feedback would promise interactivity it does not
+ * have — the one honesty defect available in a two-rule stylesheet.
+ */
+.record-name-header:hover {
+  background: none;
+}
+
+.record-name-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+/*
+ * A definition list, so the pairing of each label to its value is in the MARKUP and
+ * not only in the visual column. A screen reader announces "Experiment title, Ni foil
+ * calibration" rather than four unrelated lines.
+ *
+ * The label column matches `.field-label-col`'s 190px, so this panel's rows line up
+ * with the draft rows in the same column rather than establishing a second grid.
+ */
+.record-name-rows {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.record-name-rows dt {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.record-name-rows dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  /* A title or a note may be one long unbroken string; it wraps rather than forcing
+     the column to scroll. */
+  overflow-wrap: anywhere;
+}
+
+.record-name-value {
+  color: var(--text-strong);
+}
+
+/*
+ * The absent/unknown states. ITALIC AND A WORD, never colour alone — "No note" and
+ * "This deployment does not report the note" are different facts and both are said in
+ * text, so neither depends on being able to tell two greys apart.
+ */
+.record-name-absent {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.record-name-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.record-name-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.record-name-saved {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/*
+ * At the narrow widths the rest of this column already stacks at, the two-column grid
+ * becomes one — the same 640px breakpoint `fields.css` uses for `.field-row`, so this
+ * panel and the draft rows reflow together instead of at two different widths.
+ */
+@media (max-width: 640px) {
+  .record-name-rows {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 0;
+  }
+
+  .record-name-rows dd {
+    margin-bottom: 8px;
+  }
+}

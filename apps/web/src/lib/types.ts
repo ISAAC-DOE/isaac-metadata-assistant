@@ -740,6 +740,18 @@ export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields
     reason?: string;
   };
   source_files: string[];
+  // The record's free-text note — `source.description` on the server.
+  //
+  // IT WAS WRITE-ONLY UNTIL THE RENAME OPERATION SHIPPED. `POST /api/experiments`
+  // stored it and no read published it, so a note a scientist typed into the create
+  // form could never be seen again — which also meant no client could offer to
+  // correct it without first destroying whatever was there, having nothing to
+  // prefill with.
+  //
+  // OPTIONAL AND NULLABLE ON PURPOSE. A deployment older than that change serves no
+  // such key, and the honest reading of its absence is "this server does not tell
+  // us", which is not the same as "there is no note". Never default it to `''`.
+  description?: string | null;
   workflow: ApiWorkflow;
   artifact: ApiArtifactState;
 }

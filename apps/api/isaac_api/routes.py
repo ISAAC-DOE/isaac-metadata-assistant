@@ -1125,6 +1125,17 @@ def _detail(exp: Experiment) -> dict:
             # download from the filename; JSON content comes from /artifacts.
             "artifact_refs": artifact_refs,
             "source_files": (exp.source or {}).get("files") or [],
+            # THE NOTE, AND IT WAS WRITE-ONLY UNTIL NOW. `POST /api/experiments`
+            # stored `description` inside `source` and NO operation published it, so a
+            # note a scientist typed into the create form could never be read back —
+            # which also meant no client could offer to correct it without first
+            # destroying what was there. It is published beside `source_files` because
+            # both are the same block, and it is on the DETAIL bundle only: the list
+            # row is a summary and a thousand-character note does not belong in it.
+            #
+            # NOT `_summary`, and not a draft field. It is never parsed, never becomes
+            # a scientific value, and reaches no exported record.
+            "description": (exp.source or {}).get("description"),
             "workflow": workflow,
             # Derived exported-artifact freshness (P28.2): none | current | stale.
             "artifact": dependencies.artifact_state(exp, units=units),
@@ -2343,6 +2354,330 @@ def get_experiment(
     detail.update(vc.version_fields(exp))
     response.headers["ETag"] = exp.etag()
     return detail
+
+
+# --- 4b. rename ---------------------------------------------------------------
+#
+# THE FIRST OPERATION THAT LETS A SCIENTIST CORRECT WHAT THEY NAMED SOMETHING.
+# Before this, `title` was written exactly once — by `POST /api/experiments` — and
+# `source.description` was written once and then READ BY NOTHING: no operation
+# published it, so a note typed into the create form could never be seen again, let
+# alone fixed. `0001_experiments` is applied to the hosted database, so a typo in
+# either was durable and permanent. That is the whole reason this route exists.
+#
+# WHY `PATCH` AND NOT A `POST .../rename`. The neighbouring run operation
+# (`PATCH .../runs/{run_id}`) already renames a run through a `PATCH` on the
+# resource itself, and a second spelling for the same act on the parent resource
+# would be two names for one idea. `POST .../runs/{run_id}/remove` is a POST because
+# it is not a field write; a rename is.
+#
+# WHAT IT DOES NOT WRITE, AND THE BOUNDARY IS THE POINT. Neither field is a
+# scientific claim and neither reaches an exported record: `src/isaac_records/` names
+# neither (`grep -n description src/isaac_records/export.py` is empty, and
+# `workspace.py`'s seed-title comment records that "the title reaches NO exported
+# artifact"). So this route needs no evidence, records no confirmation, and —
+# measured, and pinned by a test — CANNOT move an exported artifact from `current` to
+# `stale`, because `dependencies.artifact_state` compares record CONTENT rather than
+# `rev`. It is deliberately NOT a second way to edit a draft field: `POST .../edit`
+# and `POST .../answers` own that, with the evidence and the confirmation they need.
+#
+# NO `confirmed_by_user` FLAG, and that is a considered difference from the run PATCH
+# beside it rather than an omission. That flag exists because the run PATCH writes
+# DRAFT FIELD VALUES, and storing one records a user confirmation that later stands as
+# the record's evidence for that value. A title is explicitly "not a scientific claim"
+# (`CreateExperimentRequest.title`'s own description), nothing derives from it, and
+# requiring a confirmation for it would train a reader to send the flag without
+# reading what it means.
+#
+# IT REFUSES INSIDE A WORKED-EXAMPLE SESSION, mirroring `POST /api/experiments`'s
+# `409`. The five built-in examples are fixed teaching material: renaming one would
+# make the tutorial's own narrative disagree with the screen, and `POST
+# /api/demo/reset` would silently revert it at the next reset — a write reported as
+# applied and then undone by an unrelated act. Refusing is the honest answer, and it
+# keeps the tutorial-isolation invariant (`CLAUDE.md` §15) untouched: this route
+# reaches no seeding path and no canonical id.
+#
+# THERE IS NO DISCARD HERE, AND THE ABSENCE IS DELIBERATE RATHER THAN UNFINISHED.
+# A scientist still cannot remove an experiment they created, and the reason is an
+# authorization boundary this slice could not cite its way past. `CLAUDE.md` §15's
+# 2026-08-07 write lift enumerates, per table, exactly what writing it covers, and for
+# the five submission-lifecycle tables that is "writing them through
+# `submission_store.py`'s append-only `INSERT`s" (`CLAUDE.md:983`) and for
+# `isaac_run_projection` "the ONE statement `Q_UPSERT_RUN_PROJECTION`". A hard delete
+# needs a `DELETE` against those tables, which contradicts both sentences; and none of
+# the four foreign keys into `isaac_experiments` carries an `ON DELETE`, so the rows
+# would have to be removed in dependency order first. See the slice report; the
+# decision is the owner's, not this route's.
+
+
+class RenameExperimentRequest(BaseModel):
+    """A new title and/or a new note for an experiment that already exists.
+
+    ``extra="forbid"`` for the same reason :class:`CreateExperimentRequest` sets it:
+    it makes "this operation writes exactly these two fields" a property of the
+    CONTRACT rather than of this handler remembering not to read a third. A body
+    naming ``draft``, ``record_id``, ``rev`` or ``id`` is a ``422``, not a silent
+    partial write.
+
+    BOTH FIELDS DEFAULT TO ``None`` AND ``None`` IS NOT "ABSENT" — the handler
+    branches on ``model_fields_set``, not on the value. That distinction is the whole
+    reason this model is not two plain strings:
+
+    * ``title`` absent -> leave the title alone; ``title: null`` -> ``422``, because a
+      record with no name is not a state this application has.
+    * ``description`` absent -> leave the note alone; ``description: null`` or ``""``
+      -> CLEAR it, back to the sentence a brand-new experiment carries.
+
+    Collapsing those would make one of them unreachable. A route that read
+    ``body.description is None`` as "clear it" would wipe the note of every client
+    that sent only a new title — a silent destruction of text the reader never
+    mentioned — and one that read it as "leave it" would make clearing a note
+    impossible. This is the same trap ``_clean_label``'s ``blank_is_a_choice``
+    documents one level down, answered the same way: by making the two cases
+    different INPUTS rather than one input with a guessed meaning.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "The new name. Omit it to leave the current one unchanged. It is not a "
+            "scientific claim and reaches no exported record. `null`, empty or "
+            "whitespace-only is `422`: a record always has a name."
+        ),
+    )
+    description: str | None = Field(
+        default=None,
+        max_length=1000,
+        description=(
+            "The new free-text note. Omit it to leave the current one unchanged; send "
+            "`null` or an empty string to clear it, which restores the sentence a "
+            "brand-new experiment carries. Never parsed and never a scientific value."
+        ),
+    )
+
+
+def _invalid_title(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"error": "invalid_title", "message": message},
+    )
+
+
+@router.patch(
+    "/experiments/{experiment_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Rename an Experiment",
+    description=(
+        "Corrects an experiment's title and/or its free-text note, and returns the "
+        "refreshed detail bundle. Nothing else about the record is touched.\n\n"
+        "Neither field is a scientific claim and neither reaches an exported record, "
+        "so no evidence is attached and no confirmation is recorded. Because the "
+        "exported-artifact freshness signal compares record CONTENT rather than the "
+        "revision number, renaming an already-exported record leaves its artifact "
+        "`current`: a rename never asks anyone to re-export.\n\n"
+        "Requires the RECORD's current `ETag` in `If-Match`. Omitted is `428`, "
+        "malformed is `400`, and stale is `412` with nothing written and the record's "
+        "current `ETag` echoed.\n\n"
+        "**Omitted and `null` mean different things, deliberately.** A field this "
+        "request does not name is left exactly as it is. `title: null`, an empty "
+        "title, or a whitespace-only title is `422` — a record always has a name. A "
+        "`null` or empty `description` CLEARS the note, restoring the sentence a "
+        "brand-new experiment carries. A body naming neither field is `422` rather "
+        "than a `200` that changed nothing, and any unrecognised field is rejected "
+        "outright.\n\n"
+        "One sentence is refused as a note: this application's own provenance marker "
+        "for the built-in example records. A record a person created must not wear "
+        "it, because that string is what classifies a record as one this application "
+        "generated from its own fixtures.\n\n"
+        "Re-sending the values the record already holds is a no-op: it rewrites "
+        "nothing and does not advance the revision.\n\n"
+        "It refuses with `409` when the `X-Isaac-Tutorial-Session` header is present, "
+        "and writes nothing. The built-in worked examples are fixed teaching "
+        "material, and a reset would revert the change anyway."
+    ),
+    response_description="The refreshed experiment detail bundle, with the new `ETag`.",
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+        409: {
+            "description": (
+                "The request carried a worked-example session header. This operation "
+                "acts only on the ordinary workspace. Nothing was changed."
+            )
+        },
+    },
+)
+def rename_experiment(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: RenameExperimentRequest = Body(
+        ...,
+        description=(
+            "`{\"title\": \"<new name>\", \"description\": \"<new note>\"}`. Either "
+            "key may be omitted to leave that field alone. Any other key is `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. THE RECORD's current `ETag`, exactly as a record read "
+            "operation returned it."
+        ),
+    ),
+):
+    if scope is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "ordinary_scope_required",
+                "operation": "PATCH /api/experiments/{experiment_id}",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "Experiments are renamed in the ordinary workspace. The built-in "
+                    "worked examples are fixed teaching material and a reset would "
+                    "revert the change. Nothing was changed."
+                ),
+            },
+        )
+    named = body.model_fields_set
+    if "title" not in named and "description" not in named:
+        # A 200 here would report a successful rename over a request that named
+        # nothing to rename — the same silent no-op `_clean_label`'s
+        # `blank_is_a_choice=False` branch exists to refuse one level down.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "unrecognized_field",
+                "key": None,
+                "keys": [],
+                "message": (
+                    "Neither a new title nor a new note was named in the request, so "
+                    "there was nothing to change. Nothing was written."
+                ),
+            },
+        )
+
+    # Existence pre-check OUTSIDE the lock, as every other mutation does.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check->lock window
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        # RESOLVE BOTH FIELDS BEFORE WRITING EITHER, so a request whose note is
+        # refused cannot leave the title renamed. Same rule the run PATCH follows.
+        #
+        # NO `_is_storable_value` GATE ON EITHER FIELD, AND THAT IS A MEASUREMENT
+        # RATHER THAN AN OVERSIGHT — the first version of this route had one on both,
+        # copied from `_clean_label`, and probing it proved both branches dead:
+        #
+        #   * RENDERABILITY IS UNREACHABLE HERE. The run PATCH needs its gate because
+        #     it takes `fields: dict` through a bare `Body`, so a lone surrogate
+        #     reaches the handler. These two fields are typed `str` on a pydantic
+        #     model, and pydantic-core refuses a lone surrogate before any handler
+        #     runs. Measured over HTTP: `{"title": "a\\ud800b"}` never enters this
+        #     function.
+        #   * SIZE WOULD HAVE MADE THIS ROUTE STRICTER THAN CREATE, which is worse
+        #     than no gate. `max_length` is 200/1000 CHARACTERS, matching
+        #     `CreateExperimentRequest` exactly; a 512-BYTE cap (`_MAX_LABEL_BYTES`,
+        #     the run-label figure) refuses ~171 emoji, so a title `POST
+        #     /api/experiments` accepts could not afterwards be corrected. The caps
+        #     that bind are the ones create uses, deliberately.
+        #
+        # WHAT THE PROBE ALSO FOUND, DISCLOSED RATHER THAN FIXED HERE: that surrogate
+        # body is a **500**, not the 422 pydantic intended — FastAPI's
+        # `request_validation_exception_handler` echoes the offending input into the
+        # error body and `JSONResponse.render` then cannot encode it. `POST
+        # /api/experiments` answers 500 to the identical input on `origin/main`, so
+        # this is a pre-existing framework-level defect on every pydantic-modelled
+        # string body in this application, reachable by `curl` and by no browser
+        # (`JSON.stringify` cannot emit it). Closing it means a custom exception
+        # handler in `app.py`, which is every route at once and is not this slice.
+        new_title: str | None = None
+        if "title" in named:
+            raw_title = body.title
+            if raw_title is None:
+                return _invalid_title(
+                    "A title cannot be removed — every record has a name. Omit "
+                    "`title` to leave the current one unchanged. Nothing was written."
+                )
+            new_title = raw_title.strip()
+            if not new_title:
+                # `max_length=200` accepts a string of spaces, exactly as
+                # `min_length=1` did on the create path, and a name that is only
+                # whitespace names nothing.
+                return _invalid_title(
+                    "A title must not be blank. Omit `title` to leave the current one "
+                    "unchanged. Nothing was written."
+                )
+
+        new_description: str | None = None
+        if "description" in named:
+            raw_description = body.description
+            if raw_description is None:
+                new_description = experiment_repository.NEW_EXPERIMENT_SOURCE_DESCRIPTION
+            else:
+                new_description = (
+                    raw_description.strip()
+                    or experiment_repository.NEW_EXPERIMENT_SOURCE_DESCRIPTION
+                )
+            # THE ONE VALUE THIS FIELD MAY NOT HOLD, refused because of what READS it
+            # rather than because of what it says. `ws.MANAGED_SOURCE_DESCRIPTION` is
+            # the provenance marker `ws.classify_experiment` treats as proof that this
+            # application created a record from its own committed fixtures, and
+            # `managed_legacy` is the one bucket `ws.remove_experiment` will delete.
+            #
+            # DISCLOSED PRECISELY: this is DEFENCE IN DEPTH, not the repair of a
+            # reachable defect. `remove_experiment`'s only caller is the demo reset,
+            # which refuses without a tutorial session and addresses
+            # `scope_root(scope)` alone — and this route refuses WITH one — so no
+            # ordinary-workspace record can reach that deletion today whatever its
+            # note says. The guard exists so a later change to either scope cannot
+            # turn a sentence a reader typed into a classification that deletes their
+            # record. `POST /api/experiments` accepts the same string and is
+            # deliberately NOT changed here: that is a published contract on a path
+            # this slice does not build, and it is reported as a finding instead.
+            if new_description == ws.MANAGED_SOURCE_DESCRIPTION:
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": "reserved_description",
+                        "key": "description",
+                        "message": (
+                            "That exact sentence is this application's own provenance "
+                            "marker for the built-in example records, so a record you "
+                            "created must not carry it. Write the note in your own "
+                            "words. Nothing was written."
+                        ),
+                    },
+                )
+
+        if new_title is not None:
+            exp.title = new_title
+        if new_description is not None:
+            source = exp.source if isinstance(exp.source, dict) else {}
+            exp.source = source
+            source["description"] = new_description
+
+        exp.save()
+        stale = None
+        if stale is not None:
+            return stale
+        detail = _detail(exp)
+        detail.update(vc.version_fields(exp))
+        response.headers["ETag"] = exp.etag()
+        return detail
 
 
 # --- 5. draft (grouped) -------------------------------------------------------

@@ -950,6 +950,44 @@ export const api = {
     });
   },
 
+  /**
+   * Correct an experiment's title and/or its free-text note.
+   *
+   * OMITTING A KEY AND SENDING `null` ARE DIFFERENT REQUESTS, and this function
+   * preserves the difference rather than normalising it away. The server reads an
+   * ABSENT key as "leave that field alone" and an explicit `null` as "clear it", so
+   * a caller that always sent both keys would wipe the note of every reader who only
+   * meant to fix a typo in the name. `undefined` here therefore means "not
+   * mentioned" and is dropped from the body; `null` is passed through untouched.
+   *
+   * THAT IS WHY THE PARAMETER IS A PARTIAL AND NOT TWO STRINGS. An earlier shape
+   * with `(id, title, description, version)` could not express "rename only" at all
+   * — every call would have had to invent a description, which is the guessing the
+   * server refuses one level up.
+   *
+   * `If-Match` IS THE RECORD's, and it is REQUIRED. Guarded on truthiness for the
+   * same reason every other mutation here is: a blank token must be sent as ABSENT
+   * (server `428`) rather than as `If-Match: ""`, which is malformed (`400`) and
+   * would report a client bug as a precondition failure.
+   */
+  async renameExperiment(
+    id: string,
+    body: { title?: string; description?: string | null },
+    version: string,
+  ): Promise<ApiExperimentDetail> {
+    const path = `/experiments/${enc(id)}`;
+    const payload: Record<string, unknown> = {};
+    if (body.title !== undefined) payload.title = body.title;
+    if (body.description !== undefined) payload.description = body.description;
+    const res = await request(path, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+      ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiExperimentDetail>(res, path);
+    throw await mutationError(res, path);
+  },
+
   getExperiment(id: string): Promise<ApiExperimentDetail> {
     return getJson<ApiExperimentDetail>(`/experiments/${enc(id)}`);
   },
