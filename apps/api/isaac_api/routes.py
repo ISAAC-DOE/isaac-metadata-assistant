@@ -925,9 +925,16 @@ def _export_step_detail(result) -> str:
     )
 
 
-def _summary(exp: Experiment, *, units: list[ExportUnit] | None = None) -> dict:
+def _summary(
+    exp: Experiment,
+    *,
+    units: list[ExportUnit] | None = None,
+    dry_run_ok: bool | None = None,
+) -> dict:
     """One summary row. ``units`` is an already-composed ``export_units()`` list, used
-    only by ``status()`` and only on its dry-run branch — see :func:`_shared_units`."""
+    only by ``status()`` and only on its dry-run branch — see :func:`_shared_units`.
+    ``dry_run_ok`` is the verdict OF that dry run, already derived by the caller for
+    this same response — see :func:`_shared_dry_run`."""
     return {
         "id": exp.id,
         "title": exp.title,
@@ -940,7 +947,7 @@ def _summary(exp: Experiment, *, units: list[ExportUnit] | None = None) -> dict:
         # (Invariance alone would NOT be enough: an invariant present-tense state
         # description over a mutating record is guaranteed to go false.)
         "scenario": ws.scenario_label(exp.id),
-        "status": exp.status(units=units),
+        "status": exp.status(units=units, dry_run_ok=dry_run_ok),
         "created_utc": exp.created_utc,
         "pending_count": exp.pending_count(),
         # KNOWN LIMIT, disclosed rather than fixed here (review item, and the C9
@@ -1034,11 +1041,59 @@ def _shared_units(exp: Experiment) -> list[ExportUnit]:
     return exp.export_units()
 
 
+def _shared_dry_run(exp: Experiment, *, units: list[ExportUnit] | None) -> bool | None:
+    """The ONE dry-run verdict a single detail response is built from, or ``None``.
+
+    **THE RESIDUAL :func:`_shared_units` DID NOT REMOVE, AND ON THE WORST WORKLOAD IT WAS
+    THE DOMINANT ONE.** Sharing the composed unit list removed the repeated
+    *composition*; it left the repeated *dry run*, because ``status()`` and
+    ``export_ready()`` each call ``Experiment._all_units_pass_dry_run`` independently.
+    Measured over HTTP on a **fully answered, unexported 200-run** record — the workload
+    the scale envelope calls *"the worst case and the one a scientist reaches at the END
+    of the work"* — ``export_draft`` was **400 calls per request, exactly 2x the run
+    count**, unmoved by the composition threading (1,000 -> 200 ``resolved_run_draft``,
+    5 -> 1 ``export_units``, 400 -> 200 ``validate_draft``, **400 -> 400
+    ``export_draft``**). An independent review put that at roughly HALF the request
+    against ~3% for the composition, which is why the fully-answered gain was ~1.28x and
+    not the 2.4x headline. This seam is what closes it.
+
+    **IT MUST NOT MAKE THE DRY RUN HAPPEN WHERE IT DOES NOT HAPPEN TODAY**, and that is
+    the trap a naive "compute it once up front" walks into. On a record that still owes
+    questions — the COMMON case, and the one every §1/§2 table in the scale envelope was
+    taken on — both consumers short-circuit before the dry run, so it is entered ZERO
+    times. Eager computation would turn 0 into 1 and make the common read slower to
+    speed up the rare one. ``Experiment.dry_run_verdict`` therefore gates on
+    ``pending_count() > 0`` and answers ``None``, which is the union of the two
+    short-circuits; see its docstring for why that union is exact.
+
+    **THREADED, NOT MEMOISED**, for the reason :func:`_shared_units` sets out at length:
+    this module mutates an ``Experiment`` and re-reads its derived state in the same
+    request, so anything stored on the instance can be served stale. Nothing is stored.
+    ``None`` means "derive your own" to every consumer, exactly as ``units=None`` does,
+    which is what lets ``test_detail_route_composes_each_run_once.py`` reproduce the
+    pre-change path by patching this one function.
+
+    THE ONE COST, MEASURED HERE RATHER THAN QUOTED FROM ELSEWHERE: this adds a fifth
+    ``pending_count()`` call to a detail read that already made four, and it is paid on
+    EVERY read including the pending ones that gain nothing from the sharing. Timed
+    directly over 2,000 repetitions: **0.0195 ms at 200 runs, 0.0474 ms at 500** — about
+    0.26% of the ~18 ms that read takes at 500 runs, and inside the run-to-run spread of
+    the A/B, which measured 17.1 -> 17.3 ms minimum over 41 interleaved reps. It is named
+    here rather than left for a reader to find.
+    """
+    return exp.dry_run_verdict(units=units)
+
+
 def _detail(exp: Experiment) -> dict:
     # ONE COMPOSITION FOR THE WHOLE RESPONSE — see `_shared_units` for the measurement
     # and for why this is an argument rather than a cache.
     units = _shared_units(exp)
-    detail = _summary(exp, units=units)
+    # …AND ONE DRY RUN. `status()` and `export_ready()` each dry-ran every unit, which
+    # is `export_draft` over 2x the run count on a fully answered record and roughly
+    # half the request — the largest single thing the unit-list threading did NOT
+    # remove. `None` when neither would have reached it; see `_shared_dry_run`.
+    dry_run_ok = _shared_dry_run(exp, units=units)
+    detail = _summary(exp, units=units, dry_run_ok=dry_run_ok)
     record_path = exp.record_path()
     sidecar_path = exp.sidecar_path()
     # `_workflow_for` is the ONE derivation (review item C5). It used to be inlined
@@ -1054,7 +1109,7 @@ def _detail(exp: Experiment) -> dict:
     # It is the same experiment at the same revision in the same read, so the second
     # derivation could only ever agree with the first.
     draft_ok = exp.draft_ok(units=units)
-    workflow = _workflow_for(exp, units=units, draft_ok=draft_ok)
+    workflow = _workflow_for(exp, units=units, draft_ok=draft_ok, dry_run_ok=dry_run_ok)
     fan_out = bool(exp.runs)
     artifact_refs = {
         "record_filename": record_path.name if exp.exported() and record_path else None,
@@ -1083,6 +1138,7 @@ def _workflow_for(
     *,
     units: list[ExportUnit] | None = None,
     draft_ok: bool | None = None,
+    dry_run_ok: bool | None = None,
 ) -> dict:
     """Derive the workflow from an experiment's current signals (same call as
     ``_detail``). Used to capture the pre-mutation step states and to surface the
@@ -1110,11 +1166,22 @@ def _workflow_for(
     ``test_detail_route_composes_each_run_once.py``, which compares the whole response
     against the un-threaded derivation byte for byte. It is deliberately NOT plumbed
     through to any route that could take it from a request.
+
+    ``dry_run_ok`` IS THE SAME KIND OF THING AS ``draft_ok`` AND CARRIES THE SAME RULE.
+    It is the verdict ``Experiment.dry_run_verdict`` returned for this experiment at
+    this revision in this read, threaded so that ``export_ready()`` here and
+    ``status()`` in :func:`_summary` share ONE dry run instead of performing one each —
+    ``export_draft`` over 2x the run count on a fully answered record, and the single
+    largest cost the unit-list threading left behind (:func:`_shared_dry_run`). ``None``
+    means "derive your own", which is what the other fourteen call sites do and what the
+    consumers themselves do when they reach the dry-run branch at all. Like
+    ``draft_ok``, it is not plumbed through to any route that could take it from a
+    request.
     """
     return derive_workflow(
         pending_count=exp.pending_count(),
         draft_ok=exp.draft_ok(units=units) if draft_ok is None else draft_ok,
-        ready=exp.export_ready(units=units),
+        ready=exp.export_ready(units=units, dry_run_ok=dry_run_ok),
         exported=exp.all_units_exported(),
         rev=exp.rev,
     )
@@ -6258,13 +6325,21 @@ def _official_block_type(key: str) -> str | None:
 #: test harness re-raised:
 #:
 #: * ``TypeError`` — the validator iterates something a client made non-iterable.
-#:   ``{"evidence": 7}`` reaches ``[e for e in (env.get("evidence") or [])]``
-#:   (``draft_validator.py:94``) and raises ``'int' object is not iterable``; so does
-#:   ``{"contributors": 7}`` at ``enumerate(attribution.get("contributors") or [])``.
+#:   ``{"evidence": 7}`` reaches ``[e for e in (env.get("evidence") or [])]`` in
+#:   ``draft_validator._check_envelope`` and raises ``'int' object is not iterable``;
+#:   so does ``{"contributors": 7}`` at
+#:   ``enumerate(attribution.get("contributors") or [])``.
 #: * ``AttributeError`` — the validator calls ``.get`` on something a client made a
 #:   non-mapping. ``{"contributors": ["not-a-dict"]}`` reaches
-#:   ``name, role = c.get("name"), c.get("role")`` (``draft_validator.py:286``) and
-#:   raises ``'str' object has no attribute 'get'``.
+#:   ``name, role = c.get("name"), c.get("role")`` in the contributors loop and raises
+#:   ``'str' object has no attribute 'get'``.
+#:
+#: THE LINE NUMBERS THAT USED TO BE HERE (``draft_validator.py:94`` and ``:286``) ARE
+#: GONE ON PURPOSE. Both were already wrong before this comment was last edited — line
+#: 94 in that file was blank — and a wrong citation in a comment about a fail-closed
+#: branch is worse than none, because it reads as a checkable fact and is not one. The
+#: enclosing FUNCTION is named instead; it survives an edit above it, which a line
+#: number does not.
 #:
 #: Those two cover every case measured on this route, and the claim is exactly that —
 #: not a proof that no third exists. It is a bounded surface: the validator was never

@@ -247,6 +247,15 @@ class QueryParameter:
     #: Carried so the tool schema REFUSES a value the route would reject, instead
     #: of forwarding it and letting a model read a 422 as "no runs matched".
     enum: tuple[str, ...] | None = None
+    #: The route's own ``max_length``, when it declares one. CARRIED BECAUSE IT WAS
+    #: DROPPED: the tool schema built from these rendered ``minimum``/``maximum`` for
+    #: integers and nothing at all for strings, so ``isaac_list_runs``' ``q`` — which
+    #: the route bounds at ``RUN_QUERY_MAX`` — was published as an UNBOUNDED string and
+    #: `validate_arguments` had nothing to check. A 60 KB value was forwarded, echoed
+    #: back in the refusal body, and past ~64 KB failed URL construction as an
+    #: unhandled error rather than as a refusal. Same derivation rule as everything
+    #: else here: read off the route, never invented.
+    max_length: int | None = None
 
 
 def _json_type_for(annotation: object) -> tuple[str, tuple[str, ...] | None] | None:
@@ -341,6 +350,7 @@ def _query_parameters(
                 description=str(getattr(query, "description", "") or "").strip(),
                 minimum=minimum,
                 maximum=maximum,
+                max_length=_max_length(query),
             )
         )
     return tuple(found)
@@ -390,6 +400,35 @@ def _bounds(query: object) -> tuple[int | None, int | None]:
         minimum if isinstance(minimum, int) else None,
         maximum if isinstance(maximum, int) else None,
     )
+
+
+def _max_length(query: object) -> int | None:
+    """The route's declared string length bound, or ``None``.
+
+    Read exactly as :func:`_bounds` reads ``ge``/``le``, and for the same reason: this
+    FastAPI keeps it as an ``annotated_types.MaxLen`` in ``Query.metadata`` while older
+    versions kept a ``max_length`` attribute, and a reader that knows only one of them
+    silently reports NO bound — which is how an unbounded string reaches a published
+    tool schema. A bound this cannot find is reported as absent rather than guessed;
+    what the caller does with an absent one is the caller's decision, and
+    ``tools._query_schema`` refuses rather than publishes.
+    """
+    # AN ``int`` FROM EITHER SOURCE, NOT "THE FIRST NON-``None``". Those differ, and the
+    # difference is a live upgrade hazard rather than a hypothetical: on the installed
+    # FastAPI the bound lives ONLY in ``metadata`` as an ``annotated_types.MaxLen``, and
+    # ``Query(max_length=200)`` has no ``max_length`` attribute at all. A version that
+    # parks a SENTINEL there instead (``PydanticUndefined`` is the obvious candidate)
+    # would satisfy a ``found is None`` test, stop the metadata scan before it started,
+    # and report NO bound — which ``tools._query_schema`` then turns into a
+    # ``RuntimeError`` that takes ``create_app()`` down at import for every MCP
+    # deployment. Requiring an ``int`` makes a sentinel simply not a bound.
+    for candidate in (
+        getattr(query, "max_length", None),
+        *(getattr(c, "max_length", None) for c in getattr(query, "metadata", None) or ()),
+    ):
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            return candidate
+    return None
 
 
 def _run_list_query_names() -> frozenset[str]:

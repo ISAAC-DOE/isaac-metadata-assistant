@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import {
@@ -241,6 +241,32 @@ describe('the completion screen bounds what it asks for', () => {
        total moving by one per submission is the repeat this test is named for. */
     const bounded = () =>
       calls.filter((c) => c === `GET /api/experiments/demo/pending?limit=${PAGE}`).length;
+    /*
+     * WAITED FOR, NOT SAMPLED — and this was a MEASURED FLAKE, not a precaution.
+     *
+     * The two mount reads come from two independent effects: the screen's own page, and
+     * `useRecordSession`'s AgentContext effect keyed on `[id, version, active,
+     * refreshNonce]`. `findByText` above resolves when the SCREEN's page has rendered,
+     * which says nothing about whether the other effect has settled. Sampling the
+     * counter at that instant therefore reads 2 on a fast machine and 1 on a slow one.
+     * It read 1 in GitHub Actions (`expected 1 to be 2`, run 32926966992) while passing
+     * every local run, which is the classic shape of an ordering assumption dressed up
+     * as an assertion.
+     *
+     * The claim is unchanged — two windows on mount, a third after one accepted answer —
+     * and `waitFor` states it without the assumption. The plain `expect` AFTER each
+     * `waitFor` is not redundant: `waitFor` succeeds on the first tick the count matches,
+     * so an over-count arriving later would slip past it. Re-asserting once the tree has
+     * settled catches 3-on-mount, which would be a real regression and is the failure
+     * this test would otherwise stop seeing.
+     *
+     * MECHANISM PROVEN, NOT INFERRED. A throwaway probe delayed every bounded read after
+     * the first by 120 ms, so the AgentContext's mount read could not have landed by the
+     * time `findByText` resolved. The sampled form then failed with EXACTLY the CI text —
+     * `expected 1 to be 2` — and this `waitFor` form passed under the same delay. The
+     * probe is not committed; it belongs in the diagnosis, not in the suite.
+     */
+    await waitFor(() => expect(bounded()).toBe(2));
     const beforeSubmit = unbounded();
     const boundedBefore = bounded();
 
@@ -249,6 +275,7 @@ describe('the completion screen bounds what it asks for', () => {
     });
     fireEvent.click(screen.getByText('Confirm'));
     await screen.findByText('1 / 120');
+    await waitFor(() => expect(bounded()).toBe(3));
 
     // THE INVERSION. It was 1 on mount and 2 after one answer; it is now 0 and 0 — the
     // parameterless read is not made by this screen or by the session hook at all.

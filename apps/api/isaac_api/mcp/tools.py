@@ -618,6 +618,40 @@ async def _inspect_evidence(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOu
 # The registry
 # --------------------------------------------------------------------------
 
+#: A LENGTH BOUND FOR A STRING QUERY PARAMETER WHOSE ROUTE DECLARES NONE.
+#:
+#: WHY THIS EXISTS AT ALL, and why it is a named map rather than a default. Every string
+#: property in every other schema in this file carries a ``maxLength``; the ones
+#: :func:`_query_schema` builds did not, because they are DERIVED from the route and the
+#: derivation dropped the bound. Restoring the derivation (``QueryParameter.max_length``)
+#: bounds ``isaac_list_runs``' ``q`` at the route's own ``RUN_QUERY_MAX``. It does not
+#: bound ``isaac_list_questions``' ``run_id``, because that route declares no bound —
+#: measured: a 60 KB ``run_id`` was forwarded and echoed back inside a ``404`` body, and
+#: past ~64 KB it failed URL construction as an unhandled internal error rather than as a
+#: refusal.
+#:
+#: **ADDING VALIDATION TO THE HTTP ROUTE IS A PRODUCT CHANGE AND IS NOT MADE HERE.** What
+#: is made here is a bound at the MCP boundary, and it is not invented: it is the SAME
+#: bound this server already publishes for the SAME identifier one field over. ``run_id``
+#: is a PATH parameter in ``isaac_check_run`` and ``isaac_update_draft``, where it is
+#: ``_RUN_ID`` (``maxLength`` 128) and where ``client._render_path`` independently refuses
+#: anything longer. A run id that this map would reject is therefore one no MCP tool could
+#: address anyway; rejecting it as a FILTER is consistency, not a new policy.
+#:
+#: A parameter that is not here and whose route declares no bound is a REFUSAL at import,
+#: not an unbounded schema — see :func:`_query_schema`. That is deliberate: the failure
+#: this closes was silent, and the next one should not be.
+#:
+#: KEYED ON THE BARE PARAMETER NAME, WHICH IS A KNOWN LIMIT AND NOT AN OVERSIGHT. A
+#: future ``run_id`` query parameter on an UNRELATED route would silently inherit this
+#: 128 with nobody reviewing it. That is tolerable at one entry, where the bound is the
+#: same identifier's own path-parameter bound one field over; it stops being tolerable
+#: the moment a second name is added, and at that point this should be keyed on
+#: ``(operation, parameter)``. Recorded here rather than pre-built, because a two-level
+#: map with one entry is harder to read than the limit it removes.
+_DECLARED_STRING_BOUNDS: dict[str, int] = {"run_id": _RUN_ID["maxLength"]}
+
+
 def _query_schema(parameters, *, base: dict | None = None) -> dict:
     """An ``experiment_id`` schema plus whatever query parameters the ROUTE actually has.
 
@@ -649,6 +683,19 @@ def _query_schema(parameters, *, base: dict | None = None) -> dict:
             spec["minimum"] = parameter.minimum
         if parameter.maximum is not None:
             spec["maximum"] = parameter.maximum
+        if parameter.json_type == "string" and parameter.enum is None:
+            # A CLOSED SET NEEDS NO LENGTH BOUND — its longest member is the bound — so
+            # `overrides` is exempt by construction rather than by being listed. Every
+            # OTHER string must carry one, from the route if the route declares one and
+            # from the reviewed map if it does not. Neither: refuse, loudly, at import.
+            bound = parameter.max_length or _DECLARED_STRING_BOUNDS.get(parameter.name)
+            if bound is None:
+                raise RuntimeError(
+                    f"the query parameter {parameter.name!r} would be published as an "
+                    "unbounded string; declare a length bound on the route, or add a "
+                    "reviewed one to _DECLARED_STRING_BOUNDS"
+                )
+            spec["maxLength"] = bound
         properties[parameter.name] = spec
     return _object_schema(properties, ["experiment_id"])
 

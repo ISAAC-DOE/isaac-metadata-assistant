@@ -80,8 +80,9 @@ repeatedly — was **1,773,294 B** before this programme's bounding work and is 
 
 > **STATUS CHANGED 2026-08-25 — the multiple is gone, the linearity is not.** The
 > diagnosis below stands unaltered and is what the fix was built from; §3A records what
-> was done, what it measured, and what is left. Read §3 for the defect and §3A for its
-> current state.
+> was done, what it measured, and what is left, and **§3B closes the one residual §3A
+> named as "not attempted"** (the repeated dry run, which was the larger half on a fully
+> answered record). Read §3 for the defect, §3A and §3B for its current state.
 
 **The record-detail route's TIME is still linear: 3.0 ms at 25 runs, 83.2 ms at 1,000**, while
 its payload is flat at ~1.5 KB. So the cost is invisible in bytes and visible only in latency,
@@ -190,7 +191,14 @@ disabled, exactly as in the A/B below):
 | | `resolved_run_draft` | `export_units` | `validate_draft` | **`export_draft`** |
 |---|---:|---:|---:|---:|
 | before (both seams disabled) | 1,000 (5×) | 5 | 400 (2×) | **400 (2×)** |
-| after | **200 (1×)** | **1** | **200 (1×)** | **400 (2×)** |
+| after the unit-list threading | **200 (1×)** | **1** | **200 (1×)** | **400 (2×)** |
+| **after the dry-run sharing (§3B)** | **200 (1×)** | **1** | **200 (1×)** | **200 (1×)** |
+
+**THE THIRD ROW IS NEW AND IS WHAT §3B RECORDS.** The `400 (2×)` the paragraphs below
+call unmovable-by-composition-sharing has been moved, by sharing the DRY RUN rather than
+the composition. Everything those paragraphs say about why the *composition* threading
+could not touch it remains exactly true and is left standing; what has changed is that a
+different seam now does.
 
 The 5× → 1× composition claim is exactly right, and `validate_draft` halves. **What does
 not move is `export_draft`: it stays at 2× the run count**, because `status()` and
@@ -215,12 +223,20 @@ figure"* — robust across repeats of the SAME workload, not transferable to a d
 maps "5× composition removed" onto the 2.4–2.5× headline will expect the fully-answered
 record to be the biggest win, and it is the smallest one measured.
 
-**The next candidate, named and NOT attempted:** `status()` and `export_ready()` could
+*Everything in this sub-section remains a true account of THE THREADING SLICE and is left
+standing as written. It is no longer a true account of the CURRENT code: §3B shares the dry
+run as well, taking the same 200-run workload to `export_draft` 200 (1×) and a further
+1.74×. Do not quote the `400 (2×)` row as the shipped state.*
+
+~~**The next candidate, named and NOT attempted:** `status()` and `export_ready()` could
 share one dry run the way they now share one composition. That is a larger change than
-this slice — the two have different short-circuits and different callers, and
-`_all_units_pass_dry_run` is reached from outside `_detail` — it is not authorised here,
-and no measurement in this repository establishes what it would be worth beyond the 2×
-above.
+this slice … it is not authorised here, and no measurement in this repository establishes
+what it would be worth beyond the 2× above.~~ — **DONE 2026-08-25; see §3B.** Struck
+rather than deleted because it was true when written and because it is the paragraph the
+next slice was built from. Its estimate of the difficulty was right — the two DO have
+different short-circuits, and reconciling them is the whole design — and its statement
+that nothing established the value was also right, which is why §3B measures it rather
+than asserting it.
 
 ### Wall-clock — the ratio is the finding; the absolutes carry a caveat
 
@@ -300,6 +316,88 @@ Also corrected: the detail response is flat as **+2 bytes**, not the +8 first pu
 `detail bytes = 1458 + len(title)` fits exactly across four independent titles, so most of
 the apparent growth was the harness's own lengthening titles presented as a run-count
 effect.
+
+## 3B. Sharing the dry run — the residual §3A named, measured and closed
+
+**WHAT WAS SHARED, AND IT IS NOT WHAT §3A SHARED.** §3A threaded the composed
+`export_units()` list; the dry run each consumer then performed over it was untouched, so
+`export_draft` stayed at 2× the run count. This slice threads the *verdict*:
+`Experiment.dry_run_verdict(units=…)` derives it once, and `status()` / `export_ready()`
+take it as an optional `dry_run_ok` whose `None` default is, line for line, the code that
+ran before the parameter existed. `routes._shared_dry_run` is the seam; nothing is stored,
+for the reason §3A gives at length.
+
+**THE GATE IS THE DESIGN, AND IT IS WHERE A NAIVE VERSION GOES WRONG.** Both consumers
+short-circuit past the dry run while `pending_count() > 0` — `status()` answers
+`needs_attention`, `export_ready()` returns `False` — so on a record that still owes
+questions the dry run is entered **zero** times. A "compute it once up front" would have
+turned 0 into N and made the COMMON case slower to speed up the rare one. So
+`dry_run_verdict` returns `None` while anything is pending, which is exactly the union of
+the two short-circuits: `status()` has an extra `all_units_exported()` short-circuit, but
+`export_ready()` does not, so there is no reachable state where a verdict is composed that
+nobody asked for.
+
+### Call counts per request — measured over HTTP, arms interleaved in one process
+
+200 runs, fully answered and unexported. The "before" arms are the current code with the
+named seams disabled, the same reconstruction §3A's A/B uses.
+
+| arm | `resolved_run_draft` | `export_units` | `validate_draft` | **`export_draft`** | min ms |
+|---|---:|---:|---:|---:|---:|
+| `main` @ `721238a` (both seams off) | 1,000 (5×) | 5 | 400 (2×) | **400 (2×)** | 5,310.7 |
+| this seam off only | 200 (1×) | 1 | 200 (1×) | **400 (2×)** | 3,321.0 |
+| **after** | **200 (1×)** | **1** | **200 (1×)** | **200 (1×)** | **1,913.7** |
+
+* this seam alone: **1.74×** (min), 1.71× (median of seven)
+* cumulative against `main`: **2.75×** (min), 2.74× (median)
+
+**And the case that must NOT get worse — 500 runs, still pending, 41 interleaved reps:**
+
+| | `export_draft` | min ms | med ms |
+|---|---:|---:|---:|
+| before | **0** | 17.1 | 19.0 |
+| after | **0** | 17.3 | 18.6 |
+
+**0 → 0 is the load-bearing figure**, and it is asserted in the normal suite rather than
+only measured here (`test_detail_route_composes_each_run_once.py`). The cost that IS paid
+on every read, including every pending one, is **one extra `pending_count()`** — measured
+directly at 0.0195 ms (200 runs) and 0.0474 ms (500 runs) over 2,000 repetitions, i.e.
+~0.26% of an ~18 ms request, which is inside the run-to-run spread above and is why the
+ratios come out at 0.99× / 1.02× rather than cleanly at 1.
+
+**THE MILLISECONDS ARE CONTAMINATED AND THE COUNTS ARE NOT.** Every figure above was taken
+with the machine's load average between 5 and 7.5 on 10 cores, with another agent working
+in the same repository. That is the same contamination §3A reports; its `main`-arm
+reconstruction here (5,310.7 ms) reproduces §3A's own contended re-measurement (5,285 ms)
+rather than its quiet-machine table (which has no 200-run row), so the arms are internally
+consistent and the *ratios* are what this section should be read for. No Linux/CI figure
+exists; nothing in CI runs this harness.
+
+### The semantic proof, unchanged in kind
+
+The full detail response is **byte-identical across all 21 shapes** with the seams on and
+off — `response.content`, not parsed JSON. The suite's `_disable_threading` now reverts
+**three** seams, not two; it had to be extended, and the extension was verified by mutation
+(`dry_run_ok=dry_run_ok` → `dry_run_ok=(dry_run_ok is False)` in `routes._detail`, which
+the byte-equality test then fails). That is the same class of defect §3A records for the
+second seam, caught this time before shipping rather than after.
+
+### What is STILL linear, and what was deliberately not done
+
+`GET /api/experiments/{id}` remains linear in time; §3A's component breakdown is unchanged
+in kind — the dominant term is the one composition the response genuinely needs.
+~~Nothing in `src/isaac_records/**` was touched.~~ **Struck 2026-08-25, and it was false of
+the commit that carried it.** The sentence is true of THIS SECTION — no performance seam
+reaches the truth core, `export.py` and `official.py` are unchanged, and no export verdict
+moves for a well-formed draft. But the commit that landed §3B also landed a wrong-typed
+top-level container guard in `src/isaac_records/draft_validator.py`, disclosed under §13 in
+`apps/api/tests/test_run_api.py::_DISCLOSED_TRUTH_PATH_CHANGES`. An unqualified "nothing was
+touched" in the one line of this artifact that speaks to truth-path exposure is exactly the
+claim a reader would rely on and not re-check, so it is corrected in place rather than
+scoped quietly. `_all_units_pass_dry_run` keeps its `units=None`
+fallback and every caller outside `routes._detail` — including
+`dependencies.build_invalidation`, which needs the verdict exactly once — is byte-for-byte
+the code it was. `GET /pending`'s unbounded default is untouched.
 
 ## 4. The tested ceiling, stated as a ceiling
 
