@@ -7275,15 +7275,20 @@ def _apply_to_run(
         "questions.\n\n"
         "**The `official` block carries the vendored official ISAAC schema's verdict "
         "WHERE THE OFFICIAL VALIDATOR RAN — and otherwise the findings that stopped "
-        "the export before it could.** A dry run is refused before official "
-        "validation by the no-guessing draft check and by ISAAC's own "
-        "anchored-pattern exactness gate (a value matching a `^...$` pattern only "
-        "because Python's `$` also matches before a trailing newline). Those "
-        "findings arrive under the same `errors` key, so `official.ok: false` is not "
-        "by itself evidence that the official schema rejected anything; "
-        "`official.schema` names the schema this deployment would validate against "
-        "and is stamped on every response. A dry-run PASS does mean official "
-        "validation ran and passed. `POST /api/validate/record` reports the two "
+        "the export before it could.** `official.official_validator_ran` SAYS WHICH, "
+        "and it is the field to branch on: `true` means the official validator "
+        "examined the document these `errors` describe, `false` means the export was "
+        "refused before it was reached — by the no-guessing draft check, or by "
+        "ISAAC's own anchored-pattern exactness gate (a value matching a `^...$` "
+        "pattern only because Python's `$` also matches before a trailing newline). "
+        "Both kinds arrive under the same `errors` key, so `official.ok: false` is "
+        "not by itself evidence that the official schema rejected anything — and "
+        "`dry_run` does not answer it, because a dry-run PASS does require official "
+        "validation while a dry-run FAILURE may never have reached it. "
+        "`official_validator_ran: false` is NOT a verdict: it says the vendored "
+        "schema did not speak, never that it refused. `official.schema` names the "
+        "schema this deployment would validate against and is stamped on every "
+        "response. `POST /api/validate/record` reports the two "
         "gates separately (`schema_ok` and `exactness_errors`).\n\n"
         "Read-only: it writes nothing, exports nothing, and does not advance the "
         "run's or the record's revision. `checked_run_version` states which "
@@ -7300,11 +7305,15 @@ def _apply_to_run(
     ),
     response_description=(
         "The draft and official verdicts, the run's blocking questions, and the "
-        "run revision that was checked. The official verdict carries `dry_run` — "
-        "false when the run is already exported, in which case the RECORD ALREADY "
-        "WRITTEN was validated rather than a candidate — and `unavailable: true` "
+        "run revision that was checked. The official verdict carries "
+        "`official_validator_ran` — whether the official schema produced the "
+        "findings beside it — `dry_run` — false when the run is already exported, in "
+        "which case the RECORD ALREADY WRITTEN was validated rather than a "
+        "candidate — and `unavailable: true` "
         "when no verdict could be reached at all, which is not the same as the "
-        "schema rejecting the document."
+        "schema rejecting the document. The three are independent: `dry_run` names "
+        "the DOCUMENT, `official_validator_ran` names the SOURCE of the findings, "
+        "and `unavailable` says there is no verdict from any gate."
     ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
 )
@@ -12319,6 +12328,33 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
     over N records would not be readable — three runs can produce the same message
     and a caller could not tell which to open — so this mirrors the export route's
     ``_unit_result_entry``.
+
+    ``official_validator_ran`` IS THE DISCRIMINATOR THE COMMENT BELOW ASKED FOR, and
+    it is the whole point of this entry. It answers ONE question — *did
+    ``isaac_records.official.validate_official`` examine the document these ``errors``
+    describe?* — so a consumer never has to reconstruct the answer from ``dry_run``
+    plus an ordering rule it had to read ``export.py`` to learn. It is derived HERE,
+    at the route, from ``official_report is not None``; nothing in
+    ``src/isaac_records/**`` changes, because that attribute already carries the fact
+    faithfully (``export.py`` returns ``None`` at exactly the two returns that precede
+    ``validate_official`` and at no other).
+
+    IT DESCRIBES THE ``errors`` LIST BESIDE IT — not the unit, not the request. That
+    is the ONE rule every producer and every consumer in this repository follows, and
+    stating it as a property of the neighbouring list is what makes the aggregate in
+    ``_fan_out_official_verdict`` derivable rather than a second convention.
+
+    ``False`` IS NOT A VERDICT AND MUST NOT BE READ AS ONE. It says the vendored
+    schema did not speak; ``CLAUDE.md`` §1 makes that schema not ours to speak for, so
+    "it did not run" is the only honest thing to publish, and "it rejected the record"
+    is the claim four surfaces made instead. On the two ``unavailable`` branches it is
+    ``False`` as well — nothing ran there either — and ``unavailable`` remains the
+    stronger, earlier-tested flag: no verdict at all, from any gate.
+
+    IT MOVES NO VERDICT. ``ok`` is untouched on every branch, and ``CLAUDE.md`` §12's
+    standing invariant — a warning or an ISAAC-local gate must never turn a PASS into a
+    FAIL — is preserved by construction: this field is never read to compute ``ok``,
+    here or anywhere downstream.
     """
     entry = {
         "run_id": unit.run_id,
@@ -12343,6 +12379,11 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
                 "errors": [{"path": "$", "message": "Validation could not be completed."}],
                 "dry_run": False,
                 "unavailable": True,
+                # The record could not be READ, so `validate_official` was never
+                # reached. `dry_run: false` here means NO DRY RUN HAPPENED; without
+                # this field a consumer branching on `dry_run` alone concluded the
+                # written record had been checked by the official schema.
+                "official_validator_ran": False,
             }
         report = validate_official(record, REPO_ROOT)
         return {
@@ -12350,6 +12391,10 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
             "ok": report.ok,
             "errors": [{"path": e.path, "message": e.message} for e in report.errors],
             "dry_run": False,
+            # The one branch that calls `validate_official` directly. `check_exactness`
+            # does NOT run here, which is why the passing copy for a materialised unit
+            # may not claim ISAAC's own gate.
+            "official_validator_ran": True,
         }
 
     try:
@@ -12362,8 +12407,11 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
             "errors": [{"path": "$", "message": "Validation could not be completed."}],
             "dry_run": True,
             "unavailable": True,
+            "official_validator_ran": False,
         }
-    # THE OFFICIAL-SCHEMA CONFLATION, RECORDED WHERE IT IS MINTED.
+    # THE OFFICIAL-SCHEMA CONFLATION, RECORDED WHERE IT IS MINTED — AND NOW CLOSED
+    # ON THE WIRE. Kept in full rather than trimmed to the fix, because the shape of
+    # the defect is what explains the shape of the field.
     #
     # These three branches produce THREE different kinds of finding under one key:
     #
@@ -12385,20 +12433,32 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
     # exactness refusal as an official-schema error"* — and `_export_step_detail`
     # already closed exactly this defect one wire over.
     #
-    # WHY FOUR SURFACES GOT IT WRONG AT ONCE, which is the part worth fixing later:
-    # THERE IS NOTHING ON THE PAYLOAD TO BRANCH ON. `schema` is stamped
+    # WHY FOUR SURFACES GOT IT WRONG AT ONCE, which is the part this field fixes:
+    # ~~THERE IS NOTHING ON THE PAYLOAD TO BRANCH ON.~~ `schema` is stamped
     # unconditionally by the two callers, and `dry_run` does not discriminate — a
     # dry-run PASS does require `validate_official`, while a dry-run FAILURE may never
-    # have reached it. So no client, however careful, can tell the two apart.
+    # have reached it. So no client, however careful, could tell the two apart, and
+    # every one of them had to remember an ordering rule it could only learn by
+    # reading `export.py`. THAT is why "fix the surfaces" recurred four times: the
+    # remedy was unbounded by construction, one file per consumer, forever.
     #
-    # THE DURABLE FIX IS A DISCRIMINATOR ON THE WIRE — an `official_validator_ran`
-    # boolean (or moving exactness findings to their own list, as
-    # `POST /api/validate/record` already does with `exactness_errors`/`schema_ok`).
-    # It is deliberately NOT done here: a new field needs coordinated frontend work,
-    # and this slice is bounded to making the DESCRIPTIONS stop claiming something the
-    # payload does not support. The three descriptions now say "the official verdict
-    # where the official validator ran; otherwise the findings that stopped it before
-    # it could", which is exactly what these branches return.
+    # ~~"THE DURABLE FIX IS A DISCRIMINATOR ON THE WIRE — an `official_validator_ran`
+    # boolean ... It is deliberately NOT done here"~~ — **DONE.** The three branches
+    # below now publish `official_validator_ran`, and every consumer branches on it
+    # instead of on an ordering rule. The strikethroughs above are deliberate: this
+    # comment named its own remedy and deferred it, and a reader who remembers the
+    # deferral needs to see that it was discharged rather than find a comment that
+    # reads as though the field were always there.
+    #
+    # THE ALTERNATIVE THAT WAS NOT TAKEN, and why. `POST /api/validate/record` splits
+    # its findings into `errors` and `exactness_errors`. Splitting them here too would
+    # be a BREAKING change to two published operations' `errors` key and would still
+    # not separate the no-guessing findings from the exactness ones — `export.py`
+    # folds those together into `draft_report` upstream of this function, so the wire
+    # this reads cannot tell them apart either (`_export_step_detail` records the same
+    # limit). One added boolean answers the question every consumer actually asks —
+    # *may I name the official schema?* — without moving a single existing key, and
+    # without this route claiming to know which of ISAAC's own two gates refused.
     if result.official_report is not None:
         errors = [
             {"path": e.path, "message": e.message} for e in result.official_report.errors
@@ -12407,7 +12467,16 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
         errors = [{"path": w, "message": m} for w, m in result.draft_report.errors]
     else:
         errors = []
-    return {**entry, "ok": result.ok, "errors": errors, "dry_run": True}
+    return {
+        **entry,
+        "ok": result.ok,
+        "errors": errors,
+        "dry_run": True,
+        # THE THREE BRANCHES ABOVE COLLAPSE TO THIS ONE BOOLEAN, which is why no
+        # client has to re-derive them: the first is the official schema's own verdict
+        # and the other two are not.
+        "official_validator_ran": result.official_report is not None,
+    }
 
 
 def _fan_out_official_verdict(exp: Experiment) -> dict:
@@ -12437,18 +12506,48 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
     ``dry_run`` at the top level is true if ANY unit's verdict came from an in-memory
     candidate: ``dry_run: false`` is the strong claim that a WRITTEN record was
     checked, and it must not be made on behalf of a unit that has no written record.
+
+    ``official_validator_ran`` AT THE TOP LEVEL DESCRIBES THE TOP-LEVEL ``errors``,
+    and that is the only aggregation rule that is derivable rather than invented.
+    ``errors`` here is the FIRST FAILING unit's list, so the flag is that unit's flag;
+    a different rule (``any``/``all`` over the units) would describe a set the
+    ``errors`` key does not carry, and a caller rendering those errors would once
+    again be reasoning about a document other than the one in front of it.
+
+    On a PASS the two candidate rules agree, so nothing hangs on the choice: a unit's
+    ``ok`` is reachable only through ``export.py``'s single ``ok=True`` return, which
+    sits after ``validate_official`` has run and passed, so every unit's flag is
+    ``True``. The empty-``entries`` case is written out rather than left to
+    ``all(())`` — which is ``True`` — because "no unit exists" must not publish that
+    the official validator ran.
+
+    ``unavailable`` FOLLOWS THE SAME RULE AND FOR THE SAME REASON. It is the first
+    failing unit's flag, because ``errors`` is that unit's list; and it is OMITTED
+    rather than published as ``False``, matching ``_validate_unit``, so a caller reads
+    its presence as the exceptional claim it is. Without it, a fan-out whose first
+    failing unit could not be READ would publish ``official_validator_ran: false``
+    alone — indistinguishable from ISAAC's export gate having refused, which is a
+    different and untrue statement.
     """
     entries = [_validate_unit(unit) for unit in exp.export_units()]
     failed = [entry for entry in entries if not entry["ok"]]
-    return {
+    body = {
         "ok": not failed,
         # The FIRST FAILING unit's errors, so a caller reading only `errors` is shown
         # an actual failure; every unit's own verdict is in `runs`.
         "errors": failed[0]["errors"] if failed else [],
         "schema": SCHEMA_LABEL,
         "dry_run": any(entry["dry_run"] for entry in entries),
+        "official_validator_ran": (
+            bool(failed[0]["official_validator_ran"])
+            if failed
+            else bool(entries) and all(e["official_validator_ran"] for e in entries)
+        ),
         "runs": entries,
     }
+    if failed and failed[0].get("unavailable") is True:
+        body["unavailable"] = True
+    return body
 
 
 # --- 9. validate --------------------------------------------------------------
@@ -12464,16 +12563,21 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
         "dry run.\n\n"
         "**`errors` is the vendored official ISAAC schema's verdict WHERE THE "
         "OFFICIAL VALIDATOR RAN — and otherwise the findings that stopped the export "
-        "before it could.** On a dry run the export is refused before official "
-        "validation by two earlier gates: the no-guessing draft check, and ISAAC's "
-        "own anchored-pattern exactness gate, which refuses a value that satisfies "
+        "before it could.** `official_validator_ran` SAYS WHICH, and it is the field "
+        "to branch on: `true` means the official validator examined the document "
+        "these `errors` describe, `false` means the export was refused before it was "
+        "reached — by the no-guessing draft check, or by ISAAC's own anchored-pattern "
+        "exactness gate, which refuses a value that satisfies "
         "one of the schema's `^...$` patterns only because Python's `$` also matches "
         "before a trailing newline. Those findings arrive here under the same "
         "`errors` key, so a failing verdict is not by itself evidence that the "
-        "official schema rejected anything. `schema` names the schema this "
+        "official schema rejected anything — and `dry_run` does not answer it, "
+        "because a dry-run PASS does require official validation while a dry-run "
+        "FAILURE may never have reached it. `official_validator_ran: false` is NOT a "
+        "verdict: it says the vendored schema did not speak, never that it refused. "
+        "`schema` names the schema this "
         "deployment would validate against; it is stamped on every response and is "
-        "not a claim that the schema produced the findings beside it. A dry-run PASS "
-        "does mean official validation ran and passed. **`POST /api/validate/record` "
+        "not a claim that the schema produced the findings beside it. **`POST /api/validate/record` "
         "reports the two gates separately (`schema_ok` and `exactness_errors`) and "
         "is the operation to use when the distinction matters.**\n\n"
         "For an already-exported record the written record is validated "
@@ -12482,21 +12586,35 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
         "(`dry_run: true`). Read-only in both cases. The verdict comes from the "
         "same deterministic core function the command line uses.\n\n"
         "A record with **runs** exports one official record per run, so it is "
-        "checked per run: `runs[]` carries each run's own verdict, its errors and "
-        "its own `dry_run`, and the top-level `ok` is true only when every run "
+        "checked per run: `runs[]` carries each run's own verdict, its errors, its "
+        "own `dry_run` and its own `official_validator_ran`, and the top-level `ok` "
+        "is true only when every run "
         "passes. The top-level `dry_run` is `true` if any run's verdict came from "
-        "an in-memory candidate rather than a written record.\n\n"
+        "an in-memory candidate rather than a written record. The top-level "
+        "`official_validator_ran` describes the top-level `errors` — which are the "
+        "FIRST FAILING run's — so it is that run's flag; when nothing failed it is "
+        "`true`, because a passing verdict is only reachable through the official "
+        "validator. Read a run's own flag for a run's own errors.\n\n"
         "If the written record cannot be read at all, no verdict is invented: the "
         "operation reports `ok: false`, the fixed error `Validation could not be "
-        "completed.`, `dry_run: false`, and **`unavailable: true`** on the run entry. "
+        "completed.`, `dry_run: false`, `official_validator_ran: false`, and "
+        "**`unavailable: true`** — at the TOP LEVEL as well as on a run entry, and "
+        "the top-level flag is present whenever the first failing run carries it. "
         "Read that as *no verdict*, not as a schema violation — the artifacts "
         "operation reports why the file could not be read. `unavailable` was added "
         "because the fixed English sentence was the only signal, and a client that "
         "matched on `ok` alone rendered a non-verdict as a schema failure; the "
         "top-level `ok` deliberately stays `false` either way, so the flag explains "
-        "the refusal without softening it."
+        "the refusal without softening it. **`official_validator_ran: false` alone "
+        "does not distinguish these two**: ISAAC's own export gate refusing and "
+        "nothing running at all both report it, so read `unavailable` first. It is "
+        "absent on every verdict that IS a verdict."
     ),
-    response_description="The official-schema verdict, its errors, and whether it was a dry run.",
+    response_description=(
+        "The verdict, its errors, whether it was a dry run, whether the official "
+        "validator produced the errors beside it, and — when nothing produced a "
+        "verdict at all — `unavailable`."
+    ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
@@ -12563,6 +12681,33 @@ def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
                 "errors": [{"path": "$", "message": "Validation could not be completed."}],
                 "schema": SCHEMA_LABEL,
                 "dry_run": False,
+                # Nothing was validated: the artifact could not be read. `dry_run:
+                # false` here means NO DRY RUN HAPPENED, which is why this flag has
+                # to be stated separately rather than inferred from it.
+                "official_validator_ran": False,
+                # `unavailable` AT THE TOP LEVEL, AND IT WAS MISSING HERE WHILE
+                # `_validate_unit` HAS SET IT ON THE EQUIVALENT BRANCH ALL ALONG.
+                #
+                # Measured over HTTP on an exported record whose artifact was deleted
+                # out of band, BEFORE this line existed:
+                #
+                #   {"ok": false, "schema": "ISAAC v1.05", "dry_run": false,
+                #    "official_validator_ran": false,
+                #    "errors": [{"path": "$", "message":
+                #                "Validation could not be completed."}]}
+                #
+                # `official_validator_ran: false` is TRUE of that payload and is not
+                # enough, because it is the same shape ISAAC's own export gate returns
+                # — so a client that reads "the validator did not run" concludes "a
+                # GATE refused", and NO gate refused: the file could not be opened.
+                # Adding the discriminator without this one would have replaced one
+                # false attribution with a different false attribution.
+                #
+                # The three keys answer three different questions and none substitutes
+                # for another: `dry_run` names the DOCUMENT, `official_validator_ran`
+                # names the SOURCE of the findings, `unavailable` says there is no
+                # verdict from any source. `ok` stays False on all of them.
+                "unavailable": True,
             }
         report = validate_official(record, REPO_ROOT)
         return {
@@ -12570,6 +12715,7 @@ def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
             "errors": [{"path": e.path, "message": e.message} for e in report.errors],
             "schema": SCHEMA_LABEL,
             "dry_run": False,
+            "official_validator_ran": True,
         }
 
     # Dry-run: export_draft in memory (writes nothing). Robust to malformed drafts.
@@ -12587,14 +12733,37 @@ def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
         else:
             errors = []
         ok = result.ok
+        # Same derivation as `_validate_unit`, from the same attribute, describing the
+        # same list. Kept beside the branch that produced `errors` rather than
+        # recomputed below, so the two can never disagree about which list they mean.
+        official_validator_ran = result.official_report is not None
+        unavailable = False
     except Exception:
         # Defensive: never 500, and never interpolate the exception (path/stack/
         # secret) into the client response. Return a fixed, path-free message and
         # log the real detail server-side for operators.
         _log.exception("validate dry-run failed experiment=%s", experiment_id)
         ok, errors = False, [{"path": "$", "message": "Validation could not be completed."}]
+        official_validator_ran = False
+        # NO VERDICT FROM ANY GATE — the same claim `_validate_unit` already makes on
+        # its own exception branch, and for the same reason: a caller must not read
+        # "the official validator did not run" as "one of ISAAC's gates refused".
+        unavailable = True
 
-    return {"ok": ok, "errors": errors, "schema": SCHEMA_LABEL, "dry_run": True}
+    body = {
+        "ok": ok,
+        "errors": errors,
+        "schema": SCHEMA_LABEL,
+        "dry_run": True,
+        "official_validator_ran": official_validator_ran,
+    }
+    # ABSENT ON EVERY VERDICT THAT IS A VERDICT, exactly as on the run entries. A key
+    # that is always present and usually `false` invites a client to treat it as part
+    # of the verdict; absence is what makes "there is no verdict here" the exceptional
+    # reading it should be.
+    if unavailable:
+        body["unavailable"] = True
+    return body
 
 
 # --- 9b. standalone validator (P36.3, Governance & Safety) ---------------------

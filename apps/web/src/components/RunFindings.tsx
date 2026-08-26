@@ -2,6 +2,12 @@ import './run-findings.css';
 import { useId } from 'react';
 import { Check, TriangleAlert, CircleHelp } from './icons';
 import { count, isValidationUnavailable } from '../lib/assistantPaths';
+import {
+  officialCheckedDocument,
+  officialDocumentSentence,
+  officialFindingSource,
+  officialFindingsCaption,
+} from '../lib/officialAttribution';
 import type { ApiValidateResult, ApiWarningsResponse } from '../lib/types';
 
 /**
@@ -104,10 +110,13 @@ const STATE_ICON = {
  * a whole class of entry. `_validate_unit`'s dry-run branch returns
  * `export_draft(...)`'s `ok`, and when the export never reached the official
  * validator (`official_report is None`) it returns the NO-GUESSING DRAFT report's
- * errors instead. Both arrive as the same `{path, message}` shape, so the wire
- * carries no discriminator: naming the official schema as the source would be a
- * claim the response does not support. Only a MATERIALISED unit's errors are
- * known to come from `validate_official`, and only there is that source named.
+ * errors instead. Both arrive as the same `{path, message}` shape.
+ *
+ * ~~"so the wire carries no discriminator"~~ — IT DOES NOW
+ * (`official_validator_ran`), and this clause STILL reads "did not pass". That is
+ * deliberate, not an oversight: a COUNT LINE aggregates several runs, whose sources
+ * may differ from one another, so no single source may be named in it. The source is
+ * named per run, beside that run's own findings, by `officialFindingsCaption`.
  */
 const STATE_CLAUSE: Record<RunFindingState, string> = {
   pass: 'passed',
@@ -183,6 +192,12 @@ export function RunFindings({
           const Icon = STATE_ICON[state];
           const label = labelFor(run);
           const advice = adviceFor(run, i);
+          /* The two questions, per run, asked once each. WHO produced the findings
+             (`official_validator_ran`, read only inside the shared module) and WHICH
+             document was read (`dry_run`). This file previously derived both from
+             `dry_run` and so could not name the real source in either direction. */
+          const source = officialFindingSource(run);
+          const documentSentence = officialDocumentSentence(officialCheckedDocument(run));
           return (
             <li className="run-finding" key={`${i}:${run.record_id}`} data-state={state}>
               <div className="run-finding-head">
@@ -202,25 +217,25 @@ export function RunFindings({
               </p>
 
               {/* WHICH DOCUMENT was checked, per unit — the same distinction the
-                  route makes. `dry_run: false` is the strong claim that a WRITTEN
-                  record was checked, so it is only made when the server makes it.
+                  route makes, and a DIFFERENT question from who produced the
+                  findings. `dry_run: false` is the strong claim that a WRITTEN record
+                  was checked, so it is only made when the server makes it.
 
-                  AND IT IS NOT MADE AT ALL FOR A NO-VERDICT RUN. `dry_run` does not
-                  mean the same thing on an `unavailable` entry: `_validate_unit`'s
+                  AND IT IS NOT MADE AT ALL FOR A NO-VERDICT RUN. `_validate_unit`'s
                   materialised-unreadable branch returns `dry_run: false` to say NO
                   DRY RUN HAPPENED (its own comment), not that the written record was
                   checked — it is returned exactly because that record could NOT be
                   read. Rendering this line there turned the server's refusal into an
                   affirmative claim that the very document it failed to open had been
-                  checked, contradicted one line later by the caption. Nothing was
-                  checked on either unavailable branch, so nothing is claimed: the
-                  caption below is the whole statement. */}
-              {state !== 'unavailable' && (
-                <p className="run-finding-subject">
-                  {run.dry_run
-                    ? 'Checked an in-memory candidate record — nothing was written.'
-                    : 'Checked the written official record.'}
-                </p>
+                  checked, contradicted one line later by the caption.
+
+                  The guard now lives in `officialCheckedDocument`, which returns
+                  `null` on that branch, rather than in this component's `state`
+                  check — because the same branch was got wrong independently in
+                  `RunCard` and in `evidenceGraph`, which is what a per-component
+                  guard buys you. */}
+              {documentSentence !== null && (
+                <p className="run-finding-subject">{documentSentence}</p>
               )}
 
               {state === 'unavailable' && (
@@ -230,46 +245,32 @@ export function RunFindings({
                   {run.errors.length > 0 ? ' What the check reported:' : ''}
                 </p>
               )}
-              {/* WHOSE FINDINGS THESE ARE, and the two cases are not the same
-                  claim. A materialised unit is validated by `validate_official`,
-                  so naming the official schema there is exact. A dry-run unit's
-                  errors come from `export_draft`, which returns the NO-GUESSING
-                  DRAFT report's errors when the export never reached the official
-                  validator — same `{path, message}` shape, no discriminator on the
-                  wire. So the dry-run caption names neither validator rather than
-                  claiming the wrong one.
+              {/* WHOSE FINDINGS THESE ARE — now answered by the server rather than
+                  guessed from `dry_run`.
 
-                  M1 — IT NAMED TWO CANDIDATE SOURCES AND THERE ARE THREE, which
-                  made a list that reads as exhaustive silently exclude the one
-                  ISAAC owns. `export.py` runs `check_exactness` on the assembled
-                  record between the no-guessing report and `validate_official`
-                  (`:339`) and FOLDS a refusal into `draft_report` (`:339-343`), so
-                  an anchored-pattern exactness finding arrives in this same
-                  undifferentiated list. A reader told the source was "the
-                  no-guessing checks or the official ISAAC schema" would conclude
-                  by elimination that an unfamiliar finding came from the schema —
-                  the exact attribution `CLAUDE.md` §12 forbids, reached by
-                  omission instead of by assertion.
+                  M1, KEPT BECAUSE THE FIX IT ASKED FOR IS THE ONE THAT SHIPPED: the
+                  old caption "named two candidate sources and there are three", so a
+                  reader told the source was "the no-guessing checks or the official
+                  ISAAC schema" would conclude by elimination that an unfamiliar
+                  finding came from the schema — the attribution `CLAUDE.md` §12
+                  forbids, reached by omission instead of by assertion. `export.py`
+                  runs `check_exactness` between the no-guessing report and
+                  `validate_official` and FOLDS a refusal into `draft_report`.
 
-                  `ValidateReview` already had both halves and this file had only
-                  one: its heading applies the same `dry_run` rule (`:648-651`),
-                  and a standing note above the list enumerates all THREE sources
-                  (`:412-420`, "Beyond the official schema, ISAAC applies one gate
-                  of its own (anchored-pattern exactness)"). This component renders
-                  without that note, so the third source has to be named in the
-                  caption itself or it is named nowhere on the surface.
+                  `officialFindingsCaption` now answers it from
+                  `official_validator_ran`: where the official schema DID produce the
+                  findings it says so, and where it did not it names ISAAC's export
+                  gate and declines to say which of ISAAC's two gates refused —
+                  because the wire still cannot separate those two from each other,
+                  and claiming one would be the same defect one level finer.
 
                   Both captions end in a colon, so both are guarded on there being
-                  something after it. `{ok: false, errors: []}` is not reachable
-                  today — `export_draft` returns `official_report=None` only when
-                  `not draft_report.ok`, and `OfficialReport.ok` is `not
-                  self.errors` — so this is defensive, not a live fix. */}
+                  something after it. `{ok: false, errors: []}` is not reachable today
+                  — `export_draft` returns `official_report=None` only when `not
+                  draft_report.ok`, and `OfficialReport.ok` is `not self.errors` — so
+                  this is defensive, not a live fix. */}
               {state === 'fail' && run.errors.length > 0 && (
-                <p className="run-finding-caption">
-                  {run.dry_run
-                    ? 'Findings reported for this run’s candidate record. This check does not record which findings came from the no-guessing checks, which from ISAAC’s own anchored-pattern exactness gate, and which from the official ISAAC schema, so none is claimed:'
-                    : 'Official ISAAC schema errors reported for this run’s written record:'}
-                </p>
+                <p className="run-finding-caption">{officialFindingsCaption(source)}</p>
               )}
               {state !== 'pass' && run.errors.length > 0 && (
                 <ul className="run-finding-errors mono">

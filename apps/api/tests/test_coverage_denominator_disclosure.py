@@ -227,7 +227,19 @@ def test_the_written_record_still_advises_and_still_passes(client):
     client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     validated = client.post(f"/api/experiments/{exp_id}/validate").json()
     warned = client.get(f"/api/experiments/{exp_id}/warnings").json()
-    assert validated == {"ok": True, "errors": [], "schema": "ISAAC v1.05", "dry_run": False}
+    # `official_validator_ran: true` is the discriminator added with the
+    # `official_validator_ran` slice, and it belongs in this EXACT-DICT assertion
+    # rather than being loosened to a subset check: this test's whole subject is that
+    # a written record with an empty series still PASSES, and the flag says the
+    # vendored schema is what passed it. Loosening the comparison would hide the next
+    # key that appears on this payload, which is what an exact dict is for.
+    assert validated == {
+        "ok": True,
+        "errors": [],
+        "schema": "ISAAC v1.05",
+        "dry_run": False,
+        "official_validator_ran": True,
+    }
     assert warned["dry_run"] is False
     assert "NO_MEASUREMENT_SERIES" in {w["code"] for w in warned["warnings"]}
 

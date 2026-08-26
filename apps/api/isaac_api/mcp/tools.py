@@ -1196,9 +1196,23 @@ def _tools() -> tuple[Tool, ...]:
             # message. CLAUDE.md §12: the gate is ISAAC's, not upstream's, and no
             # surface may report an exactness refusal as an official-schema error.
             # The vocabulary is `POST /api/validate/record`'s, which already names
-            # `schema_ok` and `exactness` separately. See `routes._validate_unit` for
-            # why a discriminator on the wire is the durable fix and why it is not in
-            # this slice.
+            # `schema_ok` and `exactness` separately.
+            #
+            # THE DISCRIMINATOR NOW EXISTS AND IS NAMED BELOW. The previous revision
+            # of this comment ended "see `routes._validate_unit` for why a
+            # discriminator on the wire is the durable fix and why it is not in this
+            # slice" — it is in the payload now, as
+            # `official.official_validator_ran`, so an agent no longer has to
+            # reconstruct the answer from `dry_run` plus an ordering rule it would
+            # have had to read `export.py` to learn. THIS DESCRIPTION IS PART OF THE
+            # FIX AND WAS THE PART THAT GOT MISSED LAST TIME: the earlier slice
+            # corrected three React renderers and left both machine-readable
+            # contracts — these tool descriptions and two OpenAPI descriptions —
+            # stating the withdrawn claim. `test_official_verdict_attribution.py` now
+            # DERIVES the guarded surface set from the routes that build an official
+            # verdict and from `Tool.operation_ids`, rather than from a hand-kept
+            # list, so a tool over such a route cannot be added without this
+            # disclosure.
             description=(
                 "Check the official record one run WOULD export — its own content "
                 "plus what it inherits — and return the no-guessing draft verdict, "
@@ -1210,12 +1224,24 @@ def _tools() -> tuple[Tool, ...]:
                 "stopped the export before it could — the no-guessing draft check, "
                 "or ISAAC's own anchored-pattern exactness gate, which refuses a "
                 "value that satisfies one of the schema's `^...$` patterns only "
-                "because Python's `$` also matches before a trailing newline. Those "
+                "because Python's `$` also matches before a trailing newline. "
+                "`official.official_validator_ran` SAYS WHICH, and it is the field "
+                "to branch on: `true` means the official validator examined the "
+                "document these `errors` describe, `false` means the export was "
+                "refused before it was reached. Both kinds "
                 "arrive under the same `errors` key, so `official.ok: false` is not "
-                "by itself evidence that the official schema rejected anything; "
+                "by itself evidence that the official schema rejected anything — and "
+                "`official.dry_run` does not answer it, because a dry-run PASS does "
+                "require official validation while a dry-run FAILURE may never have "
+                "reached it. `official_validator_ran: false` is NOT a verdict: it "
+                "says the vendored schema did not speak, never that it refused, so "
+                "report it as \"the export gate refused\" and not as \"the official "
+                "schema rejected it\" — **unless `official.unavailable` is `true`, "
+                "which is the case to read FIRST**: there no gate refused either, "
+                "because no verdict could be produced at all (the written record "
+                "could not be read, or the check itself failed). "
                 "`official.schema` names the schema this deployment would validate "
-                "against and is stamped on every response. A dry-run PASS does mean "
-                "official validation ran and passed.\n\n"
+                "against and is stamped on every response.\n\n"
                 "Both verdicts come from the same deterministic core the "
                 "command line uses; an advisory warning never turns a pass into a "
                 "failure."
