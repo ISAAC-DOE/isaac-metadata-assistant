@@ -381,7 +381,73 @@ describe('it follows ONE redirect, and there is no loop to bound', () => {
     const res = await confirmProposal(p, ctx, api as never);
     expect(res.status).toBe('refused');
     expect(api.submitAnswer).not.toHaveBeenCalled();
+    // The hinted call, and nothing after it. Asserted on BOTH writers — see the
+    // prototype block below for why naming only `submitAnswer` was not enough.
+    expect(api.editField).toHaveBeenCalledTimes(1);
   });
+
+  /*
+   * FIVE UNKNOWN TEMPLATES THAT WERE NOT TREATED AS UNKNOWN.
+   *
+   * `ANSWER_AT_OPERATIONS` was an object literal, so `Object.prototype` sat on its
+   * chain and `Object.freeze` did not sever it. `spec = MAP['toString']` returned an
+   * inherited function — truthy — so the `spec === undefined` refusal did not fire, and
+   * a target was built with `operation: undefined`:
+   *
+   *   · `spec.run` undefined  -> record-level, so `tokenFor` sent `ctx.version` instead
+   *                              of re-deriving the RUN's token;
+   *   · `write()` branches `target.operation === 'answers' ? submitAnswer : editField`
+   *                           -> `editField`, at the record;
+   *   · the self-redirect guard compares `undefined === 'edit'` -> false, so the ONE
+   *                              structural promise made in place of a retry counter —
+   *                              never repeat the operation that just refused — was
+   *                              bypassed.
+   *
+   * Measured: 2 `editField` calls per prototype key against a control's 1.
+   *
+   * THE TEST ABOVE STAYED GREEN THROUGH ALL OF IT, and that is the lesson worth keeping:
+   * its only negative assertion was `submitAnswer` not called, while the spurious write
+   * went to `editField`. A "nothing else happened" assertion has to name every writer,
+   * so this one counts BOTH.
+   */
+  const PROTOTYPE_KEYS = [
+    'toString',
+    'constructor',
+    '__proto__',
+    'valueOf',
+    'hasOwnProperty',
+  ] as const;
+
+  for (const key of PROTOTYPE_KEYS) {
+    it(`an answer_at of "${key}" is unknown, not inherited — zero writes follow`, async () => {
+      const ctx = ctxWith([]);
+      const p = runProposal(ctx);
+      const api = apiDouble({
+        editField: vi.fn().mockRejectedValue(
+          refusal(422, {
+            error: 'not_yet_answered',
+            experiment_id: ctx.experimentId,
+            run_id: RUN_ONE,
+            keys: ['series'],
+            answer_at: key,
+            message: 'Still open. Nothing was written.',
+          }),
+        ),
+      });
+
+      const res = await confirmProposal(p, ctx, api as never);
+
+      // Exactly the branch an ABSENT `answer_at` lands on: the server's own sentence,
+      // and no route invented to replace it.
+      expect(res.status).toBe('refused');
+      expect(res.message).toBe('Still open. Nothing was written.');
+      // The hint, once — and NOTHING after it, at either writer.
+      expect(api.editField).toHaveBeenCalledTimes(1);
+      expect(api.submitAnswer).not.toHaveBeenCalled();
+      // …and no token was re-derived for a redirect that never happened.
+      expect(api.getRun).toHaveBeenCalledTimes(1); // the hinted run write only
+    });
+  }
 
   it('a run-level answer_at with no run_id in the body is not followed', async () => {
     // The ids travel beside the template in the refusal's own body, by contract. Without

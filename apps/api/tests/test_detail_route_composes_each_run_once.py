@@ -39,9 +39,12 @@ flaky under CPU contention and this repository has been bitten by exactly that
 2. **A structural anti-scaling guard** — compositions-per-run is IDENTICAL for a small and
    a large record.
 3. **BYTE EQUALITY OF THE WHOLE RESPONSE, threaded against un-threaded**, over every
-   shape the derivations branch on. ``routes._shared_units`` is the one seam, so
-   monkeypatching it to ``None`` reproduces the pre-change code path exactly and the two
-   response bodies must be identical byte for byte — not merely equal as parsed JSON.
+   shape the derivations branch on. ~~``routes._shared_units`` is the one seam, so
+   monkeypatching it to ``None`` reproduces the pre-change code path exactly~~ — **there
+   are TWO seams and this file asserted one; corrected in place, see
+   ``_disable_threading``.** ``_detail`` also derives ``draft_ok`` once and hands it to
+   ``_workflow_for``, and both must be disabled to reproduce the pre-change path. The two
+   response bodies must then be identical byte for byte — not merely equal as parsed JSON.
 4. **A no-mutation guard** on the shared list: sharing one composed unit list between
    ``draft_ok``, ``status``, ``export_ready`` and ``artifact_state`` is sound only because
    ``validate_draft``, ``export_draft`` and ``transform`` read their draft and never write
@@ -89,6 +92,21 @@ def _rid(prefix: str, i: int) -> str:
     return stem + "0" * (26 - len(stem))
 
 
+def _run_id(exp_id: str, i: int) -> str:
+    """A run id that is UNIQUE TO ITS EXPERIMENT, and deterministic.
+
+    It used to be ``_rid(exp_id[:20], i)``, which keeps only the first twenty characters
+    of the experiment id — so ``…MALFORMED000000000A`` and ``…MALFORMED000000000B``, which
+    differ only in their last character, minted THE SAME run ids. Harmless while every
+    shape lives in its own experiment document, and a trap for the first assertion that
+    looks a run up by id across shapes. The TAIL is what distinguishes these fixtures, so
+    the tail is what is kept: ``exp_id[3:]`` is 23 characters and the ordinal is 3 more.
+    """
+    stem = exp_id[3:] + f"{i:03d}"
+    assert len(stem) == 26, stem
+    return stem
+
+
 def _seeded_run_draft() -> dict:
     """What ``routes._seed_for_new_run`` leaves on a run: the ``pending`` KEY PRESENT."""
     return {"pending": [copy.deepcopy(e) for e in repo.blank_draft()["pending"]]}
@@ -106,7 +124,7 @@ def _legacy_run_draft() -> dict:
 def _build(store, exp_id: str, title: str, own_draft: dict, run_drafts: list[dict]):
     exp = store.create_experiment(title, {"kind": "synthetic"}, own_draft, id=exp_id)
     for i, draft in enumerate(run_drafts):
-        exp.add_run(label=f"Run {i + 1}", draft=draft, id=_rid(exp_id[:20], i))
+        exp.add_run(label=f"Run {i + 1}", draft=draft, id=_run_id(exp_id, i))
     exp.save_versioned()
     return exp_id
 
@@ -160,7 +178,7 @@ def _fan_out(store, exp_id: str, labels: tuple[str, ...], *, sample_id: str | No
         "Fan-out fixture", {"kind": "synthetic"}, experiment_draft, id=exp_id
     )
     for i, label in enumerate(labels):
-        exp.add_run(label=label, draft=copy.deepcopy(run_draft), id=_rid(exp_id[:20], i))
+        exp.add_run(label=label, draft=copy.deepcopy(run_draft), id=_run_id(exp_id, i))
     exp.save_versioned()
     return store.load_experiment(exp_id)
 
@@ -320,6 +338,15 @@ def test_the_composition_work_per_run_does_not_grow_with_the_run_count(client, c
 # --- 3. byte equality, threaded against un-threaded ---------------------------
 
 
+#: How many DISTINCT experiments the shape set holds. Asserted inside ``_all_shapes``
+#: AND by each of its three consumers, because those two guards fail differently: the
+#: first catches a builder that stopped producing a shape (or produced an alias of one
+#: it already had), the second catches a consumer handed a set that is not the one
+#: ``_all_shapes`` promises — including an empty one, which every "for name in shapes"
+#: loop below would otherwise iterate zero times and pass.
+_SHAPE_COUNT = 21
+
+
 def _all_shapes(client) -> dict[str, str]:
     """Every shape the four unit-dependent derivations branch on, keyed by name.
 
@@ -415,6 +442,51 @@ def _all_shapes(client) -> dict[str, str]:
     stale.save_versioned()
     shapes["zero_run_stale"] = "01SHAPESOLOSTALE0000000000"
 
+    # DEGRADED ARTIFACTS — the ``MISSING_REASON`` branches, which nothing above enters.
+    # `artifact_state` has four separate "the file is not readable as the record it
+    # should be" exits (two on the single-record path, two on the fan-out path) and the
+    # shape set reached NONE of them: every exported fixture above has a well-formed
+    # artifact on disk. An independent review measured the gap and built these four; they
+    # are adopted here because a branch the byte-equality test never enters is a branch
+    # the threading is not proved over.
+    for name, exp_id, damage in (
+        ("zero_run_artifact_deleted", "01SHAPESOLODELETED00000000", "delete"),
+        ("zero_run_artifact_unparseable", "01SHAPESOLOGARBAGE00000000", "garbage"),
+    ):
+        store.create_experiment(
+            f"solo {damage}", {"kind": "synthetic"}, copy.deepcopy(merged), id=exp_id
+        )
+        _export(client, exp_id)
+        path = store.load_experiment(exp_id).record_path()
+        assert path is not None and path.exists(), exp_id
+        if damage == "delete":
+            path.unlink()
+        else:
+            path.write_text("{not json at all", encoding="utf-8")
+        shapes[name] = exp_id
+
+    for name, exp_id, damage in (
+        ("fan_out_artifact_deleted", "01SHAPEFANOUTDELETED000000", "delete"),
+        ("fan_out_artifact_unparseable", "01SHAPEFANOUTGARBAGE000000", "garbage"),
+    ):
+        damaged = _fan_out(store, exp_id, ("Run A", "Run B"), sample_id="S1")
+        _export(client, damaged.id)
+        units = store.load_experiment(exp_id).export_units()
+        path = units[0].record_path()
+        assert path is not None and path.exists(), exp_id
+        if damage == "delete":
+            path.unlink()
+        else:
+            path.write_text("{not json at all", encoding="utf-8")
+        shapes[name] = exp_id
+
+    # THE GUARD LIVES HERE, NOT IN ONE TEST, and that is the point of moving it. It used
+    # to be ``assert len(shapes) == 17`` in the coverage test alone, which counts KEYS:
+    # aliasing three builders to the same experiment id left the count at 17 while three
+    # shapes vanished, and the byte-equality test — which iterates this same dict — would
+    # not have noticed either. Counting the DISTINCT ids as well closes both, and doing it
+    # inside the builder means every consumer of the shape set gets the guard.
+    assert len(set(shapes.values())) == len(shapes) == _SHAPE_COUNT, sorted(shapes)
     return shapes
 
 
@@ -425,18 +497,63 @@ def test_the_shape_set_covers_every_branch_the_derivations_take(client):
     ``artifact.state`` values is pinned, and a shape builder that stops producing one is
     a named failure rather than a quiet loss of coverage."""
     shapes = _all_shapes(client)
-    assert len(shapes) == 17, sorted(shapes)
-
-    seen = {"status": set(), "draft_ok": set(), "artifact": set()}
+    assert len(shapes) == _SHAPE_COUNT, sorted(shapes)
+    # The count and the distinctness are asserted INSIDE ``_all_shapes`` — see the note
+    # there for why counting keys in this test alone was not a guard at all.
+    seen = {"status": set(), "draft_ok": set(), "artifact": set(), "reason": set()}
     for exp_id in shapes.values():
         body = client.get(f"/api/experiments/{exp_id}").json()
         seen["status"].add(body["status"])
         seen["draft_ok"].add(body["draft_ok"])
         seen["artifact"].add(body["artifact"]["state"])
+        seen["reason"].add(body["artifact"]["reason"])
 
     assert seen["status"] == {"needs_attention", "in_review", "ready_to_export", "done"}
     assert seen["draft_ok"] == {True, False}
     assert seen["artifact"] == {"none", "current", "stale"}
+    # THE REASON, NOT ONLY THE LABEL. Three different situations all report ``stale``,
+    # and the four degraded-artifact shapes exist precisely to reach the one the set
+    # never reached before — so pinning the label alone would let them be deleted
+    # without a failure.
+    assert seen["reason"] == {
+        None,
+        dependencies._STALE_REASON,
+        dependencies._INCOMPLETE_REASON,
+        dependencies.MISSING_REASON,
+    }, seen["reason"]
+
+
+def _disable_threading(monkeypatch) -> None:
+    """Restore the PRE-CHANGE call pattern in :func:`routes._detail`, both seams of it.
+
+    **THERE ARE TWO SEAMS, AND THIS FILE USED TO CLAIM THERE WAS ONE.** The docstring
+    below said *"``routes._shared_units`` is the single seam"*; it is not.
+    ``_detail`` also derives ``draft_ok`` ONCE and passes it as
+    ``_workflow_for(…, draft_ok=draft_ok)``, and patching ``_shared_units`` does not
+    revert that. Measured under the old single patch, ``_workflow_for`` was still
+    receiving ``draft_ok`` as a keyword on every call — so ``_workflow_for``'s
+    ``draft_ok is None`` branch was NEVER exercised through ``_detail``, and the arm
+    the test called "the code that ran before" was a third configuration that has
+    never shipped (3-run record: main 9/3/6 for
+    ``resolved_run_draft``/``export_units``/``validate_draft``, that arm 6/2/3,
+    threaded 3/1/3).
+
+    **THE CONSEQUENCE WAS REPRODUCED, NOT INFERRED.** Mutating ``routes.py``'s
+    ``draft_ok=draft_ok`` to ``draft_ok=(not draft_ok)`` left this whole file at
+    **14 passed**. It is a false claim in the proof file rather than an unguarded
+    product defect — the wider suite does catch that mutation — and the evidence
+    document's own A/B harness had it right, disabling BOTH seams.
+
+    Dropping the boolean rather than dropping the whole keyword is deliberate: it is
+    what ``_workflow_for``'s ``units=None, draft_ok=None`` default means, and it is
+    what the other fourteen call sites of `_workflow_for` actually do (fifteen in
+    `routes.py`, counted; the commit message said "twelve").
+    """
+    real_workflow_for = routes._workflow_for
+    monkeypatch.setattr(routes, "_shared_units", lambda exp: None)
+    monkeypatch.setattr(
+        routes, "_workflow_for", lambda exp, **kwargs: real_workflow_for(exp)
+    )
 
 
 def test_threading_the_unit_list_does_not_move_one_byte_of_any_response(
@@ -445,19 +562,23 @@ def test_threading_the_unit_list_does_not_move_one_byte_of_any_response(
     """THE SEMANTIC PROOF, and it is byte equality of the WHOLE response rather than a
     field-by-field comparison of the four keys that happen to depend on the unit list.
 
-    ``routes._shared_units`` is the single seam. Patched to return ``None`` every consumer
-    falls back to composing its own units — which is, line for line, the code that ran
-    before this change — so the two bodies must be identical byte for byte. A read does
-    not bump ``rev`` or ``updated_utc``, so no normalisation is needed and none is done:
-    the comparison is on ``response.content``.
+    ~~``routes._shared_units`` is the single seam.~~ **FALSE, and corrected in place
+    rather than deleted, because a proof file that misnames its own seam is the exact
+    thing worth remembering.** There are TWO — see :func:`_disable_threading`. With both
+    disabled every consumer falls back to composing its own units and deriving its own
+    ``draft_ok``, which is line for line the code that ran before this change, so the two
+    bodies must be identical byte for byte. A read does not bump ``rev`` or
+    ``updated_utc``, so no normalisation is needed and none is done: the comparison is on
+    ``response.content``.
     """
     shapes = _all_shapes(client)
+    assert len(shapes) == _SHAPE_COUNT, sorted(shapes)
     threaded = {
         name: client.get(f"/api/experiments/{exp_id}").content
         for name, exp_id in shapes.items()
     }
 
-    monkeypatch.setattr(routes, "_shared_units", lambda exp: None)
+    _disable_threading(monkeypatch)
     unthreaded = {
         name: client.get(f"/api/experiments/{exp_id}").content
         for name, exp_id in shapes.items()
@@ -505,6 +626,7 @@ def test_the_threaded_and_unthreaded_derivations_agree_on_every_shape(client):
     """The same equality as the byte test, one level down — so a failure localises to a
     derivation instead of to "some byte of some response"."""
     shapes = _all_shapes(client)
+    assert len(shapes) == _SHAPE_COUNT, sorted(shapes)
     store = client_ws(client)
     for name, exp_id in shapes.items():
         exp = store.load_experiment(exp_id)
@@ -516,6 +638,13 @@ def test_the_threaded_and_unthreaded_derivations_agree_on_every_shape(client):
             exp
         ), name
         assert routes._workflow_for(exp, units=units) == routes._workflow_for(exp), name
+        # THE SECOND SEAM, at the level it lives on. ``_detail`` does not call
+        # ``_workflow_for(exp, units=units)``; it calls it with the boolean it already
+        # derived. That configuration is what ships, so that configuration is what is
+        # compared against the un-threaded derivation.
+        assert routes._workflow_for(
+            exp, units=units, draft_ok=exp.draft_ok(units=units)
+        ) == routes._workflow_for(exp), name
         assert routes._summary(exp, units=units) == routes._summary(exp), name
 
 
@@ -524,13 +653,73 @@ def test_a_zero_run_experiment_ignores_a_unit_list_for_draft_ok(client):
     experiment is ``validate_draft(self.draft).ok`` and stays that, whatever it is
     handed — the zero-run path is the common case and its correctness argument is that
     it is the SAME CALL the pre-fan-out code made.
+
+    **THE FIXTURE IS A DRAFT THAT FAILS VALIDATION, AND THAT IS THE WHOLE TEST.** It was
+    ``repo.blank_draft()``, on which ``validate_draft(draft).ok`` is ``True`` and
+    ``all([])`` is also ``True`` — so both sides of the equality were the constant
+    ``True``, the two branches were indistinguishable, and the exact violation this test
+    names (moving the ``units`` check ABOVE the zero-run early return) left the file at
+    **14 passed**. On a failing draft the two branches answer differently: the early
+    return says ``False``, and an implementation that consulted ``units=[]`` first would
+    say ``all([]) is True``. So ``draft_ok() is False`` is asserted FIRST, because the
+    equality is only decisive once the constant is ruled out.
     """
     store = client_ws(client)
-    exp_id = _build(
-        store, "01ZERORUNIGNORESUNITS00000", "zero", repo.blank_draft(), []
-    )
+    bad = repo.blank_draft()
+    bad["meta"] = {}
+    exp_id = _build(store, "01ZERORUNIGNORESUNITS00000", "zero", bad, [])
     exp = store.load_experiment(exp_id)
     assert not exp.runs
+    assert exp.draft_ok() is False, "the fixture must not be a draft that passes"
     # A list that is not this experiment's at all: the zero-run branch returns before
-    # looking, so it cannot change the answer.
+    # looking, so it cannot change the answer — and `all([])` would answer `True`.
+    assert exp.draft_ok(units=[]) is False
     assert exp.draft_ok(units=[]) == exp.draft_ok()
+
+
+def test_the_mutation_paths_shared_unit_list_does_not_move_an_invalidation(client):
+    """THE SECOND THREADING SITE, AND IT IS ON THE MUTATION PATH.
+
+    ``dependencies.build_invalidation`` composes ``post_exp.export_units()`` once and
+    threads it to BOTH ``_post_workflow`` and ``artifact_state`` — the same sharing as
+    ``routes._detail``'s, on the path that answers every export, answer and remove. It
+    had no equivalence guard anywhere: this file never mentioned ``build_invalidation``,
+    and the differential that covered it was an out-of-suite harness. So the same
+    equality is asserted here, over the same shape set, at the level of the whole
+    returned envelope rather than of the two derivations inside it.
+
+    The un-threaded arm drops the keyword rather than passing ``units=None`` explicitly,
+    because ``units=None`` IS the un-threaded default and dropping it is what every
+    caller that does not share did before this change.
+    """
+    shapes = _all_shapes(client)
+    assert len(shapes) == _SHAPE_COUNT, sorted(shapes)
+    store = client_ws(client)
+    real_post_workflow = dependencies._post_workflow
+    real_artifact_state = dependencies.artifact_state
+
+    for name, exp_id in shapes.items():
+        exp = store.load_experiment(exp_id)
+        pre_steps = routes._workflow_for(exp)["ordered_steps"]
+        kwargs = dict(
+            changed=True,
+            changed_fields=["sample.sample_id"],
+            pre_steps=pre_steps,
+            post_exp=exp,
+        )
+        threaded = dependencies.build_invalidation(**kwargs)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(
+                dependencies, "_post_workflow", lambda e, **kw: real_post_workflow(e)
+            )
+            patch.setattr(
+                dependencies, "artifact_state", lambda e, **kw: real_artifact_state(e)
+            )
+            unthreaded = dependencies.build_invalidation(**kwargs)
+
+        assert threaded == unthreaded, name
+        # …and not vacuously: the envelope must be a real invalidation summary.
+        assert {"changed", "rev", "reopened_steps", "artifact", "reason"} <= set(
+            threaded
+        ), name

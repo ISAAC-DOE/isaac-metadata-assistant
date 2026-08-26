@@ -3668,11 +3668,23 @@ class Experiment:
         ULID — a real possibility for hand-built fixtures, and a change in behaviour
         for the zero-run path this slice promised not to touch.
 
-        ``units`` is threaded exactly as :meth:`draft_ok`'s is. IT IS TAKEN INSIDE THE
-        ``try`` for the same reason the composition was: ``export_units`` reads one JSON
-        file per materialised unit, so composing it is one of the things that can raise
-        here, and moving it outside the guard would turn a defensive ``False`` into an
-        exception on a read.
+        ``units`` is threaded exactly as :meth:`draft_ok`'s is. The composition THIS
+        METHOD performs — the ``units is None`` fallback — is taken inside the ``try``
+        because ``export_units`` reads one JSON file per materialised unit, so composing
+        it is one of the things that can raise here.
+
+        ~~"moving it outside the guard would turn a defensive ``False`` into an exception
+        on a read"~~ **— THE CODE AND THIS SENTENCE NOW DISAGREE, and the sentence is
+        struck in place rather than deleted because the disagreement is the thing worth
+        seeing.** Both threading call sites compose the list OUTSIDE any guard and hand
+        it in: ``routes._shared_units`` on the detail read, and
+        ``dependencies.build_invalidation`` on the mutation path. For a threaded caller
+        the composition has therefore already happened before this ``try`` is entered,
+        and this guard cannot cover it. **Nothing about today's behaviour moves** — the
+        composition raising is defensive-only (the ``except`` below is
+        ``# pragma: no cover``) and no test or observation has produced it — but the
+        stated invariant is no longer general, and a later slice must not read this
+        comment as evidence that every composition on this path is guarded.
         """
         try:
             if units is None:

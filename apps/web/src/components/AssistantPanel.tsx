@@ -745,12 +745,26 @@ export function AssistantPanel({
          * CLIENT COULD NOT FOLLOW IT.
          *
          * `confirmProposal` follows an `already_answered` / `not_yet_answered`
-         * `answer_at` once, so reaching here means there was nothing to follow: the
-         * server deliberately named NO operation, because on a record with runs a
-         * spectrum, a QC verdict, a descriptor and an asset hash belong to the run that
-         * measured them and no operation on the record can answer one. Omitting the key
-         * is the honest output there, and guessing a route from the other templates
-         * would walk into the second refusal the server was avoiding.
+         * `answer_at` once, so reaching here means there was nothing to follow.
+         *
+         * THE CAUSE NAMED BELOW IS THE DESIGNED ONE, NOT AN OBSERVED ONE, and this
+         * comment used to state it as though it were live. `routes.py` omits
+         * `answer_at` when no operation on the RECORD can answer the question — on a
+         * record with runs, a spectrum, a QC verdict, a descriptor and an asset hash
+         * belong to the run that measured them — and omitting the key is the honest
+         * output there, because guessing a route from the other templates would walk
+         * into the second refusal the server was avoiding. But the backend's own note
+         * at that site says the branch is not reached in practice and is passed
+         * anyway: on the record path `_refuse_run_level_on_the_record` runs FIRST, so a
+         * record WITH runs answers `409 belongs_to_a_run` and never gets here, and the
+         * call site passes `None` "rather than relying on that ordering" — a guarantee
+         * held by two functions and a table, any of which could change. So this screen
+         * is describing a contract it honours, not a state a reader has been in. The
+         * other two ways to reach here
+         * are a refusal naming a template this client does not know, and one naming a
+         * run operation with no `run_id` in the body — both equally unreachable
+         * against the shipped server, and all three land on the same honest branch by
+         * design (`lib/assistantAgent.ts`, `redirectTargetFor`).
          *
          * TWO CLAIMS ARE MADE, AND EACH IS SOMETHING THAT WAS ESTABLISHED RATHER THAN
          * ASSUMED. Both refusals write nothing — that is what they are for, and the

@@ -26,10 +26,42 @@
  * fully visible for scrollTop 194..430 — 430 being the maximum — and lands at
  * 1..39 at the bottom of the scroll.
  *
+ * ── AND THAT WAS NECESSARY AND NOT SUFFICIENT: LINUX CI WAS RED ─────────────
+ *
+ * `1..39` is ONE PIXEL of slack, and it is a coincidence rather than a fix.
+ * In the `zoom-200` project on `ubuntu-latest` the same assertion measured
+ * **-17.5..22.5**: this app ships no webfont, the 92-character claim wraps at a
+ * different word under DejaVu/Liberation, and the extra line lands BELOW the
+ * trigger. Reproduced here by inflating the tail 40px: -39..-1.
+ *
+ * The scroll range is NOT short — that was the first hypothesis and it is
+ * measurably wrong. `.assistant-foot` ends at 283.9 in a 284px scrollport at
+ * max scroll, so the container already scrolls its content fully, and bottom
+ * padding in the band makes it worse (scrollHeight and max scrollTop grow
+ * together). The trigger's top at the end of the scroll is
+ * `284 - 38 - tail`, and the tail below it measures 245 — so the whole
+ * assertion was hostage to the height of the caption and the agent controls.
+ *
+ * So the trigger is PINNED rather than scrolled past: `position: sticky;
+ * top: 0` on `.assistant-capabilities`, same band. It leaves the scrollport
+ * through the TOP, which is why `bottom: 0` would not do it. Measured on darwin
+ * at the end of the scroll: 16..54 (16 is the drawer's own top padding), and
+ * UNMOVED at 16..54 with the tail inflated 40px. The only height in it is the
+ * trigger's own 38 against the viewport's 284 — no font metric participates.
+ *
+ * THE TRADE, STATED: a pinned box is displaced out of flow and overlays what
+ * follows it — 13px of `.assistant-agent-actions` on darwin, 53px with the tail
+ * inflated 40px, in both cases the block's padding and its eyebrow rather than
+ * any button. Scrolling up a few px un-pins it. A 546px dock in a 284px
+ * viewport cannot show everything; what it must not do is put the one
+ * interactive control in the tail where scrolling does not reach it.
+ *
  * ── What this spec asserts, and why each part is here ───────────────────────
  *
  * 1. the dock is released (computed `position`), and released to `relative`
- *    rather than `static`, so its `z-index: 1` still applies to an opaque box;
+ *    rather than `static`, so its `z-index: 1` still applies to an opaque box,
+ *    AND the capabilities trigger is pinned (`sticky`) so the tail below it
+ *    cannot decide whether it is reachable;
  * 2. the trigger is FULLY inside the viewport at the bottom of the drawer's
  *    scroll. This is the assertion that was red before the rule existed;
  * 3. the composer is still fully visible without scrolling at all;
@@ -118,6 +150,16 @@ test.describe('320x568 @200% zoom — the dock is released into normal flow', ()
     });
     expect(dock.position).toBe('relative');
     expect(dock.zIndex).toBe('1');
+
+    // (1b) …and the trigger's own box is PINNED. Releasing the dock alone left
+    //      assertion (2) below depending on the height of everything after the
+    //      trigger, which is exactly the quantity that differs between this
+    //      platform and CI's.
+    expect(
+      await page.evaluate(
+        () => getComputedStyle(document.querySelector('.assistant-capabilities')!).position,
+      ),
+    ).toBe('sticky');
 
     // The precondition for the whole finding: the dock genuinely cannot fit.
     // If a future change makes it fit, this spec should be revisited rather than
@@ -216,5 +258,12 @@ test.describe('the rule does NOT reach the zoom-200 project', () => {
     expect(
       await page.evaluate(() => getComputedStyle(document.querySelector('.assistant-foot')!).position),
     ).toBe('sticky');
+    // …and the trigger is NOT pinned there either. Both declarations live in the
+    // same bounded band, so both must be inert at every recorded-baseline size.
+    expect(
+      await page.evaluate(
+        () => getComputedStyle(document.querySelector('.assistant-capabilities')!).position,
+      ),
+    ).toBe('relative');
   });
 });

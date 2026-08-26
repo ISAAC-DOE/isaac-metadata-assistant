@@ -535,6 +535,21 @@ function EvidenceViewTabs({
  * while being stated one tab away on the evidence list. A surface that asserts
  * the version it was built from is the last surface that should keep that quiet,
  * and it was the only one with no manual recourse on screen.
+ *
+ * ── …AND THE NOTE SAT BESIDE THE FALSE SENTENCE RATHER THAN CORRECTING IT ───
+ *
+ * The re-read above closed the SUCCESS path and left the FAILURE path open, and
+ * an independent review measured the residue: the version ref advanced BEFORE
+ * the await, `reloadSilent` keeps the old rows and raises `refreshFailed`, and
+ * the panel printed `detail.version` unconditionally. So when `/runs` failed
+ * while the version poll succeeded the screen showed version 2.0 over rows read
+ * at 1.0, with the refresh-failed note beside it — strictly better than no note,
+ * and still a sentence asserting the new version over the old rows.
+ *
+ * The fix is the two-version split below: `requestedRunsVersion` (what a re-read
+ * was ISSUED for) and `loadedRunsVersion` (what the rows on screen were READ
+ * at), with the second passed to the panel so the freshness sentence can name
+ * both when they differ. See `EvidenceGraphPanelProps.runsVersion`.
  */
 function EvidenceGraphView({
   id,
@@ -561,16 +576,43 @@ function EvidenceGraphView({
   const currentScope = useWorkspaceScope();
   const readInScope = useRef(currentScope);
 
-  // The version the loaded runs belong to. Compared rather than depended on, for
-  // the no-blanking reason above; `reloadSilent` is a stable callback, so this
-  // effect fires once per distinct version and never in a loop.
-  const runsVersionRef = useRef(detail.version);
+  /*
+   * TWO VERSIONS, AND CONFLATING THEM IS WHAT LEFT THE HEADLINE FALSE.
+   *
+   * `requestedRunsVersion` is the version a re-read was ISSUED for. It advances
+   * BEFORE the request, which is exactly right for its one job — deciding
+   * whether this version has already been asked for, so the effect fires once
+   * per distinct version and never loops.
+   *
+   * It is NOT a statement about what is drawn, and it was being used as one.
+   * `reloadSilent` keeps the old data and raises `refreshFailed` when the read
+   * fails, so on that path the ref said 2.0, the rows were still the ones read
+   * at 1.0, and `EvidenceGraphPanel` printed "Built from this record at version
+   * 2.0" over them — the same false statement the re-read was added to remove,
+   * surviving on the failure path. The `LiveSyncNote` below is a real
+   * mitigation and is not a correction: it sits beside the sentence.
+   *
+   * `loadedRunsVersion` is the version the rows on screen were actually READ
+   * at. It advances only when a new payload lands — `useFetch` replaces
+   * `data` with a fresh object on success and leaves it untouched on failure,
+   * so a change of identity IS the success signal, and no change to the shared
+   * hook is needed to observe it. While a re-read is in flight it correctly
+   * still reads the old version, which is what the graph is still drawing.
+   */
+  const requestedRunsVersion = useRef(detail.version);
+  const [loadedRunsVersion, setLoadedRunsVersion] = useState(detail.version);
   const reloadRunsSilent = runs.reloadSilent;
   useEffect(() => {
-    if (runsVersionRef.current === detail.version) return;
-    runsVersionRef.current = detail.version;
+    if (requestedRunsVersion.current === detail.version) return;
+    requestedRunsVersion.current = detail.version;
     reloadRunsSilent();
   }, [detail.version, reloadRunsSilent]);
+
+  const runsPayload = runs.status === 'data' ? runs.data : undefined;
+  useEffect(() => {
+    if (runsPayload === undefined) return;
+    setLoadedRunsVersion(requestedRunsVersion.current);
+  }, [runsPayload]);
 
   // ONE note for both fetches on this branch. A failed refresh of EITHER the
   // bundle (detail/evidence/classification) or the runs means the graph is not
@@ -622,6 +664,7 @@ function EvidenceGraphView({
           returned: runs.data.returned,
           offset: runs.data.offset,
         }}
+        runsVersion={loadedRunsVersion}
         readInScope={readInScope.current}
         currentScope={currentScope}
         focusRunId={focusRunId}

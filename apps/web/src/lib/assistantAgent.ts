@@ -250,8 +250,22 @@ export function answerRoutingRefusal(err: unknown): RoutingRefusal | null {
   };
 }
 
+/** The two write methods this module will ever call. Named once so the allowlist's
+ *  values and the guard that re-checks them cannot drift apart. */
+type WriteOperation = 'answers' | 'edit';
+
 /** Which of the two write methods an operation is, and whether it is run-level. */
-type WriteTarget = { operation: 'answers' | 'edit'; runId?: string };
+type WriteTarget = { operation: WriteOperation; runId?: string };
+
+/** Is this an operation `write()` can dispatch? A POSITIVE check, not "not undefined".
+ *  `write()` branches `=== 'answers' ? submitAnswer : editField`, so ANY other value —
+ *  `undefined` above all — silently selects `editField`; and `redirectTargetFor`'s
+ *  self-redirect guard compares operations, so an `undefined` one never equals the one
+ *  just attempted and the guard passes. Both failure modes are closed by refusing to
+ *  build a target whose operation is not one of these two. */
+function isWriteOperation(value: unknown): value is WriteOperation {
+  return value === 'answers' || value === 'edit';
+}
 
 /**
  * EVERY `answer_at` THIS CLIENT WILL FOLLOW, matched as an EXACT literal.
@@ -269,21 +283,50 @@ type WriteTarget = { operation: 'answers' | 'edit'; runId?: string };
  * template is used only to CHOOSE one of them; the ids come from the refusal's own
  * body, which is the convention the server documents ("the ids to substitute into it
  * are in this same body").
+ *
+ * ── THE PROTOTYPE CHAIN, AND WHY THIS IS NOT AN OBJECT LITERAL ────────────────────
+ *
+ * IT USED TO BE ONE, AND THE PARAGRAPH ABOVE WAS FALSE FOR FIVE STRINGS. An object
+ * literal inherits from `Object.prototype`, and `Object.freeze` freezes the object
+ * without severing what it inherits from. So `ANSWER_AT_OPERATIONS['toString']` — and
+ * `constructor`, `__proto__`, `valueOf`, `hasOwnProperty` — resolved to a TRUTHY
+ * inherited value, `spec === undefined` was false, and a target was built whose
+ * `operation` was `undefined`: record-level (so the record's If-Match went to a run's
+ * question), dispatched to `editField` (because `write()` branches
+ * `=== 'answers' ? … : …`), and waved through the self-redirect guard (because
+ * `undefined === 'edit'` is false). An independent review measured TWO `editField`
+ * calls for each of the five keys against a control's one.
+ *
+ * `Object.create(null)` is what makes the sentence true rather than aspirational: the
+ * map has NO prototype, so a key it was not given resolves to `undefined` and nothing
+ * else. `isWriteOperation` in `redirectTargetFor` is the second, independent guard —
+ * belt and braces, because it is the one that makes the TARGET well-formed by
+ * construction rather than by the map being clean.
+ *
+ * NOT REACHABLE AGAINST TODAY'S SERVER: the shipped backend emits only the four
+ * constants below, verified over HTTP. It took a non-conforming server, a rewriting
+ * proxy, or a future backend change. It is fixed anyway because this map is written as
+ * a fail-closed allowlist tolerant of hostile input, and a fail-closed allowlist that
+ * is only closed against inputs the current server happens not to send is decoration.
  */
-const ANSWER_AT_OPERATIONS: Readonly<
-  Record<string, { operation: 'answers' | 'edit'; run: boolean }>
-> = Object.freeze({
-  'POST /api/experiments/{experiment_id}/answers': { operation: 'answers', run: false },
-  'POST /api/experiments/{experiment_id}/runs/{run_id}/answers': {
-    operation: 'answers',
-    run: true,
-  },
-  'POST /api/experiments/{experiment_id}/edit': { operation: 'edit', run: false },
-  'POST /api/experiments/{experiment_id}/runs/{run_id}/edit': {
-    operation: 'edit',
-    run: true,
-  },
-});
+const ANSWER_AT_OPERATIONS: Readonly<Record<string, { operation: WriteOperation; run: boolean }>> =
+  Object.freeze(
+    Object.assign(
+      Object.create(null) as Record<string, { operation: WriteOperation; run: boolean }>,
+      {
+        'POST /api/experiments/{experiment_id}/answers': { operation: 'answers', run: false },
+        'POST /api/experiments/{experiment_id}/runs/{run_id}/answers': {
+          operation: 'answers',
+          run: true,
+        },
+        'POST /api/experiments/{experiment_id}/edit': { operation: 'edit', run: false },
+        'POST /api/experiments/{experiment_id}/runs/{run_id}/edit': {
+          operation: 'edit',
+          run: true,
+        },
+      } as const,
+    ),
+  );
 
 /**
  * The ONE operation this client will follow a refusal to, or `null` to surface it.
@@ -296,7 +339,10 @@ const ANSWER_AT_OPERATIONS: Readonly<
  *    hash belong to the run that measured them, so no operation on the RECORD can answer
  *    one. Absence is the honest output there and inventing a route from the other three
  *    templates would walk straight into the second refusal the server was avoiding.
- *  - **an `answer_at` this client does not know.** See `ANSWER_AT_OPERATIONS`.
+ *  - **an `answer_at` this client does not know.** See `ANSWER_AT_OPERATIONS` — and
+ *    read its prototype-chain note, because "unknown behaves exactly like absent" was
+ *    a claim this function did not honour for five inherited keys until the map lost
+ *    its prototype and the guard below started checking the operation POSITIVELY.
  *  - **a run-level template with no `run_id` in the body.** The id is taken from the
  *    refusal, never from the guess that produced it — a redirect that reuses the run
  *    we happened to try is how a value lands on the wrong run, which is the defect
@@ -304,13 +350,25 @@ const ANSWER_AT_OPERATIONS: Readonly<
  *  - **the operation we just called.** Impossible under the published contract (each
  *    refusal names the OTHER member of its pair at the same level), so reaching it means
  *    the server contradicted itself — and repeating a call that just failed is the one
- *    shape of "follow it once" that could look like a loop. Refusing structurally is
- *    cheaper than reasoning about it.
+ *    shape of "follow it once" that could look like a loop.
+ *
+ *    THE STRUCTURAL REFUSAL IS ONLY STRUCTURAL FOR A WELL-FORMED TARGET, which this
+ *    function used to take for granted. The comparison is `target.operation ===
+ *    attempted.operation`; an inherited-prototype hit produced `operation: undefined`,
+ *    which is equal to neither `'answers'` nor `'edit'`, so the guard passed and a
+ *    second write went out at the wrong level — the exact thing this bullet promises
+ *    cannot happen. It is a structural refusal again because `isWriteOperation` rejects
+ *    the target BEFORE the comparison, so there is no value that can reach it and be
+ *    equal to nothing.
  */
 function redirectTargetFor(refusal: RoutingRefusal, attempted: WriteTarget): WriteTarget | null {
   if (refusal.answerAt === null) return null;
   const spec = ANSWER_AT_OPERATIONS[refusal.answerAt];
-  if (spec === undefined) return null;
+  // Two independent refusals, either of which suffices. The map has no prototype, so an
+  // unknown template is `undefined` and nothing else; and the operation is checked
+  // POSITIVELY, so a target is only ever built out of a value `write()` can dispatch.
+  if (typeof spec !== 'object' || spec === null) return null;
+  if (!isWriteOperation(spec.operation) || typeof spec.run !== 'boolean') return null;
   // A run operation with no run named in the body has nothing to substitute, and the run
   // that was attempted is not a substitute for the run the server meant.
   if (spec.run && refusal.runId === null) return null;

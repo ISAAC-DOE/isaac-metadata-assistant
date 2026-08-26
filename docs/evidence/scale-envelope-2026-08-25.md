@@ -135,8 +135,10 @@ derived state in the same request (answer → recompute status/workflow), so a
 same, and `routes._detail` composes the list **once** through the one named seam
 `routes._shared_units` and hands it to every consumer. Nothing is stored, nothing is
 invalidated, and every other call site — `_workflow_for` is reached by every mutation
-response, a dozen sites — is byte-for-byte the code it was, because `units=None` still
-means "compose your own".
+response, ~~a dozen sites~~ **fourteen others, fifteen in `routes.py` all told; counted
+with `grep -n '_workflow_for(' apps/api/isaac_api/routes.py`, and "a dozen" was wrong by
+three** — is byte-for-byte the code it was, because `units=None` still means "compose your
+own".
 
 **A SECOND, SMALLER SHARING, FOUND BY RE-PROFILING RATHER THAN BY READING.** Sharing the
 unit list stopped the re-*composition* but `draft_ok` was still being *derived* twice from
@@ -159,11 +161,66 @@ suite by `apps/api/tests/test_detail_route_composes_each_run_once.py`:
 | 500 | 1,500 → **500** | 3 → **1** | 1,000 → **500** |
 | 1000 | **3,000 → 1,000** | 3 → **1** | 2,000 → **1,000** |
 
+**There is no `export_draft` column here because on this workload it is zero, and that
+matters — see the fully-answered record below, where it is not.** Re-measured on both arms
+at **25 runs (0 → 0, alongside 75 → 25 / 3 → 1 / 50 → 25)** and **100 runs (0 → 0,
+alongside 300 → 100 / 3 → 1 / 200 → 100)**, which also reproduces this table's first two
+rows exactly. It is zero by construction while `pending_count() > 0`: `status()`
+short-circuits before `_all_units_pass_dry_run` and `export_ready()` returns `False`
+before it, so the dry run is never entered. 250, 500 and 1,000 were not re-measured for
+this column.
+
 The 3× confirms §3's corrected trace exactly. Two further counts §3 does not give, because
 they are worse and are the ones a scientist reaches at the END of the work: on a **fully
 answered, unexported** record it was **5×** (`status()` and `export_ready()` stop
 short-circuiting the moment `pending_count()` hits 0), and on a **fully exported fan-out**
 **4×**. Both are now 1×, and both are pinned by their own tests.
+
+#### The fully-answered record, measured separately — because the table above hides its residual
+
+**`export_draft` IS ZERO ON THE WORKLOAD ABOVE BECAUSE OF WHAT THAT WORKLOAD IS, NOT
+BECAUSE OF ANYTHING THIS CHANGE DID.** Those rows are taken on a record with open
+questions, where the dry run is never reached. An independent review measured the fully-answered
+record — the one both this section and the commit message single out as *"the worst case
+and the one a scientist reaches at the END of the work"* — and found a residual this
+document had no row for. **Re-measured here at 200 fully-answered runs, over the real HTTP
+surface, both arms in one process** (the "before" arm is the current code with both seams
+disabled, exactly as in the A/B below):
+
+| | `resolved_run_draft` | `export_units` | `validate_draft` | **`export_draft`** |
+|---|---:|---:|---:|---:|
+| before (both seams disabled) | 1,000 (5×) | 5 | 400 (2×) | **400 (2×)** |
+| after | **200 (1×)** | **1** | **200 (1×)** | **400 (2×)** |
+
+The 5× → 1× composition claim is exactly right, and `validate_draft` halves. **What does
+not move is `export_draft`: it stays at 2× the run count**, because `status()` and
+`export_ready()` each call `_all_units_pass_dry_run`, and threading the unit list removes
+the *composition* they shared, not the *dry run* they each perform. Sharing the composed
+list was never going to touch that.
+
+**So the speed-up on THIS workload is materially smaller than the 2.4–2.5× headline below,
+and the two figures must not be quoted as if they were the same measurement.** The
+reviewer, on a quiet machine, measured **1,293 ms → 1,010 ms, ≈1.28×** at 200 runs, with
+`export_draft` accounting for roughly half the request against roughly 3% for the
+composition the threading removed. **A re-measurement here reproduced the CALL COUNTS
+exactly and the wall-clock NOT at all**: 5,285 ms → 3,344 ms best-of-seven, a ratio of
+1.58×, taken while another agent was working in the same repository — the un-threaded
+arm's median was 11,927 ms against its own minimum of 5,285 ms, which is contention on the
+face of it. **Neither ratio is quoted as precise, and the disagreement is reported rather
+than resolved**: the counts are contention-free by construction and are what this row
+should be read for. It also qualifies the A/B section's *"the speed-up column is the robust
+figure"* — robust across repeats of the SAME workload, not transferable to a different one.
+
+**Nothing here is false in the rows above; the omission is what misleads.** A reader who
+maps "5× composition removed" onto the 2.4–2.5× headline will expect the fully-answered
+record to be the biggest win, and it is the smallest one measured.
+
+**The next candidate, named and NOT attempted:** `status()` and `export_ready()` could
+share one dry run the way they now share one composition. That is a larger change than
+this slice — the two have different short-circuits and different callers, and
+`_all_units_pass_dry_run` is reached from outside `_detail` — it is not authorised here,
+and no measurement in this repository establishes what it would be worth beyond the 2×
+above.
 
 ### Wall-clock — the ratio is the finding; the absolutes carry a caveat
 
@@ -220,11 +277,24 @@ linear by contract for the same reason.
 
 **What was NOT changed, named rather than implied:** `GET /pending`'s unbounded default is
 still deliberately linear (§1) and a negative-control test keeps it that way; nothing in
-`src/isaac_records/**` was touched; and no response moved by one byte — 17 record shapes
-(the five canonical seeds, zero-run, legacy-run, multi-run, mixed, malformed `pending`,
-`draft_ok` false, partially and fully exported fan-outs, exported and stale zero-run) were
-captured before the change and after it and are **byte-identical**, with the same equality
-re-asserted in the suite by patching `_shared_units` to `None`.
+`src/isaac_records/**` was touched; and no response moved by one byte — ~~17~~ **21**
+record shapes (the five canonical seeds, zero-run, legacy-run, multi-run, mixed, malformed
+`pending`, `draft_ok` false, partially and fully exported fan-outs, exported and stale
+zero-run, and — added after review — four **degraded artifacts**, a deleted and an
+unparseable record file on both the single-record and the fan-out path, which are the only
+shapes that reach `dependencies.MISSING_REASON`) were captured before the change and after
+it and are **byte-identical**.
+
+~~"with the same equality re-asserted in the suite by patching `_shared_units` to
+`None`"~~ **— THAT WAS NOT ENOUGH, and it is struck rather than edited because the
+committed test asserted it as a completeness claim.** There are **two** seams: `_detail`
+also derives `draft_ok` once and hands it to `_workflow_for`, and patching
+`_shared_units` alone does not revert that. Measured: mutating `draft_ok=draft_ok` to
+`draft_ok=(not draft_ok)` left `test_detail_route_composes_each_run_once.py` at **14
+passed**. The A/B harness in this document had it right — it disabled both — and the
+suite now does too, plus a threaded-vs-un-threaded guard on
+`dependencies.build_invalidation`, the second threading site, which is on the MUTATION
+path and had no committed guard at all.
 
 Also corrected: the detail response is flat as **+2 bytes**, not the +8 first published.
 `detail bytes = 1458 + len(title)` fits exactly across four independent titles, so most of

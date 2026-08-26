@@ -44,6 +44,42 @@
  * edge exactly where a reader stops. Dropping it hands the tail back. The
  * composer is in view at scrollTop 0 either way, so nothing is traded for it.
  *
+ * ── RELEASING THE DOCK WAS NECESSARY AND NOT SUFFICIENT ─────────────────────
+ *
+ * The `1..39` above is ONE PIXEL of slack, and Linux CI spent it: the browser
+ * spec measured `-17.5..22.5` in the `zoom-200` project, red. The dock is
+ * taller there because this app ships no webfont and the 92-character claim
+ * wraps at a different word under DejaVu/Liberation, and the extra line lands
+ * BELOW the trigger, in the tail.
+ *
+ * The arithmetic, so the residue is not mistaken for noise. At the end of the
+ * scroll the drawer's last content pixel IS the viewport's last pixel — the
+ * container already scrolls its content fully, measured: `.assistant-foot`
+ * ends at 283.9 in a 284px scrollport. So the trigger's top sits at
+ * `284 - 38 - tail`, and the tail below it is `90.9 + 2 + 142 + 10 = 245`.
+ * Nothing about the scroll RANGE is short (bottom padding in the band makes it
+ * worse: scrollHeight and max scrollTop grow together and every box above the
+ * tail moves further up), and the only other lever is shrinking the tail,
+ * which is a content change.
+ *
+ * SO THE TRIGGER IS PINNED RATHER THAN SCROLLED PAST — `position: sticky;
+ * top: 0` on `.assistant-capabilities`, in the same band. Measured on darwin
+ * at the end of the scroll: `1..39` before, `16..54` after (16 is the drawer's
+ * own top padding, where `top: 0` pins). With the tail inflated by 40px to
+ * stand in for the Linux wrap: `-39..-1` before, `16..54` after — UNMOVED,
+ * which is the property. The only height in it is the trigger's own 38 against
+ * the viewport's 284, so it does not depend on which face wraps the caption.
+ *
+ * IT IS A TRADE AND THE COST IS MEASURED. A pinned box is displaced downward
+ * out of flow, so at max scroll it overlays 13px of `.assistant-agent-actions`
+ * on darwin (12 of them that block's own top padding, 1 touching its "Agent
+ * Actions" eyebrow) and 53px with the tail inflated 40px — the eyebrow, and
+ * none of the buttons, which start 61.6px down. Recoverable by scrolling up a
+ * few px, which un-pins it; a control unreachable at the resting position is
+ * recoverable by nothing. That is why the pin carries the dock's own opaque
+ * tint: something IS painted behind it, and an earlier revision of this file
+ * argued the background away on the theory that nothing was.
+ *
  * ── Alternatives measured or refused, so they are not re-proposed ───────────
  *
  *   * raising `.record-right .assistant`'s `max-height` at short viewports was
@@ -75,6 +111,15 @@ const cssFiles = import.meta.glob('../**/*.css', {
 
 const assistantCss =
   Object.entries(cssFiles).find(([path]) => path.endsWith('/assistant.css'))?.[1] ?? '';
+
+/** `playwright.config.ts` as raw source — see the projects assertion below. */
+const PLAYWRIGHT_CONFIG = (
+  import.meta.glob('../../playwright.config.ts', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }) as Record<string, string>
+)['../../playwright.config.ts'] ?? '';
 
 const stripComments = (source: string): string => source.replace(/\/\*[\s\S]*?\*\//g, '');
 
@@ -204,14 +249,26 @@ describe('the composer dock un-sticks on a short, narrow viewport', () => {
     const maxW = Number(width![1]);
     const maxH = Number(height![1]);
 
-    // The five `playwright.config.ts` projects, as (width, height).
-    const PROJECTS: [string, number, number][] = [
-      ['desktop-1280x800', 1280, 800],
-      ['laptop-1024x768', 1024, 768],
-      ['tablet-768x1024', 768, 1024],
-      ['mobile-375x812', 375, 812],
-      ['zoom-200', 640, 400],
-    ];
+    /* THE PROJECTS ARE READ OUT OF `playwright.config.ts`, NOT LISTED HERE.
+       They were listed here, and the list was the hole: a SIXTH project added
+       inside the band — which is exactly the size a future "small phone at
+       200% zoom" project would be — would not have turned this red, because
+       this test only ever checked the five it already knew.
+
+       The config is parsed as SOURCE rather than imported: importing it
+       re-evaluates `defineConfig` and pulls in `e2e/env.ts`'s `process.env`
+       reads, and its own header warns against importing it from a spec. The
+       `viewportProject(name, w, h, dpr, grep)` call is the one place a project
+       is declared, so a regex over it sees every one. */
+    const PROJECTS = [...PLAYWRIGHT_CONFIG.matchAll(
+      /viewportProject\(\s*'([^']+)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,/g,
+    )].map((m) => [m[1], Number(m[2]), Number(m[3])] as [string, number, number]);
+    // A regex that silently matched nothing would make every assertion below
+    // vacuous, which is the failure mode of deriving instead of listing.
+    expect(
+      PROJECTS.length,
+      'no viewportProject(...) declarations were found in playwright.config.ts',
+    ).toBeGreaterThanOrEqual(5);
     for (const [name, w, h] of PROJECTS) {
       expect(w <= maxW && h <= maxH, `${name} (${w}x${h}) must NOT match ${block.query}`).toBe(
         false,
@@ -220,6 +277,45 @@ describe('the composer dock un-sticks on a short, narrow viewport', () => {
 
     // …and it must still reach the viewport the defect was measured at.
     expect(160 <= maxW && 284 <= maxH, '160x284 must match the rule').toBe(true);
+  });
+
+  /*
+   * THE SECOND HALF OF THE FIX, and the half CI was red on. Releasing the dock
+   * leaves the trigger one pixel inside the viewport on darwin and ~17.5px
+   * outside it on Linux; pinning it at the scrollport's top edge takes the
+   * tail's height out of the question entirely. See the header block.
+   */
+  it('the band ALSO pins the capabilities trigger, so the tail cannot push it out', () => {
+    const block = mediaBlocks(assistantCss).find((b) => b.query === SHORT_AND_NARROW)!;
+    const caps = ruleBody(block.body, '.assistant-capabilities');
+    expect(
+      caps.length,
+      `${SHORT_AND_NARROW} must carry an .assistant-capabilities rule that pins the trigger`,
+    ).toBeGreaterThan(0);
+    expect(caps).toMatch(/position:\s*sticky/);
+    // TOP, not bottom. A bottom-sticky box is held off the BOTTOM edge; this
+    // control leaves through the TOP, which is why the release alone was not it.
+    expect(caps).toMatch(/top:\s*0/);
+    expect(caps).not.toMatch(/bottom:/);
+  });
+
+  /*
+   * THREE declarations and no fourth. The pin exists to stop the trigger being
+   * scrolled past; like the dock's own override it is not a place to hide a
+   * narrow-viewport restyle, a height cap or a `display: none`.
+   *
+   * The background is one of the three because the pin overlays the dock's
+   * tail while it is pinned — measured, 13px on darwin and 53px with the tail
+   * inflated 40px — and two texts printing over each other is not a fix. It is
+   * the DOCK's own tint (`.assistant-foot { background: var(--assist-tint) }`),
+   * so at rest the declaration is invisible.
+   */
+  it('the trigger pin changes NOTHING but `position`, `top` and the dock tint', () => {
+    const block = mediaBlocks(assistantCss).find((b) => b.query === SHORT_AND_NARROW)!;
+    const decls = declarations(ruleBody(block.body, '.assistant-capabilities'));
+    expect(decls.map(([p]) => p)).toEqual(['position', 'top', 'background']);
+    // The dock's own tint, not a new colour invented for a narrow viewport.
+    expect(Object.fromEntries(decls).background).toBe('var(--assist-tint)');
   });
 
   /*

@@ -264,6 +264,112 @@ describe('the Evidence Graph describes the version it says it was built from', (
     expect(runsReads()).toBe(readsAtStart + 1);
   });
 
+  it('a FAILED re-read no longer lets the panel assert the new version over the old rows', async () => {
+    /*
+     * THE HALF THE RE-READ FIX LEFT OPEN, and it is the same false statement on
+     * the other branch.
+     *
+     * The runs are a SEPARATE fetch from the bundle the version comes from, so
+     * `/runs` can fail while the version poll succeeds. `reloadSilent` is built
+     * to keep the old data and raise `refreshFailed` — correct, and deliberate.
+     * But the version ref advanced BEFORE the await, and `EvidenceGraphPanel`
+     * printed `detail.version` unconditionally, so the screen showed:
+     *
+     *     claimedVersion            = 2.0
+     *     drawn run rows            = [RUN001, RUN002]   (read at 1.0)
+     *     refresh-failed note       = on screen
+     *     "Built from this record at version 2.0."
+     *
+     * The `LiveSyncNote` is a real mitigation and it is not a correction: it
+     * sits BESIDE a sentence that still asserts the new version over the old
+     * rows. So the sentence itself now names both versions.
+     */
+    const live = liveDetailRoute(ID);
+    let failRuns = false;
+    const runsRoute: RouteEntry = () =>
+      failRuns
+        ? { status: 503, body: { detail: 'runs listing is down' } }
+        : { body: runsPage([runOne(), runTwo()]) };
+
+    stubFetchRoutes({
+      ...evidenceBundleRoutes(ID),
+      [`GET ${BASE}`]: live.route,
+      [`GET ${BASE}/runs`]: runsRoute,
+    });
+
+    const { container } = renderAt(`/record/${ID}/evidence?view=graph`);
+    await settle();
+
+    expect(drawnRunIds(container).sort()).toEqual(['RUN001', 'RUN002']);
+    expect(claimedVersion()).toBe(experimentDetail.version);
+    // One read, one version: the sentence is the unqualified one, everywhere.
+    expect(screen.queryByTestId('evgraph-freshness-runs')).toBeNull();
+    expect(screen.getByTestId('evgraph-freshness').textContent).toContain(
+      'Nothing here is cached across a version change.',
+    );
+
+    // The record moves and the runs re-read FAILS.
+    failRuns = true;
+    live.bump();
+    await settle(POLL_INTERVAL_MS);
+
+    // `reloadSilent` did its job: the rows are kept and the screen never blanked.
+    expect(drawnRunIds(container).sort()).toEqual(['RUN001', 'RUN002']);
+    expect(screen.queryByText(/Loading this experiment's runs/)).toBeNull();
+    // The note is on screen — necessary, and on its own not sufficient.
+    expect(
+      screen.getByText(/this is the last loaded state, not a newly checked one/i),
+    ).toBeInTheDocument();
+
+    // THE ASSERTION THAT WAS RED. The headline still names the record's version,
+    // because the evidence, classification and findings here really are at it —
+    // printing the runs' older token alone would trade one false claim for
+    // another — and it now names the run rows' OWN, older version beside it.
+    expect(claimedVersion()).toBe(experimentDetailChanged.version);
+    expect(screen.getByTestId('evgraph-freshness-runs').textContent).toBe(
+      experimentDetail.version,
+    );
+    expect(screen.getByTestId('evgraph-freshness').textContent).toContain(
+      'The run rows are OLDER',
+    );
+  });
+
+  it('a re-read that LANDS clears the qualification and restores the plain sentence', async () => {
+    // The other direction, because a qualification that never goes away is just
+    // a permanent hedge — and a hedge is its own kind of false statement.
+    const live = liveDetailRoute(ID);
+    let failRuns = false;
+    const runsRoute: RouteEntry = () =>
+      failRuns
+        ? { status: 503, body: { detail: 'runs listing is down' } }
+        : { body: runsPage([runOne(), runTwo()]) };
+
+    stubFetchRoutes({
+      ...evidenceBundleRoutes(ID),
+      [`GET ${BASE}`]: live.route,
+      [`GET ${BASE}/runs`]: runsRoute,
+    });
+
+    renderAt(`/record/${ID}/evidence?view=graph`);
+    await settle();
+
+    failRuns = true;
+    live.bump();
+    await settle(POLL_INTERVAL_MS);
+    expect(screen.getByTestId('evgraph-freshness-runs')).toBeInTheDocument();
+
+    // The reader presses Refresh on the note; the runs listing is back.
+    failRuns = false;
+    fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
+    await settle();
+
+    expect(claimedVersion()).toBe(experimentDetailChanged.version);
+    expect(screen.queryByTestId('evgraph-freshness-runs')).toBeNull();
+    expect(screen.getByTestId('evgraph-freshness').textContent).toContain(
+      'Nothing here is cached across a version change.',
+    );
+  });
+
   it('the refetch is SILENT — the graph keeps its rows WHILE the re-read is in flight', async () => {
     /*
      * WHY THIS TEST HOLDS THE RESPONSE OPEN, stated because the obvious version

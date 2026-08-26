@@ -1229,6 +1229,85 @@ button.assistant-source-chip-nav:focus-visible {
   .assistant-foot {
     position: relative;
   }
+  /* ---- …AND THE TRIGGER IS PINNED RATHER THAN SCROLLED PAST ------------
+   *
+   * RELEASING THE DOCK WAS NECESSARY AND NOT SUFFICIENT, and CI proved it.
+   * With `position: relative` alone the trigger lands at 1..39 on darwin and
+   * at -17.5..22.5 on Linux — red in the `zoom-200` project. The 16.5px is not
+   * noise: this app ships no webfont, so the 92-character claim wraps at a
+   * different word under DejaVu/Liberation, and the extra line lands BELOW the
+   * trigger. What it is arithmetic ON (darwin, this dev build, the ≤1024px
+   * drawer, /record/<id>, all measured):
+   *
+   *   drawer scrollport   284.0   (fixed top:0/bottom:0, clientHeight)
+   *   scrollHeight        714.0   -> max scrollTop 430
+   *   `.assistant-foot`   545.9   ending EXACTLY at the scrollport bottom
+   *   trigger              38.0
+   *   BELOW the trigger   245.0   = agent actions 90.9 + 2 + caption 142 + 10
+   *
+   * At the end of the scroll the last content pixel is the viewport's last
+   * pixel, so the trigger's top sits at `284 - 38 - tail`. On darwin that is
+   * 284-38-245 = 1. ONE PIXEL. It is a coincidence, not a fix, and the Linux
+   * wrap spends it.
+   *
+   * NOTHING ABOUT THE SCROLL RANGE IS SHORT — the first hypothesis, and
+   * measurably wrong. `.assistant-foot`'s bottom is 283.9 in a 284px
+   * scrollport at max scroll: the container already scrolls its content fully.
+   * `padding-bottom` in this band makes it WORSE (scrollHeight and max
+   * scrollTop grow together, so the tail still ends at the bottom edge and
+   * every box above it moves further up), and shrinking the tail is a content
+   * change — the claim is pinned at 92 characters, and the caption and the
+   * agent controls are two things a reader at this size needs.
+   *
+   * ── A 546px DOCK IN A 284px VIEWPORT IS A TRADE, AND THIS IS THE TRADE ──
+   *
+   * The trigger and its 245-262px tail cannot both be fully visible in 284px.
+   * That is arithmetic. So the trigger is not scrolled PAST: sticky at the top
+   * edge pins it once its natural position would leave the scrollport, for as
+   * long as its containing block (`.assistant-foot`, whose bottom IS the
+   * scrollport bottom at max scroll) has room. At the end of the scroll it is
+   * therefore at 16..54 of 284 — 16 being the drawer's own top padding, where
+   * `top: 0` pins — and that holds for ANY tail height. The only quantity in it
+   * is the trigger's own 38px against the viewport's 284, so no font metric
+   * participates. THAT is the part CI is red on, and the part this fixes.
+   *
+   * WHAT IT COSTS, MEASURED RATHER THAN WAVED AT. A pinned box is displaced
+   * DOWNWARD out of flow, so it overlays what follows it. At max scroll on
+   * darwin that is 13px of `.assistant-agent-actions`, of which 12 are the
+   * block's own top padding and 1 touches its "Agent Actions" eyebrow. With
+   * the tail inflated 40px to stand in for a wider face, 53px — the eyebrow,
+   * and none of the buttons, which start 61.6px down. Like any sticky header
+   * it is recoverable: scrolling up a few px un-pins it and the tail is whole.
+   * A control that is unreachable at the resting position is not recoverable
+   * by anything.
+   *
+   * `bottom: 0` would not do it: a bottom-sticky box is held off the BOTTOM
+   * edge, and this control leaves through the TOP. `top: 55vh` WAS measured —
+   * it pins the trigger at 172.2..210.2 and leaves room above for the
+   * popover — and is rejected because a larger inset means a larger
+   * displacement: it overlays the advisory caption mid-sentence instead of an
+   * eyebrow. Minimum displacement is the whole point of `top: 0`.
+   *
+   * THE BACKGROUND IS NOT DECORATION, and an earlier revision of this comment
+   * argued it away on the theory that nothing is painted behind the pin. That
+   * was measured false, and the measurement is the overlay above — the tail is
+   * behind it. The tint is the dock's own, so at rest the declaration is
+   * invisible and while pinned it is what stops two texts printing over each
+   * other.
+   *
+   * ONE THING THIS DOES NOT MAKE WORSE, since it looks like it should: the
+   * popover. It opens UPWARD, and at the end of the scroll there has never
+   * been room for it — from the unpinned trigger at 1 it renders at
+   * -101.5..-5, entirely off screen, and from the pinned 16 it is off screen
+   * too. Using it requires scrolling up either way. (Under Playwright, which
+   * scrolls an element into view before clicking it, the pinned case measures
+   * -15.5..81 against 93.5..190 unpinned; the clipped strip is the top of the
+   * catalog, which is its own scroll region.) */
+  .assistant-capabilities {
+    position: sticky;
+    top: 0;
+    background: var(--assist-tint);
+  }
 }
 
 /* P29.4b — the UNCONFIRMED staged-proposal card. Advisory-tinted, never a

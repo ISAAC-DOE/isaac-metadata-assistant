@@ -108,6 +108,21 @@ def test_the_descriptions_are_the_routes_own_words():
     assert schema["properties"]["limit"]["description"] == routes._PENDING_LIMIT_DESC
 
 
+def test_the_shared_run_id_description_labels_its_http_form_as_http():
+    """The route's ``run_id`` sentence is published VERBATIM into the MCP tool schema —
+    that verbatim-ness is the anti-drift property the test above exists to keep — so any
+    transport-specific syntax in it is read by an agent that cannot send that syntax. It
+    said *"AN EMPTY VALUE (`?run_id=`)"*, which is a query string an MCP caller never
+    writes. The remedy is NOT to de-share the sentence: it is to say which form belongs to
+    which transport, so both readers are addressed and neither is misled."""
+    description = routes._PENDING_RUN_ID_DESC
+    assert "over HTTP that is `?run_id=`" in description, description
+    assert 'to an MCP tool it is `run_id: ""`' in description, description
+    assert TOOLS["isaac_list_questions"].input_schema["properties"]["run_id"][
+        "description"
+    ] == description
+
+
 def test_the_review_gate_covers_the_pending_route_too(monkeypatch):
     """THE GATE, and it is the reason this is derived at all.
 
@@ -174,6 +189,57 @@ def test_the_tool_does_not_tell_an_agent_its_complete_list_is_a_window():
         assert f"`{name}`" in description, name
     assert "pending_page" in description
     assert "record_total" in description
+
+
+def test_the_description_does_not_promise_a_page_block_that_offset_zero_never_gets(
+    writer,
+):
+    """THE DESCRIPTION USED TO SAY *"Send ANY OF THE THREE and the response gains a
+    `pending_page` block"*, AND THAT WAS FALSE FOR ONE OF THE THREE.
+
+    ``routes.get_pending`` derives ``bounded = run_id is not None or offset != 0 or
+    limit is not None``, so ``offset`` is the odd one out: **0 is its default**, and a
+    call sending only ``offset: 0`` is the UNBOUNDED read. Nothing is truncated — the
+    answer really is complete — so this was never a truncation lie. It is the mirror
+    image: an agent told "send any of the three and you get a page block" will
+    plausibly open a paging loop at ``offset: 0`` and find no ``record_total`` and no
+    ``withheld`` to drive it with, and the existing description test asserts only that
+    those key NAMES appear, never that the sentence around them is true.
+
+    Both halves are pinned: the behaviour, over the real dispatch, and the sentence.
+    """
+    at_zero = payload(writer, "isaac_list_questions", experiment_id=PARTIAL_ID, offset=0)[
+        "data"
+    ]
+    assert "pending_page" not in at_zero, at_zero.get("pending_page")
+    assert {q["id"] for q in at_zero["pending"]} == {"series", "descriptor"}
+
+    at_one = payload(writer, "isaac_list_questions", experiment_id=PARTIAL_ID, offset=1)[
+        "data"
+    ]
+    assert "pending_page" in at_one, at_one
+
+    description = TOOLS["isaac_list_questions"].description
+    assert "Send any of the three" not in description, description
+    assert "NON-ZERO `offset`" in description, description
+    assert "`offset: 0` ON ITS OWN BOUNDS NOTHING" in description, description
+
+
+def test_the_description_qualifies_complete_the_way_the_server_does(writer):
+    """``serialize.pending_page`` is explicit that **``complete`` IS RELATIVE TO THE
+    FILTER** — under a ``run_id``, ``complete: true`` means that run has nothing
+    further, never that the record has. The tool published the key unqualified, which is
+    the one reading that turns a per-run page into a claim about the record. Asserted as
+    behaviour first, then as words."""
+    experiment_id, run_ids = _with_two_runs(writer)
+    page = payload(
+        writer, "isaac_list_questions", experiment_id=experiment_id, run_id=run_ids[0]
+    )["data"]["pending_page"]
+    assert page["complete"] is True, page
+    assert page["record_total"] > page["total"], page
+
+    description = TOOLS["isaac_list_questions"].description
+    assert "RELATIVE TO THE FILTER" in description, description
 
 
 # --- 3. the bounds actually work, end to end ------------------------------------
@@ -278,7 +344,9 @@ def test_a_limit_over_the_routes_ceiling_never_leaves_the_client(reader):
         },
     )
     assert envelope.get("error", {}).get("code") == INVALID_PARAMS, envelope
-    assert "500" in envelope["error"]["message"], envelope["error"]
+    # DERIVED, not transcribed — `:76` above already reads the ceiling off the route and
+    # a hard-coded "500" here would keep passing for the wrong reason the day it moves.
+    assert str(routes.PENDING_PAGE_MAX) in envelope["error"]["message"], envelope["error"]
 
 
 def test_the_bounded_read_is_still_denied_to_a_write_only_caller(write_only):

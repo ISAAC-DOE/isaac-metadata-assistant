@@ -386,6 +386,16 @@ export function RunCompare({
                 (`lib/evidenceGraph.ts`, RunCheckStore). Two surfaces in one
                 product should not disagree about whether a stale verdict may be
                 displayed.
+
+                WHAT THE KEY OMITS, NAMED RATHER THAN LEFT TO BE REDISCOVERED:
+                `experimentId`. Two experiments would have to hold runs with the
+                SAME id AND the same version for the stale state to survive a
+                change of record, and run ids are ULIDs minted per run — so it
+                is not reachable in this product as built. It is written down
+                because the reasoning is an argument about id generation rather
+                than a property of this component, and the next surface that
+                keys on a run identity should not have to re-derive it. Adding
+                it costs one interpolation if that ever stops holding.
               */}
               <CompareFindings
                 key={`${runA!.id}@${runA!.version}|${runB!.id}@${runB!.version}`}

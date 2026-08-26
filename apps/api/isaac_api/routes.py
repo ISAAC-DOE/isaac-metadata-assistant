@@ -79,7 +79,7 @@ from . import version_contract as vc
 from . import workspace as ws
 from .identity import require_human_actor
 from .workflow import derive_lifecycle, derive_workflow
-from .workspace import REPO_ROOT, Experiment, atomic_write_text
+from .workspace import REPO_ROOT, Experiment, ExportUnit, atomic_write_text
 
 router = APIRouter(prefix="/api")
 
@@ -925,7 +925,7 @@ def _export_step_detail(result) -> str:
     )
 
 
-def _summary(exp: Experiment, *, units=None) -> dict:
+def _summary(exp: Experiment, *, units: list[ExportUnit] | None = None) -> dict:
     """One summary row. ``units`` is an already-composed ``export_units()`` list, used
     only by ``status()`` and only on its dry-run branch — see :func:`_shared_units`."""
     return {
@@ -985,7 +985,7 @@ FAN_OUT_ARTIFACT_REASON = (
 )
 
 
-def _shared_units(exp: Experiment):
+def _shared_units(exp: Experiment) -> list[ExportUnit]:
     """The ONE composed unit list a single detail response is built from.
 
     **THE MEASURED DEFECT THIS CLOSES.** ``GET /api/experiments/{id}`` is flat in payload
@@ -1016,8 +1016,20 @@ def _shared_units(exp: Experiment):
     drafts without writing them (``validate_draft``, ``export_draft`` and ``transform``
     all build a new object) — asserted, not assumed, by that file's no-mutation test.
     A zero-run experiment gets a list too: its single unit carries ``exp.draft`` ITSELF
-    rather than a composition, so there is nothing to save on the composition and one
-    ``export_units()`` call to save on the dry run.
+    rather than a composition, so there is nothing to save on the composition.
+    ~~"and one ``export_units()`` call to save on the dry run"~~ — **TRUE ONLY WHEN THE
+    RECORD HAS NO OPEN QUESTIONS, and corrected in place because as written it claimed a
+    saving on the common case.** Measured over the HTTP surface on a zero-run record,
+    ``export_units`` calls per detail read, un-threaded -> threaded:
+
+    * ``pending_count() > 0``: **0 -> 1**. The dry run is never reached (``status()``
+      short-circuits on pending and ``export_ready()`` returns before it), so this
+      function strictly ADDS one call. It is a cheap one — a zero-run unit list is one
+      unit wrapping ``exp.draft`` with nothing composed — and the read still nets a
+      saving in the work that matters: ``validate_draft`` goes 2 -> 1, because
+      ``draft_ok`` is now derived once for the whole response.
+    * ``pending_count() == 0``: **2 -> 1**, which is the saving the struck sentence
+      described.
     """
     return exp.export_units()
 
@@ -1066,7 +1078,12 @@ def _detail(exp: Experiment) -> dict:
     return detail
 
 
-def _workflow_for(exp: Experiment, *, units=None, draft_ok: bool | None = None) -> dict:
+def _workflow_for(
+    exp: Experiment,
+    *,
+    units: list[ExportUnit] | None = None,
+    draft_ok: bool | None = None,
+) -> dict:
     """Derive the workflow from an experiment's current signals (same call as
     ``_detail``). Used to capture the pre-mutation step states and to surface the
     post-mutation workflow on a mutation response.
@@ -1080,10 +1097,12 @@ def _workflow_for(exp: Experiment, *, units=None, draft_ok: bool | None = None) 
 
     ``units`` AND ``draft_ok`` ARE OPTIONAL, AND THEY ARE OPTIONAL BECAUSE OF THE BLAST
     RADIUS. This function is called by EVERY mutation response as well as by
-    :func:`_detail` — a dozen call sites — and each of those has exactly one derivation
-    to make and nothing to share it with. So they are untouched and keep deriving their
-    own; only :func:`_detail`, which needs four unit-dependent facts for one response,
-    passes anything. See :func:`_shared_units`.
+    :func:`_detail` — **fifteen call sites in this module, counted rather than estimated
+    (``grep -n '_workflow_for(' routes.py``); the commit that introduced the parameters
+    said "a dozen" and that was wrong by three** — and each of the other fourteen has
+    exactly one derivation to make and nothing to share it with. So they are untouched
+    and keep deriving their own; only :func:`_detail`, which needs four unit-dependent
+    facts for one response, passes anything. See :func:`_shared_units`.
 
     ``draft_ok`` is a BOOLEAN THE CALLER ALREADY DERIVED, not a way to assert one. It is
     only ever passed the value ``exp.draft_ok(units=units)`` returned for this same
@@ -2420,8 +2439,9 @@ _PENDING_RUN_ID_DESC = (
     "Return only the questions owned by this run — the common case of a scientist "
     "working one measurement. Refused with `404 run_not_found` when the record holds "
     "no such run, rather than answered with an empty list that reads as 'this run has "
-    "nothing left'. AN EMPTY VALUE (`?run_id=`) IS A RUN ID THE RECORD DOES NOT HOLD "
-    "AND IS REFUSED THE SAME WAY, naming `\"\"` as the id that was not found; it is "
+    "nothing left'. AN EMPTY VALUE IS A RUN ID THE RECORD DOES NOT HOLD AND IS REFUSED "
+    "THE SAME WAY — over HTTP that is `?run_id=`, and to an MCP tool it is `run_id: "
+    "\"\"` — naming `\"\"` as the id that was not found; it is "
     "not treated as if the parameter were absent, because a caller that interpolated "
     "nothing into a run filter would otherwise be handed the WHOLE record and read it "
     "as that run's questions. `pending_page.record_total` still reports the WHOLE "
@@ -2444,9 +2464,17 @@ _PENDING_RUN_ID_DESC = (
         "record, its runs' included. A record's question count grows with its runs, "
         "so `run_id`, `offset` and `limit` let a client bound what it asks for — but "
         "bounding is something a client asks for, never something imposed on one that "
-        "does not know to page. Send any of the three and the response gains a "
-        "`pending_page` block reporting `total`, `returned`, `withheld` and whether "
-        "the list is `complete`, so a page can never be mistaken for the whole set."
+        "does not know to page. A `run_id`, a NON-ZERO `offset`, or a `limit` bounds "
+        "the read, and the response then gains a `pending_page` block reporting "
+        "`total`, `returned`, `withheld`, `record_total` and whether the list is "
+        "`complete`, so a page can never be mistaken for the whole set.\n\n"
+        "**`offset=0` ON ITS OWN BOUNDS NOTHING** — it is this route's default, so a "
+        "request sending only it is the unbounded read and carries no `pending_page`. "
+        "An earlier revision said \"send any of the three\", which was false for "
+        "exactly that case, and a client told to page will plausibly open with it. "
+        "And `complete` is RELATIVE TO THE FILTER: under a `run_id` it says that run "
+        "has nothing further, never that the record has — `record_total` is the "
+        "record's own count and is why it travels beside `total`."
     ),
     response_description="The open blocking questions, with the current `ETag`.",
     responses={

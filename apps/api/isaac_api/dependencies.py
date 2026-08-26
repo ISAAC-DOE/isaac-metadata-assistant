@@ -24,7 +24,7 @@ from isaac_records.export import transform
 
 from .workflow import CANONICAL_LABELS, derive_workflow
 from .record_attribution import without_server_stamp
-from .workspace import without_sibling_links
+from .workspace import ExportUnit, without_sibling_links
 
 _STALE_REASON = (
     "The record changed after export; the exported artifact no longer reflects "
@@ -43,7 +43,7 @@ def _canonical(obj: dict) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False)
 
 
-def artifact_state(exp, *, units=None) -> dict:
+def artifact_state(exp, *, units: list[ExportUnit] | None = None) -> dict:
     """Derived freshness of an experiment's exported official record.
 
     Returns ``{"state": "none"|"current"|"stale", "reason": str|None}``:
@@ -122,7 +122,7 @@ _INCOMPLETE_REASON = (
 )
 
 
-def _fan_out_artifact_state(exp, *, units=None) -> dict:
+def _fan_out_artifact_state(exp, *, units: list[ExportUnit] | None = None) -> dict:
     """:func:`artifact_state` for an experiment with runs. Same labels, N artifacts.
 
     Compares each run's WRITTEN record against what exporting that run now would
@@ -188,7 +188,7 @@ def reopened_steps(pre_steps: list[dict], post_steps: list[dict]) -> list[str]:
     ]
 
 
-def _post_workflow(post_exp, *, units=None) -> dict:
+def _post_workflow(post_exp, *, units: list[ExportUnit] | None = None) -> dict:
     """Derive the post-mutation workflow from the SAME signals ``_detail`` uses.
 
     ``exported`` is ``all_units_exported()`` (review item C5). It used to be
