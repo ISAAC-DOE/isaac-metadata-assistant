@@ -64,9 +64,11 @@ not re-derive it; extend it.
 
 **Branch** `fix/malformed-pending-entry-is-served-not-500`, head `724ce58`, base `1ad1f8f`.
 
-**Status when the session ended:** four of five CI checks **pass**; `browser accessibility and
-responsive baseline` was still **pending** (that job legitimately takes ~30 minutes). An
-independent review had been dispatched and **had not reported**.
+**Status:** four of five CI checks **pass**; the a11y job was still pending. **The independent
+review LANDED after this document was first written, and its verdict is DO NOT SHIP — 4 Critical,
+9 Important.** The full findings are posted as a comment on #179; the four Critical ones are
+summarised in §3.1 below. **Do not merge this PR.** The three gap fixes are sound and worth
+keeping; the work is to close the four false user-facing claims first.
 
 **What it does.** Closes the three residual gaps PR #177 named in its own tests: `GET /pending`
 returned **500** on a malformed *entry* (`pending: [7]`); a wrong-typed *item* in a top-level
@@ -75,19 +77,73 @@ wire shape to the pending route — `unavailable: true` + `unavailable_reason` n
 *shape*, never the value — and widens `ApiPendingItem.id/kind/question` to `| null` so every
 frontend consumer must decide rather than render `"Null"`.
 
+### 3.1 The review's four Critical findings — this is the work
+
+**C1 — the client tells the scientist a question "could not be read" that the server read and
+served, and discards the prose.** `serialize.py:236` returns `kind or "blocker"`, so
+`{"question": "q?"}` is served as `{id: "blocker", kind: null, question: "q?"}` with **no**
+`unavailable` flag — but `adapt.ts:470-471` requires `typeof kind === 'string'`, so the screen
+reports it unreadable. Pre-PR the same entry rendered the scientist's own question. It is the
+**exact inverse** of the defect `adapt.ts:461-465` claims to have avoided: that docstring protects
+`question` and leaves `kind` exposed.
+
+**C2 — one consumer still renders the literal `"null"`, which falsifies the PR's headline claim**
+that widening the three fields *"forced every consumer to handle it"*.
+`assistantComposer.ts:537-543` interpolates `question` under a comment asserting it is
+non-optional — **a premise the same commit deleted** at `types.ts:800`. `tsc -b` passes because
+template literals accept `null`, so the type widening could not have forced anything there.
+
+**C3 — "Every question reviewed this visit" is newly reachable over an unresolved blocker.**
+`GuidedCompletion.tsx:1358` gates on `!blocker && …`, and `blocker` now derives from `answerable`,
+so `!blocker` no longer means "every question". The comment at `:1351-1357` calls `notShown === 0`
+*"LOAD-BEARING"* **precisely because** `!blocker` accounts for every question; the filter
+invalidated that premise and the guard was not extended with `unreadable.length === 0`.
+
+**C4 — a published MCP contract is now false, not merely incomplete.** `mcp/tools.py:965` says
+*"The answer key is always `id`"* and there is now a class where `id` is `null`. `grep -c
+unavailable tools.py` → 0, four tools forward the raw body, and there is no `outputSchema`
+anywhere, so nothing rejects it. `tools.py:332-349` states the rule that makes this §1's business:
+the MCP description is *"a SEPARATE PUBLISHED CONTRACT, read by external agents that never see the
+OpenAPI document."*
+
+**Two Important findings I re-verified myself at `724ce58`**, so they are not relayed on trust:
+
+```
+block_evidence = {"series:s": 7}   ->  TypeError: 'int' object is not iterable   (GET /{id} = 500)
+series = [7]                       ->  findings: ['series[0]', 'qc']
+```
+
+**I5** puts a false claim inside a §13-protected file, and the falsity is a live 500:
+`draft_validator.py:306-310` justifies the guard's boundary by saying `block_evidence` values are
+type-checked by `_claim_covered` — which is `any(isinstance(e, dict) for e in (entries or []))`
+and raises on `7`. **I6** is #177's own defect returning one level down: `_container` returns `[7]`
+unchanged, so `if series:` is true and the qc gate produces *"a claim this module is in no position
+to make, derived from the very value it just refused"* — which is verbatim what #177's comment says
+it prevents. The new test uses `any(where == ...)`, so nothing pins the finding set.
+
+**Also named by the review and NOT in the PR's own residue list: six more read-path 500s** —
+`assets[0].sha256 = 7`, `assets[0].evidence = 7`, `implicit[0].evidence = 7`,
+`series[0].series_id = {}`, `descriptors_outputs[0].descriptors = [7]`, and the `block_evidence`
+value case above. Only two of the eight are covered by the "nested items still raise, by design"
+rationale; that argument is about the override probe and does not reach the other six.
+
+**And one that is worse than a 500: `{"kind":"qc","question":{"a":1}}` is *answerable*,** so the
+object reaches `<h2>{blocker.question}</h2>`. There is **no ErrorBoundary anywhere** in the
+codebase, so React blanks the whole page — and it falsifies `types.ts:826-832`'s claim that an
+unreadable entry *"cannot reach any of them by accident — it is a compile error"*.
+
 **Before merging, you must:**
 
-1. Confirm the a11y job passed. `gh pr checks 179`.
-2. **Re-dispatch the independent review.** It never reported. The brief that was used is in §7.1
-   below, verbatim enough to reuse. Do not merge a truth-path change on the strength of the
-   implementing agent's own report — that is the rule this repository has re-learned four times.
-3. Pay particular attention to the review item the brief calls out: **PR #177 made almost exactly
-   the same "PASS→FAIL only where it previously raised" claim and it was FALSE for
-   `block_evidence`.** Look for the same shape one level down (a list container or item position
-   reachable only conditionally). #179's disclosure may have the identical defect.
-4. If it lands, regenerate the snapshot: #179 touches six manifest-listed files
-   (`serialize.py`, `draft_validator.py`, `complete.py`, `adapt.ts`, `types.ts`,
-   `GuidedCompletion.tsx`).
+1. Close C1–C4, I5 and I6. Then re-review with a **fresh** agent — the one that produced these
+   findings has seen the code and is no longer independent of the fix.
+2. Confirm the a11y job passed. `gh pr checks 179`.
+3. Regenerate the snapshot: #179 touches six manifest-listed files (`serialize.py`,
+   `draft_validator.py`, `complete.py`, `adapt.ts`, `types.ts`, `GuidedCompletion.tsx`).
+4. **One non-issue, named so nobody chases it:** a parallel auditor reported
+   `test_the_entry_is_served_and_names_the_shape_that_was_found` failing. That was its own
+   mutation, applied in a shared worktree and reverted immediately after; the file passes 32/32
+   clean. Two agents sharing one checkout is the mistake, and it is the second time this session
+   that it produced a phantom result.
 
 **What #179 itself names as NOT fixed** — carry these forward, do not lose them:
 
@@ -334,8 +390,9 @@ Compare Runs (`RUN_COMPARE_MAX = 2` is a decision, not a deferral).
 
 ## 7. Operational notes that cost time to learn
 
-**7.1 Reviews.** Every merged PR this session got an independent Opus review from an agent that
-implemented none of it, **and every single review found something CI could not see.** #177's found
+**7.1 Reviews.** Every PR this session got an independent Opus review from an agent that
+implemented none of it, **and every single review found something CI could not see** — #179's
+found four false user-facing claims and stopped it from merging. #177's found
 that its own §13 disclosure was false. Run reviews in **isolated worktrees** — a read-only
 reviewer sharing a checkout with an implementer detected drift and briefly retracted its own
 arithmetic. Give the reviewer: the branch, the branch point, what the change claims, a
