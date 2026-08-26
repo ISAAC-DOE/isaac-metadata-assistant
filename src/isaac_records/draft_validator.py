@@ -190,12 +190,38 @@ def _check_claim(report: DraftReport, where: str, entries) -> None:
 #
 # EVERY TOP-LEVEL CONTAINER THIS MODULE WALKS, AND THE JSON TYPE IT MUST BE.
 #
-# This table exists because `validate_draft` used to walk all ten without asking, so a
-# stored draft whose `assets` was a string reached `asset.get("sha256")` and raised.
-# Measured over HTTP on `721238a`, on a record with nothing pending (which is what
-# lets `Experiment.export_ready` reach `draft_ok`): `GET /api/experiments/{id}` -> 500.
-# The exception class depended only on whether the wrong type happened to be iterable
-# (`TypeError`) or not (`AttributeError`); neither is an answer.
+# This table exists because `validate_draft` used to walk these containers without
+# asking, so a stored draft whose `assets` was a string reached `asset.get("sha256")`
+# and raised. Measured over HTTP on `721238a`, on a record with nothing pending (which
+# is what lets `Experiment.export_ready` reach `draft_ok`): `GET
+# /api/experiments/{id}` -> 500. The exception class depended only on whether the wrong
+# type happened to be iterable (`TypeError`) or not (`AttributeError`); neither is an
+# answer.
+#
+# NOT ALL TEN RAISED, AND THE DIFFERENCE MATTERS ENOUGH TO STATE IT HERE RATHER THAN
+# LET A READER ASSUME OTHERWISE. An earlier revision of this comment, and of three
+# sibling claims, said "all ten"; an independent review measured that false and it is
+# corrected rather than deleted, because the false version concealed the one verdict
+# this change moves. Measured on `721238a`, wrong-typed and truthy, one container at a
+# time on an otherwise-minimal draft:
+#
+#   EIGHT raised unconditionally:  meta, fields, attribution, assets,
+#                                  descriptors_outputs, implicit, series, links
+#   `qc`  raised only when a series was present, because that is the only thing that
+#         reads it — and the guard below is inside the SAME `if series:`, so `qc`
+#         behaves identically before and after, in both branches.
+#   `block_evidence` raised only when a series, a link, a contributor or the qc gate
+#         looked it up. A draft with NONE of those never reached `.get` and so
+#         VALIDATED CLEAN.
+#
+# So there is exactly one verdict flip: a draft storing a truthy non-object
+# `block_evidence` and carrying no series, no links and no contributors went from
+# PASS to FAIL, and `Experiment.draft_ok()` from True to False. It is a flip toward
+# refusal, on a document that could never have exported anyway — `export.build_sidecar`
+# does `(draft.get("block_evidence") or {}).items()`, so that draft raised
+# `AttributeError` out of `export_draft`. The change converts that third crash into a
+# clean refusal. Nothing that previously EXPORTED stops exporting; one thing that
+# previously reported PASS while being unexportable now reports why.
 #
 # THE RULE: a container of the wrong type is a FINDING, not an exception. This module
 # is asked "is this draft fit to become an official record, and if not, where is it

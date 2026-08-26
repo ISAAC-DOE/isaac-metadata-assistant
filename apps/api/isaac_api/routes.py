@@ -6325,13 +6325,21 @@ def _official_block_type(key: str) -> str | None:
 #: test harness re-raised:
 #:
 #: * ``TypeError`` — the validator iterates something a client made non-iterable.
-#:   ``{"evidence": 7}`` reaches ``[e for e in (env.get("evidence") or [])]``
-#:   (``draft_validator.py:94``) and raises ``'int' object is not iterable``; so does
-#:   ``{"contributors": 7}`` at ``enumerate(attribution.get("contributors") or [])``.
+#:   ``{"evidence": 7}`` reaches ``[e for e in (env.get("evidence") or [])]`` in
+#:   ``draft_validator._check_envelope`` and raises ``'int' object is not iterable``;
+#:   so does ``{"contributors": 7}`` at
+#:   ``enumerate(attribution.get("contributors") or [])``.
 #: * ``AttributeError`` — the validator calls ``.get`` on something a client made a
 #:   non-mapping. ``{"contributors": ["not-a-dict"]}`` reaches
-#:   ``name, role = c.get("name"), c.get("role")`` (``draft_validator.py:286``) and
-#:   raises ``'str' object has no attribute 'get'``.
+#:   ``name, role = c.get("name"), c.get("role")`` in the contributors loop and raises
+#:   ``'str' object has no attribute 'get'``.
+#:
+#: THE LINE NUMBERS THAT USED TO BE HERE (``draft_validator.py:94`` and ``:286``) ARE
+#: GONE ON PURPOSE. Both were already wrong before this comment was last edited — line
+#: 94 in that file was blank — and a wrong citation in a comment about a fail-closed
+#: branch is worse than none, because it reads as a checkable fact and is not one. The
+#: enclosing FUNCTION is named instead; it survives an edit above it, which a line
+#: number does not.
 #:
 #: Those two cover every case measured on this route, and the claim is exactly that —
 #: not a proof that no third exists. It is a bounded surface: the validator was never

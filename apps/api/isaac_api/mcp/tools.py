@@ -641,6 +641,14 @@ async def _inspect_evidence(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOu
 #: A parameter that is not here and whose route declares no bound is a REFUSAL at import,
 #: not an unbounded schema — see :func:`_query_schema`. That is deliberate: the failure
 #: this closes was silent, and the next one should not be.
+#:
+#: KEYED ON THE BARE PARAMETER NAME, WHICH IS A KNOWN LIMIT AND NOT AN OVERSIGHT. A
+#: future ``run_id`` query parameter on an UNRELATED route would silently inherit this
+#: 128 with nobody reviewing it. That is tolerable at one entry, where the bound is the
+#: same identifier's own path-parameter bound one field over; it stops being tolerable
+#: the moment a second name is added, and at that point this should be keyed on
+#: ``(operation, parameter)``. Recorded here rather than pre-built, because a two-level
+#: map with one entry is harder to read than the limit it removes.
 _DECLARED_STRING_BOUNDS: dict[str, int] = {"run_id": _RUN_ID["maxLength"]}
 
 

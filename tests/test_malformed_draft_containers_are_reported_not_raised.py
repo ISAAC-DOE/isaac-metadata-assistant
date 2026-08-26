@@ -9,10 +9,31 @@ reaches ``draft_ok``)::
     <workspace>/<id>/state.json  draft["assets"] = "not a list"
     GET /api/experiments/{id}   -> 500
 
-Ten containers behaved the same way — ``meta``, ``fields``, ``block_evidence``,
-``qc``, ``attribution``, ``assets``, ``descriptors_outputs``, ``implicit``,
-``series`` and ``links`` — with the exception class depending only on whether the
-wrong type happened to be iterable (``TypeError``) or not (``AttributeError``).
+NOT ALL TEN BEHAVED THE SAME WAY, and this docstring said they did until an
+independent review measured otherwise. The correction is recorded rather than
+silently applied, because the false version concealed the one verdict this change
+moves. Measured on ``721238a``, one truthy wrong-typed container at a time:
+
+* **Eight raised unconditionally** — ``meta``, ``fields``, ``attribution``,
+  ``assets``, ``descriptors_outputs``, ``implicit``, ``series``, ``links`` — with
+  the exception class depending only on whether the wrong type happened to be
+  iterable (``TypeError``) or not (``AttributeError``).
+* ``qc`` raised only when a series was present, because that is the only thing
+  that reads it. The new guard sits inside the SAME ``if series:``, so ``qc``
+  behaves identically before and after.
+* ``block_evidence`` raised only when a series, a link, a contributor or the qc
+  gate looked it up. **A draft with none of those validated CLEAN**, and now
+  reports a finding: ``ok`` True -> False, ``Experiment.draft_ok()`` True ->
+  False. That is the ONE verdict this change moves, and it moves toward refusal
+  on a document that could never have exported — ``export.build_sidecar`` does
+  ``(draft.get("block_evidence") or {}).items()``, so it raised out of
+  ``export_draft``. Nothing that previously EXPORTED stops exporting.
+
+``_base_draft`` below supplies a ``series``, which is what makes ``qc`` reachable
+and is justified for ``qc``. It ALSO makes ``block_evidence`` reachable, which is
+why this file's own table could not see the distinction above — the eleventh row
+looked like a confirmation. ``test_block_evidence_alone_is_the_one_verdict_this_moves``
+covers the case the table cannot.
 
 THE DESIGN. ``validate_draft``'s job is to answer "is this draft fit to become an
 official record, and if not, where is it wrong". For a container of the wrong type
@@ -194,3 +215,119 @@ def test_a_wrong_typed_ITEM_inside_a_well_formed_list_still_raises():
     """
     with pytest.raises(AttributeError):
         validate_draft({"assets": [7]})
+
+
+# --- the one verdict this change moves ---------------------------------------
+#
+# The parametrised table above supplies a `series`, which is what makes `qc`
+# reachable. It ALSO makes `block_evidence` reachable, so the table's
+# `block_evidence` row is a confirmation on a draft where that container really did
+# raise before. It cannot see the case where it did not, and that case is the only
+# draft in the repository whose VERDICT this change moves. These three tests cover it.
+
+
+def _pre_change_raised(draft: dict) -> bool:
+    """Did `validate_draft` raise on `721238a` for this draft?
+
+    Derived by REMOVING the guard, not by restating a conclusion: the guard's whole
+    effect is that a truthy wrong-typed container is replaced by an empty one, so the
+    pre-change path is the same walk with `draft.get(name) or expected()` in place of
+    `_container(...)`. This mirrors the file at the branch point closely enough to
+    answer the one question asked of it — did the walk reach a `.get` on the wrong
+    type — and it is written out rather than imported so that deleting the guard
+    cannot make it agree by construction.
+    """
+    attribution = draft.get("attribution")
+    contributors = attribution.get("contributors") if isinstance(attribution, dict) else None
+    block_evidence_readers = (
+        bool(draft.get("series")) or bool(draft.get("links")) or bool(contributors)
+    )
+    for name, expected in _TOP_LEVEL_CONTAINERS.items():
+        raw = draft.get(name)
+        if not raw or isinstance(raw, expected):
+            continue
+        if name == "qc" and not draft.get("series"):
+            continue  # only read behind `if series:`
+        if name == "block_evidence" and not block_evidence_readers:
+            continue  # only read by the series/links/contributors/qc lookups
+        return True
+    return False
+
+
+def test_block_evidence_alone_is_the_one_verdict_this_moves():
+    """A truthy non-object `block_evidence` with nothing that reads it: PASS -> FAIL.
+
+    This is the single draft-verdict change in the whole guard, and it was concealed
+    for one revision by a claim that "all ten containers raised". They did not.
+    """
+    draft = {
+        "meta": {"record_type": "measurement", "record_domain": "x", "source_type": "y"},
+        "fields": {},
+        "block_evidence": "free text an operator typed",
+    }
+    assert _pre_change_raised(draft) is False, "this draft did NOT raise before the guard"
+
+    report = validate_draft(draft)
+    assert report.ok is False
+    assert [where for where, _ in report.errors] == ["block_evidence"]
+
+
+def test_the_qc_container_behaves_identically_before_and_after():
+    """`qc` is read only behind `if series:`, and the guard is inside that same branch.
+
+    So a series-less draft with a wrong-typed `qc` validated clean before and validates
+    clean now — no finding is filed about the QC verdict of a spectrum that does not
+    exist. Stated as a test because the corrected disclosure claims it.
+    """
+    draft = {
+        "meta": {"record_type": "measurement", "record_domain": "x", "source_type": "y"},
+        "fields": {},
+        "qc": "not an object",
+    }
+    assert _pre_change_raised(draft) is False
+    report = validate_draft(draft)
+    assert report.ok is True, report.errors
+
+
+@pytest.mark.parametrize(
+    "name",
+    sorted(set(_TOP_LEVEL_CONTAINERS) - {"qc", "block_evidence"}),
+)
+def test_the_other_eight_containers_raised_unconditionally(name: str):
+    """The corrected disclosure says EIGHT raised with nothing else in the draft. Pinned.
+
+    If a future change makes one of these reachable only conditionally, this fails and
+    the disclosure is re-examined instead of being taken on trust.
+    """
+    expected = _TOP_LEVEL_CONTAINERS[name]
+    minimal = {
+        "meta": {"record_type": "measurement", "record_domain": "x", "source_type": "y"},
+        "fields": {},
+    }
+    for bad in _wrong_for(expected):
+        draft = {**minimal, name: bad}
+        assert _pre_change_raised(draft) is True, (name, bad)
+        report = validate_draft(draft)
+        assert report.ok is False
+        assert any(where == name for where, _ in report.errors), (name, bad, report.errors)
+
+
+def test_a_draft_that_could_never_have_exported_is_the_only_one_that_flips():
+    """The flip is toward refusal on an already-unexportable document — verify, don't assert.
+
+    `export.build_sidecar` does `(draft.get("block_evidence") or {}).items()`, so the
+    flipping draft raised `AttributeError` out of `export_draft` on `721238a`. It never
+    produced a record. The guard converts that third crash into a clean refusal, which
+    is why "nothing that previously exported stops exporting" holds.
+    """
+    import inspect
+
+    from isaac_records import export
+
+    source = inspect.getsource(export.build_sidecar)
+    assert 'draft.get("block_evidence") or {}' in source, (
+        "build_sidecar no longer normalises block_evidence with `or {}`; the claim that "
+        "the flipping draft was already unexportable must be re-measured"
+    )
+    with pytest.raises(AttributeError):
+        export.build_sidecar({"block_evidence": "free text"}, {})

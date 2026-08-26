@@ -413,11 +413,22 @@ def _max_length(query: object) -> int | None:
     what the caller does with an absent one is the caller's decision, and
     ``tools._query_schema`` refuses rather than publishes.
     """
-    found = getattr(query, "max_length", None)
-    for constraint in getattr(query, "metadata", None) or ():
-        if found is None:
-            found = getattr(constraint, "max_length", None)
-    return found if isinstance(found, int) else None
+    # AN ``int`` FROM EITHER SOURCE, NOT "THE FIRST NON-``None``". Those differ, and the
+    # difference is a live upgrade hazard rather than a hypothetical: on the installed
+    # FastAPI the bound lives ONLY in ``metadata`` as an ``annotated_types.MaxLen``, and
+    # ``Query(max_length=200)`` has no ``max_length`` attribute at all. A version that
+    # parks a SENTINEL there instead (``PydanticUndefined`` is the obvious candidate)
+    # would satisfy a ``found is None`` test, stop the metadata scan before it started,
+    # and report NO bound — which ``tools._query_schema`` then turns into a
+    # ``RuntimeError`` that takes ``create_app()`` down at import for every MCP
+    # deployment. Requiring an ``int`` makes a sentinel simply not a bound.
+    for candidate in (
+        getattr(query, "max_length", None),
+        *(getattr(c, "max_length", None) for c in getattr(query, "metadata", None) or ()),
+    ):
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            return candidate
+    return None
 
 
 def _run_list_query_names() -> frozenset[str]:

@@ -385,8 +385,16 @@ second seam, caught this time before shipping rather than after.
 ### What is STILL linear, and what was deliberately not done
 
 `GET /api/experiments/{id}` remains linear in time; §3A's component breakdown is unchanged
-in kind — the dominant term is the one composition the response genuinely needs. Nothing in
-`src/isaac_records/**` was touched. `_all_units_pass_dry_run` keeps its `units=None`
+in kind — the dominant term is the one composition the response genuinely needs.
+~~Nothing in `src/isaac_records/**` was touched.~~ **Struck 2026-08-25, and it was false of
+the commit that carried it.** The sentence is true of THIS SECTION — no performance seam
+reaches the truth core, `export.py` and `official.py` are unchanged, and no export verdict
+moves for a well-formed draft. But the commit that landed §3B also landed a wrong-typed
+top-level container guard in `src/isaac_records/draft_validator.py`, disclosed under §13 in
+`apps/api/tests/test_run_api.py::_DISCLOSED_TRUTH_PATH_CHANGES`. An unqualified "nothing was
+touched" in the one line of this artifact that speaks to truth-path exposure is exactly the
+claim a reader would rely on and not re-check, so it is corrected in place rather than
+scoped quietly. `_all_units_pass_dry_run` keeps its `units=None`
 fallback and every caller outside `routes._detail` — including
 `dependencies.build_invalidation`, which needs the verdict exactly once — is byte-for-byte
 the code it was. `GET /pending`'s unbounded default is untouched.

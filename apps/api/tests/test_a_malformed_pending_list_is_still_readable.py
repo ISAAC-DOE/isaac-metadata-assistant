@@ -273,3 +273,76 @@ def test_the_non_iterable_case_now_behaves_EXACTLY_like_the_malformed_entry_case
     assert statuses["bare"] == statuses["wrapped"], statuses
     # And the two that this change IS responsible for are green in both.
     assert statuses["bare"]["detail"] == 200 and statuses["bare"]["list"] == 200, statuses
+
+
+# --- the sibling defect, at the same layer -----------------------------------
+#
+# The `assets` half of this change was closed in `src/isaac_records/draft_validator.py`
+# and covered only by unit-level `validate_draft` tests. That leaves the HTTP symptom
+# — the one actually measured, and the one a scientist would report — pinned nowhere,
+# so a route-layer change could re-open the 500 with nothing failing. It is pinned
+# here, beside the `pending` case it is a sibling of, because both are the same
+# question: a persisted document the reader did not write must not take their record
+# away.
+
+
+def _persist_wrong_typed_container(exp_id: str, name: str, value: object) -> None:
+    """Same honest reproduction as :func:`_persist_malformed` — see its docstring.
+
+    A wrong-typed top-level container has no shipped producer either: block overrides
+    are type-gated by the vendored schema and run-level blocks are refused outright.
+    An operator edit of the persisted state, or a future importer, is the reachable
+    route to it.
+    """
+    exp = ws.load_experiment(exp_id)
+    assert exp is not None
+    exp.draft[name] = value
+    exp.save()
+
+
+@pytest.mark.parametrize(
+    "name, value",
+    [
+        ("assets", "not a list"),
+        ("descriptors_outputs", "not a list"),
+        ("attribution", "not an object"),
+        ("meta", 7),
+    ],
+    ids=["assets", "descriptors_outputs", "attribution", "meta"],
+)
+def test_a_wrong_typed_container_does_not_500_the_read(client: TestClient, name, value):
+    """Measured on ``721238a``: each of these returned **500** from ``GET
+    /api/experiments/{id}``, because ``Experiment.draft_ok`` reaches ``validate_draft``
+    and the walk hit ``.get`` on the wrong type. The listing survived (it does not
+    validate), which is the one way this family is less severe than the ``pending`` one.
+    """
+    exp_id = _create(client)
+    _persist_wrong_typed_container(exp_id, name, value)
+
+    detail = client.get(f"/api/experiments/{exp_id}")
+    assert detail.status_code == 200, detail.text
+    assert client.get("/api/experiments").status_code == 200
+
+
+def test_the_reader_is_not_told_a_malformed_container_is_export_ready(client: TestClient):
+    """THE REJECTED-ALTERNATIVE GUARD, again. Swallowing the wrong type without filing a
+    finding would return 200 and leave the export gate open on an unreadable document.
+    The record must stay refused, and the refusal must name the container."""
+    exp_id = _create(client)
+    _persist_wrong_typed_container(exp_id, "assets", "not a list")
+
+    exp = ws.load_experiment(exp_id)
+    assert exp is not None
+    assert exp.draft_ok() is False
+    assert exp.export_ready() is False
+
+    # AND THE REFUSAL NAMES THE CONTAINER. `draft_ok` is a boolean, so asserting on it
+    # alone would also pass if the draft were refused for some unrelated reason; the
+    # report is read directly from the module that produces it. (An earlier revision of
+    # this test guarded that assertion behind `hasattr(exp, "draft_report")` — a method
+    # that does not exist — so the assertion never ran at all. Kept as a note because a
+    # never-executed assertion reads exactly like a passing one.)
+    from isaac_records.draft_validator import validate_draft
+
+    report = validate_draft(exp.draft)
+    assert [where for where, _ in report.errors] == ["assets"], report.errors

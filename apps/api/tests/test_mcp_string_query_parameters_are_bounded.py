@@ -203,3 +203,43 @@ def client_over_http(tmp_path, monkeypatch):
     from conftest import tutorial_client
 
     return tutorial_client(create_app())
+
+
+# --- the reader itself, at the seam a FastAPI upgrade moves -------------------
+
+
+def test_the_bound_reader_takes_an_int_from_either_source_and_a_sentinel_from_neither():
+    """`_max_length` must find an ``int``, not "the first non-``None``".
+
+    RAISED BY INDEPENDENT REVIEW, and it is a live upgrade hazard rather than a
+    hypothetical. On the installed FastAPI the bound exists ONLY as an
+    ``annotated_types.MaxLen`` in ``Query.metadata``; ``Query(max_length=200)`` has no
+    ``max_length`` attribute at all, so the legacy branch is unreachable today and
+    nothing else exercises it. A version that parks a SENTINEL in that attribute would
+    have satisfied a ``found is None`` guard, stopped the metadata scan before it
+    started, reported NO bound, and — because `_query_schema` is fail-closed — taken
+    `create_app()` down at import for every MCP deployment. Requiring an ``int`` makes
+    a sentinel simply not a bound.
+
+    ``bool`` is excluded explicitly: ``isinstance(True, int)`` is ``True`` in Python,
+    and ``maxLength: 1`` published from a flag would be a silent refusal of every real
+    value rather than a loud one.
+    """
+    from isaac_api.mcp.policy import _max_length
+
+    class _Sentinel:
+        pass
+
+    def _q(**attrs):
+        return type("Q", (), attrs)()
+
+    def _meta(value):
+        return [type("MaxLen", (), {"max_length": value})()]
+
+    assert _max_length(_q(metadata=_meta(200))) == 200, "modern metadata form"
+    assert _max_length(_q(max_length=200, metadata=())) == 200, "legacy attribute form"
+    assert _max_length(_q(max_length=_Sentinel(), metadata=_meta(200))) == 200, (
+        "a sentinel in the attribute must not mask a real bound in the metadata"
+    )
+    assert _max_length(_q(max_length=True, metadata=())) is None, "a bool is not a bound"
+    assert _max_length(_q()) is None, "absent from both is absent"
