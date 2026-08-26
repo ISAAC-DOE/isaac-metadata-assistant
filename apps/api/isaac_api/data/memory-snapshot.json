@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "50842ee18a4060b21ed1be8362835f3602925e9e02faf825a8e7a8f0e7ce8362"
+        "sha256": "b27586d70b1045920fafc8c6c4eea754668080ef35875f09840b7a04bc7fa333"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "4173826aaec6d87f6c44fee556c5904a79bf7e050ba5fe90b8656a889bc28812"
+    "served_manifest_fingerprint": "3ac1b29e763952f7029d36947af71dd72de2bd193f4cc452d2bbc7b522db745d"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
