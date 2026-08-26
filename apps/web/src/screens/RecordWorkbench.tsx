@@ -9,6 +9,7 @@ import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
+import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
 import { RunsSection } from '../components/RunsSection';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
@@ -749,6 +750,18 @@ function LoadedWorkbench({
         reason — but rewriting four unrelated specs to keep a placement that was
         already the weaker of the two would have been collateral churn.
       */}
+      {/* THE RENAME, and it sits with the other two footer sections for their reason:
+          what a record IS, and what it is CALLED, are reference material about the
+          whole of it rather than the science the reader came for. Collapsed on
+          arrival like every section around it.
+
+          `onAgentRefresh` AND NOT `onManualRefresh`, deliberately. The second is
+          `bundle.reload`, which flips this screen back to its loading state — and
+          `RecordWorkbench` unmounts the entire loaded body while the fetch is not in
+          `data`, so a save would destroy this panel mid-announcement and drop focus
+          to `<body>`. The first is the silent refetch plus the record-session
+          recompute, which is what a version change actually calls for. */}
+      <RenameExperimentPanel detail={detail} onSaved={onAgentRefresh} />
       <RecordInfoPanel detail={detail} groups={bundle.groups} artifacts={bundle.artifacts} />
       <RecordLinksPanel artifacts={bundle.artifacts} />
         </div>
