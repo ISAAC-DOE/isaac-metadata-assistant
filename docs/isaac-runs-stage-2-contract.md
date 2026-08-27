@@ -236,3 +236,169 @@ database; touching any of them would be the change this project's rules most exp
 rollback statements, the prechecks and postchecks, and the same hard stop every packet carries:
 **the owner reviews the migration text and the operator applies it. No agent applies a migration to
 the hosted database, and no agent asks for a kubeconfig, a port-forward, or a Secret.**
+
+---
+
+# Stage 2b — the authoritative-read contract
+
+**Written 2026-08-27, at `main` = `7668bf8`, BEFORE the reader was implemented.** §§1–6 above
+are Stage 1 + Stage 2a and are unchanged. This section is the thing §4 said would need its own
+reviewed slice.
+
+## 7.1 What moves, precisely — and it is one function
+
+The application does **not** read experiments from PostgreSQL on the request path. Measured:
+`PostgresOrdinaryStore` exposes exactly four methods — `refuse_if_not_persistable` (`:1307`),
+`persist` (`:1336`), `hydrate` (`:1661`) and `stored_experiments` (`:1773`); `create` belongs to
+the `ExperimentRepository` Protocol (`:1878`), not to the store, and an earlier draft of this
+paragraph listed it here — corrected before merge, and recorded because an unchecked enumeration
+is the defect this programme has published four times. Of the four, `stored_experiments` is
+called only by `scripts/db_backfill_runs.py` and by tests, and `hydrate` has exactly two
+production callers: `workspace.py:4719` and the delegating wrapper at
+`experiment_repository.py:2182`. The database is a **write-through mirror**; the filesystem
+workspace is the working store.
+
+The one place a stored document becomes a live record is
+`PostgresOrdinaryStore.hydrate()` (`experiment_repository.py:1661`). It reads `Q_ALL_EXPERIMENTS`,
+and for each row whose workspace directory is missing it writes the row's `state` JSON to
+`<root>/<id>/experiment.json`. **The run list is the `runs` key inside that document**
+(`ws.Experiment.to_state()` → `"runs": [r.to_state() for r in self.sorted_runs()]`).
+
+> **Stage 2b is therefore exactly this: when hydrating an experiment whose projection is
+> COMPLETE, build the restored document's `runs` key from `isaac_runs` rows instead of from
+> `state["runs"]`. Nothing else moves.**
+
+That is also where a silent-data-loss bug would live, which is why it is stated this narrowly:
+get it wrong and a record is restored with no runs and the pass reports success.
+
+## 7.2 The eighteen questions, answered
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | What proves the projection is complete? | A row in `isaac_run_projection` whose `(experiment_rev, experiment_generation)` equal the document's. Nothing else. Not row presence, not `run_count`. |
+| 2 | Which version/completeness marker governs? | The **pair**, never `rev` alone — `generation` is what makes a delete-and-recreate distinguishable at `rev 0`. |
+| 3 | How is staleness detected? | The pair stops matching. Detected, never assumed absent (§2.2 invariant 2). |
+| 4 | How are legacy Experiments handled? | They are NEVER PROJECTED, so they read from the document, unchanged, forever — until a backfill or an ordinary save stamps them. **This is the normal path, not an error path.** |
+| 5 | How does backfill happen? | `scripts/db_backfill_runs.py --apply`, an operator action, unchanged by this slice. It is **not** a precondition for shipping the reader (§7.3). |
+| 6 | What does partial backfill mean? | Nothing special. Each experiment is independently COMPLETE or not. There is no global state to be half-way through. |
+| 7 | How is mismatch handled? | See §7.4. Fall back to the document, **and disclose**. Never silently pick a side. |
+| 8 | When may reads switch authority? | **Per experiment, the moment its projection is COMPLETE.** There is no global cutover instant. |
+| 9 | Is fallback allowed? | Yes — on STALE, NEVER PROJECTED, UNAVAILABLE, and on mismatch. Fallback is normal operation. |
+| 10 | When is fallback forbidden? | Never. There is no state in which the document may not be read. Removing that option is a **third** decision (§4) and is out of scope. |
+| 11 | How does CAS operate during transition? | **Unchanged.** The compare-and-swap is on `isaac_experiments.state`, which still carries `runs`. Stage 2b changes where the run list is *read from*, never what is *written*. `Q_UPSERT_EXPERIMENT` is not touched. |
+| 12 | How do revision snapshots behave? | Unchanged. `submission_store` snapshots the `ws.Experiment` in memory. If the reader is correct, that object is identical either way — which is the parity property §7.5 tests. |
+| 13 | How does Submit choose Run state? | It does not choose. It uses the hydrated `Experiment`, exactly as today. |
+| 14 | How does Run removal behave? | Unchanged. `POST .../runs/{id}/remove` mutates the document; `persist` re-diffs the rows and re-stamps in the same transaction, so the projection stays COMPLETE at the new pair. |
+| 15 | How does restart behave? | A restart is precisely when `hydrate()` runs. Authority is recomputed from the stamp, never remembered — there is no cached cutover bit to survive or fail to survive. |
+| 16 | How do concurrent writes during transition behave? | Unchanged. A writer that loses the CAS stamps nothing (§2.2 invariant 3), so a losing writer cannot leave a projection claiming completeness for a document it failed to write. |
+| 17 | Document and rows **intentionally** disagree? | **This state does not exist and must not be invented.** One transaction maintains both; there is no writer that updates one deliberately without the other. Any disagreement is unexpected — see the next row. |
+| 18 | Document and rows **unexpectedly** disagree? | §7.4. |
+
+## 7.3 Why the reader may ship before the backfill has run — and what that does NOT mean
+
+§3 says *"Stage 2b must not begin until the backfill has run in the target environment."* That
+sentence governs **when the cutover is complete**, and it is unchanged. It does not govern when
+the reader may be written, and conflating the two would make the work unstartable: the backfill
+is an operator action in an environment an agent may not connect to.
+
+The reader is **safe by construction on day one**, and the reason is mechanical rather than
+optimistic: every experiment that predates the projection is NEVER PROJECTED, and NEVER
+PROJECTED reads the document. So before the backfill, the reader is a no-op for exactly the
+records the backfill exists to cover.
+
+Two consequences, both deliberate:
+
+- **The cutover is per experiment and automatic.** An ordinary save stamps a COMPLETE
+  projection in the same transaction as the rows, so a record saved after `0005` is applied
+  reads from `isaac_runs` immediately — correctly, because its rows and its document were
+  written by the same transaction. The backfill is needed only for records that have not been
+  saved since.
+- **No surface may report the cutover as done on the strength of code alone** (§4, unchanged).
+  The honest statement remains the measured per-experiment state distribution, which is why
+  §7.6 requires it to be observable.
+
+**A kill switch is REQUIRED anyway** — prescriptive, like the rest of this section, which was
+written before the reader existed. `ISAAC_RUN_ROWS_AUTHORITATIVE=0` must force every experiment
+to NEVER-PROJECTED behaviour without a redeploy. It is defence for an operator, not a gate the
+design depends on; the default is on, because a design that needed a flag to be safe would not
+be safe.
+
+## 7.4 Mismatch — the one genuinely new rule
+
+A COMPLETE projection whose rows do not reproduce the document's `runs` is a **bug**, not a
+state. Per §2.2 invariant 4 the two agree *by construction of the upsert-and-delete pair*, so a
+disagreement means a writer, a migration, or an out-of-band statement broke that construction.
+
+The rule, and it is fail-closed in the direction that cannot lose a scientist's work:
+
+1. **Compare, always.** Even at COMPLETE, the reader compares the row set against
+   `state["runs"]` by run id. This costs one set comparison over data already in hand.
+2. **On disagreement, use the DOCUMENT.** It is the side the CAS protects, the side Submit and
+   export have always read, and the side a scientist's last write landed in. Preferring the rows
+   here would let a stale or corrupted projection delete runs.
+3. **Disclose it.** The mismatch is counted and surfaced (§7.6). A mismatch that only fell back
+   would be indistinguishable from a healthy fallback, and the whole point of the stamp is that
+   the two are distinguishable.
+4. **Never repair silently.** The reader does not rewrite rows to match, and does not re-stamp.
+   Repair is an ordinary save's job, or an operator's.
+
+**`run_count` is not used to detect this**, and that is deliberate: §2.2 invariant 4 records that
+it is `len(desired_ids)` — a writer's intention, not an observation — so treating a matching
+count as evidence of matching rows would be exactly the overclaim that invariant corrects.
+
+## 7.5 What the proof suite must establish
+
+Three phases, and a negative control that proves the suite can fail.
+
+**Before completeness** — legacy source stays safe; row absence cannot erase runs. A
+NEVER-PROJECTED experiment with three runs in its document hydrates with three runs while
+`isaac_runs` holds none.
+
+**During transition** — mismatches are visible and detected; writes cannot silently fork
+authority. A COMPLETE projection with a row deleted out of band hydrates from the document, is
+counted as a mismatch, and loses nothing.
+
+**After completeness** — reads come from the rows; restart preserves authority (recomputed, not
+remembered); CAS is unchanged.
+
+**Negative control** — revert the reader (or delete a projection row) and prove the suite turns
+RED. A parity suite that passes with the feature off is testing nothing, and this repository has
+a written instance of exactly that: `test_detail_route_composes_each_run_once.py::_disable_threading`
+silently failed to revert each newly-added seam until it was extended, **twice**.
+
+**Real PostgreSQL for the truth-path cases.** The opt-in guard is
+`ISAAC_RUN_REAL_ENGINE_PARITY=1` plus a loopback-only `PGHOST` check that **refuses `PGHOSTADDR`
+outright** (a measured 2026-08-24 finding: `PGHOST=localhost` with `PGHOSTADDR=<hosted>` defeated
+the loopback check). `ISAAC_REQUIRE_REAL_ENGINE_PARITY=1` turns an unreachable engine into a
+failure rather than a skip. Both must be honoured; neither may be weakened.
+
+**Ordering is a real trap.** `sorted_runs()` orders by `(ordinal, created_utc, id)` where
+`created_utc` is the **document** field. `isaac_runs_experiment_order_idx` is
+`(experiment_id, ordinal, run_id)` and its `created_utc` column is the **row** stamp. A reader
+that orders by the index reproduces a different sequence. The reproducing sort is
+`ORDER BY ordinal, state ->> 'created_utc', run_id` — 0002's own comment says so at
+`0002_runs.sql:223-232`.
+
+## 7.6 What must be observable, and what may never be claimed
+
+`/api/health`'s `database` block gains a per-experiment **state distribution** — counts of
+COMPLETE, STALE, NEVER PROJECTED, UNAVAILABLE, and MISMATCH from the most recent hydration pass.
+Counts only: no ids, no titles, no record content. It is an aggregate about *this application's
+own* tables, not about the production-derived `records` table, so gates **G2**/**G3** are
+untouched.
+
+Never claimable: that the cutover is complete, on the strength of code, or of a green suite, or
+of `0005` having been applied. The only honest statement is the measured distribution, and until
+an operator has applied `0005` and run the backfill, the expected distribution in the hosted
+deployment is **every experiment NEVER PROJECTED** — which is the reader working correctly, not
+the reader being off.
+
+## 7.7 Authorization basis
+
+`CLAUDE.md` §15's 2026-08-07 lift, its `isaac_run_projection` enumeration, and §4 of this
+contract, which reserved Stage 2b as *"a separate reviewed slice"* and pre-specified the
+four-state fallback this section implements. **Stage 2b adds no table, no column and no
+migration** — it reads two tables that already exist and that `0005`'s own header says the
+build that shipped it would not read. It writes nothing. `db_write.OWNED_TABLES` is unchanged,
+and no new enumeration is required, which is the first time in this programme that sentence has
+been true without a correction attached to it.
