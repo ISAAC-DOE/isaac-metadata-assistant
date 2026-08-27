@@ -361,7 +361,17 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # assistant?" is answered by the server rather than by a string compiled into
     # the browser bundle. It is not `POST /api/assistant/memory/query`, which is the
     # shipped deterministic Q&A and involves no provider.
-    assert checked == 69, f"expected 69 documented operations, found {checked}"
+    #
+    # 69 -> 70: `PATCH /api/experiments/{experiment_id}`, the rename. Until it
+    # existed, `title` was written exactly once — by `POST /api/experiments` — and no
+    # operation could change it, so with `0001_experiments` applied to the hosted
+    # database a typo made at create time was durable and permanent. It writes the
+    # title and nothing else; the free-text note the create operation accepts is
+    # deliberately NOT editable here, because it is stored at `source.description`,
+    # which `workspace.classify_experiment` also reads as a provenance marker.
+    #
+    # MEASURED from `create_app().openapi()`, not derived from the line above it.
+    assert checked == 70, f"expected 70 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -562,6 +572,14 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # has no `If-Match` to be malformed or omitted.
     ("/api/experiments", "post"): ["201", "401", "404", "409", "412", "422", "503"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422", "503"],
+    # The rename. `409` is the worked-example refusal, and it is the same code
+    # `POST /api/experiments` documents for the same reason: this operation acts on
+    # the ordinary workspace only. The 400/412/428 trio is the shared `If-Match`
+    # precondition block every record write carries.
+    (
+        "/api/experiments/{experiment_id}",
+        "patch",
+    ): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     # 409: `belongs_to_a_run`. An independent review found all three of these routes
     # emitting a live 409 that this table did not list — so the guard that exists to
     # pin the contract was certifying one that omitted a status a client will see.
@@ -770,6 +788,14 @@ EXPECTED_COMPONENT_SCHEMAS: dict[str, dict] = {
         "properties": ["description", "title"],
         "required": ["title"],
     },
+    # The rename. ONE property, and the shortness is again the assertion: `title`
+    # and nothing else. `description` is deliberately absent — the create operation
+    # accepts one and stores it at `source.description`, which
+    # `workspace.classify_experiment` also reads as the provenance marker deciding
+    # whether a record belongs to the managed demo dataset. `extra="forbid"` is what
+    # makes "a rename does not write a deletion classifier" a property of the
+    # contract rather than of the handler remembering not to read the key.
+    "RenameExperimentRequest": {"properties": ["title"], "required": ["title"]},
     "HTTPValidationError": {"properties": ["detail"], "required": []},
     "ValidationError": {
         "properties": ["ctx", "input", "loc", "msg", "type"],
