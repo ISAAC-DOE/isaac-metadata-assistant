@@ -1553,6 +1553,7 @@ export const demoResetPreviewClean = {
   canonical_count: 5,
   legacy_count: 2,
   ambiguous_count: 0,
+  malformed_ids: [] as string[],
   removed_count: 0,
   final_count: 5,
   canonical_ids: CANONICAL_RESET_IDS,
@@ -1582,6 +1583,31 @@ export const demoResetPreviewAmbiguous = {
   canonical_count: 5,
   legacy_count: 2,
   ambiguous_count: 1,
+  malformed_ids: [] as string[],
+  removed_count: 0,
+  final_count: 8,
+  canonical_ids: CANONICAL_RESET_IDS,
+  removable: LEGACY_REMOVABLE,
+  state_counts: RESET_STATE_COUNTS,
+  plan_digest: RESET_PLAN_DIGEST,
+  at_risk: RESET_AT_RISK_SOME,
+};
+
+/** Preview when a record's stored document is MALFORMED — refused (HTTP 200), and a
+ *  different refusal from ambiguity in the one way that matters to this screen: there
+ *  are ZERO ambiguous records, so a surface that names ambiguity here is telling the
+ *  operator to look for something that is not there. `final_count` equals
+ *  `previous_count` because the reset cannot be carried out — the server measures it
+ *  rather than projecting the canonical five. */
+export const demoResetPreviewMalformed = {
+  status: 'refused' as const,
+  mode: 'preview' as const,
+  refusal_reason: 'malformed_records_present' as const,
+  previous_count: 8,
+  canonical_count: 5,
+  legacy_count: 3,
+  ambiguous_count: 0,
+  malformed_ids: [CANONICAL_RESET_IDS[2]],
   removed_count: 0,
   final_count: 8,
   canonical_ids: CANONICAL_RESET_IDS,

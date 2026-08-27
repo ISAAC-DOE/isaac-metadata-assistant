@@ -5239,12 +5239,35 @@ def _load_all_experiments(session_id: str | None = None) -> list[Experiment]:
             state = json.loads((d / "experiment.json").read_text(encoding="utf-8"))
         except FileNotFoundError:
             continue  # dir removed by a concurrent reset between listing and read — benign
-        # Degrades exactly as ``list_experiments_with_hydration`` does. THE RESET'S OWN
-        # FAIL-CLOSED GATE IS UNCHANGED BY THAT: :func:`_current_plan_row` re-reads each
-        # document through the STRICT ``Experiment.from_state`` and still answers
+        # Degrades exactly as ``list_experiments_with_hydration`` does. ~~"THE RESET'S
+        # OWN FAIL-CLOSED GATE IS UNCHANGED BY THAT: :func:`_current_plan_row` re-reads
+        # each document through the STRICT ``Experiment.from_state`` and still answers
         # ``_UNREADABLE_ROW`` for one that will not hydrate, so a plan digest taken over
-        # a malformed document still refuses. This function decides only what the
-        # classification SEES; it does not decide whether a destructive reset proceeds.
+        # a malformed document still refuses."~~ **CORRECTED 2026-08-26, and it was
+        # wrong twice over.**
+        #
+        # (1) Every clause of it was true and the reassurance it added was false —
+        # which is the more useful thing to remember. The gate did still refuse, but
+        # only from INSIDE the mutation loop, one record at a time, so a malformed
+        # document was refused AFTER the reset had destroyed the managed-legacy records
+        # ahead of it, and refused with ``plan_digest_stale``, whose documented remedy
+        # is to re-preview and retry — which could never succeed.
+        #
+        # (2) It also described the WRONG MECHANISM, and the wrong one is the smaller
+        # half. Measured over the eight malformed documents
+        # ``test_one_malformed_document_does_not_take_down_the_list.py`` defines, SEVEN
+        # break the reset and only FOUR of those raise. ``draft``, ``source`` and
+        # ``answer_log`` holding a wrong-typed value hydrate strictly WITHOUT ERROR, to
+        # different content than this function's tolerant read produces — so no
+        # ``_UNREADABLE_ROW`` is involved, the rows simply differ, and the loop aborts
+        # just the same. A sentence written around ``_UNREADABLE_ROW`` could not have
+        # described those three at all.
+        #
+        # :func:`_malformed_experiment_ids` is the gate that makes the sentence true as
+        # it reads, and it asks the question that covers both mechanisms: do the two
+        # readers agree about this document? The whole scope is checked before anything
+        # is touched. This function still decides only what the classification SEES; it
+        # does not decide whether a destructive reset proceeds.
         out.append(_hydrate_experiment(state, session_id=session_id, experiment_id=d.name))
     return out
 
@@ -5517,9 +5540,38 @@ def _current_plan_row(experiment_id: str, session_id: str | None) -> list | None
     So a malformed record now classifies into a bucket and appears in the plan, and
     then this function answers ``_UNREADABLE_ROW`` for it, which compares unequal to
     the row the plan holds — and the reset REFUSES that record. That is the
-    fail-closed direction. It is also strictly better than the previous behaviour,
-    where the malformed document made the PREVIEW itself raise, so no reset could be
-    planned at all.
+    fail-closed direction.
+
+    ~~"It is also strictly better than the previous behaviour, where the malformed
+    document made the PREVIEW itself raise, so no reset could be planned at all."~~
+    **WITHDRAWN 2026-08-26 — it was false, and it was false in the direction this
+    module exists to prevent.** Fail-closed was the true half. "Strictly better" was
+    not established and did not hold: the previous behaviour answered ``500`` and
+    destroyed NOTHING, while this one, before the preflight was added, previewed as
+    ``refused: false`` with ``final_count: 5``, then destroyed the managed-legacy
+    records ahead of the malformed id, refused with a reason whose remedy could never
+    work, and left the scope permanently un-resettable — measured over HTTP, twice.
+    A refusal that arrives after a destructive act is not a better refusal than one
+    that arrives before it. The claim is withdrawn rather than reworded because the
+    lesson is the reasoning, not the sentence: **"fail-closed" is a statement about
+    the DECISION, and on a destructive path it says nothing about WHEN the decision is
+    taken. The two must be argued separately.** What replaced it is
+    :func:`_malformed_experiment_ids`, which takes the same decision before the
+    mutation loop; with that gate in place this function's refusal is the backstop for
+    a document that breaks mid-reset, and only for that.
+
+    **AND THIS FUNCTION IS NOT WHERE THE DEFECT LIVED, WHICH IS WHY IT IS BARELY
+    CHANGED.** Only four of the seven malformed documents that break the reset reach
+    ``_UNREADABLE_ROW`` at all; the other three hydrate strictly without error and
+    simply produce a DIFFERENT row than the tolerant reader does. Reasoning about this
+    sentinel is therefore reasoning about the minority of the cases, and a fix aimed
+    here would have covered four of seven while looking complete.
+
+    THE "recoverable in one further request" PROMISE BELOW DEPENDS ON THAT GATE, and
+    said so nowhere. Without it, a malformed document made the retry refuse at the same
+    place forever, so the operator was told to look again at a plan that had not
+    changed. With it, the further request re-previews, the preflight names the record,
+    and the operator gets a reason that is true.
 
     The invariant this docstring actually needs is narrower than the sentence it
     replaces, and it still holds: **for every document that hydrates, both paths
@@ -5554,15 +5606,133 @@ def _current_plan_row(experiment_id: str, session_id: str | None) -> list | None
         # read that failed for any other reason (FileNotFoundError, an OSError
         # subclass, is caught above and keeps its own meaning).
         return _UNREADABLE_ROW
+    return _strict_plan_row(state, session_id)
+
+
+def _strict_plan_row(state: object, session_id: str | None) -> list:
+    """ONE already-read document's plan row, through the STRICT reader.
+
+    Extracted from :func:`_current_plan_row` for the same reason
+    :func:`_plan_digest_row` was extracted from :func:`_plan_digest`: the reset
+    preflight needs this exact answer for a document it has ALREADY read, and a second
+    copy of the rule written beside it would be free to drift from the one the mutation
+    loop uses. There is one definition of "the strict row", and this is it.
+
+    ``from_state`` and ``_plan_digest_row`` are both inside the guard, which is how
+    :func:`_current_plan_row` has always had it: either step can fail on a document
+    this build cannot read, and the answer to both is the same. Deliberately an
+    explicit exception tuple rather than a bare ``except``: a fault of some OTHER kind
+    is a defect in this module and should still be loud, not swallowed into a refusal
+    that looks like an ordinary concurrent write.
+    """
     try:
         exp = Experiment.from_state(state, session_id=session_id)
         return _plan_digest_row(exp, classify_experiment(exp))
     except (KeyError, TypeError, ValueError, AttributeError):
-        # Rehydration failures for a state file this build cannot read. Deliberately
-        # an explicit tuple rather than a bare ``except``: a fault of some OTHER kind
-        # is a defect in this module and should still be loud, not swallowed into a
-        # refusal that looks like an ordinary concurrent write.
         return _UNREADABLE_ROW
+
+
+def _malformed_experiment_ids(
+    experiment_ids: list[str], session_id: str | None
+) -> list[str]:
+    """The ids whose stored document the reset's TWO readers do not agree about.
+
+    The reset PREFLIGHT. It exists because of a measured destructive defect, not for
+    tidiness. When the read path was made tolerant (:func:`_hydrate_experiment`) and
+    :func:`_current_plan_row` was deliberately left strict, the two came to disagree
+    about malformed documents — which was the intent — but nothing checked for that
+    disagreement BEFORE the mutation loop. So a scope holding one malformed document
+    classified cleanly, previewed as ``refused: false`` with ``final_count: 5``, and the
+    execute then removed managed-legacy records one at a time until it reached the
+    malformed id, aborted there with ``plan_digest_stale``, and left the scope
+    permanently un-resettable — every retry aborting at the same place, having destroyed
+    a little more the first time. Measured over HTTP with one canonical seed's ``title``
+    removed: ``execute`` #0 answered ``412`` with ``removed_count: 1`` (and
+    ``removed_count: 2`` of 3 in a three-legacy scope), #1 and #2 answered ``412`` with
+    ``removed_count: 0``, and the malformed canonical — the very record the reset exists
+    to restore — was never restored.
+
+    **THE PREDICATE IS READER DISAGREEMENT, NOT "the strict reader raised", and the
+    difference is three of the eight documents.** The first version of this function
+    asked only whether :func:`_current_plan_row` answered ``_UNREADABLE_ROW``. Measured
+    over the eight malformed documents that
+    ``test_one_malformed_document_does_not_take_down_the_list.py`` defines, **seven**
+    break the reset and only **four** of those seven raise. ``draft``, ``source`` and
+    ``answer_log`` holding a wrong-typed value all hydrate STRICTLY WITHOUT ERROR — and
+    to different content than the tolerant reader produces, so the rows differ, so the
+    mutation loop aborts on them exactly as it aborts on a raise. (``answer_log:
+    "nope"`` is the clearest: ``len(exp.answer_log or [])`` is ``4`` strictly, over the
+    string, and ``0`` tolerantly.) A predicate written around the raise would have left
+    three of the seven destroying records, and would have looked correct because the
+    four loudest cases passed.
+
+    So the question asked here is the one that actually decides the outcome: **do the
+    strict row and the tolerant row differ for these bytes?** The eighth document
+    (``created_utc`` holding an int) is not reported, and that is correct rather than a
+    gap — ``created_utc`` is not in the row, both readers produce the same row, and the
+    reset runs cleanly over it. The predicate reports the documents that BREAK the
+    reset, not the documents that are ill-formed.
+
+    **Both rows are built from ONE read.** Reading twice would put a window between them
+    in which a concurrent write could make the two readers disagree for a reason that
+    has nothing to do with the document, and this function would then call an ordinary
+    race "malformed" — a false and permanent-sounding reason for a transient condition.
+    From one ``state`` the disagreement is a property of the bytes alone. The residue is
+    named rather than hidden: :func:`_plan_digest_row` also stats the artifact pair, so
+    the two calls observe the filesystem microseconds apart, and a genuine concurrent
+    artifact write in that gap would be reported here. It refuses without mutating, so
+    the direction is fail-closed, and the operator's next preview answers cleanly.
+
+    It does **not** replace the per-record check in the mutation loop. A document that
+    breaks AFTER this preflight really has changed in the window, and
+    ``plan_digest_stale`` is the true reason for that one — the operator re-previews,
+    this preflight names the record, and that is the "recoverable in one further
+    request" the reason promises.
+
+    Every classified id is checked, not only the ids the reset would touch. A malformed
+    AMBIGUOUS record would already have refused the reset, but with a CLASSIFICATION
+    verdict about a document nothing could read straight: ``_hydrate_experiment`` falls
+    a non-dict ``source`` back to ``{}``, so the ambiguity verdict for such a document is
+    derived from normalised content. "I could not read it" claims less, and is the reason
+    that is true of it.
+
+    Cannot raise, and that is a safety property rather than tidiness — it runs with
+    ``_reset_lock`` held, and a raise here would answer the caller with a ``500``
+    carrying no refusal reason. A tolerant row that will not build is itself a
+    disagreement and is reported as one.
+
+    Sorted, so the reported ids are stable across calls and across filesystems.
+    """
+    out: list[str] = []
+    for experiment_id in experiment_ids:
+        state_path = scope_root(session_id) / experiment_id / "experiment.json"
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            # Absent, not malformed. A record removed since classification has no row
+            # at all, which the plan's existing machinery already compares correctly
+            # (``None`` means ABSENT and absent-then/absent-now compares equal).
+            continue
+        except (OSError, ValueError):
+            out.append(experiment_id)  # present, but the bytes will not parse
+            continue
+        strict_row = _strict_plan_row(state, session_id)
+        try:
+            tolerant = _hydrate_experiment(
+                state, session_id=session_id, experiment_id=experiment_id
+            )
+            tolerant_row = _plan_digest_row(tolerant, classify_experiment(tolerant))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            # Unreachable in practice — the classification pass above already built
+            # this same row for this same document, so it would have raised there
+            # first. Guarded anyway: the alternative is a 500 out of the destructive
+            # path, and "the tolerant reader could not build a row either" is a
+            # disagreement by any reading.
+            out.append(experiment_id)
+            continue
+        if strict_row != tolerant_row:
+            out.append(experiment_id)
+    return sorted(out)
 
 
 def _plan_digest(buckets: dict[str, list["Experiment"]]) -> str:
@@ -5664,9 +5834,14 @@ def reset_to_canonical_seed(
 ) -> dict:
     """Classify ONE TUTORIAL SESSION and (unless ``dry_run``) restore the canonical seed.
 
-    Refuses, MAKING NO CHANGES, if ANY ambiguous record exists, and — when
-    ``expected_plan_digest`` is supplied — if it does not match the digest of the
-    session as classified here.
+    Refuses, MAKING NO CHANGES, if ANY ambiguous record exists, if ANY record's stored
+    document is one the reset's strict and tolerant readers disagree about
+    (:func:`_malformed_experiment_ids`, reported as ``malformed_ids``), and — when
+    ``expected_plan_digest`` is supplied — if it does not match the digest of the session
+    as classified here. All three are decided BEFORE the mutation loop, which is the
+    property that matters: the disagreement was previously noticed only INSIDE the loop,
+    so it refused after destroying the records ahead of the malformed one, and every
+    retry aborted at the same place.
 
     It ALSO refuses, and this one is the exception to "no changes", if any single
     record changes between that classification and the moment this reset is about to
@@ -5757,14 +5932,33 @@ def reset_to_canonical_seed(
             for exp in exps
         }
         plan_digest = _plan_digest(buckets)
+        # THE PREFLIGHT. Asked here, over the whole scope, so that a document the
+        # reset's two readers disagree about refuses BEFORE the mutation loop rather
+        # than partway through it. See :func:`_malformed_experiment_ids` for the
+        # measured defect this closes, for why the predicate is disagreement rather
+        # than "the strict reader raised", and for why it does not replace the
+        # per-record check in the loop below.
+        malformed_ids = _malformed_experiment_ids(
+            [exp.id for exp in experiments], session_id
+        )
         at_risk = _at_risk_summary(canonical, legacy)
 
-        # Precondition BEFORE the ambiguity verdict: a client holding a stale plan
-        # must be told to look again, not handed a classification verdict about a
+        # Precondition BEFORE the classification verdicts: a client holding a stale
+        # plan must be told to look again, not handed a classification verdict about a
         # workspace it has never seen.
+        #
+        # MALFORMED BEFORE AMBIGUOUS, and the order is a truth claim rather than a
+        # preference. Both refuse without mutating, so the order decides only which
+        # reason the operator is given — and ``ambiguous`` is a verdict about a
+        # document's CONTENT, reached through ``_hydrate_experiment``'s fallbacks. For a
+        # document those fallbacks had to change, that verdict is derived from
+        # normalised content and claims more than this function knows. "I could not read
+        # this record straight" is the reason that is true of it.
         refusal: str | None = None
         if expected_plan_digest is not None and expected_plan_digest != plan_digest:
             refusal = "plan_digest_stale"
+        elif malformed_ids:
+            refusal = "malformed_records_present"
         elif ambiguous:
             refusal = "ambiguous_records_present"
         refused = refusal is not None
@@ -5778,9 +5972,14 @@ def reset_to_canonical_seed(
         #: the workspace-wide precondition? Tracked separately from ``mutated``
         #: because WHERE the refusal came from — not whether it managed to mutate
         #: anything first — is what decides whether the snapshot may still be
-        #: reported. A per-record abort is reached only when a write has ALREADY
-        #: landed in the window, so its snapshot is stale BY CONSTRUCTION, even when
-        #: it aborted on the very first id and removed nothing.
+        #: reported. ~~"A per-record abort is reached only when a write has ALREADY
+        #: landed in the window, so its snapshot is stale BY CONSTRUCTION, even when it
+        #: aborted on the very first id and removed nothing."~~ — **corrected
+        #: 2026-08-26; see the twin correction below, which is where the reasoning
+        #: is.** The branch's PREMISE is narrower than "a write landed": it is that the
+        #: record's row no longer matches the one classified above, which is true of a
+        #: write and true of a document that stopped being readable. Either way the
+        #: snapshot does not describe disk, which is the only thing this flag needs.
         row_abort = False
         if not dry_run and not refused:
             # C2 — the PER-RECORD precondition. Armed only when the caller supplied a
@@ -5858,9 +6057,24 @@ def reset_to_canonical_seed(
         #  * REFUSED WITHOUT MUTATING, by the PER-RECORD check (C2 — an abort on the
         #    very first id the reset would have touched): ``mutated`` is False, and
         #    that is exactly why this case needs naming rather than folding into the
-        #    first. A per-record abort is REACHABLE ONLY when a write has already
-        #    landed in the window, so the snapshot is known-stale BY CONSTRUCTION —
-        #    its count, its digest and its ``at_risk`` all predate that write. Echoing
+        #    first. ~~"A per-record abort is REACHABLE ONLY when a write has already
+        #    landed in the window, so the snapshot is known-stale BY CONSTRUCTION."~~
+        #    **CORRECTED 2026-08-26, and the correction matters because this sentence
+        #    was the ENTIRE justification for this branch reporting measured rather
+        #    than snapshot values.** The tolerant-read slice falsified its premise: a
+        #    document that the read path normalises but ``_current_plan_row`` will not
+        #    hydrate answers ``_UNREADABLE_ROW``, which matches no planned row, so this
+        #    branch was reachable with NO write anywhere — measured over HTTP, a
+        #    canonical seed with its ``title`` removed drove an execute to ``412``
+        #    after removing a managed-legacy record, then to ``412`` forever. The
+        #    preflight above now refuses that scope workspace-wide before the loop, so
+        #    the premise holds again — but it holds BECAUSE OF THAT GATE and not on
+        #    ``plan_digest``'s own authority, and the claim is written narrowly here so
+        #    a later slice cannot lean on the strong form. What this branch actually
+        #    needs, and what is true unconditionally: it is reached only when a
+        #    record's row differs from the one classified above, so the snapshot is
+        #    known NOT TO DESCRIBE DISK — its count, its digest and its ``at_risk``
+        #    all predate whatever moved that row. Echoing
         #    it here was measured returning the digest the client had just presented
         #    (so the documented "recoverable in one further request" was false, the
         #    retry 412'd again), an ``at_risk`` of zeroes over work that existed, and
@@ -5870,9 +6084,23 @@ def reset_to_canonical_seed(
         #  * PREVIEW that would proceed: nothing has happened yet, so this is
         #    necessarily a PROJECTION — and the projection is exactly the canonical
         #    five, because a non-refused reset removes the legacy set and rebuilds the
-        #    canonical set. Since R1 that projection is also GUARANTEED rather than
+        #    canonical set. ~~"Since R1 that projection is also GUARANTEED rather than
         #    hoped for: the ``plan_digest`` precondition means the execute cannot run
-        #    against a scope that gained a record after this preview.
+        #    against a scope that gained a record after this preview."~~ **CORRECTED
+        #    2026-08-26: the projection was NOT guaranteed, and the counter-example was
+        #    not a gained record.** A scope holding one document that hydrates
+        #    tolerantly but not strictly previewed ``refused: false`` with
+        #    ``final_count: 5`` — measured over HTTP — and the execute could not
+        #    produce 5 by any route: it aborted at that id and answered ``412``
+        #    forever. ``plan_digest`` never saw the problem, because the digest was
+        #    stable and correct; what was missing was a check that every classified
+        #    document can still be READ. The preflight above is that check, and it
+        #    refuses such a scope before this branch is reached. So the projection is
+        #    guaranteed again, and the honest statement of why is now TWO conditions
+        #    rather than one: ``plan_digest`` rules out a scope that changed after the
+        #    preview, and the preflight rules out a scope the execute cannot read. A
+        #    later slice that weakens either one puts this number back into the state
+        #    this correction records.
         #
         #    The projection is scope-correct only because ``session_id`` is REQUIRED.
         #    An unscoped form of this function would project five records into a
@@ -5908,6 +6136,14 @@ def reset_to_canonical_seed(
             "canonical_count": len(canonical),
             "legacy_count": len(legacy),
             "ambiguous_count": len(ambiguous),
+            # The ids whose stored document the reset's two readers disagree about,
+            # sorted. An ID ONLY: the reset surface already shows record ids
+            # (``canonical_ids``, and ``removable``'s ``id``), so naming one here
+            # discloses nothing new — but the TITLE of a malformed record would come
+            # from ``_hydrate_experiment``'s fallbacks rather than from the document,
+            # so it is deliberately not reported. Empty on every other outcome, which
+            # is what makes it safe for a client to branch on.
+            "malformed_ids": malformed_ids,
             "removed_count": removed,
             "final_count": final_count,
             # The canonical ids THIS SCOPE will hold once the reset has run — which is

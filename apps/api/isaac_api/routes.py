@@ -1784,16 +1784,25 @@ def demo_run(
 #: character for character or every reset fails closed with a 409.
 _RESET_CONFIRMATION = "RESET EXAMPLE WORKSPACE"
 
-#: Why the reset declined, when it declined. A TYPED reason, because the five
+#: Why the reset declined, when it declined. A TYPED reason, because the six
 #: refusals are not interchangeable and the UI must respond differently to each:
 #: re-preview (stale digest), send the digest (omitted), fix the phrase, or stop
-#: entirely (an ambiguous record, or the wrong runtime mode). ``None`` on success.
+#: entirely (an ambiguous record, a malformed record, or the wrong runtime mode).
+#: ``None`` on success.
+#:
+#: `malformed_records_present` was added 2026-08-26 and exists BECAUSE reusing
+#: `plan_digest_stale` for it was a measured defect, not merely imprecise: that reason
+#: means "re-preview and retry", and for a malformed document the retry could never
+#: succeed. A reason whose documented remedy does not work is worse than no reason.
+#: The response's `malformed_ids` names the records, so the operator has something to
+#: act on.
 DemoResetRefusal = Literal[
     "not_synthetic_only",
     "confirmation_required",
     "plan_digest_required",
     "plan_digest_stale",
     "ambiguous_records_present",
+    "malformed_records_present",
 ]
 
 
@@ -1824,6 +1833,12 @@ class DemoResetResponse(BaseModel):
     canonical_count: int
     legacy_count: int
     ambiguous_count: int
+    #: The ids whose stored document the reset's strict and tolerant readers do not
+    #: agree about, sorted; `[]` on every other outcome. An ID ONLY — never a title,
+    #: which for a malformed document comes from the read path's fallbacks rather than
+    #: from the document, and never a filesystem path. Ids are already on this response
+    #: (`canonical_ids`, `removable[].id`), so this discloses no new class of content.
+    malformed_ids: list[str]
     removed_count: int
     final_count: int
     canonical_ids: list[str]
@@ -1920,13 +1935,24 @@ def _reset_response(
         },
         409: {
             "description": (
-                "Refused without mutating, for one of three reasons, distinguished by "
+                "Refused without mutating, for one of four reasons, distinguished by "
                 "the typed reason in the body: no `X-Isaac-Tutorial-Session` header "
                 "was sent, so there is no worked-example session to reset "
                 "(`tutorial_scope_required`); the `execute` confirmation phrase was "
-                "missing or wrong (`confirmation_required`); or at least one record "
+                "missing or wrong (`confirmation_required`); at least one record "
                 "could not be classified as a record this session itself created "
-                "(`ambiguous_records_present`)."
+                "(`ambiguous_records_present`); or at least one record's stored "
+                "document is malformed, so the reset cannot prove what it would be "
+                "destroying (`malformed_records_present`, with the ids in "
+                "`malformed_ids`).\n\n"
+                "`malformed_records_present` is decided over the whole session BEFORE "
+                "anything is touched, and is deliberately NOT reported as `412`: a "
+                "`412` tells the client to preview again and retry, and for a "
+                "malformed record the retry can never succeed. A record is reported "
+                "when the tolerant reader this API answers reads from and the stricter "
+                "reader the reset uses to prove a record unchanged do not agree about "
+                "the stored document — which covers a document that will not parse at "
+                "all, and one that parses to different content under each."
             )
         },
         412: {
@@ -2053,12 +2079,19 @@ def demo_reset(
             data, mode=mode, status="refused", http=412, refusal_reason="plan_digest_stale"
         )
     if data["refused"]:
+        # The reason is FORWARDED, not asserted. It was hardcoded to
+        # `ambiguous_records_present` while that was the only refusal the workspace
+        # layer could reach here — which made this line a claim about the workspace's
+        # internals rather than a report of what it said, and the moment a second
+        # reason arrived (`malformed_records_present`, 2026-08-26) the route would
+        # have relabelled it as ambiguity: a false reason on the destructive path,
+        # produced by a route that never consulted the answer it was given.
         return _reset_response(
             data,
             mode=mode,
             status="refused",
             http=409,
-            refusal_reason="ambiguous_records_present",
+            refusal_reason=data["refusal"],
         )
     return _reset_response(data, mode=mode, status="ok", http=200)
 
