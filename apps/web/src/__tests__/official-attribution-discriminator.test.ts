@@ -20,9 +20,17 @@
  *
  * ── WHY `lib/experimentGraph.ts` SURVIVED EVERY SWEEP, WHICH IS THE LESSON ────
  *
- * It contains two NUL bytes (a `${kind}\0${source}\0${target}` dedup key), so `grep`
- * and `rg` WITHOUT `--text` drop every match in it and still exit 0. Three slices
- * searched for this defect and none of them could see the file. It carried the
+ * It contained two LITERAL NUL bytes (a `${kind}<NUL>${source}<NUL>${target}` dedup
+ * key), so `grep` and `rg` WITHOUT `--text` reported only "binary file matches" — no
+ * line, no content — and a sweep collecting `file:line` hits got nothing from it while
+ * exiting 0. Three slices searched for this defect and none of them could see the file.
+ *
+ * THE FILE NO LONGER CONTAINS THEM, and the past tense above is the correction rather
+ * than a rewrite of history. The dedup key now uses `\u0000` ESCAPES: the runtime
+ * string is byte-identical, so nothing about the graph changed, and the source is text
+ * again — the same remedy `components/RunCompare.tsx` records for the same reason.
+ * That is a fix at the source, and it does not weaken this file, which never depended
+ * on the NULs being there. It carried the
  * plainest form of it — a note reading "Validation here is a DRY RUN against the
  * official ISAAC schema", emitted on `validate.dry_run && errors.length > 0`, which
  * is exactly the ambiguous case — plus an unconditional producer string and an edge
@@ -337,10 +345,46 @@ describe('the derivation itself', () => {
   it('reads files the way a NUL byte cannot defeat', () => {
     const graph = FILES.find((f) => f.rel === 'lib/experimentGraph.ts');
     expect(graph, 'lib/experimentGraph.ts was not read at all').toBeTruthy();
-    // The premise of the whole file, asserted rather than asserted-about: this source
-    // really does contain NUL bytes, and this test really does see its content.
-    expect(readFileSync(join(SRC, 'lib/experimentGraph.ts')).includes(0)).toBe(true);
     expect(graph!.code).toContain('officialFindingSource');
+
+    /*
+     * ~~`expect(readFileSync(join(SRC, 'lib/experimentGraph.ts')).includes(0)).toBe(true)`~~
+     *
+     * STRUCK, AND REPLACED BY ITS OPPOSITE, because the premise was fixed rather than
+     * falsified. That line asserted this source really does contain NUL bytes — which
+     * was true, and was the defect: `rg` and `grep` reported "binary file matches" with
+     * no line and no content, so three consumer sweeps read this file as empty. The
+     * dedup key now uses `\u0000` escapes; the runtime string is byte-identical and
+     * nothing about the graph changed.
+     *
+     * Requiring the defect to persist so that a test about it can pass is the shape
+     * this repository has already corrected once (a guard that REQUIRED the false
+     * literal "No PostgreSQL has ever executed this file"). So the assertion is
+     * inverted rather than deleted: the source is text again, and it must stay text.
+     */
+    expect(
+      readFileSync(join(SRC, 'lib/experimentGraph.ts')).includes(0),
+      'lib/experimentGraph.ts carries a literal NUL again — write the separator as a \\u0000 escape',
+    ).toBe(false);
+
+    /*
+     * AND THE INVARIANT ITSELF, WHICH IS NOT ABOUT THAT ONE FILE. The header's claim is
+     * that this file reads BYTES and decodes them, and never shells out to a text
+     * search — so no future NUL, in any file, can hide a consumer from it. That is a
+     * property of THIS module's own source, and it is now checked as one rather than
+     * being demonstrated on a single file that has since been repaired.
+     */
+    const self = readFileSync(__filename).toString('utf8');
+    expect(self).toContain('readFileSync');
+    /*
+     * THE NAMES ARE ASSEMBLED, NOT WRITTEN — a self-scanning test that spells its own
+     * forbidden tokens in full always fails on itself. Each is split so the literal
+     * never appears in this source, which is the only way the check can be about the
+     * rest of the file rather than about this loop.
+     */
+    for (const shellOut of ['child_' + 'process', 'exec' + 'Sync', 'spawn' + 'Sync']) {
+      expect(self, `this scan must not shell out (${shellOut})`).not.toContain(shellOut);
+    }
   });
 
   it('scans more than a handful of files', () => {

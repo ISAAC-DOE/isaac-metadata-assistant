@@ -41,6 +41,17 @@
   --evgraph-evidence: #2f7d78;
   --evgraph-source: #8a6d4a;
   --evgraph-finding: #b23a30;
+
+  /* The five categories added when this view began reading the conflicts,
+     notes, provenance and asset routes. They stay inside the families already
+     declared above rather than opening a new hue: a conflict and a validation
+     finding are both "something is wrong here", a decision and a note are both
+     "somebody wrote this down". Nothing here borrows the Assistant's indigo. */
+  --evgraph-conflict: #a8452c;
+  --evgraph-candidate: #8c5a3c;
+  --evgraph-decision: #2f6b5a;
+  --evgraph-note: #6a5c8a;
+  --evgraph-assetref: #55606d;
 }
 
 /* --- head ---------------------------------------------------------------- */
@@ -117,7 +128,17 @@
 
 .evgraph-note[data-note='node_cap'],
 .evgraph-note[data-note='visible_cap'],
-.evgraph-note[data-note='unreadable_evidence'] {
+.evgraph-note[data-note='unreadable_evidence'],
+/* The four sub-fetch conditions carry the advisory tint for the same reason the
+   three above do: each one means the picture is INCOMPLETE or describes a
+   different read, and a reader who skims past it has been misled by an absence
+   rather than by a statement. `conflicts_record_scope`, `provenance_undescribed`
+   and `revision_state` deliberately do NOT — they describe what this view is,
+   not something that went wrong with it. */
+.evgraph-note[data-note='sub_fetch_unavailable'],
+.evgraph-note[data-note='sub_fetch_stale'],
+.evgraph-note[data-note='unreadable_entries'],
+.evgraph-note[data-note='source_bounded'] {
   border-color: var(--advisory-border);
   background: var(--advisory-bg);
   color: var(--advisory-text);
@@ -373,6 +394,29 @@
 [data-kind='evidence_source'].evgraph-row-swatch { background: var(--evgraph-source); }
 [data-kind='validation_finding'].evgraph-kind-swatch,
 [data-kind='validation_finding'].evgraph-row-swatch { background: var(--evgraph-finding); }
+[data-kind='conflict'].evgraph-kind-swatch,
+[data-kind='conflict'].evgraph-row-swatch { background: var(--evgraph-conflict); }
+[data-kind='conflict_decision'].evgraph-kind-swatch,
+[data-kind='conflict_decision'].evgraph-row-swatch { background: var(--evgraph-decision); }
+[data-kind='asset_reference'].evgraph-kind-swatch,
+[data-kind='asset_reference'].evgraph-row-swatch { background: var(--evgraph-assetref); }
+
+/* THE TWO UNACCEPTED KINDS ARE HOLLOW, not filled — the swatch reads as an
+   outline rather than as a solid category, which is the same signal the dashed
+   node outline gives on the canvas. It is deliberately NOT the only signal:
+   the details pane states what these are in words (`.evgraph-detail-unaccepted`),
+   because a border style is not something a screen reader can hear and colour
+   alone may not be perceived at all. */
+[data-kind='conflict_candidate'].evgraph-kind-swatch,
+[data-kind='conflict_candidate'].evgraph-row-swatch {
+  background: transparent;
+  border: 1.5px dashed var(--evgraph-candidate);
+}
+[data-kind='note'].evgraph-kind-swatch,
+[data-kind='note'].evgraph-row-swatch {
+  background: transparent;
+  border: 1.5px dashed var(--evgraph-note);
+}
 
 /* --- body: tree + canvas + detail ---------------------------------------- */
 
@@ -546,6 +590,14 @@
 }
 .evgraph-edge[data-edge-kind='supported_by'] { stroke: var(--evgraph-evidence); }
 .evgraph-edge[data-edge-kind='derived_from'] { stroke: var(--evgraph-source); }
+.evgraph-edge[data-edge-kind='has_conflict'] { stroke: var(--evgraph-conflict); }
+.evgraph-edge[data-edge-kind='competing_value'] {
+  stroke: var(--evgraph-candidate);
+  stroke-dasharray: 3 3;
+}
+.evgraph-edge[data-edge-kind='has_decision'] { stroke: var(--evgraph-decision); }
+.evgraph-edge[data-edge-kind='has_note'] { stroke: var(--evgraph-note); }
+.evgraph-edge[data-edge-kind='mapped_to'] { stroke: var(--evgraph-note); }
 
 /* --- nodes --------------------------------------------------------------- */
 
@@ -569,6 +621,23 @@
 .evgraph-node[data-kind='evidence_entry'] .evgraph-node-shape { stroke: var(--evgraph-evidence); fill: var(--verified-bg); }
 .evgraph-node[data-kind='evidence_source'] .evgraph-node-shape { stroke: var(--evgraph-source); fill: var(--confirmed-bg); }
 .evgraph-node[data-kind='validation_finding'] .evgraph-node-shape { stroke: var(--evgraph-finding); fill: var(--fail-bg); }
+.evgraph-node[data-kind='conflict'] .evgraph-node-shape { stroke: var(--evgraph-conflict); fill: var(--fail-bg); }
+.evgraph-node[data-kind='conflict_decision'] .evgraph-node-shape { stroke: var(--evgraph-decision); fill: var(--confirmed-bg); }
+.evgraph-node[data-kind='asset_reference'] .evgraph-node-shape { stroke: var(--evgraph-assetref); fill: var(--cover-bg); }
+
+/* UNACCEPTED: a dashed outline over the page ground, so the mark reads as an
+   open proposition rather than as a filled, settled thing. One of three signals
+   — see the swatch rule above for the other two. */
+.evgraph-node[data-kind='conflict_candidate'] .evgraph-node-shape {
+  stroke: var(--evgraph-candidate);
+  stroke-dasharray: 3 2.5;
+  fill: var(--screen-base);
+}
+.evgraph-node[data-kind='note'] .evgraph-node-shape {
+  stroke: var(--evgraph-note);
+  stroke-dasharray: 3 2.5;
+  fill: var(--screen-base);
+}
 
 .evgraph-node.anchor .evgraph-node-shape {
   stroke-width: 2.6;
@@ -645,6 +714,29 @@
   font-weight: 650;
   color: var(--text-heading);
   overflow-wrap: anywhere;
+}
+
+/*
+ * WHAT THIS IS, BEFORE WHAT IT SAYS.
+ *
+ * A competing answer and a captured note both look like content. This is the
+ * statement that they are not, placed above the value rather than among the rows
+ * of the definition list below it — a reader who takes two seconds to reach the
+ * fourth row has already read the value as the record's.
+ *
+ * Advisory tint rather than the quiet cover tint the disclosure uses: this is
+ * about the ONE thing selected, and it is a correction of what the eye just did.
+ * The full 1px border is the system-wide no-vertical-rail rule.
+ */
+.evgraph-detail-unaccepted {
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-token);
+  background: var(--advisory-bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--advisory-text);
 }
 
 .evgraph-detail-producer {

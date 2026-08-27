@@ -545,7 +545,20 @@ class Builder {
   addEdge(edge: ExperimentGraphEdge): void {
     if (edge.source === edge.target) return;
     if (!this.nodes.has(edge.source) || !this.nodes.has(edge.target)) return;
-    const key = `${edge.kind} ${edge.source} ${edge.target}`;
+    /*
+     * `\u0000` is a separator no node id or edge kind can contain, so two
+     * different edges cannot collapse to the same dedup key.
+     *
+     * WRITTEN AS AN ESCAPE, NEVER AS A LITERAL NUL BYTE. The runtime string is
+     * identical, but a raw NUL in the SOURCE makes the whole file binary to
+     * `grep` and `rg` — they drop every hit in it and still exit 0. This file
+     * carried two literal NULs and was exactly that invisible; a consumer sweep
+     * of this repository has already come back clean for that reason. See
+     * `components/RunCompare.tsx`, which records the same rule for the same
+     * reason. A file that silently opts out of every future secret, ULID or
+     * vocabulary sweep is not an acceptable price for a separator.
+     */
+    const key = `${edge.kind}\u0000${edge.source}\u0000${edge.target}`;
     if (this.edgeSeen.has(key)) return;
     this.edgeSeen.add(key);
     this.edges.push(edge);

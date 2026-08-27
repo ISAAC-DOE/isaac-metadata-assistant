@@ -459,8 +459,8 @@ describe('semantic zoom — an aggregate line says it is one, perceivably', () =
         );
       }
       // Both endpoint files are named.
-      expect(described).toContain((line.getAttribute('data-edge-from') ?? '').split(' ')[0]);
-      expect(described).toContain((line.getAttribute('data-edge-to') ?? '').split(' ')[0]);
+      expect(described).toContain((line.getAttribute('data-edge-from') ?? '').split('\u0000')[0]);
+      expect(described).toContain((line.getAttribute('data-edge-to') ?? '').split('\u0000')[0]);
     }
   });
 

@@ -799,6 +799,57 @@ export interface ListNotesQuery {
   state?: ApiNoteState;
 }
 
+/*
+ * --- `GET /experiments/{id}/provenance` ---------------------------------------
+ *
+ * DECLARED HERE RATHER THAN IN `types.ts`, and that is a deviation worth naming
+ * rather than hiding: every other wire shape in this client lives in `types.ts`,
+ * and these two belong there. They are here because the slice that added
+ * `getProvenance` was scoped to files that did not include `types.ts`. Move them
+ * when a slice that owns that file next passes through; nothing depends on their
+ * location, and `lib/evidenceGraph.ts` imports them `import type`, so they are
+ * erased at compile time and create no runtime dependency on this module.
+ *
+ * TWO INDEPENDENT DIMENSIONS, NEVER COMBINED INTO ONE VALUE — the same contract
+ * `lib/provenance.ts` mirrors for surfaces that already hold an evidence entry.
+ * `origins` is a SET, because one address can carry several citations of different
+ * kinds; `primary_origin` picks one of them by a fixed documented order.
+ */
+export interface ApiProvenanceEntry {
+  /** A record address, or `note:<id>` for a note that has no schema home yet. */
+  address: string;
+  /** Every origin the stored citations at this address produce. Never empty. */
+  origins: string[];
+  /** One of `origins`, chosen by the server's fixed precedence — never array order. */
+  primary_origin: string;
+  /** What, if anything, ESTABLISHES the value. Not a validity or export verdict. */
+  review_state: string;
+  evidence_count: number;
+  /** True when the RUN does not hold the value and resolves the record's. */
+  inherited: boolean;
+  /** Ids of notes a person MAPPED here. Never a machine's proposal. */
+  note_refs: string[];
+  /** The stored payload was only PARTLY readable, so it is not plain support. */
+  unavailable: boolean;
+  /** One of `conflict_resolution.RESOLUTION_STATES`, derived on read. */
+  resolution_state: string;
+}
+
+export interface ApiProvenanceResponse {
+  experiment_id: string;
+  /** The run described, or `null` for the record itself. */
+  run_id: string | null;
+  record_rev: number;
+  entries: ApiProvenanceEntry[];
+  /**
+   * WHAT IS NOT LISTED, COUNTED RATHER THAN OMITTED. A reviewed note is not an
+   * entry, because none of the review states is true of it.
+   */
+  notes_summary: { total: number; listed_as_unmapped: number };
+  /** Blocks that carry no value envelope to describe. Owned up to, not passed over. */
+  blocks_not_described: string[];
+}
+
 export const api = {
   health(): Promise<ApiHealth> {
     return getJson<ApiHealth>('/health');
@@ -1803,6 +1854,35 @@ export const api = {
     return getJson<ApiEvidenceClassification>(
       `/experiments/${enc(id)}/evidence-classification`,
     );
+  },
+
+  /**
+   * `GET /experiments/{id}/provenance` — the two provenance dimensions.
+   *
+   * READ-ONLY, AND DERIVED ON EVERY CALL. Nothing about it is stored: the server
+   * recomputes both dimensions from content the record already carries, so there
+   * is no projection here that can go stale, only a read that can be old — which
+   * is what `record_rev` on the response is for.
+   *
+   * `runId` NARROWS the subject to one run rather than the record, exactly as
+   * `listConflicts` does, and an id this record has no run for is a 404 naming the
+   * run rather than a silent fall back to the record's answer.
+   *
+   * THE PATH LITERAL STAYS WHOLE and the query is appended separately, exactly as
+   * `listNotes`, `listConflicts` and `listRuns` do — `backend-down-state.test.tsx`
+   * reads this module's source to derive its per-record sub-read inventory, and
+   * interpolating the query into the literal makes the scanner see `provenance?…`
+   * as a sub-resource with no product word.
+   */
+  getProvenance(
+    id: string,
+    query: { runId?: string } = {},
+  ): Promise<ApiProvenanceResponse> {
+    const params = new URLSearchParams();
+    if (query.runId !== undefined) params.set('run', query.runId);
+    const path = `/experiments/${enc(id)}/provenance`;
+    const search = params.toString();
+    return getJson<ApiProvenanceResponse>(search === '' ? path : `${path}?${search}`);
   },
 
   // S5 — one cited source fixture, read-only (governance-gated to the allowlist).

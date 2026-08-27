@@ -32,6 +32,7 @@ import {
   type EvidenceViewId,
 } from '../lib/routes';
 import type { AgentContext } from '../lib/assistantAgent';
+import type { EvidenceSubFetch } from '../lib/evidenceGraph';
 import {
   citedLinesForEntry,
   evidenceEntriesToTrail,
@@ -551,6 +552,70 @@ function EvidenceViewTabs({
  * at), with the second passed to the panel so the freshness sentence can name
  * both when they differ. See `EvidenceGraphPanelProps.runsVersion`.
  */
+/**
+ * ONE ADDITIVE SUB-READ, re-read silently whenever the record's version moves.
+ *
+ * The same two-part mechanism the runs use, factored so five call sites cannot
+ * drift into five slightly different versions of it:
+ *
+ *  · `reloadSilent` on a version change rather than `deps`, because `deps` flips
+ *    `useFetch` to `loading` and would blank what the graph is drawing every time
+ *    the record moves;
+ *  · the ref advances BEFORE the request, which is exactly right for its one job
+ *    (fire once per distinct version, never loop) and is NOT a statement about
+ *    what has landed.
+ *
+ * Nothing here claims the re-read succeeded, and nothing needs to: every one of
+ * these responses publishes the version it was read at, and `buildEvidenceGraph`
+ * compares that published token with the record's. So a failed silent re-read
+ * leaves the old data on screen carrying its own old token, and the graph says
+ * which version it describes rather than inheriting the claim of a request that
+ * did not land. That is why this hook does not surface `refreshFailed`: the
+ * stale-version note is derived from the data itself and cannot be out of step
+ * with it.
+ */
+function useVersionedSubFetch<T>(
+  fetcher: () => Promise<T>,
+  deps: readonly unknown[],
+  version: string,
+): EvidenceSubFetch<T> {
+  const fetched = useFetch(fetcher, deps);
+  const requested = useRef(version);
+  const reloadSilent = fetched.reloadSilent;
+  useEffect(() => {
+    if (requested.current === version) return;
+    requested.current = version;
+    reloadSilent();
+  }, [version, reloadSilent]);
+
+  const status = fetched.status;
+  const payload = fetched.status === 'data' ? fetched.data : undefined;
+  const message = fetched.status === 'error' ? fetched.error.message : undefined;
+
+  /*
+   * THE RETURNED STATE IS MEMOISED, AND THAT IS NOT A TIDINESS CHOICE.
+   *
+   * `EvidenceGraphPanel` puts all five of these in the dependency array of the
+   * `useMemo` that calls `buildEvidenceGraph` — which runs `computeLayout`, an
+   * O(n²) force-directed relaxation over `LAYOUT_ITERATIONS = 240` passes,
+   * synchronously on the render path, for a graph bounded at
+   * `MAX_EVIDENCE_GRAPH_NODES = 1200`. Returning a fresh object literal on every
+   * render made that dependency array change on every render, so the memo held
+   * nothing: every re-render of this screen — the record-session poll adopting a
+   * change, the agent-context read landing, each of these five reads resolving —
+   * rebuilt the whole graph and re-ran the layout. Memoised on `status` plus the
+   * payload identity, the object is stable exactly as long as the underlying fetch
+   * state is, which is what the panel's memo was written to assume.
+   *
+   * Nothing about WHAT is returned changes; only its identity is now stable.
+   */
+  return useMemo<EvidenceSubFetch<T>>(() => {
+    if (status === 'loading') return { state: 'loading' };
+    if (status === 'error') return { state: 'error', message: message ?? '' };
+    return { state: 'data', data: payload as T };
+  }, [status, payload, message]);
+}
+
 function EvidenceGraphView({
   id,
   detail,
@@ -575,6 +640,33 @@ function EvidenceGraphView({
   const runs = useFetch(() => api.listRuns(id, { limit: RUNS_PAGE_SIZE }), [id]);
   const currentScope = useWorkspaceScope();
   const readInScope = useRef(currentScope);
+
+  /*
+   * The four routes the graph reads BESIDES this screen's bundle — conflicts,
+   * notes, provenance, assets, and the revision history it reads for one
+   * question. Every one of them is already served to a record screen; no backend
+   * route was added for the graph, and `api.ts` records that policy.
+   *
+   * THEY DO NOT BLOCK, and that is the point of `useVersionedSubFetch`. The runs
+   * above are structural — without them there is no graph — so their loading and
+   * error states own the branch below. These five are ADDITIVE: a graph without
+   * its conflicts is still the graph, and turning one failed sub-read into a
+   * whole-screen `BackendDown` would trade a note for a blank page. So each state
+   * is handed to the panel, which draws what it has and says what it does not.
+   *
+   * `reloadSilent` on a version change, NOT the deps array, for the reason the
+   * runs use it: deps would flip `useFetch` to `loading`, and the graph would
+   * drop every conflict and note it is drawing each time the record moves.
+   */
+  const conflicts = useVersionedSubFetch(() => api.listConflicts(id), [id], detail.version);
+  const notes = useVersionedSubFetch(() => api.listNotes(id), [id], detail.version);
+  const provenance = useVersionedSubFetch(() => api.getProvenance(id), [id], detail.version);
+  const assets = useVersionedSubFetch(() => api.listAssets(id), [id], detail.version);
+  const revisions = useVersionedSubFetch(
+    () => api.getRevisionHistory(id),
+    [id],
+    detail.version,
+  );
 
   /*
    * TWO VERSIONS, AND CONFLATING THEM IS WHAT LEFT THE HEADLINE FALSE.
@@ -670,6 +762,11 @@ function EvidenceGraphView({
         focusRunId={focusRunId}
         onFocusRun={onFocusRun}
         onRequestRunCheck={(runId) => api.checkRun(id, runId)}
+        conflicts={conflicts}
+        notes={notes}
+        provenance={provenance}
+        assets={assets}
+        revisions={revisions}
       />
     </>
   );

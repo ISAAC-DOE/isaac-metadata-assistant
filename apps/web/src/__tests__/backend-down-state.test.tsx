@@ -704,14 +704,24 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // `SUB_READ_SUFFIXES` and `SUB_READ_SEGMENTS` do not move at all: there is no
     // sub-path below the record, because a rename PATCHes the record itself. Read out
     // of this test's own failure output (`- 40 / + 41`), not derived by adding a delta.
-    expect(experimentPathLiterals.length).toBe(41);
+    // 41 -> 42: `getProvenance`, the read of where each value came from. It writes
+    // one new `/experiments/${…}/provenance` literal and appends its optional `?run=`
+    // query as a separate string, exactly as `listConflicts`, `listNotes` and
+    // `listRuns` do — so this array gains one, `SUB_READ_SUFFIXES` gains `provenance`,
+    // and `SUB_READ_SEGMENTS` gains it too, because `provenance` is a first segment
+    // nothing else used and therefore needed its own product word in
+    // `SUB_RESOURCE_LABELS`. Read out of this test's own failure output
+    // (`- 41 / + 42`), not derived by adding a delta.
+    expect(experimentPathLiterals.length).toBe(42);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this
     // inventory is over every per-record path literal in `api.ts` — which is the point:
     // a new sub-path that no down-state classification covers is exactly what this
     // guard exists to surface.
-    expect(SUB_READ_SUFFIXES).toHaveLength(33);
+    // 33 -> 34: `provenance`, the read of where each value came from. Read out of
+    // this test's own failure output (`have a length of 33 but got 34`), not derived.
+    expect(SUB_READ_SUFFIXES).toHaveLength(34);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -733,7 +743,12 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // about how easily it recurs. The run-removal merge then hit the SAME class a
     // third time in four separate counters — and 19 is where this one lands, because
     // run removal adds a suffix under `runs`, a first segment that already existed.
-    expect(SUB_READ_SEGMENTS).toHaveLength(20);
+    // 20 -> 21: `provenance`. It is a FIRST segment nothing else used, so unlike
+    // `runs/SEG-1/remove` above it moves this counter as well as the suffix one, and
+    // it needed its own product word in `SUB_RESOURCE_LABELS` ("where the values came
+    // from") — the guard below this line is what surfaced that. Read out of this
+    // test's own failure output (`have a length of 20 but got 21`), not derived.
+    expect(SUB_READ_SEGMENTS).toHaveLength(21);
     // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
     // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
     // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`

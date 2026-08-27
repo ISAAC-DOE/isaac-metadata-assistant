@@ -230,6 +230,10 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   ingestion: 'a CSV comparison',
   notes: 'the unmapped notes',
   pending: 'the missing fields',
+  // `GET .../provenance`. "Where the values came from" is the product's phrasing
+  // for this axis (`lib/provenance.ts`: origin and review state, two separate
+  // answers); `provenance` is the wire segment and never reaches a scientist.
+  provenance: 'where the values came from',
   // The three `/revisions…` reads. "Submission history" is the product's word for
   // them; `revisions` is the wire segment and never reaches a scientist.
   revisions: 'the submission history',
