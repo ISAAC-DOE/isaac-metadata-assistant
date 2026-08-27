@@ -73,6 +73,62 @@ from isaac_api.routes import _MAX_ECHOED_BODY_DEPTH, _MAX_VALUE_DEPTH
 CRASHING_DEPTH = 1200
 
 
+def _json_parser_ceiling() -> int:
+    """The deepest array THIS interpreter's own JSON parser will accept.
+
+    ── WHY THIS IS MEASURED AND NOT A CONSTANT ─────────────────────────────────
+    THE DEPTH AT WHICH THE PARSER GIVES UP IS INTERPRETER-DEPENDENT, and this
+    file's first version pinned ``422`` at depth 1000 and 2000 because that is
+    what happened on the host it was written on. It passed there and FAILED in
+    CI, which is how the split was found rather than reasoned about:
+
+        python 3.12 (dev host)  depth 2000 -> our guard sees it -> 422
+        python 3.11 (CI)        depth 1000 -> the JSON parser refuses first -> 400
+                                              {"detail": "There was an error parsing the body"}
+
+    Both are correct behaviour and BOTH ARE TYPED REFUSALS. Which one a caller
+    gets simply depends on who sees the body first: the framework's parser, or
+    the depth guard behind it. Neither is a ``500``, which is the defect this
+    file exists to keep closed.
+
+    So the invariant is split in two rather than fudged into one loose assertion:
+    BELOW this ceiling the guard is reachable and ``422`` is pinned exactly, with
+    its redacted ``input`` and its legible ``loc``/``msg``; AT and ABOVE it, only
+    the property that survives everywhere is asserted — a typed 4xx, never a
+    ``500``, and the record untouched. Asserting ``in (400, 422)`` everywhere
+    would have been the fudge, and it would have stopped proving that the guard
+    runs at all.
+    """
+    import json
+
+    low, high = 1, 100_000
+    while low < high:
+        mid = (low + high + 1) // 2
+        try:
+            json.loads("[" * mid + "1" + "]" * mid)
+        except RecursionError:
+            high = mid - 1
+        else:
+            low = mid
+    return low
+
+
+#: Measured once per session. Everything below is reachable by our own guard.
+JSON_PARSER_CEILING = _json_parser_ceiling()
+
+#: Depths the guard demonstrably sees on THIS interpreter. The two large values
+#: are clamped so the parametrisation cannot silently become a test of the JSON
+#: parser instead of a test of the guard.
+GUARDED_DEPTHS = sorted(
+    {d for d in (50, 200, 500, 1000, 2000) if d < JSON_PARSER_CEILING}
+    | {min(500, max(50, JSON_PARSER_CEILING - 50))}
+)
+
+#: The deepest body the guard itself still sees here — used wherever a test needs
+#: "deep enough that only the guard can have refused it".
+GUARDED_DEEPEST = GUARDED_DEPTHS[-1]
+
+
 @pytest.fixture()
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
@@ -125,9 +181,15 @@ def _post_raw(client, experiment_id: str, raw_body: str):
 # =============================================================================
 
 
-@pytest.mark.parametrize("depth", [50, 200, 500, 1000, 2000])
+@pytest.mark.parametrize("depth", GUARDED_DEPTHS)
 def test_a_deeply_nested_body_is_a_TYPED_422_and_never_a_500(client, depth):
-    """The headline. ``1000`` and ``2000`` returned an unhandled ``500`` before."""
+    """The headline. ``1000`` and ``2000`` returned an unhandled ``500`` before.
+
+    Parametrised over :data:`GUARDED_DEPTHS` — the depths this interpreter's JSON
+    parser hands through to us — so the assertion stays ``422`` exactly rather
+    than being loosened to accommodate an environment where the parser refuses
+    first. The deeper case has its own test below.
+    """
     experiment_id = f"01DEEPBODY{depth:016d}"[:26]
     _make(experiment_id)
 
@@ -148,7 +210,7 @@ def test_the_refusal_still_says_WHICH_validator_refused_and_WHERE(client):
     """
     _make("01DEEPBODYLEGIBLE000000001")
 
-    body = _post_raw(client, "01DEEPBODYLEGIBLE000000001", _nested(CRASHING_DEPTH)).json()
+    body = _post_raw(client, "01DEEPBODYLEGIBLE000000001", _nested(GUARDED_DEEPEST)).json()
 
     (error,) = body["detail"]
     assert error["type"] == "dict_type"
@@ -165,7 +227,7 @@ def test_the_omitted_marker_does_not_leak_the_value_it_replaces(client):
     _make("01DEEPBODYNOLEAK0000000001")
 
     text = _post_raw(
-        client, "01DEEPBODYNOLEAK0000000001", "[" * CRASHING_DEPTH + '"SENTINEL"' + "]" * CRASHING_DEPTH
+        client, "01DEEPBODYNOLEAK0000000001", "[" * GUARDED_DEEPEST + '"SENTINEL"' + "]" * GUARDED_DEEPEST
     ).text
 
     assert "SENTINEL" not in text
@@ -186,7 +248,7 @@ def test_a_deep_value_inside_a_VALID_body_never_reached_this_path_at_all(client)
     response = _post_raw(
         client,
         "01DEEPBODYVALID00000000001",
-        '{"confirmed_by_user": true, "deep": %s}' % _nested(CRASHING_DEPTH),
+        '{"confirmed_by_user": true, "deep": %s}' % _nested(GUARDED_DEEPEST),
     )
 
     assert response.status_code == 200, response.text
@@ -211,8 +273,14 @@ def test_the_crash_was_APPLICATION_WIDE_and_so_is_the_fix(client):
         "/api/experiments/01DEEPBODYWIDE000000000001/runs",
     ):
         response = client.post(path, content=deep, headers=headers)
+        # NEVER a 500 — that is the whole defect, and it holds on every
+        # interpreter. WHICH typed refusal arrives depends on whether this
+        # interpreter's JSON parser or our depth guard saw the body first
+        # (see `_json_parser_ceiling`), so both are accepted HERE and only
+        # here; the exact-422 claim is made at guarded depths above.
         assert response.status_code != 500, (path, response.text)
-        assert response.status_code == 422, (path, response.status_code)
+        assert response.status_code in (400, 422), (path, response.status_code)
+        assert "detail" in response.json(), (path, response.text)
 
 
 # =============================================================================

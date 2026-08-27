@@ -162,9 +162,36 @@ def _is_loopback_element(element: str) -> bool:
     if element.lower() in _LOOPBACK_NAMES:
         return True
     try:
-        return ipaddress.ip_address(element.strip("[]")).is_loopback
+        parsed = ipaddress.ip_address(element.strip("[]"))
     except ValueError:
         return False
+    # AN IPv4-MAPPED IPv6 LITERAL IS REFUSED OUTRIGHT, AND NOT BECAUSE IT IS
+    # DANGEROUS — BECAUSE `is_loopback` DISAGREES ABOUT IT BETWEEN INTERPRETERS.
+    #
+    # Measured, same string, same call:
+    #
+    #     python 3.12 (this host)  ipaddress.ip_address('::ffff:127.0.0.1').is_loopback -> False
+    #     python 3.11 (CI)         same expression                                      -> True
+    #
+    # The test below pins `False`; it passed locally and FAILED in CI on the first run
+    # after this predicate was rewritten, which is how the split was found rather than
+    # reasoned about.
+    #
+    # Either answer is defensible for a NETWORK question — `::ffff:127.0.0.1` really
+    # does reach the loopback interface. Neither is defensible for a GATE. This one
+    # decides whether a suite that WRITES may open a connection, and a gate whose
+    # verdict depends on the interpreter is not a gate: it would admit on one machine
+    # what it refuses on another, silently, with no diagnostic naming the difference.
+    #
+    # So the second spelling is refused on both, explicitly, rather than left to
+    # `is_loopback`. That is the same narrowing this function already applies to a
+    # unix-socket directory, for the same reason and with the same cost: a stated skip
+    # for anyone who genuinely names their local engine that way, which is a visible
+    # non-result, and in CI not even that, because `REQUIRE_ENV` turns an unreachable
+    # engine into a failure.
+    if getattr(parsed, "ipv4_mapped", None) is not None:
+        return False
+    return parsed.is_loopback
 
 
 def _is_loopback_target(host: str) -> bool:
@@ -609,8 +636,10 @@ def test_connect_psycopg2_pins_hostaddr_so_libpq_cannot_fill_it_from_the_environ
 # is that every statement the WRITE PATH issues is a module-level constant in the
 # application, and adding a test-only read to `experiment_repository` would put a
 # statement in the application that the application never issues — and would make
-# the "no read path names isaac_runs" enumeration in
-# `test_0002_is_now_written_by_the_write_path_and_by_nothing_else` false. They
+# the enumeration in
+# `test_0002_is_now_written_by_the_write_path_and_by_nothing_else` false. (That
+# enumeration used to be "no read path names isaac_runs"; since Stage 2b it names
+# the two reads that may, so a test-only third would still break it.) They
 # still go through `policy.check(...)`, so they are bound by the same owned-table
 # and forbidden-verb rules as everything else.
 
@@ -1127,11 +1156,19 @@ def test_parity_survives_a_pod_restart_and_hydration_leaves_the_rows_untouched(
     """A POD RESTART, AND THE PROPERTY IS "UNCHANGED", NOT "REBUILT".
 
     ``PostgresOrdinaryStore.hydrate`` reads ``isaac_experiments`` and writes FILES.
-    It does not read ``isaac_runs`` and it does not write it — nothing in this
-    application reads that table at all. So the honest property after a restart is
-    that the rows are exactly as the last save left them, byte for byte including
-    the server-side stamps, and that the restored working copy still agrees with
-    them.
+    ~~"It does not read ``isaac_runs`` and it does not write it — nothing in this
+    application reads that table at all."~~ — **THE FIRST AND THIRD CLAUSES ARE NO
+    LONGER TRUE, and they are corrected in place rather than reworded because this
+    paragraph is the one a reader consults for what hydration does.** Stage 2b
+    added a READ: when an experiment's projection is COMPLETE, hydration builds the
+    restored document's ``runs`` from these rows (contract §7.1). It still does not
+    WRITE the table, which is the clause this test was ever defending.
+
+    So the honest property after a restart is UNCHANGED and is now load-bearing in
+    a second way: the rows are exactly as the last save left them, byte for byte
+    including the server-side stamps, and the restored working copy still agrees
+    with them. A reader that "helpfully" repaired a row would break the first half;
+    a reader that dropped or reordered a run would break the second.
 
     Asserting "the rows were rebuilt" would be asserting a behaviour that does not
     exist and should not; asserting "unchanged" is what actually protects the
@@ -1687,10 +1724,13 @@ def test_this_suite_reads_isaac_runs_only_as_a_test_and_never_on_the_apps_behalf
     more broadly than the code supports.** It is NOT a reachability proof. It would
     not notice a run-row read added to ``routes.py``, ``db_provider.py`` or any
     other module; it would not notice a constant that is not prefixed ``Q_``; and it
-    would not notice inline SQL built at a call site. The property that no read path
-    names ``isaac_runs`` does hold today, but the evidence for it is
-    ``test_0002_is_now_written_by_the_write_path_and_by_nothing_else``'s enumeration
-    plus review — not this assertion.
+    would not notice inline SQL built at a call site. ~~"The property that no read
+    path names ``isaac_runs`` does hold today"~~ — **CORRECTED FOR STAGE 2b: it does
+    not, and it is not supposed to.** Exactly two reads name the table, they are
+    enumerated by name in
+    ``test_0002_is_now_written_by_the_write_path_and_by_nothing_else``, and the
+    evidence for "no THIRD one" is that enumeration plus review — not this
+    assertion, whose limits above are unchanged.
 
     The one thing this test contributes to that wider property is negative: it
     confirms the five statements here are not part of the application's constant
@@ -1898,15 +1938,22 @@ def test_parity_removing_a_run_over_HTTP_removes_its_row_and_moves_no_other(work
     assert_parity(ws.load_experiment(exp.id))
 
 
-def test_FAKE_hydration_issues_no_statement_naming_isaac_runs(workspace):
+def test_FAKE_hydration_WRITES_no_statement_naming_isaac_runs(workspace):
     """FAKE-DRIVER. The read half of the pod-restart property, stated as a shape.
 
-    ``hydrate`` reads ``isaac_experiments`` and writes FILES. The real-engine test
-    asserts the OUTCOME — not one run row moved. This asserts the MECHANISM: the
-    hydration transaction issues exactly one application statement and it is
-    ``Q_ALL_EXPERIMENTS``. A future hydration that started "helpfully" rebuilding
-    run rows would be a second, unowned write path into the shadow table, and it
-    would fail here.
+    AMENDED FOR STAGE 2b, AND THE OLD NAME IS RECORDED. It was
+    ``test_FAKE_hydration_issues_no_statement_naming_isaac_runs`` and it asserted
+    that hydration issues NO statement naming ``isaac_runs`` at all. That property
+    was true while the table was write-only and it is not the property this test
+    was defending: its own docstring says what it is for — *"a future hydration
+    that started 'helpfully' REBUILDING run rows would be a second, unowned WRITE
+    PATH into the shadow table"*. Stage 2b adds a READ, deliberately and under
+    review; it adds no writer. So the assertion is narrowed from "no statement" to
+    "no WRITE statement", which is the guarantee that was ever at stake, and the
+    reads it now permits are enumerated by name rather than by count.
+
+    The real-engine test asserts the OUTCOME — not one run row moved. This asserts
+    the MECHANISM.
     """
     exp = _bare_experiment()
     exp.add_run(label="a run the row set already holds")
@@ -1917,6 +1964,14 @@ def test_FAKE_hydration_issues_no_statement_naming_isaac_runs(workspace):
     before = dict(conn.runs)
     store.hydrate()
 
-    assert [sql for sql, _ in conn.statements if "isaac_runs" in sql.lower()] == []
-    assert repo.Q_RUN_TABLE_PRESENT not in [sql for sql, _ in conn.statements]
+    naming = [sql for sql, _ in conn.statements if "isaac_runs" in sql.lower()]
+    # ENUMERATED, NOT COUNTED. Every statement hydration issues against either run
+    # table is a `SELECT`; a fifth statement, or a non-SELECT, fails here.
+    assert set(naming) <= {
+        repo.Q_RUN_ROWS_FOR_EXPERIMENTS,
+        repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS,
+    }, naming
+    for sql in naming:
+        assert sql.lower().startswith("select"), sql
     assert conn.runs == before, "hydration wrote to the shadow table"
+    assert conn.projections == {}, "hydration stamped a completeness claim"
