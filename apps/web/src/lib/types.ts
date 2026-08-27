@@ -926,6 +926,44 @@ export interface ApiValidateResult {
   errors: { path: string; message: string }[];
   schema: string; // "ISAAC v1.05"
   dry_run: boolean; // true until the record is exported
+  /**
+   * DID THE OFFICIAL VALIDATOR PRODUCE THE `errors` BESIDE THIS VERDICT?
+   *
+   * The discriminator four surfaces needed and none of them had. `dry_run` does not
+   * answer it — a dry-run PASS does require `validate_official`, a dry-run FAILURE may
+   * never have reached it, because `export.py` returns `official_report=None` on the
+   * two paths that precede it (a failed no-guessing report, and ISAAC's own
+   * anchored-pattern exactness gate, whose findings it folds into `draft_report`). So
+   * `errors` carried three kinds of finding under one key and `schema: "ISAAC v1.05"`
+   * was stamped over all of them.
+   *
+   * `false` IS NOT A VERDICT. It says the vendored schema did not speak — never that
+   * it refused. `CLAUDE.md` §1 makes that schema not ours to speak for, and §12: "no
+   * surface may report an exactness refusal as an official-schema error."
+   *
+   * DO NOT READ THIS FIELD DIRECTLY. `lib/officialAttribution.ts` is the one place it
+   * is read, and `__tests__/official-attribution-discriminator.test.ts` fails if a
+   * second file reads it. Fixing this defect surface-by-surface has already recurred
+   * four times; one decision point is the fix.
+   *
+   * Optional because a response predating the field carries neither it nor any
+   * substitute — `officialFindingSource` degrades to the old ordering rule and, where
+   * even that is silent, answers `unnamed` rather than guessing.
+   */
+  official_validator_ran?: boolean;
+  /**
+   * NO VERDICT COULD BE PRODUCED, AT THE TOP LEVEL — the same claim the `runs[]`
+   * entries below have always carried, and it was MISSING here while the route
+   * returned the state it describes.
+   *
+   * `post_validate` returns it on two branches: an exported record whose written
+   * artifact cannot be read, and an exception during the dry run. Both were
+   * previously indistinguishable from "one of ISAAC's own gates refused", because
+   * `official_validator_ran: false` is true of a gate refusal too. Absent on every
+   * verdict that IS a verdict; `ok` stays `false` either way, so this explains a
+   * refusal without softening it. Read through `officialFindingSource`.
+   */
+  unavailable?: boolean;
   // Present ONLY for a record whose runs each export their own official record:
   // one verdict per run, because a flat list of N records' errors is not
   // addressable. `ok` above is true only when every entry is; `dry_run` above is
@@ -937,6 +975,10 @@ export interface ApiValidateResult {
     ok: boolean;
     errors: { path: string; message: string }[];
     dry_run: boolean;
+    // PER UNIT, describing THAT unit's `errors`. The top-level flag above describes
+    // the top-level `errors`, which are the FIRST FAILING unit's — so for a specific
+    // run's findings, read the run's own flag. See `lib/officialAttribution.ts`.
+    official_validator_ran?: boolean;
     // NO VERDICT COULD BE PRODUCED — set by `_validate_unit` on the two branches
     // whose own comment reads "no verdict, not a schema violation": an unreadable
     // written artifact, and an exception during the dry run. `ok` is `false` on
@@ -2198,6 +2240,31 @@ export interface ApiRunCheckVerdict {
    * REASON legible without turning a non-verdict into a pass.
    */
   unavailable?: boolean;
+  /**
+   * DID THE OFFICIAL VALIDATOR PRODUCE THE `errors` BESIDE THIS VERDICT?
+   *
+   * The discriminator four surfaces needed and none of them had. `dry_run` does not
+   * answer it — a dry-run PASS does require `validate_official`, a dry-run FAILURE may
+   * never have reached it, because `export.py` returns `official_report=None` on the
+   * two paths that precede it (a failed no-guessing report, and ISAAC's own
+   * anchored-pattern exactness gate, whose findings it folds into `draft_report`). So
+   * `errors` carried three kinds of finding under one key and `schema: "ISAAC v1.05"`
+   * was stamped over all of them.
+   *
+   * `false` IS NOT A VERDICT. It says the vendored schema did not speak — never that
+   * it refused. `CLAUDE.md` §1 makes that schema not ours to speak for, and §12: "no
+   * surface may report an exactness refusal as an official-schema error."
+   *
+   * DO NOT READ THIS FIELD DIRECTLY. `lib/officialAttribution.ts` is the one place it
+   * is read, and `__tests__/official-attribution-discriminator.test.ts` fails if a
+   * second file reads it. Fixing this defect surface-by-surface has already recurred
+   * four times; one decision point is the fix.
+   *
+   * Optional because a response predating the field carries neither it nor any
+   * substitute — `officialFindingSource` degrades to the old ordering rule and, where
+   * even that is silent, answers `unnamed` rather than guessing.
+   */
+  official_validator_ran?: boolean;
 }
 
 export interface ApiRunCheckResponse {
@@ -2297,6 +2364,12 @@ export interface ApiNotesResponse {
   unreadable_entries: number;
   /** The server's own list of paths a note may be mapped to. Never transcribed here. */
   mappable_field_paths: string[];
+  /**
+   * The SUBSET of those a write route in this build accepts a value at — 18 of the 25
+   * at time of writing. Mapping and entering a value are different acts, and a client
+   * that tells a person to do the second must know whether it is possible.
+   */
+  value_writable_field_paths: string[];
   sources: string[];
   /** The EXPERIMENT's version token — the `If-Match` every note write must carry. */
   experiment_version: string;

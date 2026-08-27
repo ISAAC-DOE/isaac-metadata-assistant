@@ -115,6 +115,12 @@ import {
   type ViewportBox,
 } from './experimentGraph';
 import { runFindingText } from './runFields';
+import {
+  OFFICIAL_SOURCE_LABEL,
+  officialCheckedDocument,
+  officialDocumentDetailValue,
+  officialFindingSource,
+} from './officialAttribution';
 import { inheritedTally } from './runOverrides';
 import { titleCase } from './labels';
 
@@ -1417,42 +1423,40 @@ const FINDING_ORIGINS = [
 ] as const;
 
 /**
- * What a finding of one channel is CALLED — the official channel's answer depends
- * on `dry_run`, which is why this is a function and not a table entry.
+ * What a finding of one channel is CALLED. The `official` channel's answer is the
+ * shared module's, not this file's.
  *
- * The rule is `ValidateReview`'s (`ValidateReview.tsx:86-105`), and the wording is
- * its wording: name the official ISAAC schema as the source ONLY where `dry_run ===
- * false`, and otherwise say that the source is not named. An ABSENT flag names
- * neither the source nor the document, because an absent flag is evidence of
- * neither. The `blocker` and `draft` labels are unchanged: those two channels have
- * one producer each and never carried a claim about the schema.
+ * IT USED TO BE A CONSTANT — `{ key: 'official', label: 'Official schema check' }`,
+ * with no branch anywhere — so every element of `check.official.errors` became a
+ * graph node, a `Reported by` line and an edge label attributing it to the official
+ * ISAAC schema. On a dry run that attribution is unsupported: `export.py` returns
+ * `official_report=None` on two paths BEFORE `validate_official` is called, and
+ * `post_run_check` stamps `official["schema"] = "ISAAC v1.05"` over the result.
+ * Measured over HTTP on a run whose descriptor name carries a trailing newline,
+ * `official.errors[0].message` was the exactness gate's own text, `draft.errors` was
+ * empty, and this module labelled the node "Official schema check". `CLAUDE.md` §12:
+ * no surface may report an exactness refusal as an official-schema error.
  *
- * `unavailable` IS TESTED BEFORE `dry_run`, AND WAS NOT — the defect the first
- * version of this function shipped while fixing its neighbour.
- * `_validate_unit`'s materialised-unreadable branch returns `{ok: false, dry_run:
- * false, unavailable: true, errors: [{path: "$", message: "Validation could not be
- * completed."}]}` under its own comment "no verdict, not a schema violation".
- * `dry_run: false` there does NOT mean a written record was checked; it is returned
- * precisely because that record could not be READ. Taking the `false` branch made
- * every node and every edge read "Official schema check on Run 1 …: Validation could
- * not be completed." — the server's refusal to give a verdict, rendered as the
- * official schema having given one. This function took only two parameters and so
- * could not see the flag at all; that is why it is a parameter now.
+ * THE FIRST FIX WAS ALSO WRONG, in the branch it added: it read `dry_run` before
+ * `unavailable`, and `_validate_unit`'s materialised-unreadable return carries
+ * `dry_run: false` WITH `unavailable: true` — so every node and edge read "Official
+ * schema check on Run 1 …: Validation could not be completed.", the server's refusal
+ * to give a verdict rendered as the official schema having given one.
  *
- * The register is `ValidateReview`'s and `RunFindings`' again ("no verdict", "not a
- * schema failure"), rather than a fourth phrasing of the same idea.
+ * NEITHER OF THOSE IS DERIVABLE HERE ANY MORE. `officialFindingSource` answers it
+ * from the server's own `official_validator_ran`, tests `unavailable` first, and owns
+ * the wording — so a graph node, a card heading and a screen headline cannot disagree
+ * about the same payload, which is what four separate ladders guaranteed they could.
+ * The `blocker` and `draft` labels stay local: those two channels have one producer
+ * each and never carried a claim about the schema.
  */
 function findingOriginLabel(
   key: (typeof FINDING_ORIGINS)[number]['key'],
-  dryRun: boolean | undefined,
-  unavailable: boolean | undefined,
+  official: ApiRunCheckResponse['official'] | undefined,
 ): string {
   if (key === 'blocker') return 'Blocker';
   if (key === 'draft') return 'Draft check';
-  if (unavailable === true) return 'No verdict — not a schema failure';
-  if (dryRun === false) return 'Official schema check';
-  if (dryRun === true) return 'Candidate-record check — source not named';
-  return 'Check finding — source not named';
+  return OFFICIAL_SOURCE_LABEL[officialFindingSource(official)];
 }
 
 /**
@@ -1481,11 +1485,7 @@ function addFindings(
     // dry-run finding can never be attributed to the official schema — and a
     // NO-VERDICT unit can never be attributed to any validator. See
     // `findingOriginLabel`.
-    const originLabel = findingOriginLabel(
-      origin.key,
-      check.official?.dry_run,
-      check.official?.unavailable,
-    );
+    const originLabel = findingOriginLabel(origin.key, check.official);
     lists[origin.key].forEach((finding, index) => {
       // `runFindingText` returns null for an element carrying no describable
       // text. A null is RENDERED as the honest sentence, never dropped — the
@@ -1505,22 +1505,19 @@ function addFindings(
       if (path) detail.push({ term: 'Path', value: path });
       if (origin.key === 'official') {
         detail.push({
+          /* WHICH DOCUMENT — a different question from WHO produced the findings, and
+             `officialCheckedDocument` is the only thing that answers it. It returns
+             `null` for a no-verdict unit, because `unavailable` carries `dry_run:
+             false` and reading that as "the record already written was checked" states
+             the one thing the server explicitly could not do: it set the flag BECAUSE
+             the written record could not be read. Rendering the corrected label above
+             while this line kept the old reading would put the contradiction back on
+             the same pane, one row down. */
           term: 'Dry run',
-          value:
-            /* THE NO-VERDICT CASE FIRST, for the same reason the label branches on it
-               first: `unavailable` carries `dry_run: false`, and reading that as "the
-               record already written was checked" states the one thing the server
-               explicitly could not do — it set the flag BECAUSE the written record
-               could not be read. Rendering the corrected heading above this line while
-               this line kept the old reading would put the contradiction back on the
-               same pane, one row down. */
-            check.official?.unavailable === true
-              ? 'neither — no verdict could be produced for this run'
-              : check.official?.dry_run === undefined
-                ? 'the server did not say'
-                : check.official.dry_run
-                  ? 'yes — a candidate record was checked'
-                  : 'no — the record already written was checked',
+          value: officialDocumentDetailValue(
+            officialFindingSource(check.official),
+            officialCheckedDocument(check.official),
+          ),
         });
       }
       const id = b.addNode({

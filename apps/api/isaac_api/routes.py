@@ -2345,6 +2345,228 @@ def get_experiment(
     return detail
 
 
+# --- 4b. rename ---------------------------------------------------------------
+#
+# THE FIRST OPERATION THAT LETS A SCIENTIST CORRECT WHAT THEY NAMED SOMETHING.
+# Until this route existed, ``title`` was written exactly once — by
+# ``POST /api/experiments`` — and no operation could change it. ``0001_experiments``
+# is applied to the hosted database, so a typo made at create time was durable and
+# permanent. That is the whole reason this route exists.
+#
+# WHY ``PATCH`` AND NOT ``POST .../rename``. The neighbouring run operation
+# (``PATCH .../runs/{run_id}``) already renames a run through a ``PATCH`` on the
+# resource itself. A second spelling for the same act on the parent resource would
+# be two names for one idea. ``POST .../runs/{run_id}/remove`` is a POST because it
+# is not a field write; a rename is.
+#
+# WHY THE TITLE ONLY, AND NOT THE NOTE BESIDE IT ON THE CREATE FORM. This is the
+# one design decision in this slice that was made against the obvious symmetry, so
+# it is written down rather than left to be re-derived. ``POST /api/experiments``
+# stores its optional ``description`` at ``source.description`` — and that key is
+# not a free-text note. It is a PROVENANCE MARKER that
+# ``workspace.classify_experiment`` reads as proof that this application generated
+# a record from its own committed fixtures, and ``managed_legacy`` is the one
+# bucket ``workspace.remove_experiment`` will delete. Making it editable would put
+# a deletion classifier under a text box.
+#
+# MEASURED, over HTTP, on ``origin/main``, rather than reasoned about: creating an
+# experiment whose ``description`` is exactly ``ws.MANAGED_SOURCE_DESCRIPTION``
+# returns ``201`` and the record then classifies ``managed_legacy``. That hazard
+# already exists on the create path; this route deliberately does not widen it, and
+# deliberately does not silently fix a published contract it was not asked to
+# change. It is reported as a finding instead. Correcting a mistyped note therefore
+# still has no route, and the honest fix is to give the note a home of its own
+# rather than to let a rename write the classifier — which is a data-model decision
+# and not this slice's to take.
+#
+# NO ``confirmed_by_user`` FLAG, and that is a considered difference from the run
+# PATCH beside it rather than an omission. That flag exists because the run PATCH
+# writes DRAFT FIELD VALUES, and storing one records a user confirmation that later
+# stands as the record's evidence for that value. A title is explicitly "not a
+# scientific claim" (``CreateExperimentRequest.title``'s own description), it
+# reaches no exported record, and requiring a confirmation for it would train a
+# reader to send the flag without reading what it means.
+#
+# IT REFUSES INSIDE A WORKED-EXAMPLE SESSION, mirroring ``POST /api/experiments``'s
+# ``409``. The five built-in examples are fixed teaching material: renaming one
+# would make the tutorial's own narrative disagree with the screen, and
+# ``POST /api/demo/reset`` would revert it at the next reset — a write reported as
+# applied and then undone by an unrelated act. Refusing is the honest answer, and it
+# keeps the tutorial-isolation invariant (``CLAUDE.md`` §15) untouched: this route
+# reaches no seeding path and no canonical id.
+#
+# THERE IS NO DISCARD HERE, AND THE ABSENCE IS DELIBERATE RATHER THAN UNFINISHED.
+# A scientist still cannot remove an experiment they created. ``CLAUDE.md`` §15's
+# 2026-08-07 write lift enumerates, per table, exactly what writing each one covers,
+# and every one of those enumerations is an INSERT/UPSERT: the five
+# submission-lifecycle tables are covered for "writing them through
+# ``submission_store.py``'s append-only ``INSERT``s", and ``isaac_run_projection``
+# for "the ONE statement ``Q_UPSERT_RUN_PROJECTION``". No committed sentence
+# permits a ``DELETE`` against any of them. Four foreign keys point at
+# ``isaac_experiments`` and none carries an ``ON DELETE``, so a hard delete would
+# also have to remove rows from tables whose append-only guarantee is pinned by
+# test. §15's own standing rule applies: a slice that cannot cite a committed
+# sentence permitting what it does has not established its authorization basis. The
+# decision is the owner's, not this route's; see the slice report.
+
+
+class RenameExperimentRequest(BaseModel):
+    """A new title for an experiment that already exists.
+
+    ``extra="forbid"`` is the load-bearing line, exactly as it is on
+    :class:`CreateExperimentRequest`: it makes "this operation writes the title and
+    nothing else" a property of the CONTRACT rather than of this handler
+    remembering not to read a second field. A body naming ``description``,
+    ``draft``, ``record_id``, ``rev`` or ``id`` is a ``422``, not a silent partial
+    write — and for ``description`` in particular that refusal is the point, since
+    that key is a deletion classifier and not a note (see the block above).
+
+    ``max_length=200`` MATCHES ``CreateExperimentRequest.title`` EXACTLY, and the
+    match is deliberate rather than incidental. A rename that were stricter than
+    create would leave a title this application accepted impossible to correct,
+    which is the failure this whole route exists to remove.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        min_length=1,
+        max_length=200,
+        description=(
+            "The new name. Required. It is not a scientific claim and reaches no "
+            "exported record. Empty or whitespace-only is `422`: a record always "
+            "has a name."
+        ),
+    )
+
+
+@router.patch(
+    "/experiments/{experiment_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Rename an Experiment",
+    description=(
+        "Changes an experiment's title, and returns the refreshed detail bundle. "
+        "Nothing else about the record is touched.\n\n"
+        "A title is not a scientific claim and reaches no exported record, so no "
+        "evidence is attached and no confirmation is recorded. Because the "
+        "exported-artifact freshness signal compares record CONTENT rather than the "
+        "revision number, renaming an already-exported record leaves its artifact "
+        "`current`: a rename never asks anyone to re-export.\n\n"
+        "Requires the record's current `ETag` in `If-Match`. Omitted is `428`, "
+        "malformed is `400`, and stale is `412` with nothing written and the "
+        "record's current `ETag` echoed.\n\n"
+        "A blank or whitespace-only title is `422`, and any field other than "
+        "`title` is rejected outright. In particular the free-text note taken by "
+        "`POST /api/experiments` is NOT editable here: it is stored as the record's "
+        "source description, which this application also reads as the provenance "
+        "marker that identifies a record generated from its own committed fixtures. "
+        "A text box over that classifier is not something this operation offers.\n\n"
+        "Re-sending the title the record already holds is a no-op: it rewrites "
+        "nothing, does not advance the revision, and returns the same `ETag`.\n\n"
+        "It refuses with `409` when the `X-Isaac-Tutorial-Session` header is "
+        "present, and writes nothing. The built-in worked examples are fixed "
+        "teaching material, and a reset would revert the change anyway."
+    ),
+    response_description="The refreshed experiment detail bundle, with the record's `ETag`.",
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+        409: {
+            "description": (
+                "The request carried a worked-example session header. This "
+                "operation acts only on the ordinary workspace. Nothing was changed."
+            )
+        },
+    },
+)
+def rename_experiment(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: RenameExperimentRequest = Body(
+        ...,
+        description=(
+            "`{\"title\": \"<new name>\"}`. Any other key is `422`, including the "
+            "`description` the create operation accepts."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a record read "
+            "operation returned it."
+        ),
+    ),
+):
+    if scope is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "ordinary_scope_required",
+                "operation": "PATCH /api/experiments/{experiment_id}",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "Experiments are renamed in the ordinary workspace. The "
+                    "built-in worked examples are fixed teaching material and a "
+                    "reset would revert the change. Nothing was changed."
+                ),
+            },
+        )
+    # Existence pre-check OUTSIDE the lock, as every other mutation does.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check->lock window
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        title = body.title.strip()
+        if not title:
+            # `min_length=1` accepts a string of spaces, exactly as it does on the
+            # create path, and a name that is only whitespace names nothing. Same
+            # typed shape `create_experiment_route` returns, so a client handles one
+            # refusal rather than two spellings of it.
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "invalid_title",
+                    "message": (
+                        "An experiment needs a title. Nothing was changed."
+                    ),
+                },
+            )
+
+        exp.title = title
+        # `save_versioned`, NOT `save`. The difference is the whole `If-Match`
+        # contract: `title` is inside `_authoritative_signature`, so this is what
+        # bumps `rev` and moves the ETag when the name actually changes, and what
+        # writes nothing and leaves the ETag alone when the client re-sent the name
+        # the record already had. Calling `save` here would rename the record while
+        # leaving its validator unmoved — a second client holding the pre-rename
+        # ETag would then pass its own precondition and silently overwrite this
+        # write, which is the exact loss the precondition exists to prevent.
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale
+        # The full detail bundle, the same shape `POST /api/experiments` and
+        # `GET /api/experiments/{id}` return, so a client replaces its state in one
+        # hop instead of patching a field by hand. Its cost is disclosed rather than
+        # assumed: on a fully-answered record this pays one `dry_run_verdict`, which
+        # `pending_count() > 0` short-circuits on every record that still owes
+        # questions. A rename is a rare, human-paced act, not the per-answer hot
+        # path the response-bounding work was about.
+        detail = _detail(exp)
+        detail.update(vc.version_fields(exp))
+        response.headers["ETag"] = exp.etag()
+        return detail
+
+
 # --- 5. draft (grouped) -------------------------------------------------------
 
 
@@ -6643,6 +6865,145 @@ def _override_address(body: dict) -> tuple[str, str, str] | None:
     return address, kind, name
 
 
+#: The question text stored on a contributor's ``user_confirmation`` evidence entry.
+#:
+#: IT NAMES THE OPERATION AND REFUSES TO NAME THE PERSON. What this application can
+#: honestly assert is that a request arrived at ONE named operation carrying
+#: ``confirmed_by_user: true`` and this contributor in its payload. WHO sent it is not
+#: recorded, because no trusted authentication boundary exists to read an identity from
+#: (``CLAUDE.md`` §15; the same reason ``draft_validator`` refuses
+#: ``attribution.uploaded_by`` outright). An entry naming a person would be exactly the
+#: unverifiable claim that refusal exists to prevent, and the operation's own
+#: description already promises "WHO recorded it is NOT" stored.
+_ATTRIBUTION_CONFIRMATION_QUESTION = (
+    "Who contributed to this run, and in what role? Confirmed by whoever sent POST "
+    "/api/experiments/{experiment_id}/runs/{run_id}/overrides for block:attribution "
+    "with confirmed_by_user: true. This application receives no verified user "
+    "identity, so WHO confirmed it is deliberately not recorded."
+)
+
+
+def _attribution_evidence_key(name: str, role: str) -> str:
+    """The ``block_evidence`` key ``draft_validator`` looks a contributor up under.
+
+    SPELT ONCE. The validator builds ``f"attribution:{name}|{role}"`` and asks whether
+    ``block_evidence`` covers it; a second hand-written copy of that format anywhere is
+    a silent coverage failure the moment either side changes.
+    """
+    return f"attribution:{name}|{role}"
+
+
+def _attribution_confirmations(payload: object, timestamp: str) -> dict[str, list[dict]]:
+    """The ``block_evidence`` entries a confirmed ``block:attribution`` payload earns.
+
+    **THE DEFECT THIS CLOSES, measured over HTTP.** An override at ``block:attribution``
+    carrying one contributor was accepted with ``200``, and the export then refused at
+    the DRAFT validator with ``official_report: null`` and
+    ``attribution.contributors[0]: "contributor has no evidence; attribution must cite
+    its source or be user-confirmed"``. The route wrote the block and no
+    ``block_evidence``, and ``block:attribution`` is the ONLY write path this build
+    offers for a contributor — so a contributor set through the only available route
+    could never be exported, by any subsequent request.
+
+    **NO EVIDENCE REQUIREMENT IS WEAKENED, AND THAT IS THE POINT.** The
+    ``attribution:<name>|<role>`` coverage rule lives in ``draft_validator`` — a truth-
+    plane file under ``CLAUDE.md`` §13 — and is not touched. ``tags`` is exempt from
+    coverage BY DESIGN ("authorship IS the confirmation") and attribution deliberately
+    is not; that stays true. What changed is that the write now RECORDS the evidence it
+    actually has instead of discarding it and then failing a gate for its absence.
+
+    **THE ENTITLEMENT, AND THE COMMITTED PRECEDENT FOR IT.** The claim recorded is "a
+    request carrying ``confirmed_by_user: true`` supplied this contributor at this
+    operation" — nothing more. That is the SAME basis, on the SAME flag, that
+    :func:`_apply_run_field` already mints a ``user_confirmation`` entry on for a run
+    field value, using the same ``models.user_confirmation`` helper and therefore the
+    same four-key shape ``complete.py`` writes for ``qc:status`` and each
+    ``series:<id>``. This is that representation reused, not a second one invented. The
+    route refuses the request with ``422 confirmation_required`` before reaching here
+    when the flag is absent.
+
+    **ONLY A CONTRIBUTOR THIS APPLICATION CAN KEY, and the rest stay refused.** ``name``
+    and ``role`` must both be non-empty ``str``. ``_refuse_override_payload`` applies no
+    contributor shape check at all (its docstring records this, measured), so
+    ``{"contributors": [{}]}`` and ``{"contributors": [{"name": ["a"], "role": "b"}]}``
+    are both stored with ``200``. Minting an entry keyed off a list-valued name would
+    let a contributor whose shape the official schema cannot hold pass the coverage gate
+    and reach an exported record. So none is minted, the run check and the export gate go
+    on refusing those, and the refusal is fail-closed.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    contributors = payload.get("contributors")
+    if not isinstance(contributors, list):
+        return {}
+    entries: dict[str, list[dict]] = {}
+    for contributor in contributors:
+        if not isinstance(contributor, dict):
+            continue
+        name, role = contributor.get("name"), contributor.get("role")
+        if not (isinstance(name, str) and name and isinstance(role, str) and role):
+            continue
+        entries[_attribution_evidence_key(name, role)] = [
+            user_confirmation(
+                _ATTRIBUTION_CONFIRMATION_QUESTION, f"{name} | {role}", timestamp
+            )
+        ]
+    return entries
+
+
+def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dict]]) -> None:
+    """Make the RUN's own ``attribution:`` block evidence exactly ``entries``.
+
+    **REPLACE, NOT MERGE, and the direction matters twice.** An override REPLACES the
+    run's whole ``attribution`` block, so a contributor dropped from the payload is gone
+    from the record — and leaving their confirmation behind would put a provenance entry
+    for a person the record no longer names into ``export.build_sidecar``'s output. It
+    would also mean a stale key could cover a contributor re-added later without anyone
+    confirming them again. Passing ``{}`` (which the clear operation does) removes them
+    all, and ``_merge_block_evidence`` then lets the EXPERIMENT's own entries show
+    through again, which is exactly what "this run inherits again" means.
+
+    **THE RUN'S OWN ``block_evidence``, never the experiment's.** The override is the
+    run's, so its evidence is the run's; writing to the experiment would attach one
+    run's confirmation to every sibling that never received it.
+
+    **IDEMPOTENT BY CONSTRUCTION, which is a requirement here rather than a nicety.**
+    The operation's published contract says recording the same override twice is a no-op
+    that does not restamp or move the run's revision, and ``save_versioned`` keeps that
+    promise by comparing the authoritative signature. An entry carries a timestamp, so
+    an unconditional rewrite would break it. An existing entry whose question and answer
+    already match is therefore KEPT with its original timestamp, and only a genuinely
+    new confirmation is stamped.
+    """
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    run.draft = draft
+    existing = draft.get("block_evidence")
+    existing = existing if isinstance(existing, dict) else {}
+
+    def _same(kept, fresh) -> bool:
+        return (
+            isinstance(kept, list)
+            and len(kept) == 1
+            and isinstance(kept[0], dict)
+            and kept[0].get("source_type") == fresh[0]["source_type"]
+            and kept[0].get("question") == fresh[0]["question"]
+            and kept[0].get("answer") == fresh[0]["answer"]
+        )
+
+    rebuilt = {
+        key: value
+        for key, value in existing.items()
+        if not (isinstance(key, str) and key.startswith("attribution:"))
+    }
+    for key, fresh in entries.items():
+        prior = existing.get(key)
+        rebuilt[key] = prior if _same(prior, fresh) else fresh
+    if rebuilt:
+        draft["block_evidence"] = rebuilt
+    else:
+        draft.pop("block_evidence", None)
+
+
 @router.post(
     "/experiments/{experiment_id}/runs/{run_id}/overrides",
     tags=[TAG_EXPERIMENTS],
@@ -6763,6 +7124,23 @@ def post_run_override(
         except ValueError:
             return _not_overridable(address)
 
+        # THE CONFIRMATION THIS REQUEST EARNED IS RECORDED, not discarded and then
+        # missed at the export gate. `confirmed_by_user is not True` was refused above,
+        # so by this line a person has said "store this"; for `block:attribution` that
+        # is the only thing that can ever satisfy `draft_validator`'s coverage rule for
+        # a contributor, and without it a contributor set through the only write path
+        # this build offers could never be exported. See `_attribution_confirmations`
+        # for the entitlement and for the shapes it deliberately declines to key.
+        #
+        # IT IS DONE HERE RATHER THAN IN `set_run_override` because the fact being
+        # recorded is the ROUTE's: the domain model was not told about the flag and
+        # should not have to be, and nothing that reaches the model by another path
+        # then mints a confirmation nobody made.
+        if address == ws.block_address("attribution"):
+            _rewrite_run_attribution_evidence(
+                run, _attribution_confirmations(body.get("payload"), _now_iso())
+            )
+
         # The client's validator is the RUN's, so it is deliberately NOT passed to
         # `_save_versioned` — see `patch_run` for why echoing a run version as a
         # record conflict's `expected_version` would be two things wearing one name.
@@ -6853,6 +7231,18 @@ def post_run_override_clear(
             cleared = exp.clear_run_override(run, address)
         except ValueError:
             return _not_overridable(address)
+
+        # AND THE CONFIRMATIONS THAT OVERRIDE EARNED GO WITH IT. The run holds no
+        # attribution block of its own any more, so a stored confirmation for one of
+        # its contributors is provenance for a claim this run no longer makes — it
+        # would reach `export.build_sidecar` naming somebody the record does not.
+        # `_merge_block_evidence` then lets the EXPERIMENT's own entries show through
+        # again, which is what "the run inherits again" has to mean for evidence too.
+        # Unconditional, exactly as the save below is: on a clear that removed nothing
+        # there is nothing to remove here either, and `save_versioned` still writes
+        # nothing because the signature did not move.
+        if address == ws.block_address("attribution"):
+            _rewrite_run_attribution_evidence(run, {})
 
         # SAVED UNCONDITIONALLY, INCLUDING THE NO-OP, and the no-op still does not move
         # the run: `save_versioned` persists only when the authoritative signature
@@ -7286,15 +7676,20 @@ def _apply_to_run(
         "questions.\n\n"
         "**The `official` block carries the vendored official ISAAC schema's verdict "
         "WHERE THE OFFICIAL VALIDATOR RAN — and otherwise the findings that stopped "
-        "the export before it could.** A dry run is refused before official "
-        "validation by the no-guessing draft check and by ISAAC's own "
-        "anchored-pattern exactness gate (a value matching a `^...$` pattern only "
-        "because Python's `$` also matches before a trailing newline). Those "
-        "findings arrive under the same `errors` key, so `official.ok: false` is not "
-        "by itself evidence that the official schema rejected anything; "
-        "`official.schema` names the schema this deployment would validate against "
-        "and is stamped on every response. A dry-run PASS does mean official "
-        "validation ran and passed. `POST /api/validate/record` reports the two "
+        "the export before it could.** `official.official_validator_ran` SAYS WHICH, "
+        "and it is the field to branch on: `true` means the official validator "
+        "examined the document these `errors` describe, `false` means the export was "
+        "refused before it was reached — by the no-guessing draft check, or by "
+        "ISAAC's own anchored-pattern exactness gate (a value matching a `^...$` "
+        "pattern only because Python's `$` also matches before a trailing newline). "
+        "Both kinds arrive under the same `errors` key, so `official.ok: false` is "
+        "not by itself evidence that the official schema rejected anything — and "
+        "`dry_run` does not answer it, because a dry-run PASS does require official "
+        "validation while a dry-run FAILURE may never have reached it. "
+        "`official_validator_ran: false` is NOT a verdict: it says the vendored "
+        "schema did not speak, never that it refused. `official.schema` names the "
+        "schema this deployment would validate against and is stamped on every "
+        "response. `POST /api/validate/record` reports the two "
         "gates separately (`schema_ok` and `exactness_errors`).\n\n"
         "Read-only: it writes nothing, exports nothing, and does not advance the "
         "run's or the record's revision. `checked_run_version` states which "
@@ -7311,11 +7706,15 @@ def _apply_to_run(
     ),
     response_description=(
         "The draft and official verdicts, the run's blocking questions, and the "
-        "run revision that was checked. The official verdict carries `dry_run` — "
-        "false when the run is already exported, in which case the RECORD ALREADY "
-        "WRITTEN was validated rather than a candidate — and `unavailable: true` "
+        "run revision that was checked. The official verdict carries "
+        "`official_validator_ran` — whether the official schema produced the "
+        "findings beside it — `dry_run` — false when the run is already exported, in "
+        "which case the RECORD ALREADY WRITTEN was validated rather than a "
+        "candidate — and `unavailable: true` "
         "when no verdict could be reached at all, which is not the same as the "
-        "schema rejecting the document."
+        "schema rejecting the document. The three are independent: `dry_run` names "
+        "the DOCUMENT, `official_validator_ran` names the SOURCE of the findings, "
+        "and `unavailable` says there is no verdict from any gate."
     ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
 )
@@ -7635,6 +8034,53 @@ NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
 )
 
 
+#: THE MAPPABLE PATHS SOME WRITE OPERATION IN THIS BUILD WILL ACCEPT A VALUE AT.
+#:
+#: **IT EXISTS BECAUSE A COPY CLAIM WAS FALSE FOR 7 OF THE 25.** After mapping a note,
+#: ``UnmappedNotesPanel`` told the scientist *"It does not write a value — a value
+#: still has to be entered and confirmed on the field itself"*, and this operation's
+#: description and the ``review`` operation's said the same thing in prose. The first
+#: half is true of all 25. The second half describes an ACTION, and for seven of them
+#: no request can perform it. Measured over HTTP on a record created through ``POST
+#: /api/experiments``, with one run, against every write route this application has —
+#: ``POST .../answers``, ``POST .../edit``, ``POST .../runs/{id}/answers``, ``PATCH
+#: .../runs/{id}`` and ``POST .../runs/{id}/overrides`` — the six
+#: ``system.configuration.*`` paths and ``timestamps.created_utc`` are refused by ALL
+#: FIVE (``422 unrecognized_field`` from the four field routes, ``422
+#: not_overridable`` from the override route). The sentence pointed at a locked door,
+#: on the one screen whose purpose is to stop captured content being thrown away.
+#:
+#: WHY THOSE SEVEN ARE NOT SIMPLY GIVEN A WRITE ROUTE, which would be the better fix
+#: if it were this slice's to make. ``system.configuration`` is a DESIGNATED OPEN
+#: namespace in the vendored schema (it declares no ``properties``), ``field_level``
+#: deliberately leaves it unclassified, and ``CLAUDE.md`` §15 records the six
+#: ``system.configuration.*`` fields as ``unclassified, verified`` pending an external
+#: answer — so classifying them here would be deciding an open question rather than
+#: reporting a fact. ``timestamps.created_utc`` is likewise unclassified. Widening
+#: either is a product decision and is deliberately not made here.
+#:
+#: DERIVED FROM THE TWO SETS THAT ENFORCE IT, never listed by hand — the discipline
+#: its inputs already keep. :data:`RUN_WRITABLE_FIELD_PATHS` is exactly what ``PATCH
+#: .../runs/{run_id}`` accepts; :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` is exactly
+#: what ``POST .../runs/{run_id}/overrides`` accepts. A path leaving either set leaves
+#: this one, in the same import, so the served answer and the enforced answer cannot
+#: drift. ``test_note_value_writability_is_measured_not_asserted`` re-derives it the
+#: only way that actually proves it: by sending a write at every one of the 25 paths
+#: to every one of the five routes and comparing the observed statuses to this set.
+#:
+#: TWO THINGS IT DOES NOT PROMISE, and both matter to the copy built on it. It does
+#: not promise the value will be ACCEPTED — a closed enum, a required sibling
+#: property or the no-guessing rules may still refuse the particular value. And every
+#: one of these routes is a RUN's, so a record with no runs yet can write none of
+#: them; membership means "a route exists", not "you can do it right now".
+NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT: frozenset[str] = frozenset(
+    path
+    for path in NOTE_MAPPABLE_FIELD_PATHS
+    if path in RUN_WRITABLE_FIELD_PATHS
+    or ws.field_address(path) in EXPERIMENT_OVERRIDABLE_ADDRESSES
+)
+
+
 #: The largest one note's text may serialise to. A REFUSAL, NEVER A TRUNCATION.
 #:
 #: "Never truncated" is a promise about what is STORED, and it is kept by refusing
@@ -7801,6 +8247,14 @@ def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
         # set the route actually enforces. These are one expression, so the control a
         # client offers and the request the server accepts cannot disagree.
         "mappable_field_paths": sorted(NOTE_MAPPABLE_FIELD_PATHS),
+        # AND THE SERVER'S OWN ANSWER TO "AND MAY I THEN ENTER ITS VALUE?", which is a
+        # DIFFERENT question and has a different answer for 7 of the 25. Served for
+        # exactly the reason the line above is: the panel tells a person what to do
+        # next after mapping, and the only alternative to being told is transcribing
+        # the two write routes' admissible sets into the frontend, where they are free
+        # to drift from what the routes enforce. See
+        # `NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT` for the measurement.
+        "value_writable_field_paths": sorted(NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT),
         "sources": sorted(notes.NOTE_SOURCES),
         "experiment_version": exp.version_token(),
     }
@@ -7840,6 +8294,19 @@ _NOTE_LIST_DESC = (
         "from it may still be a real schema field, and a refusal against this "
         "list says what this application can map a note to rather than what the "
         "official schema defines.\n\n"
+        "`value_writable_field_paths` is the SUBSET of those paths that some "
+        "write operation in this build accepts a value at — `PATCH "
+        "/api/experiments/{experiment_id}/runs/{run_id}` for a run's own field, "
+        "`POST /api/experiments/{experiment_id}/runs/{run_id}/overrides` for a "
+        "record-level one. MAPPING A NOTE AND ENTERING ITS VALUE ARE DIFFERENT "
+        "ACTS, and for 7 of the 25 mappable paths the second one has no route at "
+        "all: every write operation refuses them. Mapping to such a path is still "
+        "correct and still keeps the content on the record in full — this key "
+        "says only that no request can then put a value there, so a client must "
+        "not tell a person to go and do it. It promises nothing about a value "
+        "being ACCEPTED: a closed enum, a required sibling property or the "
+        "no-guessing rules may still refuse the particular value. Both routes are "
+        "a run's, so a record with no runs can write none of them yet.\n\n"
         "`unreadable_entries` counts stored entries this build cannot present as "
         "notes. There are two kinds and the count does not separate them: an "
         "entry the note model refused, and an entry whose id another note already "
@@ -8083,9 +8550,15 @@ def get_note(
         "to, and requires `field_path` to be one of the paths `GET .../notes` "
         "reports under `mappable_field_paths`. IT WRITES NO VALUE. Deriving a "
         "value from prose would mean deciding what the value is, which this "
-        "application makes a person do through the confirmed-edit path that "
-        "already exists; a mapped note says where the content belongs, not what "
-        "the field should hold.\n\n"
+        "application makes a person do through a separate confirmed write; a "
+        "mapped note says where the content belongs, not what the field should "
+        "hold. WHETHER SUCH A WRITE EXISTS FOR THE MAPPED PATH IS A SEPARATE "
+        "QUESTION, and for 7 of the 25 mappable paths the answer is no — `GET "
+        ".../notes` reports `value_writable_field_paths`, the subset some write "
+        "operation accepts a value at. Mapping outside it is still a correct and "
+        "useful act and the content stays on the record in full, but no request "
+        "in this build can then put a value there, and nothing here implies one "
+        "can.\n\n"
         "`edit` stores a corrected wording BESIDE the verbatim capture and never "
         "replaces it, and leaves the review state alone — fixing a typo is not a "
         "triage decision. `keep` records that this content is prose about the "
@@ -12330,6 +12803,33 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
     over N records would not be readable — three runs can produce the same message
     and a caller could not tell which to open — so this mirrors the export route's
     ``_unit_result_entry``.
+
+    ``official_validator_ran`` IS THE DISCRIMINATOR THE COMMENT BELOW ASKED FOR, and
+    it is the whole point of this entry. It answers ONE question — *did
+    ``isaac_records.official.validate_official`` examine the document these ``errors``
+    describe?* — so a consumer never has to reconstruct the answer from ``dry_run``
+    plus an ordering rule it had to read ``export.py`` to learn. It is derived HERE,
+    at the route, from ``official_report is not None``; nothing in
+    ``src/isaac_records/**`` changes, because that attribute already carries the fact
+    faithfully (``export.py`` returns ``None`` at exactly the two returns that precede
+    ``validate_official`` and at no other).
+
+    IT DESCRIBES THE ``errors`` LIST BESIDE IT — not the unit, not the request. That
+    is the ONE rule every producer and every consumer in this repository follows, and
+    stating it as a property of the neighbouring list is what makes the aggregate in
+    ``_fan_out_official_verdict`` derivable rather than a second convention.
+
+    ``False`` IS NOT A VERDICT AND MUST NOT BE READ AS ONE. It says the vendored
+    schema did not speak; ``CLAUDE.md`` §1 makes that schema not ours to speak for, so
+    "it did not run" is the only honest thing to publish, and "it rejected the record"
+    is the claim four surfaces made instead. On the two ``unavailable`` branches it is
+    ``False`` as well — nothing ran there either — and ``unavailable`` remains the
+    stronger, earlier-tested flag: no verdict at all, from any gate.
+
+    IT MOVES NO VERDICT. ``ok`` is untouched on every branch, and ``CLAUDE.md`` §12's
+    standing invariant — a warning or an ISAAC-local gate must never turn a PASS into a
+    FAIL — is preserved by construction: this field is never read to compute ``ok``,
+    here or anywhere downstream.
     """
     entry = {
         "run_id": unit.run_id,
@@ -12354,6 +12854,11 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
                 "errors": [{"path": "$", "message": "Validation could not be completed."}],
                 "dry_run": False,
                 "unavailable": True,
+                # The record could not be READ, so `validate_official` was never
+                # reached. `dry_run: false` here means NO DRY RUN HAPPENED; without
+                # this field a consumer branching on `dry_run` alone concluded the
+                # written record had been checked by the official schema.
+                "official_validator_ran": False,
             }
         report = validate_official(record, REPO_ROOT)
         return {
@@ -12361,6 +12866,10 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
             "ok": report.ok,
             "errors": [{"path": e.path, "message": e.message} for e in report.errors],
             "dry_run": False,
+            # The one branch that calls `validate_official` directly. `check_exactness`
+            # does NOT run here, which is why the passing copy for a materialised unit
+            # may not claim ISAAC's own gate.
+            "official_validator_ran": True,
         }
 
     try:
@@ -12373,8 +12882,11 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
             "errors": [{"path": "$", "message": "Validation could not be completed."}],
             "dry_run": True,
             "unavailable": True,
+            "official_validator_ran": False,
         }
-    # THE OFFICIAL-SCHEMA CONFLATION, RECORDED WHERE IT IS MINTED.
+    # THE OFFICIAL-SCHEMA CONFLATION, RECORDED WHERE IT IS MINTED — AND NOW CLOSED
+    # ON THE WIRE. Kept in full rather than trimmed to the fix, because the shape of
+    # the defect is what explains the shape of the field.
     #
     # These three branches produce THREE different kinds of finding under one key:
     #
@@ -12396,20 +12908,32 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
     # exactness refusal as an official-schema error"* — and `_export_step_detail`
     # already closed exactly this defect one wire over.
     #
-    # WHY FOUR SURFACES GOT IT WRONG AT ONCE, which is the part worth fixing later:
-    # THERE IS NOTHING ON THE PAYLOAD TO BRANCH ON. `schema` is stamped
+    # WHY FOUR SURFACES GOT IT WRONG AT ONCE, which is the part this field fixes:
+    # ~~THERE IS NOTHING ON THE PAYLOAD TO BRANCH ON.~~ `schema` is stamped
     # unconditionally by the two callers, and `dry_run` does not discriminate — a
     # dry-run PASS does require `validate_official`, while a dry-run FAILURE may never
-    # have reached it. So no client, however careful, can tell the two apart.
+    # have reached it. So no client, however careful, could tell the two apart, and
+    # every one of them had to remember an ordering rule it could only learn by
+    # reading `export.py`. THAT is why "fix the surfaces" recurred four times: the
+    # remedy was unbounded by construction, one file per consumer, forever.
     #
-    # THE DURABLE FIX IS A DISCRIMINATOR ON THE WIRE — an `official_validator_ran`
-    # boolean (or moving exactness findings to their own list, as
-    # `POST /api/validate/record` already does with `exactness_errors`/`schema_ok`).
-    # It is deliberately NOT done here: a new field needs coordinated frontend work,
-    # and this slice is bounded to making the DESCRIPTIONS stop claiming something the
-    # payload does not support. The three descriptions now say "the official verdict
-    # where the official validator ran; otherwise the findings that stopped it before
-    # it could", which is exactly what these branches return.
+    # ~~"THE DURABLE FIX IS A DISCRIMINATOR ON THE WIRE — an `official_validator_ran`
+    # boolean ... It is deliberately NOT done here"~~ — **DONE.** The three branches
+    # below now publish `official_validator_ran`, and every consumer branches on it
+    # instead of on an ordering rule. The strikethroughs above are deliberate: this
+    # comment named its own remedy and deferred it, and a reader who remembers the
+    # deferral needs to see that it was discharged rather than find a comment that
+    # reads as though the field were always there.
+    #
+    # THE ALTERNATIVE THAT WAS NOT TAKEN, and why. `POST /api/validate/record` splits
+    # its findings into `errors` and `exactness_errors`. Splitting them here too would
+    # be a BREAKING change to two published operations' `errors` key and would still
+    # not separate the no-guessing findings from the exactness ones — `export.py`
+    # folds those together into `draft_report` upstream of this function, so the wire
+    # this reads cannot tell them apart either (`_export_step_detail` records the same
+    # limit). One added boolean answers the question every consumer actually asks —
+    # *may I name the official schema?* — without moving a single existing key, and
+    # without this route claiming to know which of ISAAC's own two gates refused.
     if result.official_report is not None:
         errors = [
             {"path": e.path, "message": e.message} for e in result.official_report.errors
@@ -12418,7 +12942,16 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
         errors = [{"path": w, "message": m} for w, m in result.draft_report.errors]
     else:
         errors = []
-    return {**entry, "ok": result.ok, "errors": errors, "dry_run": True}
+    return {
+        **entry,
+        "ok": result.ok,
+        "errors": errors,
+        "dry_run": True,
+        # THE THREE BRANCHES ABOVE COLLAPSE TO THIS ONE BOOLEAN, which is why no
+        # client has to re-derive them: the first is the official schema's own verdict
+        # and the other two are not.
+        "official_validator_ran": result.official_report is not None,
+    }
 
 
 def _fan_out_official_verdict(exp: Experiment) -> dict:
@@ -12448,18 +12981,48 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
     ``dry_run`` at the top level is true if ANY unit's verdict came from an in-memory
     candidate: ``dry_run: false`` is the strong claim that a WRITTEN record was
     checked, and it must not be made on behalf of a unit that has no written record.
+
+    ``official_validator_ran`` AT THE TOP LEVEL DESCRIBES THE TOP-LEVEL ``errors``,
+    and that is the only aggregation rule that is derivable rather than invented.
+    ``errors`` here is the FIRST FAILING unit's list, so the flag is that unit's flag;
+    a different rule (``any``/``all`` over the units) would describe a set the
+    ``errors`` key does not carry, and a caller rendering those errors would once
+    again be reasoning about a document other than the one in front of it.
+
+    On a PASS the two candidate rules agree, so nothing hangs on the choice: a unit's
+    ``ok`` is reachable only through ``export.py``'s single ``ok=True`` return, which
+    sits after ``validate_official`` has run and passed, so every unit's flag is
+    ``True``. The empty-``entries`` case is written out rather than left to
+    ``all(())`` — which is ``True`` — because "no unit exists" must not publish that
+    the official validator ran.
+
+    ``unavailable`` FOLLOWS THE SAME RULE AND FOR THE SAME REASON. It is the first
+    failing unit's flag, because ``errors`` is that unit's list; and it is OMITTED
+    rather than published as ``False``, matching ``_validate_unit``, so a caller reads
+    its presence as the exceptional claim it is. Without it, a fan-out whose first
+    failing unit could not be READ would publish ``official_validator_ran: false``
+    alone — indistinguishable from ISAAC's export gate having refused, which is a
+    different and untrue statement.
     """
     entries = [_validate_unit(unit) for unit in exp.export_units()]
     failed = [entry for entry in entries if not entry["ok"]]
-    return {
+    body = {
         "ok": not failed,
         # The FIRST FAILING unit's errors, so a caller reading only `errors` is shown
         # an actual failure; every unit's own verdict is in `runs`.
         "errors": failed[0]["errors"] if failed else [],
         "schema": SCHEMA_LABEL,
         "dry_run": any(entry["dry_run"] for entry in entries),
+        "official_validator_ran": (
+            bool(failed[0]["official_validator_ran"])
+            if failed
+            else bool(entries) and all(e["official_validator_ran"] for e in entries)
+        ),
         "runs": entries,
     }
+    if failed and failed[0].get("unavailable") is True:
+        body["unavailable"] = True
+    return body
 
 
 # --- 9. validate --------------------------------------------------------------
@@ -12475,16 +13038,21 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
         "dry run.\n\n"
         "**`errors` is the vendored official ISAAC schema's verdict WHERE THE "
         "OFFICIAL VALIDATOR RAN — and otherwise the findings that stopped the export "
-        "before it could.** On a dry run the export is refused before official "
-        "validation by two earlier gates: the no-guessing draft check, and ISAAC's "
-        "own anchored-pattern exactness gate, which refuses a value that satisfies "
+        "before it could.** `official_validator_ran` SAYS WHICH, and it is the field "
+        "to branch on: `true` means the official validator examined the document "
+        "these `errors` describe, `false` means the export was refused before it was "
+        "reached — by the no-guessing draft check, or by ISAAC's own anchored-pattern "
+        "exactness gate, which refuses a value that satisfies "
         "one of the schema's `^...$` patterns only because Python's `$` also matches "
         "before a trailing newline. Those findings arrive here under the same "
         "`errors` key, so a failing verdict is not by itself evidence that the "
-        "official schema rejected anything. `schema` names the schema this "
+        "official schema rejected anything — and `dry_run` does not answer it, "
+        "because a dry-run PASS does require official validation while a dry-run "
+        "FAILURE may never have reached it. `official_validator_ran: false` is NOT a "
+        "verdict: it says the vendored schema did not speak, never that it refused. "
+        "`schema` names the schema this "
         "deployment would validate against; it is stamped on every response and is "
-        "not a claim that the schema produced the findings beside it. A dry-run PASS "
-        "does mean official validation ran and passed. **`POST /api/validate/record` "
+        "not a claim that the schema produced the findings beside it. **`POST /api/validate/record` "
         "reports the two gates separately (`schema_ok` and `exactness_errors`) and "
         "is the operation to use when the distinction matters.**\n\n"
         "For an already-exported record the written record is validated "
@@ -12493,21 +13061,35 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
         "(`dry_run: true`). Read-only in both cases. The verdict comes from the "
         "same deterministic core function the command line uses.\n\n"
         "A record with **runs** exports one official record per run, so it is "
-        "checked per run: `runs[]` carries each run's own verdict, its errors and "
-        "its own `dry_run`, and the top-level `ok` is true only when every run "
+        "checked per run: `runs[]` carries each run's own verdict, its errors, its "
+        "own `dry_run` and its own `official_validator_ran`, and the top-level `ok` "
+        "is true only when every run "
         "passes. The top-level `dry_run` is `true` if any run's verdict came from "
-        "an in-memory candidate rather than a written record.\n\n"
+        "an in-memory candidate rather than a written record. The top-level "
+        "`official_validator_ran` describes the top-level `errors` — which are the "
+        "FIRST FAILING run's — so it is that run's flag; when nothing failed it is "
+        "`true`, because a passing verdict is only reachable through the official "
+        "validator. Read a run's own flag for a run's own errors.\n\n"
         "If the written record cannot be read at all, no verdict is invented: the "
         "operation reports `ok: false`, the fixed error `Validation could not be "
-        "completed.`, `dry_run: false`, and **`unavailable: true`** on the run entry. "
+        "completed.`, `dry_run: false`, `official_validator_ran: false`, and "
+        "**`unavailable: true`** — at the TOP LEVEL as well as on a run entry, and "
+        "the top-level flag is present whenever the first failing run carries it. "
         "Read that as *no verdict*, not as a schema violation — the artifacts "
         "operation reports why the file could not be read. `unavailable` was added "
         "because the fixed English sentence was the only signal, and a client that "
         "matched on `ok` alone rendered a non-verdict as a schema failure; the "
         "top-level `ok` deliberately stays `false` either way, so the flag explains "
-        "the refusal without softening it."
+        "the refusal without softening it. **`official_validator_ran: false` alone "
+        "does not distinguish these two**: ISAAC's own export gate refusing and "
+        "nothing running at all both report it, so read `unavailable` first. It is "
+        "absent on every verdict that IS a verdict."
     ),
-    response_description="The official-schema verdict, its errors, and whether it was a dry run.",
+    response_description=(
+        "The verdict, its errors, whether it was a dry run, whether the official "
+        "validator produced the errors beside it, and — when nothing produced a "
+        "verdict at all — `unavailable`."
+    ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
@@ -12574,6 +13156,33 @@ def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
                 "errors": [{"path": "$", "message": "Validation could not be completed."}],
                 "schema": SCHEMA_LABEL,
                 "dry_run": False,
+                # Nothing was validated: the artifact could not be read. `dry_run:
+                # false` here means NO DRY RUN HAPPENED, which is why this flag has
+                # to be stated separately rather than inferred from it.
+                "official_validator_ran": False,
+                # `unavailable` AT THE TOP LEVEL, AND IT WAS MISSING HERE WHILE
+                # `_validate_unit` HAS SET IT ON THE EQUIVALENT BRANCH ALL ALONG.
+                #
+                # Measured over HTTP on an exported record whose artifact was deleted
+                # out of band, BEFORE this line existed:
+                #
+                #   {"ok": false, "schema": "ISAAC v1.05", "dry_run": false,
+                #    "official_validator_ran": false,
+                #    "errors": [{"path": "$", "message":
+                #                "Validation could not be completed."}]}
+                #
+                # `official_validator_ran: false` is TRUE of that payload and is not
+                # enough, because it is the same shape ISAAC's own export gate returns
+                # — so a client that reads "the validator did not run" concludes "a
+                # GATE refused", and NO gate refused: the file could not be opened.
+                # Adding the discriminator without this one would have replaced one
+                # false attribution with a different false attribution.
+                #
+                # The three keys answer three different questions and none substitutes
+                # for another: `dry_run` names the DOCUMENT, `official_validator_ran`
+                # names the SOURCE of the findings, `unavailable` says there is no
+                # verdict from any source. `ok` stays False on all of them.
+                "unavailable": True,
             }
         report = validate_official(record, REPO_ROOT)
         return {
@@ -12581,6 +13190,7 @@ def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
             "errors": [{"path": e.path, "message": e.message} for e in report.errors],
             "schema": SCHEMA_LABEL,
             "dry_run": False,
+            "official_validator_ran": True,
         }
 
     # Dry-run: export_draft in memory (writes nothing). Robust to malformed drafts.
@@ -12598,14 +13208,37 @@ def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
         else:
             errors = []
         ok = result.ok
+        # Same derivation as `_validate_unit`, from the same attribute, describing the
+        # same list. Kept beside the branch that produced `errors` rather than
+        # recomputed below, so the two can never disagree about which list they mean.
+        official_validator_ran = result.official_report is not None
+        unavailable = False
     except Exception:
         # Defensive: never 500, and never interpolate the exception (path/stack/
         # secret) into the client response. Return a fixed, path-free message and
         # log the real detail server-side for operators.
         _log.exception("validate dry-run failed experiment=%s", experiment_id)
         ok, errors = False, [{"path": "$", "message": "Validation could not be completed."}]
+        official_validator_ran = False
+        # NO VERDICT FROM ANY GATE — the same claim `_validate_unit` already makes on
+        # its own exception branch, and for the same reason: a caller must not read
+        # "the official validator did not run" as "one of ISAAC's gates refused".
+        unavailable = True
 
-    return {"ok": ok, "errors": errors, "schema": SCHEMA_LABEL, "dry_run": True}
+    body = {
+        "ok": ok,
+        "errors": errors,
+        "schema": SCHEMA_LABEL,
+        "dry_run": True,
+        "official_validator_ran": official_validator_ran,
+    }
+    # ABSENT ON EVERY VERDICT THAT IS A VERDICT, exactly as on the run entries. A key
+    # that is always present and usually `false` invites a client to treat it as part
+    # of the verdict; absence is what makes "there is no verdict here" the exceptional
+    # reading it should be.
+    if unavailable:
+        body["unavailable"] = True
+    return body
 
 
 # --- 9b. standalone validator (P36.3, Governance & Safety) ---------------------

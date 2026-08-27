@@ -86,8 +86,50 @@ def _project_one(exp) -> dict:
     Each expensive derivation (``status``, ``draft_ok``, ``export_ready``,
     ``classify_fields``) is computed exactly ONCE — no value is recomputed within
     this record's projection.
+
+    ~~That sentence was TRUE OF THE FOUR NAMED CALLS AND FALSE OF WHAT THEY COST~~,
+    and it is corrected in place rather than rewritten because it is the reason nobody
+    looked. Each of ``status``, ``draft_ok`` and ``export_ready`` is indeed *called*
+    once — and each of them independently COMPOSED the export-unit list and re-resolved
+    every run's draft underneath. Measured on a fully answered three-run fan-out, with
+    ``export_units`` and ``resolved_run_draft`` counted directly::
+
+        before   export_units 4   resolved_run_draft 12   export_draft 6   (2x runs)
+        after    export_units 1   resolved_run_draft  3   export_draft 3   (1x runs)
+
+    TWO THINGS ABOUT ARRIVING AT THOSE NUMBERS ARE WORTH KEEPING, because both are the
+    shape of error this file is about.
+
+    The first attempt reached ``export_units`` 4 -> **2**, not 4 -> 1: threading the
+    three derivations left ``artifact_state`` composing a second list, and only a stack
+    trace found it. *"I threaded the seams"* is exactly the kind of claim that reads as
+    complete and measures as half.
+
+    And ``export_draft`` was **missing from the first version of this table**, measured
+    as 0 by a probe that patched ``isaac_records.export.export_draft`` while
+    ``workspace`` had imported the name directly — so the patch was on an object nobody
+    called. It is the LARGER of the two terms (the dry run, 2x the run count, which PR
+    #177 measured at roughly half a detail request), and a counter aimed at the wrong
+    object reported its absence as a zero rather than as a failure to observe.
+
+    ``routes._detail`` closed exactly this in PR #176 (``_shared_units``) and PR #177
+    (``_shared_dry_run``); this projection is the site those slices did not reach, and
+    PR #179's residue list named it. The seams are the same two, used the same way:
+    THREADED, NOT MEMOISED — nothing is stored on the ``Experiment``, because this
+    module is called in a loop over records that a caller may have mutated, and a cache
+    on the instance can be served stale. ``None`` still means "derive your own".
+
+    ``dry_run_verdict`` answers ``None`` while ``pending_count() > 0``, which is exactly
+    the union of ``status``'s and ``export_ready``'s short-circuits — so on a record
+    that still owes questions the dry run is entered ZERO times here, as it was before,
+    and this does not make the common case slower to speed up the rare one.
     """
     pending = exp.pending_count()
+    # ONE COMPOSITION AND ONE DRY RUN FOR THE WHOLE PROJECTION — see the docstring for
+    # the measurement, and `routes._shared_units` / `routes._shared_dry_run` for why
+    # these are arguments rather than caches.
+    units = exp.export_units()
+    dry_run_ok = exp.dry_run_verdict(units=units)
     # REVIEW ITEM F2 — `all_units_exported()`, not `exported()`. The C5 fix named
     # "all three `derive_workflow` sites" and there are FIVE; this projection was one
     # of the two it missed, so `GET /api/runtime/records` disagreed with the detail
@@ -100,10 +142,23 @@ def _project_one(exp) -> dict:
     # `record_id` below stays `exp.record_id` — null for a fan-out — for exactly the
     # reason `routes._summary` gives: `exported` and `record_id` answer two different
     # questions, and a fan-out genuinely has no single record id.
+    # `all_units_exported` is deliberately NOT given `units`: it reads `run.record_id`
+    # directly and never builds a unit list, which its own docstring says and which the
+    # before-measurement confirms — it is not one of the four compositions.
     exported = exp.all_units_exported()
-    status = exp.status()
-    draft_ok = exp.draft_ok()
-    ready = exp.export_ready()
+    status = exp.status(units=units, dry_run_ok=dry_run_ok)
+    draft_ok = exp.draft_ok(units=units)
+    # `units=` HERE IS CURRENTLY UNREACHABLE, and it is kept deliberately rather than
+    # trimmed. `export_ready` reads `units` only on the branch where `dry_run_ok is
+    # None`, and that branch is guarded by `pending_count() > 0`, which returns `False`
+    # before it looks — so with the verdict threaded above, no call from this site can
+    # reach it. A mutation removing the argument therefore PASSES the whole suite, and
+    # that is recorded here instead of being reported as a clean sweep: an inert
+    # mutation surviving is information about the code, not a hole in the tests.
+    # It stays because `routes._workflow_for` passes both for the same pair, and an
+    # argument that is correct-but-unread costs nothing while a missing one becomes a
+    # silent 2x the moment the gate changes.
+    ready = exp.export_ready(units=units, dry_run_ok=dry_run_ok)
 
     workflow = derive_workflow(
         pending_count=pending,
@@ -129,7 +184,13 @@ def _project_one(exp) -> dict:
         },
         "evidence_counts": _evidence_counts(exp.draft),
         # The freshness string only (none|current|stale) — never the reason body.
-        "artifact_state": artifact_state(exp)["state"],
+        # THE SECOND COMPOSITION, AND IT WAS THE ONE THE FIRST FIX MISSED. Threading
+        # `units` into the three derivations above took the count 4 -> 2, not 4 -> 1,
+        # and a trace named this call as the remainder (`_fan_out_artifact_state` <-
+        # `artifact_state` <- `_project_one`). The parameter already existed; this site
+        # simply never passed it. Recorded because "I threaded the seams" is exactly
+        # the kind of claim that reads as complete and measures as half.
+        "artifact_state": artifact_state(exp, units=units)["state"],
         # Freshness metadata for stale-view detection (same signal as the ETag).
         "record_rev": exp.rev,
         "updated_utc": exp.updated_utc,
