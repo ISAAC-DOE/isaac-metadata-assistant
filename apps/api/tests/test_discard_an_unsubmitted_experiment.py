@@ -787,7 +787,7 @@ def test_the_three_deletes_are_issued_in_FOREIGN_KEY_DEPENDENCY_ORDER(workspace)
     ], issued
     assert removed == 1
     assert conn.runs == {}
-    assert conn.projections == set()
+    assert conn.projections == {}
     assert EXPERIMENT_ID not in conn.experiments
     # ONE transaction, committed once.
     assert conn.commits == 1 and conn.rollbacks == 0
@@ -828,7 +828,7 @@ def test_a_FOREIGN_KEY_REFUSAL_removes_NOTHING_AT_ALL(workspace):
         _durable_store(conn).discard(exp)
 
     assert conn.runs == runs_before
-    assert conn.projections == {EXPERIMENT_ID}
+    assert set(conn.projections) == {EXPERIMENT_ID}
     assert EXPERIMENT_ID in conn.experiments
     assert conn.rollbacks == 1 and conn.commits == 0
 

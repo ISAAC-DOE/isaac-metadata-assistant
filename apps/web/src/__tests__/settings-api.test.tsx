@@ -1884,7 +1884,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // separately is precisely that neither can be inferred from the other, and
     // guessing one from the other is the mistake the separation exists to prevent.
     // Both are re-measured from the served document, never arithmetic over a delta.
-    expect(total).toBe(101071);
+    //
+    // RE-MEASURED 2026-08-27 after `GET /api/health` gained a paragraph describing
+    // `experiment_storage.run_projection`. 101,071 -> 101,768 (+697): ONE existing
+    // description changed — health's — and no other, which
+    // `test_contract_description_parity.py` proves rather than leaving it asserted
+    // here. The added prose names what the Stage-2b block reports (the kill switch,
+    // and the per-experiment state distribution the last hydration pass measured),
+    // states that it is counts only, distinguishes a `null` `last_pass` from a pass
+    // that classified none, and says outright that an all-unavailable or
+    // all-never-projected distribution is the reader working correctly. Re-derived
+    // three ways, never incremented: the splitPurpose rule transcribed into Python
+    // over `create_app().openapi()` restricted to the 71 operations this array
+    // names; the same rule over the transcribed array; and raw sum of
+    // `d.description.length` = 102,184 minus 2 per `\n\n` separator (208 x 2 = 416)
+    // = 101,768. The entry was re-transcribed from `create_app().openapi()` with
+    // `json.dumps(..., ensure_ascii=False)`, never hand-edited.
+    expect(total).toBe(101768);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1905,7 +1921,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // asserted here. RE-MEASURED from the served document, not incremented.
     // 206 -> 207 (+1): `POST .../discard` APPENDED one paragraph — the `If-Match: *`
     // refusal. RE-MEASURED from the served document.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(207);
+    // 207 -> 208 (+1): `GET /api/health` APPENDED one paragraph — the Stage-2b
+    // `experiment_storage.run_projection` block. It moves by exactly one because the
+    // sentences were added as a NEW paragraph rather than woven into the existing
+    // `experiment_storage` one; a change that left this at 207 while the character
+    // total moved would mean the prose had been written into an existing paragraph,
+    // which is precisely why these two aggregates are asserted separately and neither
+    // is inferred from the other. RE-DERIVED from the served document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(208);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

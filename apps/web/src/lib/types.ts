@@ -1664,6 +1664,38 @@ export interface ApiHealthExperimentStorage {
    * anything it does not recognise as unknown and says nothing.
    */
   state?: string;
+  /**
+   * THE STAGE-2b RUN-PROJECTION BLOCK. Declared because the route serves it and a
+   * type that does not describe what is on the wire is a type that will be
+   * believed instead of the wire. Nothing in this application reads it yet — it is
+   * additive, and nothing breaks without it.
+   *
+   * `authoritative` IS CONFIGURATION AND `last_pass` IS AN OBSERVATION, and they
+   * are deliberately not merged. The first is the `ISAAC_RUN_ROWS_AUTHORITATIVE`
+   * kill switch, read on every request so an operator's edit takes effect without
+   * a redeploy. The second is the per-experiment state distribution the most
+   * recent classifying hydration pass measured.
+   *
+   * `last_pass: null` MEANS NO PASS HAS CLASSIFIED ANYTHING — which is NOT the
+   * same claim as a pass that classified none, and a renderer that collapsed the
+   * two would report a measurement that was never taken. It is also `null` while
+   * the kill switch is off, deliberately: labelling disabled experiments
+   * `never_projected` would report a state the reader never measured.
+   *
+   * COUNTS ONLY: no ids, no titles, no record content. Keys are the five outcomes
+   * of the contract's four states plus `mismatch`; typed as an index signature
+   * because a future outcome must be a value a client can ignore rather than a
+   * shape change. AND NOTHING HERE MAY BE READ AS "THE CUTOVER IS COMPLETE" — an
+   * all-`unavailable` or all-`never_projected` distribution is the reader working
+   * correctly, not the reader being off.
+   *
+   * Optional for the same reason the block above it is: a build predating it, and
+   * a health body the client failed to fetch, simply have none.
+   */
+  run_projection?: {
+    authoritative: boolean;
+    last_pass: Record<string, number> | null;
+  };
 }
 
 export interface ApiHealth {

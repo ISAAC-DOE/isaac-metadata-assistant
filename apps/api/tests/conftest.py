@@ -220,14 +220,23 @@ def _clear_storage_observation():
     process-wide bit in the application, so it needs a process-wide reset here
     rather than a per-test one where it happens to be remembered.
 
+    THE THIRD GLOBAL IS THE STAGE-2b DISTRIBUTION, and it leaks in the direction
+    that reads as evidence. ``_last_run_authority`` records what the most recent
+    CLASSIFYING hydration pass measured, and a pass with nothing to restore
+    deliberately does not overwrite it — so without a reset here, a case asserting
+    "this deployment reports every experiment UNAVAILABLE" would pass on a
+    distribution some earlier case measured.
+
     Cleared BEFORE and AFTER: before, so a test's starting state is stated rather
     than inherited; after, so a failing test cannot poison the rest of the run.
     """
     _repo.forget_storage_failure()
     _repo.forget_run_table_presence()
+    _repo.forget_run_authority()
     yield
     _repo.forget_storage_failure()
     _repo.forget_run_table_presence()
+    _repo.forget_run_authority()
 
 
 def tutorial_client(app, **kwargs) -> TestClient:

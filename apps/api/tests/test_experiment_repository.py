@@ -300,6 +300,12 @@ def test_no_pghost_selects_the_filesystem_repository():
         "backend": "filesystem",
         "durable": False,
         "state": repo.STORAGE_STATE_EPHEMERAL,
+        # STAGE 2b. `authoritative` is the kill switch read from configuration —
+        # it is `True` even with no database, because it says what this build
+        # would do, not what it has done. `last_pass` is `None` until a hydration
+        # pass has actually classified an experiment, which is a different claim
+        # from "a pass ran and found nothing" and is why it is not `{}`.
+        "run_projection": {"authoritative": True, "last_pass": None},
     }
 
 
@@ -314,6 +320,7 @@ def test_pghost_with_the_expected_database_selects_postgres():
         "backend": "postgres",
         "durable": True,
         "state": repo.STORAGE_STATE_DURABLE,
+        "run_projection": {"authoritative": True, "last_pass": None},
     }
 
 
@@ -339,6 +346,7 @@ def test_a_wrong_pgdatabase_degrades_to_the_filesystem_AND_SAYS_SO():
         # state word — and `backend: "filesystem"` is what distinguishes it, because
         # here the app really has fallen back rather than kept trying.
         "state": repo.STORAGE_STATE_UNAVAILABLE,
+        "run_projection": {"authoritative": True, "last_pass": None},
     }
 
 
@@ -356,6 +364,7 @@ def test_health_reports_the_storage_block_without_opening_a_connection(app, monk
         "backend": "postgres",
         "durable": True,
         "state": repo.STORAGE_STATE_DURABLE,
+        "run_projection": {"authoritative": True, "last_pass": None},
     }
     assert body["status"] == "ok"
 
@@ -558,17 +567,66 @@ class FakeCursor:
             self._pending = []
             self.rowcount = len(doomed)
         elif sql == repo.Q_UPSERT_RUN_PROJECTION:
-            # MODELLED ONLY SO THE DISCARD CAN BE SEEN TO REMOVE IT. Nothing in the
-            # application reads this table, so the row's CONTENT is deliberately not
-            # modelled — only that a claim exists for this experiment.
-            self._connection.projections.add(params[0])
+            # THE ROW'S CONTENT IS NOW MODELLED, AND IT USED TO SAY IT NEED NOT BE.
+            # ~~"Nothing in the application reads this table, so the row's CONTENT
+            # is deliberately not modelled — only that a claim exists."~~ — that
+            # was true for Stage 2a and is FALSE from Stage 2b: the hydration
+            # reader selects `(experiment_rev, experiment_generation)` and decides
+            # from them which of the four states an experiment is in. A fake that
+            # stored only the id would answer that read with nothing, so every
+            # experiment would look NEVER PROJECTED and the whole cutover would
+            # test green while doing nothing.
+            experiment_id, rev, generation, run_count, projector = params
+            self._connection.projections[experiment_id] = (
+                rev,
+                generation,
+                run_count,
+                projector,
+            )
             self._pending = []
             self.rowcount = 1
         elif sql == repo.Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT:
             existed = params[0] in self._connection.projections
-            self._connection.projections.discard(params[0])
+            self._connection.projections.pop(params[0], None)
             self._pending = []
             self.rowcount = 1 if existed else 0
+        elif sql == repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS:
+            # THE STAGE-2b READ. Column order MUST match the statement:
+            # experiment_id, experiment_rev, experiment_generation. `run_count` and
+            # `projector` are deliberately NOT returned — the statement does not
+            # select them, and a fake that volunteered them would let a reader that
+            # started using `run_count` pass here and violate contract §7.4
+            # against a real engine.
+            wanted = set(params[0])
+            self._pending = [
+                (experiment_id, row[0], row[1])
+                for experiment_id, row in sorted(self._connection.projections.items())
+                if experiment_id in wanted
+            ]
+            self.rowcount = len(self._pending)
+        elif sql == repo.Q_RUN_ROWS_FOR_EXPERIMENTS:
+            # THE OTHER STAGE-2b READ, AND THE ORDER IS THE POINT OF MODELLING IT.
+            # `0002_runs.sql` names the sort that reproduces `sorted_runs`:
+            # `(ordinal, state ->> 'created_utc', run_id)`. The index's own order is
+            # `(experiment_id, ordinal, run_id)`, which is a DIFFERENT sequence, so
+            # a fake that returned rows in id order would hide a reader that sorted
+            # by the index. This models the statement's own ORDER BY.
+            wanted = set(params[0])
+            rows = [
+                (row[0], run_id, row[2])
+                for run_id, row in self._connection.runs.items()
+                if row[0] in wanted
+            ]
+            rows.sort(
+                key=lambda r: (
+                    r[0],
+                    self._connection.runs[r[1]][1],
+                    str((r[2] or {}).get("created_utc", "")),
+                    r[1],
+                )
+            )
+            self._pending = rows
+            self.rowcount = len(rows)
         elif sql == repo.Q_DELETE_RUNS_FOR_EXPERIMENT:
             doomed = [
                 run_id
@@ -670,9 +728,12 @@ class FakeConnection:
         #: about. Populated by an ACCEPTED upsert and by ``stored``, so a test that
         #: seeded a winner document has a row to delete without saying so twice.
         self.experiments: set = set(self.stored)
-        #: ``isaac_run_projection``, as a set of experiment ids. Existence only —
-        #: nothing in the application reads this table.
-        self.projections: set = set()
+        #: ``isaac_run_projection``, as ``experiment_id -> (experiment_rev,
+        #: experiment_generation, run_count, projector)``. IT WAS A SET OF IDS and
+        #: could be, while nothing read the table. Stage 2b's reader selects the
+        #: version pair out of it, so the content has to be real or the reader
+        #: would classify every experiment NEVER PROJECTED and test green.
+        self.projections: dict = {}
         #: Experiment ids that a HISTORY row still references. Deleting one raises
         #: :class:`ForeignKeyViolation`, which is what a real server does for a
         #: parent row with children under the `NO ACTION` default every migration
@@ -696,7 +757,7 @@ class FakeConnection:
             dict(self.stored),
             dict(self.runs),
             set(self.experiments),
-            set(self.projections),
+            dict(self.projections),
         )
         cur = FakeCursor(self)
         self.cursors.append(cur)
@@ -845,6 +906,17 @@ _READ_STATEMENTS = [
     # because classifying it as a write would say something false about it: it
     # returns whether a relation resolves and touches no data at all.
     repo.Q_RUN_TABLE_PRESENT,
+    # ── THE TWO STAGE-2b READS. THE FIRST READS OF EITHER TABLE, EVER. ──────────
+    # `isaac_runs` and `isaac_run_projection` were write-only by design while
+    # nothing depended on them; Stage 2b is the separately-reviewed slice that
+    # contract §4 reserved for moving a reader onto them. Both are READS in the
+    # strict sense — they issue a `SELECT`, they take no lock a `SELECT` does not
+    # take, and neither can change a row. See
+    # `test_0002_is_now_written_by_the_write_path_and_by_nothing_else` and
+    # `test_0005_is_written_by_the_write_path_and_read_by_nothing`, both of which
+    # were AMENDED rather than deleted to admit exactly these two.
+    repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS,
+    repo.Q_RUN_ROWS_FOR_EXPERIMENTS,
 ]
 _WRITE_STATEMENTS = [
     dbw.Q_SET_STATEMENT_TIMEOUT,
@@ -990,8 +1062,13 @@ def test_persist_sends_the_state_as_a_parameter_never_as_interpolated_sql():
 # `postgres-migration` job is where a real engine answers those, and this file's
 # own docstring says so.
 #
-# NOTHING READS THIS TABLE. Every assertion below is about what was WRITTEN; no
-# read path in the application consults a run row, and none is added here.
+# ~~"NOTHING READS THIS TABLE. Every assertion below is about what was WRITTEN; no
+# read path in the application consults a run row, and none is added here."~~ —
+# **CORRECTED FOR STAGE 2b.** One read path does now consult a run row —
+# `PostgresOrdinaryStore.hydrate`, through `Q_RUN_ROWS_FOR_EXPERIMENTS` — and it is
+# tested in `test_run_rows_become_authoritative.py`, not here. The half that still
+# holds, and is what this section is for, is UNCHANGED: every assertion below is
+# about what was WRITTEN, and no reader is added in this section.
 
 
 def _exp_with_runs(*labels, rid="01ABCDEFGHJKMNPQRSTVWXYZ00"):
@@ -1426,6 +1503,11 @@ def test_health_still_reports_durable_while_0002_is_pending(app, monkeypatch):
         "backend": repo.BACKEND_POSTGRES,
         "durable": True,
         "state": repo.STORAGE_STATE_DURABLE,
+        # `last_pass` is None: every record in this case is on disk already, so the
+        # hydration pass had nothing to restore and therefore classified nothing.
+        # A pass with nothing to do deliberately does not overwrite the
+        # distribution — see `_last_run_authority`.
+        "run_projection": {"authoritative": True, "last_pass": None},
     }
     assert [row["id"] for row in client.get("/api/experiments").json()["experiments"]] == [rid]
     assert _run_statements(conn) == []
@@ -2794,16 +2876,27 @@ def test_0002_is_now_written_by_the_write_path_and_by_nothing_else():
     the application's complete statement set; so the property is replaced by the one
     that is true, and the enumeration is kept.
 
-    WHAT IS ASSERTED NOW, and it is a stronger claim than the old one in the
-    direction that still matters:
+    AMENDED AGAIN FOR STAGE 2b, AND THE SECOND HALF OF THE PROPERTY IS NOW GONE
+    RATHER THAN WEAKENED. ~~"NO READ names it. The state document remains
+    authoritative, no read path in this application consults a run row, and this is
+    what pins that."~~ — THAT IS NO LONGER TRUE, AND IT IS THE WHOLE POINT OF
+    STAGE 2b. `Q_RUN_ROWS_FOR_EXPERIMENTS` is a genuine read: hydration builds a
+    restored document's `runs` from it when that experiment's projection is
+    COMPLETE. Deleting the test, or quietly dropping the read assertion, would have
+    removed the only enumeration of this application's complete statement set — the
+    same mistake the inversion above was written to avoid — so the property is
+    replaced by the one that is true and the enumeration is kept.
 
-    * the WRITE path names `isaac_runs` — exactly three statements, all in
-      `experiment_repository`, all issued from `PostgresOrdinaryStore.persist`;
-    * NO READ names it. The state document remains authoritative, no read path in
-      this application consults a run row, and this is what pins that. `SELECT
-      run_id, ordinal, state, rev, generation` is classified as a READ of the table
-      and is the one exception, because the diff has to see the current rows to
-      write only what moved — it is inside the write path and feeds nothing else.
+    WHAT IS ASSERTED NOW:
+
+    * the WRITE path names `isaac_runs` — exactly four statements, all in
+      `experiment_repository`, all issued from `PostgresOrdinaryStore.persist` or
+      `.discard`;
+    * exactly TWO reads name it, and they are named individually rather than
+      counted. `Q_EXPERIMENT_RUN_ROWS` is the write path's own diff read (it has to
+      see the current rows to write only what moved, and it feeds nothing else).
+      `Q_RUN_ROWS_FOR_EXPERIMENTS` is the Stage-2b reader. Any THIRD read fails
+      here, which is what keeps "who may read this table" a reviewed decision.
 
     Measured over the module-level constants in the three modules that hold them,
     rather than asserted, exactly as before.
@@ -2815,23 +2908,38 @@ def test_0002_is_now_written_by_the_write_path_and_by_nothing_else():
                 assert getattr(module, name) in _ALL_STATEMENTS, f"{module.__name__}.{name}"
 
     naming = [sql for sql in _ALL_STATEMENTS if "isaac_runs" in sql.lower()]
-    # THREE -> FOUR. The discard adds `Q_DELETE_RUNS_FOR_EXPERIMENT`, which is a
-    # different statement from `Q_DELETE_ABSENT_RUNS` and deliberately not a reuse
-    # of it: that one removes the rows a still-existing experiment no longer names
-    # (its predicate is the COMPLEMENT of a desired set), this one removes them all
-    # for an experiment that is about to stop existing. Still a WRITE-path-only
-    # table: the read assertion below is unchanged.
+    # THREE -> FOUR -> FIVE, and the fifth is a READ. The discard added
+    # `Q_DELETE_RUNS_FOR_EXPERIMENT`, which is a different statement from
+    # `Q_DELETE_ABSENT_RUNS` and deliberately not a reuse of it: that one removes
+    # the rows a still-existing experiment no longer names (its predicate is the
+    # COMPLEMENT of a desired set), this one removes them all for an experiment
+    # that is about to stop existing. Stage 2b adds
+    # `Q_RUN_ROWS_FOR_EXPERIMENTS`, which ends the write-path-only property; see
+    # the docstring. The order is `_ALL_STATEMENTS`' — reads, then writes.
     assert naming == [
         repo.Q_EXPERIMENT_RUN_ROWS,
+        repo.Q_RUN_ROWS_FOR_EXPERIMENTS,
         repo.Q_UPSERT_RUN,
         repo.Q_DELETE_ABSENT_RUNS,
         repo.Q_DELETE_RUNS_FOR_EXPERIMENT,
     ], naming
     # No read of EXPERIMENT state, and no migration bookkeeping, touches the table.
+    # THE EXEMPT SET IS ENUMERATED, NOT COUNTED, so a third reader is a visible,
+    # reviewed edit here rather than a number that quietly goes up.
     for sql in _READ_STATEMENTS:
-        if sql is repo.Q_EXPERIMENT_RUN_ROWS:
+        if sql in (repo.Q_EXPERIMENT_RUN_ROWS, repo.Q_RUN_ROWS_FOR_EXPERIMENTS):
             continue
         assert "isaac_runs" not in sql.lower(), sql
+    # AND THE STAGE-2b READER IS PINNED AT ITS ORDER BY, because the ordering is
+    # the trap `0002_runs.sql` warns about at its own index: the index is
+    # `(experiment_id, ordinal, run_id)` and its `created_utc` column is the
+    # SERVER-SIDE ROW STAMP, so a reader ordering by the index reproduces a
+    # different sequence from `sorted_runs`, which tie-breaks on the DOCUMENT's
+    # `created_utc`. The reproducing sort is the one named in that comment.
+    assert (
+        "ORDER BY experiment_id, ordinal, state ->> 'created_utc', run_id"
+        in repo.Q_RUN_ROWS_FOR_EXPERIMENTS
+    )
 
     # ── A FOURTH STATEMENT REFERS TO THE TABLE AND IS NOT IN `naming`, WHICH
     # ── WOULD BE A HOLE IN THIS ENUMERATION IF IT WERE NOT SAID OUT LOUD. ────────
@@ -2870,13 +2978,32 @@ def test_0002_is_now_written_by_the_write_path_and_by_nothing_else():
 # reader can tell whether one has lost its test.
 
 
-def test_0005_is_written_by_the_write_path_and_read_by_nothing():
-    """INVARIANT 5 — no read moves in Stage 2a.
+def test_0005_is_written_by_the_write_path_and_read_by_ONE_reader():
+    """INVARIANT 5 HAS BEEN DISCHARGED, NOT DELETED — AND THE OLD NAME IS RECORDED.
 
-    The whole safety argument for shipping a table before its reader is that
-    nothing can be depending on it yet. That is a mechanical property and this is
-    where it is mechanical: exactly ONE statement in this application names
-    `isaac_run_projection`, it is in `_WRITE_STATEMENTS`, and no read names it.
+    It was `test_0005_is_written_by_the_write_path_and_read_by_nothing`, and it
+    asserted that NO statement in this application reads `isaac_run_projection`.
+    That was invariant 5 — "no read moves in Stage 2a" — and it was never a
+    permanent property: the same invariant's own second sentence says *"Turning a
+    reader on is Stage 2b, is a separate reviewed slice"*. This is that slice, so
+    the invariant is SATISFIED by having been superseded through the process it
+    named, rather than broken.
+
+    Deleting the test would have removed the only enumeration of the statements
+    that name this table, which is the mechanism that made "nothing depends on it
+    yet" checkable in the first place. So the enumeration is kept and the claim is
+    narrowed to the one that is now true, and the narrowing is stated so a future
+    reader can tell an amended assertion from an eroded one:
+
+    * THREE statements name `isaac_run_projection`, and they are enumerated:
+      the write path's stamp, the discard's delete, and the Stage-2b reader.
+    * EXACTLY ONE of them is a read, and it is named. A second reader fails here.
+    * NOTHING UPDATES a row of this table and nothing deletes one except with the
+      experiment it describes — both unchanged from Stage 2a.
+    * THE READER DOES NOT SELECT `run_count`. Contract §7.4 forbids using it to
+      detect a mismatch, because §2.2 invariant 4 records that it is
+      `len(desired_ids)` — an intention, not an observation. A column that is never
+      selected cannot be misused, and this is where that stays true.
 
     Measured over the module-level constants, like its `0002` counterpart, so a
     second statement cannot appear without appearing here.
@@ -2886,25 +3013,39 @@ def test_0005_is_written_by_the_write_path_and_read_by_nothing():
     # application names `isaac_run_projection`"~~ stopped being true when discard
     # shipped, and the docstring above is corrected rather than reworded because the
     # sentence was load-bearing: it was the mechanical form of "nothing can be
-    # depending on this table yet". THE PART THAT MATTERS IS UNCHANGED and is what
-    # the loop below still asserts — NOTHING READS IT. A claim is written when the
+    # depending on this table yet". ~~"THE PART THAT MATTERS IS UNCHANGED and is
+    # what the loop below still asserts — NOTHING READS IT."~~ — CORRECTED FOR
+    # STAGE 2b, which is the reviewed slice invariant 5 named: ONE reader exists,
+    # it is enumerated by name, and a second one still fails here. A claim is written when the
     # rows it describes are written, and removed when the experiment it describes is
     # removed; a superseded completeness claim describes a row set that no longer
     # exists, so leaving one behind for a deleted experiment would be the stale row
     # the whole table exists to prevent.
+    # TWO -> THREE, and the third is the Stage-2b READ. See the docstring for why
+    # the "read by nothing" half is discharged rather than weakened.
     assert naming == [
+        repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS,
         repo.Q_UPSERT_RUN_PROJECTION,
         repo.Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT,
     ], naming
     for sql in _READ_STATEMENTS:
+        if sql is repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS:
+            continue
         assert "isaac_run_projection" not in sql.lower(), sql
+    # THE ONE READER SELECTS THE VERSION PAIR AND NOTHING ELSE. `run_count` and
+    # `projector` are absent BY TEXT, which is the mechanical form of contract
+    # §7.4's rule that `run_count` may not be used to detect a mismatch.
+    assert "run_count" not in repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS
+    assert "projector" not in repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS
+    assert "experiment_rev" in repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS
+    assert "experiment_generation" in repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS
     # NO UPDATE ANYWHERE, and the only DELETE is the discard's — which removes a
     # claim WITH the experiment it describes, never on its own. The rollback's DROP
     # lives in a file `load_migrations` never loads.
     for sql in _ALL_STATEMENTS:
         lowered = sql.lower()
         if "isaac_run_projection" in lowered:
-            assert lowered.startswith(("insert into", "delete from")), sql
+            assert lowered.startswith(("insert into", "delete from", "select")), sql
             assert not lowered.startswith("update"), sql
     # And the probe reaches it by PARAMETER, exactly as it reaches `isaac_runs` —
     # pinned here so the projection table cannot become a second writer unnoticed.
@@ -5179,6 +5320,10 @@ def test_MODE_B_a_succeeding_SELECT_and_a_failing_WRITE_is_disclosed_in_band(
         "backend": "postgres",
         "durable": True,
         "state": "durable",
+        # `last_pass` is None because the pass ABORTED mid-loop: the distribution
+        # is published after the loop, so a pass that did not finish publishes
+        # nothing rather than a partial count that would read as a measurement.
+        "run_projection": {"authoritative": True, "last_pass": None},
     }
 
 
