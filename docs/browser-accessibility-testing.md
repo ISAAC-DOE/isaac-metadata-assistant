@@ -444,6 +444,75 @@ You can only measure the platform you are on.
   fake platform-specificity.
 * Never "fix" one platform by copying the other's number.
 
+#### The local darwin refresh — the exact procedure, and why nothing else can do it
+
+**No CI job will ever produce the `darwin` column.** Checked rather than assumed:
+`grep -rn 'macos\|darwin' .github/workflows/` returns nothing and every `runs-on:` is
+`ubuntu-latest`. A macOS developer running the suite locally is the **only** thing that has
+ever judged that column or ever will. If nobody does it, the column goes stale silently —
+which is not hypothetical: on 2026-08-27 a refresh found **14 cells wrong**, each one a
+`{ darwin, linux }` pair whose linux half a CI transcription had updated and whose darwin
+half nothing had measured for eleven days. Every run agreed with every number the whole time.
+
+Two commands. Run the backend from the repository root, then Playwright from `apps/web`:
+
+```bash
+# terminal 1 — repository root. A scratch workspace, not a reused one.
+ISAAC_UI_WORKSPACE=$(mktemp -d) \
+ISAAC_UI_CORS_ORIGINS="http://127.0.0.1:5173,http://localhost:5173" \
+  .venv/bin/uvicorn isaac_api.app:app --app-dir apps/api --host 127.0.0.1 --port 8000
+
+# terminal 2 — apps/web
+npx playwright test e2e/specs/a11y-axe.spec.ts e2e/specs/a11y-narrow.spec.ts --reporter=list
+```
+
+**The port-5173 trap, and it is the one that wastes an afternoon.** `playwright.config.ts`
+sets `reuseExistingServer`, so a Vite dev server already listening on 5173 is ADOPTED rather
+than replaced — including one serving a **different worktree**. You then measure somebody
+else's tree and transcribe the numbers into this one. Check before every refresh:
+
+```bash
+lsof -ti:5173      # must print nothing
+```
+
+Then, in order:
+
+1. **Two consecutive runs, and diff them.** One run is not a measurement; text-node counts
+   that disagree between two back-to-back runs are noise, not a baseline. The failure lines
+   are extractable rather than read by eye:
+
+   ```bash
+   grep -oE '(GREW|IMPROVED) [a-z0-9-]+ @ [a-z0-9-]+ on darwin: rule "[a-z-]+" (grew|fell) from [0-9]+ to [0-9]+' run.log | sort -u
+   ```
+
+2. **Transcribe the "to" number into the `darwin` slot.** Never the linux slot, never a
+   rounded number, never a number from the other column.
+
+3. **Collapse or split as the readings require.** A pair whose halves now agree must become a
+   bare scalar (the well-formedness guard rejects an equal pair); a scalar that no longer holds
+   on both platforms must become a pair. Both directions happen — the 2026-08-27 refresh
+   produced 15 collapses and one new split.
+
+4. **Correct `A11Y_BASELINE_TOTAL_NODES.darwin` from the corrected map, do not compute it by
+   hand.** Run `npx vitest run e2e/invariants/baseline-aggregate.invariant.test.ts`; its
+   failure message states the sum. Do not touch `linux`.
+
+5. **Update `DARWIN_CARRIED_FORWARD` and `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES`** in
+   `e2e/a11y-baseline.ts`, and `DARWIN_MEASUREMENT`'s date and commit. That register is what
+   makes a carried-forward darwin half distinguishable from a measured one; it is the thing
+   whose absence let the 14 cells rot. The same invariant suite checks it.
+
+6. **Re-run the suite and require 0 failures**, then say which commit you measured at.
+
+**Ordinary product work has the reciprocal obligation.** When CI hands you a linux figure for a
+cell, the darwin half you leave behind is now UNMEASURED — add its key to
+`DARWIN_CARRIED_FORWARD` and raise `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` in the same edit.
+That is not bookkeeping: it is the only signal a later reader gets that the number is a
+carry-forward rather than a reading.
+
+**A green macOS run still says nothing about CI** — see the section immediately above. Fixing
+the darwin column does not make `browser-a11y` green and is not meant to.
+
 ### Accessibility
 
 Status column: **OPEN** means the defect is still in the app and still baselined. **FIXED** means the

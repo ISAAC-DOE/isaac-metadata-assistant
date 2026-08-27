@@ -53,6 +53,32 @@ import {
 
 configure({ asyncUtilTimeout: 5_000 });
 
+/*
+ * THE HARNESS DEADLINE, RAISED SO THE BUDGET ABOVE CAN ACTUALLY BE SPENT.
+ *
+ * `vite.config.ts` declares no `testTimeout`, so vitest's own per-test deadline is
+ * ALSO 5,000 ms. Two equal budgets make the raised one unreachable: a `findBy*` here
+ * can never spend its five seconds, because the harness kills the test at the same
+ * instant — and the failure then reads `Test timed out in 5000ms`, which names neither
+ * the query nor the DOM. The full argument, the CI measurements and the scaled proof
+ * are written out once at `run-workspace.test.tsx:67-112` rather than five times.
+ *
+ * 30,000 ms is a HARNESS limit, NOT a performance claim. It is the number this
+ * repository already uses for its mount-heavy suites (`run-workspace`,
+ * `experiment-graph`, `evidence-graph`, `graph-real-artifact`, `memory-status`). Every
+ * `find*`/`waitFor` still resolves as soon as the DOM is ready, and the strict 5,000 ms
+ * default still stands in every other file of the suite.
+ *
+ * IT CANNOT TURN A RED ASSERTION GREEN, and that was checked rather than assumed. The
+ * two budgets bound different things: `testTimeout` bounds the TEST, `asyncUtilTimeout`
+ * bounds each individual `waitFor`/`findBy*`. Raising only the former gives no single
+ * query one millisecond more than it already had, so a value that never arrives still
+ * never arrives. This file is the easiest of the five to check: it calls `waitFor`
+ * ZERO times, and its single negative assertion (`:312`, no Environment combobox on a
+ * collapsed card) is a synchronous `queryByRole` no deadline can move.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 const ID = 'demo';
 const BASE = `/api/experiments/${ID}`;
 

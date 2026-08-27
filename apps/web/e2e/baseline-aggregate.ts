@@ -125,6 +125,77 @@ export function sumA11yNodes(entries: readonly BaselineEntry[]): PlatformTotals 
   return total;
 }
 
+/** What `auditDarwinProvenance` found: how much of the darwin column is unmeasured. */
+export interface DarwinProvenance {
+  /** `sumA11yNodes(entries).darwin` — the whole declared darwin debt. */
+  readonly totalNodes: number;
+  /** The part of it sitting in cells nobody has measured on darwin. */
+  readonly unverifiedNodes: number;
+  /** Those cells, in the order the register lists them. */
+  readonly unverifiedKeys: readonly string[];
+  /**
+   * Register entries that match NO cell in the baseline. A key survives a cell's
+   * deletion silently otherwise, and a register that names cells which no longer
+   * exist under-reports without ever disagreeing with anything.
+   */
+  readonly unknownKeys: readonly string[];
+  /**
+   * Register entries whose cell is a SCALAR. A scalar asserts both columns with one
+   * number, so "the darwin half is carried forward" cannot be true of it in the sense
+   * this register means; either the cell should be split or the key should go.
+   */
+  readonly scalarKeys: readonly string[];
+  /** `unverifiedNodes / totalNodes`, 0 when there is nothing to divide. */
+  readonly unverifiedFraction: number;
+}
+
+/**
+ * HOW MUCH OF THE DARWIN COLUMN IS A READING, AND HOW MUCH IS CARRIED FORWARD.
+ *
+ * The defect this answers is recorded in full at `DARWIN_CARRIED_FORWARD` in
+ * `a11y-baseline.ts`: a carried-forward darwin half is indistinguishable from a
+ * measured one, and 14 cells were wrong for eleven days because of it, with every run
+ * agreeing with every number. This does not FIX that — only a darwin run can — but it
+ * makes the size of the exposure a number a reviewer can see.
+ *
+ * Takes both inputs as parameters, like every other function here, so the invariant
+ * suite's negative controls can prove it is not vacuous by feeding it a register that
+ * really does name unverified cells and checking the arithmetic changes.
+ */
+export function auditDarwinProvenance(
+  entries: readonly BaselineEntry[],
+  carriedForward: readonly string[]
+): DarwinProvenance {
+  const totalNodes = sumA11yNodes(entries).darwin;
+  const unverifiedKeys: string[] = [];
+  const unknownKeys: string[] = [];
+  const scalarKeys: string[] = [];
+  let unverifiedNodes = 0;
+
+  for (const key of carriedForward) {
+    const owning = entries.filter((entry) => key in entry.counts);
+    if (owning.length === 0) {
+      unknownKeys.push(key);
+      continue;
+    }
+    unverifiedKeys.push(key);
+    for (const entry of owning) {
+      const count = entry.counts[key];
+      if (typeof count === 'number') scalarKeys.push(key);
+      unverifiedNodes += platformCount(count, 'darwin');
+    }
+  }
+
+  return {
+    totalNodes,
+    unverifiedNodes,
+    unverifiedKeys,
+    unknownKeys,
+    scalarKeys,
+    unverifiedFraction: totalNodes === 0 ? 0 : unverifiedNodes / totalNodes,
+  };
+}
+
 /**
  * Sum every recorded layout offender, per platform. Same contract as above.
  *

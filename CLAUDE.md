@@ -557,10 +557,25 @@ Current state:
     - ~~tutorial browser specs~~ — **DONE.** `e2e/specs/tutorial.spec.ts` +
       `e2e/mutation/tutorial-lifecycle.spec.ts`.
     - ~~the screenshot sweep~~ — **DONE.** `e2e/specs/visual-sweep.spec.ts`.
-    - **`.section-tab` contrast — STILL OPEN**, and now quantified: `screens.css` uses
+    - ~~**`.section-tab` contrast — STILL OPEN**, and now quantified: `screens.css` uses
       `--text-tertiary #78838f` at 12.5px/500 for **3.86:1**. The narrow fix has in-repo precedent
       (`--text-muted #5b6570`, 5.93:1). It needs a Linux-CI round-trip to re-transcribe ~35 cells,
-      which is why it is not a one-line change.
+      which is why it is not a one-line change.~~ — **DONE, corrected 2026-08-27, and the whole
+      item is struck rather than edited because "STILL OPEN" is a claim a future session acts
+      on.** Verified at HEAD `7668bf8`, not quoted: `apps/web/src/screens/screens.css:337-346`
+      now reads `color: var(--text-muted)`, and `styles/tokens.css:29` gives `--text-muted`
+      `#5b6570` — recomputed here as **5.93:1** on `#ffffff` against the discarded
+      `--text-tertiary #78838f`'s **3.86:1**, so both figures above were right and it is the
+      STATUS that was stale. It landed in `d0c1096` ("FINDING A16 fix"), merged as PR #186 /
+      `1dd28ad`; `git merge-base --is-ancestor d0c1096 1dd28ad` exits 0. **The Linux-CI
+      round-trip the item said was needed has also happened**, which is why the fix could
+      merge: `e2e/a11y-baseline.ts` records it under "`.section-tab` TRANSCRIPTION,
+      2026-08-27", linux 2802 → 2431, **119 cells** transcribed from CI run 33025558592 at head
+      `2da0c71` — not the "~35" the estimate above guessed. Two things it did NOT close, kept
+      separate so nobody reads this as more than it is: **A3**, the app-wide 1,610-node
+      `--text-tertiary` contrast debt, is untouched and is a palette decision; and the darwin
+      half of those 119 cells was **reasoned rather than measured** until a local macOS run on
+      2026-08-27 confirmed all 119 and corrected 19 other cells.
     - **backend-sourced jargon on product screens — UNCERTAIN, and the named exemplar is wrong.**
       `MANAGED_SOURCE_DESCRIPTION` reaches **no** frontend file: `rg "Synthetic XANES campaign"
       apps/web/` returns **0** hits. So the example this item rested on no longer supports it.
@@ -820,8 +835,9 @@ Current state:
   operator's two completeness queries, `docs/migration-approval-packet-0005.md` §8A); the
   campaign-sheet capture fields (technique, facility, sample, contributors — a record can be
   finished but not richly described); an apply route for `POST /ingestion/csv/preview`; the
-  Evidence Graph / Compare Runs cross-feature work; the `.section-tab` contrast item (3.86:1 at
-  12.5px/500, and the narrow fix has in-repo precedent); the human responsive / 200%-zoom
+  Evidence Graph / Compare Runs cross-feature work; ~~the `.section-tab` contrast item (3.86:1 at
+  12.5px/500, and the narrow fix has in-repo precedent)~~ — **DONE, corrected 2026-08-27; see the
+  struck item earlier in §11 for the evidence**; the human responsive / 200%-zoom
   visual sign-off; personal-deploy retirement; and **every hosted QA of every image from this
   session** — `/krish` sits behind an Authentik edge this environment cannot authenticate to, so
   the honest status is `HOSTED QA PENDING (Krish)`. `docs/dean-operator-addendum-2026-08-25.md`
@@ -930,8 +946,24 @@ Current state:
   authorization.** A hard delete would also need **eight statements in dependency order across
   seven referencing tables, six of them append-only history**, none carrying `ON DELETE`.
 
-  **Named rather than implied, and still not done:** the `.section-tab` contrast fix is written
-  but its **~40 Linux baseline cells need a CI round-trip** to transcribe (PR #186); `isaac_runs`
+  **Named rather than implied, and still not done:** ~~the `.section-tab` contrast fix is written
+  but its **~40 Linux baseline cells need a CI round-trip** to transcribe (PR #186)~~ —
+  **DONE, corrected 2026-08-27.** PR #186 merged as `1dd28ad`, and the round-trip happened:
+  **119** cells, not ~40, transcribed from CI run 33025558592 at head `2da0c71`
+  (`e2e/a11y-baseline.ts`, "`.section-tab` TRANSCRIPTION, 2026-08-27", linux 2802 → 2431).
+  This is the THIRD site in §11 asserting the same stale item; all three are corrected in
+  the same change, because "the item is closed" is itself a checkable claim and a
+  partially-swept correction is what this file has been caught publishing before.
+  **A NEW residue this closure created and then closed:** the darwin half of those 119 cells
+  was REASONED, and no CI job can ever judge it (`grep -rn 'macos\|darwin' .github/workflows/`
+  returns nothing). A local macOS run on 2026-08-27 at `7668bf8` measured it — 149 of 168
+  cells confirmed, **19 corrected**, `A11Y_BASELINE_TOTAL_NODES.darwin` 2161 → **2435** — and
+  found that **15 of the 20 recorded "platform splits" were not platform differences at all
+  but a stale darwin column** — all 15 collapsed back to scalars. Two of the remaining five
+  (`memory-graph@zoom-200`, `validator@zoom-200`) reproduced exactly and are now confirmed
+  rather than assumed; the other three had a darwin half that was wrong while the difference
+  was real, and one scalar became a genuine split. `DARWIN_CARRIED_FORWARD` now makes a
+  carried-forward darwin half distinguishable from a measured one; `isaac_runs`
   Stage 2b; an apply route for `POST /ingestion/csv/preview` — **which is NOT residual work but a
   committed human decision** (*"Option 1 — reconciliation-only … a deliberate authority boundary,
   NOT a defect"*); the Evidence Graph / Compare Runs cross-feature work; the human responsive /
