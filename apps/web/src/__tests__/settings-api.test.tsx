@@ -1852,7 +1852,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // corrected IN PLACE. Both were re-transcribed from `create_app().openapi()` by
     // script rather than hand-edited, and `test_contract_description_parity.py` proves
     // the copy matches the served document.
-    expect(total).toBe(94773);
+    // RE-MEASURED 2026-08-26 after merging main. This branch rewrote two verdict-route
+    // descriptions while #182 corrected two notes descriptions; both move the same
+    // three aggregates. The figure comes from the served document at every merge,
+    // never from adding the two branches' deltas.
+    expect(total).toBe(96167);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
