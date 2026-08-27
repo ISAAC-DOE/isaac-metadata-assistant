@@ -1631,14 +1631,17 @@ of `/api/health`, deliberately adjacent to `mode`.
 
 ## 16. Resume Protocol
 
-**READ [`docs/session-handoff-2026-08-26.md`](docs/session-handoff-2026-08-26.md) FIRST if you are
-resuming after 2026-08-26.** That session stopped on a usage limit rather than at a natural
-boundary, so it left state a normal resume would not expect: **one open PR (#179) whose independent
-review never reported**, and **four in-flight implementation slices preserved as `wip/*` branches
-that are UNVERIFIED SNAPSHOTS committed by the orchestrator, not by their agents — none may be
-merged as-is.** The handoff also carries the evidence-backed list of what remains implementable
-versus what is Dean's, Krish's or Angel's. It is a description of where work stopped, not an
-authorization to continue; verify every fact in it with the commands in its §1.
+**[`docs/session-handoff-2026-08-26.md`](docs/session-handoff-2026-08-26.md) IS CLOSED OUT.** It
+was written when a session stopped on a usage limit with one unreviewed PR and four unverified
+`wip/*` branches; **all of that resolved on 2026-08-27** — every PR merged with an independent
+review and green CI, and each `wip/` slice was re-run from its brief and re-measured rather than
+merged. Its box at the top carries the current state; the body is kept for its evidence and
+reasoning, not as a description of where things stand. **Read it for the still-open list**
+(`system.domain` has no write path; discard needs the owner; A11Y-06's residue; the reasoned darwin
+a11y column) **and for three operational traps that cost real time** — a `.venv` symlink that
+reached `main`, the snapshot conflicting every open PR on each merge, and OpenAPI aggregates that
+must be re-measured rather than added. It is a description, not an authorization; verify every fact
+with the commands in its §1.
 
 After interruption or context reset:
 
