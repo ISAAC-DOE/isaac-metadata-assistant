@@ -2223,8 +2223,25 @@ class ExportUnit:
         out of a persisted document through :func:`_as_str`, so it can be anything at
         all. A unit whose id is not a record id can never be exported anyway —
         ``export_draft`` refuses it with a typed draft error — so refusing to name a
-        file for it costs nothing and removes the only place this slice could have
-        turned document content into a filesystem path.
+        file for it costs nothing.
+
+        ~~"and removes THE ONLY PLACE this slice could have turned document content
+        into a filesystem path"~~ — **struck 2026-08-26, because it was measurably
+        false of the experiment-level twin, and it is left visible rather than edited
+        away.** :meth:`Experiment.record_path` gated on TRUTHINESS, not on
+        ``is_record_id``, so a persisted ``record_id`` of ``"../planted_secret"``
+        built ``<records_dir>/../planted_secret.json`` and ``GET
+        /api/experiments/{id}/artifacts`` answered **200** carrying the contents of a
+        file outside ``records_dir`` — measured over HTTP on ``cde8d7c``, with
+        ``"../../../far_away_secret"`` reaching outside the whole workspace. Both
+        halves of the experiment-level twin are gated now (the parse in
+        :meth:`Experiment.from_state`, the path in :meth:`Experiment.record_path`), so
+        the claim this docstring wanted to make is true of the record namespace as a
+        whole rather than of one class inside it.
+
+        The lesson worth keeping is not the traversal. It is that "the only place"
+        is a claim about EVERY class carrying the value, and this one was checked on
+        one of the two.
         """
         if not is_record_id(self.target_id):
             return None
@@ -2729,11 +2746,53 @@ class Experiment:
         return f'"{self.version_token()}"'
 
     def record_path(self) -> Path | None:
-        return self.records_dir / f"{self.record_id}.json" if self.record_id else None
+        """``<records_dir>/<record_id>.json``, or ``None`` if that is not a record id.
+
+        THE SECOND OF TWO INDEPENDENT GATES on the same value, and the redundancy is
+        deliberate. :meth:`from_state` already refuses a non-record-id through
+        :func:`_as_record_id`, so on the READ path this can only ever see a 26-char
+        id — but ``record_id`` is a plain mutable attribute, assigned directly by the
+        export route and by ``ExportUnit.mark_exported``, and an ``Experiment`` can be
+        constructed without going through ``from_state`` at all. A parse-time guard
+        cannot cover those; a guard at the point a string BECOMES A PATH can. It is
+        the posture this codebase already takes for the same shape of value:
+        ``mcp/tools._EXPERIMENT_ID`` bounds an id in the published schema AND
+        ``mcp/client._render_path`` refuses it again before a request is built.
+
+        ``is_record_id`` RATHER THAN A ``resolve()``-BASED CONTAINMENT CHECK, and that
+        choice is the stronger one rather than the cheaper one. ``is_record_id`` is
+        ``\\A[0-9A-Z]{26}\\Z`` — an allowlist that cannot express ``/``, ``\\``, ``.``
+        or a NUL, so no value it admits can name anything but a direct child of
+        ``records_dir``. A containment check would be strictly WEAKER (it admits any
+        name inside the directory, including one this application would never mint)
+        and would put a filesystem syscall on a hot read path. A third gate would be
+        redundant with this one rather than independent of it.
+
+        ``is_record_id`` rather than TRUTHINESS is the whole defect: ``if
+        self.record_id`` accepted ``"../planted_secret"`` and rejected ``0`` / ``{}``
+        / ``[]`` / ``""`` / ``False`` — exactly backwards, because :meth:`exported`
+        asks ``is not None`` and so called those five "exported" while this method
+        handed the reader ``None`` to call ``.read_text()`` on.
+        """
+        return (
+            self.records_dir / f"{self.record_id}.json"
+            if is_record_id(self.record_id)
+            else None
+        )
 
     def sidecar_path(self) -> Path | None:
-        rid = self.record_id
-        return self.records_dir / f"{rid}.evidence.json" if rid else None
+        """``<records_dir>/<record_id>.evidence.json``, gated exactly as its pair is.
+
+        The SAME predicate as :meth:`record_path` rather than a weaker one, because
+        ``routes.get_artifacts`` reads both and reports ONE ``artifact.state`` for the
+        pair: a sidecar path built from a value the record path refused would make the
+        two halves disagree about the same id.
+        """
+        return (
+            self.records_dir / f"{self.record_id}.evidence.json"
+            if is_record_id(self.record_id)
+            else None
+        )
 
     # -- persistence --
 
@@ -3547,6 +3606,21 @@ class Experiment:
         ``session_id`` is supplied by the caller that knew which directory the state
         was read from — it is never read out of ``state``, which deliberately does
         not carry it.
+
+        THIS READER IS STRICT AND IT RAISES, DELIBERATELY. ``id``, ``title`` and
+        ``created_utc`` are hard subscripts and ``rev`` goes through a bare ``int()``,
+        so a document missing one of them, or carrying a non-numeric ``rev``, raises
+        ``KeyError``/``TypeError``/``ValueError`` here. SIX consumers depend on that
+        raise as a fail-closed or fail-soft gate, and each is enumerated in
+        :func:`_readable_experiment_state`.
+
+        **NO REQUEST-ANSWERING READ CALLS THIS DIRECTLY ANY MORE**, and that is what
+        closed the measured whole-list 500: the three paths that turn a stored
+        document into a response (:func:`list_experiments_with_hydration`,
+        :func:`_load_all_experiments`, :func:`load_experiment`) go through
+        :func:`_hydrate_experiment`, which normalises first. If you add a fourth, use
+        that one — a reader calling this directly can 500 an entire workspace over one
+        malformed document, which is exactly the defect that was measured.
         """
         exp = cls(
             session_id=session_id,
@@ -3556,7 +3630,32 @@ class Experiment:
             source=state.get("source") or {},
             draft=state.get("draft") or {},
             answer_log=state.get("answer_log") or [],
-            record_id=state.get("record_id"),
+            # GUARDED FOR THE SAME REASON ``Run.from_state`` GUARDS ITS OWN
+            # ``record_id``, and this line was the measured counter-example to
+            # ``ExportUnit.record_path``'s claim to have been "the only place this
+            # slice could have turned document content into a filesystem path".
+            # Measured over HTTP on ``cde8d7c`` with the value written into the
+            # persisted state document:
+            #
+            #   ``{}`` / ``[]`` / ``0`` / ``""`` / ``False``
+            #       -> ``GET /{id}/evidence`` **500**, ``GET /{id}/artifacts`` **500**
+            #       (``exported()`` is ``record_id is not None``, so a FALSY non-``None``
+            #       said "exported" while ``record_path()``, gated on the same
+            #       truthiness, answered ``None`` and the route read ``.read_text()``
+            #       off it)
+            #   ``"../planted_secret"``      -> ``/artifacts`` **200**, body carrying a
+            #                                   JSON file from OUTSIDE ``records_dir``
+            #   ``"../../../far_away_secret"`` -> **200**, a file outside the whole
+            #                                   workspace
+            #
+            # REACHABILITY, STATED PLAINLY RATHER THAN OVERSTATED: no route lets a
+            # client set ``record_id`` — export mints it with ``new_record_id()`` — so
+            # the traversal needs a persisted document written from outside this
+            # application (an operator edit, an out-of-band ``INSERT``, a future
+            # importer). THIS IS DEFENCE IN DEPTH, NOT A LIVE BREACH. The read also
+            # only resolves in a workspace where ``records_dir`` exists, i.e. one where
+            # something has been exported.
+            record_id=_as_record_id(state.get("record_id")),
             rev=int(state.get("rev") or 0),  # missing/legacy -> 0
             updated_utc=state.get("updated_utc") or "",  # __post_init__ -> created_utc
             generation=state.get("generation") or "",  # missing/legacy -> deterministic fallback
@@ -3908,6 +4007,127 @@ class Experiment:
         if dry_run_ok is None:
             return self._all_units_pass_dry_run(units=units)
         return dry_run_ok
+
+
+def _readable_experiment_state(state: object, experiment_id: str | None) -> dict:
+    """A state document :meth:`Experiment.from_state` cannot RAISE on. Never raises.
+
+    THE ONE PLACE THAT DECIDES WHAT A MALFORMED EXPERIMENT DOCUMENT IS, in the same
+    sense :func:`_hydrate_runs` owns that decision for a run entry — so a reader and a
+    writer cannot come to disagree about what a document contains.
+
+    THE DEFECT, MEASURED OVER HTTP ON ``cde8d7c``. ``Experiment.from_state`` read
+    ``id``, ``title`` and ``created_utc`` as HARD SUBSCRIPTS and coerced ``rev`` with a
+    bare ``int()``, so ONE malformed persisted document took down the WHOLE list:
+
+    =========================================  =========================  ==========
+    persisted value                            ``GET /api/experiments``   own detail
+    =========================================  =========================  ==========
+    ``id`` absent                              **500**                    **500**
+    ``title`` absent                           **500**                    **500**
+    ``created_utc`` absent                     **500**                    **500**
+    ``rev: "x"``                               **500**                    **500**
+    ``draft: "nope"``                          **500**                    **500**
+    ``source: "nope"``                         200                        **500**
+    ``created_utc: 5`` (with a 2nd record)     **500**                    200
+    the whole document is a JSON list          **500**                    **500**
+    =========================================  =========================  ==========
+
+    Every OTHER record's own detail route answered 200 throughout, which is what made
+    this present as a silent whole-workspace outage rather than as one broken record:
+    ``list_experiments_with_hydration`` catches only ``FileNotFoundError``. The
+    ``created_utc: 5`` row needs a SECOND record to reproduce, because its raise is in
+    ``out.sort(key=lambda e: e.created_utc)`` comparing ``int`` with ``str`` — the
+    experiment-level twin of the ``sorted_runs`` defect :func:`_as_str` records, and
+    the reason a single-record probe would have called that row clean.
+
+    WHY THE TOLERANCE LIVES HERE AND ``from_state`` STAYS STRICT — the one place this
+    deliberately departs from its own precedent. ``Run.from_state`` was made TOTAL when
+    the same defect was measured for runs, and doing that again was the obvious move.
+    It was rejected after reading the consumers that depend on the raise, because it
+    would have silently weakened all six at once:
+
+    * :func:`_current_plan_row` — the reset PREFLIGHT. An unhydratable document answers
+      ``_UNREADABLE_ROW``, which compares unequal to every real row, so the destructive
+      reset REFUSES. A total reader would hand it a plausible row instead.
+    * :meth:`Experiment._heal_from_conflict` and :meth:`Experiment._local_state_or_none`
+      — a local file is overwritten with a durable winner only when both sides parse.
+    * :meth:`Experiment._persisted_sig_and_rev` — a corrupt file means "no prior state".
+    * ``experiment_repository.PostgresOrdinaryStore.stored_experiments`` — counts an
+      unhydratable row as ``unreadable`` rather than projecting it, which is the
+      completeness signal ``isaac_run_projection`` is driven by (``CLAUDE.md`` §15).
+    * ``experiment_repository.current_experiment`` — falls back to the caller's own
+      experiment so a failure to parse a conflict winner cannot turn a ``412`` into a
+      ``500``.
+    * ``submission_store._previous_unit_drafts`` — a predecessor that will not parse
+      yields ``None`` ("no comparable predecessor") rather than a change list computed
+      from degraded content, which would report invented changes.
+
+    So the strict reader keeps its contract and its raise, all six keep their posture
+    untouched, and the READ path — which is where the outage was — normalises first.
+    One assembly (``from_state``), one policy (here).
+
+    NOTHING IS REPAIRED AND NOTHING IS INVENTED. Each key falls back to what a document
+    MISSING that key already got: :func:`_as_str` -> ``""`` (never ``str()`` coercion,
+    which would manufacture a title out of ``{"a": 1}``), :func:`_as_int` -> 0, a
+    non-dict ``source``/``draft`` -> ``{}``, a non-list ``answer_log`` -> ``[]``. The
+    stored document is NOT rewritten by reading it. A later SAVE of the degraded record
+    does write the fallbacks — the same disclosed consequence ``Run.from_state``
+    records for its own guards.
+
+    THE DEGRADED RECORD STAYS BLOCKED, AND THAT IS MEASURED RATHER THAN ASSERTED — see
+    ``test_a_malformed_experiment_document_stays_blocked``. No degradation reaches
+    ``ready_to_export`` or ``done``, and none of them produces an artifact. A blocker is
+    deliberately NOT invented for the reader: a synthetic ``pending`` entry would be
+    written into the stored document by the next save, which is the repair
+    ``CLAUDE.md`` §5 forbids.
+
+    ``experiment_id`` IS THE DOCUMENT'S ADDRESS, NOT A GUESS. When the stored ``id`` is
+    unusable the fallback is the directory the state was READ FROM — the same rule two
+    other readers already apply in the opposite direction (``stored_experiments`` skips
+    a row whose ``state["id"] != <row key>``; ``_heal_from_conflict`` skips a winner
+    whose ``state["id"] != self.id``), both treating the address as authoritative over
+    the document's claim about itself. It matters beyond cosmetics: ``Experiment.dir``
+    is ``scope_root / self.id``, so an ``id`` of ``""`` would alias the SCOPE ROOT and a
+    later save would write ``<scope_root>/experiment.json`` — a real file, outside every
+    experiment directory, that no enumeration would ever read again.
+    """
+    if not isinstance(state, dict):
+        # Not a document at all: every read below would go through ``.get``.
+        state = {}
+    readable = dict(state)
+    readable["id"] = _as_str(state.get("id")) or _as_str(experiment_id)
+    readable["title"] = _as_str(state.get("title"))
+    readable["created_utc"] = _as_str(state.get("created_utc"))
+    readable["rev"] = _as_int(state.get("rev"))
+    readable["updated_utc"] = _as_str(state.get("updated_utc"))
+    readable["generation"] = _as_str(state.get("generation"))
+    # ``or {}`` was never a type guard here either: every wrong type is TRUTHY, so
+    # ``"nope"`` reached ``.get`` and ``.items()`` further down the read.
+    for key in ("source", "draft"):
+        if not isinstance(state.get(key), dict):
+            readable[key] = {}
+    if not isinstance(state.get("answer_log"), list):
+        readable["answer_log"] = []
+    return readable
+
+
+def _hydrate_experiment(
+    state: object,
+    *,
+    session_id: str | None = None,
+    experiment_id: str | None = None,
+) -> "Experiment":
+    """Rehydrate one experiment for a READER. Never raises on a malformed document.
+
+    :meth:`Experiment.from_state` over :func:`_readable_experiment_state` — see that
+    function for the measured defect, the policy, and why the strict reader is left
+    strict. Every path that answers a request from a stored document goes through here;
+    the six fail-closed consumers listed there deliberately do not.
+    """
+    return Experiment.from_state(
+        _readable_experiment_state(state, experiment_id), session_id=session_id
+    )
 
 
 # --- store operations ---------------------------------------------------------
@@ -4587,7 +4807,20 @@ def list_experiments_with_hydration(
             state = json.loads((d / "experiment.json").read_text(encoding="utf-8"))
         except FileNotFoundError:
             continue  # dir removed by a concurrent reset between listing and read — benign
-        out.append(Experiment.from_state(state, session_id=session_id))
+        # ONE MALFORMED DOCUMENT MUST NOT COST THE WHOLE LIST. Only
+        # ``FileNotFoundError`` is caught above, so before this every raise inside
+        # hydration was a 500 over the ENTIRE workspace while each healthy record's own
+        # detail route still answered 200 — see :func:`_readable_experiment_state` for
+        # the measured table. STILL UNCOVERED, and named rather than implied: the
+        # ``json.loads`` above. A torn or non-JSON ``experiment.json`` raises
+        # ``JSONDecodeError`` here and is the same whole-list outage by a different
+        # cause; what a reader should be shown for a file that does not parse AT ALL is
+        # a separate policy decision (a blank row at its address, or nothing) and is
+        # deliberately not made here.
+        out.append(_hydrate_experiment(state, session_id=session_id, experiment_id=d.name))
+    # ``e.created_utc`` is a ``str`` for every row by construction now. This comparison
+    # is the SECOND place a wrong-typed key took the list down (``int`` vs ``str``), and
+    # it needs two records to reproduce — which is why a single-record probe missed it.
     out.sort(key=lambda e: e.created_utc)
     return out, hydration
 
@@ -4766,8 +4999,15 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
             # that is the honest 404 this branch must go on producing.
             if not state_path.exists():
                 return None
-    return Experiment.from_state(
-        json.loads(state_path.read_text(encoding="utf-8")), session_id=session_id
+    # DEGRADES RATHER THAN RAISING, for the same reason the two enumerations do: the
+    # owner of a malformed record did nothing wrong and must not be shown a 500 in
+    # place of their record. ``experiment_id`` is passed as the address fallback — it
+    # is the segment this path was built from, so a document whose own ``id`` is
+    # unusable stays addressable and its ``dir`` cannot alias the scope root.
+    return _hydrate_experiment(
+        json.loads(state_path.read_text(encoding="utf-8")),
+        session_id=session_id,
+        experiment_id=experiment_id,
     )
 
 
@@ -4999,7 +5239,36 @@ def _load_all_experiments(session_id: str | None = None) -> list[Experiment]:
             state = json.loads((d / "experiment.json").read_text(encoding="utf-8"))
         except FileNotFoundError:
             continue  # dir removed by a concurrent reset between listing and read — benign
-        out.append(Experiment.from_state(state, session_id=session_id))
+        # Degrades exactly as ``list_experiments_with_hydration`` does. ~~"THE RESET'S
+        # OWN FAIL-CLOSED GATE IS UNCHANGED BY THAT: :func:`_current_plan_row` re-reads
+        # each document through the STRICT ``Experiment.from_state`` and still answers
+        # ``_UNREADABLE_ROW`` for one that will not hydrate, so a plan digest taken over
+        # a malformed document still refuses."~~ **CORRECTED 2026-08-26, and it was
+        # wrong twice over.**
+        #
+        # (1) Every clause of it was true and the reassurance it added was false —
+        # which is the more useful thing to remember. The gate did still refuse, but
+        # only from INSIDE the mutation loop, one record at a time, so a malformed
+        # document was refused AFTER the reset had destroyed the managed-legacy records
+        # ahead of it, and refused with ``plan_digest_stale``, whose documented remedy
+        # is to re-preview and retry — which could never succeed.
+        #
+        # (2) It also described the WRONG MECHANISM, and the wrong one is the smaller
+        # half. Measured over the eight malformed documents
+        # ``test_one_malformed_document_does_not_take_down_the_list.py`` defines, SEVEN
+        # break the reset and only FOUR of those raise. ``draft``, ``source`` and
+        # ``answer_log`` holding a wrong-typed value hydrate strictly WITHOUT ERROR, to
+        # different content than this function's tolerant read produces — so no
+        # ``_UNREADABLE_ROW`` is involved, the rows simply differ, and the loop aborts
+        # just the same. A sentence written around ``_UNREADABLE_ROW`` could not have
+        # described those three at all.
+        #
+        # :func:`_malformed_experiment_ids` is the gate that makes the sentence true as
+        # it reads, and it asks the question that covers both mechanisms: do the two
+        # readers agree about this document? The whole scope is checked before anything
+        # is touched. This function still decides only what the classification SEES; it
+        # does not decide whether a destructive reset proceeds.
+        out.append(_hydrate_experiment(state, session_id=session_id, experiment_id=d.name))
     return out
 
 
@@ -5252,15 +5521,65 @@ _UNREADABLE_ROW: list = ["\x00unreadable"]
 def _current_plan_row(experiment_id: str, session_id: str | None) -> list | None:
     """Re-read ONE record from disk NOW and rebuild its plan row (``None`` if absent).
 
-    Deliberately reads and rehydrates by exactly the same two steps
-    ``_load_all_experiments`` uses (``read_text`` -> ``Experiment.from_state``) and
-    then hands the result to the one shared :func:`_plan_digest_row`, so a record
-    nobody touched produces a row byte-identical to the one classified earlier and
-    the comparison can never refuse spuriously. That the row also stats the artifact
-    pair is therefore automatic here, and is the point: this is the single definition
-    of what "unchanged" means. Absence is a real answer,
-    not an error: a record removed in the window has no row, which differs from the
-    row it had when it was classified — which is the point.
+    Reads with ``read_text`` -> ``Experiment.from_state`` and then hands the result to
+    the one shared :func:`_plan_digest_row`, so a record nobody touched produces a row
+    byte-identical to the one classified earlier and the comparison can never refuse
+    spuriously.
+
+    ~~"by exactly the same two steps ``_load_all_experiments`` uses"~~ — **struck
+    2026-08-26: that stopped being true, deliberately, and the divergence is now the
+    interesting part.** ``_load_all_experiments`` reads through
+    :func:`_hydrate_experiment`, which normalises a malformed document rather than
+    raising; THIS function still uses the STRICT ``Experiment.from_state``. The two
+    therefore disagree about exactly one class of document, and they are MEANT to:
+
+    * the classification pass must not 500 a whole workspace over one bad document —
+      that was a measured outage, and the reader who owns the record did nothing wrong;
+    * a DESTRUCTIVE reset must not proceed on a document it cannot prove is unchanged.
+
+    So a malformed record now classifies into a bucket and appears in the plan, and
+    then this function answers ``_UNREADABLE_ROW`` for it, which compares unequal to
+    the row the plan holds — and the reset REFUSES that record. That is the
+    fail-closed direction.
+
+    ~~"It is also strictly better than the previous behaviour, where the malformed
+    document made the PREVIEW itself raise, so no reset could be planned at all."~~
+    **WITHDRAWN 2026-08-26 — it was false, and it was false in the direction this
+    module exists to prevent.** Fail-closed was the true half. "Strictly better" was
+    not established and did not hold: the previous behaviour answered ``500`` and
+    destroyed NOTHING, while this one, before the preflight was added, previewed as
+    ``refused: false`` with ``final_count: 5``, then destroyed the managed-legacy
+    records ahead of the malformed id, refused with a reason whose remedy could never
+    work, and left the scope permanently un-resettable — measured over HTTP, twice.
+    A refusal that arrives after a destructive act is not a better refusal than one
+    that arrives before it. The claim is withdrawn rather than reworded because the
+    lesson is the reasoning, not the sentence: **"fail-closed" is a statement about
+    the DECISION, and on a destructive path it says nothing about WHEN the decision is
+    taken. The two must be argued separately.** What replaced it is
+    :func:`_malformed_experiment_ids`, which takes the same decision before the
+    mutation loop; with that gate in place this function's refusal is the backstop for
+    a document that breaks mid-reset, and only for that.
+
+    **AND THIS FUNCTION IS NOT WHERE THE DEFECT LIVED, WHICH IS WHY IT IS BARELY
+    CHANGED.** Only four of the seven malformed documents that break the reset reach
+    ``_UNREADABLE_ROW`` at all; the other three hydrate strictly without error and
+    simply produce a DIFFERENT row than the tolerant reader does. Reasoning about this
+    sentinel is therefore reasoning about the minority of the cases, and a fix aimed
+    here would have covered four of seven while looking complete.
+
+    THE "recoverable in one further request" PROMISE BELOW DEPENDS ON THAT GATE, and
+    said so nowhere. Without it, a malformed document made the retry refuse at the same
+    place forever, so the operator was told to look again at a plan that had not
+    changed. With it, the further request re-previews, the preflight names the record,
+    and the operator gets a reason that is true.
+
+    The invariant this docstring actually needs is narrower than the sentence it
+    replaces, and it still holds: **for every document that hydrates, both paths
+    produce the same row**, because both end in :func:`_plan_digest_row`. That the row
+    also stats the artifact pair is therefore automatic here, and is the point: this is
+    the single definition of what "unchanged" means. Absence is a real answer, not an
+    error: a record removed in the window has no row, which differs from the row it had
+    when it was classified — which is the point.
 
     Callers hold that id's ``record_lock``; the ``FileNotFoundError`` guard mirrors
     ``_load_all_experiments``'s and exists for the same benign reason.
@@ -5287,15 +5606,133 @@ def _current_plan_row(experiment_id: str, session_id: str | None) -> list | None
         # read that failed for any other reason (FileNotFoundError, an OSError
         # subclass, is caught above and keeps its own meaning).
         return _UNREADABLE_ROW
+    return _strict_plan_row(state, session_id)
+
+
+def _strict_plan_row(state: object, session_id: str | None) -> list:
+    """ONE already-read document's plan row, through the STRICT reader.
+
+    Extracted from :func:`_current_plan_row` for the same reason
+    :func:`_plan_digest_row` was extracted from :func:`_plan_digest`: the reset
+    preflight needs this exact answer for a document it has ALREADY read, and a second
+    copy of the rule written beside it would be free to drift from the one the mutation
+    loop uses. There is one definition of "the strict row", and this is it.
+
+    ``from_state`` and ``_plan_digest_row`` are both inside the guard, which is how
+    :func:`_current_plan_row` has always had it: either step can fail on a document
+    this build cannot read, and the answer to both is the same. Deliberately an
+    explicit exception tuple rather than a bare ``except``: a fault of some OTHER kind
+    is a defect in this module and should still be loud, not swallowed into a refusal
+    that looks like an ordinary concurrent write.
+    """
     try:
         exp = Experiment.from_state(state, session_id=session_id)
         return _plan_digest_row(exp, classify_experiment(exp))
     except (KeyError, TypeError, ValueError, AttributeError):
-        # Rehydration failures for a state file this build cannot read. Deliberately
-        # an explicit tuple rather than a bare ``except``: a fault of some OTHER kind
-        # is a defect in this module and should still be loud, not swallowed into a
-        # refusal that looks like an ordinary concurrent write.
         return _UNREADABLE_ROW
+
+
+def _malformed_experiment_ids(
+    experiment_ids: list[str], session_id: str | None
+) -> list[str]:
+    """The ids whose stored document the reset's TWO readers do not agree about.
+
+    The reset PREFLIGHT. It exists because of a measured destructive defect, not for
+    tidiness. When the read path was made tolerant (:func:`_hydrate_experiment`) and
+    :func:`_current_plan_row` was deliberately left strict, the two came to disagree
+    about malformed documents — which was the intent — but nothing checked for that
+    disagreement BEFORE the mutation loop. So a scope holding one malformed document
+    classified cleanly, previewed as ``refused: false`` with ``final_count: 5``, and the
+    execute then removed managed-legacy records one at a time until it reached the
+    malformed id, aborted there with ``plan_digest_stale``, and left the scope
+    permanently un-resettable — every retry aborting at the same place, having destroyed
+    a little more the first time. Measured over HTTP with one canonical seed's ``title``
+    removed: ``execute`` #0 answered ``412`` with ``removed_count: 1`` (and
+    ``removed_count: 2`` of 3 in a three-legacy scope), #1 and #2 answered ``412`` with
+    ``removed_count: 0``, and the malformed canonical — the very record the reset exists
+    to restore — was never restored.
+
+    **THE PREDICATE IS READER DISAGREEMENT, NOT "the strict reader raised", and the
+    difference is three of the eight documents.** The first version of this function
+    asked only whether :func:`_current_plan_row` answered ``_UNREADABLE_ROW``. Measured
+    over the eight malformed documents that
+    ``test_one_malformed_document_does_not_take_down_the_list.py`` defines, **seven**
+    break the reset and only **four** of those seven raise. ``draft``, ``source`` and
+    ``answer_log`` holding a wrong-typed value all hydrate STRICTLY WITHOUT ERROR — and
+    to different content than the tolerant reader produces, so the rows differ, so the
+    mutation loop aborts on them exactly as it aborts on a raise. (``answer_log:
+    "nope"`` is the clearest: ``len(exp.answer_log or [])`` is ``4`` strictly, over the
+    string, and ``0`` tolerantly.) A predicate written around the raise would have left
+    three of the seven destroying records, and would have looked correct because the
+    four loudest cases passed.
+
+    So the question asked here is the one that actually decides the outcome: **do the
+    strict row and the tolerant row differ for these bytes?** The eighth document
+    (``created_utc`` holding an int) is not reported, and that is correct rather than a
+    gap — ``created_utc`` is not in the row, both readers produce the same row, and the
+    reset runs cleanly over it. The predicate reports the documents that BREAK the
+    reset, not the documents that are ill-formed.
+
+    **Both rows are built from ONE read.** Reading twice would put a window between them
+    in which a concurrent write could make the two readers disagree for a reason that
+    has nothing to do with the document, and this function would then call an ordinary
+    race "malformed" — a false and permanent-sounding reason for a transient condition.
+    From one ``state`` the disagreement is a property of the bytes alone. The residue is
+    named rather than hidden: :func:`_plan_digest_row` also stats the artifact pair, so
+    the two calls observe the filesystem microseconds apart, and a genuine concurrent
+    artifact write in that gap would be reported here. It refuses without mutating, so
+    the direction is fail-closed, and the operator's next preview answers cleanly.
+
+    It does **not** replace the per-record check in the mutation loop. A document that
+    breaks AFTER this preflight really has changed in the window, and
+    ``plan_digest_stale`` is the true reason for that one — the operator re-previews,
+    this preflight names the record, and that is the "recoverable in one further
+    request" the reason promises.
+
+    Every classified id is checked, not only the ids the reset would touch. A malformed
+    AMBIGUOUS record would already have refused the reset, but with a CLASSIFICATION
+    verdict about a document nothing could read straight: ``_hydrate_experiment`` falls
+    a non-dict ``source`` back to ``{}``, so the ambiguity verdict for such a document is
+    derived from normalised content. "I could not read it" claims less, and is the reason
+    that is true of it.
+
+    Cannot raise, and that is a safety property rather than tidiness — it runs with
+    ``_reset_lock`` held, and a raise here would answer the caller with a ``500``
+    carrying no refusal reason. A tolerant row that will not build is itself a
+    disagreement and is reported as one.
+
+    Sorted, so the reported ids are stable across calls and across filesystems.
+    """
+    out: list[str] = []
+    for experiment_id in experiment_ids:
+        state_path = scope_root(session_id) / experiment_id / "experiment.json"
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            # Absent, not malformed. A record removed since classification has no row
+            # at all, which the plan's existing machinery already compares correctly
+            # (``None`` means ABSENT and absent-then/absent-now compares equal).
+            continue
+        except (OSError, ValueError):
+            out.append(experiment_id)  # present, but the bytes will not parse
+            continue
+        strict_row = _strict_plan_row(state, session_id)
+        try:
+            tolerant = _hydrate_experiment(
+                state, session_id=session_id, experiment_id=experiment_id
+            )
+            tolerant_row = _plan_digest_row(tolerant, classify_experiment(tolerant))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            # Unreachable in practice — the classification pass above already built
+            # this same row for this same document, so it would have raised there
+            # first. Guarded anyway: the alternative is a 500 out of the destructive
+            # path, and "the tolerant reader could not build a row either" is a
+            # disagreement by any reading.
+            out.append(experiment_id)
+            continue
+        if strict_row != tolerant_row:
+            out.append(experiment_id)
+    return sorted(out)
 
 
 def _plan_digest(buckets: dict[str, list["Experiment"]]) -> str:
@@ -5397,9 +5834,14 @@ def reset_to_canonical_seed(
 ) -> dict:
     """Classify ONE TUTORIAL SESSION and (unless ``dry_run``) restore the canonical seed.
 
-    Refuses, MAKING NO CHANGES, if ANY ambiguous record exists, and — when
-    ``expected_plan_digest`` is supplied — if it does not match the digest of the
-    session as classified here.
+    Refuses, MAKING NO CHANGES, if ANY ambiguous record exists, if ANY record's stored
+    document is one the reset's strict and tolerant readers disagree about
+    (:func:`_malformed_experiment_ids`, reported as ``malformed_ids``), and — when
+    ``expected_plan_digest`` is supplied — if it does not match the digest of the session
+    as classified here. All three are decided BEFORE the mutation loop, which is the
+    property that matters: the disagreement was previously noticed only INSIDE the loop,
+    so it refused after destroying the records ahead of the malformed one, and every
+    retry aborted at the same place.
 
     It ALSO refuses, and this one is the exception to "no changes", if any single
     record changes between that classification and the moment this reset is about to
@@ -5490,14 +5932,33 @@ def reset_to_canonical_seed(
             for exp in exps
         }
         plan_digest = _plan_digest(buckets)
+        # THE PREFLIGHT. Asked here, over the whole scope, so that a document the
+        # reset's two readers disagree about refuses BEFORE the mutation loop rather
+        # than partway through it. See :func:`_malformed_experiment_ids` for the
+        # measured defect this closes, for why the predicate is disagreement rather
+        # than "the strict reader raised", and for why it does not replace the
+        # per-record check in the loop below.
+        malformed_ids = _malformed_experiment_ids(
+            [exp.id for exp in experiments], session_id
+        )
         at_risk = _at_risk_summary(canonical, legacy)
 
-        # Precondition BEFORE the ambiguity verdict: a client holding a stale plan
-        # must be told to look again, not handed a classification verdict about a
+        # Precondition BEFORE the classification verdicts: a client holding a stale
+        # plan must be told to look again, not handed a classification verdict about a
         # workspace it has never seen.
+        #
+        # MALFORMED BEFORE AMBIGUOUS, and the order is a truth claim rather than a
+        # preference. Both refuse without mutating, so the order decides only which
+        # reason the operator is given — and ``ambiguous`` is a verdict about a
+        # document's CONTENT, reached through ``_hydrate_experiment``'s fallbacks. For a
+        # document those fallbacks had to change, that verdict is derived from
+        # normalised content and claims more than this function knows. "I could not read
+        # this record straight" is the reason that is true of it.
         refusal: str | None = None
         if expected_plan_digest is not None and expected_plan_digest != plan_digest:
             refusal = "plan_digest_stale"
+        elif malformed_ids:
+            refusal = "malformed_records_present"
         elif ambiguous:
             refusal = "ambiguous_records_present"
         refused = refusal is not None
@@ -5511,9 +5972,14 @@ def reset_to_canonical_seed(
         #: the workspace-wide precondition? Tracked separately from ``mutated``
         #: because WHERE the refusal came from — not whether it managed to mutate
         #: anything first — is what decides whether the snapshot may still be
-        #: reported. A per-record abort is reached only when a write has ALREADY
-        #: landed in the window, so its snapshot is stale BY CONSTRUCTION, even when
-        #: it aborted on the very first id and removed nothing.
+        #: reported. ~~"A per-record abort is reached only when a write has ALREADY
+        #: landed in the window, so its snapshot is stale BY CONSTRUCTION, even when it
+        #: aborted on the very first id and removed nothing."~~ — **corrected
+        #: 2026-08-26; see the twin correction below, which is where the reasoning
+        #: is.** The branch's PREMISE is narrower than "a write landed": it is that the
+        #: record's row no longer matches the one classified above, which is true of a
+        #: write and true of a document that stopped being readable. Either way the
+        #: snapshot does not describe disk, which is the only thing this flag needs.
         row_abort = False
         if not dry_run and not refused:
             # C2 — the PER-RECORD precondition. Armed only when the caller supplied a
@@ -5591,9 +6057,24 @@ def reset_to_canonical_seed(
         #  * REFUSED WITHOUT MUTATING, by the PER-RECORD check (C2 — an abort on the
         #    very first id the reset would have touched): ``mutated`` is False, and
         #    that is exactly why this case needs naming rather than folding into the
-        #    first. A per-record abort is REACHABLE ONLY when a write has already
-        #    landed in the window, so the snapshot is known-stale BY CONSTRUCTION —
-        #    its count, its digest and its ``at_risk`` all predate that write. Echoing
+        #    first. ~~"A per-record abort is REACHABLE ONLY when a write has already
+        #    landed in the window, so the snapshot is known-stale BY CONSTRUCTION."~~
+        #    **CORRECTED 2026-08-26, and the correction matters because this sentence
+        #    was the ENTIRE justification for this branch reporting measured rather
+        #    than snapshot values.** The tolerant-read slice falsified its premise: a
+        #    document that the read path normalises but ``_current_plan_row`` will not
+        #    hydrate answers ``_UNREADABLE_ROW``, which matches no planned row, so this
+        #    branch was reachable with NO write anywhere — measured over HTTP, a
+        #    canonical seed with its ``title`` removed drove an execute to ``412``
+        #    after removing a managed-legacy record, then to ``412`` forever. The
+        #    preflight above now refuses that scope workspace-wide before the loop, so
+        #    the premise holds again — but it holds BECAUSE OF THAT GATE and not on
+        #    ``plan_digest``'s own authority, and the claim is written narrowly here so
+        #    a later slice cannot lean on the strong form. What this branch actually
+        #    needs, and what is true unconditionally: it is reached only when a
+        #    record's row differs from the one classified above, so the snapshot is
+        #    known NOT TO DESCRIBE DISK — its count, its digest and its ``at_risk``
+        #    all predate whatever moved that row. Echoing
         #    it here was measured returning the digest the client had just presented
         #    (so the documented "recoverable in one further request" was false, the
         #    retry 412'd again), an ``at_risk`` of zeroes over work that existed, and
@@ -5603,9 +6084,23 @@ def reset_to_canonical_seed(
         #  * PREVIEW that would proceed: nothing has happened yet, so this is
         #    necessarily a PROJECTION — and the projection is exactly the canonical
         #    five, because a non-refused reset removes the legacy set and rebuilds the
-        #    canonical set. Since R1 that projection is also GUARANTEED rather than
+        #    canonical set. ~~"Since R1 that projection is also GUARANTEED rather than
         #    hoped for: the ``plan_digest`` precondition means the execute cannot run
-        #    against a scope that gained a record after this preview.
+        #    against a scope that gained a record after this preview."~~ **CORRECTED
+        #    2026-08-26: the projection was NOT guaranteed, and the counter-example was
+        #    not a gained record.** A scope holding one document that hydrates
+        #    tolerantly but not strictly previewed ``refused: false`` with
+        #    ``final_count: 5`` — measured over HTTP — and the execute could not
+        #    produce 5 by any route: it aborted at that id and answered ``412``
+        #    forever. ``plan_digest`` never saw the problem, because the digest was
+        #    stable and correct; what was missing was a check that every classified
+        #    document can still be READ. The preflight above is that check, and it
+        #    refuses such a scope before this branch is reached. So the projection is
+        #    guaranteed again, and the honest statement of why is now TWO conditions
+        #    rather than one: ``plan_digest`` rules out a scope that changed after the
+        #    preview, and the preflight rules out a scope the execute cannot read. A
+        #    later slice that weakens either one puts this number back into the state
+        #    this correction records.
         #
         #    The projection is scope-correct only because ``session_id`` is REQUIRED.
         #    An unscoped form of this function would project five records into a
@@ -5641,6 +6136,14 @@ def reset_to_canonical_seed(
             "canonical_count": len(canonical),
             "legacy_count": len(legacy),
             "ambiguous_count": len(ambiguous),
+            # The ids whose stored document the reset's two readers disagree about,
+            # sorted. An ID ONLY: the reset surface already shows record ids
+            # (``canonical_ids``, and ``removable``'s ``id``), so naming one here
+            # discloses nothing new — but the TITLE of a malformed record would come
+            # from ``_hydrate_experiment``'s fallbacks rather than from the document,
+            # so it is deliberately not reported. Empty on every other outcome, which
+            # is what makes it safe for a client to branch on.
+            "malformed_ids": malformed_ids,
             "removed_count": removed,
             "final_count": final_count,
             # The canonical ids THIS SCOPE will hold once the reset has run — which is

@@ -430,10 +430,28 @@ export function ResetDemoDialog() {
                 </dl>
               )}
 
+              {/*
+                * THE REASON IS READ, NOT ASSUMED. This paragraph used to state
+                * "because an ambiguous record is present" for EVERY refused preview,
+                * which was true only while ambiguity was the only reason a preview
+                * could carry. `malformed_records_present` (2026-08-26) made it false:
+                * the one surface that renders the refusal would have told the operator
+                * to look for an ambiguous record in a session that has none, while the
+                * record actually blocking the reset went unnamed.
+                *
+                * The claim that a REFUSED PREVIEW changed nothing is safe to keep here
+                * and only here: every reason a preview can carry is decided before the
+                * mutation block. The execute paths below deliberately make no such
+                * claim, for the opposite reason.
+                */}
               {refused && (
                 <p className="reset-refused" role="note">
-                  This reset was <strong>refused for safety</strong> because an ambiguous record
-                  is present. No records were changed, and the reset stays disabled.
+                  This reset was <strong>refused for safety</strong>{' '}
+                  {preview.status === 'data' &&
+                  preview.data.refusal_reason === 'malformed_records_present'
+                    ? 'because a record is stored in a form this build cannot read, so the reset cannot prove what it would be replacing.'
+                    : 'because an ambiguous record is present.'}{' '}
+                  No records were changed, and the reset stays disabled.
                 </p>
               )}
 
