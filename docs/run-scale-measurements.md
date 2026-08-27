@@ -1,5 +1,42 @@
 # High-run-count: the measured envelope, and what it rules out
 
+> # RE-MEASURED AGAIN ON 2026-08-27 — SEE [`docs/evidence/scale-envelope-2026-08-27.md`](evidence/scale-envelope-2026-08-27.md)
+>
+> That sweep measured this branch's new surfaces (the Evidence Graph's five sub-fetches,
+> Compare Runs' four reads, the Discard control) at **25 · 100 · 250 · 500 · 1000**, over real
+> HTTP with a real Chromium. **Three of its results bear directly on this document**, and are
+> recorded here rather than only there because a reader who stops at this file would otherwise
+> carry away two claims that no longer hold:
+>
+> 1. **§4(a)'s "next slice" SHIPPED.** ~~"Bounding it is a contract change — the route has no
+>    `limit` — and is named here as the next slice"~~ — `GET /pending?limit=50` now exists and is
+>    **flat at 49.6 KiB / 50 entries from 25 to 1,000 runs**, against 2,910.9 KiB unbounded. The
+>    unbounded default is deliberately unchanged and is still correct for Review Record and
+>    Export Readiness.
+>
+> 2. **§4(b)'s shape holds; its NUMBER has moved.** The detail route's payload is still flat and
+>    its latency still linear, but at **205 ms at 1,000 runs, not 634 ms** — the
+>    `routes._shared_units` / `_shared_dry_run` threading landed in between. Do not quote 634 ms
+>    as current.
+>
+> 3. **§5's headline is now HALF TRUE, and this is the correction that matters.** ~~"the cost is
+>    in the DATA, not in the rendering"~~ was measured on the RECORD screen and is true there —
+>    DOM 1,186 at 1,000 runs, re-confirmed. It is **FALSE of Export Readiness**, which held
+>    **22,267 DOM nodes** at 1,000 runs (`run-finding`×1000 plus twelve sibling classes ×1000
+>    each) — *larger than the 16,134* §1 above calls "THE DEFECT". The §1 bound was applied to
+>    the record screen's banner and never reached the sibling screen with the same shape.
+>    Now bounded to **2,318**.
+>
+> **§5's own lesson applies to §5**: *a conclusion about where cost lives expires when the thing
+> it was measured on changes shape* — and "the DOM is bounded" had never been checked on any
+> screen but one. The virtualization conclusion is unaffected: post-fix, no screen measured
+> exceeds 2,318 nodes.
+>
+> Everything else in this document reproduced. The 2026-08-27 sweep also commits the per-class
+> DOM probe whose absence §1 records ("it is NOT independently re-measurable"), as
+> `apps/web/e2e/mutation/dom-attribution.bench.ts`.
+
+
 > # RE-MEASURED IN FULL ON 2026-08-20 — AND IT FOUND A DEFECT THAT MADE THIS DOCUMENT'S HEADLINE CONCLUSION FALSE
 >
 > **Everything below the horizontal rule is the OLD measurement.** It is kept because it is what the

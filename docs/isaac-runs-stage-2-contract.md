@@ -391,10 +391,23 @@ disagreement means a writer, a migration, or an out-of-band statement broke that
 
 The rule, and it is fail-closed in the direction that cannot lose a scientist's work:
 
-1. **Compare, always.** Even at COMPLETE, the reader compares the row set against
-   `state["runs"]` by run id. ~~"This costs one set comparison over data already in hand."~~ —
+1. **Compare, always.** Even at COMPLETE, the reader compares the rows against
+   `state["runs"]` — **over the FULL RUN DOCUMENTS, not the id set.**
+
+   ~~"the reader compares the row set against `state["runs"]` by run id"~~ — **CORRECTED
+   2026-08-27, and the implementing slice found it rather than this document.** Comparing ids
+   alone contradicts rule 2 one line below: with a matching id set but divergent row CONTENT
+   the rows would win and nothing would be disclosed. That is a worse failure than the one
+   rule 1 was written to catch, because it substitutes different *science* rather than a
+   different *count*. The implementer measured it rather than arguing it — an out-of-band row
+   mutation was adopted silently — and pinned it with a test that said so before recommending
+   the change. ~~"This costs one set comparison over data already in hand."~~ —
    **THE RULE STANDS; ITS PRICE TAG WAS WRONG, and it is corrected rather than deleted.** The
-   comparison is still one set comparison over data already in hand, so the per-experiment cost
+   comparison is now a per-run DOCUMENT comparison over data already in hand — corrected a
+   second time, in the same direction as the first: it is `O(total runs across the experiments
+   this pass actually restored)`, with a dict equality per run rather than one string-set
+   compare. Still cheap, and still bounded by records genuinely missing locally, which on a warm
+   pod is zero. The per-experiment cost
    is what it says. What was wrong is the FREQUENCY it was implicitly sized against: §7.1's
    opening sentence had this section believing `hydrate()` ran once per restart, so "one set
    comparison" read as one comparison per experiment per pod lifetime. It is **once per
@@ -412,6 +425,15 @@ The rule, and it is fail-closed in the direction that cannot lose a scientist's 
    the two are distinguishable.
 4. **Never repair silently.** The reader does not rewrite rows to match, and does not re-stamp.
    Repair is an ordinary save's job, or an operator's.
+
+   **AND A NON-ZERO `mismatch` IS PERSISTENT, WHICH THIS RULE DID NOT SAY.** A row corrupted out
+   of band stays corrupted, so every pass that reclassifies that experiment counts it again — the
+   figure does not decay, and it does not distinguish *one mismatch once* from *one mismatch on
+   every pass*. The distribution is overwritten per pass and deliberately carries no id, so the
+   count is the only signal. **What an operator does with a non-zero `mismatch`:** nothing
+   urgent — the reader is already using the document, so no scientist is seeing wrong runs — and
+   the repair is an ordinary save of that experiment, which re-diffs the rows and re-stamps.
+   Counts-only stays; naming the experiment would put a record id in a health endpoint.
 
 **`run_count` is not used to detect this**, and that is deliberate: §2.2 invariant 4 records that
 it is `len(desired_ids)` — a writer's intention, not an observation — so treating a matching
@@ -452,7 +474,24 @@ that orders by the index reproduces a different sequence. The reproducing sort i
 
 ## 7.6 What must be observable, and what may never be claimed
 
-`/api/health`'s `database` block gains a per-experiment **state distribution** — counts of
+`/api/health`'s **`experiment_storage.run_projection`** block gains a per-experiment **state
+distribution**.
+
+~~"`/api/health`'s `database` block gains…"~~ — **CORRECTED 2026-08-27; the implementing slice
+was right and this section was wrong.** `routes.py:1553-1560` says the `database` block is about
+the read-only diagnostic over the **production-derived** sample, and that conflating it with this
+application's own experiments "would be the kind of error this file has made before".
+`experiment_storage` is the block about this application's own experiments, which is exactly what
+this distribution describes — and it is what this section's own justification below argues for.
+The deviation is adopted, not merely tolerated.
+
+**`last_pass` is `null` until a pass has CLASSIFIED something.** A warm pass with nothing to
+restore does not overwrite it, or the informative post-restart measurement would be erased by the
+next list request. And when the kill switch is off the block reports `authoritative: false` with a
+null `last_pass` rather than labelling every experiment NEVER PROJECTED — that would report a
+state the reader never measured.
+
+It carries counts of
 COMPLETE, STALE, NEVER PROJECTED, UNAVAILABLE, and MISMATCH from the most recent hydration pass.
 Counts only: no ids, no titles, no record content. It is an aggregate about *this application's
 own* tables, not about the production-derived `records` table, so gates **G2**/**G3** are
@@ -464,7 +503,14 @@ prediction an operator would check that distribution against is **two prediction
 (corrected 2026-08-27 — this sentence named the wrong state, and it is the one sentence here an
 operator would actually test):
 
-| When | Expected distribution | Why |
+**THE CASE AN OPERATOR HITS FIRST IS NOT IN THIS TABLE, and omitting it would send them to
+debug a healthy pod.** `hydrate()` RESTORES rather than refreshes: it skips any record whose
+`experiment.json` is already on disk. So a **warm pod classifies nothing**, and `last_pass` is
+`null` — not "all unavailable", not "all never projected". The distributions below appear only
+after a restart, or after a working copy goes missing. **`null` on a healthy warm pod is the
+expected reading, not a defect.**
+
+| When (after a pass that classified something) | Expected distribution | Why |
 |---|---|---|
 | `0005` **not applied** — the state of every environment today, per this document's status line | **every experiment `UNAVAILABLE`** | §2.1: the predicate for UNAVAILABLE is `isaac_runs` **or** `isaac_run_projection` absent |
 | `0005` applied, backfill **not run** | **every experiment `NEVER PROJECTED`**, except any saved since `0005` was applied, which are `COMPLETE` | an ordinary save stamps a COMPLETE projection in the same transaction as the rows |
