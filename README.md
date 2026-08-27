@@ -36,7 +36,25 @@ Working prototype (`v0.1.0`), **synthetic data only**.
   (ETag/If-Match), export artifacts, and **reconciliation-only** CSV ingestion — upload a synthetic
   campaign sheet and preview each value reconciled against the record as evidence; it **never**
   mutates the official record.
-- **894** passing Python tests plus **550** frontend tests, including a test that the truth plane never imports Graphify.
+- **5,867** passing Python tests plus **4,706** frontend tests (178 test files), including a test
+  that the truth plane never imports Graphify. ~~"**894** passing Python tests plus **550**
+  frontend tests"~~ — **CORRECTED 2026-08-27**, and the size of the error is the reason it is
+  marked as a correction rather than quietly overwritten: the stale figures were low by roughly
+  6.6× and 8.6×, having been left untouched across every phase since. **Re-measure rather than
+  quoting this line** — it will go stale the same way:
+
+  ```bash
+  .venv/bin/pytest -q      # → 5867 passed, 39 skipped   (2026-08-27, this branch)
+  cd apps/web && npx vitest run --reporter=dot
+                           # → Test Files 178 passed (178) / Tests 4706 passed (4706)
+  ```
+
+  The backend figure counts PASSES only: the same run reports **39 skipped** — opt-in guards, of
+  which the real-PostgreSQL parity suites are the largest identified group, the rest not
+  individually classified here — and, on this branch, **1 expected failure** in
+  `test_committed_snapshot.py`
+  from deliberate, unresolved snapshot drift. Quoting "5,867 passing" beside a run that was not
+  wholly green would be the overclaim this file has just been corrected for, so both are stated.
 
 **Not built yet**
 

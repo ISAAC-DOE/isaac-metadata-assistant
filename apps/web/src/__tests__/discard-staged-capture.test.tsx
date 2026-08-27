@@ -401,7 +401,9 @@ describe('the transcript box', () => {
    * the right things; nothing proved the panel SELECTS the right one, which is the half
    * that can be false on a screen. It matters more here than anywhere else in this slice:
    * after Finalize the segments ARE stored with the record as Unmapped Notes
-   * (`routes.py:9483-9494`), so the unsent body — "Nothing in it has been read or stored"
+   * (`routes.py:9936-9954` at commit `8994525` — the `EVERY SEGMENT IS STORED` loop;
+   * ~~`9483-9494`~~ was a wrong pointer, corrected 2026-08-27 in all four places that
+   * carried it), so the unsent body — "Nothing in it has been read or stored"
    * — becomes a false statement rendered above a box whose words are on the record.
    *
    * Three states are walked, because the branch is `reading === null` and a failed
@@ -586,6 +588,62 @@ describe('the transcript box', () => {
     await waitFor(() => expect(screen.getByLabelText('Transcript')).toHaveValue(''));
     expect(trigger(DISCARD_COPY.transcriptUnsent)).toBeNull();
     expect(trigger(DISCARD_COPY.transcriptAfterFinalize)).toBeNull();
+  });
+
+  /*
+   * THE SAME LEAK, ONE STEP FURTHER IN — found by independent review of the fix above,
+   * because "only while the proposals are on screen" was not what the predicate said.
+   *
+   * The edit `<input>` renders only on a candidate row's `decision === undefined`
+   * branch: accepting (or rejecting) a proposal replaces it with the accepted/rejected
+   * line, and NEITHER `accept` NOR `reject` deletes the row's `edits` entry. So
+   * `reading !== null && Object.keys(edits).length > 0` stayed true over a map whose
+   * every entry was invisible. Empty the transcript box by hand afterwards and the
+   * reader was offered "Discard this transcript" — with no transcript, and no edit
+   * anywhere on screen — under copy whose first clause is "This clears the transcript
+   * box". That is the same "offering to clear something they could not see" defect the
+   * test above exists to close, reachable without ever leaving the record.
+   */
+  it('offers nothing once the only edited proposal has been ACCEPTED and the box emptied', async () => {
+    stubFetchRoutes({
+      [RUNS]: { body: runsPage },
+      [CAPS]: { body: capabilities },
+      [CAPTURE]: { body: captureReading([CANDIDATE]) },
+      [`PATCH /api/experiments/${EXP}/runs/run-1`]: {
+        body: { run: { ...RUN, version: 'r1.1' }, experiment_version: 'g1.5' },
+      },
+    });
+    render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={EXP} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.change(screen.getByLabelText('Transcript'), {
+      target: { value: 'Temperature was 300 K.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
+
+    const edit = await screen.findByLabelText('Edit before accepting');
+    fireEvent.change(edit, { target: { value: '310' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    // The row is decided, so the box that held the edit is gone from the document.
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Edit before accepting')).toBeNull(),
+    );
+
+    // The reader now empties the transcript box themselves. Nothing they can see is
+    // staged, so nothing may be offered.
+    fireEvent.change(screen.getByLabelText('Transcript'), { target: { value: '' } });
+    expect(trigger(DISCARD_COPY.transcriptAfterFinalize)).toBeNull();
+    expect(trigger(DISCARD_COPY.transcriptUnsent)).toBeNull();
+
+    // …and the Undo the accepted value earned is untouched by any of this: the map the
+    // Discard would have cleared is `edits`, never `decisions`.
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
   });
 
   /*

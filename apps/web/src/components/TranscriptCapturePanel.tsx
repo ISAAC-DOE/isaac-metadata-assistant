@@ -535,9 +535,22 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    * "This clears the transcript box". The reset now drops the map as well; tying the
    * predicate to what is rendered is the structural half of the same fix, so the control
    * can never be offered for state the branch below is not describing.
+   *
+   * `reading !== null` WAS NOT THE WHOLE OF "ON SCREEN", and this is the second half of
+   * that fix, found in independent review of the first. The edit `<input>` renders only
+   * on the `decision === undefined` branch of a candidate row — accepting or rejecting a
+   * proposal unmounts it and NEITHER `accept` NOR `reject` deletes its `edits` entry. So
+   * a reader who typed over a proposal, accepted it, and then emptied the transcript box
+   * by hand was still offered "Discard this transcript" with an empty box and no visible
+   * edit anywhere: a control offering to clear state the reader cannot see, which is the
+   * exact defect the paragraph above claims to have closed. An entry counts only while
+   * the row that renders it is still undecided.
    */
-  const hasStagedCapture =
-    text !== '' || (reading !== null && Object.keys(edits).length > 0);
+  const stagedEditCount =
+    reading === null
+      ? 0
+      : Object.keys(edits).filter((index) => decisions[Number(index)] === undefined).length;
+  const hasStagedCapture = text !== '' || stagedEditCount > 0;
   const discardCopy =
     reading === null ? DISCARD_COPY.transcriptUnsent : DISCARD_COPY.transcriptAfterFinalize;
   const discardStagedCapture = () => {

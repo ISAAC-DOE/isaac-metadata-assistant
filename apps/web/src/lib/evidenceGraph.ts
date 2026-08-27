@@ -77,16 +77,25 @@
  * Step 6 therefore reads the count off the SERVER's `ApiEvidenceEntry` and refuses
  * the edge whenever anything at all was dropped.
  *
- * ── The four routes beyond the record bundle ────────────────────────────────
+ * ── The FIVE routes beyond the record bundle ────────────────────────────────
+ *
+ * ~~"The four routes beyond the record bundle"~~ — CORRECTED. There are FIVE, and the
+ * heading contradicted the sentence below it, which listed five. It is also a
+ * READ-COST claim, which is why the count is not cosmetic: **a graph mount costs five
+ * network reads beyond the bundle**, not four. `readSubFetch` is called five times in
+ * `buildEvidenceGraph`, and `EvidenceExplorer` fires five `useVersionedSubFetch`
+ * reads. Counted, not asserted: `rg -c 'readSubFetch\(' lib/evidenceGraph.ts`.
  *
  * This module read the bundle (detail, runs, evidence trail, classification, run
- * checks) and nothing else, and four routes the record screens ALREADY call went
+ * checks) and nothing else, and five routes the record screens ALREADY call went
  * unread — so the graph could not answer "which conflict was decided, and does the
  * decision still hold?", "what has been written down that has no place yet?",
- * "where did this value come from?" or "which asset is referenced, and does it
- * reach any exported record?". They are now inputs: `GET .../conflicts`,
- * `GET .../notes`, `GET .../provenance` and `GET .../assets`, plus
- * `GET .../revisions` for exactly one question. **No backend route was added.**
+ * "where did this value come from?", "which asset is referenced, and does it
+ * reach any exported record?" or "is the content drawn here on record as a
+ * revision?". They are now inputs: `GET .../conflicts`, `GET .../notes`,
+ * `GET .../provenance`, `GET .../assets` and `GET .../revisions` — the last for
+ * exactly one question. **No backend route was added**, and each of the five is
+ * already served to a record screen (`revisions` to `RevisionHistoryPanel`).
  *
  * Four things about them that are design rather than convenience:
  *
@@ -686,8 +695,9 @@ export interface EvidenceGraphInput {
   /** The `?run=` focus, if any. An id naming no loaded run is stated, not guessed. */
   focusRunId?: string | null;
 
-  // ── the four routes this view reads BESIDES the bundle ───────────────────
+  // ── the FIVE routes this view reads BESIDES the bundle ───────────────────
   //
+  // ~~"the four routes"~~ — corrected; the five fields below are the enumeration.
   // Every one is optional, and the absence of one is not a failure — see
   // `EvidenceSubFetch`. Each response carries its own version token, and the
   // builder compares it with the record's rather than assuming they agree; see
@@ -1069,7 +1079,7 @@ function evidenceDetailLines(ev: FieldEvidence, address: string): EvidenceGraphD
   return lines;
 }
 
-// ------------------------------------------- the four routes beyond the bundle
+// ------------------------------------------- the FIVE routes beyond the bundle
 
 /**
  * The product word for an origin the SERVER named, or the raw string.
@@ -1131,12 +1141,24 @@ function emptyLedger(): SubFetchLedger {
 }
 
 /**
- * Read one sub-fetch, recording its state, and return its data or `null`.
+ * Read one sub-fetch, recording its state, and return its data WITH the freshness
+ * verdict that was reached about it — or `null`.
  *
  * `undefined` returns `null` and records NOTHING — a mount that does not read a
  * source has nothing to report about it. Every other state is recorded before the
  * data is returned, so a source can be simultaneously usable and disclosed as
  * stale rather than being either trusted or dropped.
+ *
+ * THE VERDICT IS RETURNED, NOT ONLY LEDGERED, and that is a correction rather than
+ * a convenience. Ledgering it alone makes staleness a GRAPH-LEVEL note, which is
+ * the right place for "what those sources contributed describes a different read"
+ * — but it leaves a consumer free to make a POSITIVE claim out of stale content
+ * with no way to know it should not. `applyRevisions` did exactly that: it
+ * compared a `current_content_signature` taken at an older read against the
+ * content drawn now and announced "that content is on record as revision N of M",
+ * a certification the comparison cannot support across two versions. A consumer
+ * that certifies must be able to see the verdict; one that merely reports numbers
+ * need not, and the ledger note still covers it.
  */
 function readSubFetch<T>(
   sourceLabel: string,
@@ -1154,7 +1176,7 @@ function readSubFetch<T>(
     expected: string | null;
     reported: (data: T) => string | null | undefined;
   },
-): T | null {
+): { data: T; freshness: SubFetchFreshness } | null {
   if (fetched === undefined) return null;
   if (fetched.state === 'loading') {
     ledger.loading.push(sourceLabel);
@@ -1177,7 +1199,7 @@ function readSubFetch<T>(
   } else if (verdict === 'unknown') {
     ledger.unknownFreshness.push(sourceLabel);
   }
-  return fetched.data;
+  return { data: fetched.data, freshness: verdict };
 }
 
 /** The decision's own words for what state it is in. Never a colour, never a verdict. */
@@ -1952,11 +1974,29 @@ function pushUnique(node: EvidenceGraphNode, line: EvidenceGraphDetailLine): voi
  * and the third is "not known from this page", because the revision list is
  * BOUNDED and a signature absent from the page read is not a signature that does
  * not exist.
+ *
+ * ~~"Three answers"~~ — there are FOUR, and the fourth is the one the other three
+ * are only valid inside: this response has to describe the SAME read of the record
+ * that everything above was drawn from. See the `freshness` parameter.
  */
 function applyRevisions(
   b: Builder,
   ctx: ExtraSourceContext,
   res: ApiRevisionHistory,
+  /**
+   * The verdict {@link readSubFetch} reached about THIS response, threaded here
+   * rather than only ledgered.
+   *
+   * The one question this function answers is a comparison BETWEEN TWO READS: the
+   * content drawn by everything above (the record at `detail.version`) against
+   * `res.current_content_signature` (the record as this response read it). That
+   * comparison is only meaningful when the two reads are the same read. When they
+   * are not — `stale`, or `unknown` because a token is missing — a match proves
+   * nothing and a MISS proves nothing either, so neither answer may be stated.
+   * The `sub_fetch_stale` note says the source was read elsewhere; it does not
+   * un-say a certification printed above it.
+   */
+  freshness: SubFetchFreshness,
 ): void {
   const root = b.nodes.get(ctx.rootId);
   if (res.availability.state !== 'available') {
@@ -1987,6 +2027,35 @@ function applyRevisions(
         value: changes === '' ? 'no address-level change was recorded' : changes,
       });
     }
+  }
+
+  /*
+   * THE COMPARISON IS BETWEEN TWO READS, AND IT IS ONLY MEANINGFUL WHEN THEY ARE
+   * THE SAME READ.
+   *
+   * Every branch below turns on whether `res.current_content_signature` — the
+   * signature of the record AS THIS RESPONSE READ IT — appears among the
+   * revisions. When this response describes a different version from the one
+   * drawn above, that signature is not the drawn content's signature, so a match
+   * certifies content this response never saw and a miss reports a divergence
+   * that may not exist. Both were being stated: "that content is on record as
+   * revision N" and "the draft has changed since the last one was recorded" are
+   * each a positive claim, and each was reachable from a stale read.
+   *
+   * `unknown` takes the same arm as `stale` on purpose. A response that publishes
+   * no token has not been SHOWN to describe this version, and `fresh` is the one
+   * answer that has to be earned — the same asymmetry {@link subFetchFreshness}
+   * is built on. The numbers above are left in place: a count of recorded
+   * revisions is a fact about the history and degrades to being merely old, which
+   * the `sub_fetch_stale` note already covers. It is the CERTIFICATION that must
+   * not be made.
+   */
+  if (freshness !== 'fresh') {
+    b.note(
+      'revision_state',
+      `Whether the content drawn here is on record as a revision could not be established: the submission history was read at a different version of this record, so the content signature it carries is not this content's. ${total} revision(s) had been recorded as of that read. Nothing historical is drawn either way — this graph draws the record as it is now.`,
+    );
+    return;
   }
 
   if (match) {
@@ -2687,8 +2756,10 @@ export function buildEvidenceGraph(
     }
   }
 
-  // ── 7. the four routes beyond the bundle ──────────────────────────────────
+  // ── 7. the FIVE routes beyond the bundle ──────────────────────────────────
   //
+  // FIVE, not four: conflicts, notes, assets, provenance and revisions — the five
+  // `readSubFetch` calls below are the enumeration, and the count was wrong here.
   // Ordered AFTER the runs deliberately. Every one of these is bounded by its own
   // constant, but the global node cap is shared, and the spine of this graph —
   // the experiment, its runs and what they carry — must not be displaced by a
@@ -2719,7 +2790,7 @@ export function buildEvidenceGraph(
     reported: (d) => d.experiment_version,
   });
   if (conflictsRes) {
-    addConflicts(b, extras, conflictsRes);
+    addConflicts(b, extras, conflictsRes.data);
     /*
      * SAID WHENEVER CONFLICTS WERE READ AT ALL, not only when the record has some.
      * `GET .../conflicts` takes an optional `?run=` and this view asks WITHOUT it,
@@ -2733,7 +2804,7 @@ export function buildEvidenceGraph(
      * run-scoped response would otherwise have the claim printed over it, which is
      * the same class of defect as printing a version a fetch did not read.
      */
-    if (conflictsRes.run_id === null) {
+    if (conflictsRes.data.run_id === null) {
       b.note(
         'conflicts_record_scope',
         "Conflicting evidence is read for the record's own fields, in one request. This view does not ask per run — that would be one request per run — so a run that stores its own value at an address is not described here. Open that run's own evidence to see it.",
@@ -2745,13 +2816,13 @@ export function buildEvidenceGraph(
     expected: detail.version,
     reported: (d) => d.experiment_version,
   });
-  if (notesRes) addNotes(b, extras, notesRes);
+  if (notesRes) addNotes(b, extras, notesRes.data);
 
   const assetsRes = readSubFetch('The asset references', input.assets, ledger, {
     expected: detail.version,
     reported: (d) => d.experiment_version,
   });
-  if (assetsRes) addAssetReferences(b, extras, assetsRes);
+  if (assetsRes) addAssetReferences(b, extras, assetsRes.data);
 
   /*
    * `record_rev` RATHER THAN `experiment_version`, because that is the token this
@@ -2763,13 +2834,13 @@ export function buildEvidenceGraph(
     expected: revToken(detail.rev),
     reported: (d) => revToken(d.record_rev),
   });
-  if (provenanceRes) applyProvenance(b, extras, provenanceRes);
+  if (provenanceRes) applyProvenance(b, extras, provenanceRes.data);
 
   const revisionsRes = readSubFetch('The submission history', input.revisions, ledger, {
     expected: revToken(detail.rev),
     reported: (d) => revToken(d.record_rev),
   });
-  if (revisionsRes) applyRevisions(b, extras, revisionsRes);
+  if (revisionsRes) applyRevisions(b, extras, revisionsRes.data, revisionsRes.freshness);
 
   emitLedgerNotes(b, ledger);
 

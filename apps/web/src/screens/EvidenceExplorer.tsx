@@ -608,6 +608,19 @@ function useVersionedSubFetch<T>(
    * state is, which is what the panel's memo was written to assume.
    *
    * Nothing about WHAT is returned changes; only its identity is now stable.
+   *
+   * ~~"which is what the panel's memo was written to assume"~~ — TRUE OF THESE FIVE
+   * AND FALSE OF THE MEMO AS A WHOLE, corrected in place because the sentence read
+   * as though memoising them made the memo hold, and MEASURED it did not. The panel's
+   * dependency array also carries `runsMeta`, which this screen built as a fresh
+   * object literal in the JSX, so the memo missed on EVERY render no matter what
+   * these five returned. Measured with a counting wrapper around
+   * `buildEvidenceGraph`: three parent renders produced 3 builds with the literal and
+   * 1 with a stable object. Making these five stable was necessary and was not
+   * sufficient, and the deficit was WIDENED by the same change — five more `useFetch`
+   * hooks are five more state transitions on this component, each of which was a
+   * whole graph rebuild and a fresh `computeLayout`. `runsMeta` is memoised below;
+   * the claim above is now true of the array rather than of one fifth of it.
    */
   return useMemo<EvidenceSubFetch<T>>(() => {
     if (status === 'loading') return { state: 'loading' };
@@ -642,10 +655,15 @@ function EvidenceGraphView({
   const readInScope = useRef(currentScope);
 
   /*
-   * The four routes the graph reads BESIDES this screen's bundle — conflicts,
+   * The FIVE routes the graph reads BESIDES this screen's bundle — conflicts,
    * notes, provenance, assets, and the revision history it reads for one
-   * question. Every one of them is already served to a record screen; no backend
-   * route was added for the graph, and `api.ts` records that policy.
+   * question. ~~"The four routes"~~ — CORRECTED: this comment said "four" and then
+   * listed five, and three lines down called them "These five". It is a read-cost
+   * claim as well as a count — **a graph mount costs five network reads beyond the
+   * bundle** — so the enumeration below, five `useVersionedSubFetch` calls, is the
+   * authority. Every one of them is already served to a record screen (the revision
+   * history to `components/RevisionHistoryPanel.tsx`); no backend route was added for
+   * the graph, and `api.ts` records that policy.
    *
    * THEY DO NOT BLOCK, and that is the point of `useVersionedSubFetch`. The runs
    * above are structural — without them there is no graph — so their loading and
@@ -706,6 +724,33 @@ function EvidenceGraphView({
     setLoadedRunsVersion(requestedRunsVersion.current);
   }, [runsPayload]);
 
+  /*
+   * THE FOUR RUN COUNTS, AS ONE STABLE OBJECT — and this is the dependency that
+   * decided whether `EvidenceGraphPanel`'s `useMemo` held anything at all.
+   *
+   * It was built as an object literal in the JSX below, so it had a fresh identity
+   * on every render of this component, so the panel's memo — whose array contains
+   * it — missed unconditionally and `buildEvidenceGraph` plus `computeLayout` (an
+   * O(n²) relaxation over 240 passes, on the render path, for a graph bounded at
+   * 1200 nodes) ran on every render. Measured with a counting wrapper: three
+   * renders, three builds with the literal, one with a stable object.
+   *
+   * Keyed on `runsPayload`, whose identity `useFetch` replaces only when a new
+   * payload lands — the same success signal the effect above already relies on, so
+   * this introduces no second notion of "the runs changed". The `?? 0` arms are
+   * unreachable at the call site: the panel is rendered only below the
+   * `runs.status !== 'data'` guards, so a caller never sees a zeroed meta.
+   */
+  const runsMeta = useMemo(
+    () => ({
+      total: runsPayload?.total ?? 0,
+      matched: runsPayload?.matched ?? 0,
+      returned: runsPayload?.returned ?? 0,
+      offset: runsPayload?.offset ?? 0,
+    }),
+    [runsPayload],
+  );
+
   // ONE note for both fetches on this branch. A failed refresh of EITHER the
   // bundle (detail/evidence/classification) or the runs means the graph is not
   // the freshly-read state the header claims, and the reader gets the same
@@ -750,12 +795,7 @@ function EvidenceGraphView({
         evidence={evidence}
         classification={classification}
         runs={runs.data.runs}
-        runsMeta={{
-          total: runs.data.total,
-          matched: runs.data.matched,
-          returned: runs.data.returned,
-          offset: runs.data.offset,
-        }}
+        runsMeta={runsMeta}
         runsVersion={loadedRunsVersion}
         readInScope={readInScope.current}
         currentScope={currentScope}

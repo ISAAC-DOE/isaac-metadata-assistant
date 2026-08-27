@@ -9,7 +9,10 @@
  * false".
  *
  * WHY THE DRIFT WOULD BE WORSE HERE THAN A WRONG WORD. This application HAS NO DELETION.
- * `apps/api/isaac_api/routes.py:8155-8158` states it as a governing rule — "there is no
+ * `apps/api/isaac_api/routes.py:8618-8620` (at commit `8994525`; ~~`8155-8158`~~ was
+ * wrong and pointed into the run-answers handler — corrected 2026-08-27, and the
+ * anchor to search on is the phrase `NOTHING CAPTURED IS EVER`) states it as a
+ * governing rule — "there is no
  * DELETE here, and there will not be one. Dismissal is a state" — and
  * `transcript_capture.py:129-159` records two retention states that were deliberately NOT
  * offered because "both are deletion guarantees, and there is no deletion anywhere in the
@@ -164,6 +167,28 @@ function statesItNeverReachedTheRecord(prose: string): boolean {
  * earlier in the same clause. That exception is what keeps "Nothing in it has been read
  * or stored" (true, required) apart from "your note was captured" (false, banned).
  *
+ * ~~"earlier in the same CLAUSE"~~ WAS TOO WIDE, AND A SECOND INDEPENDENT REVIEWER WALKED
+ * STRAIGHT BACK THROUGH IT. The exception says a negation must GOVERN the assertion; the
+ * first implementation accepted a negation anywhere earlier in the sentence, including in
+ * a different independent clause that governs nothing. The string that defeated it:
+ *
+ *     "Nothing else on this record changes: what you typed has already been captured"
+ *
+ * "Nothing" sits before the affirmation, so the detector stood down \u2014 while the sentence
+ * asserts exactly what this detector exists to ban, and every \u00a73 ban and the required-claim
+ * check pass it too. It is the SAME inverted disclosure as the string above, wearing the
+ * fix as a disguise, which is the worse of the two failures because the guard now reads as
+ * having been hardened.
+ *
+ * The lookback is therefore bounded at the nearest preceding `,`, `;` or `:` \u2014 the
+ * sub-clause the assertion actually lives in. That is safe for the shipped copy for a
+ * measured reason rather than a hopeful one: the only two bodies that rely on the
+ * exception at all are `transcriptUnsent` ("Nothing in it has been read or stored") and
+ * `conflictDecision` ("None of it has been recorded"), and in both the negation is the
+ * first word of its own sub-clause. Note the asymmetry with the sentence above: narrowing
+ * the SPLIT to commas would break `guidedAnswer`; narrowing this LOOKBACK to commas does
+ * not, because the two do different jobs.
+ *
  * WHAT IT STILL CANNOT DO, stated rather than implied. The subject list is a fixed set of
  * phrases, so an affirmation about a subject it does not name ("everything here has been
  * captured") passes; and no regex can decide whether a paragraph is TRUE. A human
@@ -182,22 +207,41 @@ const AFFIRMS_THE_STAGED_THING_REACHED = new RegExp(
 
 function affirmsTheStagedThingReached(prose: string): boolean {
   return clausesOf(prose).some((clause) => {
-    const hit = clause.match(AFFIRMS_THE_STAGED_THING_REACHED);
-    if (hit === null || hit.index === undefined) return false;
-    // A negation EARLIER IN THE SAME CLAUSE is what makes "Nothing in it has been read"
-    // the required claim rather than its opposite.
-    return !NEGATION.test(clause.slice(0, hit.index));
+    // EVERY match, not just the first: a clause may carry a negated affirmation and an
+    // un-negated one, and stopping at the first would let the second through.
+    const scan = new RegExp(AFFIRMS_THE_STAGED_THING_REACHED.source, 'ig');
+    let hit: RegExpExecArray | null;
+    while ((hit = scan.exec(clause)) !== null) {
+      const before = clause.slice(0, hit.index);
+      // A negation GOVERNS the assertion only from inside its own sub-clause. See the
+      // note above for the string that defeated the un-bounded version.
+      const boundary = Math.max(
+        before.lastIndexOf(','),
+        before.lastIndexOf(';'),
+        before.lastIndexOf(':'),
+      );
+      if (!NEGATION.test(before.slice(boundary + 1))) return true;
+    }
+    return false;
   });
 }
 
 /**
- * FIVE OF THE SIX MAY SAY "this was never sent". THE SIXTH MUST NOT, and that is the
+ * FOUR OF THE FIVE MAY SAY "this was never sent". THE FIFTH MUST NOT, and that is the
  * whole reason it is a separate entry rather than a shared string.
  *
+ * ~~"FIVE OF THE SIX … THE SIXTH"~~ — CORRECTED 2026-08-27. There are FIVE controls,
+ * not six — `expect(DISCARD_COPY_ENTRIES).toHaveLength(5)` is asserted in §2 of this
+ * same file — and the filter below removes one, leaving FOUR. The "six" was the RULE
+ * count from `lib/discardContent.ts` leaking into a sentence about controls: two
+ * different enumerations of two different things, one sentence apart.
+ *
  * Once Finalize succeeds, every segment of the transcript is stored with the record as
- * Unmapped Notes (`routes.py:9483-9494`). A Discard offered from that moment on clears a
- * box whose words ARE on the record, so it is held to the OPPOSITE requirement — it must
- * say so — asserted by name below rather than by this predicate.
+ * Unmapped Notes (`routes.py:9936-9954`, the `EVERY SEGMENT IS STORED` loop, at commit
+ * `8994525`; ~~`9483-9494`~~ named neither the loop nor the served sentence). A Discard
+ * offered from that moment on clears a box whose words ARE on the record, so it is held
+ * to the OPPOSITE requirement — it must say so — asserted by name below rather than by
+ * this predicate.
  */
 const NEVER_SENT_CONTROLS = DISCARD_COPY_ENTRIES.filter(
   ([name]) => name !== 'transcriptAfterFinalize',
@@ -460,6 +504,47 @@ describe('§4 the guards have the polarity they claim', () => {
     expect(statesItNeverReachedTheRecord(proseOf(inverted))).toBe(true);
     // …and the affirmation detector does.
     expect(affirmsTheStagedThingReached(proseOf(inverted))).toBe(true);
+  });
+
+  it('a NEGATION-SHIELDED inversion is caught too — the bypass a SECOND reviewer found', () => {
+    /*
+     * The fix above closed one hole and opened a narrower one, and this is it. The
+     * detector's exception is that a negation which GOVERNS the assertion makes it the
+     * required claim; the first implementation read that as "a negation anywhere earlier
+     * in the sentence", which a different independent clause satisfies while governing
+     * nothing:
+     *
+     *     "Nothing else on this record changes: what you typed has already been captured"
+     *
+     * Every §3 ban passes it. `statesItNeverReachedTheRecord` passes it — "Nothing" and
+     * "captured" are one sentence. And the un-bounded lookback passed it too, so the
+     * guard read as hardened while admitting the same inverted disclosure it had just
+     * been hardened against. The lookback now stops at the nearest `,`, `;` or `:`.
+     */
+    const shielded: DiscardCopy = {
+      ...DISCARD_COPY.noteCapture,
+      body:
+        'This clears the note box. Nothing else on this record changes: what you ' +
+        'typed has already been captured, and the notes it holds stay as they are.',
+    };
+    expect(proseOf(shielded)).not.toMatch(DELETION_VERBS);
+    expect(proseOf(shielded)).not.toMatch(OVERSTATED_STAKES);
+    expect(proseOf(shielded)).not.toMatch(RESTORE_PROMISE);
+    expect(statesItNeverReachedTheRecord(proseOf(shielded))).toBe(true);
+    // …and the only detector left standing must catch it.
+    expect(affirmsTheStagedThingReached(proseOf(shielded))).toBe(true);
+  });
+
+  it('…and the narrowed lookback does not ban the two shipped bodies that rely on it', () => {
+    // The exception is load-bearing for exactly two controls, and narrowing it must not
+    // reach either. Asserted by name rather than through the parametrised sweep, so a
+    // future narrowing that DID reach them names which one it broke.
+    expect(
+      affirmsTheStagedThingReached(proseOf(DISCARD_COPY.transcriptUnsent)),
+    ).toBe(false);
+    expect(
+      affirmsTheStagedThingReached(proseOf(DISCARD_COPY.conflictDecision)),
+    ).toBe(false);
   });
 
   it.each([

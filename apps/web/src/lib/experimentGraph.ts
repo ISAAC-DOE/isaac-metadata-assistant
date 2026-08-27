@@ -1033,8 +1033,33 @@ export function buildExperimentGraph(
   const issueDocument = officialCheckedDocument(validate);
   /*
    * THIS FILE WAS THE FIFTH CONSUMER OF THIS PAYLOAD AND WAS MISSED BY EVERY SWEEP,
-   * FOR A REASON WORTH RECORDING: it contains NUL bytes, so `grep`/`rg` without
-   * `--text` silently drop every hit in it and still exit 0. Three slices corrected
+   * FOR A REASON WORTH RECORDING: it CONTAINED two literal NUL bytes, which made a
+   * repo-wide `rg` sweep drop every hit in it silently. ~~"it contains NUL bytes"~~ —
+   * PAST TENSE SINCE `7a66127`, which rewrote the separator as the escape `\u0000`
+   * (see `addEdge` above). The runtime string is byte-for-byte unchanged; only the
+   * SOURCE stopped being binary, and `python -c "print(open(__file__,'rb').read()
+   * .count(b'\x00'))"` now answers `0` for this file.
+   *
+   * THE HAZARD IS REAL BUT ITS ATTRIBUTION WAS FOLKLORE, AND IT IS RE-MEASURED HERE
+   * RATHER THAN REPEATED. Reproduced on the pre-fix bytes (`git show 7a66127^:` this
+   * path) with a token on three lines, ripgrep 14.1.1:
+   *
+   *   · `rg TOKEN DIR/` — TRAVERSAL, which is how a repo sweep is actually run:
+   *     the file is ABSENT from the output, with NO notice, and rg exits 0 because
+   *     other files matched. THIS is the silent false negative, and it is the one
+   *     that lost this file.
+   *   · `rg --text TOKEN DIR/` — all three lines.
+   *   · `rg -n TOKEN FILE` — a file named EXPLICITLY behaves differently: it prints
+   *     `binary file matches (found "\0" byte around offset N)`, no line, no content,
+   *     exit 0. A VISIBLE false negative.
+   *   · `rg -c TOKEN FILE` and `rg --text -c TOKEN FILE` — both `3`. rg searched
+   *     PAST the NUL; counting modes were never wrong.
+   *   · `/usr/bin/grep -c` — `3`; `/usr/bin/grep -n` — `Binary file … matches`.
+   *     Plain grep was not wrong either. What IS silent is `grep -I`
+   *     (ignore-binary), which some agent shells add by default: no output, exit 1.
+   *
+   * So "grep/rg silently drop every hit and still exit 0" is TRUE of a directory
+   * sweep and FALSE of an explicitly-named file. Three slices corrected
    * the official-schema conflation in `RunCard`, `evidenceGraph`, `RunFindings`,
    * `ValidateReview` and `ExportReadiness` while this module — which builds the
    * Project Memory experiment graph — kept the plainest form of it, gated on exactly

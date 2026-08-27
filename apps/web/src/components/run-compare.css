@@ -255,6 +255,15 @@
    * defect there to fix.
    */
   position: relative;
+
+  /*
+   * …AND THE SENTENCE ABOVE THE TABLE MUST NOT SCROLL WITH IT. See `.rc-caption`.
+   * The third use of a container in this repository, after `evgraph` and
+   * `expgraph`; named, as both of those are, so no unnamed `@container` query
+   * can resolve against it by accident.
+   */
+  container-type: inline-size;
+  container-name: rccompare;
 }
 
 .rc-tablewrap:focus-visible {
@@ -268,6 +277,28 @@
   font-size: 12.5px;
 }
 
+/*
+ * THE CAPTION IS THE ONE PART OF THIS TABLE THAT MUST NOT BE SCROLLED TO.
+ *
+ * A `<caption>` takes the TABLE's width, and the table carries a `min-width` so
+ * its four columns stay legible. Below that width the wrap above becomes a
+ * scroller and the caption went with it: measured at 390 and at 320, the caption
+ * was 620px wide inside a 278px / 208px visible box, so the reader saw
+ * "Addresses where Run 2 and Run 3 di" and had to drag sideways for the half
+ * that says how many addresses are NOT listed. The table is meant to scroll;
+ * the sentence explaining it is not.
+ *
+ * `100cqi` resolves against `.rc-tablewrap`'s own inline size — the visible box,
+ * not the scrolled content — so the caption wraps to the column the reader
+ * actually has, while the table keeps its `min-width` untouched (measured: 620px
+ * at both narrow widths, unchanged). `position: sticky` holds it at the left
+ * edge while the table is dragged, so it stays whole rather than sliding off.
+ *
+ * At every width where the table already fits, `100cqi` IS the caption's current
+ * width and nothing moves: measured 656 at 768, 790 at 1440, identical either
+ * way. The element keeps `display: table-caption`, so it is still the table's
+ * caption to an assistive technology.
+ */
 .rc-caption {
   caption-side: top;
   text-align: left;
@@ -275,6 +306,9 @@
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-muted);
+  position: sticky;
+  left: 0;
+  width: 100cqi;
 }
 
 .rc-table thead th {
@@ -575,8 +609,16 @@
 /*
  * NOT CARRIED BY COLOUR EITHER. The mark is a glyph, a sentence naming the run, and
  * a surface — the same three signals every category row carries. `data-state`
- * changes the tint only; `current` (a decision that still covers these answers) and
- * `open` say so in their own words above the tint.
+ * changes the tint only.
+ *
+ * AND THAT LAST SENTENCE WAS FALSE FOR ONE COMMIT, in the comment written to
+ * assert it. It read "`current` … and `open` say so in their own words above the
+ * tint"; they did not. Both marks rendered the identical sentence and the decision
+ * state was reachable only by expanding the detail row, so `current` (green) and
+ * `open` (amber) differed on screen by TINT ALONE — the one thing this comment
+ * exists to forbid. `Row` now appends "decided, and the decision still covers these
+ * answers" / "not currently decided", and the claim above is true because of that
+ * clause, not because of this comment.
  */
 .rc-conflict {
   display: inline-flex;

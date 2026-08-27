@@ -397,12 +397,34 @@ class DiscardRefusedByHistory(RuntimeError):
 
     No migration in this repository writes an ``ON DELETE`` clause, so the SQL
     default ``NO ACTION`` applies to every foreign key into ``isaac_experiments``
-    — including the four that ``0003_revisions`` and ``0004_submissions``
-    declare. Deleting an experiment row that still has a revision or a submission
-    is therefore REFUSED BY THE SERVER, the whole transaction rolls back, and the
-    two run-side deletes issued before it are undone with it. Append-only history
-    survives a defect in this application's own reasoning, which is the only kind
-    of guarantee worth having about it.
+    — ~~including the four that ``0003_revisions`` and ``0004_submissions``
+    declare~~ — **including the TWO of them that those migrations declare, which
+    is a correction and not a rewording.** Re-measured over the SQL bodies with the
+    comment lines stripped: ``0003``/``0004`` declare SIX foreign keys between
+    them, and exactly two point at ``isaac_experiments`` —
+    (the reviewer's own first pass at this sentence said FIVE and was wrong by one,
+    which is why the count now lives in an executing test rather than in prose:
+    ``test_the_FK_BACKSTOP_is_TWO_direct_keys_and_the_rest_are_TRANSITIVE``) —
+    ``isaac_experiment_revisions_experiment_fk`` and
+    ``isaac_submissions_experiment_fk``. The other four
+    (``isaac_run_revisions_revision_fk``, ``isaac_revision_changes_revision_fk``,
+    ``isaac_submissions_revision_fk``, ``isaac_submission_runs_submission_fk``)
+    point at ``isaac_experiment_revisions`` and ``isaac_submissions``, so they
+    cannot refuse
+    an ``isaac_experiments`` delete on their own and counting them here overstated
+    the backstop by a factor of two in the one docstring that argues for it.
+
+    **THE GUARANTEE IS UNCHANGED, AND IT IS TRANSITIVE RATHER THAN DIRECT** — which
+    is the reason the miscount did not become a hole. Every one of those four
+    requires a parent in ``isaac_experiment_revisions`` or ``isaac_submissions``,
+    and each of those two carries its own ``NOT NULL`` foreign key into
+    ``isaac_experiments``. So a history row for an experiment implies a row that
+    directly blocks that experiment's delete, and the two direct keys are
+    sufficient. Deleting an experiment row that still has a revision or a
+    submission is therefore REFUSED BY THE SERVER, the whole transaction rolls
+    back, and the two run-side deletes issued before it are undone with it.
+    Append-only history survives a defect in this application's own reasoning,
+    which is the only kind of guarantee worth having about it.
 
     IT IS NOT RECORDED AS A STORAGE FAILURE, for :class:`DurableWriteConflict`'s
     reason: the round trip worked and the server behaved exactly as designed, so
@@ -1149,9 +1171,14 @@ PROJECTION_TABLE = "isaac_run_projection"
 # single run. The two projections go first, the experiment last.
 #
 # AND THE ORDER IS ALSO THE BACKSTOP. Because the experiment delete goes LAST,
-# and because `0003`/`0004` declare four more foreign keys into the same parent
-# with the same `NO ACTION`, a record that still carries a revision or a
-# submission is refused BY THE SERVER at that final statement — and the two
+# and because ~~`0003`/`0004` declare four more foreign keys into the same parent
+# with the same `NO ACTION`~~ — **TWO, re-measured; see
+# :class:`DiscardRefusedByHistory` for the count and for why the guarantee is
+# unchanged** — `isaac_experiment_revisions_experiment_fk` and
+# `isaac_submissions_experiment_fk` name `isaac_experiments` directly with the same
+# `NO ACTION`, and every other history row requires a parent in one of those two
+# tables — a record that still carries a revision or a
+# submission is refused BY THE SERVER at that final statement, and the two
 # deletes already issued roll back with it. The route refuses long before this;
 # this is what holds if the route's reasoning is ever wrong. See
 # :class:`DiscardRefusedByHistory`.

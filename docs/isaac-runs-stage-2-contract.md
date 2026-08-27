@@ -247,19 +247,67 @@ reviewed slice.
 
 ## 7.1 What moves, precisely — and it is one function
 
-The application does **not** read experiments from PostgreSQL on the request path. Measured:
-`PostgresOrdinaryStore` exposes exactly four methods — `refuse_if_not_persistable` (`:1307`),
-`persist` (`:1336`), `hydrate` (`:1661`) and `stored_experiments` (`:1773`); `create` belongs to
-the `ExperimentRepository` Protocol (`:1878`), not to the store, and an earlier draft of this
-paragraph listed it here — corrected before merge, and recorded because an unchecked enumeration
-is the defect this programme has published four times. Of the four, `stored_experiments` is
-called only by `scripts/db_backfill_runs.py` and by tests, and `hydrate` has exactly two
-production callers: `workspace.py:4719` and the delegating wrapper at
-`experiment_repository.py:2182`. The database is a **write-through mirror**; the filesystem
-workspace is the working store.
+> **TWO CORRECTIONS, 2026-08-27, AND THE SECOND ONE IS THIS PARAGRAPH FAILING ITS OWN TEST.**
+> Both were found by an independent truthfulness audit, not by the author. Every line number
+> below is now re-derived at commit **`8994525`** — the commit that added this section — because
+> the numbers this paragraph originally carried came from `main` (`7668bf8`), not from its own
+> HEAD, and that is mechanically checkable rather than inferred: `refuse_if_not_persistable`
+> `:1307`, `persist` `:1336`, `hydrate` `:1661`, `stored_experiments` `:1773` and the Protocol's
+> `create` `:1878` are EXACTLY the five line numbers `git show
+> 7668bf8:apps/api/isaac_api/experiment_repository.py | grep -n "^    def "` prints, and NONE of
+> them is HEAD's. The single exception — `experiment_repository.py:2182`, the delegating wrapper —
+> IS HEAD's (`main`'s is `:1934`), so the paragraph was part-updated and part-copied, which is the
+> worst of the two. The vantage point is stated so a later reader can re-derive rather than trust:
+> `git show 8994525:apps/api/isaac_api/experiment_repository.py | grep -n "^    def "`.
+
+~~"The application does **not** read experiments from PostgreSQL on the request path."~~ —
+**FALSE, and it is the sentence the whole of §7 was built on top of.** Corrected in place rather
+than reworded, because a reader who saw the old sentence needs to see that it moved.
+
+**The application reads experiments from PostgreSQL on exactly one request path.**
+`GET /api/experiments` — My Experiments, the product's primary screen — calls
+`ws.list_experiments_with_hydration(scope)` (`routes.py:2180`), which calls
+`_hydrate_ordinary_scope()` (`workspace.py:4628`), which calls
+`PostgresOrdinaryStore.hydrate()` (`workspace.py:4719`), which reads `Q_ALL_EXPERIMENTS`. That is
+not an accident of layering: `workspace.py:4645` carries a heading saying so outright — *"WHY ON
+EVERY ORDINARY READ rather than once at boot. … an `emptyDir` is per-pod, so a second replica
+starts empty while the first is serving, and a boot-time hydration would leave that replica
+permanently blind to everything created before it started. Hydrating on read is one bounded
+`SELECT` on a table this application owns, and it writes only what is genuinely absent."*
+
+**`hydrate()` RESTORES; IT DOES NOT REFRESH** — its own docstring states that as a heading, and the
+skip is on `experiment.json`, not on the row, so a record whose state file is already present is
+left exactly as it is. The read is therefore bounded and almost always writes nothing. But it is
+**per list request, not per restart**, and every cost estimate in this section has to be sized
+against that.
+
+Measured: `PostgresOrdinaryStore` exposes ~~exactly four methods~~ — **FIVE**, at `8994525` —
+`refuse_if_not_persistable` (`:1461`), `persist` (`:1490`), `discard` (`:1815`), `hydrate`
+(`:1909`) and `stored_experiments` (`:2021`); `create` belongs to the `ExperimentRepository`
+Protocol (`:2126`), not to the store, and an earlier draft of this paragraph listed it here —
+corrected before merge. **The second correction is worse than the first, because it is the same
+defect this paragraph names.** `discard` was added by `d93b896`, a commit that was ALREADY an
+ancestor of this document when the "exactly four" sentence was written; the enumeration was
+copied from `main` rather than measured at HEAD, in the sentence that boasts about enumerations
+having been published wrong four times. It is now five times, and this is the fifth.
+
+**`discard` matters to Stage 2b specifically, which is why omitting it was not a cosmetic slip.**
+It is the ONE method that **deletes** `isaac_run_projection` and `isaac_runs` rows — three
+statements in foreign-key dependency order, in one transaction, guarded by the same
+`_table_available` probes the write path uses. A Stage-2b reader must account for it: after a
+discard the experiment has no projection row and no run rows, which is NEVER PROJECTED by §2.1's
+predicate — and that is correct, because the experiment's durable row is gone too. Its one
+production caller is `ws.discard_experiment` (`workspace.py:5366`), reached from
+`routes.py:3073`.
+
+Of the five, `stored_experiments` is called only by `scripts/db_backfill_runs.py` and by tests,
+and `hydrate` has exactly two production callers: `workspace.py:4719` and the delegating wrapper
+at `experiment_repository.py:2182`. The database is ~~a **write-through mirror**~~ **a
+write-through mirror that is also read back on every ordinary list**; the filesystem workspace is
+still the working store, and that half is unchanged.
 
 The one place a stored document becomes a live record is
-`PostgresOrdinaryStore.hydrate()` (`experiment_repository.py:1661`). It reads `Q_ALL_EXPERIMENTS`,
+`PostgresOrdinaryStore.hydrate()` (`experiment_repository.py:1909`). It reads `Q_ALL_EXPERIMENTS`,
 and for each row whose workspace directory is missing it writes the row's `state` JSON to
 `<root>/<id>/experiment.json`. **The run list is the `runs` key inside that document**
 (`ws.Experiment.to_state()` → `"runs": [r.to_state() for r in self.sorted_runs()]`).
@@ -289,7 +337,7 @@ get it wrong and a record is restored with no runs and the pass reports success.
 | 12 | How do revision snapshots behave? | Unchanged. `submission_store` snapshots the `ws.Experiment` in memory. If the reader is correct, that object is identical either way — which is the parity property §7.5 tests. |
 | 13 | How does Submit choose Run state? | It does not choose. It uses the hydrated `Experiment`, exactly as today. |
 | 14 | How does Run removal behave? | Unchanged. `POST .../runs/{id}/remove` mutates the document; `persist` re-diffs the rows and re-stamps in the same transaction, so the projection stays COMPLETE at the new pair. |
-| 15 | How does restart behave? | A restart is precisely when `hydrate()` runs. Authority is recomputed from the stamp, never remembered — there is no cached cutover bit to survive or fail to survive. |
+| 15 | How does restart behave? | ~~"A restart is precisely when `hydrate()` runs."~~ — **CORRECTED 2026-08-27, same root as §7.1's opening sentence.** `hydrate()` runs on **every ordinary-scope `GET /api/experiments`**, restart or not; a restart is merely the case in which it has the most to do, because the `emptyDir` workspace is empty and every row's directory is missing. The answer this row exists to give is unchanged and does not depend on the wrong half: authority is recomputed from the stamp on each pass, never remembered — there is no cached cutover bit to survive or fail to survive. |
 | 16 | How do concurrent writes during transition behave? | Unchanged. A writer that loses the CAS stamps nothing (§2.2 invariant 3), so a losing writer cannot leave a projection claiming completeness for a document it failed to write. |
 | 17 | Document and rows **intentionally** disagree? | **This state does not exist and must not be invented.** One transaction maintains both; there is no writer that updates one deliberately without the other. Any disagreement is unexpected — see the next row. |
 | 18 | Document and rows **unexpectedly** disagree? | §7.4. |
@@ -302,9 +350,21 @@ the reader may be written, and conflating the two would make the work unstartabl
 is an operator action in an environment an agent may not connect to.
 
 The reader is **safe by construction on day one**, and the reason is mechanical rather than
-optimistic: every experiment that predates the projection is NEVER PROJECTED, and NEVER
-PROJECTED reads the document. So before the backfill, the reader is a no-op for exactly the
-records the backfill exists to cover.
+optimistic — but ~~"every experiment that predates the projection is NEVER PROJECTED"~~ names the
+**wrong one of the four states for the situation that actually obtains today**, and §2.1 keeps
+them as separate rows precisely so an operator can tell them apart. Corrected 2026-08-27:
+
+- **Until `0005` is applied — which is the state of every environment, per this document's own
+  status line — `isaac_run_projection` does not exist, so every experiment is `UNAVAILABLE`,**
+  not NEVER PROJECTED.
+- **Between `0005` being applied and the backfill having run, an experiment that has not been
+  saved since is `NEVER PROJECTED`.**
+
+Both read the document, which is why the conclusion is untouched: before the backfill, the reader
+is a no-op for exactly the records the backfill exists to cover. Only the stated reason moves —
+and it moves in the one direction that matters, because the two states are separately reported in
+§7.6's distribution and an operator checking the health block against this prediction would find
+it disagreeing.
 
 Two consequences, both deliberate:
 
@@ -332,7 +392,18 @@ disagreement means a writer, a migration, or an out-of-band statement broke that
 The rule, and it is fail-closed in the direction that cannot lose a scientist's work:
 
 1. **Compare, always.** Even at COMPLETE, the reader compares the row set against
-   `state["runs"]` by run id. This costs one set comparison over data already in hand.
+   `state["runs"]` by run id. ~~"This costs one set comparison over data already in hand."~~ —
+   **THE RULE STANDS; ITS PRICE TAG WAS WRONG, and it is corrected rather than deleted.** The
+   comparison is still one set comparison over data already in hand, so the per-experiment cost
+   is what it says. What was wrong is the FREQUENCY it was implicitly sized against: §7.1's
+   opening sentence had this section believing `hydrate()` ran once per restart, so "one set
+   comparison" read as one comparison per experiment per pod lifetime. It is **once per
+   experiment per `GET /api/experiments`** — the product's primary screen, on every load. The
+   honest sizing is therefore *O(runs) per experiment per list request*, and a Stage-2b
+   implementation must measure it on a realistic workspace rather than assume it is free. It is
+   still cheap enough to be the right rule: the alternative is a reader that cannot tell a
+   healthy fallback from a corrupted projection, and this repository has already published one
+   surface that could not (§7.5's negative-control note).
 2. **On disagreement, use the DOCUMENT.** It is the side the CAS protects, the side Submit and
    export have always read, and the side a scientist's last write landed in. Preferring the rows
    here would let a stale or corrupted projection delete runs.
@@ -388,17 +459,42 @@ own* tables, not about the production-derived `records` table, so gates **G2**/*
 untouched.
 
 Never claimable: that the cutover is complete, on the strength of code, or of a green suite, or
-of `0005` having been applied. The only honest statement is the measured distribution, and until
-an operator has applied `0005` and run the backfill, the expected distribution in the hosted
-deployment is **every experiment NEVER PROJECTED** — which is the reader working correctly, not
-the reader being off.
+of `0005` having been applied. The only honest statement is the measured distribution, and the
+prediction an operator would check that distribution against is **two predictions, not one**
+(corrected 2026-08-27 — this sentence named the wrong state, and it is the one sentence here an
+operator would actually test):
+
+| When | Expected distribution | Why |
+|---|---|---|
+| `0005` **not applied** — the state of every environment today, per this document's status line | **every experiment `UNAVAILABLE`** | §2.1: the predicate for UNAVAILABLE is `isaac_runs` **or** `isaac_run_projection` absent |
+| `0005` applied, backfill **not run** | **every experiment `NEVER PROJECTED`**, except any saved since `0005` was applied, which are `COMPLETE` | an ordinary save stamps a COMPLETE projection in the same transaction as the rows |
+
+~~"the expected distribution in the hosted deployment is **every experiment NEVER PROJECTED**"~~
+was right about the second row and wrong about the first, which is the row that describes today.
+Either way the reading is the same and is the point: **that is the reader working correctly, not
+the reader being off.**
 
 ## 7.7 Authorization basis
 
 `CLAUDE.md` §15's 2026-08-07 lift, its `isaac_run_projection` enumeration, and §4 of this
 contract, which reserved Stage 2b as *"a separate reviewed slice"* and pre-specified the
 four-state fallback this section implements. **Stage 2b adds no table, no column and no
-migration** — it reads two tables that already exist and that `0005`'s own header says the
-build that shipped it would not read. It writes nothing. `db_write.OWNED_TABLES` is unchanged,
-and no new enumeration is required, which is the first time in this programme that sentence has
-been true without a correction attached to it.
+migration** — it reads two tables that already exist, and **each of them has its own migration
+header saying the build that shipped it would not read it** (corrected 2026-08-27: ~~"that
+`0005`'s own header says the build that shipped it would not read"~~ attributed both tables to
+one migration). `0005_run_projection.sql` says it of **`isaac_run_projection`** — *"No read path
+in this application consults this table in the build that ships it — the write path stamps it and
+nothing else."* `isaac_runs` is **`0002`'s**, and `0002_runs.sql` says it there — *"No application
+code writes or reads `isaac_runs`."* Note that `0002`'s sentence has since been half-overtaken by
+the shadow-write slice, which is exactly why it must be attributed to `0002` and read at its own
+vantage point rather than folded into `0005`'s.
+
+It writes nothing. `db_write.OWNED_TABLES` is unchanged, and no new enumeration is required.
+~~"which is the first time in this programme that sentence has been true without a correction
+attached to it"~~ — **WITHDRAWN 2026-08-27, and withdrawn rather than reworded because the
+self-congratulation is the part that was wrong.** It was false when it was written and it is
+false now: §7.1 of this same section carried an unchecked enumeration (*"exactly four methods"*,
+measured five), and this paragraph carried a second misattribution. The sentence claimed a clean
+record in the paragraph immediately after two defects of exactly the kind it was claiming to have
+avoided. **The durable lesson is the one §15 of `CLAUDE.md` has now recorded five times: "no
+enumeration is required here" is itself a checkable claim, and this one was published unchecked.**

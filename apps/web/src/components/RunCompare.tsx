@@ -1370,11 +1370,16 @@ function Row({
   const detailId = useId();
   const findingsA = findings?.a.get(row.path) ?? [];
   const findingsB = findings?.b.get(row.path) ?? [];
+  // A SIDE WITH NO VALUE CAN STILL CARRY CITATIONS, so the toggle is offered for
+  // one. Without the last two clauses the panel that now describes those entries
+  // is unreachable on the one row shape that has them and nothing else.
   const hasDetail =
     row.a.present ||
     row.b.present ||
     row.a.conflict !== null ||
     row.b.conflict !== null ||
+    row.a.support.length > 0 ||
+    row.b.support.length > 0 ||
     findingsA.length > 0 ||
     findingsB.length > 0;
   return (
@@ -1409,6 +1414,25 @@ function Row({
               {row.conflict === 'both'
                 ? 'A conflict is recorded on both runs here'
                 : `A conflict is recorded on ${row.a.conflict !== null ? runA.label : runB.label} here`}
+              {/*
+                WHETHER IT HAS BEEN DECIDED, IN WORDS. `data-state` tints this mark
+                green for `current` and amber otherwise, and for one commit that
+                tint was the ONLY carrier of the difference: both marks read "A
+                conflict is recorded … here" and the decision state appeared only
+                inside the detail row, which is collapsed by default. A decided
+                conflict and an undecided one are not a colour apart — this repo's
+                own rule is glyph plus words plus surface — so the word is here.
+
+                `conflictState` is `current` only when EVERY recorded conflict on
+                this row is currently decided, which is why the other arm says "not
+                currently decided" about the row rather than about one side: on a
+                `both` row with one decision and one outstanding, that is exactly
+                what is true, and naming a side would need a claim per side that
+                the mark does not make.
+              */}
+              {conflictState(row) === 'current'
+                ? ' — decided, and the decision still covers these answers'
+                : ' — not currently decided'}
             </span>
           )}
           {/*
@@ -1546,9 +1570,51 @@ function SideDetail({
           )}
         </>
       ) : (
-        <p className="rc-detail-line">
-          {originWord(side.origin)}. There is nothing cited here to describe.
-        </p>
+        /*
+          NO VALUE IS NOT THE SAME AS NOTHING RECORDED, and this branch used to say
+          it was: it rendered "There is nothing cited here to describe" for EVERY
+          side without a value, while `supportOf` reads the envelope's citations
+          whether or not it carries one. A draft field with `status:
+          needs_confirmation`, no value and two spreadsheet citations is an
+          ordinary ISAAC shape — the extractor records what it read and asks — and
+          on an `On one run only` row (which is listed by default, and expandable
+          because the OTHER side has a value) this panel asserted that the run's
+          own stored citations were not there. The sentence is now conditioned on
+          the citations it is about, and they are listed when they exist.
+
+          The two provenance dimensions are deliberately still not shown here:
+          `provenanceOf` computes them only for a side that holds a value, the
+          review AXIS reads `not-applicable` whenever either side is absent, and a
+          chip saying what "establishes" a value there is no value for would be a
+          claim about nothing.
+        */
+        <>
+          <p className="rc-detail-line">
+            {originWord(side.origin)}.{' '}
+            {side.support.length === 0
+              ? 'There is nothing cited here to describe.'
+              : 'No value is recorded, and these entries are cited beside it.'}
+          </p>
+          {side.support.length > 0 && (
+            <>
+              <p className="rc-detail-line">
+                <span className="rc-detail-key">Recorded status</span>{' '}
+                {side.status ?? 'no status recorded'} · {evidenceWord(side)}
+              </p>
+              <ul className="rc-detail-list">
+                {side.support.map((entry, index) => (
+                  <li key={`${entry.key}#${index}`}>{supportWord(entry)}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {side.undescribableSupport > 0 && (
+            <p className="rc-detail-fail">
+              {side.undescribableSupport} of the entries above could not be read by this build.
+              They are counted rather than described.
+            </p>
+          )}
+        </>
       )}
       {side.conflict !== null && <ConflictDetail conflict={side.conflict} />}
       {findings.length > 0 && (

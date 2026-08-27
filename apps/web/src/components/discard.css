@@ -37,6 +37,36 @@
   gap: 8px;
   min-height: 32px;
   margin-top: 8px;
+
+  /*
+   * THE SLOT MUST OCCUPY ITS FORM'S FULL COLUMN, AND IN TWO OF THE FOUR MOUNTS IT
+   * DID NOT. `stretch` is `align-self`'s initial value, so this restores the
+   * default rather than asking for anything new — it is here because two parents
+   * override it.
+   *
+   * `.notes-capture` and `.capture-form` are both `display: flex;
+   * flex-direction: column; align-items: flex-start`, which makes every child
+   * shrink-to-fit. Two things above then stopped being true of those two mounts:
+   *
+   *   * `align-items: flex-end` had nothing to right-align against, so the
+   *     trigger sat at the LEFT edge — contradicting `TranscriptCapturePanel`'s
+   *     own "BELOW Finalize, quiet and right-aligned";
+   *   * `.discard-confirm`'s `align-self: stretch` stretched to the slot, and the
+   *     slot was only as wide as its widest child — the confirm's own max-content
+   *     width, which `.discard-confirm-text`'s `max-width: 68ch` pins at 565px.
+   *
+   * So opening the step widened the slot from 142px to 565px and MOVED THE
+   * TRIGGER 423px to the right, out from under the pointer that had just pressed
+   * it. Measured on `/record/<id>` at 1440: closed, the trigger spans 276→418
+   * while the sibling textarea ends at 1074; open, it spans 699→841. At 1024 the
+   * same misalignment measures 617 against 972. At 390 the two already agreed,
+   * which is why a narrow-only check would have missed it.
+   *
+   * Inert in the other two mounts: `.guided` and `.conflict` are block
+   * containers, where the slot was already full width and measured so (658 of a
+   * 660px column).
+   */
+  align-self: stretch;
 }
 
 /* Programmatic focus only (`tabIndex={-1}`), as the announced landing place after a

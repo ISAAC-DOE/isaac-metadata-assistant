@@ -493,6 +493,31 @@
   border-radius: var(--radius-token);
   cursor: pointer;
   min-width: 0;
+
+  /*
+   * A WRAPPED LABEL USED TO PAINT ON TOP OF THE ROWS BELOW IT, and the cause is
+   * that these rows are flex ITEMS, not just flex containers.
+   *
+   * `.evgraph-tree` is a column flex container with `max-height: 420px`. Once the
+   * rows together exceed that, the default `flex-shrink: 1` shrinks each item —
+   * `min-height: 30px` stops it at 30px, but a row whose label wraps to three or
+   * four lines NEEDS 83px, and `overflow` is `visible`, so the surplus was
+   * rendered outside the box and over its neighbours. The tree scrolled by the
+   * shrunken total, so the rows below never moved out of the way.
+   *
+   * MEASURED at 1440 on `/record/<id>/evidence?view=graph`: 4 of 17 rows had
+   * `scrollHeight` 83 against a `getBoundingClientRect().height` of 30 — the
+   * experiment's own title row among them, so this was visible on the shipped
+   * fixture and not only on long content. With `flex: none`, no row reports
+   * `scrollHeight` past its own height and the tree scrolls by the real total.
+   *
+   * `flex: none` rather than `flex-shrink: 0`: the basis and grow factor should
+   * be stated too, because a row's height is its content's and nothing else's.
+   * `.evgraph-row-label` already carries `overflow-wrap: anywhere` — wrapping is
+   * what this tree intends, so the fix is to let the row be as tall as the wrap
+   * it asked for, not to truncate the label and hide what a note says.
+   */
+  flex: none;
 }
 
 .evgraph-row:hover {

@@ -235,23 +235,18 @@ export function reviewStateFor(item: {
 }
 
 // --- the wire shape ----------------------------------------------------------
-
-/** One entry of `GET /api/experiments/{id}/provenance`. */
-export interface ApiProvenanceEntry {
-  address: string;
-  origins: ProvenanceOrigin[];
-  primary_origin: ProvenanceOrigin;
-  review_state: ProvenanceReviewState;
-  evidence_count: number;
-  inherited: boolean;
-  note_refs: string[];
-}
-
-export interface ApiProvenance {
-  experiment_id: string;
-  run_id: string | null;
-  record_rev: number;
-  entries: ApiProvenanceEntry[];
-  notes_summary: { total: number; listed_as_unmapped: number };
-  blocks_not_described: string[];
-}
+//
+// REMOVED 2026-08-27: `ApiProvenanceEntry` and `ApiProvenance` were declared HERE and
+// AGAIN in `lib/api.ts`, both for `GET /api/experiments/{id}/provenance`, with
+// different types — this pair closed `origins`/`primary_origin`/`review_state` to the
+// unions above and omitted `unavailable` and `resolution_state` — and NOTHING enforced
+// agreement between them. Nothing was broken only because this pair had no importer,
+// which is luck rather than design: the next consumer to reach for the nearer of the
+// two would have got a shape the server does not send.
+//
+// THE SURVIVING DECLARATION IS IN `lib/types.ts`, with the OPEN `string` typing. That
+// is the deliberate half of the choice: `originLabel` below does
+// `ORIGIN_LABEL[origin] ?? origin`, and that fallback needs an unrecognised origin to
+// be representable. The unions in this module remain correct for what they describe —
+// this client's own derivation from an evidence entry it already holds — and are
+// unchanged. Do not re-declare a wire shape here.

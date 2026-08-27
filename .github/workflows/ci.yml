@@ -1063,11 +1063,26 @@ jobs:
       # — which means it proves the application's HANDLING of it and cannot prove the
       # constraint behaves that way at all. This step is where the engine answers.
       #
-      # FOUR SCENARIOS, and the fourth is the control: the three deletes in dependency
-      # order; the same experiment `DELETE` issued FIRST and refused; a planted history
-      # row making the backstop fire with all three tables intact afterwards; and the
-      # same discard succeeding once the planted row is gone, so the backstop case
-      # cannot pass because the discard was broken for an unrelated reason.
+      # ~~FOUR SCENARIOS~~ FIVE, and the fourth is the control: the three deletes in
+      # dependency order; the same experiment `DELETE` issued FIRST and refused; a
+      # planted history row making the backstop fire with all three tables intact
+      # afterwards; and the same discard succeeding once the planted row is gone, so
+      # the backstop case cannot pass because the discard was broken for an unrelated
+      # reason.
+      #
+      # THE FIFTH WAS ADDED BY AN INDEPENDENT REVIEW, and the reason is a gap the four
+      # above read as covering and did not. TWO foreign keys name `isaac_experiments`
+      # from the history side — `isaac_experiment_revisions_experiment_fk` and
+      # `isaac_submissions_experiment_fk` — and every one of the four plants a
+      # REVISION, so the key protecting a SUBMISSION, which is the artifact this
+      # operation's authorization names FIRST among the things it may not erase, was
+      # proven by nothing on any engine. `CLAUDE.md` §15 independently records
+      # `isaac_submissions_experiment_fk` as one of the five declared constraints the
+      # migration job's own coverage step drives no refusal off either, so it is not
+      # covered elsewhere. The fifth plants a submission whose parent revision belongs
+      # to a DIFFERENT experiment, leaving the target with a submission row and no
+      # revision row, and it is also the first execution
+      # `Q_SUBMISSION_COUNT_FOR_EXPERIMENT` has ever had against a real server.
       #
       # IT RUNS HERE AND NOT IN THE PARITY STEP ABOVE, deliberately. That step asserts
       # an exact `expected_scenarios` count over ONE file and rejects any skip; folding
@@ -1111,16 +1126,34 @@ jobs:
           # is the FIRST and ONLY execution those four scenarios ever get.
           #
           # THE NUMBER IS THE MEASURED COUNT OF WHAT RUNS IN THIS STEP, which is the
-          # WHOLE FILE — the 43 that need no engine plus the 4 that do — because the
-          # engine is present here and nothing in the file is deselected. Measured:
+          # WHOLE FILE — the ones that need no engine plus the 4 that do — because
+          # the engine is present here and nothing in the file is deselected.
+          # Measured:
           # `pytest apps/api/tests/test_discard_an_unsubmitted_experiment.py -q`
-          # reports `43 passed, 4 skipped` without an engine, and the skip assertion
-          # above already proves those 4 are not skipped here. It is an EQUALITY for
+          # reports `46 passed, 5 skipped` without an engine, and the skip assertion
+          # above already proves those 5 are not skipped here. It is an EQUALITY for
           # the reason the parity step records at length: a floor tolerates deletion
           # and drifts silently, while an equality must be updated in the same commit
           # as any added or removed scenario. If you are reading this because the step
           # failed after you added one, change the number and say so in the PR.
-          expected_scenarios=47
+          #
+          # 47 -> 51: an independent review added four scenarios, and this line is the
+          # proof that the rule above works as advertised — the review changed the
+          # file and had to change this number in the same breath.
+          # `test_the_503_description_names_BOTH_facts_it_can_report` pins a published
+          # `503` that named one of its two reachable error values;
+          # `test_the_FK_BACKSTOP_is_TWO_direct_keys_and_the_rest_are_TRANSITIVE`
+          # executes a foreign-key count two docstrings had asserted wrongly; and
+          # `test_REAL_ENGINE_a_planted_SUBMISSION_alone_refuses_the_discard` (with its
+          # engine-free shape check) closes the gap that made this step's own claim
+          # narrower than it read — the four original real-engine scenarios plant a
+          # REVISION every time, so `isaac_submissions_experiment_fk`, the key that
+          # protects a submission, was proven by nothing on any engine. It is also
+          # the first real execution `Q_SUBMISSION_COUNT_FOR_EXPERIMENT` has ever had.
+          # THE FIFTH REAL-ENGINE SCENARIO HAS NEVER RUN ANYWHERE EITHER: this host
+          # has no container runtime and no PostgreSQL, so if this step goes red, its
+          # planted `INSERT` is the first thing to read.
+          expected_scenarios=51
           passed=$(grep -Eo '[0-9]+ passed' /tmp/discard.log | grep -Eo '^[0-9]+' || echo 0)
           [ "$passed" = "$expected_scenarios" ] || {
             echo "::error::$passed discard test(s) passed; exactly $expected_scenarios are expected."

@@ -192,6 +192,26 @@
   gap: 4px;
 }
 
+/*
+ * THIS FORM'S MEASURE IS 68ch, AND THE DISCARD SLOT HAS TO KEEP IT.
+ *
+ * `.discard-slot` asks its parent for the full column (`align-self: stretch`,
+ * and see `discard.css` for the two mounts that were denying it). That is right
+ * where the form's controls fill the column, which is `.notes-capture`'s case —
+ * and wrong here, because every control below caps itself at `68ch`. Without
+ * this rule the quiet Discard trigger right-aligned to the panel edge (measured
+ * at 1440: 1080) while the textarea it belongs to ended at 820, and the confirm
+ * step became the widest box in the panel.
+ *
+ * The number is `.capture-control`'s and `.capture-hint`'s own, stated here
+ * rather than inherited so the three move together; `.discard-confirm-text`
+ * already carries the same measure, so the step's box now bounds its sentence
+ * exactly instead of trailing 270px of empty surface.
+ */
+.capture-form .discard-slot {
+  max-width: 68ch;
+}
+
 .capture-label {
   margin-top: 10px;
   font-size: 12px;

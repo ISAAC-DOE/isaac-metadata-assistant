@@ -7,13 +7,22 @@
  * delete, or roll back anything the record holds.
  *
  * WHY THE COPY IS CENTRALISED. There is no deletion anywhere in this product's notes
- * model to build a deletion promise on. `apps/api/isaac_api/routes.py:8155-8158` states
- * it as a governing rule — "NOTHING CAPTURED IS EVER SILENTLY DISCARDED — there is no
- * DELETE here, and there will not be one. Dismissal is a state." — and
- * `transcript_capture.py:129-159` records two retention states that were deliberately
- * NOT offered for exactly that reason: "both are deletion guarantees, and there is no
- * deletion anywhere in the notes model to build one on. Offering a control that quietly
- * did nothing would be worse than offering none."
+ * model to build a deletion promise on. `apps/api/isaac_api/routes.py:8618-8620`
+ * (line numbers at commit `8994525`; the anchor is the phrase itself, which is unique
+ * in that file) states it as a governing rule — "NOTHING CAPTURED IS EVER SILENTLY
+ * DISCARDED — there is no DELETE here, and there will not be one. Dismissal is a
+ * state." — and `transcript_capture.py:129-159` records two retention states that were
+ * deliberately NOT offered for exactly that reason: "both are deletion guarantees, and
+ * there is no deletion anywhere in the notes model to build one on. Offering a control
+ * that quietly did nothing would be worse than offering none."
+ *
+ * ~~`routes.py:8155-8158`~~ — CORRECTED 2026-08-27. That range is inside the RUN ANSWERS
+ * handler and has nothing to do with notes or deletion. The claim was true and its
+ * citation landed on unrelated code, which in a module whose whole premise is "the words
+ * are the risky part, so here is the code that backs each one" is the failure the
+ * citations exist to prevent. Re-derive rather than trusting a number:
+ * `git show 8994525:apps/api/isaac_api/routes.py | grep -n 'NOTHING CAPTURED IS EVER'`.
+ * (`transcript_capture.py:129-159` was re-checked at the same time and is CORRECT.)
  *
  * A Discard control that said it removed anything from the record would BE that
  * control. So SIX rules bind every string below, and
@@ -41,9 +50,22 @@
  *
  * THE TRANSCRIPT HAS TWO BODIES, AND THAT IS THE POINT RATHER THAN AN EXCEPTION. Once
  * Finalize succeeds, every segment of the transcript is stored with the record as
- * Unmapped Notes (`routes.py:9483-9494`), so from that moment a control that cleared the
- * box while saying "nothing has been sent" would be false. The second body is what makes
- * the control truthful after finalize; it is not a softening of the first.
+ * Unmapped Notes, so from that moment a control that cleared the box while saying
+ * "nothing has been sent" would be false. The second body is what makes the control
+ * truthful after finalize; it is not a softening of the first.
+ *
+ * TWO CITATIONS, BECAUSE THE CLAIM HAS TWO HALVES — the code that DOES it and the
+ * sentence the server SAYS about it (both at commit `8994525`):
+ *
+ *   · `routes.py:9936-9954` — the `# EVERY SEGMENT IS STORED` loop in the transcript
+ *     finalize handler: one `exp.capture_note(...)` per segment of the reading.
+ *   · `routes.py:9434` — `_retention_disclosure`'s served text, "The finalized
+ *     transcript is stored with this record as Unmapped Notes and stays with it."
+ *
+ * ~~`routes.py:9483-9494`~~ — CORRECTED 2026-08-27: that range names neither. The claim
+ * is unchanged and was always true; only the pointer was wrong. Anchor phrases, which
+ * are what to search on if the line numbers drift: `EVERY SEGMENT IS STORED` and
+ * `stored with this record as Unmapped`.
  */
 
 /*

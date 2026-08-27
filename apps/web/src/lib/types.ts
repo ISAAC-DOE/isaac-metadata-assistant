@@ -3055,3 +3055,58 @@ export interface ApiAssetRemoved {
   detached_from_runs: string[];
   experiment_version: string;
 }
+
+/*
+ * --- `GET /experiments/{id}/provenance` ---------------------------------------
+ *
+ * MOVED HERE FROM `lib/api.ts` (2026-08-27), where a comment had recorded that they
+ * belonged here and asked the next slice that owned this file to move them. See that
+ * comment's replacement in `api.ts` for the reason it was more than housekeeping: a
+ * SECOND, differently-typed declaration of this same contract existed in
+ * `lib/provenance.ts` with nothing enforcing agreement, and has been removed.
+ *
+ * TWO INDEPENDENT DIMENSIONS, NEVER COMBINED INTO ONE VALUE — the same contract
+ * `lib/provenance.ts` mirrors for surfaces that already hold an evidence entry.
+ * `origins` is a SET, because one address can carry several citations of different
+ * kinds; `primary_origin` picks one of them by a fixed documented order.
+ *
+ * `origins`, `primary_origin` and `review_state` are `string`, NOT the closed unions
+ * `provenance.ts` declares for its own in-client derivation. `originLabel`'s
+ * `ORIGIN_LABEL[origin] ?? origin` fallback depends on an unrecognised origin being
+ * representable; a closed union would turn a server-side addition into a compile error
+ * here and a silent one on screen.
+ */
+export interface ApiProvenanceEntry {
+  /** A record address, or `note:<id>` for a note that has no schema home yet. */
+  address: string;
+  /** Every origin the stored citations at this address produce. Never empty. */
+  origins: string[];
+  /** One of `origins`, chosen by the server's fixed precedence — never array order. */
+  primary_origin: string;
+  /** What, if anything, ESTABLISHES the value. Not a validity or export verdict. */
+  review_state: string;
+  evidence_count: number;
+  /** True when the RUN does not hold the value and resolves the record's. */
+  inherited: boolean;
+  /** Ids of notes a person MAPPED here. Never a machine's proposal. */
+  note_refs: string[];
+  /** The stored payload was only PARTLY readable, so it is not plain support. */
+  unavailable: boolean;
+  /** One of `conflict_resolution.RESOLUTION_STATES`, derived on read. */
+  resolution_state: string;
+}
+
+export interface ApiProvenanceResponse {
+  experiment_id: string;
+  /** The run described, or `null` for the record itself. */
+  run_id: string | null;
+  record_rev: number;
+  entries: ApiProvenanceEntry[];
+  /**
+   * WHAT IS NOT LISTED, COUNTED RATHER THAN OMITTED. A reviewed note is not an
+   * entry, because none of the review states is true of it.
+   */
+  notes_summary: { total: number; listed_as_unmapped: number };
+  /** Blocks that carry no value envelope to describe. Owned up to, not passed over. */
+  blocks_not_described: string[];
+}

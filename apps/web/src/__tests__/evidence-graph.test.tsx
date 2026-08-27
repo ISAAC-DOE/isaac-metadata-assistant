@@ -467,9 +467,21 @@ describe('evidence graph · derivation from stored state', () => {
     // ~~`expect(kinds.size).toBe(EVIDENCE_EDGE_KINDS.length)`~~ — the vocabulary
     // grew past what this fixture can produce, and the count is SPLIT rather than
     // bumped. Five kinds (`has_conflict`, `competing_value`, `has_decision`,
-    // `has_note`, `mapped_to`) come from four routes this input carries none of,
-    // so a bumped total would have been satisfiable only by making this fixture
-    // read them — which would delete the negative control below.
+    // `has_note`, `mapped_to`) come from TWO of the five sub-fetch routes this input
+    // carries none of — `conflicts` (`addConflicts`, `addCandidates`,
+    // `addOrphanDecisions`) and `notes` (`addNotes`) — so a bumped total would have
+    // been satisfiable only by making this fixture read them, which would delete the
+    // negative control below.
+    //
+    // ~~"come from four routes this input carries none of"~~ — CORRECTED 2026-08-27,
+    // found while correcting the same miscount in `lib/evidenceGraph.ts` and
+    // `screens/EvidenceExplorer.tsx`. "Four" was wrong on BOTH readings: the five
+    // kinds are emitted by two routes, and the number of sub-fetch routes the input
+    // carries none of is FIVE, not four. Measured by reading which builder emits each
+    // kind; the other three sub-fetch routes are `provenance`, `assets` and
+    // `revisions`, and none of them emits any of THESE five (provenance and revisions
+    // mint no nodes at all, by design; `addAssetReferences` emits `asset_reference`
+    // and `references`, which are not in this list).
     expect(kinds.size).toBe(BUNDLE_EDGE_KINDS.length);
   });
 

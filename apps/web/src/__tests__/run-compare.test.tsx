@@ -39,6 +39,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
+import axe from 'axe-core';
 
 import { RunsSection, RUNS_PAGE_SIZE } from '../components/RunsSection';
 import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
@@ -1233,6 +1234,14 @@ describe('a recorded conflict and a value difference stay different things', () 
     await waitFor(() => expect(category('field:sample.material.name')).toBe('same'));
     const cell = row('field:sample.material.name');
     expect(cell.textContent).toContain('A conflict is recorded on Run 1 here');
+    /*
+      AND WHETHER IT HAS BEEN DECIDED, IN THE MARK'S OWN WORDS. `data-state` tints
+      it, and for one commit the tint was the ONLY carrier: this sentence and the
+      decided one below were byte-identical, and the decision state lived only in
+      the detail row, which is collapsed by default. Paired with the assertion in
+      `a decided conflict reads as decided`, which pins the other polarity.
+    */
+    expect(cell.textContent).toContain('A conflict is recorded on Run 1 here — not currently decided');
     // ...and its category is untouched: the two runs record the same thing.
     expect(cell.textContent).toContain('Same value, same source');
 
@@ -1289,7 +1298,12 @@ describe('a recorded conflict and a value difference stay different things', () 
     await contextBand();
     await waitFor(() => expect(document.querySelector('.rc-conflict')).not.toBeNull());
 
-    expect(document.querySelector('.rc-conflict')?.getAttribute('data-state')).toBe('current');
+    const mark = document.querySelector('.rc-conflict')!;
+    expect(mark.getAttribute('data-state')).toBe('current');
+    // THE OTHER HALF OF THE POLARITY PAIR. Green is not a word; drop the clause and
+    // this row reads identically to the undecided one above.
+    expect(mark.textContent).toContain('decided, and the decision still covers these answers');
+    expect(mark.textContent).not.toContain('not currently decided');
     const summary = document.querySelector('.rc-summary')?.textContent ?? '';
     expect(summary).toContain('0 still awaiting a decision');
 
@@ -1319,6 +1333,102 @@ describe('a recorded conflict and a value difference stay different things', () 
 /* ── 9. what each run records, and where a difference leads ────────────────── */
 
 describe('the expanded detail describes support without weighing it', () => {
+  /*
+   * A SIDE WITH CITATIONS AND NO VALUE, which is an ordinary ISAAC shape and was
+   * the one this panel asserted the opposite about.
+   *
+   * `{value: null, status: needs_confirmation, evidence: [...]}` is what the
+   * deterministic extractor writes when it has read something and cannot confirm a
+   * value: the citations are stored and there is no value yet. `supportOf` reads
+   * them whether or not a value is present, and the absent branch of `SideDetail`
+   * nevertheless rendered "There is nothing cited here to describe" — a statement
+   * about the scientist's record that the same object disproves.
+   */
+  it('a side with citations and no value is described, never reported as nothing', async () => {
+    const cited = {
+      value: null,
+      status: 'needs_confirmation',
+      evidence: [
+        { source_type: 'spreadsheet', source_file: 'synthetic-sheet.csv', locator: 'C1' },
+      ],
+    };
+    const held = { value: 'powder', status: 'verified', evidence: [] };
+    const citedAbsence = runFixture({
+      id: 'RUN001',
+      label: 'Run 1',
+      ordinal: 1,
+      version: 'r1.0',
+      fields: { 'context.environment': env('in_situ') },
+      inherited: {
+        'field:sample.form': {
+          state: 'inherited',
+          payload: cited,
+          inherited_payload: cited,
+          overridable: true,
+        },
+      },
+    });
+    const holdsValue = runFixture({
+      id: 'RUN002',
+      label: 'Run 2',
+      ordinal: 2,
+      version: 'r2.0',
+      fields: { 'context.environment': env('in_situ') },
+      inherited: {
+        'field:sample.form': {
+          state: 'inherited',
+          payload: held,
+          inherited_payload: held,
+          overridable: true,
+        },
+        // THE INVERSE CASE, so the fix is not "delete the sentence": Run 1 does not
+        // resolve this address at all, and has no citation at it either.
+        'field:descriptors.notes': {
+          state: 'inherited',
+          payload: env('synthetic descriptor note'),
+          inherited_payload: env('synthetic descriptor note'),
+          overridable: true,
+        },
+      },
+    });
+    mount([citedAbsence, holdsValue], `/record/${ID}`, contextRoutes());
+    await selectTwo();
+    await contextBand();
+
+    // ABSENCE IS STILL ABSENCE — the row is not turned into a value difference by
+    // the citations, and the value axis is untouched.
+    expect(category('field:sample.form')).toBe('absent-on-one');
+
+    fireEvent.click(
+      within(row('field:sample.form')).getByRole('button', {
+        name: /^Show what each run records here/,
+      }),
+    );
+    const detail = document.querySelector('[data-detail-for="field:sample.form"]')!;
+    const cardA = detail.querySelectorAll('.rc-detail-side')[0] as HTMLElement;
+    expect(cardA.textContent).toContain('Run 1');
+    expect(cardA.textContent).toContain('No value is recorded, and these entries are cited');
+    expect(cardA.textContent).toContain('spreadsheet');
+    expect(cardA.textContent).toContain('synthetic-sheet.csv');
+    expect(cardA.textContent).toContain('needs_confirmation');
+    expect(cardA.textContent).toContain('1 evidence entry');
+    // THE DEFECT THIS PINS, and its polarity: the panel used to assert exactly the
+    // opposite of what the run's own envelope holds.
+    expect(cardA.textContent).not.toContain('There is nothing cited here to describe');
+
+    // AND THE SENTENCE IS NOT SIMPLY GONE — which would be the lazy fix, and would
+    // leave an empty card wherever a side genuinely records nothing.
+    fireEvent.click(
+      within(row('field:descriptors.notes')).getByRole('button', {
+        name: /^Show what each run records here/,
+      }),
+    );
+    const other = document.querySelector('[data-detail-for="field:descriptors.notes"]')!;
+    const otherA = other.querySelectorAll('.rc-detail-side')[0] as HTMLElement;
+    expect(otherA.textContent).toContain('Address not resolved for this run');
+    expect(otherA.textContent).toContain('There is nothing cited here to describe');
+  });
+
   it('lists the entries each run cites, by source, file and locator', async () => {
     mount([runA(), runB()], `/record/${ID}`, contextRoutes());
     await selectTwo();
@@ -1736,5 +1846,140 @@ describe('negative control: these assertions distinguish the two answers', () =>
     expect(
       forbiddenIn('2 different answers are cited here, across 3 entries. No decision is recorded.'),
     ).toEqual([]);
+  });
+});
+
+/* ── 13. the structure the widening added is machine-checked ───────────────── */
+
+/**
+ * AN AXE SCAN OVER THE WIDENED SURFACE, ADDED BY REVIEW.
+ *
+ * The slice added an expandable row per address, a two-card context band, a block
+ * list and a conflict mark, and every accessibility claim about them rested on
+ * reading the source. Two of the rules below are here for a specific way this
+ * shape goes wrong:
+ *
+ *   · `nested-interactive` — each cell carries an `Open` link and each relation
+ *     cell a disclosure button, in a row whose first cell is a `<th>`.
+ *   · `th-has-data-cells` / `scope-attr-valid` — the group header is a
+ *     `<th colSpan=4 scope="colgroup">` inside `<tbody>`, which is the least
+ *     ordinary structure on the screen.
+ *
+ * AND ONE THING THIS SCAN DOES **NOT** PROVE, established by planting it rather
+ * than assumed: a DANGLING `aria-controls` IS NOT AN AXE VIOLATION. The detail row
+ * is unmounted when collapsed, so an unconditional `aria-controls` would be a
+ * broken IDREF on every closed row; the first version of this block cited
+ * `aria-valid-attr-value` as the proof of the `open ? id : undefined` guard, and
+ * the planted control below returned ZERO violations for exactly that defect —
+ * axe treats it as needing review, not as a failure. The rule is kept because it
+ * catches other bad attribute values; the IDREF itself is asserted directly over
+ * the DOM in the second test, which is the check the scan cannot make.
+ *
+ * The scanner is proven on a planted defect first, for the reason
+ * `experiment-graph.test.tsx` does it: a scan configured with a typo'd rule name
+ * reports nothing and reads as a pass.
+ */
+describe('the widened comparison is structurally sound', () => {
+  const RULES = [
+    'aria-allowed-attr',
+    'aria-allowed-role',
+    'aria-required-children',
+    'aria-required-parent',
+    'aria-valid-attr-value',
+    'button-name',
+    'empty-table-header',
+    'label',
+    'link-name',
+    'list',
+    'listitem',
+    'nested-interactive',
+    'scope-attr-valid',
+    'td-headers-attr',
+    'th-has-data-cells',
+  ];
+
+  async function violations(container: HTMLElement): Promise<string[]> {
+    const results = await axe.run(container, {
+      runOnly: { type: 'rule', values: RULES },
+      resultTypes: ['violations'],
+    });
+    return results.violations.map((v) => `${v.id} × ${v.nodes.length}`);
+  }
+
+  it('the scanner is proven on a defect, and on one it deliberately does not catch', async () => {
+    const { container } = render(
+      <div>
+        <button type="button" />
+        <button type="button" aria-expanded={false} aria-controls="not-in-the-document">
+          Show
+        </button>
+      </div>,
+    );
+    const found = await violations(container);
+    // IT RUNS: an unnamed control fails it.
+    expect(found).toEqual(expect.arrayContaining(['button-name \u00d7 1']));
+    // AND ITS LIMIT, MEASURED RATHER THAN ASSUMED: the second button's
+    // `aria-controls` names nothing in the document and axe reports NO violation
+    // for it. Anything relying on this scan to prove the conditional
+    // `aria-controls` in `Row` is relying on a check that does not exist.
+    expect(found).not.toEqual(expect.arrayContaining(['aria-valid-attr-value \u00d7 1']));
+  });
+
+  it('reports no violation with the context band, a conflict and an expanded row', async () => {
+    const twin = { ...runA(), id: 'RUN002', label: 'Run 2', ordinal: 2, version: 'r2.0' };
+    const { view } = mount(
+      [runA(), twin as Run],
+      `/record/${ID}`,
+      contextRoutes({
+        [`GET ${BASE}/conflicts?run=RUN001`]: {
+          body: conflictsBody({
+            conflicts: [conflictAt('sample.material.name')],
+            counts: { conflicting_addresses: 1, resolved: 0, deferred: 0, stale: 0, unresolved: 1 },
+          }),
+        },
+        [`GET ${BASE}/pending?run_id=RUN001&limit=5`]: {
+          body: pendingBody([
+            { id: 'series', kind: 'series', question: 'Confirm the measurement series.' },
+          ]),
+        },
+      }),
+    );
+    await selectTwo();
+    await contextBand();
+    await waitFor(() => expect(document.querySelector('.rc-conflict')).not.toBeNull());
+
+    // Closed rows first — this is the state a dangling `aria-controls` lives in.
+    expect(await violations(view.container)).toEqual([]);
+    // AND THE IDREF ITSELF, ASSERTED DIRECTLY, because the scan above does not.
+    // Every disclosure button on screen is closed, and none of them points at an
+    // element: drop the `open ? id : undefined` guard and this goes red.
+    const controls = () =>
+      screen
+        .getAllByRole('button', { name: /^(Show|Hide) what each run records here/ })
+        .map((el) => el.getAttribute('aria-controls'));
+    expect(controls().length).toBeGreaterThan(0);
+    for (const id of controls()) {
+      expect(id === null || document.getElementById(id) !== null).toBe(true);
+    }
+
+    // Then one row open, so the panel it points at is really in the document.
+    fireEvent.click(
+      screen.getAllByRole('button', { name: /^Show what each run records here/ })[0],
+    );
+    expect(document.querySelector('.rc-detail')).not.toBeNull();
+    expect(await violations(view.container)).toEqual([]);
+
+    // Every row expanded, including the ones the reader reaches last.
+    for (const toggle of screen.getAllByRole('button', {
+      name: /^Show what each run records here/,
+    })) {
+      fireEvent.click(toggle);
+    }
+    expect(await violations(view.container)).toEqual([]);
+    // Now every button is open, so every `aria-controls` must resolve.
+    for (const id of controls()) {
+      expect(id).not.toBeNull();
+      expect(document.getElementById(id!)).not.toBeNull();
+    }
   });
 });

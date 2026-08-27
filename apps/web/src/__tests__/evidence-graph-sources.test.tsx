@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render, fireEvent } from '@testing-library/react';
 import { EvidenceGraphPanel } from '../screens/graph/EvidenceGraphPanel';
 import {
@@ -1341,6 +1343,74 @@ describe('evidence graph · what is historical versus current', () => {
     expect(text).not.toContain('the draft has changed since the last one was recorded');
   });
 
+  /*
+   * THE CERTIFICATION IS ONLY VALID INSIDE ONE READ, and it was being made across
+   * two. Found by independent review of the slice that added this file.
+   *
+   * Every branch above turns on whether `current_content_signature` — the signature
+   * of the record AS THE HISTORY RESPONSE READ IT — appears among the revisions. On
+   * a STALE read that signature belongs to a different version from the one every
+   * node above was drawn from, so a match certifies content this response never saw
+   * and a miss reports a divergence that may not exist. Measured before the fix, at
+   * `record_rev: 2` against a record at `rev: 3`, the graph printed:
+   *
+   *     Everything drawn here is the record's CURRENT content, and that content is
+   *     on record as revision 3 of 3.
+   *
+   * — i.e. "your changes are recorded" over a draft that has since moved. The
+   * `sub_fetch_stale` note sat BELOW it and does not un-say it; this repository's
+   * own rule is that a neighbouring worried note does not correct a claim.
+   *
+   * `unknown` takes the same arm as `stale`: a response that publishes no token has
+   * not been SHOWN to describe this version, and `fresh` has to be earned.
+   */
+  it('refuses to certify — either way — when the history describes a DIFFERENT read', () => {
+    for (const over of [
+      { record_rev: 2 }, // stale: a real, different version
+      { record_rev: undefined as unknown as number }, // unknown: no token at all
+    ]) {
+      const matching = buildOk({ revisions: data(revisionsFixture(over)) });
+      const text = noteText(matching, 'revision_state');
+      expect(text).toContain('could not be established');
+      expect(text).toContain('read at a different version of this record');
+      // Neither positive claim may be made from a read of another version.
+      expect(text).not.toContain('on record as revision');
+      expect(text).not.toContain('the draft has changed since the last one was recorded');
+      // The staleness itself is still disclosed by the mechanism that owns it.
+      expect(noteKinds(matching)).toContain('sub_fetch_stale');
+
+      // …and the MISS arm is refused for the same reason, not just the match arm.
+      const moved = buildOk({
+        revisions: data(
+          revisionsFixture({ ...over, current_content_signature: 'sig-moved', total: 1, returned: 1 }),
+        ),
+      });
+      expect(noteText(moved, 'revision_state')).toContain('could not be established');
+      expect(noteText(moved, 'revision_state')).not.toContain(
+        'the draft has changed since the last one was recorded',
+      );
+    }
+  });
+
+  it('POLARITY: a history read at THIS version still certifies, and still says which', () => {
+    // The half that makes the test above mean something. `revisionsFixture` is
+    // `record_rev: 3`, which is `experimentDetail`'s own rev — so this is a fresh
+    // read and every branch above stays reachable.
+    const fresh = buildOk({ revisions: data(revisionsFixture()) });
+    expect(noteText(fresh, 'revision_state')).toContain('on record as revision 2 of 2');
+    expect(noteText(fresh, 'revision_state')).not.toContain('could not be established');
+    expect(noteKinds(fresh)).not.toContain('sub_fetch_stale');
+
+    const movedFresh = buildOk({
+      revisions: data(
+        revisionsFixture({ current_content_signature: 'sig-moved', total: 1, returned: 1 }),
+      ),
+    });
+    expect(noteText(movedFresh, 'revision_state')).toContain(
+      'the draft has changed since the last one was recorded',
+    );
+  });
+
   it("quotes the server's own sentence when the history is unavailable", () => {
     const graph = buildOk({
       revisions: data(
@@ -1494,5 +1564,75 @@ describe('evidence graph panel · the extra sources on screen', () => {
     const runRow = container.querySelector('[role="treeitem"][data-kind="run"]');
     fireEvent.click(runRow as HTMLElement);
     expect(container.querySelector('.evgraph-detail-unaccepted')).toBeNull();
+  });
+});
+
+// ===========================================================================
+// 10 · the panel's memo actually holds
+// ===========================================================================
+
+/*
+ * WHY A SOURCE-SHAPE GUARD, AND WHAT IT DOES AND DOES NOT PROVE.
+ *
+ * `EvidenceGraphPanel` calls `buildEvidenceGraph` — and through it `computeLayout`,
+ * an O(n²) relaxation over 240 passes, synchronously on the render path, for a
+ * graph bounded at `MAX_EVIDENCE_GRAPH_NODES` — inside a `useMemo`. That memo is
+ * only worth anything if EVERY member of its dependency array is referentially
+ * stable across a render that changed none of them.
+ *
+ * It was not. `runsMeta` was built as an object literal in `EvidenceExplorer`'s
+ * JSX, so the array changed on every render and the memo missed unconditionally.
+ * MEASURED with a counting wrapper around `buildEvidenceGraph`: three parent
+ * renders produced THREE builds with the literal and ONE with a stable object.
+ * The slice that added the four extra sources made that deficit worse rather than
+ * causing it — five more `useFetch` hooks are five more state transitions on that
+ * component, and each one was a whole rebuild and a fresh layout.
+ *
+ * This guard is over the SHAPE of the call site rather than over a render count,
+ * because counting renders means mounting the whole Evidence screen with its
+ * bundle, its runs, its five sub-reads and its record-session poller — a fixture
+ * whose failure mode is its own. So: no dependency of that memo may be handed to
+ * the panel as an inline object or array literal.
+ *
+ * WHAT IT CANNOT SEE, stated rather than implied: a prop that is stable-looking at
+ * the JSX but computed unmemoised one line above (`foo={makeIt()}`), and any
+ * instability in a value the panel derives internally. It catches the established
+ * shape — a literal in the JSX — which is the drift that actually happened.
+ */
+describe('evidence graph panel · every memo dependency arrives referentially stable', () => {
+  it('EvidenceExplorer hands the panel no inline object or array literal', () => {
+    const source = readFileSync(
+      resolve(__dirname, '..', 'screens/EvidenceExplorer.tsx'),
+      'utf8',
+    );
+    const open = source.indexOf('<EvidenceGraphPanel');
+    expect(open, 'the panel should be mounted in EvidenceExplorer.tsx').toBeGreaterThan(-1);
+    const jsx = source.slice(open, source.indexOf('/>', open));
+
+    // Exactly the props that reach `buildEvidenceGraph`'s useMemo dependency array.
+    const MEMO_DEPS = [
+      'detail',
+      'runs',
+      'runsMeta',
+      'evidence',
+      'classification',
+      'focusRunId',
+      'readInScope',
+      'currentScope',
+      'conflicts',
+      'notes',
+      'provenance',
+      'assets',
+      'revisions',
+    ];
+    for (const prop of MEMO_DEPS) {
+      const m = new RegExp(`\\b${prop}=\\{(.)`).exec(jsx);
+      expect(m, `${prop} is not passed to the panel at all`).toBeTruthy();
+      expect(
+        m![1],
+        `${prop} is passed as an inline ${m![1] === '{' ? 'object' : 'array'} literal, so the panel's useMemo misses on every render and the whole graph is rebuilt`,
+      ).not.toBe('{');
+      expect(m![1]).not.toBe('[');
+    }
   });
 });

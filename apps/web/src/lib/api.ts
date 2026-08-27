@@ -59,6 +59,7 @@ import type {
   ApiPendingItem,
   ApiPendingPage,
   ApiPendingResponse,
+  ApiProvenanceResponse,
   ApiProviderCapabilities,
   ApiProviderRefusal,
   ApiRevisionDetail,
@@ -802,53 +803,31 @@ export interface ListNotesQuery {
 /*
  * --- `GET /experiments/{id}/provenance` ---------------------------------------
  *
- * DECLARED HERE RATHER THAN IN `types.ts`, and that is a deviation worth naming
- * rather than hiding: every other wire shape in this client lives in `types.ts`,
- * and these two belong there. They are here because the slice that added
- * `getProvenance` was scoped to files that did not include `types.ts`. Move them
- * when a slice that owns that file next passes through; nothing depends on their
- * location, and `lib/evidenceGraph.ts` imports them `import type`, so they are
- * erased at compile time and create no runtime dependency on this module.
+ * MOVED TO `types.ts` (2026-08-27), which is where the comment that used to sit here
+ * said they belonged: *"every other wire shape in this client lives in `types.ts`, and
+ * these two belong there … Move them when a slice that owns that file next passes
+ * through."* This is that slice.
  *
- * TWO INDEPENDENT DIMENSIONS, NEVER COMBINED INTO ONE VALUE — the same contract
- * `lib/provenance.ts` mirrors for surfaces that already hold an evidence entry.
- * `origins` is a SET, because one address can carry several citations of different
- * kinds; `primary_origin` picks one of them by a fixed documented order.
+ * IT WAS NOT A TIDY-UP. `lib/provenance.ts` — the very module the comment cited as the
+ * mirror — ALREADY DECLARED an `ApiProvenanceEntry` and an `ApiProvenance` for this
+ * same route, with DIFFERENT types (`origins: ProvenanceOrigin[]` against `string[]`,
+ * `review_state: ProvenanceReviewState` against `string`, and three fewer fields), and
+ * nothing enforced agreement between them. Two declarations of one wire contract is a
+ * defect whether or not it has bitten yet, and this one had not bitten only because the
+ * older pair had NO IMPORTER — luck, not design. Those dead declarations are removed;
+ * these are the ones that survive, and there is now exactly one.
+ *
+ * THE OPEN `string` TYPING IS DELIBERATE AND IS THE HALF THAT SURVIVED THE MERGE.
+ * `provenance.ts`'s `originLabel` does `ORIGIN_LABEL[origin] ?? origin` — an
+ * unrecognised origin must be REPRESENTABLE for that fallback to have anything to fall
+ * back to. Closing the union would make an origin the server adds tomorrow a compile
+ * error here and an invisible one on screen.
+ *
+ * RE-EXPORTED FROM THIS MODULE so that `import type { ApiProvenanceResponse } from
+ * './api'` keeps resolving. A re-export is not a second declaration; `rg --text
+ * ApiProvenance` shows exactly one `export interface` for each, in `types.ts`.
  */
-export interface ApiProvenanceEntry {
-  /** A record address, or `note:<id>` for a note that has no schema home yet. */
-  address: string;
-  /** Every origin the stored citations at this address produce. Never empty. */
-  origins: string[];
-  /** One of `origins`, chosen by the server's fixed precedence — never array order. */
-  primary_origin: string;
-  /** What, if anything, ESTABLISHES the value. Not a validity or export verdict. */
-  review_state: string;
-  evidence_count: number;
-  /** True when the RUN does not hold the value and resolves the record's. */
-  inherited: boolean;
-  /** Ids of notes a person MAPPED here. Never a machine's proposal. */
-  note_refs: string[];
-  /** The stored payload was only PARTLY readable, so it is not plain support. */
-  unavailable: boolean;
-  /** One of `conflict_resolution.RESOLUTION_STATES`, derived on read. */
-  resolution_state: string;
-}
-
-export interface ApiProvenanceResponse {
-  experiment_id: string;
-  /** The run described, or `null` for the record itself. */
-  run_id: string | null;
-  record_rev: number;
-  entries: ApiProvenanceEntry[];
-  /**
-   * WHAT IS NOT LISTED, COUNTED RATHER THAN OMITTED. A reviewed note is not an
-   * entry, because none of the review states is true of it.
-   */
-  notes_summary: { total: number; listed_as_unmapped: number };
-  /** Blocks that carry no value envelope to describe. Owned up to, not passed over. */
-  blocks_not_described: string[];
-}
+export type { ApiProvenanceEntry, ApiProvenanceResponse } from './types';
 
 export const api = {
   health(): Promise<ApiHealth> {
