@@ -22,6 +22,7 @@ from typing import Annotated, Any, Literal, Mapping, Sequence
 import logging
 
 from fastapi import APIRouter, Body, Depends, Header, Path, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -531,6 +532,112 @@ async def storage_unavailable_handler(request, exc) -> JSONResponse:
     )
 
 
+#: The deepest client-supplied value this application will ECHO BACK inside a
+#: ``422`` validation body.
+#:
+#: DERIVED, NOT PICKED, and deliberately a second number rather than a reuse of
+#: :data:`_MAX_VALUE_DEPTH`. That constant's own docstring says in as many words:
+#: *"IF THIS GUARD IS EVER REUSED FOR ANOTHER FIELD SET, re-derive it"* — it is
+#: measured headroom for five run-level SCALARS, and this bounds a whole REQUEST
+#: BODY, which legitimately wraps such a value in one or two more containers. What
+#: is shared is the PREDICATE (:func:`_value_depth_within`), which is the part that
+#: must not exist twice; the limit is a property of what is being bounded.
+#:
+#: THE TWO NUMBERS IT SITS BETWEEN, BOTH MEASURED ON THIS APPLICATION.
+#:
+#: * The floor: no legitimate body approaches it. The deepest whole document
+#:   anywhere in this repository nests 7, and a stored value is already capped at
+#:   :data:`_MAX_VALUE_DEPTH` (32) by ``_is_storable_value``, so 64 is double the
+#:   deepest value the store will accept, before counting the body around it.
+#: * The ceiling: bisected over HTTP against this application, the shallowest
+#:   top-level body that crashed the encoder was **972**. 64 sits ~15x below it.
+#:
+#: It bounds only what is ECHOED. Nothing here decides whether a request is valid;
+#: the validators do that, exactly as before.
+_MAX_ECHOED_BODY_DEPTH = 64
+
+
+async def request_validation_error_handler(request, exc) -> JSONResponse:
+    """FastAPI's ``422``, made unable to crash on the body it is describing.
+
+    THE DEFECT, MEASURED OVER HTTP. A request body of ~1,000-deep nested JSON
+    returned an unhandled **500** on most POSTs in this application, ``.../discard``
+    among them. The crash was NOT in any route: it was in
+    ``fastapi.exception_handlers.request_validation_exception_handler``, which
+    renders the ``422`` by calling ``jsonable_encoder`` over ``exc.errors()`` — and
+    each error echoes the offending ``input`` back to the caller. ``jsonable_encoder``
+    recurses per level, so the handler that exists to REFUSE a bad body was itself
+    destroyed by it, before the route function was ever entered.
+
+    SO THE SEVERITY IS ERROR-SHAPE AND AVAILABILITY, NOT INTEGRITY, and saying so
+    precisely matters because the two have different remedies. The record survives at
+    every depth — verified at 50, 100, 200, 500, 1,000 and 2,000 — because the body
+    never reaches a handler. What the caller loses is the typed refusal: a ``500``
+    with no ``detail`` says "this server is broken" where the truth is "your body is
+    not one this operation accepts", and it says it on a path where an operator would
+    then go looking for a defect in the route.
+
+    THE FIX BOUNDS WHAT IS ECHOED, NOT WHAT IS ACCEPTED. Every error whose ``input``
+    is deeper than :data:`_MAX_ECHOED_BODY_DEPTH` has that member — and only that
+    member — replaced by a marker naming the reason and the limit. ``type``, ``loc``,
+    ``msg`` and ``url`` are untouched, so the caller still learns exactly which
+    validator refused and where. For every other request this handler is
+    BYTE-IDENTICAL to FastAPI's default, which is the property that lets it be
+    registered application-wide without renegotiating the ``422`` contract of ~70
+    operations: the substitution is reachable only on inputs that previously produced
+    a ``500``, so no response that used to be a ``422`` changes at all.
+
+    IT REUSES THE APPLICATION'S EXISTING DEPTH PREDICATE and does not add a second
+    one. :func:`_value_depth_within` is iterative precisely so that it cannot raise
+    ``RecursionError`` on the input it is measuring — "a guard that crashes on the
+    attack it guards against is not a guard", as its own docstring puts it — which is
+    what makes it usable here, where a recursive depth check would simply move the
+    crash one function earlier.
+
+    THE ``except RecursionError`` IS A BACKSTOP AND IS NOT THE MECHANISM. The bound
+    above is what closes the measured defect. This catches the residual case the
+    bound does not reach — a deeply nested value arriving somewhere other than
+    ``input`` (a ``ctx`` member, say) — and turns it into a typed ``422`` rather than
+    a ``500``. It is deliberately narrow: a bare ``except Exception`` here would
+    convert a genuine defect in this application into a client-blaming ``422``, which
+    is the trade ``_PROBE_STRUCTURAL_ERRORS`` refuses one file over, for the same
+    reason.
+    """
+    bounded = []
+    for error in exc.errors():
+        if (
+            isinstance(error, dict)
+            and "input" in error
+            and not _value_depth_within(error["input"], _MAX_ECHOED_BODY_DEPTH)
+        ):
+            error = {
+                **error,
+                "input": {
+                    "omitted": "too_deeply_nested",
+                    "max_depth": _MAX_ECHOED_BODY_DEPTH,
+                },
+            }
+        bounded.append(error)
+    try:
+        content = {"detail": jsonable_encoder(bounded)}
+    except RecursionError:
+        # The value could not be rendered at all. Report the refusal without it,
+        # naming nothing the encoder could not reach.
+        content = {
+            "detail": [
+                {
+                    "type": "too_deeply_nested",
+                    "loc": ["body"],
+                    "msg": (
+                        "The request body is nested too deeply to validate or to "
+                        "describe. Nothing was read and nothing was written."
+                    ),
+                }
+            ]
+        }
+    return JSONResponse(status_code=422, content=content)
+
+
 async def durable_write_conflict_handler(request, exc) -> JSONResponse:
     """The LAST RESORT for a refused durable write: still a 412, never a 500.
 
@@ -757,6 +864,95 @@ def _malformed_if_match(exp) -> JSONResponse:
     )
 
 
+def _is_wildcard_if_match(if_match: str | None) -> bool:
+    """Is this header the RFC 9110 wildcard, ``*``?
+
+    ONE DEFINITION, deliberately, and it is why this is a function rather than a
+    comparison written twice. :func:`_check_if_match` normalises with ``.strip()``
+    before testing for ``*``, and the discard route has to ask the same question one
+    step earlier in order to refuse it. Two copies of ``raw == "*"`` would be two
+    normalisations free to drift, and the direction they would drift in is the bad
+    one: a header this predicate stopped recognising is a wildcard the destructive
+    path would then WAVE THROUGH, because its refusal is written as an early return
+    and ``_check_if_match`` would go on returning ``None`` for it. So the two
+    callers share the test rather than agreeing about it.
+
+    ``None`` is not a wildcard — an ABSENT header is a different condition with a
+    different status (``428``), decided by :func:`_check_if_match`.
+    """
+    return if_match is not None and if_match.strip() == "*"
+
+
+def _wildcard_precondition_refused(exp) -> JSONResponse:
+    """``400`` for ``If-Match: *`` on an operation that cannot be undone.
+
+    WHY THIS EXISTS AT ALL, AND WHY IT IS NOT A GENERAL TIGHTENING. ``*`` is
+    accepted everywhere else in this API and that is deliberate, documented RFC 9110
+    behaviour: it matches *if the resource exists*, so it compares no revisions and a
+    caller may overwrite a record it never read. ``test_mcp_if_match_wildcard.py``
+    pins that acceptance as a contract and explicitly instructs that it must not be
+    "made consistent" by tightening — and it is not tightened here. Run removal and
+    asset removal keep accepting ``*`` for the reason that test gives: both are
+    recoverable by re-adding, and both already refuse a published artifact with a
+    ``409``.
+
+    DISCARD IS THE ONE OPERATION WHERE THAT REASONING DOES NOT REACH, on its own
+    published words. Its description ends *"There is no undo. That is why the
+    confirmation and the precondition are both required."* ``*`` satisfies the
+    precondition without the client holding a validator at all, which makes the
+    second half of that sentence vacuous while the sentence goes on claiming it —
+    a copy/behaviour mismatch, not a hardening preference. Measured over HTTP
+    before this refusal existed: the same client that got ``412 stale_write`` from a
+    stale real ETag got ``200`` from ``*``, and the ``discarded_title`` it reported
+    was the title a CONCURRENT writer had just committed — the discard destroyed an
+    edit it had not read and could not have read.
+
+    ``*`` IS ALSO THE IDIOM FOR *"I HOLD NO VALIDATOR"*, which is precisely the
+    state in which an irreversible removal must not proceed.
+
+    WHY ``400`` AND NOT ``428``, DECIDED RATHER THAN DEFAULTED.
+
+    * ``428 precondition_required`` states that the header was OMITTED. A client
+      that sent ``If-Match: *`` did supply one, and answering "precondition
+      required" to a request that carries a precondition sends the caller looking
+      for a header they already set. The ``428`` body here is
+      ``precondition_required``, which would be a false statement about the request.
+    * ``412 stale_write`` states that a validator was compared and lost, and its
+      body carries ``expected_rev`` / ``expected_version``. ``*`` carries no
+      version — :func:`_first_client_token` returns ``None`` for it, by design — so
+      a ``412`` would echo nulls into the two fields a client reads to recover, and
+      would assert a staleness that does not exist. Worse, ``412`` promises that a
+      re-read and a retry converge; re-reading changes nothing about ``*``.
+    * ``400`` states that the header supplied is not a usable precondition FOR THIS
+      OPERATION. That is exactly the fact. It is also the status this route already
+      publishes for the neighbouring condition (a header that is not one or more
+      strong quoted validators), so refusing ``*`` adds no new status code to the
+      contract — only a new typed ``error`` inside one that was already declared.
+
+    THE ``error`` IS ITS OWN VALUE AND NOT ``malformed_if_match``, and the
+    difference is not cosmetic. ``If-Match: *`` is well-formed under RFC 9110;
+    telling a client their header is malformed would be a false statement about a
+    correct header, and it would send a caller hunting a syntax bug that is not
+    there. The remedy differs too — a malformed header is respelt, a wildcard is
+    REPLACED by a validator the client must first go and read — so one name for the
+    two would be one name for two repairs.
+    """
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "wildcard_precondition_refused",
+            **_precondition_identity(exp),
+            "message": (
+                "If-Match: * is not a usable precondition for this operation, "
+                "because this operation cannot be undone. `*` carries no validator: "
+                "it asserts only that the record exists, so it would let a discard "
+                "destroy a version it has never read. Send the record's current "
+                "ETag, exactly as a read returned it."
+            ),
+        },
+    )
+
+
 def _stale_write(exp, expected_token: str | None) -> JSONResponse:
     resp = JSONResponse(
         status_code=412,
@@ -866,8 +1062,12 @@ def _check_if_match(if_match: str | None, exp) -> JSONResponse | None:
             return _precondition_required(exp)
         return None
     raw = if_match.strip()
-    if raw == "*":
-        return None  # matches iff the resource exists — and we loaded it
+    if _is_wildcard_if_match(if_match):
+        # Matches iff the resource exists — and we loaded it. UNCHANGED, and it is
+        # the shared predicate that keeps it unchanged: the one route that refuses
+        # `*` refuses it BEFORE calling this, so this branch stays exactly as wide
+        # as it has always been for every other operation.
+        return None
     # RFC 9110 #-list: recipients ignore empty list elements, so a trailing comma
     # or an empty element is tolerated. A header that reduces to NO tags (e.g. just
     # "," or whitespace) is malformed.
@@ -1315,6 +1515,16 @@ def _build_commit() -> str | None:
         "observation, recorded when a real read or write against that database "
         "failed — so this operation still opens no connection of its own, and it "
         "reports what has already happened rather than testing anything now.\n\n"
+        "`experiment_storage.run_projection` reports whether this deployment lets "
+        "the `isaac_runs` rows be the authority for a record's run list, and the "
+        "per-experiment state distribution the most recent hydration pass measured "
+        "— counts of complete, stale, never-projected, unavailable and mismatched, "
+        "and nothing else: no ids, no titles, no record content. `last_pass` is "
+        "`null` until a pass has classified something, which is not the same claim "
+        "as a pass that classified none. A distribution of entirely unavailable or "
+        "entirely never-projected experiments is the reader working correctly, not "
+        "the reader being off, and nothing here may be read as saying the run "
+        "rows have become the authority everywhere.\n\n"
         "It states, in `submission`, whether this deployment is configured to accept "
         "a submission at all, and if not, why — submitting needs both durable "
         "storage and a way to establish who is calling, and a deployment can have "
@@ -2637,6 +2847,557 @@ def rename_experiment(
         response.headers["ETag"] = exp.etag()
         return detail
 
+
+
+# --- 4b. discard --------------------------------------------------------------
+#
+# WHAT THIS IS, AND THE SENTENCE THAT AUTHORIZES IT. `POST /api/experiments`
+# created a record and nothing took one away: a scientist who created a record by
+# mistake owned it forever, and the reset one file over says in its own description
+# that "there is deliberately no general per-experiment delete operation". That
+# sentence is still true and this operation does not contradict it. The project
+# owner authorized, narrowly, **explicit Discard semantics for unsubmitted
+# Draft/capture state only** — and explicitly NOT a generic destructive DELETE
+# primitive, and explicitly not a way to erase an official submitted ISAAC record,
+# an immutable submitted revision, revision history, submission history, a
+# published evidence sidecar, historical conflict evidence, or audit history.
+#
+# SO IT IS A DOMAIN OPERATION AND NOT AN HTTP `DELETE`. It is `POST .../discard`,
+# the same shape the three narrow removals this codebase already ships use
+# (`.../runs/{id}/remove`, `.../assets/{id}/remove`, `.../overrides/clear`). A
+# `DELETE` verb on `/experiments/{id}` would say the resource is generically
+# deletable, which is exactly the thing that was not authorized, and it would say it
+# in the published contract where a client reads it.
+#
+# MECHANICAL PERMISSION IS NOT AUTHORIZATION, AND THAT IS WHY THE PREVIOUS SESSION
+# DECLINED TO BUILD THIS. `db_write._FORBIDDEN_KEYWORDS` does not contain `delete`,
+# so a `DELETE` against any owned table has always been mechanically accepted by the
+# statement policy. Nothing about that changed here and nothing about it is
+# evidence: the authorization is the owner's sentence above, and it covers only the
+# never-submitted case.
+
+
+#: The refusals this operation can answer with, as its published contract.
+#:
+#: EVERY 409 HERE IS A REASON THE RECORD IS NOT DISCARDABLE, and they are separate
+#: `error` values rather than one `not_discardable` because they are separate facts
+#: with separate remedies — and because a scientist told only "no" cannot tell a
+#: record that was submitted from one that merely has an exported run.
+_R_DISCARD_REFUSED: dict = {
+    409: {
+        "description": (
+            "This experiment is not discardable, and NOTHING WAS REMOVED. The typed "
+            "`error` says which of SIX reasons applies — five decided by this "
+            "server before anything is touched, and one the database itself "
+            "decides:\n\n"
+            "* `submitted` — at least one revision or submission row exists for this "
+            "record. A submission is an attributable declaration a person made and "
+            "its history is append-only; discard never erases one. `revision_count` "
+            "and `submission_count` report what was found.\n"
+            "* `experiment_exported` — the record itself has produced an official "
+            "ISAAC record under its own identity. `record_id` names it.\n"
+            "* `runs_exported` — at least one run has produced an official ISAAC "
+            "record. `run_ids` names the runs that block it and `record_stems` the "
+            "artifacts they keep claimed.\n"
+            "* `published_artifacts_present` — an official record and/or an evidence "
+            "sidecar is on disk under this experiment, whatever the state says. "
+            "`record_stems` names them. This is the same disk-not-only-state "
+            "question `POST .../runs/{run_id}/remove` asks, asked of the whole "
+            "record.\n"
+            "* `canonical_example_record` — a built-in worked example. Those are "
+            "fixed teaching material; the worked-example reset is the operation for "
+            "them.\n"
+            "* `history_rows_present` — the database itself refused to "
+            "remove the experiment row because a history row still references it. "
+            "The whole transaction rolled back, so nothing at all was removed. That "
+            "is the foreign-key backstop firing behind the `submitted` check above, "
+            "and reaching it means this server's own precheck was wrong."
+        )
+    },
+}
+
+#: THE WHOLE `503` FOR THIS OPERATION, AND IT DESCRIBES TWO DIFFERENT FACTS.
+#:
+#: **IT IS THE MERGE WINNER AND MUST THEREFORE DESCRIBE EVERY `503` THIS ROUTE CAN
+#: ANSWER.** The decorator below spreads `_R_STORAGE_UNAVAILABLE` and then this
+#: dict, and both are keyed `503`, so the later one REPLACES the earlier one
+#: outright in the published contract. That is not a bug in the merge — it is how
+#: `/experiments/{id}/pending` and `/experiments/{id}/submit` already resolve their
+#: own collisions — but it makes this description the only one a client ever reads,
+#: and a corrected version of it is what an independent review had to add.
+#:
+#: ~~"`error` is `submission_history_unreadable`"~~ — **FALSE AS A FLAT STATEMENT,
+#: and kept struck through because it was a definite claim about a destructive
+#: path's error code.** Measured over HTTP: a durable store that refuses the removal
+#: answers `503 {"error": "experiment_storage_unavailable"}`, which this description
+#: named nowhere while asserting the other value unconditionally. The route's own
+#: test comment already said the `503` "carries TWO DIFFERENT FACTS"; the published
+#: contract carried one.
+#:
+#: NEITHER IS A 409, AND THE DIFFERENCE IS THE WHOLE POINT. A 409 states a fact
+#: about the RECORD. Both of these state a fact about the SERVER — either the one
+#: question that decides whether discarding is allowed has no answer, or the
+#: database would not accept the removal. Nothing was removed on either. Both are
+#: resolved by an operator or by a retry, never by editing the record.
+#:
+#: ~~"the history tables exist and could not be read"~~ — corrected before it
+#: shipped, because it claimed more than the branch knows. The read can fail at the
+#: CONNECTION, before the table-presence probe runs at all, and then whether the
+#: tables exist is exactly as unknown as everything else. "Absent tables" is a
+#: DIFFERENT and safe answer that returns `None` and lets the discard proceed; only
+#: "could not establish" reaches here.
+_R_DISCARD_HISTORY_UNREADABLE: dict = {
+    503: {
+        "description": (
+            "This server could not carry out the discard, and NOTHING WAS REMOVED. "
+            "Two different facts about the SERVER reach this status, and the typed "
+            "`error` says which:\n\n"
+            "* `submission_history_unreadable` — this deployment stores submission "
+            "history in its own database and could not read it, so it cannot prove "
+            "this record was never submitted. The question that decides whether "
+            "discarding is allowed has no answer, so the operation fails closed "
+            "rather than guessing.\n"
+            "* `experiment_storage_unavailable` — this deployment stores experiments "
+            "in its own database and that database did not accept the removal. The "
+            "experiment is still there, in the workspace and in the database.\n\n"
+            "Neither response names a host, path, credential or driver message. "
+            "Both are usually worth retrying; neither is fixed by editing the record."
+        )
+    },
+}
+
+
+#: The precondition statuses AS THIS OPERATION ANSWERS THEM, overriding the two
+#: entries in :data:`_R_PRECONDITION` that are not true here.
+#:
+#: IT MUST BE SPREAD AFTER ``_R_PRECONDITION`` AND THAT IS LOAD-BEARING, not a
+#: style choice — a later key REPLACES an earlier one outright, which is the same
+#: merge rule ``_R_DISCARD_HISTORY_UNREADABLE`` relies on for its ``503`` one
+#: constant above. Spread first, these would be silently discarded and the route
+#: would publish a ``428`` that promises ``If-Match: *`` is accepted here, which is
+#: exactly the claim this operation stopped honouring.
+#:
+#: ``412`` IS DELIBERATELY NOT OVERRIDDEN. It means the same thing here as
+#: everywhere else and its shared wording is correct as it stands; restating it
+#: would be a second copy free to drift from the one every other write publishes.
+_R_DISCARD_PRECONDITION: dict = {
+    400: {
+        "description": (
+            "`If-Match` was supplied but cannot serve as this operation's "
+            "precondition, and NOTHING WAS REMOVED. Two typed `error` values:\n\n"
+            "* `malformed_if_match` — the header is not one or more strong quoted "
+            "validators. This is the same condition, with the same meaning, that "
+            "every other write answers `400` for.\n"
+            "* `wildcard_precondition_refused` — the header was `If-Match: *`. "
+            "**This operation is the only one in this API that refuses it.** `*` is "
+            "well-formed and is accepted everywhere else, where it means what RFC "
+            "9110 says it means; it is refused here because it carries no validator "
+            "at all, and this is the one operation with no undo. Re-reading and "
+            "retrying does not clear it — send the `ETag` a read returned."
+        )
+    },
+    428: {
+        "description": (
+            "`If-Match` was omitted, and nothing was removed. Send the record's "
+            "current `ETag`.\n\n"
+            "**THE API-WIDE EXCEPTION FOR `If-Match: *` DOES NOT APPLY TO THIS "
+            "OPERATION.** Every other write accepts `*` and lets a caller overwrite "
+            "a record it has never read; that is deliberate and unchanged. Here `*` "
+            "is refused with `400 wildcard_precondition_refused`, because a request "
+            "that holds no validator must not be able to destroy the version it "
+            "never read."
+        )
+    },
+}
+
+
+def _discard_refusal(error: str, message: str, experiment_id: str, **extra) -> JSONResponse:
+    """One typed 409 for a record this operation will not discard.
+
+    Every one of them writes nothing, and every one of them says so in the message
+    rather than leaving a reader to infer it from the status code.
+    """
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": error,
+            "experiment_id": experiment_id,
+            "message": message,
+            **extra,
+        },
+    )
+
+
+def _published_stems(exp: Experiment) -> list[str]:
+    """Every official-record STEM present on disk under this experiment, sorted.
+
+    THE DISK, NOT THE STATE, AND THAT IS THE SAME LESSON `_run_published_stem`
+    RECORDS. An export writes the official record and its evidence sidecar BEFORE
+    it persists the state, so a refused state save leaves a published PAIR on disk
+    that no `record_id` names. A discard decided from state alone would delete
+    exactly that pair — an official ISAAC record, removed by an operation whose
+    authorization explicitly forbids removing one.
+
+    IT IS DELIBERATELY BROADER THAN THE TWO STATE CHECKS BESIDE IT rather than a
+    replacement for them: it catches an ORPHAN pair as well — a record left behind
+    by a run that was itself removed — which neither `exp.record_id` nor any current
+    run can see. The state checks stay because they can name WHICH run blocks the
+    discard, which this cannot.
+
+    `_artifact_stem` IS REUSED RATHER THAN RE-DERIVED. It is the one definition of
+    what counts as an artifact filename, shared with the export prune's candidate
+    scan, and a second copy here would be free to drift on the day one is fixed.
+
+    NO PATH IS RETURNED OR LOGGED. A stem is a record id, which this API already
+    publishes; a directory is a server path, which it never does.
+    """
+    records_dir = exp.records_dir
+    if not records_dir.is_dir():
+        return []
+    stems = set()
+    for path in sorted(records_dir.iterdir()):
+        if not path.is_file():
+            continue
+        stem = _artifact_stem(path.name)
+        if stem is not None:
+            stems.add(stem)
+    return sorted(stems)
+
+
+def _submission_history_refusal(experiment_id: str, scope: str | None) -> JSONResponse | None:
+    """`None` if this record provably has no history; a refusal otherwise.
+
+    THREE ANSWERS, AND COLLAPSING ANY TWO OF THEM WOULD BE A DEFECT.
+
+    * **Provably none.** Either this is a worked-example session — where a
+      submission is impossible by three independent enforcements, the first of which
+      is `post_submit`'s own scope refusal, and where
+      `PostgresOrdinaryStore.refuse_if_not_persistable` means no row of any kind
+      was ever written for that record — or this deployment has no database at all
+      (`revision_history.reader()` is `None`, gated on the SAME
+      `repo._postgres_available` the submit path gates on, so a deployment that
+      cannot record a submission is exactly a deployment that cannot hold one), or
+      the history tables are not there. Returns `None`; the discard may proceed.
+    * **History exists.** A 409 naming the counts. The discard is refused.
+    * **Could not be established.** A 503. NOT a 409 and NOT a silent pass: the
+      question that decides whether this record may be destroyed has no answer, so
+      the fail-closed direction is to refuse and say why. Every failure the read can
+      raise is caught, including the driver's own, and only the exception CLASS
+      would ever be reported — never its message, which psycopg2 fills with the
+      host, the user and the connection string.
+
+    IT OPENS ONE SHORT READ TRANSACTION AND FETCHES TWO INTEGERS. It never reads a
+    revision document, a subject, or a signature: this operation has no business
+    reading the content of history it is about to refuse to touch.
+    """
+    if scope is not None:
+        return None
+    selected = revision_history.reader()
+    if selected is None:
+        return None
+    try:
+        presence = selected.presence(experiment_id)
+    except _HISTORY_READ_FAILURES as failure:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "submission_history_unreadable",
+                "experiment_id": experiment_id,
+                "failure": type(failure).__name__,
+                "message": (
+                    "This deployment stores submission history in its own database "
+                    "and could not read it just now, so it cannot establish whether "
+                    "this record has ever been submitted. Nothing was removed."
+                ),
+            },
+        )
+    if not presence["tables_present"]:
+        return None
+    revisions = int(presence["revision_count"])
+    submissions_recorded = int(presence["submission_count"])
+    if revisions == 0 and submissions_recorded == 0:
+        return None
+    return _discard_refusal(
+        "submitted",
+        (
+            "This record has been submitted, so it cannot be discarded. A "
+            "submission is an attributable declaration, and its revision and "
+            "submission history are append-only — nothing here removes one. "
+            "Nothing was removed."
+        ),
+        experiment_id,
+        revision_count=revisions,
+        submission_count=submissions_recorded,
+    )
+
+
+_DISCARD_DESCRIPTION = (
+    "Discards one experiment that has never been submitted and has never published "
+    "anything: the record, its runs, its answers, its notes and its assets, in the "
+    "workspace and in this deployment's own database. It exists because "
+    "`POST /api/experiments` could create a record and nothing could take one away, "
+    "so a record created by mistake was permanent.\n\n"
+    "**IT IS NOT A GENERAL DELETE, AND IT CANNOT REACH HISTORY.** It refuses with "
+    "`409` — writing nothing — when this record has ever been submitted (any "
+    "revision or submission row exists for it), when the record itself has been "
+    "exported, when any run has produced an official ISAAC record, when an official "
+    "record or evidence sidecar is present on disk under this experiment whatever "
+    "the state says, or when it is one of the built-in worked examples. Revision "
+    "history, submission history and published artifacts are never removed, "
+    "rewritten or marked by this operation on any path — and the database's own "
+    "foreign keys refuse the removal as a backstop if this server's precheck is "
+    "ever wrong, rolling the whole transaction back.\n\n"
+    "It requires `confirmed_by_user: true` and the record's current `ETag` in "
+    "`If-Match`. Omitted is `428`, malformed is `400`, and stale is `412` — each "
+    "with nothing removed. The precondition is checked inside the same critical "
+    "section as the removal, over the record as it is at that instant.\n\n"
+    "**`If-Match: *` is refused here with `400 wildcard_precondition_refused`, and "
+    "this is the only operation in this API that refuses it.** Everywhere else `*` "
+    "is accepted and means what RFC 9110 says — *if the resource exists* — so a "
+    "caller may overwrite a record it has never read; that is deliberate and is "
+    "unchanged, including for the two removals that are recoverable by re-adding "
+    "(`POST .../runs/{run_id}/remove` and `POST .../assets/{asset_id}/remove`). It "
+    "is refused on this operation because `*` carries no validator at all — it is "
+    "the client stating it holds no version — and there is no undo here, so "
+    "accepting it would let a request destroy a version it had never read and "
+    "could not have read. It is `400` rather than `412`, because nothing is stale "
+    "and re-reading changes nothing, and rather than `428`, because a header WAS "
+    "sent. Nothing is removed.\n\n"
+    "**Repeating a discard is `404`, not a second `200`**, matching the precedent "
+    "`POST .../runs/{run_id}/remove` sets: this operation is addressed to a record, "
+    "and every other record operation answers `404` for an id this workspace does "
+    "not hold. A `200` would additionally require claiming a record \"was "
+    "discarded\" for an id that may never have existed.\n\n"
+    "There is no undo. That is why the confirmation and the precondition are both "
+    "required, and why the operation refuses anything that has published or "
+    "declared something."
+)
+
+
+@router.post(
+    "/experiments/{experiment_id}/discard",
+    tags=[TAG_EXPERIMENTS],
+    summary="Discard an Unsubmitted Experiment",
+    description=_DISCARD_DESCRIPTION,
+    response_description=(
+        "What was discarded — the record's id and title, how many runs went with "
+        "it, and how many durable rows this deployment removed (`0` where "
+        "experiments are not stored in a database, which is the normal answer "
+        "there). No `ETag` is returned: the record no longer exists."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_DISCARD_REFUSED,
+        **_R_DISCARD_HISTORY_UNREADABLE,
+        **_R_PRECONDITION,
+        # LAST, so its 400 and 428 win. See the constant's own note.
+        **_R_DISCARD_PRECONDITION,
+    },
+)
+def post_experiment_discard(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    body: dict = Body(
+        ...,
+        description="`{\"confirmed_by_user\": true}`. Nothing else is read.",
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it."
+        ),
+    ),
+):
+    """Discard one unsubmitted experiment. THE ORDER OF THE FIVE REFUSALS IS THE
+    CONTRACT.
+
+    It is `post_run_remove`'s order, deliberately, because the two are the same
+    shape of act: exists -> confirmed -> domain refusal -> precondition -> write.
+
+    THE PRECONDITION IS CHECKED INSIDE THE SAME CRITICAL SECTION AS THE MUTATION.
+    This repository has a written history of exactly that defect on the reset path,
+    so it is worth stating rather than assuming: both `_check_if_match` and the
+    removal happen under one `record_lock`, over an experiment re-read INSIDE that
+    lock. The copy read by the existence pre-check above is never mutated.
+
+    THE DOMAIN REFUSALS ARE ORDERED CHEAPEST-FIRST, AND THAT ORDERING IS AN
+    OPTIMISATION RATHER THAN A CONTRACT. All five are refusals that write nothing,
+    so which one a record hits first changes only the message. The local checks —
+    the canonical id, the record's own `record_id`, its runs, its records directory
+    — need no database, so a record already blocked by one of them never opens a
+    read transaction to be told the same "no" a second way.
+
+    IDEMPOTENCY IS 404, NOT A SECOND 200, matching `post_run_remove`'s stated
+    precedent for the same reasons: the retry is told the truth about the record
+    rather than being sent to re-read a version in order to remove something that
+    no longer exists, and a 200 would claim a record "was discarded" for an id that
+    may never have existed.
+
+    THE SCOPE IS THREADED, NOT REFUSED, and one consequence is stated rather than
+    left to be discovered: every record a worked-example session can hold is a
+    canonical example, and canonical examples are refused, so a discard inside a
+    session always answers `409 canonical_example_record` in this build. Threading
+    the scope is still what makes that refusal correct — it is a refusal about THAT
+    session's record. A session header can never reach an ordinary record, and an
+    ordinary request can never reach a session's; each resolves in its own scope or
+    answers 404.
+    """
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does it,
+    # so a bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # discarded in the pre-check->lock window
+        if exp.id != experiment_id:
+            # THE DOCUMENT MUST CLAIM THE ADDRESS IT WAS READ FROM, and on the only
+            # destructive path in this API that is checked rather than assumed.
+            #
+            # `_readable_experiment_state` resolves `id` as `state["id"] or
+            # <directory name>` — the DOCUMENT wins and the address is only the
+            # fallback — while `Experiment.dir` is `scope_root / self.id`. So a
+            # stored document under `<root>/A` whose own `id` reads `B` hydrates to
+            # a record addressed as A and pointed at B, and every step below would
+            # then be asking about a DIFFERENT record than the one this request
+            # named: `_published_stems` would scan B's records directory rather than
+            # A's, the history precheck (which takes the path id) would count A's
+            # rows while the durable delete takes B's, and `_remove_experiment_dir`
+            # would remove `<root>/B` — up to and including B's published official
+            # records and evidence sidecars, which is the single act this
+            # operation's authorization names first among the things it may not do.
+            #
+            # NOTHING IN THIS APPLICATION CAN PRODUCE THAT DOCUMENT — `save` writes
+            # `self.id` into the file it writes under `self.dir`, hydration refuses a
+            # row filed under an id its own state does not carry, and
+            # `_heal_from_conflict` skips a winner whose `state["id"]` disagrees — so
+            # this is defence in depth and not a live hole, for exactly the reason
+            # `_run_published_stem` gives for the identical guard one step down: an
+            # asymmetry between a read path that tolerates the mismatch and a
+            # destructive path that acts on it stops being harmless after a later
+            # change.
+            #
+            # 404, AND NO NEW REFUSAL CODE. This workspace holds no record whose id
+            # is `experiment_id`; it holds a directory whose document claims to be
+            # something else, and a destructive operation that cannot say which
+            # record it is addressed to must not proceed. The record is not reachable
+            # under its self-claimed id either (there is no directory of that name),
+            # so the fail-closed outcome is that a document in this state cannot be
+            # discarded at all — which is the correct direction for a removal.
+            return _not_found(experiment_id)
+        if not isinstance(body, dict) or body.get("confirmed_by_user") is not True:
+            return _confirmation_required("discard an experiment")
+
+        # -- domain refusals: is this record discardable at all? ----------------
+        if exp.id in ws.CANONICAL_IDS:
+            return _discard_refusal(
+                "canonical_example_record",
+                (
+                    "This is one of the built-in worked examples. They are fixed "
+                    "teaching material that the worked-example reset restores; they "
+                    "are not a record anyone created and they are not discarded. "
+                    "Nothing was removed."
+                ),
+                experiment_id,
+            )
+        if exp.record_id is not None:
+            return _discard_refusal(
+                "experiment_exported",
+                (
+                    "This record has already produced an official ISAAC record "
+                    "under its own identity. Published artifacts are never removed "
+                    "or rewritten by this application. Nothing was removed."
+                ),
+                experiment_id,
+                record_id=exp.record_id,
+            )
+        blocking_runs = [
+            (run.id, stem)
+            for run, stem in (
+                (run, _run_published_stem(exp, run)) for run in exp.sorted_runs()
+            )
+            if stem is not None
+        ]
+        if blocking_runs:
+            return _discard_refusal(
+                "runs_exported",
+                (
+                    "At least one run of this record has produced an official ISAAC "
+                    "record. Published artifacts are never removed or rewritten by "
+                    "this application, and the runs are what keep them claimed. "
+                    "Nothing was removed."
+                ),
+                experiment_id,
+                run_ids=[run_id for run_id, _ in blocking_runs],
+                record_stems=sorted({stem for _, stem in blocking_runs}),
+            )
+        stems = _published_stems(exp)
+        if stems:
+            return _discard_refusal(
+                "published_artifacts_present",
+                (
+                    "An official ISAAC record and/or an evidence sidecar is present "
+                    "on disk under this experiment. Either one alone is enough: "
+                    "published artifacts are never removed by this application, "
+                    "whatever the record's own state says about them. Nothing was "
+                    "removed."
+                ),
+                experiment_id,
+                record_stems=stems,
+            )
+        history_refusal = _submission_history_refusal(experiment_id, scope)
+        if history_refusal is not None:
+            return history_refusal
+
+        # -- the precondition, inside this same critical section ---------------
+        # `*` FIRST, AND ONLY HERE. `_check_if_match` returns `None` for `*` by
+        # design, so this refusal has to come BEFORE it or it cannot exist at all.
+        # It is scoped to this one call site rather than folded into the shared
+        # helper precisely so that run removal, asset removal and every other write
+        # go on accepting `*` exactly as `test_mcp_if_match_wildcard.py` requires.
+        # See `_wildcard_precondition_refused` for why an irreversible removal is
+        # the one operation that is different, and why the status is 400.
+        if _is_wildcard_if_match(if_match):
+            return _wildcard_precondition_refused(exp)
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        # -- the write ---------------------------------------------------------
+        # READ BEFORE THE REMOVAL, because afterwards there is no record to name.
+        discarded_title, discarded_run_count = exp.title, len(exp.runs)
+        try:
+            outcome = ws.discard_experiment(exp)
+        except experiment_repository.DiscardRefusedByHistory:
+            # THE FOREIGN-KEY BACKSTOP FIRED, which means the precheck above was
+            # wrong. The whole transaction rolled back — the run rows and the
+            # projection claim are still there with the experiment — and the
+            # workspace directory was never touched, because the durable delete
+            # goes first for exactly this reason.
+            return _discard_refusal(
+                "history_rows_present",
+                (
+                    "This deployment's database refused to remove this experiment "
+                    "because history rows still reference it. The whole removal was "
+                    "rolled back and nothing was removed. Submission history is "
+                    "append-only and is never destroyed by this operation."
+                ),
+                experiment_id,
+            )
+        return {
+            "discarded_experiment_id": experiment_id,
+            "discarded_title": discarded_title,
+            "discarded_run_count": discarded_run_count,
+            # MEASURED FROM THE SERVER, never assumed. `0` is the normal, honest
+            # answer on a deployment that stores experiments on the filesystem, and
+            # also for a record written before the migration reached this
+            # deployment — neither is an error and neither is hidden.
+            "durable_rows_removed": outcome["durable_rows_removed"],
+        }
 
 # --- 5. draft (grouped) -------------------------------------------------------
 

@@ -130,6 +130,135 @@ def test_no_submission_statement_updates_or_deletes_history():
     )
 
 
+def test_the_write_policy_itself_refuses_every_history_mutation():
+    """THE SAME GUARANTEE, ENFORCED AT THE SEAM RATHER THAN OVER AN INVENTORY.
+
+    The test above is an INVENTORY: it reads the statements that exist today and
+    finds none that rewrites history. That is a real guard and it is kept — but it is
+    checked against source, so the first branch that adds such a statement is the
+    branch that has to delete it, and the property it protects would then be gone
+    with nothing left saying so.
+
+    ``db_write.WriteStatementPolicy`` closes the other half. Every ``cursor.execute``
+    on the write path goes through ``policy.check(...)``, and the policy is consulted
+    BEFORE a connection is opened, so a mutation of one of these five tables is
+    refused whatever declared it — including SQL read from a committed migration
+    file. THIS ONE COMPLEMENTS THE INVENTORY, IT DOES NOT REPLACE IT: the inventory
+    catches a bad statement that is never executed in a test, and the policy catches
+    one that is.
+
+    STILL NOT A DATABASE-LEVEL GUARANTEE, and this file's other tests say why at
+    length: a psql session, a rollback ``.sql`` a human runs, or any client that is
+    not this application is unaffected, because nothing here revokes a privilege.
+    """
+    policy = dbw.WriteStatementPolicy()
+    accepted: list[str] = []
+    for table in _HISTORY_TABLES:
+        for sql in (
+            f"DELETE FROM {table} WHERE submission_id = %s",
+            f"UPDATE {table} SET subject = %s WHERE submission_id = %s",
+        ):
+            try:
+                policy.check(sql)
+            except dbw.WriteRefused:
+                continue
+            accepted.append(sql)
+    assert accepted == [], (
+        "the write policy admitted a statement that rewrites an append-only history "
+        f"row: {accepted}"
+    )
+
+    # The three shapes a leading-verb check would miss, each refused as well. `ONLY`
+    # sits between the verb and the table; a CTE puts the whole `DELETE` behind
+    # `WITH`, so the statement's first token is `with`; and `ON CONFLICT ... DO
+    # UPDATE` rewrites a row without naming a table after the verb at all.
+    for sql in (
+        "DELETE FROM ONLY isaac_submissions WHERE submission_id = %s",
+        "UPDATE ONLY isaac_submissions SET subject = %s",
+        "WITH gone AS (DELETE FROM isaac_revision_changes RETURNING change_id) "
+        "SELECT count(*) FROM gone",
+        "INSERT INTO isaac_submissions (submission_id) VALUES (%s) "
+        "ON CONFLICT (submission_id) DO UPDATE SET subject = %s",
+    ):
+        with pytest.raises(dbw.WriteRefused):
+            policy.check(sql)
+
+
+def test_the_policy_refusal_costs_nothing_the_application_legitimately_issues():
+    """THE NEGATIVE CONTROL. A refusal that also refuses real work is a regression.
+
+    Three classes, and each is a shape the guard above could plausibly have caught by
+    accident: the append itself, which is the entire point of an append-only table;
+    the current-state deletes and upserts on the four tables deliberately ABSENT from
+    ``_APPEND_ONLY_TABLES``; and the ``CREATE`` statements of every committed forward
+    migration, which the runner feeds through this same policy.
+
+    ROLLBACK FILES ARE NOT IN SCOPE HERE, AND THAT WAS ESTABLISHED RATHER THAN
+    ASSUMED: ``db_migrate`` excludes ``*.rollback.sql`` by suffix and never loads one
+    — a human runs it with psql — and every rollback statement would in any case be
+    refused by the PRE-EXISTING ``drop`` keyword rule, not by this addition.
+    """
+    policy = dbw.WriteStatementPolicy()
+
+    # 1. Every statement the WRITE PATH declares, enumerated from its modules rather
+    #    than listed here, so a new one is covered the day it lands.
+    #
+    #    THE MODULE LIST IS A FILTER, NOT A CONVENIENCE, and leaving it out made this
+    #    test fail on its first run — usefully. `_module_statements()` sweeps the whole
+    #    backend, and `db_provider`/`db_recon` declare READ statements naming
+    #    `records`, which this policy refuses by design and which never reach it: they
+    #    are the read plane and open their own connections. Including them would have
+    #    made the negative control assert something false about the write policy.
+    write_path = (
+        "db_write.py",
+        "db_migrate.py",
+        "experiment_repository.py",
+        "revision_history.py",
+        "submission_store.py",
+    )
+    checked = 0
+    for where, sql in _module_statements().items():
+        if not where.startswith(write_path):
+            continue
+        policy.check(sql)  # raises WriteRefused if this addition broke it
+        checked += 1
+    # ...and the filter must not have filtered everything away.
+    assert checked >= 30, checked
+    assert any(
+        k.startswith("submission_store.py:") for k in _module_statements()
+    ), "the sweep no longer reaches the module whose tables this test is about"
+
+    # 2. The shapes the five tables' absentee siblings rely on, spelled out.
+    for sql in (
+        "INSERT INTO isaac_submissions (submission_id) VALUES (%s)",
+        "INSERT INTO isaac_experiment_revisions (revision_id) VALUES (%s)",
+        "INSERT INTO isaac_run_revisions (run_revision_id) VALUES (%s)",
+        "INSERT INTO isaac_revision_changes (change_id) VALUES (%s)",
+        "INSERT INTO isaac_submission_runs (unit_id) VALUES (%s)",
+        "SELECT * FROM isaac_submissions WHERE experiment_id = %s",
+        "DELETE FROM isaac_experiments WHERE experiment_id = %s",
+        "DELETE FROM isaac_runs WHERE experiment_id = %s",
+        "DELETE FROM isaac_run_projection WHERE experiment_id = %s",
+        "INSERT INTO isaac_experiments (experiment_id) VALUES (%s) "
+        "ON CONFLICT (experiment_id) DO UPDATE SET rev = %s",
+        "INSERT INTO isaac_run_projection (experiment_id) VALUES (%s) "
+        "ON CONFLICT (experiment_id) DO UPDATE SET rev = %s",
+    ):
+        policy.check(sql)
+
+    # 3. Every FORWARD migration statement, loaded the way the runner loads it.
+    migrations = Path(dbm.__file__).parent / "migrations"
+    forward = [
+        path
+        for path in sorted(migrations.glob("*.sql"))
+        if not path.name.endswith(".rollback.sql")
+    ]
+    assert len(forward) >= 5, [p.name for p in forward]
+    for path in forward:
+        for statement in dbm.split_statements(path.read_text(encoding="utf-8")):
+            policy.check(statement)
+
+
 def test_the_scan_above_is_not_vacuous():
     """Guards the guard: it must be LOOKING at the statements it claims to check."""
     statements = _module_statements()

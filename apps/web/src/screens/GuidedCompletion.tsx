@@ -1273,6 +1273,11 @@ function LoadedCompletion({
             onStagedChange={(value) => {
               staged.current[blocker.key] = value;
             }}
+            /* The reader abandoned what they typed for THIS question. The surviving
+               copy above must go with it, for the reason `discardStaged` records: a
+               staged value that outlives the intent comes back pre-filled, one click
+               from being confirmed. Keyed exactly as the read above is keyed. */
+            onDiscardStaged={() => discardStaged(blocker.key)}
             onConfirm={(value) => confirmAnswer(blocker, value)}
             onDontKnow={() => leaveMissing(blocker.key)}
           />

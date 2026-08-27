@@ -165,6 +165,12 @@ def test_health_commit_null_when_neither_env_set(tmp_path, monkeypatch):
             "backend": "filesystem",
             "durable": False,
             "state": "ephemeral",
+            # STAGE 2b. `authoritative` is the `ISAAC_RUN_ROWS_AUTHORITATIVE` kill
+            # switch, read from configuration; `last_pass` is the distribution the
+            # most recent CLASSIFYING hydration pass measured, and `None` — not an
+            # all-zero dict — is what "no pass has classified anything in this
+            # process" honestly looks like.
+            "run_projection": {"authoritative": True, "last_pass": None},
         },
         # A deployment with no database and no configured verifier can record no
         # submission, and says so with both reasons rather than one. The field is

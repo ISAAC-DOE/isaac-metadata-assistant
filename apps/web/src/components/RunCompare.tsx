@@ -43,12 +43,18 @@
  * paging they already use. Nothing here ever calls `listRuns` at all.
  *
  * THE TWO RUNS ARE READ FROM THE PAGE WHEN THEY ARE ON IT. A comparison assembled
- * from cards the reader just clicked costs ZERO requests. Only a deep link — where
- * the ids arrive before any run does — costs anything, and it costs exactly one
- * `getRun` per run that is not on the loaded page, never a list read. The
- * resolution deliberately WAITS for the first page rather than racing it: firing
- * two reads for runs that are already in flight is two requests to learn what was
- * about to arrive, and the page read is already on its way.
+ * from cards the reader just clicked costs ZERO requests FOR THE TWO RUNS. Only a
+ * deep link — where the ids arrive before any run does — costs anything there, and
+ * it costs exactly one `getRun` per run that is not on the loaded page, never a
+ * list read. The resolution deliberately WAITS for the first page rather than
+ * racing it: firing two reads for runs that are already in flight is two requests
+ * to learn what was about to arrive, and the page read is already on its way.
+ *
+ * "ZERO REQUESTS" IS NARROWED RATHER THAN LEFT STANDING, because it stopped being
+ * the whole truth the moment the record-context band arrived. A comparison of two
+ * on-page runs now costs FOUR bounded reads — `listConflicts` and `getPendingPage`
+ * per run — issued once per compared pair, only while the panel is on screen, and
+ * never repeated on a Focus Run round trip. Still no `listRuns`, ever.
  *
  * IT IS READ-ONLY, AND IT SAYS SO ON SCREEN. Nothing here writes, overrides,
  * reverts, exports or submits. `Check both runs` is the one control that reaches
@@ -61,31 +67,49 @@ import './run-compare.css';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../lib/api';
-import { RECORD_RUN_PARAM, RUN_COMPARE_MAX } from '../lib/routes';
+import { RECORD_ADDRESS_PARAM, RECORD_RUN_PARAM, RUN_COMPARE_MAX } from '../lib/routes';
 import {
   buildRunComparison,
   categoryWord,
+  conflictWord,
   evidenceWord,
   originWord,
+  originsWord,
+  reviewWord,
+  supportWord,
+  type CompareBlock,
   type CompareCategory,
+  type CompareConflict,
   type CompareRow,
   type CompareSide,
   type RunComparison,
 } from '../lib/runCompare';
+import { formatCreatedDate } from '../lib/labels';
 import { runFindingText } from '../lib/runFields';
 import {
   ArrowLeftRight,
+  ChevronDown,
+  ChevronRight,
+  CircleAlert,
   CircleDashed,
   CircleHelp,
   CornerDownRight,
   Columns2,
   Equal,
   Pencil,
+  Shield,
   type LucideIcon,
 } from './icons';
 import { LoadingPanel } from './FetchStates';
 import { StatusChip } from './StatusChip';
-import type { ApiRunCheckResponse, ApiRunView } from '../lib/types';
+import type {
+  ApiConflictsResponse,
+  ApiPendingItem,
+  ApiPendingPage,
+  ApiRunCheckFinding,
+  ApiRunCheckResponse,
+  ApiRunView,
+} from '../lib/types';
 
 /**
  * The glyph for each comparison category. ALWAYS paired with the word and with a
@@ -97,10 +121,85 @@ const CATEGORY_ICON: Record<CompareCategory, LucideIcon> = {
   same: Equal,
   value: ArrowLeftRight,
   'absent-on-one': CircleDashed,
+  review: Shield,
   provenance: CornerDownRight,
   evidence: Pencil,
   incomparable: CircleHelp,
 };
+
+/**
+ * HOW MANY OPEN QUESTIONS THIS PANEL LISTS PER RUN, and the count is not the bound
+ * that matters. `GET /pending` grew a page block precisely because a record's
+ * questions grow with its runs (measured: 3,000 entries / 1.77 MB at 1,000 runs),
+ * so this asks for a WINDOW and reads `pending_page.total` for the real number.
+ * The window is small on purpose: this is a comparison, not the completion screen,
+ * and five is enough to recognise what is outstanding before going there.
+ */
+const CONTEXT_PENDING_PREVIEW = 5;
+
+/**
+ * THE RECORD CONTEXT FOR ONE RUN. Every field is separately fallible and every
+ * failure is carried rather than swallowed — a panel that renders nothing where a
+ * read failed is a panel asserting there was nothing to show.
+ */
+interface SideContext {
+  conflicts: ApiConflictsResponse | null;
+  conflictsMessage: string | null;
+  pending: ApiPendingItem[];
+  pendingPage: ApiPendingPage | null;
+  pendingMessage: string | null;
+}
+
+type ContextState =
+  | { status: 'loading' }
+  | { status: 'ready'; a: SideContext; b: SideContext };
+
+function readMessage(err: unknown): string {
+  const text = err instanceof Error ? err.message.trim() : '';
+  return text === '' ? 'The read did not complete.' : text;
+}
+
+/**
+ * TWO BOUNDED READS FOR ONE RUN, AND NEITHER CAN REJECT.
+ *
+ * `Promise.all` over two `.catch`-terminated chains rather than `allSettled`,
+ * because each read has its own place to put its own failure and neither may take
+ * the other down: a conflicts read that 500s must not remove the open-question
+ * count from the screen, and the reverse.
+ *
+ * NOTHING HERE LISTS RUNS. The comparison's read discipline (see the file header)
+ * is unchanged: a run already on the page costs nothing, a deep-linked run costs
+ * one `getRun`, and this adds exactly two per run, once per compared pair.
+ */
+async function readSideContext(experimentId: string, runId: string): Promise<SideContext> {
+  const side: SideContext = {
+    conflicts: null,
+    conflictsMessage: null,
+    pending: [],
+    pendingPage: null,
+    pendingMessage: null,
+  };
+  await Promise.all([
+    api
+      .listConflicts(experimentId, { runId })
+      .then((res) => {
+        side.conflicts = res;
+      })
+      .catch((err: unknown) => {
+        side.conflictsMessage = readMessage(err);
+      }),
+    api
+      .getPendingPage(experimentId, { runId, limit: CONTEXT_PENDING_PREVIEW })
+      .then((res) => {
+        side.pending = res.pending;
+        side.pendingPage = res.page ?? null;
+      })
+      .catch((err: unknown) => {
+        side.pendingMessage = readMessage(err);
+      }),
+  ]);
+  return side;
+}
 
 /** One selected run, once the panel has tried to obtain it. */
 type SideState =
@@ -225,10 +324,120 @@ export function RunCompare({
   const runA = states[0]?.status === 'run' ? states[0].run : undefined;
   const runB = states[1]?.status === 'run' ? states[1].run : undefined;
 
+  /*
+   * THE COMPOSITE IDENTITY OF THIS COMPARISON — which two runs, at which two
+   * versions. Everything downstream that can go stale is keyed on it.
+   *
+   * It was already the `key` on `CompareFindings`, for the reasons written out
+   * below that element. It is lifted to a value here because a second thing now
+   * depends on it (the record context) and because a third now needs to READ it: a
+   * finding can only be attached to a table row if the verdicts and the table are
+   * known to describe the same two runs, and a React `key` is not readable.
+   */
+  const compareKey =
+    runA !== undefined && runB !== undefined
+      ? `${runA.id}@${runA.version}|${runB.id}@${runB.version}`
+      : '';
+
+  const [context, setContext] = useState<{ key: string; state: ContextState } | null>(null);
+  const [rereadNonce, setRereadNonce] = useState(0);
+  /*
+   * WHICH READ HAS ALREADY BEEN ISSUED, so that returning from Focus Run does not
+   * re-issue it. `hidden` is in the effect's dependencies (nothing is read while
+   * the panel is not on screen) and toggles every time the reader opens and closes
+   * a run — without this the same four requests would fire on every round trip.
+   */
+  const contextReadRef = useRef('');
+
+  /*
+   * WHICH PAIR, AT WHICH VERSIONS, ON WHICH ATTEMPT — the identity BOTH the
+   * de-duplication ref and the stored response are keyed on.
+   *
+   * THE NONCE IS IN THE KEY, and that is what lets the response be matched by key
+   * instead of by an `alive` flag. Read again re-issues under a NEW key, so a
+   * first read that answers after the second was issued can no longer be mistaken
+   * for it.
+   */
+  const contextKey = compareKey === '' ? '' : `${compareKey}#${rereadNonce}`;
+
+  useEffect(() => {
+    if (contextKey === '' || hidden) return;
+    if (contextReadRef.current === contextKey) return;
+    contextReadRef.current = contextKey;
+    setContext({ key: contextKey, state: { status: 'loading' } });
+    void Promise.all([
+      readSideContext(experimentId, selected[0]),
+      readSideContext(experimentId, selected[1]),
+    ]).then(([a, b]) => {
+      /*
+       * NO `alive` FLAG, AND ITS REMOVAL IS A FIX RATHER THAN A TIDY-UP.
+       *
+       * `hidden` is in this effect's dependencies, so entering Focus Run tore the
+       * effect down — and an `alive = false` cleanup then DISCARDED a read that
+       * was already in flight while `contextReadRef` went on saying it had been
+       * issued. Coming back re-ran the effect, matched the ref and returned: the
+       * panel sat on `{ status: 'loading' }` permanently, telling the reader it
+       * was "reading what else this record holds" when nothing was in flight and
+       * nothing ever would be. There is no recovery control in that state — `Read
+       * again` lives in the band the loading branch replaces — so it was a false
+       * progress claim with no way out, and the conflicts axis stayed `unknown`
+       * for the rest of the session.
+       *
+       * The response is matched by KEY instead. A pair (or a Read again) that has
+       * moved on leaves `prev.key` different and this answer is dropped, which is
+       * everything `alive` was there to do; a read that was merely hidden and
+       * un-hidden still lands. Nothing is re-requested to achieve it.
+       */
+      setContext((prev) =>
+        prev !== null && prev.key === contextKey && prev.state.status === 'loading'
+          ? { key: contextKey, state: { status: 'ready', a, b } }
+          : prev,
+      );
+    });
+    // `selected` is a fresh array per render; `contextKey` names the same two runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [experimentId, contextKey, hidden]);
+
+  /*
+   * THE CONTEXT ONLY COUNTS FOR THE PAIR IT WAS READ FOR. A key mismatch is
+   * treated as "not obtained", never as "obtained and empty" — which is the whole
+   * difference between a row saying nothing is stored and a row saying nobody
+   * looked.
+   */
+  const ready =
+    context !== null && context.key === contextKey && context.state.status === 'ready'
+      ? context.state
+      : null;
+  const contextLoading =
+    context !== null && context.key === contextKey && context.state.status === 'loading';
+
   const comparison = useMemo(
-    () => (runA !== undefined && runB !== undefined ? buildRunComparison(runA, runB) : null),
-    [runA, runB],
+    () =>
+      runA !== undefined && runB !== undefined
+        ? buildRunComparison(runA, runB, {
+            a: { conflicts: ready?.a.conflicts?.conflicts },
+            b: { conflicts: ready?.b.conflicts?.conflicts },
+          })
+        : null,
+    [runA, runB, ready],
   );
+
+  /*
+   * THE TWO CHECK RESPONSES, HELD BESIDE THE PAIR THEY DESCRIBE.
+   *
+   * They used to live inside `CompareFindings`, evicted by a React `key`. The
+   * eviction is unchanged in effect and is now STATED rather than delegated: a
+   * stored key that is not `compareKey` reads as `idle`, so a verdict computed for
+   * a previous pair can neither be displayed under the current pair's labels nor
+   * attached to a row of the current pair's table. Storing it here is what lets a
+   * finding reach the row it names.
+   */
+  const [check, setCheck] = useState<{ key: string; state: CheckState }>({
+    key: '',
+    state: { status: 'idle' },
+  });
+  const checkState: CheckState =
+    check.key === compareKey ? check.state : { status: 'idle' };
 
   const [showAgreeing, setShowAgreeing] = useState(false);
 
@@ -330,6 +539,13 @@ export function RunCompare({
             <UnresolvedComparison states={states} ids={selected} />
           ) : (
             <>
+              <RecordContext
+                runA={runA!}
+                runB={runB!}
+                ready={ready}
+                loading={contextLoading}
+                onReread={() => setRereadNonce((n) => n + 1)}
+              />
               <CompareSummary
                 comparison={comparison}
                 showAgreeing={showAgreeing}
@@ -340,23 +556,25 @@ export function RunCompare({
                 runA={runA!}
                 runB={runB!}
                 showAgreeing={showAgreeing}
+                findings={checkState.status === 'data' ? findingsByPath(checkState) : null}
               />
               {comparison.blocks.length > 0 && (
-                /*
-                  THE SAME BOUNDARY `overrideRows` DRAWS, disclosed rather than
-                  denied. A block payload is an object or a list; this table has no
-                  honest one-line rendering for one, so it is named and not compared.
-                */
-                <p className="rc-note">
-                  {comparison.blocks.length} whole-block address
-                  {comparison.blocks.length === 1 ? '' : 'es'} resolved by these runs{' '}
-                  {comparison.blocks.length === 1 ? 'is' : 'are'} not compared here —{' '}
-                  <span className="mono">{comparison.blocks.join(', ')}</span>. A block is an
-                  object or a list, and this table has no one-line rendering for one.
-                </p>
+                <BlockDisclosure
+                  blocks={comparison.blocks}
+                  labelA={runA!.label}
+                  labelB={runB!.label}
+                />
               )}
               {/*
                 KEYED ON WHICH RUNS AND WHICH VERSIONS, and it was not.
+
+                THE KEY IS NOW `compareKey`, HELD IN STATE BESIDE THE RESPONSES
+                RATHER THAN PASSED AS A REACT `key`. Everything below is unchanged
+                about WHY the eviction exists and what it prevents; only the
+                mechanism moved, because a finding cannot be attached to a table
+                row unless something can READ which pair the verdicts describe, and
+                a React `key` cannot be read. `checkState` above is the eviction:
+                a stored key that is not the current pair reads as `idle`.
 
                 `CompareFindings` holds the two check responses in local state
                 with no eviction of any kind, and this element carried no `key`,
@@ -398,10 +616,11 @@ export function RunCompare({
                 it costs one interpolation if that ever stops holding.
               */}
               <CompareFindings
-                key={`${runA!.id}@${runA!.version}|${runB!.id}@${runB!.version}`}
                 experimentId={experimentId}
                 runA={runA!}
                 runB={runB!}
+                state={checkState}
+                onState={(next) => setCheck({ key: compareKey, state: next })}
               />
             </>
           )}
@@ -512,6 +731,281 @@ function UnresolvedComparison({
   return <LoadingPanel label="Loading the two runs to compare…" />;
 }
 
+/* ── the record context these two runs sit in ──────────────────────────────── */
+
+/**
+ * WHAT ELSE THE RECORD HOLDS ABOUT EACH RUN — open questions, and recorded
+ * conflicts. Two facts per run, neither of which the table above can see.
+ *
+ * WHY THIS IS NOT IN THE TABLE. An open question does not belong to an address a
+ * comparison can put in a row. `ApiPendingItem` carries `kind`, `about` and an
+ * `id` that is a URI for assets and a kind for everything else — none of which is
+ * the official path a row is keyed by — so attaching a question to a row would
+ * mean matching prose against an address and calling the guess a fact. The
+ * questions are therefore reported PER RUN, where the data actually is, and the
+ * panel says so rather than leaving the omission to be noticed.
+ *
+ * WHAT IT DELIBERATELY DOES NOT COMPARE. Neither number is subtracted from the
+ * other, and there is no "Run 1 is further along". Both are stated side by side
+ * and the reader draws their own conclusion — the same refusal the verdicts below
+ * make, for the same reason.
+ */
+function RecordContext({
+  runA,
+  runB,
+  ready,
+  loading,
+  onReread,
+}: {
+  runA: ApiRunView;
+  runB: ApiRunView;
+  ready: { a: SideContext; b: SideContext } | null;
+  loading: boolean;
+  onReread: () => void;
+}) {
+  const headingId = useId();
+  if (loading) {
+    return (
+      <p className="rc-note" role="status">
+        Reading what else this record holds about these two runs…
+      </p>
+    );
+  }
+  if (ready === null) {
+    return (
+      <p className="rc-note">
+        Open questions and recorded conflicts have not been read for these two runs. The table
+        below compares what each run holds and says nothing either way about them.
+      </p>
+    );
+  }
+  /*
+   * THE FRESHNESS CHECK, AND IT IS A REAL ONE RATHER THAN A RESTATEMENT.
+   *
+   * Each conflicts response carries the `record_rev` it was computed at. The two
+   * reads are issued together but answered separately, so a record that changes
+   * between them yields two different revisions — and the union of two views of
+   * different documents is not a view of either. It is DISCLOSED rather than
+   * hidden, and rather than being made to look current by showing only one.
+   */
+  const revA = ready.a.conflicts?.record_rev ?? null;
+  const revB = ready.b.conflicts?.record_rev ?? null;
+  const split = revA !== null && revB !== null && revA !== revB;
+  return (
+    <section className="rc-context" aria-labelledby={headingId}>
+      <div className="rc-context-head">
+        <h4 className="rc-context-title" id={headingId}>
+          What else this record holds about each run
+        </h4>
+        <button type="button" className="btn btn-secondary" onClick={onReread}>
+          Read again
+        </button>
+      </div>
+      {/*
+        THE ONE SENTENCE THAT STOPS THIS READING AS A SURVEY OF EVERYTHING.
+        A conflict at an address a run INHERITS is stored once, at the record, and
+        decided there; `GET .../conflicts?run=` describes a run's own fields only.
+        Saying nothing here would let an empty conflict line read as "there are
+        none anywhere", which is a claim neither read supports.
+      */}
+      <p className="rc-context-scope">
+        Read for each run on its own, once. Conflicts recorded against the record rather than
+        against a run are not read here — they are the same for both runs and are decided on the
+        record. Nothing on this panel is written, and no run was changed by reading it.
+      </p>
+      {split && (
+        <p className="rc-note" role="status">
+          These two reads answered at different revisions of the record — {runA.label} at
+          revision {revA}, {runB.label} at revision {revB}. The record changed while they were
+          being read. Use Read again for one revision.
+        </p>
+      )}
+      <div className="rc-context-sides">
+        <ContextSide run={runA} side={ready.a} />
+        <ContextSide run={runB} side={ready.b} />
+      </div>
+    </section>
+  );
+}
+
+function ContextSide({ run, side }: { run: ApiRunView; side: SideContext }) {
+  /*
+   * THE REVISION IS THE PRECISE IDENTITY; THE DATE IS CONTEXT. `run.rev` and
+   * `run.version` are what a stale screen is recognised by, and they are exact —
+   * so the date is rendered readably and the exact instant the server sent stays
+   * on the `<time>` element rather than being dropped.
+   */
+  const updated = formatCreatedDate(run.updated_utc);
+  const counts = side.conflicts?.counts;
+  const page = side.pendingPage;
+  const openCount = page !== null ? page.total : side.pending.length;
+  return (
+    <div className="rc-context-side">
+      <p className="rc-context-label">{run.label}</p>
+      {/*
+        THE RUN'S OWN REVISION, STATED. A comparison is a read of two documents at
+        two particular moments; naming the moment is what makes a stale screen
+        recognisable as one instead of looking like a current answer.
+      */}
+      <p className="rc-context-rev">
+        Revision {run.rev} · version <span className="mono">{run.version}</span>
+        {updated !== undefined ? (
+          <>
+            {' '}
+            · updated <time dateTime={run.updated_utc}>{updated.display}</time>
+          </>
+        ) : null}
+      </p>
+
+      {side.pendingMessage !== null ? (
+        <p className="rc-context-fail" role="status">
+          Open questions could not be read for this run. {side.pendingMessage} Nothing is claimed
+          about how many are outstanding.
+        </p>
+      ) : (
+        <>
+          <p className="rc-context-fact">
+            <strong>{openCount}</strong> open question{openCount === 1 ? '' : 's'} owned by this
+            run
+            {page !== null && page.record_total !== openCount ? (
+              <> · {page.record_total} open on the whole record</>
+            ) : null}
+          </p>
+          {side.pending.length > 0 && (
+            <ul className="rc-context-list">
+              {side.pending.map((item, index) => (
+                <li key={item.blocker_key ?? `${item.id ?? 'entry'}#${index}`}>
+                  {item.unavailable === true
+                    ? `An entry this build could not read${item.unavailable_reason ? ` — ${item.unavailable_reason}` : ''}`
+                    : (item.question ?? item.about ?? item.kind ?? 'An entry carrying no question text')}
+                </li>
+              ))}
+              {page !== null && page.withheld > 0 && (
+                <li className="rc-context-more">
+                  {page.withheld} further open question{page.withheld === 1 ? '' : 's'} on this
+                  run are not listed here.
+                </li>
+              )}
+            </ul>
+          )}
+        </>
+      )}
+
+      {side.conflictsMessage !== null ? (
+        <p className="rc-context-fail" role="status">
+          Recorded conflicts could not be read for this run. {side.conflictsMessage} The table
+          below says nothing either way about them.
+        </p>
+      ) : counts === undefined ? null : (
+        <>
+          <p className="rc-context-fact">
+            <strong>{counts.conflicting_addresses}</strong> address
+            {counts.conflicting_addresses === 1 ? '' : 'es'} on this run cite more than one
+            answer
+            {counts.conflicting_addresses > 0 ? (
+              <>
+                {' '}
+                · {counts.resolved} decided · {counts.unresolved} still awaiting a decision
+              </>
+            ) : null}
+          </p>
+          {side.conflicts !== null && side.conflicts.unreadable_resolution_entries > 0 && (
+            <p className="rc-context-fail">
+              {side.conflicts.unreadable_resolution_entries} stored decision
+              {side.conflicts.unreadable_resolution_entries === 1 ? '' : 's'} could not be read by
+              this build. They are counted rather than described: saying what one contains would
+              mean inventing it.
+            </p>
+          )}
+          {side.conflicts !== null && side.conflicts.resolutions_without_conflict.length > 0 && (
+            <p className="rc-context-fail">
+              {side.conflicts.resolutions_without_conflict.length} recorded decision
+              {side.conflicts.resolutions_without_conflict.length === 1 ? ' names' : 's name'} an
+              address this run carries no conflict at.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── the blocks this table does not compare ────────────────────────────────── */
+
+/**
+ * THE SAME BOUNDARY `overrideRows` DRAWS, disclosed rather than denied — and the
+ * disclosure now says what is in each block.
+ *
+ * A block payload is an object or a list; this table has no honest one-line
+ * rendering for one, so it is still named and still not compared. What is stated
+ * instead is which top-level KEYS each run's payload carries, which is checkable
+ * by opening either run and asserts nothing about what is under them. Two payloads
+ * are never deep-equalled into "the same": a verdict the reader cannot see is a
+ * verdict they cannot check.
+ */
+function BlockDisclosure({
+  blocks,
+  labelA,
+  labelB,
+}: {
+  blocks: readonly CompareBlock[];
+  labelA: string;
+  labelB: string;
+}) {
+  return (
+    <div className="rc-blocks">
+      <p className="rc-note">
+        {blocks.length} whole-block address{blocks.length === 1 ? '' : 'es'} resolved by these
+        runs {blocks.length === 1 ? 'is' : 'are'} not compared here. A block is an object or a
+        list, and this table has no one-line rendering for one. What each run records inside one
+        is listed by name below; nothing is said about the values under those names.
+      </p>
+      <ul className="rc-block-list">
+        {blocks.map((block) => (
+          <li key={block.name}>
+            <span className="mono">{block.name}</span>
+            {' — '}
+            <BlockKeys block={block} labelA={labelA} labelB={labelB} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function BlockKeys({
+  block,
+  labelA,
+  labelB,
+}: {
+  block: CompareBlock;
+  labelA: string;
+  labelB: string;
+}) {
+  const side = (label: string, present: boolean, unnamed: boolean, keys: string[]) => {
+    if (!present) return `${label} does not resolve it`;
+    if (unnamed) return `${label} records something here that is not a set of named keys`;
+    if (keys.length === 0) return `${label} records it with no keys`;
+    return `${label} records ${keys.join(', ')}`;
+  };
+  const only =
+    block.onlyA.length === 0 && block.onlyB.length === 0
+      ? null
+      : [
+          block.onlyA.length > 0 ? `${block.onlyA.join(', ')} only on ${labelA}` : null,
+          block.onlyB.length > 0 ? `${block.onlyB.join(', ')} only on ${labelB}` : null,
+        ]
+          .filter((part): part is string => part !== null)
+          .join('; ');
+  return (
+    <>
+      {side(labelA, block.presentOnA, block.unnamedA, block.keysA)};{' '}
+      {side(labelB, block.presentOnB, block.unnamedB, block.keysB)}.
+      {only !== null && <> Named on one run only: {only}.</>}
+    </>
+  );
+}
+
 /* ── summary ───────────────────────────────────────────────────────────────── */
 
 /**
@@ -548,6 +1042,9 @@ function CompareSummary({
   }
   if (tally.absentOnOne > 0) {
     parts.push(`${tally.absentOnOne} recorded on one run only`);
+  }
+  if (tally.review > 0) {
+    parts.push(`${tally.review} the same value in a different review state`);
   }
   if (tally.provenance > 0) {
     parts.push(`${tally.provenance} the same value from a different source`);
@@ -593,6 +1090,45 @@ function CompareSummary({
           ))}
         </ul>
       )}
+      {tally.conflictsUnknown && (
+        /*
+          NEVER AN ABSENT LINE. With the conflicts read missing for a run, every row
+          below is silent about recorded conflicts — and silence in a comparison
+          reads as "there are none". This says which it is, once.
+        */
+        <p className="rc-summary-line">
+          Recorded conflicts were not read for at least one of these runs, so nothing below says
+          either way whether one is stored at an address.
+        </p>
+      )}
+      {tally.conflicted > 0 && (
+        /*
+          A SIXTH NUMBER THAT SUMS WITH NOTHING, and the sentence says why.
+
+          A recorded conflict is a fact about ONE run's own citations at one
+          address. It is not a disagreement between the two runs, so it is not in
+          `differ in some way`; it is not an agreement either. Folding it into
+          either would put a claim on screen that neither read supports — the same
+          mistake `incomparable` is stated separately to avoid.
+        */
+        <p className="rc-summary-line">
+          <strong>{tally.conflicted}</strong> address
+          {tally.conflicted === 1 ? '' : 'es'} carry a conflict recorded against one of these
+          runs&rsquo; own citations — {tally.conflictedUnresolved} still awaiting a decision.
+          That is not a disagreement between the two runs: it never sets the comparison a row
+          is listed under, and it is in none of the numbers above. An address may carry one and
+          also differ on some axis, and it is then among the differences above for that
+          difference alone.
+          {tally.conflictedAgreeing > 0 && (
+            <>
+              {' '}
+              {tally.conflictedAgreeing} of them are addresses where the two runs record the same
+              thing, and {tally.conflictedAgreeing === 1 ? 'it is' : 'they are'} listed below
+              anyway.
+            </>
+          )}
+        </p>
+      )}
       {tally.differing === 0 && (
         /*
           THE DENOMINATOR IS `agreeing`, NOT `compared`. It used to be `compared`,
@@ -601,9 +1137,9 @@ function CompareSummary({
           every one of the 10 addresses compared here" when only 9 had been.
         */
         <p className="rc-summary-line">
-          These two runs record the same value, from the same source, with the same status and
-          the same number of evidence entries, at every one of the {tally.agreeing} address
-          {tally.agreeing === 1 ? '' : 'es'} this table was able to compare.
+          These two runs record the same value, from the same source, in the same review state,
+          with the same status and the same cited entries, at every one of the {tally.agreeing}{' '}
+          address{tally.agreeing === 1 ? '' : 'es'} this table was able to compare.
           {tally.incomparable > 0
             ? ` ${tally.incomparable} further address${tally.incomparable === 1 ? '' : 'es'} could not be compared and ${tally.incomparable === 1 ? 'is' : 'are'} listed below.`
             : ''}{' '}
@@ -632,16 +1168,109 @@ function incomparableClause(n: number): string {
   return `, and ${n} ${n === 1 ? 'address' : 'addresses'} this table could not compare`;
 }
 
+/**
+ * THE EXCEPTION TO "the same on both runs and are not listed".
+ *
+ * A row carrying a recorded conflict IS listed even when the two runs agree, so
+ * without this the caption would describe a table the reader can see contradicts
+ * it. Empty when there are none, which is every comparison with no conflicts read
+ * or none recorded — the caption is then byte-identical to what it always was.
+ */
+function agreeingConflictClause(n: number): string {
+  if (n === 0) return '';
+  /* NO "because". `run-compare.test.tsx`'s vocabulary scan bans the word outright,
+     and the ban is not negotiable for a caption merely because the causality here
+     is about the table rather than about the science — a scanner with exceptions is
+     a scanner nobody trusts. A colon states the same fact and reads better. */
+  return `, except ${n} listed anyway: a conflict is recorded at ${n === 1 ? 'it' : 'them'}`;
+}
+
+/**
+ * EVERY FINDING THAT NAMES AN ADDRESS, INDEXED BY THAT ADDRESS — and the count of
+ * every finding that names none.
+ *
+ * THE ATTACHMENT RULE IS EXACTLY ONE THING: the finding object carries a `path`,
+ * and that path equals a row's own path. Nothing is matched on prose, nothing is
+ * matched on a prefix, and a bare-string finding is never attached — the union
+ * `ApiRunCheckFinding` includes a plain string precisely because the contract does
+ * not say what an element is, and reading an address out of a sentence would be a
+ * guess presented as a link.
+ *
+ * WHAT IS NOT ATTACHED IS COUNTED, not dropped. The panel below still lists every
+ * finding of both runs, and the table says how many of them name no address, so
+ * "no finding is attached to this row" can never be read as "no finding exists".
+ */
+interface RowFindings {
+  a: Map<string, string[]>;
+  b: Map<string, string[]>;
+  /**
+   * FINDINGS THAT NAME NO ADDRESS AT ALL, and nothing else.
+   *
+   * IT USED TO ALSO COUNT A FINDING THIS BUILD COULD NOT DESCRIBE, which made the
+   * sentence built on it say that an undescribable finding "names no address" —
+   * a claim about a `path` the number had not looked at, in a panel that counts
+   * those separately one paragraph below. The two are different facts and are
+   * counted in different places.
+   *
+   * IT IS DELIBERATELY NOT "findings not shown on a row". A finding may name a
+   * path this table has no row for — the comparison's rows are the addresses the
+   * two runs RESOLVE, and an official-schema error can name any path in the
+   * document — and this number cannot see that, because the rows are not in
+   * scope here. The sentence beside it is written to that limit rather than past
+   * it: it says a named path is shown on that row WHERE THIS TABLE LISTS THE
+   * ADDRESS, which is checkable, instead of promising an attachment that may not
+   * exist.
+   */
+  unattached: number;
+}
+
+function pathFindings(res: ApiRunCheckResponse): { byPath: Map<string, string[]>; unattached: number } {
+  const all = [
+    ...(res.blockers ?? []),
+    ...(res.draft?.errors ?? []),
+    ...(res.official?.errors ?? []),
+  ];
+  const byPath = new Map<string, string[]>();
+  let unattached = 0;
+  for (const finding of all as ApiRunCheckFinding[]) {
+    const text = runFindingText(finding);
+    const path =
+      finding !== null && typeof finding === 'object' && typeof finding.path === 'string'
+        ? finding.path.trim()
+        : '';
+    if (path === '') {
+      unattached += 1;
+      continue;
+    }
+    // A finding that names an address but that this build cannot describe is NOT
+    // counted here — `findingTexts`'s `opaque` is where it is counted, and saying
+    // it names no address would be false about the one field this loop did read.
+    if (text === null) continue;
+    const list = byPath.get(path);
+    if (list === undefined) byPath.set(path, [text]);
+    else list.push(text);
+  }
+  return { byPath, unattached };
+}
+
+function findingsByPath(check: { a: ApiRunCheckResponse; b: ApiRunCheckResponse }): RowFindings {
+  const a = pathFindings(check.a);
+  const b = pathFindings(check.b);
+  return { a: a.byPath, b: b.byPath, unattached: a.unattached + b.unattached };
+}
+
 function CompareTable({
   comparison,
   runA,
   runB,
   showAgreeing,
+  findings,
 }: {
   comparison: RunComparison;
   runA: ApiRunView;
   runB: ApiRunView;
   showAgreeing: boolean;
+  findings: RowFindings | null;
 }) {
   const groups = comparison.groups
     .map((group) => ({
@@ -687,7 +1316,7 @@ function CompareTable({
         <caption className="rc-caption">
           {showAgreeing
             ? `Every address listed for ${runA.label} and ${runB.label} — ${comparison.tally.differing} that differ, ${comparison.tally.agreeing} that are the same${incomparableClause(comparison.tally.incomparable)}.`
-            : `Addresses where ${runA.label} and ${runB.label} differ${comparison.tally.incomparable > 0 ? `, and ${comparison.tally.incomparable} this table could not compare` : ''}. ${comparison.tally.agreeing} further address${comparison.tally.agreeing === 1 ? ' is' : 'es are'} the same on both runs and ${comparison.tally.agreeing === 1 ? 'is' : 'are'} not listed.`}
+            : `Addresses where ${runA.label} and ${runB.label} differ${comparison.tally.incomparable > 0 ? `, and ${comparison.tally.incomparable} this table could not compare` : ''}. ${comparison.tally.agreeing} further address${comparison.tally.agreeing === 1 ? ' is' : 'es are'} the same on both runs and ${comparison.tally.agreeing === 1 ? 'is' : 'are'} not listed${agreeingConflictClause(comparison.tally.conflictedAgreeing)}.`}
         </caption>
         <thead>
           <tr>
@@ -708,7 +1337,7 @@ function CompareTable({
               </th>
             </tr>
             {group.shown.map((row) => (
-              <Row key={row.key} row={row} runA={runA} runB={runB} />
+              <Row key={row.key} row={row} runA={runA} runB={runB} findings={findings} />
             ))}
           </tbody>
         ))}
@@ -717,28 +1346,316 @@ function CompareTable({
   );
 }
 
-function Row({ row, runA, runB }: { row: CompareRow; runA: ApiRunView; runB: ApiRunView }) {
+function Row({
+  row,
+  runA,
+  runB,
+  findings,
+}: {
+  row: CompareRow;
+  runA: ApiRunView;
+  runB: ApiRunView;
+  findings: RowFindings | null;
+}) {
   const Glyph = CATEGORY_ICON[row.category];
+  /*
+   * PROGRESSIVE DISCLOSURE, NOT MORE COLUMNS. Four dimensions arrived; four columns
+   * did not. The table keeps its four headers at every width, and everything the
+   * widening added — the cited entries, the two provenance dimensions, the recorded
+   * conflict in full, and any finding that names this address — lives in one
+   * expandable row per address. A dense table that has to scroll sideways to be
+   * read at all is a table nobody reads.
+   */
+  const [open, setOpen] = useState(false);
+  const detailId = useId();
+  const findingsA = findings?.a.get(row.path) ?? [];
+  const findingsB = findings?.b.get(row.path) ?? [];
+  // A SIDE WITH NO VALUE CAN STILL CARRY CITATIONS, so the toggle is offered for
+  // one. Without the last two clauses the panel that now describes those entries
+  // is unreachable on the one row shape that has them and nothing else.
+  const hasDetail =
+    row.a.present ||
+    row.b.present ||
+    row.a.conflict !== null ||
+    row.b.conflict !== null ||
+    row.a.support.length > 0 ||
+    row.b.support.length > 0 ||
+    findingsA.length > 0 ||
+    findingsB.length > 0;
   return (
-    <tr className="rc-row" data-category={row.category} data-address={row.address}>
-      <th scope="row" className="rc-addr">
-        <span className="rc-addr-path mono">{row.path}</span>
-        <span className="rc-addr-scope">
-          {row.scope === 'run-field' ? "the run's own field" : 'record-level address'}
-        </span>
-      </th>
-      <SideCell row={row} side={row.a} run={runA} />
-      <SideCell row={row} side={row.b} run={runB} />
-      <td className="rc-rel">
-        <span className="rc-rel-state" data-category={row.category}>
-          <Glyph size={13} strokeWidth={2.2} aria-hidden="true" />
-          {categoryWord(row.category)}
-        </span>
-        <span className="rc-rel-text">
-          <RelationText row={row} runA={runA} runB={runB} />
-        </span>
-      </td>
-    </tr>
+    <>
+      <tr className="rc-row" data-category={row.category} data-address={row.address}>
+        <th scope="row" className="rc-addr">
+          <span className="rc-addr-path mono">{row.path}</span>
+          <span className="rc-addr-scope">
+            {row.scope === 'run-field' ? "the run's own field" : 'record-level address'}
+          </span>
+        </th>
+        <SideCell row={row} side={row.a} run={runA} findings={findingsA} />
+        <SideCell row={row} side={row.b} run={runB} findings={findingsB} />
+        <td className="rc-rel">
+          <span className="rc-rel-state" data-category={row.category}>
+            <Glyph size={13} strokeWidth={2.2} aria-hidden="true" />
+            {categoryWord(row.category)}
+          </span>
+          <span className="rc-rel-text">
+            <RelationText row={row} runA={runA} runB={runB} />
+          </span>
+          {(row.conflict === 'one' || row.conflict === 'both') && (
+            /*
+              THE RECORDED CONFLICT, MARKED SEPARATELY FROM THE CATEGORY — because
+              it is a separate fact. The category says what the two RUNS record; this
+              says that ONE run's own citations at this address assert more than one
+              answer. It never becomes the category, never changes the counts, and
+              its words never say the two runs disagree.
+            */
+            <span className="rc-conflict" data-state={conflictState(row)}>
+              <CircleAlert size={12} strokeWidth={2.2} aria-hidden="true" />
+              {row.conflict === 'both'
+                ? 'A conflict is recorded on both runs here'
+                : `A conflict is recorded on ${row.a.conflict !== null ? runA.label : runB.label} here`}
+              {/*
+                WHETHER IT HAS BEEN DECIDED, IN WORDS. `data-state` tints this mark
+                green for `current` and amber otherwise, and for one commit that
+                tint was the ONLY carrier of the difference: both marks read "A
+                conflict is recorded … here" and the decision state appeared only
+                inside the detail row, which is collapsed by default. A decided
+                conflict and an undecided one are not a colour apart — this repo's
+                own rule is glyph plus words plus surface — so the word is here.
+
+                `conflictState` is `current` only when EVERY recorded conflict on
+                this row is currently decided, which is why the other arm says "not
+                currently decided" about the row rather than about one side: on a
+                `both` row with one decision and one outstanding, that is exactly
+                what is true, and naming a side would need a claim per side that
+                the mark does not make.
+              */}
+              {conflictState(row) === 'current'
+                ? ' — decided, and the decision still covers these answers'
+                : ' — not currently decided'}
+            </span>
+          )}
+          {/*
+            THE `unknown` ARM IS DELIBERATELY NOT A ROW MARK.
+
+            An unread conflicts response is one fact about the whole comparison, not
+            one fact per address; repeating it on every row of a fifty-row table is
+            the wall this widening is written to avoid, and it would drown the rows
+            that DO carry a recorded conflict. It is stated once, prominently, in
+            two places a reader cannot miss — beside the run it failed for in the
+            context band, and in the summary above the table. Rule: never silent,
+            never fifty times.
+          */}
+          {hasDetail && (
+            <button
+              type="button"
+              className="rc-detail-toggle"
+              aria-expanded={open}
+              /*
+                POINTED AT THE PANEL ONLY WHILE THE PANEL EXISTS. The detail row is
+                unmounted when collapsed, so an unconditional `aria-controls` is a
+                dangling IDREF on every closed row of the table — and this repo
+                already settled the pattern six times over (`RecordInfoPanel`,
+                `RenameExperimentPanel`, `DiscardStaged`, `RunCard`,
+                `AssetReferencesPanel`, `UnmappedNotesPanel` all write
+                `open ? id : undefined`). One surface should not disagree.
+              */
+              aria-controls={open ? detailId : undefined}
+              onClick={() => setOpen((prev) => !prev)}
+            >
+              {open ? (
+                <ChevronDown size={12} strokeWidth={2.2} aria-hidden="true" />
+              ) : (
+                <ChevronRight size={12} strokeWidth={2.2} aria-hidden="true" />
+              )}
+              {open ? 'Hide what each run records here' : 'Show what each run records here'}
+              {/* WCAG 2.5.3: the visible words come first, the address after. */}
+              <span className="sr-only"> for {row.path}</span>
+            </button>
+          )}
+        </td>
+      </tr>
+      {hasDetail && open && (
+        <tr className="rc-detail-row" data-detail-for={row.address}>
+          <td colSpan={4}>
+            <div className="rc-detail" id={detailId}>
+              <SideDetail row={row} side={row.a} label={runA.label} findings={findingsA} />
+              <SideDetail row={row} side={row.b} label={runB.label} findings={findingsB} />
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Which decision state to surface on the row mark. The worse-known of the two. */
+function conflictState(row: CompareRow): string {
+  const states = [row.a.conflict?.resolutionState, row.b.conflict?.resolutionState].filter(
+    (state): state is string => state !== undefined,
+  );
+  if (states.length === 0) return 'none';
+  // `current` only when EVERY recorded conflict here is currently decided. One
+  // undecided address is undecided, whatever the other run recorded.
+  return states.every((state) => state === 'current') ? 'current' : 'open';
+}
+
+/**
+ * ONE RUN'S SIDE OF THE EXPANDED DETAIL — described, never judged.
+ *
+ * Four things, each read from stored content: where the citations say the value
+ * came from, what the provenance mirror says establishes it, WHICH entries are
+ * cited, and the recorded conflict in full. Nothing here compares the two runs: the
+ * comparison is the row above, and repeating it as a judgement about one side
+ * ("better supported") is the one thing this block exists not to do.
+ */
+function SideDetail({
+  row,
+  side,
+  label,
+  findings,
+}: {
+  row: CompareRow;
+  side: CompareSide;
+  label: string;
+  findings: string[];
+}) {
+  return (
+    <div className="rc-detail-side">
+      <p className="rc-detail-label">{label}</p>
+      {side.present ? (
+        <>
+          {/*
+            TWO SEPARATE FACTS, NEVER RUN TOGETHER. `originsWord` is what the stored
+            CITATIONS say produced the value; `originWord` is whether this RUN holds
+            it or reads the record's. They answered the same label for one commit —
+            "Inherited from the record · inherited from record" — which reads as a
+            rendering fault and hides that they are different questions.
+          */}
+          <p className="rc-detail-line">
+            <span className="rc-detail-key">Where it came from</span> {originsWord(side)}
+          </p>
+          {row.scope === 'record-level' && (
+            <p className="rc-detail-line">
+              <span className="rc-detail-key">How this run holds it</span>{' '}
+              {originWord(side.origin)}
+            </p>
+          )}
+          <p className="rc-detail-line">
+            {/*
+              NAMED AS THIS BUILD'S OWN READING, not as a verdict from the server.
+              `lib/provenance.ts` computes it from the citations stored on the run and
+              deliberately cannot report a recorded decision; saying so is what stops a
+              reader treating it as the record's official position.
+            */}
+            <span className="rc-detail-key">What establishes it</span> {reviewWord(side.reviewState)}
+            {' — read from the citations stored on this run, not a decision anybody recorded.'}
+          </p>
+          <p className="rc-detail-line">
+            <span className="rc-detail-key">Recorded status</span>{' '}
+            {side.status ?? 'no status recorded'} · {evidenceWord(side)}
+          </p>
+          {side.support.length > 0 && (
+            <ul className="rc-detail-list">
+              {side.support.map((entry, index) => (
+                <li key={`${entry.key}#${index}`}>{supportWord(entry)}</li>
+              ))}
+            </ul>
+          )}
+          {side.undescribableSupport > 0 && (
+            <p className="rc-detail-fail">
+              {side.undescribableSupport} of the entries above could not be read by this build.
+              They are counted rather than described.
+            </p>
+          )}
+        </>
+      ) : (
+        /*
+          NO VALUE IS NOT THE SAME AS NOTHING RECORDED, and this branch used to say
+          it was: it rendered "There is nothing cited here to describe" for EVERY
+          side without a value, while `supportOf` reads the envelope's citations
+          whether or not it carries one. A draft field with `status:
+          needs_confirmation`, no value and two spreadsheet citations is an
+          ordinary ISAAC shape — the extractor records what it read and asks — and
+          on an `On one run only` row (which is listed by default, and expandable
+          because the OTHER side has a value) this panel asserted that the run's
+          own stored citations were not there. The sentence is now conditioned on
+          the citations it is about, and they are listed when they exist.
+
+          The two provenance dimensions are deliberately still not shown here:
+          `provenanceOf` computes them only for a side that holds a value, the
+          review AXIS reads `not-applicable` whenever either side is absent, and a
+          chip saying what "establishes" a value there is no value for would be a
+          claim about nothing.
+        */
+        <>
+          <p className="rc-detail-line">
+            {originWord(side.origin)}.{' '}
+            {side.support.length === 0
+              ? 'There is nothing cited here to describe.'
+              : 'No value is recorded, and these entries are cited beside it.'}
+          </p>
+          {side.support.length > 0 && (
+            <>
+              <p className="rc-detail-line">
+                <span className="rc-detail-key">Recorded status</span>{' '}
+                {side.status ?? 'no status recorded'} · {evidenceWord(side)}
+              </p>
+              <ul className="rc-detail-list">
+                {side.support.map((entry, index) => (
+                  <li key={`${entry.key}#${index}`}>{supportWord(entry)}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {side.undescribableSupport > 0 && (
+            <p className="rc-detail-fail">
+              {side.undescribableSupport} of the entries above could not be read by this build.
+              They are counted rather than described.
+            </p>
+          )}
+        </>
+      )}
+      {side.conflict !== null && <ConflictDetail conflict={side.conflict} />}
+      {findings.length > 0 && (
+        <div className="rc-detail-findings">
+          <p className="rc-detail-key">
+            Reported by the last check of this run, at this address
+          </p>
+          <ul className="rc-detail-list">
+            {findings.map((text) => (
+              <li key={text}>{text}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConflictDetail({ conflict }: { conflict: CompareConflict }) {
+  return (
+    <div className="rc-detail-conflict">
+      <p className="rc-detail-key">Recorded conflict on this run</p>
+      <p className="rc-detail-line">{conflictWord(conflict)}</p>
+      {/* The server's own deterministic sentence, which quotes no value. */}
+      <p className="rc-detail-line">{conflict.explanation}</p>
+      {conflict.unavailable && (
+        <p className="rc-detail-fail">
+          Part of the stored evidence at this address could not be read, so what is counted here
+          is not everything that is stored.
+        </p>
+      )}
+      {/*
+        WHERE IT IS DECIDED, AND WHY NOT HERE. This panel is read-only. Showing the
+        competing answers would invite a choice it cannot record, and recording one
+        needs the record's own version token.
+      */}
+      <p className="rc-detail-line">
+        The competing answers are not listed here. This panel is read-only; a decision is
+        recorded on the record&rsquo;s own conflict surface.
+      </p>
+    </div>
   );
 }
 
@@ -753,10 +1670,31 @@ function Row({ row, runA, runB }: { row: CompareRow; runA: ApiRunView; runB: Api
  * exact address is rendered, with its provenance, by the card's own panels — and it
  * PRESERVES the comparison in the URL, so leaving focus returns to this table.
  */
-function SideCell({ row, side, run }: { row: CompareRow; side: CompareSide; run: ApiRunView }) {
+function SideCell({
+  row,
+  side,
+  run,
+  findings,
+}: {
+  row: CompareRow;
+  side: CompareSide;
+  run: ApiRunView;
+  findings: string[];
+}) {
   const [searchParams] = useSearchParams();
   const search = new URLSearchParams(searchParams);
   search.set(RECORD_RUN_PARAM, run.id);
+  /*
+   * THE LINK NOW NAMES THE ADDRESS AS WELL AS THE RUN, and the destination uses it.
+   *
+   * "Open" used to carry `run.id` alone, so a reader following a difference at
+   * `sample.material.name` landed on a run card and had to find the address
+   * themselves — on a record with many resolved addresses that is the difference
+   * between a link and a hint. `RunsSection` reads this parameter, brings the
+   * matching `[data-address]` row into view and marks it; it is a scroll target and
+   * nothing else, so a stale or unknown address changes nothing on the page.
+   */
+  search.set(RECORD_ADDRESS_PARAM, row.address);
   return (
     <td className="rc-cell" data-present={side.present}>
       <span className="rc-value">
@@ -785,6 +1723,16 @@ function SideCell({ row, side, run }: { row: CompareRow; side: CompareSide; run:
         // recorded beside a value; it says nothing about whether the value is right.
         <span className="rc-meta">
           {side.status ?? 'no status recorded'} · {evidenceWord(side)}
+        </span>
+      )}
+      {findings.length > 0 && (
+        /*
+          A FINDING IS ATTACHED ONLY WHERE IT NAMED THIS ADDRESS ITSELF. It is
+          reported as what the check said, at this address, on this run — never as
+          an explanation of the difference beside it, which nothing here knows.
+        */
+        <span className="rc-cell-finding">
+          {findings.length} finding{findings.length === 1 ? '' : 's'} at this address
         </span>
       )}
       {row.listed && (
@@ -872,13 +1820,46 @@ function RelationText({
           )}
         </>
       );
-    case 'provenance':
+    case 'review':
       return (
         <>
-          Both runs report the same value, from different places: {a} —{' '}
-          {originWord(row.a.origin).toLowerCase()}; {b} — {originWord(row.b.origin).toLowerCase()}.
-          A run that overrides an address keeps its own value when the record changes; a run that
-          inherits follows it.
+          {/*
+            BOTH STATES, NAMED, AND NEITHER RANKED. "Supported" is not a pass and
+            "Needs review" is not a failure — `lib/provenance.ts` says so in its own
+            words — so this states what each side reads as and stops.
+          */}
+          Both runs report the same value. What is recorded as establishing it reads
+          differently: {a} — {reviewWord(row.a.reviewState).toLowerCase()}; {b} —{' '}
+          {reviewWord(row.b.reviewState).toLowerCase()}. Each is read from the citations stored
+          on that run, and neither is a schema, completion or export verdict.
+        </>
+      );
+    case 'provenance':
+      /*
+       * TWO DIFFERENT PROVENANCE DIFFERENCES, AND THEY GET DIFFERENT SENTENCES.
+       *
+       * The axis now compares the run's INHERITANCE STATE and the ORIGINS its stored
+       * citations name. Only one branch below is about inheritance; running both
+       * through the inheritance sentence produced "from different places: Run 1 —
+       * inherited from record; Run 2 — inherited from record", which names two
+       * different places by writing the same words twice.
+       */
+      if (row.a.origin !== row.b.origin) {
+        return (
+          <>
+            Both runs report the same value, from different places: {a} —{' '}
+            {originWord(row.a.origin).toLowerCase()}; {b} —{' '}
+            {originWord(row.b.origin).toLowerCase()}. A run that overrides an address keeps its
+            own value when the record changes; a run that inherits follows it.
+          </>
+        );
+      }
+      return (
+        <>
+          Both runs report the same value. The citations stored beside it name different
+          sources: {a} — {originsWord(row.a).toLowerCase()}; {b} —{' '}
+          {originsWord(row.b).toLowerCase()}. Where a value came from is not a statement about
+          whether it is backed.
         </>
       );
     case 'evidence':
@@ -886,8 +1867,11 @@ function RelationText({
         <>
           Same value on both runs. What each run records beside it differs — {a}:{' '}
           {row.a.status ?? 'no status recorded'}, {evidenceWord(row.a)}; {b}:{' '}
-          {row.b.status ?? 'no status recorded'}, {evidenceWord(row.b)}. This counts entries; it
-          does not weigh them.
+          {row.b.status ?? 'no status recorded'}, {evidenceWord(row.b)}.
+          {row.a.supportSignature !== row.b.supportSignature
+            ? ' The entries cited on each are not the same set — open the row to read them.'
+            : ''}{' '}
+          This counts and lists entries; it does not weigh them.
         </>
       );
     case 'same':
@@ -931,12 +1915,16 @@ function CompareFindings({
   experimentId,
   runA,
   runB,
+  state: check,
+  onState: setCheck,
 }: {
   experimentId: string;
   runA: ApiRunView;
   runB: ApiRunView;
+  /** Held by `RunCompare` beside the pair it describes. See `checkState` there. */
+  state: CheckState;
+  onState: (next: CheckState) => void;
 }) {
-  const [check, setCheck] = useState<CheckState>({ status: 'idle' });
   const headingId = useId();
 
   const run = () => {
@@ -1014,6 +2002,7 @@ function FindingsResult({
 }) {
   const fa = findingTexts(a);
   const fb = findingTexts(b);
+  const unattached = findingsByPath({ a, b }).unattached;
   const setB = new Set(fb.described);
   const setA = new Set(fa.described);
   const both = [...new Set(fa.described.filter((text) => setB.has(text)))].sort();
@@ -1027,14 +2016,35 @@ function FindingsResult({
         <Verdict res={b} label={labelB} />
       </div>
       {/*
-        THE ONE SENTENCE THAT KEEPS THIS PANEL HONEST. Two verdicts side by side
-        read as a scoreboard unless they are told not to. Each check is a read of
-        ONE run at ONE version; neither says anything about the other run, and
-        nothing here relates a finding to a difference in the table above.
+        THE ONE SENTENCE THAT KEEPS THIS PANEL HONEST, AND IT IS NOW NARROWER
+        BECAUSE THE BEHAVIOUR IS.
+
+        It used to end "no finding below is connected to any row in the table
+        above", which was true and is no longer: a finding that carries its own
+        `path` is shown on the row whose address that path IS. Leaving the sentence
+        standing would have made the panel deny something the table does one
+        element away — the kind of stale claim this repository has shipped before.
+
+        What is unchanged is everything that mattered about it. Two verdicts side by
+        side read as a scoreboard unless they are told not to; each check is a read
+        of ONE run at ONE version; and an attachment is an address match, never a
+        claim that the finding explains a difference.
+
+        AND THE REPLACEMENT IS NARROWER AGAIN, because the first version of it was
+        not true either. It said a finding naming an official path "is also shown on
+        that row above" — unconditionally — while the table's rows are only the
+        addresses the two runs RESOLVE. An official-schema error naming a path
+        neither run resolves reaches no row at all, and the sentence promised a
+        reader they would find it there. The clause is now conditioned on the table
+        listing the address, which is something the reader can check on the screen
+        in front of them.
       */}
       <p className="rc-note">
         Each verdict is a read of one run at the version named beside it. Neither check examined
-        the other run, and no finding below is connected to any row in the table above.
+        the other run. A finding that names an official path is also shown on that row above,
+        wherever this table lists that address — that is an address match and nothing more; no
+        finding here is offered as the reason two runs differ. {unattached}{' '}
+        finding{unattached === 1 ? '' : 's'} name no address and appear only in this panel.
       </p>
       <FindingGroup title={`Reported for both runs`} findings={both} />
       <FindingGroup title={`Reported for ${labelA} only`} findings={onlyA} />
@@ -1134,8 +2144,16 @@ function announce({
     // be two: an address this table could not read is not an address that differs.
     `${tally.differing} of ${tally.compared} addresses differ; ${tally.agreeing} are the same` +
     (tally.incomparable > 0 ? `; ${tally.incomparable} could not be compared. ` : '. ') +
+    // A RECORDED CONFLICT IS SPOKEN SEPARATELY, for the reason it is COUNTED
+    // separately: it is not one of the differences, and a reader who cannot see
+    // the panel must not be told a number that quietly includes it.
+    (tally.conflicted > 0
+      ? `${tally.conflicted} of them carry a conflict recorded against one run's own citations. `
+      : '') +
     (showAgreeing
       ? 'All compared addresses are listed.'
-      : 'Only the addresses that differ are listed.')
+      : tally.conflicted > 0
+        ? 'Only the addresses that differ, and the ones carrying a recorded conflict, are listed.'
+        : 'Only the addresses that differ are listed.')
   );
 }

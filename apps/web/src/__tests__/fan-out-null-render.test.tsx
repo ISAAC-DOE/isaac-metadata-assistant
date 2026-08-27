@@ -154,9 +154,9 @@ describe('a fan-out record never renders the string "null"', () => {
  * that avoids the null and substitutes a claim that is false for an exported record
  * is not GUARDED, it is BROKEN. Two of them were quoted as guarded siblings.
  *
- * A RE-SWEEP with `rg --text` — plain `rg` reports `apps/web/src/lib/experimentGraph.ts`
- * as "binary file matches" because it contains a NUL byte, and SILENTLY DROPS all 20
- * hits in it, which is how the first sweep lost that file entirely — finds
+ * A RE-SWEEP with `rg --text` — plain `rg` DROPPED all 20 hits in
+ * `apps/web/src/lib/experimentGraph.ts`, which is how the first sweep lost that file
+ * entirely — finds
  * 67 consumers: 14 BROKEN, 15 GUARDED, 38 NOT-AFFECTED (previously reported as
  * 41 / 8 / 8 / 25). Part of the +26 is finer granularity; the part that is not is
  * `experimentGraph.ts`, the two `POST /export` response sites, and the whole
@@ -164,6 +164,19 @@ describe('a fan-out record never renders the string "null"', () => {
  *
  * The two fixed here are the two that ALARM. The rest are recorded in the commit
  * message and are passive.
+ *
+ * THAT FILE NO LONGER CONTAINS A NUL BYTE, AND THE SENTENCE ABOVE IS CORRECTED RATHER
+ * THAN DELETED because the sweep numbers depend on it. ~~"plain `rg` reports … as
+ * 'binary file matches' because it contains a NUL byte"~~ — since `7a66127` the
+ * separator is written as the escape `\u0000`, the runtime string is unchanged, and
+ * `experimentGraph.ts` holds ZERO NUL bytes. Re-measured on the pre-fix bytes rather
+ * than repeated from memory (ripgrep 14.1.1): a DIRECTORY sweep — `rg TOKEN dir/`,
+ * which is how the original sweep ran — omitted the file with NO notice and exited 0;
+ * an explicitly NAMED file printed the visible `binary file matches` line instead; and
+ * `rg -c`, `rg --text -c` and `/usr/bin/grep -c` all returned the CORRECT count. So
+ * the silence was the traversal's, not ripgrep's in general, and `grep`'s own silent
+ * variant needs `-I`. The 67/14/15/38 figures above stand: they were produced with
+ * `--text`, which was correct then and is a no-op for this file now.
  */
 describe('a fan-out never states something false', () => {
   it('a SUCCESSFUL fan-out export is not reported as a refusal that wrote nothing', async () => {

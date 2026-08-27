@@ -5272,20 +5272,60 @@ def _load_all_experiments(session_id: str | None = None) -> list[Experiment]:
     return out
 
 
-def _remove_experiment_dir(exp_dir: Path, *, session_id: str | None = None) -> None:
-    """Delete a single experiment directory after proving it is safe.
+def _assert_removable_experiment_dir(
+    exp_dir: Path, *, session_id: str | None = None
+) -> None:
+    """Prove ``exp_dir`` is safe to delete, or raise. Deletes nothing itself.
 
-    Path-safety guard: the target must resolve to a DIRECT child of that SCOPE's
-    root — ``scope_root(session_id)``, never the root itself, never a nested or
-    ``..`` escape, and never a directory belonging to a different scope. Anything
-    else raises rather than deleting.
+    The target must resolve to a DIRECT child of that SCOPE's root —
+    ``scope_root(session_id)``, never the root itself, never a nested or ``..``
+    escape, and never a directory belonging to a different scope.
+
+    WHY THIS IS A SEPARATE FUNCTION FROM THE DELETE IT GUARDS. It used to live
+    inside :func:`_remove_experiment_dir`, which is the LAST step of
+    :func:`discard_experiment` — and the step before it is a durable DELETE that
+    has already committed by the time this ran. Measured over HTTP, with a scope
+    root reached through a symlink: the durable delete committed, this raised, and
+    the caller got an **untyped 500** with the record still readable and still
+    listed. Every retry did the same thing, because the condition is a property of
+    the filesystem and not of the moment — so the ``discard_experiment`` docstring's
+    promise that "re-issuing the discard converges" was true of a transient store
+    failure and false of this one, and nothing distinguished them to a caller.
+
+    A guard that runs after the destruction it guards is not a guard. This one is
+    now ALSO called before the first destructive step, so a directory this refuses
+    is refused while the record is still whole. It stays inside
+    :func:`_remove_experiment_dir` as well: the reset path
+    (:func:`remove_experiment`) reaches that function by its own route, and a guard
+    that only one of two callers performs is the shape this defect had.
+
+    NO ABSOLUTE PATH IN THE MESSAGE. It used to interpolate the fully resolved
+    ``target``, which put an absolute server path into an exception that is logged
+    and, before the fix above, into a 500. ``CLAUDE.md`` forbids that, and
+    ``workspace``'s own logging note is explicit that a message is an exfiltration
+    surface. The name alone is the experiment id, which this module already treats
+    as loggable — and it is taken from the REQUESTED ``exp_dir`` rather than from
+    the resolved target, so a symlink cannot report the name of whatever it points
+    at either.
     """
     root = scope_root(session_id).resolve()
     target = exp_dir.resolve()
     if target == root or target.parent != root:
         raise ValueError(
-            f"refusing to remove {target} — not a direct child of the scope root"
+            f"refusing to remove {exp_dir.name!r} — not a direct child of the "
+            "scope root"
         )
+
+
+def _remove_experiment_dir(exp_dir: Path, *, session_id: str | None = None) -> None:
+    """Delete a single experiment directory after proving it is safe.
+
+    The proof is :func:`_assert_removable_experiment_dir`; see it for what is
+    checked and why the check is also performed earlier by
+    :func:`discard_experiment`.
+    """
+    _assert_removable_experiment_dir(exp_dir, session_id=session_id)
+    target = exp_dir.resolve()
     # Tolerate an already-removed dir: two concurrent resets (e.g. two browser
     # tabs) can each snapshot the same managed-legacy dir, and losing the race to
     # delete it is benign — the dir being gone IS the desired end state. Only this
@@ -5312,6 +5352,73 @@ def remove_experiment(exp: Experiment) -> None:
         )
     _remove_experiment_dir(exp.dir, session_id=exp.session_id)
 
+
+
+def discard_experiment(exp: Experiment) -> dict:
+    """DISCARD one experiment: its durable rows first, then its own directory.
+
+    Returns ``{"durable_rows_removed": int}`` — MEASURED from the server, not
+    asserted. ``0`` is the honest and normal answer on a deployment with no
+    database, and also for a record that was created before the migration reached
+    this deployment.
+
+    THIS IS NOT :func:`remove_experiment`, AND THE TWO MUST NOT BE MERGED. That
+    one exists for the guarded worked-example RESET, and it refuses anything that
+    does not classify ``managed_legacy`` — which every record a scientist creates
+    does not, by construction (:data:`NEW_EXPERIMENT_SOURCE_DESCRIPTION` is
+    deliberately not the demo provenance marker). Its guard is right for the reset
+    and wrong here, and weakening it to admit this operation would widen what a
+    reset may destroy. So this is a second, separately-guarded entry point that
+    shares the one thing worth sharing: :func:`_remove_experiment_dir`, and
+    therefore the direct-child path check against the record's OWN scope root.
+
+    THE AUTHORIZATION IS NARROW AND THIS FUNCTION DOES NOT ENFORCE ALL OF IT. The
+    project owner authorized "explicit Discard semantics for unsubmitted
+    Draft/capture state only", and the checks that establish *unsubmitted* — no
+    revision, no submission, no exported run, no published artifact — live in the
+    route, because they need a database read and an HTTP refusal to report. What
+    is enforced HERE is the one invariant that must not depend on a caller getting
+    the order right: a canonical example record is never discarded.
+
+    THE DURABLE DELETE GOES FIRST, mirroring :meth:`Experiment.save`, and the
+    order is load-bearing in the same way. If the database refuses or is
+    unavailable this raises and the directory is NOT removed, so the record is
+    still there and the reader is told the discard did not happen. The other
+    ordering loses the directory and leaves a durable row that hydration would
+    write straight back — a discard that silently undoes itself at the next pod
+    restart. If the durable delete succeeds and the directory removal then fails,
+    the record is still listed (the filesystem is what reads answer from) and
+    re-issuing the discard converges: the second durable delete removes zero rows
+    and the directory removal is retried.
+
+    SCOPE IS THE GATE, exactly as it is in :meth:`Experiment.save`.
+    :func:`_ordinary_store` returns ``None`` for any record belonging to a
+    worked-example session, so a session record's discard never reaches the
+    database — there is nothing of it there to reach.
+    """
+    if exp.id in CANONICAL_IDS:
+        raise ValueError(
+            f"refusing to discard the canonical example record {exp.id!r}"
+        )
+    # THE PATH-SAFETY GUARD RUNS BEFORE THE FIRST DESTRUCTIVE STEP, NOT AFTER IT.
+    # It used to run only inside `_remove_experiment_dir` — the LAST step below —
+    # so a directory that failed it failed AFTER the durable delete had committed,
+    # leaving the record readable, the rows gone, and every retry refusing
+    # identically. See `_assert_removable_experiment_dir` for the measurement.
+    #
+    # THE CHECK IS DELIBERATELY PERFORMED TWICE. This is not belt-and-braces for its
+    # own sake: `_remove_experiment_dir` is also reached by the reset path, which
+    # never comes through here, so removing it from there would move the hole rather
+    # than close it. Running it twice costs two `resolve()` calls and cannot change
+    # the outcome — the predicate is pure and the second call is the one that
+    # actually gates the `rmtree`.
+    _assert_removable_experiment_dir(exp.dir, session_id=exp.session_id)
+    store = _ordinary_store(exp.session_id)
+    durable_rows_removed = 0
+    if store is not None:
+        durable_rows_removed = store.discard(exp)
+    _remove_experiment_dir(exp.dir, session_id=exp.session_id)
+    return {"durable_rows_removed": durable_rows_removed}
 
 def _canonical_state_counts(session_id: str | None = None) -> dict:
     """Workflow-state distribution over the canonical experiments present IN ONE SCOPE.

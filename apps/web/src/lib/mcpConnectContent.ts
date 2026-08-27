@@ -364,10 +364,42 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     tools: ['isaac_check_run'],
   },
   {
+    /*
+     * TWO OVERCLAIMS, CORRECTED 2026-08-27 AGAINST A MEASURED WALK — and the
+     * shape of the failure is the one worth remembering, not the wording.
+     *
+     * This row read: *"Read the field-by-field trail for a record: each value,
+     * the kind of support behind it, and the source cited."* The BACKEND tool it
+     * describes already said neither half was true, in `mcp/tools.py`'s own
+     * `isaac_inspect_evidence` description — *"A BLOCK-LEVEL entry … carries its
+     * support with `value: null`"* and *"on a record with RUNS this returns the
+     * record's own trail only — each run's evidence is not in it"*. So the
+     * machine-readable contract was corrected and the SCIENTIST-FACING copy was
+     * not, which is the wrong way round: an agent's operator reads this tab, and
+     * the tool description is read by the model.
+     *
+     * Measured through the registry (`isaac_answer_questions` → `isaac_create_run`
+     * → `isaac_answer_questions` at the run level → `isaac_inspect_evidence`):
+     *
+     *     record with NO runs, all three questions answered   ->  3 entries,
+     *                                                             every one `value: null`
+     *     the SAME record once `isaac_create_run` has run,
+     *     the science answered on the run as the API's own
+     *     `409 belongs_to_a_run` REQUIRES                     ->  {"evidence": []}
+     *
+     * The second line is the one that matters. Once a record has runs, answering
+     * at the record level is refused, so the run is the only place the science
+     * can go — and the trail then shows the agent none of what it just wrote.
+     * The run's draft demonstrably holds the confirmations (`block_evidence`
+     * keys `qc:status`, `series:…`); no operation in the allowlist, and no route
+     * in the HTTP API, serves them. `routes.py`'s own comment states this as
+     * "STATED, NOT FIXED"; the gap is the API's, and this row's job is not to
+     * paper over it.
+     */
     id: 'inspect-evidence',
     action: 'Inspect the evidence',
     detail:
-      'Read the field-by-field trail for a record: each value, the kind of support behind it, and the source cited.',
+      'Read the evidence trail for a record: each entry’s official path or block key, the kind of support behind it, and the source cited. Two limits, because this row used to promise more than the tool returns. A block-level entry — a QC verdict, a spectrum, a descriptor set, an attribution or a link — carries no value of its own, so the value has to be read from the record itself. And on a record that has runs, the trail is the record’s own only: each run’s evidence is not in it, so a record whose spectrum, verdict and descriptors were answered on a run — which is where ISAAC requires them once runs exist — reads as an empty trail.',
     tools: ['isaac_inspect_evidence'],
   },
 ];

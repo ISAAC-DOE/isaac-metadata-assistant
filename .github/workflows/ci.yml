@@ -68,12 +68,21 @@ jobs:
           selected = repo.repository()
           assert selected.backend == repo.BACKEND_FILESYSTEM, selected.backend
           assert selected.durable is False
-          assert repo.storage_status() == {
+          # `run_projection` is Stage 2b's per-experiment state distribution. It is
+          # separated from the exact-equality below rather than folded into it: these
+          # steps exist to pin the FOUR durability keys, and a fifth key whose value
+          # legitimately varies with what the last hydration pass classified would make
+          # them brittle about something they do not test. Its own shape is asserted
+          # immediately after, so it is pinned rather than ignored.
+          _status = dict(repo.storage_status())
+          _projection = _status.pop("run_projection", None)
+          assert _status == {
               "configured": False,
               "backend": "filesystem",
               "durable": False,
               "state": repo.STORAGE_STATE_EPHEMERAL,
           }, repo.storage_status()
+          assert sorted(_projection or {}) == ["authoritative", "last_pass"], _projection
           print("no database configured: filesystem repository selected, durability NOT claimed")
           PY
 
@@ -489,13 +498,21 @@ jobs:
           # Durability is still claimed, because it is still true: the experiment
           # rows ARE in the database. Nothing this application does touches the
           # table 0002 has not created yet.
+          # `run_projection` is Stage 2b's per-experiment state distribution. It is
+          # separated from the exact-equality below rather than folded into it: these
+          # steps exist to pin the FOUR durability keys, and a fifth key whose value
+          # legitimately varies with what the last hydration pass classified would make
+          # them brittle about something they do not test. Its own shape is asserted
+          # immediately after, so it is pinned rather than ignored.
           after = client.get("/api/health").json()["experiment_storage"]
-          assert after == {
+          _projection = dict(after).pop("run_projection", None)
+          assert {k: v for k, v in after.items() if k != "run_projection"} == {
               "configured": True,
               "backend": "postgres",
               "durable": True,
               "state": repo.STORAGE_STATE_DURABLE,
           }, after
+          assert sorted(_projection or {}) == ["authoritative", "last_pass"], _projection
           print("0001-only database: create, read, list and RUN SAVES all work with 0002 pending")
           PY
           # AND THE APPLICATION DID NOT CREATE THE TABLE BEHIND THE MIGRATION'S
@@ -595,13 +612,21 @@ jobs:
           app = create_app()
           client = TestClient(app)
 
+          # `run_projection` is Stage 2b's per-experiment state distribution. It is
+          # separated from the exact-equality below rather than folded into it: these
+          # steps exist to pin the FOUR durability keys, and a fifth key whose value
+          # legitimately varies with what the last hydration pass classified would make
+          # them brittle about something they do not test. Its own shape is asserted
+          # immediately after, so it is pinned rather than ignored.
           status = client.get("/api/health").json()["experiment_storage"]
-          assert status == {
+          _projection = dict(status).pop("run_projection", None)
+          assert {k: v for k, v in status.items() if k != "run_projection"} == {
               "configured": True,
               "backend": "postgres",
               "durable": True,
               "state": repo.STORAGE_STATE_DURABLE,
           }, status
+          assert sorted(_projection or {}) == ["authoritative", "last_pass"], _projection
 
           created = client.post("/api/experiments", json={"title": "CI durable"})
           assert created.status_code == 201, created.text
@@ -1050,6 +1075,119 @@ jobs:
             exit 1; }
           echo "parity oracle: $passed scenarios ran against the real engine, none skipped"
           rm -rf /tmp/isaac-pg-parity
+
+      # THE DISCARD DELETES, AGAINST THE REAL ENGINE.
+      #
+      # WHAT ONLY A REAL POSTGRESQL CAN ANSWER HERE. `POST /api/experiments/{id}/discard`
+      # issues the first `DELETE`s this application has ever declared against
+      # `isaac_experiments`, and its whole safety argument rests on a property of the
+      # SERVER rather than of the code: no migration in this repository writes an
+      # `ON DELETE` clause, so `NO ACTION` applies to every foreign key into that
+      # table, and a parent row with children is REFUSED. The in-process double in
+      # `apps/api/tests/test_discard_an_unsubmitted_experiment.py` models that refusal
+      # — which means it proves the application's HANDLING of it and cannot prove the
+      # constraint behaves that way at all. This step is where the engine answers.
+      #
+      # ~~FOUR SCENARIOS~~ FIVE, and the fourth is the control: the three deletes in
+      # dependency order; the same experiment `DELETE` issued FIRST and refused; a
+      # planted history row making the backstop fire with all three tables intact
+      # afterwards; and the same discard succeeding once the planted row is gone, so
+      # the backstop case cannot pass because the discard was broken for an unrelated
+      # reason.
+      #
+      # THE FIFTH WAS ADDED BY AN INDEPENDENT REVIEW, and the reason is a gap the four
+      # above read as covering and did not. TWO foreign keys name `isaac_experiments`
+      # from the history side — `isaac_experiment_revisions_experiment_fk` and
+      # `isaac_submissions_experiment_fk` — and every one of the four plants a
+      # REVISION, so the key protecting a SUBMISSION, which is the artifact this
+      # operation's authorization names FIRST among the things it may not erase, was
+      # proven by nothing on any engine. `CLAUDE.md` §15 independently records
+      # `isaac_submissions_experiment_fk` as one of the five declared constraints the
+      # migration job's own coverage step drives no refusal off either, so it is not
+      # covered elsewhere. The fifth plants a submission whose parent revision belongs
+      # to a DIFFERENT experiment, leaving the target with a submission row and no
+      # revision row, and it is also the first execution
+      # `Q_SUBMISSION_COUNT_FOR_EXPERIMENT` has ever had against a real server.
+      #
+      # IT RUNS HERE AND NOT IN THE PARITY STEP ABOVE, deliberately. That step asserts
+      # an exact `expected_scenarios` count over ONE file and rejects any skip; folding
+      # a second file into it would make one number describe two suites. Same
+      # variables, same throwaway service container, same one-file-by-path discipline.
+      #
+      # 0003 AND 0004 ARE APPLIED BY THIS POINT — "Apply the remaining migration"
+      # above applies every migration — so the two scenarios that skip when the
+      # history tables are absent do not skip here, which is why a skip is an error
+      # below rather than a tolerated outcome.
+      #
+      # NO HOSTED DATABASE IS INVOLVED. This is the same throwaway service container
+      # every other step in this job uses.
+      - name: Run the discard deletes and the FK backstop against the real engine
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-discard
+          ISAAC_RUN_REAL_ENGINE_PARITY: "1"
+          ISAAC_REQUIRE_REAL_ENGINE_PARITY: "1"
+        run: |
+          set -euo pipefail
+          pytest apps/api/tests/test_discard_an_unsubmitted_experiment.py -q -rs \
+            | tee /tmp/discard.log
+          # A SKIP IS NOT A PASS, and pytest exits 0 on a skipped test. Every
+          # scenario in that file runs without an engine EXCEPT the four gated ones,
+          # so the skip count here must be ZERO: a non-zero one means the engine was
+          # not reached and the only assertions this step exists for did not run.
+          skipped=$(grep -Eo '[0-9]+ skipped' /tmp/discard.log | grep -Eo '^[0-9]+' || true)
+          [ -z "$skipped" ] || {
+            echo "::error::$skipped discard test(s) SKIPPED against a real engine."
+            echo "::error::The four real-engine scenarios are the only reason this step exists."
+            exit 1; }
+          # ...AND THE CONVERSE, WHICH THIS STEP WAS MISSING. An independent review
+          # measured the asymmetry: the parity step above asserts BOTH an empty skip
+          # count AND an exact scenario count, and this one asserted only the first.
+          # A skip guard alone cannot see a DELETED scenario — three of the four
+          # real-engine tests could have been removed tomorrow and this step would
+          # still have printed "the real-engine scenarios ran, none skipped" and
+          # passed green, while its own comment says those four are the only reason
+          # it exists. That matters more here than anywhere else in this job: no
+          # container runtime and no PostgreSQL exist on a developer machine, so CI
+          # is the FIRST and ONLY execution those four scenarios ever get.
+          #
+          # THE NUMBER IS THE MEASURED COUNT OF WHAT RUNS IN THIS STEP, which is the
+          # WHOLE FILE — the ones that need no engine plus the 4 that do — because
+          # the engine is present here and nothing in the file is deselected.
+          # Measured:
+          # `pytest apps/api/tests/test_discard_an_unsubmitted_experiment.py -q`
+          # reports `46 passed, 5 skipped` without an engine, and the skip assertion
+          # above already proves those 5 are not skipped here. It is an EQUALITY for
+          # the reason the parity step records at length: a floor tolerates deletion
+          # and drifts silently, while an equality must be updated in the same commit
+          # as any added or removed scenario. If you are reading this because the step
+          # failed after you added one, change the number and say so in the PR.
+          #
+          # 47 -> 51: an independent review added four scenarios, and this line is the
+          # proof that the rule above works as advertised — the review changed the
+          # file and had to change this number in the same breath.
+          # `test_the_503_description_names_BOTH_facts_it_can_report` pins a published
+          # `503` that named one of its two reachable error values;
+          # `test_the_FK_BACKSTOP_is_TWO_direct_keys_and_the_rest_are_TRANSITIVE`
+          # executes a foreign-key count two docstrings had asserted wrongly; and
+          # `test_REAL_ENGINE_a_planted_SUBMISSION_alone_refuses_the_discard` (with its
+          # engine-free shape check) closes the gap that made this step's own claim
+          # narrower than it read — the four original real-engine scenarios plant a
+          # REVISION every time, so `isaac_submissions_experiment_fk`, the key that
+          # protects a submission, was proven by nothing on any engine. It is also
+          # the first real execution `Q_SUBMISSION_COUNT_FOR_EXPERIMENT` has ever had.
+          # THE FIFTH REAL-ENGINE SCENARIO HAS NEVER RUN ANYWHERE EITHER: this host
+          # has no container runtime and no PostgreSQL, so if this step goes red, its
+          # planted `INSERT` is the first thing to read.
+          expected_scenarios=51
+          passed=$(grep -Eo '[0-9]+ passed' /tmp/discard.log | grep -Eo '^[0-9]+' || echo 0)
+          [ "$passed" = "$expected_scenarios" ] || {
+            echo "::error::$passed discard test(s) passed; exactly $expected_scenarios are expected."
+            echo "::error::Fewer means a scenario was deleted — including, possibly, one of the four"
+            echo "::error::real-engine ones this step is the only execution of. More means a scenario"
+            echo "::error::was added without updating \`expected_scenarios\` here. Neither is silent."
+            exit 1; }
+          echo "discard: $passed scenarios ran against the real engine, none skipped"
+          rm -rf /tmp/isaac-pg-discard
 
       # THE SUBMISSION LIFECYCLE, END TO END, AGAINST THE REAL ENGINE.
       #

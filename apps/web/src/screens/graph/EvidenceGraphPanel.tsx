@@ -35,15 +35,21 @@ import {
   type EvidenceGraphRunsMeta,
   type EvidenceGraphViewState,
   type EvidenceNodeKind,
+  type EvidenceSubFetch,
   type RunCheckStore,
   type ViewportBox,
   type ViewportRect,
 } from '../../lib/evidenceGraph';
 import { screenBoundedUnits, type GraphPoint } from '../../lib/graphModel';
+import type { ApiProvenanceResponse } from '../../lib/api';
 import type {
+  ApiAssetsResponse,
+  ApiConflictsResponse,
   ApiEvidenceClassification,
   ApiEvidenceEntry,
   ApiExperimentDetail,
+  ApiNotesResponse,
+  ApiRevisionHistory,
   ApiRunCheckResponse,
   ApiRunView,
 } from '../../lib/types';
@@ -106,6 +112,19 @@ const KIND_SHAPES: Readonly<Record<EvidenceNodeKind, 'circle' | 'square' | 'diam
     evidence_entry: 'square',
     evidence_source: 'square',
     validation_finding: 'diamond',
+    conflict: 'diamond',
+    /*
+     * A DIAMOND, LIKE THE CONFLICT ABOVE IT AND THE FINDING — the shapes here
+     * carry no meaning of their own beyond "these read as one family", and the
+     * thing that distinguishes an UNACCEPTED item is its outline (dashed, in the
+     * stylesheet) plus the sentence on its details pane. A unique silhouette
+     * would be a fourth shape for a reader to learn and would still not tell a
+     * screen-reader user anything.
+     */
+    conflict_candidate: 'diamond',
+    conflict_decision: 'square',
+    note: 'square',
+    asset_reference: 'square',
   });
 
 /** Mark radii in CSS PIXELS — see `screenBoundedUnits`: zoom means "see more". */
@@ -120,6 +139,11 @@ const KIND_RADII: Readonly<Record<EvidenceNodeKind, number>> = Object.freeze({
   evidence_entry: 6.5,
   evidence_source: 6,
   validation_finding: 7.5,
+  conflict: 8.5,
+  conflict_candidate: 6.5,
+  conflict_decision: 7,
+  note: 7,
+  asset_reference: 8,
 });
 
 const LABEL_PX = 11.5;
@@ -172,11 +196,38 @@ const FILTERABLE_KINDS: readonly EvidenceNodeKind[] = [
   'context',
   'measurement',
   'asset',
+  'asset_reference',
   'descriptor',
   'evidence_entry',
   'evidence_source',
   'validation_finding',
+  'conflict',
+  'conflict_candidate',
+  'conflict_decision',
+  'note',
 ];
+
+/**
+ * Kinds whose members are NOT things the record accepts, and which therefore
+ * carry an explicit statement of what they are wherever they are selected.
+ *
+ * The model already puts that sentence on every one of these nodes as a detail
+ * line, so this set does not decide the wording — it decides whether the details
+ * pane leads with it, at the top, before the value. A competing answer that reads
+ * like a value for the two seconds before a reader reaches the fourth row of a
+ * definition list has already misled them.
+ */
+const UNACCEPTED_KINDS: ReadonlySet<EvidenceNodeKind> = new Set<EvidenceNodeKind>([
+  'conflict_candidate',
+  'note',
+]);
+
+/** The one-line statement each unaccepted kind leads with. */
+const UNACCEPTED_LEDE: Readonly<Partial<Record<EvidenceNodeKind, string>>> = Object.freeze({
+  conflict_candidate:
+    'Not a value this record holds. One of several answers the stored citations assert — the record keeps them all and accepts none.',
+  note: 'Not a value, not evidence, not verified. Captured text that has no place in the record yet.',
+});
 
 function domId(prefix: string, id: string): string {
   return `${prefix}-${id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -331,6 +382,22 @@ export interface EvidenceGraphPanelProps {
    * triggers, and which run each one was for.
    */
   onRequestRunCheck: (runId: string) => Promise<ApiRunCheckResponse>;
+
+  /**
+   * The four routes this view reads BESIDES the record bundle, each in whatever
+   * state its own read is in.
+   *
+   * OPTIONAL, and an omitted one is not a failed one — see `EvidenceSubFetch`. A
+   * mount that does not read a source says nothing about it; a mount that reads
+   * one and fails gets a note. They are passed as STATES rather than as data so
+   * this panel keeps performing no I/O of its own, which is what lets a test
+   * assert exactly what a given combination of states draws.
+   */
+  conflicts?: EvidenceSubFetch<ApiConflictsResponse>;
+  notes?: EvidenceSubFetch<ApiNotesResponse>;
+  provenance?: EvidenceSubFetch<ApiProvenanceResponse>;
+  assets?: EvidenceSubFetch<ApiAssetsResponse>;
+  revisions?: EvidenceSubFetch<ApiRevisionHistory>;
 }
 
 export function EvidenceGraphPanel({
@@ -346,6 +413,11 @@ export function EvidenceGraphPanel({
   focusRunId,
   onFocusRun,
   onRequestRunCheck,
+  conflicts,
+  notes,
+  provenance,
+  assets,
+  revisions,
 }: EvidenceGraphPanelProps) {
   const freshnessKey = evidenceGraphFreshnessKey(currentScope, detail.version);
 
@@ -363,7 +435,20 @@ export function EvidenceGraphPanel({
   const result = useMemo(
     () =>
       buildEvidenceGraph(
-        { detail, runs, runsMeta, evidence, classification, checks, focusRunId },
+        {
+          detail,
+          runs,
+          runsMeta,
+          evidence,
+          classification,
+          checks,
+          focusRunId,
+          conflicts,
+          notes,
+          provenance,
+          assets,
+          revisions,
+        },
         { readIn: readInScope, current: currentScope },
       ),
     [
@@ -376,6 +461,11 @@ export function EvidenceGraphPanel({
       focusRunId,
       readInScope,
       currentScope,
+      conflicts,
+      notes,
+      provenance,
+      assets,
+      revisions,
     ],
   );
 
@@ -1271,6 +1361,21 @@ function NodeDetail({
       </p>
       <h3 className="evgraph-detail-title">{node.label}</h3>
 
+      {/*
+        WHAT THIS IS, BEFORE WHAT IT SAYS. A competing answer and a captured note
+        both look like content, and the model already states on each node that
+        the record accepts neither — but as one row among a dozen in a definition
+        list further down. This puts the statement where a reader meets it first,
+        in text (so it reaches the accessible name of nothing and the reading
+        order of everything), matched by the dashed outline the stylesheet gives
+        these two kinds on both the canvas and the tree.
+      */}
+      {UNACCEPTED_KINDS.has(node.kind) && UNACCEPTED_LEDE[node.kind] && (
+        <p className="evgraph-detail-unaccepted" role="note">
+          {UNACCEPTED_LEDE[node.kind]}
+        </p>
+      )}
+
       <p className="evgraph-detail-producer">
         <span className="evgraph-detail-producer-term">Where this came from</span>
         <span className="evgraph-detail-producer-value">{node.producer}</span>
@@ -1390,6 +1495,29 @@ function NodeDetail({
           effect: <code>created_utc</code> orders records in time, which is not causation. No
           similarity is computed, and no scientific interpretation of any value is drawn,
           because nothing in this application computes one.
+        </p>
+        {/*
+          THE EXPANSION GREW WITH THE VOCABULARY. Five kinds of node and five
+          kinds of relationship were added when this view began reading the
+          conflicts, notes, provenance and asset routes, and each of them brings
+          a line somebody could reasonably expect to see drawn. The sentence
+          above is unchanged — it is rendered from the exported constant and
+          cannot be paraphrased — and this paragraph names what the new
+          vocabulary specifically does not assert.
+        */}
+        <p>
+          A <strong>competing answer is not chosen</strong> by anything here, and no line
+          marks one as the one a decision picked: matching a recorded decision’s value back
+          to an answer would need this application to reproduce the server’s own
+          canonicalisation, which is a second definition of “the same value”. A{' '}
+          <strong>note is placed only where a person placed it</strong> — a deterministic
+          proposal is shown as a proposal and never drawn as a line, because on a diagram a
+          line reads as a fact. No relationship is drawn from a value’s <em>origin</em>:
+          where a value came from is shown on the node that owns the address, and it is
+          never joined to another node, because two values sharing an origin are not
+          related by it. And <strong>no earlier revision is drawn at all</strong> — this is
+          the record as it is now, and a superseded value shown beside a current one would
+          read as one the record still holds.
         </p>
         <p className="evgraph-legend-kinds">
           {EVIDENCE_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}

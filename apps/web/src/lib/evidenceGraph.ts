@@ -77,6 +77,44 @@
  * Step 6 therefore reads the count off the SERVER's `ApiEvidenceEntry` and refuses
  * the edge whenever anything at all was dropped.
  *
+ * ── The FIVE routes beyond the record bundle ────────────────────────────────
+ *
+ * ~~"The four routes beyond the record bundle"~~ — CORRECTED. There are FIVE, and the
+ * heading contradicted the sentence below it, which listed five. It is also a
+ * READ-COST claim, which is why the count is not cosmetic: **a graph mount costs five
+ * network reads beyond the bundle**, not four. `readSubFetch` is called five times in
+ * `buildEvidenceGraph`, and `EvidenceExplorer` fires five `useVersionedSubFetch`
+ * reads. Counted, not asserted: `rg -c 'readSubFetch\(' lib/evidenceGraph.ts`.
+ *
+ * This module read the bundle (detail, runs, evidence trail, classification, run
+ * checks) and nothing else, and five routes the record screens ALREADY call went
+ * unread — so the graph could not answer "which conflict was decided, and does the
+ * decision still hold?", "what has been written down that has no place yet?",
+ * "where did this value come from?", "which asset is referenced, and does it
+ * reach any exported record?" or "is the content drawn here on record as a
+ * revision?". They are now inputs: `GET .../conflicts`, `GET .../notes`,
+ * `GET .../provenance`, `GET .../assets` and `GET .../revisions` — the last for
+ * exactly one question. **No backend route was added**, and each of the five is
+ * already served to a record screen (`revisions` to `RevisionHistoryPanel`).
+ *
+ * Four things about them that are design rather than convenience:
+ *
+ *   · EACH IS OPTIONAL AND EACH IS A STATE, not data — see {@link EvidenceSubFetch}.
+ *     "not read yet", "could not be read" and "this mount does not read it" are
+ *     three different facts and only the middle one is a failure.
+ *   · EACH IS BOUNDED BY ITS OWN CONSTANT and says what it withheld. The global
+ *     node cap is shared, so leaning on it alone would let a record with 900 notes
+ *     displace the runs a reader came for, under a note that named neither.
+ *   · EACH IS COMPARED AGAINST THE RECORD'S VERSION using the token IT publishes —
+ *     `subFetchFreshness`, the same version-token discipline as the key below, not
+ *     a second mechanism.
+ *   · PROVENANCE AND REVISIONS MINT NO NODES. The first describes addresses this
+ *     view already draws, so it adds lines to the node that owns each one; the
+ *     second is read for a sentence about whether the drawn content is on record,
+ *     and NO historical revision is drawn at all. A superseded value drawn beside a
+ *     current one, in a picture whose grammar is "these things are related", reads
+ *     as something the record still holds.
+ *
  * ── Freshness ───────────────────────────────────────────────────────────────
  *
  * The graph itself holds NO cache: it is a pure function of the data handed to it,
@@ -91,15 +129,32 @@
  * Pure by construction: no React, no fetch, no DOM, no clock, no randomness.
  */
 import type {
+  ApiAsset,
+  ApiAssetsResponse,
+  ApiConflict,
+  ApiConflictCandidate,
+  ApiConflictResolution,
+  ApiConflictsResponse,
   ApiEvidenceClassification,
   ApiEvidenceEntry,
   ApiExperimentDetail,
   ApiMemoryGraphEdge,
+  ApiNote,
+  ApiNotesResponse,
+  ApiResolutionWithoutConflict,
+  ApiRevisionHistory,
   ApiRunCheckFinding,
   ApiRunCheckResponse,
   ApiRunView,
   FieldEvidence,
 } from './types';
+import type { ApiProvenanceResponse } from './api';
+import {
+  ORIGIN_LABEL,
+  REVIEW_STATE_LABEL,
+  type ProvenanceOrigin,
+  type ProvenanceReviewState,
+} from './provenance';
 import {
   MAX_SCALE,
   MIN_SCALE,
@@ -161,6 +216,49 @@ export const MAX_VISIBLE_EVIDENCE_NODES = 200;
 /** Bound on the in-graph search result list. An unbounded list is not a result. */
 export const MAX_EVIDENCE_SEARCH_RESULTS = 12;
 
+/*
+ * ── Per-source bounds, and why each source needs its OWN one ────────────────
+ *
+ * `MAX_EVIDENCE_GRAPH_NODES` bounds the graph. It does NOT bound a source, and
+ * relying on it alone would be a silent truncation with a misleading name: an
+ * experiment carrying 900 notes would fill the cap with notes, the `node_cap`
+ * note would say "more than 1200 nodes", and the runs a reader came for would
+ * simply be missing with no sentence saying which source displaced them.
+ *
+ * So each unbounded route gets a bound of its own, is truncated in a
+ * DETERMINISTIC order (never "whatever arrived first"), and says what it withheld
+ * through the `source_bounded` note. `GET /notes`, `GET /conflicts` and
+ * `GET /assets` take no `limit` parameter, so the bound is applied here, on what
+ * is DRAWN — the payload cost was already paid by the record screens that read
+ * the same routes (`api.ts`: no backend route was added for this surface).
+ */
+
+/**
+ * Bound on `conflict` nodes drawn. Ordered by address, so the cut is stable.
+ *
+ * ALSO the bound on `resolutions_without_conflict[]` — the second unbounded array
+ * in the same response. See {@link addOrphanDecisions}: they come from one route,
+ * they are the same family of thing, and each withholding is disclosed under its
+ * own clause of the `source_bounded` note.
+ */
+export const MAX_GRAPH_CONFLICTS = 40;
+
+/**
+ * Bound on `conflict_candidate` nodes under ONE conflict.
+ *
+ * Deliberately small. A disagreement between more than a handful of answers is
+ * not read one candidate at a time, and `distinct_value_count` is on the conflict
+ * node either way — so the reader is never told there are six when there are
+ * sixty.
+ */
+export const MAX_CONFLICT_CANDIDATES = 6;
+
+/** Bound on `note` nodes drawn. Ordered by capture time, then id. */
+export const MAX_GRAPH_NOTES = 50;
+
+/** Bound on `asset_reference` nodes drawn. Ordered by asset id. */
+export const MAX_GRAPH_ASSET_REFS = 60;
+
 // ------------------------------------------------------- closed vocabularies
 
 /**
@@ -178,6 +276,17 @@ export const EVIDENCE_NODE_KINDS = [
   'evidence_entry',
   'evidence_source',
   'validation_finding',
+  /*
+   * The five kinds added when this view stopped reading only the evidence trail.
+   * Each names a thing a SCIENTIST recognises, and each has exactly one route
+   * behind it — see `NODE_PRODUCERS`. None of them is a schema concept and none
+   * of them is a repository concept.
+   */
+  'conflict',
+  'conflict_candidate',
+  'conflict_decision',
+  'note',
+  'asset_reference',
 ] as const;
 
 export type EvidenceNodeKind = (typeof EVIDENCE_NODE_KINDS)[number];
@@ -198,6 +307,20 @@ export const EVIDENCE_EDGE_KINDS = [
   'derived_from',
   'validated_by',
   'conflicts_with',
+  /*
+   * `conflicts_with` joins TWO EVIDENCE ENTRIES and says they disagree; it is
+   * emitted under the two conditions step 6 states and nothing here relaxes them.
+   * `has_conflict` is a different statement entirely — it joins an ADDRESS to the
+   * server's own record OF the disagreement, which exists whether or not the pair
+   * can be named. The two coexist deliberately: one is a pair, the other is a
+   * subject, and collapsing them would let a `> 2`-entry conflict either vanish or
+   * acquire an invented pair.
+   */
+  'has_conflict',
+  'competing_value',
+  'has_decision',
+  'has_note',
+  'mapped_to',
 ] as const;
 
 export type EvidenceEdgeKind = (typeof EVIDENCE_EDGE_KINDS)[number];
@@ -259,6 +382,30 @@ export const NODE_PRODUCERS: Readonly<Record<EvidenceNodeKind, string>> = Object
    */
   validation_finding:
     'one finding of the run check (POST /api/experiments/{id}/runs/{runId}/check) — its `blockers`, `draft.errors` and `official.errors` lists',
+  conflict:
+    'one element of conflicts[] (GET /api/experiments/{id}/conflicts) — an address whose stored evidence asserts incompatible values',
+  /*
+   * A CANDIDATE IS NOT A VALUE THE RECORD HOLDS. `conflicts[].candidates[]` groups
+   * the competing answers BY VALUE, each with the citations asserting it; the
+   * record stores all of them and accepts none. Nothing in this module marks one as
+   * chosen — see `candidateDecidedLine`, which compares only the SERVER's two
+   * canonical strings and never canonicalises anything itself.
+   */
+  conflict_candidate:
+    'one element of conflicts[].candidates[] (GET /api/experiments/{id}/conflicts) — one competing answer, with the citations that assert it',
+  /*
+   * ONE PRODUCER FOR TWO FIELDS, because they are the same act recorded in two
+   * places: `conflicts[].resolution` is a decision whose address still conflicts,
+   * and `resolutions_without_conflict[]` is a decision whose address no longer
+   * does. `Builder.addNode` tests a node producer for EQUALITY (a kind has one),
+   * so naming both fields in the one string is what keeps the answer to "where did
+   * this come from?" true on both arms rather than true on the commoner one.
+   */
+  conflict_decision:
+    'a recorded decision — conflicts[].resolution or resolutions_without_conflict[] (GET /api/experiments/{id}/conflicts)',
+  note: 'one element of notes[] (GET /api/experiments/{id}/notes) — captured text with no schema home yet',
+  asset_reference:
+    "one element of assets[] (GET /api/experiments/{id}/assets) — this record's asset library",
 });
 
 /**
@@ -278,7 +425,11 @@ export const EDGE_PRODUCERS: Readonly<Record<EvidenceEdgeKind, readonly string[]
   measured_under: ['a measurement.* / series* / qc* address present on this owner'],
   has_context: ['a context.* address present on this owner'],
   has_descriptor: ['a descriptors* address present on this owner'],
-  references: ['an assets* address present on this owner'],
+  references: [
+    'an assets* address present on this owner',
+    "this record's asset library (GET /api/experiments/{id}/assets)",
+    'assets[].used_by_runs (GET /api/experiments/{id}/assets)',
+  ],
   supported_by: ['a stored evidence entry recorded at an address in this group'],
   derived_from: [
     'the source recorded on this evidence entry (source_file / rule / user confirmation)',
@@ -287,6 +438,32 @@ export const EDGE_PRODUCERS: Readonly<Record<EvidenceEdgeKind, readonly string[]
   validated_by: ['a finding of the run check (POST .../runs/{runId}/check)'],
   conflicts_with: [
     "the server's evidence-support classification `conflicting_evidence` at an address carrying exactly two entries",
+  ],
+  has_conflict: [
+    'one element of conflicts[] at this address (GET /api/experiments/{id}/conflicts)',
+  ],
+  competing_value: [
+    'one element of conflicts[].candidates[] at this address (GET /api/experiments/{id}/conflicts)',
+  ],
+  has_decision: [
+    'conflicts[].resolution — the recorded decision at this address (GET /api/experiments/{id}/conflicts)',
+    'one element of resolutions_without_conflict[] (GET /api/experiments/{id}/conflicts)',
+  ],
+  has_note: [
+    'notes[].run_id names this run (GET /api/experiments/{id}/notes)',
+    'notes[] carrying no run_id (GET /api/experiments/{id}/notes)',
+  ],
+  /*
+   * `mapped_field_path` ONLY, and `candidate_field_path` DELIBERATELY NOT. The
+   * first is a path a PERSON named; the second is what something deterministic
+   * PROPOSED, and `notes.py` keeps the two apart precisely so a suggestion is
+   * never indistinguishable from a decision. Drawing a line for a proposal nobody
+   * has accepted would undo that here, in the one representation where a line
+   * reads as a fact. The proposal is shown on the note's own details instead,
+   * labelled as a proposal.
+   */
+  mapped_to: [
+    'notes[].mapped_field_path — the path a person named (GET /api/experiments/{id}/notes)',
   ],
 });
 
@@ -302,6 +479,13 @@ export const NODE_KIND_LABELS: Readonly<Record<EvidenceNodeKind, string>> = Obje
   evidence_entry: 'Evidence Entry',
   evidence_source: 'Evidence Source',
   validation_finding: 'Validation Finding',
+  conflict: 'Conflict',
+  // "Competing answer", not "candidate value": the second reads as a value the
+  // record is holding, and the record holds all of them and accepts none.
+  conflict_candidate: 'Competing Answer',
+  conflict_decision: 'Conflict Decision',
+  note: 'Unmapped Note',
+  asset_reference: 'Asset Reference',
 });
 
 /** Product-facing name for each edge kind, for the legend and the details pane. */
@@ -316,6 +500,11 @@ export const EDGE_KIND_LABELS: Readonly<Record<EvidenceEdgeKind, string>> = Obje
   derived_from: 'derived from',
   validated_by: 'validated by',
   conflicts_with: 'conflicts with',
+  has_conflict: 'has conflict',
+  competing_value: 'competing answer',
+  has_decision: 'decided by',
+  has_note: 'has note',
+  mapped_to: 'placed at',
 });
 
 /** The containment edge kind for each grouped child — one map, no second copy. */
@@ -387,7 +576,27 @@ export type EvidenceGraphNoteKind =
   | 'checks_on_demand'
   | 'focus_run_unknown'
   | 'node_cap'
-  | 'visible_cap';
+  | 'visible_cap'
+  /*
+   * The four sub-fetch note kinds are COMPOSED — one note listing every source in
+   * that condition — rather than one kind per source.
+   *
+   * `Builder.note` keeps the FIRST text per kind, so a `conflicts_stale` and a
+   * `notes_stale` kind would have produced two notes whose survival order a reader
+   * cannot see, and eleven kinds where four say the same thing. Each of these
+   * gathers across sources and emits once, at the end, naming every source it
+   * covers. That is the same shape `unmodelled_addresses` already uses.
+   */
+  | 'sub_fetch_unavailable'
+  | 'sub_fetch_stale'
+  | 'unreadable_entries'
+  | 'source_bounded'
+  /** Conflicts are read at RECORD scope only. `?run=` is a per-run request. */
+  | 'conflicts_record_scope'
+  /** `provenance.blocks_not_described` — what the route itself did not describe. */
+  | 'provenance_undescribed'
+  /** Whether the drawn content is on record as a revision. Never history drawn. */
+  | 'revision_state';
 
 export interface EvidenceGraphNote {
   kind: EvidenceGraphNoteKind;
@@ -453,6 +662,25 @@ export interface EvidenceGraphRunsMeta {
   offset: number;
 }
 
+/**
+ * ONE SUB-FETCH, IN ONE OF ITS FOUR STATES — and the fourth is `undefined`.
+ *
+ * The three members below are the states a reader can be in once a mount has
+ * decided to read a source. `undefined` — the field simply absent from
+ * {@link EvidenceGraphInput} — is the FOURTH and is a different fact: this mount
+ * does not read that source at all, so there is nothing to report about it and no
+ * note is emitted. A mount that reads a source and fails says so; a mount that
+ * never asked says nothing, because "could not be read" would be false.
+ *
+ * `loading` and `error` are kept apart for the reason the run-check states are:
+ * "not read yet" and "could not be read" are different, and only one of them is
+ * worth a reader's attention.
+ */
+export type EvidenceSubFetch<T> =
+  | { state: 'loading' }
+  | { state: 'error'; message: string }
+  | { state: 'data'; data: T };
+
 export interface EvidenceGraphInput {
   detail: ApiExperimentDetail;
   /** The runs actually LOADED — a bounded page, never "all runs". */
@@ -466,6 +694,31 @@ export interface EvidenceGraphInput {
   checks: Record<string, ApiRunCheckResponse>;
   /** The `?run=` focus, if any. An id naming no loaded run is stated, not guessed. */
   focusRunId?: string | null;
+
+  // ── the FIVE routes this view reads BESIDES the bundle ───────────────────
+  //
+  // ~~"the four routes"~~ — corrected; the five fields below are the enumeration.
+  // Every one is optional, and the absence of one is not a failure — see
+  // `EvidenceSubFetch`. Each response carries its own version token, and the
+  // builder compares it with the record's rather than assuming they agree; see
+  // `SUB_FETCH_SOURCES`.
+
+  /** `GET /api/experiments/{id}/conflicts` — RECORD scope. See `conflicts_record_scope`. */
+  conflicts?: EvidenceSubFetch<ApiConflictsResponse>;
+  /** `GET /api/experiments/{id}/notes`. */
+  notes?: EvidenceSubFetch<ApiNotesResponse>;
+  /** `GET /api/experiments/{id}/provenance` — RECORD scope. */
+  provenance?: EvidenceSubFetch<ApiProvenanceResponse>;
+  /** `GET /api/experiments/{id}/assets` — the asset LIBRARY, not the addresses. */
+  assets?: EvidenceSubFetch<ApiAssetsResponse>;
+  /**
+   * `GET /api/experiments/{id}/revisions`.
+   *
+   * Read for ONE question — is the content drawn here on record as a revision? —
+   * and for nothing else. No historical revision is drawn as a node; see
+   * `applyRevisions` for why.
+   */
+  revisions?: EvidenceSubFetch<ApiRevisionHistory>;
 }
 
 /**
@@ -500,6 +753,51 @@ export function evidenceGraphFreshnessKey(
   experimentVersion: string,
 ): string {
   return `${scope ?? ''}|${experimentVersion}`;
+}
+
+/**
+ * THE SAME MECHANISM, APPLIED TO A SUB-FETCH — a version TOKEN comparison, never
+ * a timestamp, a counter or a boolean "loaded".
+ *
+ * {@link evidenceGraphFreshnessKey} answers "is anything CACHED here describing a
+ * record that has moved?" for the one thing that is cached. This answers the
+ * neighbouring question for the four things that are FETCHED SEPARATELY: each of
+ * those routes reads the record at whatever version it happens to hold, and each
+ * one publishes the token it read. So the comparison is against the token the
+ * RESPONSE carries, not against when the request went out — a re-read that
+ * arrives late but reads the current version is fresh, and a re-read that lands
+ * instantly on an older replica is not.
+ *
+ * `null` is `unknown`, not `fresh`, and that asymmetry is the whole point: a
+ * response that publishes no token cannot be said to agree with the record, and
+ * `fresh` is the one answer that must be earned.
+ */
+export type SubFetchFreshness = 'fresh' | 'stale' | 'unknown';
+
+/**
+ * The `record_rev` token, as a STRING or as `null` — never as the string
+ * `"undefined"`.
+ *
+ * Two of the five sub-fetches publish a NUMBER (`record_rev`) rather than the
+ * `"<generation>.<rev>"` string, so the number has to be rendered before
+ * {@link subFetchFreshness} can compare it. Rendering it with a bare `String()`
+ * is what silently defeated the guarantee that function's own doc calls "the
+ * whole point": `String(undefined)` is `"undefined"`, which is a non-empty
+ * string, so a record and a response that BOTH publish no rev compared EQUAL and
+ * the response was drawn as `fresh` — the one answer that must be earned. A
+ * missing token now returns `null` and reaches the `unknown` arm, which discloses.
+ */
+function revToken(rev: unknown): string | null {
+  return typeof rev === 'number' && Number.isFinite(rev) ? String(rev) : null;
+}
+
+export function subFetchFreshness(
+  expected: string | null | undefined,
+  reported: string | null | undefined,
+): SubFetchFreshness {
+  if (typeof expected !== 'string' || expected === '') return 'unknown';
+  if (typeof reported !== 'string' || reported === '') return 'unknown';
+  return expected === reported ? 'fresh' : 'stale';
 }
 
 /**
@@ -655,6 +953,27 @@ export const nodeIds = {
     `source:confirmation:${question}#${timestamp}`,
   finding: (runId: string, origin: string, index: number) =>
     `finding:${runId}:${origin}#${index}`,
+  /*
+   * SCOPED BY RUN, not by address alone. `GET .../conflicts` answers about the
+   * RECORD's own fields or about ONE run's, and the same address can conflict in
+   * both — so an id built from the address alone would merge two different
+   * disagreements into one node, silently, the first time anything passes
+   * run-scoped conflicts in. This view asks at record scope today; the id does not
+   * depend on that staying true.
+   */
+  conflict: (runId: string | null, address: string) => `conflict:${runId ?? ''}#${address}`,
+  /*
+   * Built FROM the conflict's own id, so the scoping above cannot be forgotten
+   * here, and keyed on the SERVER's `canonical` — the exact string its conflict
+   * rule compares, so two candidates are the same node precisely when the server
+   * says they are the same answer. Keying on array position would make a node's
+   * identity depend on how the response happened to be ordered.
+   */
+  conflictCandidate: (conflictNodeId: string, canonical: string) =>
+    `${conflictNodeId}#answer#${canonical}`,
+  decision: (resolutionId: string) => `decision:${resolutionId}`,
+  note: (noteId: string) => `note:${noteId}`,
+  assetReference: (assetId: string) => `asset-ref:${assetId}`,
 } as const;
 
 // ------------------------------------------------------------------ narrowing
@@ -758,6 +1077,1074 @@ function evidenceDetailLines(ev: FieldEvidence, address: string): EvidenceGraphD
   if (ev.answer) lines.push({ term: 'Your answer', value: ev.answer });
   if (ev.timestamp) lines.push({ term: 'Confirmed', value: ev.timestamp });
   return lines;
+}
+
+// ------------------------------------------- the FIVE routes beyond the bundle
+
+/**
+ * The product word for an origin the SERVER named, or the raw string.
+ *
+ * A LOOKUP, NEVER AN ENUMERATION, and the difference is a project rule rather
+ * than a nicety. `provenance.py:86-94` records that `assistant` is a member of the
+ * dimension that **nothing in this build produces**, and that no surface may list
+ * it as an available capability. A lookup renders it if and only if a response
+ * carries it; a static list of origins in a legend would advertise it. This module
+ * therefore has no origin legend, no origin filter and no origin chip inventory —
+ * an origin reaches the screen only attached to an address that reported it.
+ */
+function originLabel(origin: string): string {
+  return ORIGIN_LABEL[origin as ProvenanceOrigin] ?? origin;
+}
+
+function reviewStateLabel(state: string): string {
+  return REVIEW_STATE_LABEL[state as ProvenanceReviewState] ?? state;
+}
+
+/** Everything the extra sources need in order to hang nodes off the right owner. */
+interface ExtraSourceContext {
+  rootId: string;
+  /** The group node for an address under one owner, or undefined. */
+  groupNodeFor: (ownerId: string, address: string) => string | undefined;
+  /** Loaded runs only. A run beyond the bounded page is absent, and is SAID to be. */
+  runNodeByRunId: Map<string, string>;
+  runLabelByRunId: Map<string, string>;
+  /** Accumulators the four composed notes are built from, at the very end. */
+  ledger: SubFetchLedger;
+}
+
+/**
+ * What the composed sub-fetch notes are built out of.
+ *
+ * Gathered across every source and emitted ONCE each, for the reason
+ * {@link EvidenceGraphNoteKind} states: one kind per source would give four kinds
+ * saying the same thing and let `Builder.note`'s first-wins rule decide, by
+ * iteration order, which source a reader is told about.
+ */
+interface SubFetchLedger {
+  loading: string[];
+  failed: { source: string; message: string }[];
+  stale: { source: string; expected: string; reported: string }[];
+  unknownFreshness: string[];
+  unreadable: { source: string; count: number }[];
+  bounded: string[];
+}
+
+function emptyLedger(): SubFetchLedger {
+  return {
+    loading: [],
+    failed: [],
+    stale: [],
+    unknownFreshness: [],
+    unreadable: [],
+    bounded: [],
+  };
+}
+
+/**
+ * Read one sub-fetch, recording its state, and return its data WITH the freshness
+ * verdict that was reached about it — or `null`.
+ *
+ * `undefined` returns `null` and records NOTHING — a mount that does not read a
+ * source has nothing to report about it. Every other state is recorded before the
+ * data is returned, so a source can be simultaneously usable and disclosed as
+ * stale rather than being either trusted or dropped.
+ *
+ * THE VERDICT IS RETURNED, NOT ONLY LEDGERED, and that is a correction rather than
+ * a convenience. Ledgering it alone makes staleness a GRAPH-LEVEL note, which is
+ * the right place for "what those sources contributed describes a different read"
+ * — but it leaves a consumer free to make a POSITIVE claim out of stale content
+ * with no way to know it should not. `applyRevisions` did exactly that: it
+ * compared a `current_content_signature` taken at an older read against the
+ * content drawn now and announced "that content is on record as revision N of M",
+ * a certification the comparison cannot support across two versions. A consumer
+ * that certifies must be able to see the verdict; one that merely reports numbers
+ * need not, and the ledger note still covers it.
+ */
+function readSubFetch<T>(
+  sourceLabel: string,
+  fetched: EvidenceSubFetch<T> | undefined,
+  ledger: SubFetchLedger,
+  freshness: {
+    /**
+     * `null` when the RECORD publishes no token to compare against — which is a
+     * different fact from a mismatch and must reach {@link subFetchFreshness} as
+     * one. Typing this `string` and stringifying at the call site is how the
+     * `null` is `unknown`, never `fresh` guarantee was defeated for the two
+     * `record_rev` sources: `String(undefined)` is the non-empty `"undefined"`,
+     * and two of them compare EQUAL, so a pair of missing tokens read as `fresh`.
+     */
+    expected: string | null;
+    reported: (data: T) => string | null | undefined;
+  },
+): { data: T; freshness: SubFetchFreshness } | null {
+  if (fetched === undefined) return null;
+  if (fetched.state === 'loading') {
+    ledger.loading.push(sourceLabel);
+    return null;
+  }
+  if (fetched.state === 'error') {
+    ledger.failed.push({ source: sourceLabel, message: fetched.message });
+    return null;
+  }
+  const reported = freshness.reported(fetched.data);
+  const verdict = subFetchFreshness(freshness.expected, reported);
+  if (verdict === 'stale') {
+    // `stale` is reachable only when BOTH are non-empty strings, so neither cast
+    // below can print `null` or `undefined` at a reader.
+    ledger.stale.push({
+      source: sourceLabel,
+      expected: String(freshness.expected),
+      reported: String(reported),
+    });
+  } else if (verdict === 'unknown') {
+    ledger.unknownFreshness.push(sourceLabel);
+  }
+  return { data: fetched.data, freshness: verdict };
+}
+
+/** The decision's own words for what state it is in. Never a colour, never a verdict. */
+function decisionStateSentence(state: string, outcome: string): string {
+  if (outcome === 'deferred') {
+    return 'Somebody looked at this disagreement and deliberately did not choose. The conflict stands.';
+  }
+  if (state === 'current') {
+    return 'Somebody chose, and the answers they chose between are still the answers recorded here.';
+  }
+  if (state === 'stale') {
+    return 'Somebody chose, and MORE competing evidence has been recorded since. The decision was made over a different set of answers, so it no longer covers this disagreement — it is kept and shown rather than deleted, and the address is conflicting again.';
+  }
+  return `The server reports this decision's state as \`${state}\`.`;
+}
+
+function decisionLabel(outcome: string, state: string): string {
+  if (outcome === 'deferred') return 'Deferred — nobody chose';
+  if (state === 'stale') return 'Decision — superseded';
+  if (state === 'current') return 'Decision — current';
+  return `Decision — ${state}`;
+}
+
+function decisionDetailLines(
+  resolution: ApiConflictResolution,
+): EvidenceGraphDetailLine[] {
+  const lines: EvidenceGraphDetailLine[] = [
+    { term: 'Address', value: resolution.address },
+    { term: 'Outcome', value: resolution.outcome },
+    { term: 'Decision state', value: resolution.state },
+    { term: 'What that means', value: decisionStateSentence(resolution.state, resolution.outcome) },
+  ];
+  if (resolution.outcome === 'resolved') {
+    const chosen = valueText(resolution.chosen_value);
+    lines.push({
+      term: 'Value stood behind',
+      value: chosen ?? 'the stored decision records no readable value',
+    });
+    lines.push({
+      term: 'Chosen from',
+      value:
+        resolution.chosen_from === 'edited'
+          ? 'a value none of the recorded citations asserts — the person entered it'
+          : resolution.chosen_from === 'candidate'
+            ? 'one of the recorded competing answers'
+            : 'the stored decision does not say',
+    });
+  }
+  lines.push({
+    term: 'Competing answers at the time',
+    value: String(resolution.competing_values.length),
+  });
+  if (resolution.rationale) lines.push({ term: 'Reason given', value: resolution.rationale });
+  lines.push({ term: 'Recorded', value: resolution.recorded_utc });
+  /*
+   * WHO, INCLUDING HONESTLY NOBODY. `subject` is null whenever no trusted
+   * boundary established one, and `trust_basis` says what the attribution is
+   * WORTH — a basis of `test_fixture` is a real shipped basis and is not proof
+   * anybody authenticated. Substituting a placeholder name here is exactly the
+   * invention the backend refuses by pairing the two fields.
+   */
+  lines.push({
+    term: 'Who is on record',
+    value: resolution.subject
+      ? `${resolution.subject} (trust basis: ${resolution.trust_basis})`
+      : `nobody — no trusted identity was established (trust basis: ${resolution.trust_basis})`,
+  });
+  lines.push({ term: 'Times revised', value: String(Math.max(0, resolution.history.length - 1)) });
+  /*
+   * THE ONE THING A READER MUST NOT INFER, stated rather than left to the shape.
+   * The backend serialises `is_field_value` and `is_evidence` as the literal
+   * `false` precisely so this guarantee survives the boundary; a graph node that
+   * showed the chosen value without this line would read as the field's value.
+   */
+  lines.push({
+    term: 'Not the value, not a citation',
+    value:
+      'Recording a decision changes no scientific content. This is not the field’s value and not an evidence entry — the competing citations are all still stored, exactly as they were.',
+  });
+  return lines;
+}
+
+/**
+ * Was this competing answer among the ones the decision was made over?
+ *
+ * BOTH SIDES OF THIS COMPARISON ARE THE SERVER'S OWN CANONICAL STRINGS — the
+ * candidate's `canonical` and the resolution's `competing_values`, produced by the
+ * same function on the same side of the wire. Nothing here canonicalises anything,
+ * which is the trap `api.resolveConflict` records: reproducing the server's
+ * `json.dumps(..., sort_keys=True, default=str)` in TypeScript is a second
+ * definition of "the same value", and JS and Python already disagree about
+ * container separators and non-ASCII escaping.
+ *
+ * `chosen_value` is deliberately NOT compared, because it is the raw value and
+ * matching it to a candidate WOULD need that canonicalisation. So no candidate is
+ * ever marked "this is the one that was chosen"; the chosen value is stated on the
+ * decision node, where it needs no matching.
+ */
+function candidateDecidedLine(
+  candidate: ApiConflictCandidate,
+  resolution: ApiConflictResolution | null,
+): EvidenceGraphDetailLine | null {
+  if (!resolution) return null;
+  return resolution.competing_values.includes(candidate.canonical)
+    ? {
+        term: 'Present when the decision was made',
+        value:
+          'Yes — this answer was among the ones the recorded decision was made over.',
+      }
+    : {
+        term: 'Present when the decision was made',
+        value:
+          'No — this answer was recorded AFTER the decision, which is why that decision no longer covers this disagreement.',
+      };
+}
+
+/**
+ * Conflicts, decisions and competing answers, from `GET .../conflicts`.
+ *
+ * The classification-derived `conflicts_with` edge of step 6 is untouched and
+ * still governs when a PAIR may be named. This adds the SUBJECT of the
+ * disagreement, which exists whether or not a pair can be named — and, for the
+ * first time, the recorded human decision about it.
+ */
+function addConflicts(
+  b: Builder,
+  ctx: ExtraSourceContext,
+  res: ApiConflictsResponse,
+): void {
+  if (res.unreadable_resolution_entries > 0) {
+    ctx.ledger.unreadable.push({
+      source: 'recorded conflict decisions',
+      count: res.unreadable_resolution_entries,
+    });
+  }
+
+  const ordered = [...(res.conflicts ?? [])].sort((x, y) => byIdAsc(x.address, y.address));
+  const drawn = ordered.slice(0, MAX_GRAPH_CONFLICTS);
+  if (ordered.length > drawn.length) {
+    ctx.ledger.bounded.push(
+      `${ordered.length - drawn.length} of ${ordered.length} conflicting address(es) — the first ${MAX_GRAPH_CONFLICTS} by address are drawn`,
+    );
+  }
+
+  for (const conflict of drawn) {
+    const ownerRunNode = conflict.run_id ? ctx.runNodeByRunId.get(conflict.run_id) : undefined;
+    const ownerBase = ownerRunNode ?? ctx.rootId;
+    const owner = ctx.groupNodeFor(ownerBase, conflict.address) ?? ownerBase;
+    const conflictId = addConflictNode(b, ctx, conflict, owner, ownerRunNode ?? null);
+    if (!conflictId) continue;
+
+    b.addEdge({
+      source: owner,
+      target: conflictId,
+      kind: 'has_conflict',
+      producer: EDGE_PRODUCERS.has_conflict[0],
+      why: `The server reports ${conflict.address} as conflicting: ${conflict.explanation}`,
+      label: conflict.resolution_state,
+      containment: true,
+    });
+
+    addCandidates(b, ctx, conflict, conflictId);
+
+    if (conflict.resolution) {
+      const decisionId = addDecisionNode(b, conflict.resolution, conflictId, ownerRunNode ?? null);
+      if (decisionId) {
+        b.addEdge({
+          source: conflictId,
+          target: decisionId,
+          kind: 'has_decision',
+          producer: EDGE_PRODUCERS.has_decision[0],
+          why: `A decision about ${conflict.address} is on record, and the server derives its state as \`${conflict.resolution.state}\`. ${decisionStateSentence(conflict.resolution.state, conflict.resolution.outcome)}`,
+          label: conflict.resolution.state,
+          containment: true,
+        });
+      }
+    }
+  }
+
+  addOrphanDecisions(b, ctx, res.resolutions_without_conflict ?? []);
+}
+
+function addConflictNode(
+  b: Builder,
+  ctx: ExtraSourceContext,
+  conflict: ApiConflict,
+  owner: string,
+  runNodeId: string | null,
+): string | null {
+  const detail: EvidenceGraphDetailLine[] = [
+    { term: 'Address', value: conflict.address },
+    {
+      term: 'Scope',
+      value: conflict.run_id
+        ? `this run's own fields (${ctx.runLabelByRunId.get(conflict.run_id) ?? conflict.run_id})`
+        : "the record's own fields",
+    },
+    { term: 'Why this is here', value: conflict.explanation },
+    { term: 'Distinct competing answers', value: String(conflict.distinct_value_count) },
+    { term: 'Citations recorded here', value: String(conflict.evidence_count) },
+    { term: 'Decision state', value: conflict.resolution_state },
+  ];
+  if (conflict.unavailable) {
+    detail.push({
+      term: 'Partly unreadable',
+      value:
+        'Some of the stored evidence at this address could not be read, so the competing answers below are not the whole picture. Nothing is invented in place of what could not be read.',
+    });
+  }
+  if (!conflict.resolution) {
+    detail.push({
+      term: 'Decided?',
+      value:
+        'No decision is on record for this address. Nothing here picks a winner, and the record stores every competing citation.',
+    });
+  }
+  /*
+   * AN ALREADY-DECIDED ADDRESS IS STILL LISTED, and this line is why that is not
+   * a contradiction: nothing in this API removes an evidence entry, so the
+   * competing citations remain stored forever and the address goes on classifying
+   * as conflicting. A reader branches on the decision state, never on the absence
+   * of a conflict.
+   */
+  if (conflict.resolved) {
+    detail.push({
+      term: 'Still listed after a decision',
+      value:
+        'A decided address is still shown, because nothing removes an evidence entry: the competing citations remain stored and the address goes on classifying as conflicting. What changed is that a decision is now on record.',
+    });
+  }
+  return b.addNode({
+    id: nodeIds.conflict(conflict.run_id, conflict.address),
+    kind: 'conflict',
+    label: shortLabel(conflict.address, 40),
+    producer: NODE_PRODUCERS.conflict,
+    detail,
+    runId: conflict.run_id ?? (runNodeId ? (b.nodes.get(runNodeId)?.runId ?? null) : null),
+    parentId: owner,
+  });
+}
+
+function addCandidates(
+  b: Builder,
+  ctx: ExtraSourceContext,
+  conflict: ApiConflict,
+  conflictId: string,
+): void {
+  /*
+   * SERVER ORDER, CUT AT THE TAIL. The order is the evidence array's, which is
+   * deterministic in the response, so the same response always drops the same
+   * candidates; re-sorting would reorder a list whose order is the record's.
+   */
+  const candidates = conflict.candidates ?? [];
+  const drawn = candidates.slice(0, MAX_CONFLICT_CANDIDATES);
+  if (candidates.length > drawn.length) {
+    ctx.ledger.bounded.push(
+      `${candidates.length - drawn.length} of ${candidates.length} competing answer(s) at ${conflict.address} — the first ${MAX_CONFLICT_CANDIDATES} the server lists are drawn, and the full count is on the conflict itself`,
+    );
+  }
+  for (const candidate of drawn) {
+    const value = valueText(candidate.value);
+    const detail: EvidenceGraphDetailLine[] = [
+      { term: 'Address', value: conflict.address },
+      { term: 'Competing answer', value: value ?? '(the stored value has no one-line rendering)' },
+      /*
+       * RULE, STATED ON EVERY ONE OF THEM. A competing answer is not a value the
+       * record holds and not something anything here accepts; the panel also
+       * marks the kind visually. Both, because a colour is not a claim a screen
+       * reader can hear and a sentence is not something a reader sees at a glance.
+       */
+      {
+        term: 'What this is',
+        value:
+          'One of the answers the stored citations assert. The record holds all of them and accepts none — this is not the field’s value, and nothing here has chosen it.',
+      },
+      { term: 'Citations asserting it', value: String(candidate.evidence_count) },
+    ];
+    if (candidate.uncited_evidence_count > 0) {
+      detail.push({
+        term: 'Citations that cannot be named',
+        value: `${candidate.uncited_evidence_count} of them record no source type, so there is nothing safe to name. They are counted, not withheld.`,
+      });
+    }
+    for (const source of candidate.sources) {
+      detail.push({
+        term: 'Cited by',
+        value: source.locator ? `${source.source_type} — ${source.locator}` : source.source_type,
+      });
+    }
+    const decided = candidateDecidedLine(candidate, conflict.resolution);
+    if (decided) detail.push(decided);
+
+    const id = b.addNode({
+      id: nodeIds.conflictCandidate(conflictId, candidate.canonical),
+      kind: 'conflict_candidate',
+      label: shortLabel(value ?? candidate.canonical, 40),
+      producer: NODE_PRODUCERS.conflict_candidate,
+      detail,
+      runId: conflict.run_id ?? null,
+      parentId: conflictId,
+    });
+    if (!id) continue;
+    b.addEdge({
+      source: conflictId,
+      target: id,
+      kind: 'competing_value',
+      producer: EDGE_PRODUCERS.competing_value[0],
+      why: `${candidate.evidence_count} stored citation(s) at ${conflict.address} assert this answer. Nothing here accepts it; the record holds every competing answer at once.`,
+      label: null,
+      containment: true,
+    });
+  }
+}
+
+function addDecisionNode(
+  b: Builder,
+  resolution: ApiConflictResolution,
+  parentId: string,
+  runNodeId: string | null,
+): string | null {
+  return b.addNode({
+    id: nodeIds.decision(resolution.resolution_id),
+    kind: 'conflict_decision',
+    label: decisionLabel(resolution.outcome, resolution.state),
+    producer: NODE_PRODUCERS.conflict_decision,
+    detail: decisionDetailLines(resolution),
+    runId: resolution.run_id ?? (runNodeId ? (b.nodes.get(runNodeId)?.runId ?? null) : null),
+    parentId,
+  });
+}
+
+/**
+ * A recorded decision whose address carries NO conflict on this subject.
+ *
+ * It is drawn rather than dropped for the reason the server reports it rather than
+ * omitting it: a decision is a recorded human act, and a surface that showed only
+ * decisions attached to live conflicts would make one silently disappear the
+ * moment the disagreement it settled stopped being one — including when the run it
+ * belonged to was removed.
+ *
+ * BOUNDED BY {@link MAX_GRAPH_CONFLICTS}, LIKE THE CONFLICTS BESIDE IT — and this
+ * was the one list on this route that had no bound at all.
+ *
+ * `resolutions_without_conflict[]` is a second unbounded array in the SAME
+ * response as `conflicts[]`, and it grows monotonically: a decision is never
+ * deleted, so every address whose disagreement was settled, and every decision
+ * belonging to a removed run, lands here forever. Leaning on the shared node cap
+ * for it was exactly the silent truncation the per-source bounds exist to end —
+ * measured at 2,000 orphans, the cap filled with decisions, the notes and asset
+ * references read afterwards drew NOTHING, and the only disclosure was the generic
+ * `node_cap` note, which names no source. The bound is `MAX_GRAPH_CONFLICTS`
+ * rather than a sixth constant because these come from the same route and are the
+ * same family of thing — a recorded disagreement — and a reader meets them under
+ * one heading; the withholding is disclosed as its own clause so the two are never
+ * confusable.
+ */
+function addOrphanDecisions(
+  b: Builder,
+  ctx: ExtraSourceContext,
+  orphans: readonly ApiResolutionWithoutConflict[],
+): void {
+  // Sorted by resolution id, so the cut is stable rather than "whatever the
+  // response happened to list first".
+  const ordered = [...orphans].sort((x, y) => byIdAsc(x.resolution_id, y.resolution_id));
+  const drawn = ordered.slice(0, MAX_GRAPH_CONFLICTS);
+  if (ordered.length > drawn.length) {
+    ctx.ledger.bounded.push(
+      `${ordered.length - drawn.length} of ${ordered.length} recorded decision(s) whose address carries no conflict now — the first ${MAX_GRAPH_CONFLICTS} by decision id are drawn`,
+    );
+  }
+  for (const orphan of drawn) {
+    const id = b.addNode({
+      id: nodeIds.decision(orphan.resolution_id),
+      kind: 'conflict_decision',
+      label: `${orphan.outcome === 'deferred' ? 'Deferred' : 'Decision'} — no conflict here now`,
+      producer: NODE_PRODUCERS.conflict_decision,
+      detail: [
+        { term: 'Address', value: orphan.address },
+        { term: 'Outcome', value: orphan.outcome },
+        {
+          term: 'Why this is here',
+          value: orphan.orphaned_run
+            ? 'This decision belongs to a run that has since been removed from the record. It is a recorded human act, so it is shown rather than dropped, and the run it was about no longer exists.'
+            : 'A decision is on record at this address, and the address carries no conflict on this subject now. It is shown rather than dropped, because a decision is a recorded human act.',
+        },
+        {
+          term: 'Run',
+          value: orphan.run_id
+            ? (ctx.runLabelByRunId.get(orphan.run_id) ??
+              `${orphan.run_id} — this run is not on the page of runs loaded here`)
+            : "the record's own fields",
+        },
+        {
+          term: 'Not the value, not a citation',
+          value:
+            'Recording a decision changes no scientific content. This is not the field’s value and not an evidence entry.',
+        },
+      ],
+      runId: null,
+      parentId: ctx.rootId,
+    });
+    if (!id) continue;
+    b.addEdge({
+      source: ctx.rootId,
+      target: id,
+      kind: 'has_decision',
+      producer: EDGE_PRODUCERS.has_decision[1],
+      why: `The server lists a recorded decision at ${orphan.address} that this subject carries no conflict at${orphan.orphaned_run ? ', and the run it belongs to has been removed from the record' : ''}. It is reported rather than dropped.`,
+      label: orphan.outcome,
+      containment: true,
+    });
+  }
+}
+
+/**
+ * Captured text with no schema home, from `GET .../notes`.
+ *
+ * A note is NOT evidence and NOT a field value — `ApiNote` carries all three of
+ * `is_evidence`, `is_field_value` and `verified` as the literal `false`, and this
+ * module states that on every note rather than relying on the kind's name.
+ */
+function addNotes(b: Builder, ctx: ExtraSourceContext, res: ApiNotesResponse): void {
+  if (res.unreadable_entries > 0) {
+    ctx.ledger.unreadable.push({ source: 'captured notes', count: res.unreadable_entries });
+  }
+
+  /*
+   * SORTED HERE RATHER THAN TRUSTED. The server sorts, but the CUT below depends
+   * on the order, so the order is stated rather than assumed: capture time, then
+   * id for two notes captured in the same instant.
+   */
+  const ordered = [...(res.notes ?? [])].sort(
+    (x, y) => byIdAsc(x.captured_utc, y.captured_utc) || byIdAsc(x.id, y.id),
+  );
+  const drawn = ordered.slice(0, MAX_GRAPH_NOTES);
+  if (ordered.length > drawn.length) {
+    ctx.ledger.bounded.push(
+      `${ordered.length - drawn.length} of ${ordered.length} captured note(s) — the ${MAX_GRAPH_NOTES} captured earliest are drawn`,
+    );
+  }
+
+  for (const note of drawn) {
+    const runNodeId = note.run_id ? ctx.runNodeByRunId.get(note.run_id) : undefined;
+    const parentId = runNodeId ?? ctx.rootId;
+    const id = addNoteNode(b, ctx, note, parentId, runNodeId ? note.run_id : null);
+    if (!id) continue;
+
+    b.addEdge({
+      source: parentId,
+      target: id,
+      kind: 'has_note',
+      producer: runNodeId ? EDGE_PRODUCERS.has_note[0] : EDGE_PRODUCERS.has_note[1],
+      why: runNodeId
+        ? `This note was captured against this run (notes[].run_id === ${note.run_id}).`
+        : note.run_id
+          ? `This note names run ${note.run_id}, which is not on the page of runs loaded here, so it is shown under the experiment rather than attached to a run that is not drawn.`
+          : 'This note was captured against the record as a whole — it names no run, and none is inferred for it.',
+      label: note.state,
+      containment: true,
+    });
+
+    // The path a PERSON named. See `EDGE_PRODUCERS.mapped_to` for why the
+    // machine's proposal is deliberately not drawn as a relationship.
+    if (note.mapped_field_path) {
+      const target =
+        ctx.groupNodeFor(parentId, note.mapped_field_path) ??
+        ctx.groupNodeFor(ctx.rootId, note.mapped_field_path);
+      if (target) {
+        b.addEdge({
+          source: id,
+          target,
+          kind: 'mapped_to',
+          producer: EDGE_PRODUCERS.mapped_to[0],
+          why: `Somebody said this note belongs at ${note.mapped_field_path}. Mapping records a target; it writes no value, mints no evidence and confirms nothing.`,
+          label: 'mapped',
+          containment: false,
+        });
+      }
+    }
+  }
+}
+
+function addNoteNode(
+  b: Builder,
+  ctx: ExtraSourceContext,
+  note: ApiNote,
+  parentId: string,
+  runId: string | null,
+): string | null {
+  const detail: EvidenceGraphDetailLine[] = [
+    { term: 'Captured text', value: note.display_text },
+  ];
+  /*
+   * THE VERBATIM CAPTURE SURVIVES A CORRECTION. `revised_text` is stored BESIDE
+   * `text`, never replacing it, so when the two differ both are shown — showing
+   * only the corrected wording would quietly lose what was actually captured.
+   */
+  if (note.revised_text !== null && note.revised_text !== note.text) {
+    detail.push({ term: 'As originally captured', value: note.text });
+  }
+  detail.push(
+    { term: 'Source', value: note.source },
+    { term: 'Captured', value: note.captured_utc },
+    { term: 'Review state', value: note.state },
+    {
+      term: 'Run',
+      value: runId
+        ? (ctx.runLabelByRunId.get(runId) ?? runId)
+        : note.run_id
+          ? `${note.run_id} — this run is not on the page of runs loaded here`
+          : 'no run — this note is about the record as a whole, and none is inferred',
+    },
+  );
+  if (note.mapped_field_path) {
+    detail.push({
+      term: 'Placed by a person at',
+      value: `${note.mapped_field_path} — somebody said it belongs there. That records a target; it writes no value and confirms nothing.`,
+    });
+  } else {
+    detail.push({
+      term: 'Placed at',
+      value: 'nowhere yet — nothing has said where this belongs, and no home is guessed for it.',
+    });
+  }
+  if (note.candidate_field_path) {
+    /*
+     * A PROPOSAL, AND SAID TO BE ONE. `notes.py` keeps `candidate_field_path` and
+     * `mapped_field_path` apart precisely so a suggestion is never
+     * indistinguishable from a decision, which is why this is a detail line and
+     * NOT a `mapped_to` edge: on a graph, a line reads as a fact.
+     */
+    detail.push({
+      term: 'Proposed home (nobody has accepted this)',
+      value: note.candidate_rule
+        ? `${note.candidate_field_path} — proposed by the rule "${note.candidate_rule}". A proposal, not a decision; no line is drawn for it.`
+        : `${note.candidate_field_path} — proposed deterministically, with no rule text stored. A proposal, not a decision; no line is drawn for it.`,
+    });
+  }
+  detail.push(
+    { term: 'Times acted on', value: String(note.history.length) },
+    {
+      term: 'What this is not',
+      value:
+        'A note is not evidence, not a field value and not verified — the record stores all three as false. Turning prose into a value means deciding what the value is, and nothing here does that.',
+    },
+  );
+
+  return b.addNode({
+    id: nodeIds.note(note.id),
+    kind: 'note',
+    label: shortLabel(note.display_text, 44),
+    producer: NODE_PRODUCERS.note,
+    detail,
+    runId,
+    parentId,
+  });
+}
+
+/**
+ * The asset LIBRARY, from `GET .../assets` — which is a different set from the
+ * `assets*` ADDRESSES the existing `asset` nodes are built from.
+ *
+ * The two are deliberately NOT joined. A library entry has an `asset_id`; an
+ * address has an array index; and matching one to the other would be a guess about
+ * ordering that nothing in the response supports. So a shared asset appears once,
+ * under the experiment, with an explicit line to every run that uses it.
+ */
+function addAssetReferences(
+  b: Builder,
+  ctx: ExtraSourceContext,
+  res: ApiAssetsResponse,
+): void {
+  if (res.unreadable_entries > 0) {
+    ctx.ledger.unreadable.push({ source: 'asset references', count: res.unreadable_entries });
+  }
+  const ordered = [...(res.assets ?? [])].sort((x, y) => byIdAsc(x.asset_id, y.asset_id));
+  const drawn = ordered.slice(0, MAX_GRAPH_ASSET_REFS);
+  if (ordered.length > drawn.length) {
+    ctx.ledger.bounded.push(
+      `${ordered.length - drawn.length} of ${ordered.length} asset reference(s) — the first ${MAX_GRAPH_ASSET_REFS} by asset id are drawn`,
+    );
+  }
+
+  for (const asset of drawn) {
+    const id = b.addNode({
+      id: nodeIds.assetReference(asset.asset_id),
+      kind: 'asset_reference',
+      label: shortLabel(asset.uri, 40),
+      producer: NODE_PRODUCERS.asset_reference,
+      detail: assetDetailLines(asset, ctx),
+      // Library-level: it can be used by several runs, so it belongs to none.
+      runId: null,
+      parentId: ctx.rootId,
+    });
+    if (!id) continue;
+    b.addEdge({
+      source: ctx.rootId,
+      target: id,
+      kind: 'references',
+      producer: EDGE_PRODUCERS.references[1],
+      why: `This record's asset library holds a reference to ${asset.uri}.`,
+      label: asset.content_role,
+      containment: true,
+    });
+    for (const use of asset.used_by_runs) {
+      const runNode = ctx.runNodeByRunId.get(use.run_id);
+      if (!runNode) continue;
+      b.addEdge({
+        source: runNode,
+        target: id,
+        kind: 'references',
+        producer: EDGE_PRODUCERS.references[2],
+        why: `The server lists this run in used_by_runs for this asset reference, so this run's exported record carries it.`,
+        label: null,
+        containment: false,
+      });
+    }
+  }
+}
+
+function assetDetailLines(
+  asset: ApiAsset,
+  ctx: ExtraSourceContext,
+): EvidenceGraphDetailLine[] {
+  const lines: EvidenceGraphDetailLine[] = [
+    { term: 'Asset id', value: asset.asset_id },
+    { term: 'URI', value: asset.uri },
+    { term: 'Content role', value: asset.content_role },
+  ];
+  if (asset.media_type) lines.push({ term: 'Media type', value: asset.media_type });
+  /*
+   * A STATEMENT ABOUT THE STRING, NOT ABOUT THE FILE. `sha256_wellformed` is named
+   * for exactly what it measures; nothing in this application has opened the file
+   * at the URI, and no surface may let this read as a verification result.
+   */
+  lines.push({
+    term: 'Digest as supplied',
+    value: asset.sha256
+      ? `${asset.sha256} — ${asset.sha256_wellformed ? 'this is 64 lowercase hexadecimal characters' : 'this is NOT 64 lowercase hexadecimal characters'}. Nothing here has opened the file, so this says nothing about what the file contains.`
+      : 'no digest was supplied, and none is computed or repaired here',
+  });
+  lines.push({ term: 'Citations recorded on it', value: String(asset.evidence_count) });
+  lines.push({
+    term: 'Used by',
+    value:
+      asset.used_by_runs.length === 0
+        ? 'no run'
+        : asset.used_by_runs
+            .map((u) => ctx.runLabelByRunId.get(u.run_id) ?? u.label ?? u.run_id)
+            .join(', '),
+  });
+  /*
+   * `none` IS THE VALUE THAT MUST NEVER BE HIDDEN. An experiment that has runs
+   * exports one record per run, composed from that run's blocks, and `assets` is
+   * run-level — so a library entry associated with no run reaches no exported
+   * record at all. A scientist who recorded a file and saw it listed would
+   * otherwise never find out.
+   */
+  lines.push({
+    term: 'Reaches an exported record',
+    value:
+      asset.export_reach === 'none'
+        ? 'NO — this reference is associated with no run, and assets are run-level, so no exported record carries it.'
+        : asset.export_reach === 'runs'
+          ? 'Yes — through the runs it is associated with.'
+          : 'Yes — through the record itself.',
+  });
+  if (asset.notes) lines.push({ term: 'Notes recorded on it', value: asset.notes });
+  return lines;
+}
+
+/**
+ * The two provenance dimensions, applied to the nodes that ALREADY exist.
+ *
+ * NO NODE IS CREATED HERE, and that is the design rather than a shortcut. This
+ * route answers a question ABOUT an address — where the value came from, and what
+ * establishes it — and this view already draws a node per address GROUP. Minting a
+ * node per address would multiply the graph by the size of the draft to say two
+ * words about each one, and would put a second, differently-shaped representation
+ * of the same addresses beside the first.
+ *
+ * Origins are rendered by LOOKUP only — see {@link originLabel}.
+ */
+function applyProvenance(
+  b: Builder,
+  ctx: ExtraSourceContext,
+  res: ApiProvenanceResponse,
+): void {
+  let unplaced = 0;
+  for (const entry of [...(res.entries ?? [])].sort((x, y) => byIdAsc(x.address, y.address))) {
+    // A note entry (`note:<id>`) is a note, and notes are drawn from the notes
+    // route — which lists every note, not only the unreviewed ones this route
+    // describes. Describing them twice would give one note two representations.
+    if (entry.address.startsWith('note:')) continue;
+    const target = ctx.groupNodeFor(ctx.rootId, entry.address);
+    if (!target) {
+      unplaced += 1;
+      continue;
+    }
+    const node = b.nodes.get(target);
+    if (!node) {
+      unplaced += 1;
+      continue;
+    }
+    const others = entry.origins.filter((o) => o !== entry.primary_origin);
+    pushUnique(node, {
+      term: `Where this came from · ${entry.address}`,
+      value:
+        others.length === 0
+          ? originLabel(entry.primary_origin)
+          : `${originLabel(entry.primary_origin)} (also: ${others.map(originLabel).join(', ')})`,
+    });
+    pushUnique(node, {
+      term: `Review state · ${entry.address}`,
+      value: `${reviewStateLabel(entry.review_state)}. Where a value came from says nothing about whether it is backed — these are two separate answers, and neither is a validity or export verdict.`,
+    });
+    if (entry.unavailable) {
+      pushUnique(node, {
+        term: `Partly unreadable · ${entry.address}`,
+        value:
+          'Some of the stored payload at this address could not be read, so it is not presented as plain support.',
+      });
+    }
+  }
+
+  const root = b.nodes.get(ctx.rootId);
+  if (root && res.notes_summary) {
+    pushUnique(root, {
+      term: 'Notes on this record',
+      value: `${res.notes_summary.total} captured, of which ${res.notes_summary.listed_as_unmapped} are still unreviewed.`,
+    });
+  }
+
+  const blocks = res.blocks_not_described ?? [];
+  if (blocks.length > 0 || unplaced > 0) {
+    const parts: string[] = [];
+    if (blocks.length > 0) {
+      parts.push(
+        `The server itself did not describe ${blocks.length} part(s) of this record, because they carry no value envelope to describe: ${blocks.join(', ')}.`,
+      );
+    }
+    if (unplaced > 0) {
+      parts.push(
+        `${unplaced} described address(es) belong to a part of the record this view does not draw, so their origin and review state are not shown here.`,
+      );
+    }
+    b.note(
+      'provenance_undescribed',
+      `Where each value came from, and what establishes it, is shown on the node that owns the address. ${parts.join(' ')} They are counted rather than hidden.`,
+    );
+  }
+}
+
+/** Append a detail line unless the node already carries exactly it. */
+function pushUnique(node: EvidenceGraphNode, line: EvidenceGraphDetailLine): void {
+  if (node.detail.some((l) => l.term === line.term && l.value === line.value)) return;
+  node.detail.push(line);
+}
+
+/**
+ * WHAT IS HISTORICAL VERSUS CURRENT — answered as a STATEMENT, not as nodes.
+ *
+ * No historical revision is drawn, and the omission is the honest answer rather
+ * than an unfinished one. This graph draws the record as it is NOW: every node
+ * above comes from the current draft, and a superseded value drawn beside a
+ * current one — in a picture whose whole grammar is "these things are related" —
+ * would read as something the record still holds. A history is a second model with
+ * a second time axis, not a layer over this one.
+ *
+ * So the route is read for exactly one question: is the content drawn here on
+ * record as a revision, or has the draft moved since the last one? Three answers,
+ * and the third is "not known from this page", because the revision list is
+ * BOUNDED and a signature absent from the page read is not a signature that does
+ * not exist.
+ *
+ * ~~"Three answers"~~ — there are FOUR, and the fourth is the one the other three
+ * are only valid inside: this response has to describe the SAME read of the record
+ * that everything above was drawn from. See the `freshness` parameter.
+ */
+function applyRevisions(
+  b: Builder,
+  ctx: ExtraSourceContext,
+  res: ApiRevisionHistory,
+  /**
+   * The verdict {@link readSubFetch} reached about THIS response, threaded here
+   * rather than only ledgered.
+   *
+   * The one question this function answers is a comparison BETWEEN TWO READS: the
+   * content drawn by everything above (the record at `detail.version`) against
+   * `res.current_content_signature` (the record as this response read it). That
+   * comparison is only meaningful when the two reads are the same read. When they
+   * are not — `stale`, or `unknown` because a token is missing — a match proves
+   * nothing and a MISS proves nothing either, so neither answer may be stated.
+   * The `sub_fetch_stale` note says the source was read elsewhere; it does not
+   * un-say a certification printed above it.
+   */
+  freshness: SubFetchFreshness,
+): void {
+  const root = b.nodes.get(ctx.rootId);
+  if (res.availability.state !== 'available') {
+    // The server's own sentence, verbatim. It knows why; this module does not.
+    b.note(
+      'revision_state',
+      `Whether the content drawn here is on record as a revision could not be established: ${res.availability.message} Nothing historical is drawn either way — this graph draws the record as it is now.`,
+    );
+    return;
+  }
+
+  const revisions = [...(res.revisions ?? [])].sort((x, y) => y.revision_no - x.revision_no);
+  const total = res.total ?? revisions.length;
+  const returned = res.returned ?? revisions.length;
+  const match = revisions.find((r) => r.content_signature === res.current_content_signature);
+  const latest = revisions[0];
+
+  if (root) {
+    pushUnique(root, { term: 'Recorded revisions', value: String(total) });
+    pushUnique(root, { term: 'Lifecycle', value: res.lifecycle.label });
+    if (latest) {
+      const changes = Object.entries(latest.change_counts)
+        .sort((x, y) => byIdAsc(x[0], y[0]))
+        .map(([kind, n]) => `${n} ${kind}`)
+        .join(', ');
+      pushUnique(root, {
+        term: `Revision ${latest.revision_no} recorded these changes`,
+        value: changes === '' ? 'no address-level change was recorded' : changes,
+      });
+    }
+  }
+
+  /*
+   * THE COMPARISON IS BETWEEN TWO READS, AND IT IS ONLY MEANINGFUL WHEN THEY ARE
+   * THE SAME READ.
+   *
+   * Every branch below turns on whether `res.current_content_signature` — the
+   * signature of the record AS THIS RESPONSE READ IT — appears among the
+   * revisions. When this response describes a different version from the one
+   * drawn above, that signature is not the drawn content's signature, so a match
+   * certifies content this response never saw and a miss reports a divergence
+   * that may not exist. Both were being stated: "that content is on record as
+   * revision N" and "the draft has changed since the last one was recorded" are
+   * each a positive claim, and each was reachable from a stale read.
+   *
+   * `unknown` takes the same arm as `stale` on purpose. A response that publishes
+   * no token has not been SHOWN to describe this version, and `fresh` is the one
+   * answer that has to be earned — the same asymmetry {@link subFetchFreshness}
+   * is built on. The numbers above are left in place: a count of recorded
+   * revisions is a fact about the history and degrades to being merely old, which
+   * the `sub_fetch_stale` note already covers. It is the CERTIFICATION that must
+   * not be made.
+   */
+  if (freshness !== 'fresh') {
+    b.note(
+      'revision_state',
+      `Whether the content drawn here is on record as a revision could not be established: the submission history was read at a different version of this record, so the content signature it carries is not this content's. ${total} revision(s) had been recorded as of that read. Nothing historical is drawn either way — this graph draws the record as it is now.`,
+    );
+    return;
+  }
+
+  if (match) {
+    b.note(
+      'revision_state',
+      `Everything drawn here is the record's CURRENT content, and that content is on record as revision ${match.revision_no} of ${total}. No earlier revision is drawn: this graph draws the record as it is now, and a superseded value shown beside a current one would read as one the record still holds.`,
+    );
+    return;
+  }
+  /*
+   * ZERO IS ITS OWN ANSWER, not the tail of the one below it. With no revisions at
+   * all there is no "last one" for the draft to have changed since, and the
+   * sentence below would have asserted a history this record does not have.
+   */
+  if (total === 0) {
+    b.note(
+      'revision_state',
+      "Everything drawn here is the record's CURRENT content, and no revision of it has been recorded yet. Nothing historical exists to draw.",
+    );
+    return;
+  }
+  if (returned >= total) {
+    b.note(
+      'revision_state',
+      `Everything drawn here is the record's CURRENT content, and it matches none of the ${total} recorded revision(s) — the draft has changed since the last one was recorded. No earlier revision is drawn.`,
+    );
+    return;
+  }
+  b.note(
+    'revision_state',
+    `Everything drawn here is the record's CURRENT content. ${total} revision(s) are recorded and ${returned} were read; none of those ${returned} matches this content. Whether an unread revision does is not known from this page, so it is not stated. No earlier revision is drawn.`,
+  );
+}
+
+/** The four composed sub-fetch notes, emitted once each at the very end. */
+function emitLedgerNotes(b: Builder, ledger: SubFetchLedger): void {
+  if (ledger.failed.length > 0 || ledger.loading.length > 0) {
+    const parts: string[] = [];
+    for (const f of ledger.failed) {
+      parts.push(`${f.source} could not be read (${f.message})`);
+    }
+    /*
+     * PHRASED WITHOUT A VERB. `${list} has/have not been read` needs to agree with
+     * a list of PROPER NAMES ("Notes", "Asset references"), and no choice of verb
+     * is right for both — "Notes has not been read yet" is what the singular arm
+     * produced, about a source whose name is plural.
+     */
+    if (ledger.loading.length > 0) {
+      parts.push(`not read yet: ${ledger.loading.join(', ')}`);
+    }
+    b.note(
+      'sub_fetch_unavailable',
+      `${parts.join('; ')}. Nothing from those sources is drawn, and an empty space where they would be is NOT a statement that this record has none.`,
+    );
+  }
+
+  if (ledger.stale.length > 0 || ledger.unknownFreshness.length > 0) {
+    const parts: string[] = [];
+    for (const s of ledger.stale) {
+      parts.push(
+        `${s.source} was read at version ${s.reported}, and this record is at ${s.expected}`,
+      );
+    }
+    if (ledger.unknownFreshness.length > 0) {
+      parts.push(
+        `${ledger.unknownFreshness.join(', ')} reported no version, so ${ledger.unknownFreshness.length === 1 ? 'it cannot be' : 'they cannot be'} shown to describe this version of the record`,
+      );
+    }
+    b.note(
+      'sub_fetch_stale',
+      `${parts.join('; ')}. What those sources contributed is drawn, and it describes a different read of this record — a re-read has not landed since.`,
+    );
+  }
+
+  if (ledger.unreadable.length > 0) {
+    b.note(
+      'unreadable_entries',
+      `${ledger.unreadable
+        .map((u) => `${u.count} ${u.source}`)
+        .join(', ')} could not be read from the stored record, so they are not drawn. They are preserved in the record and counted here, because saying what one contains would mean inventing it.`,
+    );
+  }
+
+  if (ledger.bounded.length > 0) {
+    b.note(
+      'source_bounded',
+      `This view is bounded, and these were withheld rather than silently dropped: ${ledger.bounded.join('; ')}. Open the record's own sections to see them all.`,
+    );
+  }
 }
 
 // ------------------------------------------------------------------ the builder
@@ -1094,6 +2481,15 @@ export function buildEvidenceGraph(
 
   // ── 3. the runs ───────────────────────────────────────────────────────────
   const runOrder: string[] = [];
+  /*
+   * The runs actually LOADED, indexed. Every source below that names a run looks
+   * it up HERE and never assumes the name resolves: the run page is bounded, so a
+   * note or a decision can legitimately name a run this graph is not drawing, and
+   * the honest answer is to say which run rather than to hang the node off
+   * whichever run happens to be on screen.
+   */
+  const runNodeByRunId = new Map<string, string>();
+  const runLabelByRunId = new Map<string, string>();
   for (const run of runs) {
     const runNodeId = nodeIds.run(run.id);
     const ownAddresses = Object.keys(run.fields ?? {}).sort(byIdAsc);
@@ -1149,6 +2545,8 @@ export function buildEvidenceGraph(
     });
     if (!added) continue;
     runOrder.push(added);
+    runNodeByRunId.set(run.id, added);
+    runLabelByRunId.set(run.id, run.label || `Run ${run.ordinal}`);
     b.addEdge({
       source: rootId,
       target: added,
@@ -1358,6 +2756,94 @@ export function buildEvidenceGraph(
     }
   }
 
+  // ── 7. the FIVE routes beyond the bundle ──────────────────────────────────
+  //
+  // FIVE, not four: conflicts, notes, assets, provenance and revisions — the five
+  // `readSubFetch` calls below are the enumeration, and the count was wrong here.
+  // Ordered AFTER the runs deliberately. Every one of these is bounded by its own
+  // constant, but the global node cap is shared, and the spine of this graph —
+  // the experiment, its runs and what they carry — must not be displaced by a
+  // record that happens to hold a great many notes.
+  const ledger = emptyLedger();
+  const extras: ExtraSourceContext = {
+    rootId,
+    groupNodeFor: (ownerId, address) => {
+      const group = groupForAddress(address);
+      if (!group) return undefined;
+      return ownerGroups.get(ownerId)?.byItem.get(`${group.kind}/${group.itemKey}`);
+    },
+    runNodeByRunId,
+    runLabelByRunId,
+    ledger,
+  };
+
+  /*
+   * THE NAMES A READER SEES ARE PRODUCT WORDS, NOT WIRE SEGMENTS — the same words
+   * `components/FetchStates.tsx`'s `SUB_RESOURCE_LABELS` uses for a failed read of
+   * the very same routes, so a reader who meets both surfaces meets one vocabulary.
+   * "Conflicts", "Notes" and "Provenance" are path segments; `CLAUDE.md` §11 records
+   * backend-sourced jargon on product screens as an open defect class, and a note
+   * that names a route is exactly that.
+   */
+  const conflictsRes = readSubFetch('The conflicting evidence', input.conflicts, ledger, {
+    expected: detail.version,
+    reported: (d) => d.experiment_version,
+  });
+  if (conflictsRes) {
+    addConflicts(b, extras, conflictsRes.data);
+    /*
+     * SAID WHENEVER CONFLICTS WERE READ AT ALL, not only when the record has some.
+     * `GET .../conflicts` takes an optional `?run=` and this view asks WITHOUT it,
+     * so what is drawn is the record's own fields; a per-run answer would be one
+     * request per run, which is exactly the unbounded read the bounded run page
+     * exists to prevent. A reader who is not told this would read "no conflict on
+     * Run 2" off a graph that never asked about Run 2.
+     *
+     * GUARDED ON THE RESPONSE'S OWN `run_id`, not on what this view asked for. The
+     * sentence is true of what this view does — but a caller handing in a
+     * run-scoped response would otherwise have the claim printed over it, which is
+     * the same class of defect as printing a version a fetch did not read.
+     */
+    if (conflictsRes.data.run_id === null) {
+      b.note(
+        'conflicts_record_scope',
+        "Conflicting evidence is read for the record's own fields, in one request. This view does not ask per run — that would be one request per run — so a run that stores its own value at an address is not described here. Open that run's own evidence to see it.",
+      );
+    }
+  }
+
+  const notesRes = readSubFetch('The unmapped notes', input.notes, ledger, {
+    expected: detail.version,
+    reported: (d) => d.experiment_version,
+  });
+  if (notesRes) addNotes(b, extras, notesRes.data);
+
+  const assetsRes = readSubFetch('The asset references', input.assets, ledger, {
+    expected: detail.version,
+    reported: (d) => d.experiment_version,
+  });
+  if (assetsRes) addAssetReferences(b, extras, assetsRes.data);
+
+  /*
+   * `record_rev` RATHER THAN `experiment_version`, because that is the token this
+   * route publishes. `detail.rev` is the same number from the same document, so
+   * the comparison stays a version-token comparison rather than becoming a second
+   * freshness mechanism — see `subFetchFreshness`.
+   */
+  const provenanceRes = readSubFetch('Where the values came from', input.provenance, ledger, {
+    expected: revToken(detail.rev),
+    reported: (d) => revToken(d.record_rev),
+  });
+  if (provenanceRes) applyProvenance(b, extras, provenanceRes.data);
+
+  const revisionsRes = readSubFetch('The submission history', input.revisions, ledger, {
+    expected: revToken(detail.rev),
+    reported: (d) => revToken(d.record_rev),
+  });
+  if (revisionsRes) applyRevisions(b, extras, revisionsRes.data, revisionsRes.freshness);
+
+  emitLedgerNotes(b, ledger);
+
   if (b.truncated) {
     b.note(
       'node_cap',
@@ -1365,7 +2851,7 @@ export function buildEvidenceGraph(
     );
   }
 
-  // ── 7. focus ──────────────────────────────────────────────────────────────
+  // ── 8. focus ──────────────────────────────────────────────────────────────
   let anchorId = rootId;
   const focus = input.focusRunId ?? null;
   if (focus) {

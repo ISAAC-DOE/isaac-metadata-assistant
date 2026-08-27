@@ -59,6 +59,7 @@ import type {
   ApiPendingItem,
   ApiPendingPage,
   ApiPendingResponse,
+  ApiProvenanceResponse,
   ApiProviderCapabilities,
   ApiProviderRefusal,
   ApiRevisionDetail,
@@ -798,6 +799,35 @@ export interface ListRunsQuery {
 export interface ListNotesQuery {
   state?: ApiNoteState;
 }
+
+/*
+ * --- `GET /experiments/{id}/provenance` ---------------------------------------
+ *
+ * MOVED TO `types.ts` (2026-08-27), which is where the comment that used to sit here
+ * said they belonged: *"every other wire shape in this client lives in `types.ts`, and
+ * these two belong there … Move them when a slice that owns that file next passes
+ * through."* This is that slice.
+ *
+ * IT WAS NOT A TIDY-UP. `lib/provenance.ts` — the very module the comment cited as the
+ * mirror — ALREADY DECLARED an `ApiProvenanceEntry` and an `ApiProvenance` for this
+ * same route, with DIFFERENT types (`origins: ProvenanceOrigin[]` against `string[]`,
+ * `review_state: ProvenanceReviewState` against `string`, and three fewer fields), and
+ * nothing enforced agreement between them. Two declarations of one wire contract is a
+ * defect whether or not it has bitten yet, and this one had not bitten only because the
+ * older pair had NO IMPORTER — luck, not design. Those dead declarations are removed;
+ * these are the ones that survive, and there is now exactly one.
+ *
+ * THE OPEN `string` TYPING IS DELIBERATE AND IS THE HALF THAT SURVIVED THE MERGE.
+ * `provenance.ts`'s `originLabel` does `ORIGIN_LABEL[origin] ?? origin` — an
+ * unrecognised origin must be REPRESENTABLE for that fallback to have anything to fall
+ * back to. Closing the union would make an origin the server adds tomorrow a compile
+ * error here and an invisible one on screen.
+ *
+ * RE-EXPORTED FROM THIS MODULE so that `import type { ApiProvenanceResponse } from
+ * './api'` keeps resolving. A re-export is not a second declaration; `rg --text
+ * ApiProvenance` shows exactly one `export interface` for each, in `types.ts`.
+ */
+export type { ApiProvenanceEntry, ApiProvenanceResponse } from './types';
 
 export const api = {
   health(): Promise<ApiHealth> {
@@ -1803,6 +1833,35 @@ export const api = {
     return getJson<ApiEvidenceClassification>(
       `/experiments/${enc(id)}/evidence-classification`,
     );
+  },
+
+  /**
+   * `GET /experiments/{id}/provenance` — the two provenance dimensions.
+   *
+   * READ-ONLY, AND DERIVED ON EVERY CALL. Nothing about it is stored: the server
+   * recomputes both dimensions from content the record already carries, so there
+   * is no projection here that can go stale, only a read that can be old — which
+   * is what `record_rev` on the response is for.
+   *
+   * `runId` NARROWS the subject to one run rather than the record, exactly as
+   * `listConflicts` does, and an id this record has no run for is a 404 naming the
+   * run rather than a silent fall back to the record's answer.
+   *
+   * THE PATH LITERAL STAYS WHOLE and the query is appended separately, exactly as
+   * `listNotes`, `listConflicts` and `listRuns` do — `backend-down-state.test.tsx`
+   * reads this module's source to derive its per-record sub-read inventory, and
+   * interpolating the query into the literal makes the scanner see `provenance?…`
+   * as a sub-resource with no product word.
+   */
+  getProvenance(
+    id: string,
+    query: { runId?: string } = {},
+  ): Promise<ApiProvenanceResponse> {
+    const params = new URLSearchParams();
+    if (query.runId !== undefined) params.set('run', query.runId);
+    const path = `/experiments/${enc(id)}/provenance`;
+    const search = params.toString();
+    return getJson<ApiProvenanceResponse>(search === '' ? path : `${path}?${search}`);
   },
 
   // S5 — one cited source fixture, read-only (governance-gated to the allowlist).

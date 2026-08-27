@@ -7,6 +7,7 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import { QC_VERDICTS } from '../lib/types';
 import {
   DescriptorForm,
+  EMPTY_DESCRIPTOR,
   SeriesEntry,
   descriptorDraftFrom,
   descriptorIsComplete,
@@ -14,6 +15,8 @@ import {
   seriesParseError,
   seriesTextFrom,
 } from './StructuredValueEntry';
+import { DiscardStaged } from './DiscardStaged';
+import { DISCARD_COPY } from '../lib/discardContent';
 import type { PendingBlocker, QcAnswer, QcVerdict } from '../lib/types';
 
 interface GuidedPromptProps {
@@ -59,6 +62,22 @@ interface GuidedPromptProps {
    * typed is kept, including through Refresh" false for exactly that blocker.
    */
   onStagedChange?: (value: unknown) => void;
+  /**
+   * Drop the owner's surviving copy of this question's staged answer.
+   *
+   * PROVIDING IT IS WHAT MOUNTS THE DISCARD CONTROL, and that gate is the point. The
+   * owner keeps staged input in a ref that outlives this component (so a Refresh cannot
+   * destroy it), so clearing local state alone would leave the discarded value waiting
+   * to be restored — the exact defect `GuidedCompletion.discardStaged` exists to close
+   * for Cancel and for "I don't know".
+   *
+   * It is deliberately NOT passed on the EDIT mount, which already has an explicit
+   * abandon — its secondary control is relabelled `Cancel` and wired to `cancelEdit`,
+   * which discards the staged copy and restores the confirmed value. A second control
+   * doing nearly the same thing beside it would make the reader choose between two
+   * abandons with no way to tell them apart.
+   */
+  onDiscardStaged?: () => void;
 }
 
 /**
@@ -89,6 +108,7 @@ export function GuidedPrompt({
   hideBlankHint = false,
   onTextChange,
   onStagedChange,
+  onDiscardStaged,
 }: GuidedPromptProps) {
   /* `initialValue` is `unknown` because a verdict blocker's answer is an object. The
      text inputs take only the string form; anything else is not a pasted value and
@@ -218,6 +238,47 @@ export function GuidedPrompt({
     : isVerdict
       ? verdict !== '' && verdictNote.trim().length > 0
       : text.trim().length > 0;
+
+  /*
+   * IS ANYTHING STAGED FOR THIS QUESTION? Read off the SAME states the confirm path
+   * reads, branch for branch, so the control cannot appear over a control that is not
+   * mounted or hide beside one that is.
+   *
+   * It is deliberately WEAKER than `canConfirm`. `canConfirm` asks "is this answerable
+   * yet" — a descriptor with three of four required fields, or a series whose JSON is
+   * half-written, is not. Both are still the reader's work, and both are exactly the
+   * states in which they might want to start again. A Discard gated on `canConfirm`
+   * would be absent from every half-finished form, which is where it is worth most.
+   */
+  const hasStagedAnswer = isVerdict
+    ? verdict !== '' || verdictNote !== ''
+    : entering
+      ? entryKind === 'series'
+        ? seriesText !== ''
+        : Object.values(descriptor).some((field) => field !== '')
+      : structured
+        ? staged
+        : text !== '';
+
+  /*
+   * CLEAR EVERY BOX THIS QUESTION OWNS — no request, and nothing beyond this question.
+   *
+   * All six states are reset rather than only the branch on screen: a blocker's
+   * `inputType` cannot change under a mounted prompt today, but resetting only the
+   * visible one leaves the others as a silent carry that the next reader would have to
+   * re-derive. `onDiscardStaged` runs LAST, because the owner's surviving copy is what
+   * a Refresh reads and it must be dropped after — not before — the local state that
+   * feeds it.
+   */
+  const discardStagedAnswer = () => {
+    setTextState('');
+    setStaged(false);
+    setVerdict('');
+    setVerdictNote('');
+    setDescriptor(EMPTY_DESCRIPTOR);
+    setSeriesText('');
+    onDiscardStaged?.();
+  };
 
   const handleConfirm = () => {
     if (!canConfirm) return;
@@ -455,6 +516,23 @@ export function GuidedPrompt({
           </>
         )}
       </div>
+
+      {/*
+        BETWEEN THE FIELD AND THE FOOTER, and not inside the footer, because the footer
+        already holds "I don't know — leave honestly missing". Those two are different
+        acts and must not read as a pair of similar ones: "I don't know" is an ANSWER —
+        it records a decision to leave the field honestly missing and moves the queue on
+        — while Discard only empties the boxes and leaves the question exactly where it
+        was. Mounted only where the owner can also drop its surviving copy; see
+        `onDiscardStaged`.
+      */}
+      {onDiscardStaged && (
+        <DiscardStaged
+          staged={hasStagedAnswer}
+          copy={DISCARD_COPY.guidedAnswer}
+          onDiscard={discardStagedAnswer}
+        />
+      )}
 
       <div className="guided-footer">
         <button

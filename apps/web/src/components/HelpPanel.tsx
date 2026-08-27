@@ -113,13 +113,34 @@ export function HelpPanel() {
             </section>
 
             <section className="help-section">
+              {/* CORRECTED: this read "<strong>{LABELS.signalAdvisory} review</strong> is AI
+                  consistency notes". That was FALSE, and it was the one sentence on a shipped
+                  product screen that implied a model is involved in reviewing a record — which
+                  `ai-integration-decision-packet.md` §9 forbids in as many words: "build nothing
+                  that implies any of it exists".
+
+                  What the Advisory signal actually is: `GET /api/experiments/{id}/warnings` ->
+                  `src/isaac_records/portal_warnings.py`, whose own header calls it "local
+                  heuristics" and places it at stage 3 of the validation stack, ADVISORY ONLY and
+                  non-gating. It is `tuple(check(record) for check in _CHECKS)` — deterministic,
+                  content-derived, no model.
+
+                  The module that IS the AI tier is `src/isaac_records/review.py`, stage 4, an
+                  "advisory placeholder" — and it has ZERO production importers (measured: `rg`
+                  for `isaac_records.review` / `from .review import` across `src` and `apps/api`,
+                  excluding the module itself, returns nothing). Nothing in this build runs it.
+
+                  The sibling copy in `lib/tutorialSteps.ts:195-196` already said this correctly
+                  ("advisory notes ... never blocks or authorises anything"), so the two screens
+                  disagreed and the wrong one was the one that named a technology. */}
               <h3>Three separate signals</h3>
               <p>
                 <strong>{LABELS.evidenceAudit}</strong> is a deterministic evidence-coverage count.{' '}
                 <strong>Official {LABELS.signalValidation}</strong> is the ISAAC v1.05 schema
                 verdict — the only signal that gates export.{' '}
-                <strong>{LABELS.signalAdvisory} review</strong> is AI consistency notes; it never
-                blocks or authorizes anything.
+                <strong>{LABELS.signalAdvisory} review</strong> is a set of deterministic
+                local checks over the record's own content; it never blocks or authorizes
+                anything.
               </p>
             </section>
 

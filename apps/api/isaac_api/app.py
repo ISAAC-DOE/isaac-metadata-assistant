@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
@@ -34,6 +35,7 @@ from .routes import (
     OPENAPI_TAGS,
     TutorialScopeError,
     durable_write_conflict_handler,
+    request_validation_error_handler,
     router,
     storage_unavailable_handler,
     tutorial_scope_error_handler,
@@ -257,6 +259,24 @@ def create_app() -> FastAPI:
     # a bare 500 with a traceback in the server log instead of the typed 409 that
     # tells the caller nothing was written and why.
     app.add_exception_handler(HumanActorRequired, human_actor_required_handler)
+    # A request body too deeply nested for FastAPI's OWN 422 handler to render.
+    #
+    # THIS ONE REPLACES A DEFAULT RATHER THAN ADDING A CASE, which is why it is
+    # worth a note. FastAPI installs `request_validation_exception_handler` for
+    # `RequestValidationError`; that handler echoes the offending `input` back
+    # through `jsonable_encoder`, which recurses per level, so a ~1,000-deep body
+    # destroyed the handler that exists to refuse it and the caller got an
+    # unhandled 500 instead of a 422 — on most POSTs in this application. The
+    # record was never at risk (the route function is not entered), but the
+    # refusal was unreadable and named nothing.
+    #
+    # The replacement is byte-identical to FastAPI's for every request whose
+    # `input` is renderable, and bounds only what is ECHOED — never what is
+    # accepted. See the handler's docstring for the derivation of the bound and
+    # for why the depth predicate is the application's existing iterative one.
+    app.add_exception_handler(
+        RequestValidationError, request_validation_error_handler
+    )
     # ISAAC_BASE_PATH prefixes every route (the router keeps its own /api
     # prefix, so routes land at {base}/api/*). Unset, prefix="" is byte-identical
     # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR

@@ -293,6 +293,29 @@ function buildOk(over: Partial<EvidenceGraphInput> = {}): EvidenceGraph {
   return result.graph;
 }
 
+/**
+ * The edge kinds the RECORD BUNDLE alone can produce — the ten this file's
+ * fixture exercises.
+ *
+ * The vocabulary is larger than this list, and the difference is not an omission:
+ * `has_conflict`, `competing_value`, `has_decision`, `has_note` and `mapped_to`
+ * come from `GET .../conflicts`, `GET .../notes` and `GET .../assets`, which this
+ * fixture deliberately carries none of. They are covered — in both directions —
+ * by `evidence-graph-sources.test.tsx`.
+ */
+const BUNDLE_EDGE_KINDS = [
+  'has_run',
+  'performed_on',
+  'measured_under',
+  'has_context',
+  'has_descriptor',
+  'references',
+  'supported_by',
+  'derived_from',
+  'validated_by',
+  'conflicts_with',
+] as const;
+
 /** Every node id in the containment subtree under `rootId`, inclusive. */
 function subtreeOf(graph: EvidenceGraph, rootId: string): Set<string> {
   const out = new Set<string>();
@@ -427,23 +450,12 @@ describe('evidence graph · derivation from stored state', () => {
     }
   });
 
-  it('exercises all ten permitted edge kinds from stored state alone', () => {
+  it('exercises all ten BUNDLE-derived edge kinds from stored state alone', () => {
     const graph = buildOk({ checks: { [RUN_A]: checkFixture() } });
     const kinds = new Set(graph.edges.map((e) => e.kind));
 
-    // The nine that this fixture's stored state supports.
-    for (const kind of [
-      'has_run',
-      'performed_on',
-      'measured_under',
-      'has_context',
-      'has_descriptor',
-      'references',
-      'supported_by',
-      'derived_from',
-      'validated_by',
-      'conflicts_with',
-    ]) {
+    // The ten that this fixture's stored state supports.
+    for (const kind of BUNDLE_EDGE_KINDS) {
       expect(kinds, `no ${kind} edge was produced`).toContain(kind);
     }
     // (`for (const kind of kinds) expect(EVIDENCE_EDGE_KINDS).toContain(kind)`
@@ -451,7 +463,54 @@ describe('evidence graph · derivation from stored state', () => {
     // already types it, so it could not fail; removed rather than left to look
     // like coverage. The list above is the real assertion — it names all ten and
     // fails if a producer stops firing.)
-    expect(kinds.size).toBe(EVIDENCE_EDGE_KINDS.length);
+    //
+    // ~~`expect(kinds.size).toBe(EVIDENCE_EDGE_KINDS.length)`~~ — the vocabulary
+    // grew past what this fixture can produce, and the count is SPLIT rather than
+    // bumped. Five kinds (`has_conflict`, `competing_value`, `has_decision`,
+    // `has_note`, `mapped_to`) come from TWO of the five sub-fetch routes this input
+    // carries none of — `conflicts` (`addConflicts`, `addCandidates`,
+    // `addOrphanDecisions`) and `notes` (`addNotes`) — so a bumped total would have
+    // been satisfiable only by making this fixture read them, which would delete the
+    // negative control below.
+    //
+    // ~~"come from four routes this input carries none of"~~ — CORRECTED 2026-08-27,
+    // found while correcting the same miscount in `lib/evidenceGraph.ts` and
+    // `screens/EvidenceExplorer.tsx`. "Four" was wrong on BOTH readings: the five
+    // kinds are emitted by two routes, and the number of sub-fetch routes the input
+    // carries none of is FIVE, not four. Measured by reading which builder emits each
+    // kind; the other three sub-fetch routes are `provenance`, `assets` and
+    // `revisions`, and none of them emits any of THESE five (provenance and revisions
+    // mint no nodes at all, by design; `addAssetReferences` emits `asset_reference`
+    // and `references`, which are not in this list).
+    expect(kinds.size).toBe(BUNDLE_EDGE_KINDS.length);
+  });
+
+  it('produces NONE of the five source-derived edge kinds from the bundle alone', () => {
+    /*
+     * THE NEGATIVE CONTROL FOR THE SPLIT ABOVE, and the reason the total was not
+     * simply raised. `evidence-graph-sources.test.tsx` asserts each of these five
+     * DOES appear when its route has data; this asserts that none of them can be
+     * produced without one, so neither test is passing because a kind is emitted
+     * unconditionally.
+     */
+    const graph = buildOk({ checks: { [RUN_A]: checkFixture() } });
+    const kinds = new Set<string>(graph.edges.map((e) => e.kind));
+        // `BUNDLE_EDGE_KINDS` is a narrow `as const` tuple, so `.includes` refuses a
+    // member of the wider union at compile time. Widened for the membership test
+    // only; the tuple keeps its narrow type, which is what makes the `toEqual`
+    // below a real check rather than a `string[]` comparison.
+    const bundle: readonly string[] = BUNDLE_EDGE_KINDS;
+    const sourceDerived = EVIDENCE_EDGE_KINDS.filter((k) => !bundle.includes(k));
+    expect(sourceDerived).toEqual([
+      'has_conflict',
+      'competing_value',
+      'has_decision',
+      'has_note',
+      'mapped_to',
+    ]);
+    for (const kind of sourceDerived) {
+      expect(kinds, `${kind} appeared with no route to produce it`).not.toContain(kind);
+    }
   });
 
   it('a run reading the experiment’s value derives from the EXPERIMENT node, not a copy', () => {

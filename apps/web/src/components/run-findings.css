@@ -47,6 +47,20 @@
   max-width: 72ch;
 }
 
+/*
+ * The withheld-entries disclosure. `--text-secondary`, matching `.run-findings-summary`
+ * rather than the dimmer `.run-findings-note`: this sentence is the reader's only way to
+ * know that runs exist which are not on screen, so it is content, not a caption. (It also
+ * keeps it clear of the `--text-tertiary` contrast item CLAUDE.md tracks at 3.86:1.)
+ */
+.run-findings-withheld {
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .run-findings-list {
   margin: 12px 0 0;
   padding: 0;

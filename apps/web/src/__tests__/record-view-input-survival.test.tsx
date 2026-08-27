@@ -44,6 +44,39 @@ import {
 // assumption about the host, not an assertion about the product.
 configure({ asyncUtilTimeout: 5_000 });
 
+/*
+ * THE HARNESS DEADLINE, RAISED SO THE BUDGET ABOVE CAN ACTUALLY BE SPENT.
+ *
+ * `vite.config.ts` declares no `testTimeout`, so vitest's own per-test deadline is
+ * ALSO 5,000 ms. Two equal budgets make the raised one unreachable: a `findBy*` here
+ * can never spend its five seconds, because the harness kills the test at the same
+ * instant — and the failure then reads `Test timed out in 5000ms`, which names neither
+ * the query nor the DOM. The full argument, the CI measurements and the scaled proof
+ * are written out once at `run-workspace.test.tsx:67-112` rather than five times.
+ *
+ * MEASURED IN THIS FILE, not inherited: in a full `npx vitest run` on a loaded machine
+ * this file failed TWO tests with exactly `Test timed out in 5000ms`, while run alone
+ * it passes 3/3 in ~3.5 s. That is a deadline crossed under worker contention, not a
+ * race and not a product defect.
+ *
+ * 30,000 ms is a HARNESS limit, NOT a performance claim. It is the number this
+ * repository already uses for its mount-heavy suites (`run-workspace`,
+ * `experiment-graph`, `evidence-graph`, `graph-real-artifact`, `memory-status`). Every
+ * `find*`/`waitFor` still resolves as soon as the DOM is ready, and the strict 5,000 ms
+ * default still stands in every other file of the suite.
+ *
+ * IT CANNOT TURN A RED ASSERTION GREEN, and that was checked rather than assumed. The
+ * two budgets bound different things: `testTimeout` bounds the TEST, `asyncUtilTimeout`
+ * bounds each individual `waitFor`/`findBy*`. Raising only the former gives no single
+ * query one millisecond more than it already had, so a value that never arrives still
+ * never arrives — it merely now reports testing-library's error and its DOM dump
+ * instead of a bare number. Every negative assertion in this file
+ * (`:140`, `:141`, `:142`, `:169`) is a SYNCHRONOUS `queryBy*` evaluated at its own
+ * point in the test, which no deadline can move; the one `waitFor` carrying a negative
+ * (`:191`, "not still Saving") polls on its own unchanged 5,000 ms budget.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 const ID = 'demo';
 const BASE = `/api/experiments/${ID}`;
 

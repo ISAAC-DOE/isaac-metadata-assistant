@@ -370,8 +370,20 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # deliberately NOT editable here, because it is stored at `source.description`,
     # which `workspace.classify_experiment` also reads as a provenance marker.
     #
+    # 70 -> 71: `POST /api/experiments/{experiment_id}/discard`. Until it existed,
+    # `POST /api/experiments` could create a record and NOTHING could take one away
+    # — the reset one file over says so in its own description ("there is
+    # deliberately no general per-experiment delete operation"), and that sentence
+    # is still true: this is a narrow domain operation, not a generic delete. It
+    # refuses, writing nothing, anything that has ever been submitted, has exported
+    # under its own identity, has an exported run, has a published artifact on disk,
+    # or is a built-in worked example. It is a `POST .../discard` rather than an
+    # HTTP `DELETE` deliberately — a `DELETE` verb on `/experiments/{id}` would tell
+    # every client the resource is generically deletable, which is exactly what was
+    # not authorized.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 70, f"expected 70 documented operations, found {checked}"
+    assert checked == 71, f"expected 71 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -690,6 +702,21 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # the run has been exported, so removing it would orphan a written official
     # record, and it is refused with nothing written.
     ("/api/experiments/{experiment_id}/runs/{run_id}/remove", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
+    # DISCARD. The same code set as run removal, and for the same reasons: it
+    # rewrites nothing but removes the whole record, so it carries the RECORD's
+    # `If-Match` and the whole 400/412/428 set. There is no `DELETE` verb — removal
+    # is a sub-path POST, the shape every other removal in this API uses, and a
+    # `DELETE` on `/experiments/{id}` would advertise a generic deletability that
+    # was never authorized.
+    #
+    # THE `409` CARRIES SIX DISTINCT REFUSALS and the `503` carries TWO DIFFERENT
+    # FACTS, which is why neither is collapsible into the other. The 409s are all
+    # about the RECORD (submitted, exported, an exported run, a published artifact
+    # on disk, a canonical example, or the database's own foreign key refusing);
+    # the 503s are about the SERVER (durable storage did not accept the removal, or
+    # the submission history could not be read so the one question that decides
+    # this has no answer). Every one of the eight writes nothing.
+    ("/api/experiments/{experiment_id}/discard", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/source-preview", "get"): ["200", "400", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/validate", "post"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/warnings", "get"): ["200", "401", "404", "422", "503"],

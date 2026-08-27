@@ -23,8 +23,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   A11Y_BASELINE,
+  A11Y_BASELINE_DARWIN_UNVERIFIED_NODES,
   A11Y_BASELINE_TOTAL_NODES,
   BASELINE_PLATFORMS,
+  DARWIN_CARRIED_FORWARD,
+  DARWIN_MEASUREMENT,
   PROJECT_IDS,
   SCAN_PROJECT_IDS,
   type BaselineEntry,
@@ -40,6 +43,7 @@ import {
   a11yBaselineKeys,
   auditA11yWellFormedness,
   auditAggregate,
+  auditDarwinProvenance,
   auditEntryShapes,
   auditBaselineAggregates,
   layoutBaselineKeys,
@@ -116,6 +120,225 @@ describe('declared baseline totals equal the entries they total', () => {
     expect(mismatches[0].platform).toBe('darwin');
     expect(mismatches[0].drift).toBe(-1);
     expect(mismatches[0].message).toContain('A11Y_BASELINE_TOTAL_NODES');
+  });
+});
+
+/*
+ * ── HOW MUCH OF THE DARWIN COLUMN IS A READING ──────────────────────────────
+ *
+ * `A11Y_BASELINE_TOTAL_NODES` catches a total that disagrees with its cells. It
+ * cannot catch a CELL that disagrees with reality, and on the darwin half nothing
+ * could: no CI job runs macOS (`grep -rn 'macos\|darwin' .github/workflows/` returns
+ * nothing; every `runs-on:` is `ubuntu-latest`), so the only judge of that column is a
+ * developer's laptop. 15 cells were wrong for eleven days as a result (~~14~~; corrected in
+ * independent review 2026-08-27, see `baseline-aggregate.ts`) — a linux-only
+ * transcription writes a linux delta into one half of a pair and leaves the other at a
+ * number nothing has measured since, and the two halves look identical afterwards.
+ *
+ * `DARWIN_CARRIED_FORWARD` is the register that makes them look different, and these
+ * tests are what stop the register itself rotting. They do NOT fail on unverified
+ * debt — an unverified number is still the best number available and deleting it would
+ * lose the ratchet. They fail when the register stops describing the file.
+ */
+describe('the darwin column says how much of itself is measured', () => {
+  it('the declared unverified-node count equals the register it totals', () => {
+    const provenance = auditDarwinProvenance(A11Y_BASELINE, DARWIN_CARRIED_FORWARD);
+    expect(provenance.unverifiedNodes).toBe(A11Y_BASELINE_DARWIN_UNVERIFIED_NODES);
+  });
+
+  it('the declared darwin total is the one the provenance audit reads', () => {
+    // Ties the two literals together, so `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES`
+    // can never be a fraction of a total that has since moved.
+    const provenance = auditDarwinProvenance(A11Y_BASELINE, DARWIN_CARRIED_FORWARD);
+    expect(provenance.totalNodes).toBe(A11Y_BASELINE_TOTAL_NODES.darwin);
+  });
+
+  it('every registered key names a cell that still exists', () => {
+    // A cell can be deleted (its defect fixed) while its key survives here. The
+    // register would then under-report without disagreeing with anything.
+    const provenance = auditDarwinProvenance(A11Y_BASELINE, DARWIN_CARRIED_FORWARD);
+    expect(provenance.unknownKeys).toEqual([]);
+  });
+
+  it('no registered key names a SCALAR cell', () => {
+    // A scalar asserts BOTH columns with one number, so "its darwin half is carried
+    // forward" is not a statement this file can make about it. Either the cell splits
+    // or the key goes.
+    const provenance = auditDarwinProvenance(A11Y_BASELINE, DARWIN_CARRIED_FORWARD);
+    expect(provenance.scalarKeys).toEqual([]);
+  });
+
+  /*
+   * THE CURRENT STATE, ASSERTED RATHER THAN ASSUMED — and it is the reason the four
+   * tests above are not vacuous today. The register is EMPTY because the 2026-08-27
+   * darwin run scanned all 168 cells and corrected 19 of them, not because nobody has
+   * filled it in. If a later slice transcribes a linux figure and correctly registers
+   * the cell, THIS test is the one that fails, and its failure is the prompt to update
+   * both literals in the same edit.
+   */
+  it('reports that NO darwin node is currently carried forward', () => {
+    const provenance = auditDarwinProvenance(A11Y_BASELINE, DARWIN_CARRIED_FORWARD);
+    expect(provenance.unverifiedKeys).toEqual([]);
+    expect(provenance.unverifiedFraction).toBe(0);
+    expect(provenance.totalNodes).toBeGreaterThan(0);
+  });
+
+  /*
+   * THE REGISTER IS OPT-IN, AND THAT IS THE HOLE THIS CLOSES.
+   *
+   * Independent review, 2026-08-27. Everything above is a ROT guard: it fails when the
+   * register stops describing the file. Nothing fails when the register is simply not
+   * WRITTEN — and that is precisely how the 15 fake splits arrived. A future author
+   * transcribes a linux figure from CI, turns a scalar into `{ darwin: <old>, linux:
+   * <new> }`, does not add the key here, and every test in this describe block stays
+   * green: `unverifiedNodes` is still 0 because the register is still empty, and
+   * `A11Y_BASELINE_TOTAL_NODES.darwin` does not move because the darwin half did not.
+   * The register makes DECLARED debt visible; it cannot see UNDECLARED debt, which is
+   * the only kind that has ever occurred here.
+   *
+   * A split is the shape that transcription creates, so the split SET is what to pin.
+   * FOUR cells are genuinely per-platform today, all measured on both faces. A fifth
+   * cannot appear without editing this list, and editing it is the moment to decide
+   * whether the new darwin half was measured or carried forward — and, if carried
+   * forward, to register it above.
+   *
+   * It is a ratchet over a LIST, not an assertion that four is correct forever: a real
+   * font-metrics difference is welcome to become the fifth. What it forbids is one
+   * arriving unremarked.
+   *
+   * ── IT WAS SIX, AND THIS EDIT IS THE PROCEDURE THE GUARD ASKS FOR ──────────────
+   *
+   * The discard/evidence-graph branch (2026-08-27) moved four of the six, and the list
+   * is updated here in the same change, with provenance for each:
+   *
+   *   REMOVED  settings-explorer@desktop-1280x800  {darwin 44, linux 43} -> scalar 44
+   *   REMOVED  settings-explorer@laptop-1024x768   {darwin 45, linux 43} -> scalar 44
+   *   REMOVED  settings-explorer@width-390         {darwin 52, linux 51} -> scalar 52
+   *
+   *     All three COLLAPSE because linux caught up: the 71st operation
+   *     (`POST /api/experiments/{id}/discard`) took each linux half to the darwin
+   *     half's value — 44/44/52, transcribed from CI job 98470544956 — and a darwin run
+   *     on 2026-08-27 re-read 44/44/52 on this host. Equal halves are rejected by
+   *     `auditA11yWellFormedness`, so a scalar is not a choice here; it is the only
+   *     legal encoding, and it means two measurements agreeing rather than one asserted.
+   *
+   *   ADDED    settings-explorer@mobile-375x812    scalar 50 -> {darwin 51, linux 50}
+   *
+   *     A REAL, MEASURED difference, and the one cell in this family where the two
+   *     faces moved in opposite directions. CI job 98470544956 reported no change at
+   *     `mobile-375x812`, so linux stays 50; the darwin run reads 51. The darwin half
+   *     is measured, so it does NOT go in `DARWIN_CARRIED_FORWARD` and
+   *     `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0.
+   *
+   * The seven `evidence-graph` cells changed in the same branch and are deliberately
+   * NOT here: they are darwin-measured scalars, which assert both columns. That is the
+   * file's existing encoding for a one-platform reading (see the note at those cells),
+   * and minting a split for them would be the exact anti-pattern this guard forbids —
+   * a linux half nothing measured.
+   */
+  it('the set of per-platform SPLIT cells is exactly the four measured on both faces', () => {
+    const splits: string[] = [];
+    for (const entry of A11Y_BASELINE) {
+      for (const [key, count] of Object.entries(entry.counts)) {
+        if (typeof count !== 'number') splits.push(`${entry.rule} @ ${key}`);
+      }
+    }
+    expect(
+      splits.sort(),
+      'a `{ darwin, linux }` cell asserts that the two platforms were MEASURED separately. ' +
+        'If you are adding one because CI reported a linux figure and you left the darwin ' +
+        'half standing, that half is carried forward: add the key to DARWIN_CARRIED_FORWARD ' +
+        'and move A11Y_BASELINE_DARWIN_UNVERIFIED_NODES in the same edit. If you measured ' +
+        'both, add it here and say where the darwin reading came from.'
+    ).toEqual(
+      [
+        'color-contrast @ memory-graph@zoom-200',
+        'color-contrast @ settings-about@width-320',
+        'color-contrast @ settings-explorer@mobile-375x812',
+        'color-contrast @ validator@zoom-200',
+      ].sort()
+    );
+  });
+
+  it('records where the darwin column came from', () => {
+    expect(DARWIN_MEASUREMENT.runs).toBeGreaterThanOrEqual(2);
+    expect(DARWIN_MEASUREMENT.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(DARWIN_MEASUREMENT.command).toContain('a11y-axe.spec.ts');
+    expect(DARWIN_MEASUREMENT.command).toContain('a11y-narrow.spec.ts');
+  });
+
+  /*
+   * NEGATIVE CONTROLS. Four assertions of `[]` and a `0` prove nothing on their own —
+   * a function that returned empty for every input would satisfy all of them. Each
+   * control below feeds the SAME function a register that really does name something
+   * and asserts the exact reading changes.
+   */
+  it('counts the DARWIN half of a registered split, not the linux half', () => {
+    const entries: readonly BaselineEntry[] = [
+      {
+        rule: 'color-contrast',
+        impact: 'serious',
+        note: 'Synthetic entry used only by this control; it describes no real defect.',
+        targetPattern: '^synthetic$',
+        counts: { 'fake@desktop-1280x800': { darwin: 7, linux: 90 } },
+      },
+    ];
+    const provenance = auditDarwinProvenance(entries, ['fake@desktop-1280x800']);
+    expect(provenance.totalNodes).toBe(7);
+    expect(provenance.unverifiedNodes).toBe(7);
+    expect(provenance.unverifiedFraction).toBe(1);
+    expect(provenance.unknownKeys).toEqual([]);
+    expect(provenance.scalarKeys).toEqual([]);
+  });
+
+  it('reports a registered key that names no cell', () => {
+    const entries: readonly BaselineEntry[] = [
+      {
+        rule: 'color-contrast',
+        impact: 'serious',
+        note: 'Synthetic entry used only by this control; it describes no real defect.',
+        targetPattern: '^synthetic$',
+        counts: { 'fake@desktop-1280x800': { darwin: 7, linux: 90 } },
+      },
+    ];
+    const provenance = auditDarwinProvenance(entries, ['gone@zoom-200']);
+    expect(provenance.unknownKeys).toEqual(['gone@zoom-200']);
+    expect(provenance.unverifiedKeys).toEqual([]);
+    expect(provenance.unverifiedNodes).toBe(0);
+  });
+
+  it('reports a registered key whose cell is a scalar', () => {
+    const entries: readonly BaselineEntry[] = [
+      {
+        rule: 'color-contrast',
+        impact: 'serious',
+        note: 'Synthetic entry used only by this control; it describes no real defect.',
+        targetPattern: '^synthetic$',
+        counts: { 'fake@desktop-1280x800': 11 },
+      },
+    ];
+    const provenance = auditDarwinProvenance(entries, ['fake@desktop-1280x800']);
+    expect(provenance.scalarKeys).toEqual(['fake@desktop-1280x800']);
+    expect(provenance.unverifiedNodes).toBe(11);
+  });
+
+  it('reports a fraction between 0 and 1 when only part of the column is unverified', () => {
+    const entries: readonly BaselineEntry[] = [
+      {
+        rule: 'color-contrast',
+        impact: 'serious',
+        note: 'Synthetic entry used only by this control; it describes no real defect.',
+        targetPattern: '^synthetic$',
+        counts: {
+          'fake@desktop-1280x800': { darwin: 3, linux: 4 },
+          'fake@zoom-200': { darwin: 9, linux: 4 },
+        },
+      },
+    ];
+    const provenance = auditDarwinProvenance(entries, ['fake@desktop-1280x800']);
+    expect(provenance.totalNodes).toBe(12);
+    expect(provenance.unverifiedNodes).toBe(3);
+    expect(provenance.unverifiedFraction).toBeCloseTo(0.25, 10);
   });
 });
 

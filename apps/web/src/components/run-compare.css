@@ -255,6 +255,15 @@
    * defect there to fix.
    */
   position: relative;
+
+  /*
+   * …AND THE SENTENCE ABOVE THE TABLE MUST NOT SCROLL WITH IT. See `.rc-caption`.
+   * The third use of a container in this repository, after `evgraph` and
+   * `expgraph`; named, as both of those are, so no unnamed `@container` query
+   * can resolve against it by accident.
+   */
+  container-type: inline-size;
+  container-name: rccompare;
 }
 
 .rc-tablewrap:focus-visible {
@@ -268,6 +277,28 @@
   font-size: 12.5px;
 }
 
+/*
+ * THE CAPTION IS THE ONE PART OF THIS TABLE THAT MUST NOT BE SCROLLED TO.
+ *
+ * A `<caption>` takes the TABLE's width, and the table carries a `min-width` so
+ * its four columns stay legible. Below that width the wrap above becomes a
+ * scroller and the caption went with it: measured at 390 and at 320, the caption
+ * was 620px wide inside a 278px / 208px visible box, so the reader saw
+ * "Addresses where Run 2 and Run 3 di" and had to drag sideways for the half
+ * that says how many addresses are NOT listed. The table is meant to scroll;
+ * the sentence explaining it is not.
+ *
+ * `100cqi` resolves against `.rc-tablewrap`'s own inline size — the visible box,
+ * not the scrolled content — so the caption wraps to the column the reader
+ * actually has, while the table keeps its `min-width` untouched (measured: 620px
+ * at both narrow widths, unchanged). `position: sticky` holds it at the left
+ * edge while the table is dragged, so it stays whole rather than sliding off.
+ *
+ * At every width where the table already fits, `100cqi` IS the caption's current
+ * width and nothing moves: measured 656 at 768, 790 at 1440, identical either
+ * way. The element keeps `display: table-caption`, so it is still the table's
+ * caption to an assistive technology.
+ */
 .rc-caption {
   caption-side: top;
   text-align: left;
@@ -275,6 +306,9 @@
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-muted);
+  position: sticky;
+  left: 0;
+  width: 100cqi;
 }
 
 .rc-table thead th {
@@ -446,6 +480,289 @@
   color: var(--text-muted);
 }
 
+/* ── the record context these two runs sit in ──────────────────────────────── */
+
+.rc-context {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+
+.rc-context-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rc-context-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.rc-context-scope {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.rc-context-sides {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 0;
+}
+
+.rc-context-side {
+  flex: 1 1 260px;
+  /* `min-width: 0` so a long question wraps instead of forcing the flex item wider
+     than the panel — the row above scrolls inside its own container, this band does
+     not and must never make the page scroll sideways. */
+  min-width: 0;
+  padding: 9px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-inner);
+}
+
+.rc-context-label {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 620;
+  color: var(--text-primary);
+}
+
+.rc-context-rev {
+  margin: 2px 0 6px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+
+.rc-context-fact {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.rc-context-list {
+  margin: 4px 0 0;
+  padding-left: 17px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.rc-context-more {
+  list-style: none;
+  margin-left: -17px;
+  font-style: italic;
+}
+
+/* A read that did not complete, or content this build could not describe. Its own
+   surface AND its own words — never an absent line, which reads as "there is
+   none". `--needsyou-*` is the repo's existing "this needs a person" pairing. */
+.rc-context-fail {
+  margin: 5px 0 0;
+  padding: 5px 7px;
+  background: var(--needsyou-bg);
+  border: 1px solid var(--needsyou-border);
+  border-radius: var(--radius-inner);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--needsyou-text);
+  /* THE ONLY BAND ON THIS PANEL OUTSIDE `.rc-tablewrap`'s scroll container, and
+     the one that renders a SERVER MESSAGE verbatim. An unbroken token in one — a
+     path, a URL, an id — would otherwise widen the flex item past the panel and
+     scroll the whole page sideways at 320px, which `min-width: 0` alone cannot
+     prevent because it permits the shrink without making the content wrap. */
+  overflow-wrap: anywhere;
+}
+
+/* ── the blocks this table does not compare ────────────────────────────────── */
+
+.rc-blocks {
+  margin: 10px 0 0;
+}
+
+.rc-block-list {
+  margin: 5px 0 0;
+  padding-left: 18px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ── a recorded conflict, and the expanded row ─────────────────────────────── */
+
+/*
+ * NOT CARRIED BY COLOUR EITHER. The mark is a glyph, a sentence naming the run, and
+ * a surface — the same three signals every category row carries. `data-state`
+ * changes the tint only.
+ *
+ * AND THAT LAST SENTENCE WAS FALSE FOR ONE COMMIT, in the comment written to
+ * assert it. It read "`current` … and `open` say so in their own words above the
+ * tint"; they did not. Both marks rendered the identical sentence and the decision
+ * state was reachable only by expanding the detail row, so `current` (green) and
+ * `open` (amber) differed on screen by TINT ALONE — the one thing this comment
+ * exists to forbid. `Row` now appends "decided, and the decision still covers these
+ * answers" / "not currently decided", and the claim above is true because of that
+ * clause, not because of this comment.
+ */
+.rc-conflict {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 5px;
+  padding: 3px 6px;
+  border-radius: var(--radius-inner);
+  font-size: 11px;
+  line-height: 1.45;
+  font-weight: 600;
+  background: var(--missing-bg);
+  border: 1px solid var(--missing-border);
+  color: var(--missing-text);
+}
+
+.rc-conflict[data-state='current'] {
+  background: var(--confirmed-bg);
+  border-color: var(--confirmed-border);
+  color: var(--confirmed-text);
+}
+
+.rc-conflict[data-state='unknown'] {
+  background: var(--cover-bg);
+  border-color: var(--cover-border);
+  color: var(--cover-text);
+  font-weight: 400;
+}
+
+.rc-cell-finding {
+  display: block;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--text-slate);
+}
+
+.rc-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--action);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.rc-detail-toggle:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.rc-detail-row > td {
+  padding: 0 10px 10px;
+  border-bottom: 1px solid var(--border-hair);
+  background: var(--surface-subtle);
+}
+
+.rc-detail {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 9px 0 0;
+}
+
+.rc-detail-side {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-inner);
+}
+
+.rc-detail-label {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--text-primary);
+}
+
+.rc-detail-line {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.rc-detail-key {
+  display: inline;
+  font-weight: 620;
+  color: var(--text-strong);
+}
+
+.rc-detail-list {
+  margin: 4px 0 0;
+  padding-left: 17px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.rc-detail-conflict,
+.rc-detail-findings {
+  margin: 8px 0 0;
+  padding: 7px 8px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-inner);
+}
+
+.rc-detail-fail {
+  margin: 5px 0 0;
+  padding: 5px 7px;
+  background: var(--needsyou-bg);
+  border: 1px solid var(--needsyou-border);
+  border-radius: var(--radius-inner);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--needsyou-text);
+}
+
+/*
+ * THE ADDRESS A COMPARISON LINKED TO, once Focus Run has it on screen.
+ *
+ * Written HERE rather than in `runs.css` because the link that produces it is
+ * this component's, and the attribute it keys on is one `RunInheritedPanel`
+ * already published — the two files are not coupled by anything new. Outline
+ * rather than a background, so it survives forced-colours mode; `offset` so it
+ * reads as a mark on the row and not as a focus ring on a control.
+ */
+[data-linked-address='true'] {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+  border-radius: var(--radius-inner);
+}
+
 /* ── findings ──────────────────────────────────────────────────────────────── */
 
 .rc-findings {
@@ -518,6 +835,19 @@
 @media (max-width: 720px) {
   .rc-addr {
     width: 130px;
+  }
+
+  /* The expanded detail stacks its two sides instead of sitting them beside each
+     other: at these widths two 260px columns inside a 620px row leave prose in
+     ~40-character lines. It is inside the table's own scroll container either way
+     — `min-width: 0` on the sides is what keeps it from widening that container
+     beyond the 620px the table already declares. */
+  .rc-detail {
+    display: block;
+  }
+
+  .rc-detail-side + .rc-detail-side {
+    margin-top: 8px;
   }
 
   .rc-table {

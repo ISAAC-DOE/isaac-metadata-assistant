@@ -63,6 +63,8 @@ import type {
   ApiRunView,
   ApiTranscriptCapture,
 } from '../lib/types';
+import { DiscardStaged } from './DiscardStaged';
+import { DISCARD_COPY } from '../lib/discardContent';
 import './transcriptCapture.css';
 
 type VoiceState = 'unsupported' | 'idle' | 'recording' | 'held';
@@ -255,6 +257,13 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     setDecisions({});
     setSelectedRun('');
     setText('');
+    /* `edits` belongs to the CANDIDATES of the record that was open — it is keyed by
+       their position in that record's proposal list — so it belongs in this reset with
+       them. It was missing, and while nothing rendered the stale entries (a proposal row
+       needs `reading`, and `finalize` clears the map before setting it), they were enough
+       to make `hasStagedCapture` true on the next record. Found in review of the Discard
+       slice, which is what first made that leak visible. */
+    setEdits({});
   }, [experimentId]);
 
   useEffect(() => {
@@ -489,6 +498,66 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     transcriptRef.current?.focus();
   }
 
+  /* ---- discard (typed input only; no request, ever) ----------------------- */
+
+  /*
+   * WHAT THE DISCARD CONTROL REACHES, AND — MORE IMPORTANTLY — WHAT IT DOES NOT.
+   *
+   * It clears `text` and `edits`. Both are things a person typed into a box on this
+   * screen and never sent: `text` is read only when Finalize is pressed, and an `edits`
+   * entry is a value typed over a proposal that has not been accepted.
+   *
+   * IT DELIBERATELY DOES NOT CLEAR `reading` OR `decisions`, and that is a decision
+   * against the obvious "discard everything":
+   *
+   *   * `reading` is the SERVER'S ANSWER to a finalize — the proposals, the
+   *     clarifications, the notes it stored. It is data that arrived, not a draft that
+   *     was typed. Clearing it would hide the panel's own record of what was stored
+   *     with the record moments earlier, which is the disclosure a reader most needs
+   *     at exactly that moment.
+   *   * `decisions` holds the Undo path for proposals that were ACCEPTED — values
+   *     already written to the run through `api.updateRun`. Dropping that map would
+   *     take away the only control that reverses a real write, in the name of
+   *     discarding something unsent. A control that quietly removed a remedy would be
+   *     doing the opposite of what it says.
+   *
+   * The copy branches on the same condition for the same reason: once a finalize has
+   * landed, the words ARE stored with the record as notes, and a sentence saying
+   * nothing has been sent would be false. See `lib/discardContent.ts`.
+   */
+  /*
+   * `edits` COUNTS ONLY WHILE THE PROPOSALS IT EDITS ARE ON SCREEN, and the guard is a
+   * review fix rather than belt-and-braces. An `edits` entry is only reachable, and only
+   * rendered, from a proposal row — and those exist only while `reading !== null`. The
+   * map survived a record change (the reset below did not clear it), so a reader who
+   * edited a proposal on one record and moved to another met a Discard trigger over an
+   * EMPTY box, offering to clear something they could not see, under the copy that says
+   * "This clears the transcript box". The reset now drops the map as well; tying the
+   * predicate to what is rendered is the structural half of the same fix, so the control
+   * can never be offered for state the branch below is not describing.
+   *
+   * `reading !== null` WAS NOT THE WHOLE OF "ON SCREEN", and this is the second half of
+   * that fix, found in independent review of the first. The edit `<input>` renders only
+   * on the `decision === undefined` branch of a candidate row — accepting or rejecting a
+   * proposal unmounts it and NEITHER `accept` NOR `reject` deletes its `edits` entry. So
+   * a reader who typed over a proposal, accepted it, and then emptied the transcript box
+   * by hand was still offered "Discard this transcript" with an empty box and no visible
+   * edit anywhere: a control offering to clear state the reader cannot see, which is the
+   * exact defect the paragraph above claims to have closed. An entry counts only while
+   * the row that renders it is still undecided.
+   */
+  const stagedEditCount =
+    reading === null
+      ? 0
+      : Object.keys(edits).filter((index) => decisions[Number(index)] === undefined).length;
+  const hasStagedCapture = text !== '' || stagedEditCount > 0;
+  const discardCopy =
+    reading === null ? DISCARD_COPY.transcriptUnsent : DISCARD_COPY.transcriptAfterFinalize;
+  const discardStagedCapture = () => {
+    setText('');
+    setEdits({});
+  };
+
   /* ---- render ------------------------------------------------------------ */
 
   return (
@@ -716,6 +785,18 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
         >
           {CAPTURE_COPY.finalize}
         </button>
+        {/* BELOW Finalize, quiet and right-aligned: this is the destructive-of-typing
+            branch and must never sit where the primary action is expected. Closing the
+            panel still keeps the text — that behaviour is deliberate (see the reset
+            effect above) and this control is the explicit act it was missing, not a
+            reason to make closing destructive. */}
+        <DiscardStaged
+          staged={hasStagedCapture}
+          copy={discardCopy}
+          onDiscard={discardStagedCapture}
+          onAnnounce={setAnnouncement}
+          onFocusAfterDiscard={() => transcriptRef.current?.focus()}
+        />
       </div>
 
       {reading !== null && (

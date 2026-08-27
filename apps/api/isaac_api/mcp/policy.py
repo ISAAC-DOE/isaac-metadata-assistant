@@ -56,6 +56,7 @@ from typing import Mapping
 
 __all__ = [
     "ALLOWED_METHODS",
+    "DESTRUCTIVE_TOKENS",
     "FORBIDDEN_PATH_TOKENS",
     "FORBIDDEN_TOOL_TOKENS",
     "OPERATIONS",
@@ -117,6 +118,7 @@ FORBIDDEN_TOOL_TOKENS = frozenset(
         "approve",
         "delete",
         "destroy",
+        "discard",
         "drop",
         "export",
         "finalis",
@@ -137,25 +139,67 @@ FORBIDDEN_TOOL_TOKENS = frozenset(
 )
 
 #: Substrings that may never appear in an allowlisted operation's path template.
-#: This is the same refusal as :data:`FORBIDDEN_TOOL_TOKENS` applied one layer
-#: down, so a permitted-looking tool name cannot be pointed at a forbidden route.
+#:
+#: ~~"This is the same refusal as :data:`FORBIDDEN_TOOL_TOKENS` applied one layer
+#: down, so a permitted-looking tool name cannot be pointed at a forbidden route."~~
+#: **CORRECTED 2026-08-26 — that sentence was FALSE for the destructive verbs, which
+#: are the ones it most needed to be true for.** Measured: ``delete``, ``destroy``,
+#: ``drop``, ``purge`` and ``remove`` were all in the TOOL set and NONE of them was
+#: in this one, while ``POST .../runs/{run_id}/remove`` and
+#: ``POST .../assets/{asset_id}/remove`` had existed as routes for some time — so a
+#: tool named anything innocuous could have been pointed at either of them and this
+#: layer would not have said a word. ``POST .../experiments/{id}/discard`` would have
+#: been a third. The five are added here, together with ``discard``, and the claim is
+#: kept struck through rather than reworded because the point of the two lists is
+#: that the relationship between them is checkable — and this one went unchecked.
+#:
+#: **THE TWO SETS ARE STILL NOT EQUAL, AND MUST NOT BE MADE EQUAL.** ``database``,
+#: ``uploads``, ``verification``, ``demo`` and ``tutorial/sessions`` are path-only,
+#: deliberately: they name ROUTES whose subject matter is off limits, not verbs a
+#: tool might be called. ``approve``, ``finalis``/``finaliz``, ``governance``,
+#: ``grant``, ``publish``, ``revoke``, ``signoff``/``sign_off`` and ``truncate`` are
+#: tool-only, because no route path carries them. What IS now asserted, by
+#: ``test_mcp_boundaries``, is the narrower and checkable property: every
+#: DESTRUCTIVE verb appears in BOTH sets.
 #:
 #: ``database`` and ``verification`` are here because those routes read the
 #: production-derived corpus (``CLAUDE.md`` §15, gates G2/G3); ``uploads`` because
 #: ingestion is refused deployment-wide; ``tutorial/sessions`` because session
 #: lifecycle belongs to the deployment binding, not to a tool argument.
+#:
+#: NONE of the six added verbs collides with any of the eleven permitted operation
+#: paths — checked before they were added, and re-checked continuously by
+#: ``_validated``, which refuses at import time if a permitted path ever contains
+#: one. So this costs nothing today and refuses a whole class of route tomorrow.
 FORBIDDEN_PATH_TOKENS = frozenset(
     {
         "database",
+        "delete",
         "demo",
+        "destroy",
+        "discard",
+        "drop",
         "export",
         "migrat",
+        "purge",
+        "remove",
         "reset",
         "submit",
         "tutorial/sessions",
         "uploads",
         "verification",
     }
+)
+
+#: The verbs that must appear in BOTH sets above. Named once, here, so the property
+#: has a definition rather than living only inside a test's literal.
+#:
+#: It is deliberately NOT "the intersection of the two sets" — that would be a
+#: tautology no drift could break. It is the class of verb that must never name a
+#: tool AND must never name a route a tool can reach, and it is the exact class the
+#: correction above records having been enforced in only one of the two places.
+DESTRUCTIVE_TOKENS = frozenset(
+    {"delete", "destroy", "discard", "drop", "purge", "remove"}
 )
 
 

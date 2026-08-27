@@ -1710,7 +1710,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `validate_provider_config_or_raise` refuses to boot an application that names
     // the test double. Its own description says so in those terms, which is the
     // reason the paragraph count moves by five rather than by one.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(70);
+    // 70 -> 71: `POST /api/experiments/{experiment_id}/discard`. Until it existed,
+    // `POST /api/experiments` could create a record and no operation could take one
+    // away. It is a narrow domain operation, not a generic delete: it refuses,
+    // writing nothing, any record that has ever been submitted, has exported, has an
+    // exported run, has a published artifact on disk, or is a built-in worked
+    // example. RE-MEASURED from the served document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(71);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -1857,7 +1863,44 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // re-measured from the served document at every merge, never arithmetic over the
     // two branches' deltas — adding them would have given 96,159 and been wrong by the
     // bytes the merge itself moved.
-    expect(total).toBe(98335);
+    // RE-MEASURED 2026-08-27 after the discard operation merged. 98,335 -> 100,212
+    // (+1,877): ONE new operation, `POST .../discard`; no existing description
+    // changed, and `test_contract_description_parity.py` proves that rather than
+    // leaving it asserted here. Re-measured from the served document, never
+    // arithmetic over a branch's delta.
+    // RE-MEASURED 2026-08-27, same day, after `POST .../discard` began REFUSING
+    // `If-Match: *`. 100,212 -> 101,071 (+859): one existing description changed —
+    // discard's — and no other. The added prose states the refusal, names the
+    // `wildcard_precondition_refused` error, and says why the code is `400` rather
+    // than `428` (which would claim the header was omitted) or `412` (whose body
+    // carries `expected_version`/`expected_rev`, both `None` for `*`, so it would
+    // echo nulls into the two fields a client reads to recover).
+    //
+    // ~~"The PARAGRAPH count below does NOT move, because the sentences were written
+    // INTO existing paragraphs rather than appended as new ones."~~ **That was
+    // written without measuring and it is wrong — the paragraph count DOES move,
+    // 206 -> 207.** The refusal is its own appended paragraph. Recorded rather than
+    // quietly corrected, because the reason these two aggregates are asserted
+    // separately is precisely that neither can be inferred from the other, and
+    // guessing one from the other is the mistake the separation exists to prevent.
+    // Both are re-measured from the served document, never arithmetic over a delta.
+    //
+    // RE-MEASURED 2026-08-27 after `GET /api/health` gained a paragraph describing
+    // `experiment_storage.run_projection`. 101,071 -> 101,768 (+697): ONE existing
+    // description changed — health's — and no other, which
+    // `test_contract_description_parity.py` proves rather than leaving it asserted
+    // here. The added prose names what the Stage-2b block reports (the kill switch,
+    // and the per-experiment state distribution the last hydration pass measured),
+    // states that it is counts only, distinguishes a `null` `last_pass` from a pass
+    // that classified none, and says outright that an all-unavailable or
+    // all-never-projected distribution is the reader working correctly. Re-derived
+    // three ways, never incremented: the splitPurpose rule transcribed into Python
+    // over `create_app().openapi()` restricted to the 71 operations this array
+    // names; the same rule over the transcribed array; and raw sum of
+    // `d.description.length` = 102,184 minus 2 per `\n\n` separator (208 x 2 = 416)
+    // = 101,768. The entry was re-transcribed from `create_app().openapi()` with
+    // `json.dumps(..., ensure_ascii=False)`, never hand-edited.
+    expect(total).toBe(101768);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1872,7 +1915,20 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `POST .../runs/{run_id}/answers` was written INTO an existing paragraph and
     // therefore must not move this count — which is why it is asserted separately from
     // the character total rather than inferred from it.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(202);
+    // 202 -> 206 (+4): `POST .../discard` is ONE new operation carrying a lead plus
+    // four post-lead paragraphs. No existing description moved, and
+    // `test_contract_description_parity.py` proves that rather than leaving it
+    // asserted here. RE-MEASURED from the served document, not incremented.
+    // 206 -> 207 (+1): `POST .../discard` APPENDED one paragraph — the `If-Match: *`
+    // refusal. RE-MEASURED from the served document.
+    // 207 -> 208 (+1): `GET /api/health` APPENDED one paragraph — the Stage-2b
+    // `experiment_storage.run_projection` block. It moves by exactly one because the
+    // sentences were added as a NEW paragraph rather than woven into the existing
+    // `experiment_storage` one; a change that left this at 207 while the character
+    // total moved would mean the prose had been written into an existing paragraph,
+    // which is precisely why these two aggregates are asserted separately and neither
+    // is inferred from the other. RE-DERIVED from the served document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(208);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

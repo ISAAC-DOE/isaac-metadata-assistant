@@ -326,9 +326,20 @@ export function officialExportBlockedSentence(
  * would be the defect again.
  *
  * IT LIVES HERE AND NOT IN THE GRAPH MODULE ON PURPOSE. That module was the fifth
- * consumer of this payload and the last to be found, because it contains NUL bytes
- * and every `grep`/`rg` sweep silently skipped it. Copy kept next to its renderer is
- * copy that can be missed; copy kept here is copy the guard can see.
+ * consumer of this payload and the last to be found, because it CONTAINED two literal
+ * NUL bytes and a repo-wide `rg` sweep therefore dropped every hit in it without
+ * saying so. ~~"because it contains NUL bytes and every `grep`/`rg` sweep silently
+ * skipped it"~~ — PAST TENSE SINCE `7a66127`, which rewrote the separator as the
+ * escape `\u0000`; `lib/experimentGraph.ts` now holds ZERO NUL bytes and the runtime
+ * string is unchanged. Two precisions carried over from the re-measurement recorded
+ * in that file: the silent drop is a property of a DIRECTORY sweep (an explicitly
+ * named file gets a visible `binary file matches` notice instead, and `rg -c` /
+ * `grep -c` were correct all along), and the reason the file was lost is that a
+ * repo-wide sweep is a directory sweep.
+ *
+ * THE ARGUMENT FOR THIS MODULE DOES NOT REST ON THE NUL BYTES and outlives their
+ * removal: copy kept next to its renderer is copy that can be missed; copy kept here
+ * is copy the guard can see.
  */
 export function officialFindingsNote(source: OfficialFindingSource): string | null {
   switch (source) {

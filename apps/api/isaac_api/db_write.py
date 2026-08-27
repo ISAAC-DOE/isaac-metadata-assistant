@@ -338,6 +338,52 @@ _TABLE_INTRODUCERS = ("from", "join", "into", "update", "table", "on")
 #: not read it, write it, index it, analyze it, or reference it in a constraint.
 _FORBIDDEN_TABLES = ("records",)
 
+#: The five submission-lifecycle tables, which are APPEND-ONLY. A statement that
+#: would ``DELETE`` from one, or ``UPDATE`` a row in one, is refused here.
+#:
+#: WHY THIS MOVED INTO THE POLICY, having previously lived only in a test. The
+#: append-only guarantee was enforced by ``test_submission_store.py``, whose own
+#: words are "THE APPEND-ONLY GUARANTEE. It is this test, and nothing else" — it
+#: enumerates the application's ``Q_*`` constants and asserts none of them issues an
+#: ``UPDATE`` or a ``DELETE`` naming these five. That is a guarantee about the
+#: statements that exist TODAY, checked at test time, and the first branch that adds
+#: one is the branch that removes it.
+#:
+#: The stated reason it could not be stronger was that the DATABASE cannot enforce
+#: it here: a trigger needs a dollar-quoted body, which
+#: ``db_migrate.split_statements`` refuses outright, and ``REVOKE`` is a forbidden
+#: verb above. Both are true, and neither is a fact about THIS class — every
+#: ``cursor.execute`` on the write path already routes through
+#: :meth:`WriteStatementPolicy.check`, and this object is consulted BEFORE a
+#: connection is opened. So the guarantee is enforced here as well, at the one seam
+#: every write already passes through.
+#:
+#: IT IS NOT A DATABASE-LEVEL GUARANTEE AND MUST NOT BE DESCRIBED AS ONE. A psql
+#: session, a rollback ``.sql`` file run by a human, or any client that is not this
+#: application is unaffected — nothing here revokes a privilege. What it does close
+#: is the reachable case: SQL issued by this application, including SQL read from a
+#: committed migration file.
+#:
+#: ``isaac_experiments``, ``isaac_runs``, ``isaac_run_projection`` and
+#: ``isaac_schema_migrations`` are deliberately ABSENT. Each is current-state rather
+#: than history and each has a legitimate delete or upsert today —
+#: ``Q_DELETE_EXPERIMENT``, ``Q_DELETE_RUNS_FOR_EXPERIMENT``,
+#: ``Q_DELETE_ABSENT_RUNS``, ``Q_DELETE_RUN_PROJECTION`` and the two
+#: ``ON CONFLICT ... DO UPDATE`` upserts.
+_APPEND_ONLY_TABLES: frozenset[str] = frozenset(
+    {
+        "isaac_experiment_revisions",
+        "isaac_run_revisions",
+        "isaac_revision_changes",
+        "isaac_submissions",
+        "isaac_submission_runs",
+    }
+)
+
+#: The two verbs that mutate a row that already exists. ``INSERT`` is deliberately
+#: absent: appending is the whole point of an append-only table.
+_MUTATION_INTRODUCERS = ("delete", "update")
+
 
 class WriteStatementPolicy:
     """Refuses any statement outside this application's own tables.
@@ -367,6 +413,8 @@ class WriteStatementPolicy:
                 raise WriteRefused(
                     "statement names a table this application must never reference"
                 )
+            if token in _MUTATION_INTRODUCERS:
+                self._refuse_append_only_mutation(tokens, index, token)
             if token not in _TABLE_INTRODUCERS:
                 continue
             named = self._table_after(tokens, index)
@@ -408,6 +456,51 @@ class WriteStatementPolicy:
         if candidate == "conflict":
             return None
         return candidate
+
+    @staticmethod
+    def _refuse_append_only_mutation(
+        tokens: list[str], index: int, verb: str
+    ) -> None:
+        """Refuse ``DELETE``/``UPDATE`` against an append-only history table.
+
+        TWO SHAPES, BECAUSE ONE PREDICATE CANNOT SEE BOTH.
+
+        1. The verb INTRODUCES its own target — ``DELETE FROM t``, ``DELETE FROM
+           ONLY t``, ``UPDATE t SET``, ``UPDATE ONLY t SET`` — including inside a
+           CTE (``WITH x AS (DELETE FROM t ...) SELECT ...``), which a check on the
+           statement's leading verb alone would miss because the leading token
+           there is ``with``.
+        2. ``ON CONFLICT ... DO UPDATE SET`` — the verb introduces a SET clause, not
+           a table, and the row it rewrites belongs to whatever the enclosing
+           ``INSERT INTO`` named. Resolving that properly would need a parser, so
+           the rule here is deliberately blunt: a ``DO UPDATE`` in a statement that
+           names ANY append-only table anywhere is refused. That over-refuses in
+           principle (an upsert into an owned table that merely mentions a history
+           table in a subquery) and under-refuses nothing; no statement in this
+           application has that shape, and an over-refusal is loud and fixable
+           while an admission is silent.
+
+        WHAT IT DOES NOT CATCH, stated rather than implied, because the class
+        docstring's own "KNOWN, ACCEPTED LIMITS" section exists for exactly this:
+        it is still a TOKENIZER. A verb assembled at run time inside a string, a
+        dollar-quoted body, or a name reached through a view or a rule is invisible
+        to it — the same limits already recorded above, unchanged by this addition.
+        """
+        if verb == "update" and index and tokens[index - 1] == "do":
+            named = [t for t in tokens if t in _APPEND_ONLY_TABLES]
+            if named:
+                raise WriteRefused(
+                    "statement would mutate an append-only history table"
+                )
+            return
+        cursor = index + 1
+        skippable = ("from", "only") if verb == "delete" else ("only",)
+        while cursor < len(tokens) and tokens[cursor] in skippable:
+            cursor += 1
+        if cursor >= len(tokens):
+            return
+        if tokens[cursor] in _APPEND_ONLY_TABLES:
+            raise WriteRefused("statement would mutate an append-only history table")
 
 
 # --- environment --------------------------------------------------------------

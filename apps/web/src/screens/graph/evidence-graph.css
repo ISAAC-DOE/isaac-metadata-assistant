@@ -41,6 +41,17 @@
   --evgraph-evidence: #2f7d78;
   --evgraph-source: #8a6d4a;
   --evgraph-finding: #b23a30;
+
+  /* The five categories added when this view began reading the conflicts,
+     notes, provenance and asset routes. They stay inside the families already
+     declared above rather than opening a new hue: a conflict and a validation
+     finding are both "something is wrong here", a decision and a note are both
+     "somebody wrote this down". Nothing here borrows the Assistant's indigo. */
+  --evgraph-conflict: #a8452c;
+  --evgraph-candidate: #8c5a3c;
+  --evgraph-decision: #2f6b5a;
+  --evgraph-note: #6a5c8a;
+  --evgraph-assetref: #55606d;
 }
 
 /* --- head ---------------------------------------------------------------- */
@@ -117,7 +128,17 @@
 
 .evgraph-note[data-note='node_cap'],
 .evgraph-note[data-note='visible_cap'],
-.evgraph-note[data-note='unreadable_evidence'] {
+.evgraph-note[data-note='unreadable_evidence'],
+/* The four sub-fetch conditions carry the advisory tint for the same reason the
+   three above do: each one means the picture is INCOMPLETE or describes a
+   different read, and a reader who skims past it has been misled by an absence
+   rather than by a statement. `conflicts_record_scope`, `provenance_undescribed`
+   and `revision_state` deliberately do NOT — they describe what this view is,
+   not something that went wrong with it. */
+.evgraph-note[data-note='sub_fetch_unavailable'],
+.evgraph-note[data-note='sub_fetch_stale'],
+.evgraph-note[data-note='unreadable_entries'],
+.evgraph-note[data-note='source_bounded'] {
   border-color: var(--advisory-border);
   background: var(--advisory-bg);
   color: var(--advisory-text);
@@ -373,6 +394,29 @@
 [data-kind='evidence_source'].evgraph-row-swatch { background: var(--evgraph-source); }
 [data-kind='validation_finding'].evgraph-kind-swatch,
 [data-kind='validation_finding'].evgraph-row-swatch { background: var(--evgraph-finding); }
+[data-kind='conflict'].evgraph-kind-swatch,
+[data-kind='conflict'].evgraph-row-swatch { background: var(--evgraph-conflict); }
+[data-kind='conflict_decision'].evgraph-kind-swatch,
+[data-kind='conflict_decision'].evgraph-row-swatch { background: var(--evgraph-decision); }
+[data-kind='asset_reference'].evgraph-kind-swatch,
+[data-kind='asset_reference'].evgraph-row-swatch { background: var(--evgraph-assetref); }
+
+/* THE TWO UNACCEPTED KINDS ARE HOLLOW, not filled — the swatch reads as an
+   outline rather than as a solid category, which is the same signal the dashed
+   node outline gives on the canvas. It is deliberately NOT the only signal:
+   the details pane states what these are in words (`.evgraph-detail-unaccepted`),
+   because a border style is not something a screen reader can hear and colour
+   alone may not be perceived at all. */
+[data-kind='conflict_candidate'].evgraph-kind-swatch,
+[data-kind='conflict_candidate'].evgraph-row-swatch {
+  background: transparent;
+  border: 1.5px dashed var(--evgraph-candidate);
+}
+[data-kind='note'].evgraph-kind-swatch,
+[data-kind='note'].evgraph-row-swatch {
+  background: transparent;
+  border: 1.5px dashed var(--evgraph-note);
+}
 
 /* --- body: tree + canvas + detail ---------------------------------------- */
 
@@ -449,6 +493,31 @@
   border-radius: var(--radius-token);
   cursor: pointer;
   min-width: 0;
+
+  /*
+   * A WRAPPED LABEL USED TO PAINT ON TOP OF THE ROWS BELOW IT, and the cause is
+   * that these rows are flex ITEMS, not just flex containers.
+   *
+   * `.evgraph-tree` is a column flex container with `max-height: 420px`. Once the
+   * rows together exceed that, the default `flex-shrink: 1` shrinks each item —
+   * `min-height: 30px` stops it at 30px, but a row whose label wraps to three or
+   * four lines NEEDS 83px, and `overflow` is `visible`, so the surplus was
+   * rendered outside the box and over its neighbours. The tree scrolled by the
+   * shrunken total, so the rows below never moved out of the way.
+   *
+   * MEASURED at 1440 on `/record/<id>/evidence?view=graph`: 4 of 17 rows had
+   * `scrollHeight` 83 against a `getBoundingClientRect().height` of 30 — the
+   * experiment's own title row among them, so this was visible on the shipped
+   * fixture and not only on long content. With `flex: none`, no row reports
+   * `scrollHeight` past its own height and the tree scrolls by the real total.
+   *
+   * `flex: none` rather than `flex-shrink: 0`: the basis and grow factor should
+   * be stated too, because a row's height is its content's and nothing else's.
+   * `.evgraph-row-label` already carries `overflow-wrap: anywhere` — wrapping is
+   * what this tree intends, so the fix is to let the row be as tall as the wrap
+   * it asked for, not to truncate the label and hide what a note says.
+   */
+  flex: none;
 }
 
 .evgraph-row:hover {
@@ -483,9 +552,40 @@
   color: var(--text-heading);
 }
 
+/*
+ * THE THREE RULES BELOW WERE MOVED OFF `--text-quaternary`/`--text-tertiary`,
+ * AND THE REASON IS A MEASUREMENT RATHER THAN A PREFERENCE.
+ *
+ * When this view began reading the conflicts, notes, provenance and asset
+ * routes it drew MORE of the things these three classes style — three more
+ * tree rows, one more detail term, and up to three more connection rows — and
+ * the automated contrast scan grew by 5 nodes at desktop and 7 at every other
+ * viewport, on `color-contrast` alone. The growth was NOT in any of the styling
+ * that commit added: every new declaration there is a stroke, a fill or a
+ * swatch, and not one of them failed. It was these three long-standing classes
+ * rendering new content, each already below the AA floor:
+ *
+ *   .evgraph-row-kind       #9aa4af on #ffffff  2.53:1   (2.39:1 on a selected row)
+ *   .evgraph-detail-row dt  #78838f on #ffffff  3.86:1
+ *   .evgraph-conn-kind      #9aa4af on #fbfcfd  2.46:1
+ *
+ * AA needs 4.50:1 and none of them is large text (10.5px and 11.5px), so
+ * AA-large's 3.00:1 does not apply either. `--text-muted` (#5b6570) clears the
+ * floor against every ground these three actually meet — 5.93:1 on white,
+ * 5.61:1 on the selected-row tint, 5.77:1 on the connection tint — and it is
+ * the token `.section-tab` was moved to for exactly this reason. No new token
+ * is introduced and no element is hidden, shrunk or removed: every label these
+ * rules style still says what it said.
+ *
+ * WHAT IS DELIBERATELY LEFT ALONE. The rest of this file's `--text-tertiary`
+ * and `--text-quaternary` usages still fail, and they are the systemic token
+ * debt `e2e/a11y-baseline.ts` already assigns to a queued design-system slice.
+ * Fixing them here would hide that slice's effect behind a graph change, which
+ * that file asks in as many words not to do.
+ */
 .evgraph-row-kind {
   font-size: 10.5px;
-  color: var(--text-quaternary);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -546,6 +646,14 @@
 }
 .evgraph-edge[data-edge-kind='supported_by'] { stroke: var(--evgraph-evidence); }
 .evgraph-edge[data-edge-kind='derived_from'] { stroke: var(--evgraph-source); }
+.evgraph-edge[data-edge-kind='has_conflict'] { stroke: var(--evgraph-conflict); }
+.evgraph-edge[data-edge-kind='competing_value'] {
+  stroke: var(--evgraph-candidate);
+  stroke-dasharray: 3 3;
+}
+.evgraph-edge[data-edge-kind='has_decision'] { stroke: var(--evgraph-decision); }
+.evgraph-edge[data-edge-kind='has_note'] { stroke: var(--evgraph-note); }
+.evgraph-edge[data-edge-kind='mapped_to'] { stroke: var(--evgraph-note); }
 
 /* --- nodes --------------------------------------------------------------- */
 
@@ -569,6 +677,23 @@
 .evgraph-node[data-kind='evidence_entry'] .evgraph-node-shape { stroke: var(--evgraph-evidence); fill: var(--verified-bg); }
 .evgraph-node[data-kind='evidence_source'] .evgraph-node-shape { stroke: var(--evgraph-source); fill: var(--confirmed-bg); }
 .evgraph-node[data-kind='validation_finding'] .evgraph-node-shape { stroke: var(--evgraph-finding); fill: var(--fail-bg); }
+.evgraph-node[data-kind='conflict'] .evgraph-node-shape { stroke: var(--evgraph-conflict); fill: var(--fail-bg); }
+.evgraph-node[data-kind='conflict_decision'] .evgraph-node-shape { stroke: var(--evgraph-decision); fill: var(--confirmed-bg); }
+.evgraph-node[data-kind='asset_reference'] .evgraph-node-shape { stroke: var(--evgraph-assetref); fill: var(--cover-bg); }
+
+/* UNACCEPTED: a dashed outline over the page ground, so the mark reads as an
+   open proposition rather than as a filled, settled thing. One of three signals
+   — see the swatch rule above for the other two. */
+.evgraph-node[data-kind='conflict_candidate'] .evgraph-node-shape {
+  stroke: var(--evgraph-candidate);
+  stroke-dasharray: 3 2.5;
+  fill: var(--screen-base);
+}
+.evgraph-node[data-kind='note'] .evgraph-node-shape {
+  stroke: var(--evgraph-note);
+  stroke-dasharray: 3 2.5;
+  fill: var(--screen-base);
+}
 
 .evgraph-node.anchor .evgraph-node-shape {
   stroke-width: 2.6;
@@ -647,6 +772,29 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * WHAT THIS IS, BEFORE WHAT IT SAYS.
+ *
+ * A competing answer and a captured note both look like content. This is the
+ * statement that they are not, placed above the value rather than among the rows
+ * of the definition list below it — a reader who takes two seconds to reach the
+ * fourth row has already read the value as the record's.
+ *
+ * Advisory tint rather than the quiet cover tint the disclosure uses: this is
+ * about the ONE thing selected, and it is a correction of what the eye just did.
+ * The full 1px border is the system-wide no-vertical-rail rule.
+ */
+.evgraph-detail-unaccepted {
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-token);
+  background: var(--advisory-bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--advisory-text);
+}
+
 .evgraph-detail-producer {
   display: flex;
   flex-direction: column;
@@ -685,7 +833,8 @@
 
 .evgraph-detail-row dt {
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  /* See the note above `.evgraph-row-kind`. */
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
@@ -812,7 +961,8 @@
 .evgraph-conn-kind {
   font-size: 10.5px;
   font-weight: 500;
-  color: var(--text-quaternary);
+  /* See the note above `.evgraph-row-kind`. */
+  color: var(--text-muted);
 }
 
 .evgraph-conn-why {

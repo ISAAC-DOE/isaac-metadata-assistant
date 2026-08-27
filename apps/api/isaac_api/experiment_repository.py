@@ -157,6 +157,13 @@ __all__ = [
     "BACKEND_FILESYSTEM",
     "BACKEND_POSTGRES",
     "NEW_EXPERIMENT_SOURCE_DESCRIPTION",
+    "RUN_AUTHORITY_COMPLETE",
+    "RUN_AUTHORITY_MISMATCH",
+    "RUN_AUTHORITY_NEVER_PROJECTED",
+    "RUN_AUTHORITY_STALE",
+    "RUN_AUTHORITY_STATES",
+    "RUN_AUTHORITY_UNAVAILABLE",
+    "RUN_ROWS_AUTHORITATIVE_ENV",
     "SQLSTATE_UNDEFINED_TABLE",
     "STORAGE_READ_FAILED_MESSAGE",
     "STORAGE_RESTORE_FAILED_MESSAGE",
@@ -174,11 +181,15 @@ __all__ = [
     "StorageNotProvisioned",
     "StorageUnavailable",
     "blank_draft",
+    "forget_run_authority",
     "forget_run_table_presence",
     "forget_storage_failure",
     "is_undefined_table",
     "ordinary_store",
     "repository",
+    "resolve_run_authority",
+    "run_authority_summary",
+    "run_rows_authoritative",
     "run_table_seen",
     "storage_failure",
     "storage_status",
@@ -386,6 +397,66 @@ class DurableWriteConflict(RuntimeError):
             return fallback
 
 
+
+class DiscardRefusedByHistory(RuntimeError):
+    """The database ANSWERED, and it refused to delete an experiment row.
+
+    THE FOURTH FAILURE, AND IT IS THE FOREIGN-KEY BACKSTOP FIRING. Discard is
+    gated in the route: it refuses before writing anything if any revision or
+    submission row exists for the record. That precheck is the mechanism; THIS is
+    what happens if the precheck is ever wrong.
+
+    No migration in this repository writes an ``ON DELETE`` clause, so the SQL
+    default ``NO ACTION`` applies to every foreign key into ``isaac_experiments``
+    — ~~including the four that ``0003_revisions`` and ``0004_submissions``
+    declare~~ — **including the TWO of them that those migrations declare, which
+    is a correction and not a rewording.** Re-measured over the SQL bodies with the
+    comment lines stripped: ``0003``/``0004`` declare SIX foreign keys between
+    them, and exactly two point at ``isaac_experiments`` —
+    (the reviewer's own first pass at this sentence said FIVE and was wrong by one,
+    which is why the count now lives in an executing test rather than in prose:
+    ``test_the_FK_BACKSTOP_is_TWO_direct_keys_and_the_rest_are_TRANSITIVE``) —
+    ``isaac_experiment_revisions_experiment_fk`` and
+    ``isaac_submissions_experiment_fk``. The other four
+    (``isaac_run_revisions_revision_fk``, ``isaac_revision_changes_revision_fk``,
+    ``isaac_submissions_revision_fk``, ``isaac_submission_runs_submission_fk``)
+    point at ``isaac_experiment_revisions`` and ``isaac_submissions``, so they
+    cannot refuse
+    an ``isaac_experiments`` delete on their own and counting them here overstated
+    the backstop by a factor of two in the one docstring that argues for it.
+
+    **THE GUARANTEE IS UNCHANGED, AND IT IS TRANSITIVE RATHER THAN DIRECT** — which
+    is the reason the miscount did not become a hole. Every one of those four
+    requires a parent in ``isaac_experiment_revisions`` or ``isaac_submissions``,
+    and each of those two carries its own ``NOT NULL`` foreign key into
+    ``isaac_experiments``. So a history row for an experiment implies a row that
+    directly blocks that experiment's delete, and the two direct keys are
+    sufficient. Deleting an experiment row that still has a revision or a
+    submission is therefore REFUSED BY THE SERVER, the whole transaction rolls
+    back, and the two run-side deletes issued before it are undone with it.
+    Append-only history survives a defect in this application's own reasoning,
+    which is the only kind of guarantee worth having about it.
+
+    IT IS NOT RECORDED AS A STORAGE FAILURE, for :class:`DurableWriteConflict`'s
+    reason: the round trip worked and the server behaved exactly as designed, so
+    ``/api/health`` must not start reporting an outage over it.
+
+    IT DELIBERATELY CARRIES NO ROW COUNT AND NO ROW. The refusal proves that at
+    least one referencing row exists; it does not say how many, in which table, or
+    what they contain, and this application must not go looking — reading
+    submission history to explain a refusal is a different operation with a
+    different authorization.
+    """
+
+    def __init__(self, experiment_id: str | None = None) -> None:
+        super().__init__(
+            "the database refused to remove this experiment because history rows "
+            "still reference it; nothing was removed"
+        )
+        #: The id whose removal was refused. Known at the raise site.
+        self.experiment_id = experiment_id
+
+
 # --- the degradation this process has actually observed -----------------------
 #
 # ONE MODULE GLOBAL, and it holds an exception CLASS NAME — never a message, a
@@ -482,6 +553,16 @@ STORAGE_RESTORE_FAILED_MESSAGE = (
     "so it cannot say whether this record exists. Nothing was changed. Retrying "
     "may not clear this on its own — if it persists, it needs a server-side fix."
 )
+#: THE FOURTH, AND IT IS THE ONLY ONE THAT DESCRIBES A REMOVAL. The write wording
+#: ends "Nothing was saved", which is exactly backwards for an operation whose
+#: whole purpose is to stop something being saved: a reader told "nothing was
+#: saved" about a failed discard would reasonably conclude the discard had worked.
+#: Fixed and path-free for the same reason the other three are.
+STORAGE_DISCARD_FAILED_MESSAGE = (
+    "This deployment stores experiments in its own database, and that "
+    "database did not accept the removal. Nothing was discarded, and the "
+    "experiment is still there."
+)
 
 
 def _unavailable(exc: BaseException, message: str = STORAGE_WRITE_FAILED_MESSAGE) -> StorageUnavailable:
@@ -545,6 +626,39 @@ def is_undefined_table(exc: BaseException) -> bool:
     diagnostics = getattr(exc, "diag", None)
     return (
         str(getattr(diagnostics, "sqlstate", "") or "").strip() == SQLSTATE_UNDEFINED_TABLE
+    )
+
+
+#: PostgreSQL's SQLSTATE for ``foreign_key_violation``. The server's own code for
+#: the one refusal that means A ROW STILL REFERENCES THIS ONE — which, for the
+#: discard path, means append-only history exists for a record the route had
+#: concluded had none.
+SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
+
+
+def is_foreign_key_violation(exc: BaseException) -> bool:
+    """Whether ``exc`` POSITIVELY identifies a foreign-key refusal.
+
+    Written as an exact copy of :func:`is_undefined_table`'s mechanism rather than
+    as a variation on it, and for the same three reasons: the SQLSTATE is the
+    SERVER's statement, it needs no driver import, and it is spelled identically
+    across ``psycopg2`` and ``psycopg`` 3. A message match is not used and must not
+    be added.
+
+    IT FAILS CLOSED, and the closed direction here is the opposite of the one
+    :func:`is_undefined_table` chooses, because the consequences are opposite. An
+    exception carrying no recognisable SQLSTATE returns ``False`` and is therefore
+    reported as a storage OUTAGE (``503``) rather than as a history refusal
+    (``409``). Both answers say the same operational thing — nothing was removed —
+    so the cost of the wrong one is a misdirected diagnosis, never a destroyed row.
+    """
+    for attribute in ("pgcode", "sqlstate"):
+        if str(getattr(exc, attribute, "") or "").strip() == SQLSTATE_FOREIGN_KEY_VIOLATION:
+            return True
+    diagnostics = getattr(exc, "diag", None)
+    return (
+        str(getattr(diagnostics, "sqlstate", "") or "").strip()
+        == SQLSTATE_FOREIGN_KEY_VIOLATION
     )
 
 
@@ -822,22 +936,30 @@ Q_ALL_EXPERIMENTS = (
 )
 
 
-# --- the run rows: a SHADOW WRITE, and nothing reads them ----------------------
+# --- the run rows: written here, and READ BY ONE READER (Stage 2b) ------------
 #
-# WHAT THESE THREE STATEMENTS ARE, AND — MORE IMPORTANTLY — WHAT THEY ARE NOT.
+# ~~"a SHADOW WRITE, and nothing reads them"~~ — **THE HEADING AND ONE CLAUSE BELOW
+# WERE TRUE UNTIL STAGE 2b AND ARE CORRECTED IN PLACE**, because this comment is
+# where a reader comes to find out what the table is for and a stale answer here is
+# worse than none.
+#
+# WHAT THESE FOUR STATEMENTS ARE, AND — MORE IMPORTANTLY — WHAT THEY ARE NOT.
 # They make the rows of `isaac_runs` for one experiment equal
 # `exp.sorted_runs()`, inside the SAME transaction that upserts the experiment.
-# They are ADDITIVE: `Experiment.to_state()` still serialises `runs`, the state
-# document is still the authoritative copy, and NO READ PATH IN THIS APPLICATION
-# TOUCHES THIS TABLE. Migration `0002_runs` exists so a Run can become the unit of
-# write (contract §8 DECISION D7); this slice makes the rows exist and correct, and
-# moving any reader onto them is a later, separately reviewed slice.
+# They are ADDITIVE: `Experiment.to_state()` still serialises `runs` and the state
+# document is still the authoritative copy. ~~"and NO READ PATH IN THIS APPLICATION
+# TOUCHES THIS TABLE"~~ — `PostgresOrdinaryStore.hydrate` now reads
+# `Q_RUN_ROWS_FOR_EXPERIMENTS` and builds a RESTORED document's `runs` from these
+# rows when that experiment's projection is COMPLETE. That is Stage 2b, it is the
+# separately reviewed slice this paragraph said would come, and it is the ONLY
+# reader; see the "STAGE 2b" section below. Migration `0002_runs` exists so a Run
+# can become the unit of write (contract §8 DECISION D7).
 #
-# SO WHAT IS THE POINT OF WRITING ROWS NOBODY READS? That the table is never wrong.
-# A reader added later inherits a row set that has been maintained from the first
-# write rather than one that has to be backfilled from documents of unknown vintage
-# — and a defect in the projection surfaces now, under test, instead of on the day
-# something starts depending on it.
+# THE POINT OF HAVING WRITTEN ROWS NOBODY READ was that the table is never wrong.
+# The reader added later inherited a row set that had been maintained from the
+# first write rather than one backfilled from documents of unknown vintage — and
+# defects in the projection surfaced under test rather than on the day something
+# started depending on it. That bet is what Stage 2b is now collecting on.
 #
 # WHY THEY ARE MODULE-LEVEL CONSTANTS WITH `%s` PLACEHOLDERS, like every other
 # statement in this application: `db_write`'s primary guarantee is that no
@@ -954,8 +1076,16 @@ Q_DELETE_ABSENT_RUNS = (
 # instead of assumed-absent. The full contract, including the four states every
 # future read must distinguish, is `docs/isaac-runs-stage-2-contract.md`.
 #
-# NOTHING READS THIS TABLE IN THIS BUILD. Stage 2b — moving a reader onto
-# `isaac_runs` — is a separate slice gated on the backfill having run.
+# ~~"NOTHING READS THIS TABLE IN THIS BUILD. Stage 2b — moving a reader onto
+# `isaac_runs` — is a separate slice gated on the backfill having run."~~ —
+# **CORRECTED IN PLACE: Stage 2b IS this build.** `Q_RUN_PROJECTIONS_FOR_EXPERIMENTS`
+# reads it, from `PostgresOrdinaryStore.hydrate`, and nothing else does. The
+# "gated on the backfill" half is corrected too, and the correction is the
+# contract's own (§7.3): §3's gate governs when the CUTOVER is complete, not when
+# the reader may be written. The reader is safe before the backfill by
+# construction — every experiment the backfill would cover is NEVER PROJECTED or
+# UNAVAILABLE, and both read the document — so it is a no-op for exactly those
+# records.
 
 #: The projector the ORDINARY application write path stamps. A CLOSED value set in the
 #: migration's own CHECK (`write-path` | `backfill`), so a typo here is refused by the
@@ -1026,6 +1156,525 @@ Q_UPSERT_RUN_PROJECTION = (
 #: :data:`RUN_TABLE`.
 PROJECTION_TABLE = "isaac_run_projection"
 
+
+# --- STAGE 2b: the two reads that move the run list's authority ----------------
+#
+# WHAT MOVES, AND IT IS ONE THING. When :meth:`PostgresOrdinaryStore.hydrate`
+# restores an experiment whose projection is COMPLETE, the restored document's
+# ``runs`` key is built from ``isaac_runs`` rows instead of from the stored
+# document's own ``runs``. NOTHING ELSE MOVES: the compare-and-swap is still on
+# ``isaac_experiments.state``, ``Experiment.to_state()`` still serialises ``runs``,
+# ``Q_UPSERT_EXPERIMENT`` is untouched, and every write path is byte-for-byte what
+# it was. The contract is `docs/isaac-runs-stage-2-contract.md` §7.
+#
+# THAT IS ALSO WHERE A SILENT-DATA-LOSS BUG WOULD LIVE, which is why the scope is
+# stated this narrowly: get it wrong and a record is restored with no runs and the
+# pass reports success. The four states below exist so that outcome is unwritable.
+#
+# THE FOUR STATES ARE DECIDED BY :func:`resolve_run_authority`, and every read must
+# distinguish all four (contract §2.1). Three of them — STALE, NEVER PROJECTED and
+# UNAVAILABLE — read the document, and that is NORMAL OPERATION rather than an
+# error path. ``run_count = 0`` beside a matching version pair is COMPLETE and
+# means "this experiment has no runs", which is the state `0002` alone could not
+# express.
+#
+# WHY THESE TWO STATEMENTS ARE PLURAL. ``hydrate`` reads every stored experiment in
+# ONE ``SELECT`` and restores only those whose workspace directory is missing. A
+# per-experiment read here would turn one round trip into 2N. ``= ANY(%s::text[])``
+# keeps it at two statements for any N, with no SQL built at run time — the same
+# shape, and the same explicit cast for the empty case, that
+# :data:`Q_DELETE_ABSENT_RUNS` already uses.
+#
+# AND THEY ARE ISSUED ONLY WHEN THERE IS SOMETHING TO RESTORE. ``hydrate`` runs on
+# every ordinary ``GET /api/experiments``, not once per restart (contract §7.1),
+# and it skips any record whose ``experiment.json`` is already on disk. So the
+# steady state — every record present locally — issues NEITHER of these statements,
+# and the added cost is bounded by how many records are genuinely missing, which is
+# normally zero and is "all of them" exactly once, after a pod restart.
+
+#: The completeness claims for a batch of experiments.
+#:
+#: ``run_count`` IS DELIBERATELY NOT SELECTED, and its absence is the mechanical
+#: form of a rule rather than an economy. Contract §7.4: ``run_count`` must not be
+#: used to detect a mismatch, because §2.2 invariant 4 records that it is
+#: ``len(desired_ids)`` — a writer's INTENTION, not an observation — so treating a
+#: matching count as evidence of matching rows is exactly the overclaim that
+#: invariant corrects. A column that is never read cannot be misused;
+#: ``test_the_reader_never_selects_run_count`` pins it.
+#:
+#: ``projector`` is likewise not selected: who made the claim is an operator's
+#: question (it is what `0005`'s index leads on and what the Stage-2b gate query
+#: groups by), and it has no bearing on whether the claim is current.
+Q_RUN_PROJECTIONS_FOR_EXPERIMENTS = (
+    "SELECT experiment_id, experiment_rev, experiment_generation"
+    " FROM isaac_run_projection WHERE experiment_id = ANY(%s::text[])"
+)
+
+#: The run rows for a batch of experiments, IN THE ORDER ``sorted_runs`` PRODUCES.
+#:
+#: ORDERING IS A REAL TRAP AND THIS IS WHERE IT IS PAID. ``sorted_runs`` orders by
+#: ``(ordinal, created_utc, id)`` where ``created_utc`` is the DOCUMENT field.
+#: ``isaac_runs_experiment_order_idx`` is ``(experiment_id, ordinal, run_id)`` and
+#: the column of that name on this table is the SERVER-SIDE ROW STAMP — a different
+#: value entirely — so a reader that ordered by the index would reproduce a
+#: DIFFERENT SEQUENCE. `0002_runs.sql` says so in its own words beside that index
+#: and names the reproducing sort; this is that sort, verbatim, with
+#: ``experiment_id`` in front so one statement can serve a batch.
+#:
+#: The order is belt-and-braces rather than load-bearing: a restored document is
+#: parsed straight back through ``Experiment.from_state``, which re-sorts. It is
+#: written anyway because "the reader reproduces the document" is the property this
+#: whole slice is judged on, and reproducing it only up to a permutation is a
+#: weaker claim than the one being made.
+#:
+#: ``rev``, ``generation`` and ``ordinal`` are not selected: the run DOCUMENT is
+#: what a restored ``runs`` entry is made of, and the promoted columns are a
+#: projection OF that document rather than a part of it.
+Q_RUN_ROWS_FOR_EXPERIMENTS = (
+    "SELECT experiment_id, run_id, state FROM isaac_runs"
+    " WHERE experiment_id = ANY(%s::text[])"
+    " ORDER BY experiment_id, ordinal, state ->> 'created_utc', run_id"
+)
+
+
+#: THE KILL SWITCH. ``ISAAC_RUN_ROWS_AUTHORITATIVE=0`` forces every experiment to
+#: document-reading behaviour without a redeploy.
+#:
+#: IT IS DEFENCE FOR AN OPERATOR, NOT A GATE THE DESIGN DEPENDS ON, and the default
+#: is therefore ON: a design that needed a flag to be safe would not be safe
+#: (contract §7.3). What the flag buys is a single environment edit on a pod that
+#: is misbehaving, in a deployment where the alternative is waiting for an image.
+#:
+#: READ PER CALL, NEVER AT IMPORT, which is what "without a redeploy" requires — a
+#: module-level constant resolved at import time would freeze whichever value the
+#: process started with.
+#:
+#: WHEN IT IS OFF, NEITHER STATEMENT ABOVE IS ISSUED AT ALL. The reader does not
+#: read the tables and then discard the answer; it does not ask. That is what makes
+#: "off" provable by statement inspection rather than by trusting a branch.
+RUN_ROWS_AUTHORITATIVE_ENV = "ISAAC_RUN_ROWS_AUTHORITATIVE"
+
+#: The values that turn the switch OFF, compared case-insensitively after
+#: stripping. An UNRECOGNISED value leaves the reader ON, deliberately: a typo must
+#: not silently disable a shipped behaviour, and the enumerated set is small enough
+#: that an operator who wants it off can hit one of them. Unset and empty both mean
+#: ON, because empty is what unsetting a variable in a manifest usually produces.
+_RUN_ROWS_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def run_rows_authoritative(env: Mapping[str, str] | None = None) -> bool:
+    """Whether ``isaac_runs`` may be the authority for a COMPLETE projection.
+
+    Configuration only. It opens nothing, and it is read on every hydration pass
+    and by :func:`storage_status`, so an operator's edit takes effect on the next
+    request rather than on the next roll.
+    """
+    raw = (os.environ if env is None else env).get(RUN_ROWS_AUTHORITATIVE_ENV)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _RUN_ROWS_DISABLED_VALUES
+
+
+# The FOUR STATES of contract §2.1, plus the one outcome that is not a state.
+
+#: A projection row exists AND its version pair equals the document's. The rows may
+#: be used.
+RUN_AUTHORITY_COMPLETE = "complete"
+
+#: A row exists and the pair differs — the rows are behind. Use the document.
+RUN_AUTHORITY_STALE = "stale"
+
+#: No row. The rows say nothing about this experiment. Use the document.
+RUN_AUTHORITY_NEVER_PROJECTED = "never_projected"
+
+#: ``isaac_runs`` or ``isaac_run_projection`` is absent. Use the document. This is
+#: the state of EVERY experiment in every environment until `0005` is applied.
+RUN_AUTHORITY_UNAVAILABLE = "unavailable"
+
+#: NOT A STATE — A BUG (contract §7.4). A COMPLETE projection whose rows do not
+#: reproduce the document's ``runs``. Per §2.2 invariant 4 the two agree by
+#: construction of the upsert-and-delete pair, so a disagreement means a writer, a
+#: migration or an out-of-band statement broke that construction. The DOCUMENT is
+#: used — it is the side the compare-and-swap protects and the side a scientist's
+#: last write landed in — and the disagreement is COUNTED, because a mismatch that
+#: only fell back would be indistinguishable from a healthy fallback.
+RUN_AUTHORITY_MISMATCH = "mismatch"
+
+#: Every outcome, in a fixed order, so the distribution `storage_status` publishes
+#: has a stable shape and a missing key is a defect rather than a zero.
+RUN_AUTHORITY_STATES: tuple[str, ...] = (
+    RUN_AUTHORITY_COMPLETE,
+    RUN_AUTHORITY_STALE,
+    RUN_AUTHORITY_NEVER_PROJECTED,
+    RUN_AUTHORITY_UNAVAILABLE,
+    RUN_AUTHORITY_MISMATCH,
+)
+
+
+def _as_projected_rev(value: Any) -> int | None:
+    """``value`` as a non-negative revision, or ``None`` if it is not one.
+
+    ``None`` NEVER COMPARES EQUAL, which is the whole reason this returns it
+    instead of ``0``: a document whose ``rev`` cannot be read must not be able to
+    match a stamp, because "COMPLETE" is the one verdict that lets the rows
+    replace the document.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stored_projections(rows: Any) -> dict[str, tuple[int | None, Any]]:
+    """``experiment_id -> (experiment_rev, experiment_generation)`` for the claims.
+
+    The rev is normalised through :func:`_as_projected_rev` here rather than at the
+    comparison, so an unreadable stamp is ``None`` and can never match.
+    """
+    out: dict[str, tuple[int | None, Any]] = {}
+    for row in rows or []:
+        out[str(row[0])] = (_as_projected_rev(row[1]), row[2])
+    return out
+
+
+def _grouped_run_rows(rows: Any) -> dict[str, list[tuple[str, dict | None]]]:
+    """``experiment_id -> [(run_id, state document or None), ...]``, order preserved.
+
+    ``state`` is normalised with the same tolerance :func:`_stored_run_rows`
+    applies — psycopg2 returns ``jsonb`` as a ``dict``, anything without the
+    adapter registered returns text — and anything else becomes ``None``. A
+    ``None`` here can never reproduce a run, so it makes the experiment a MISMATCH
+    and the document is used, which is the safe direction.
+    """
+    out: dict[str, list[tuple[str, dict | None]]] = {}
+    for row in rows or []:
+        state = row[2]
+        if isinstance(state, (str, bytes, bytearray)):
+            try:
+                state = json.loads(state)
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                state = None
+        if not isinstance(state, dict):
+            state = None
+        out.setdefault(str(row[0]), []).append((str(row[1]), state))
+    return out
+
+
+def _document_runs(state: Mapping[str, Any]) -> list[dict] | None:
+    """The run DOCUMENTS the stored document names, or ``None`` if it does not say.
+
+    ``None`` MEANS "UNCOMPARABLE", NOT "EMPTY", and the caller turns it into a
+    MISMATCH so the document is used unchanged. A ``runs`` value that is not a list
+    of objects carrying string ids is a document this application did not write;
+    §11's read-path rule is that a malformed value already PERSISTED is read rather
+    than refused, and reading it means leaving it exactly as it is.
+
+    IT RETURNS THE ENTRIES, NOT THEIR IDS, and that widening is the whole of the
+    2026-08-27 correction to contract §7.4 rule 1. ~~``_document_run_ids``, which
+    returned ``list[str] | None``~~ made the id list the only thing the caller
+    could compare, so a row whose CONTENT had diverged inside a matching id set was
+    unobservable. The ids are still derived here — by the caller, from these
+    entries — so every id-shaped refusal above is unchanged.
+    """
+    runs = state.get("runs")
+    if runs is None:
+        return []
+    if not isinstance(runs, list):
+        return None
+    entries: list[dict] = []
+    for entry in runs:
+        if not isinstance(entry, dict):
+            return None
+        rid = entry.get("id")
+        if not isinstance(rid, str) or not rid:
+            return None
+        entries.append(entry)
+    return entries
+
+
+def _rows_reproduce_the_document(
+    run_rows: list[tuple[str, dict | None]], document_runs: list[dict]
+) -> bool:
+    """Whether the row documents are the document's ``runs``, AS DOCUMENTS.
+
+    Contract §7.4 rule 2 says the document wins on ANY disagreement, and rule 1
+    used to say the comparison was "by run id". Those two disagreed, and the
+    disagreement was measured rather than argued: with matching id sets and
+    divergent CONTENT, the id comparison returned COMPLETE, the row's document was
+    written over the scientist's, and nothing was disclosed. A content divergence
+    is exactly as much "a COMPLETE projection that does not reproduce the
+    document" as a missing id is, and it is MORE dangerous, because it substitutes
+    different science rather than a different count. The contract is being
+    corrected to match this function, not the other way round.
+
+    WHAT IS COMPARED, AND WHAT IS DELIBERATELY NOT NORMALISED
+    --------------------------------------------------------
+    Both sides are ``Run.to_state()`` — `_run_row_params` writes the row's ``state``
+    as ``run.to_state()`` VERBATIM and ``Experiment.to_state()`` serialises
+    ``[r.to_state() for r in self.sorted_runs()]`` — written by the SAME
+    transaction. So the honest comparison is plain ``==`` between two parsed
+    documents, and four things that look like they need normalising do not:
+
+    * **Key order.** Nothing to do. Both sides are parsed into ``dict`` before they
+      reach here (`_grouped_run_rows` for the rows, the stored state file for the
+      document), and ``dict.__eq__`` is order-insensitive. Neither side is ever
+      compared as TEXT — which matters, because ``jsonb`` does not preserve key
+      order, so a text comparison would report MISMATCH on every experiment and
+      quietly disable Stage 2b permanently.
+    * **``jsonb`` returned as text.** Already normalised upstream:
+      `_grouped_run_rows` ``json.loads`` a ``str``/``bytes`` ``state`` and maps
+      anything that is not then a ``dict`` to ``None``, which the caller refuses.
+    * **Numeric types.** ``==`` on parsed values makes ``1 == 1.0`` and
+      ``-0.0 == 0.0`` true, which is what a ``jsonb`` round trip may legitimately
+      produce. A canonical-JSON-string comparison would call those DIFFERENT; it is
+      deliberately not used, for that reason.
+    * **Legacy ``experiment_id: ""``.** Nothing is normalised and nothing needs to
+      be. The row's DOCUMENT keeps whatever the run has always said — including the
+      empty string `workspace._hydrate_runs` deliberately never repairs — and the
+      row's ``experiment_id`` COLUMN, which does carry the owner's id, is not part
+      of this comparison at all.
+
+    THE COMPARISON IS ORDER-INSENSITIVE, AND THAT IS ALSO A REFUSAL TO INVENT A
+    MISMATCH. The rows arrive ordered by ``ordinal, state ->> 'created_utc',
+    run_id`` — a sort the DATABASE performs under its own collation — while
+    ``sorted_runs()`` performs the same sort in Python. For ULIDs and ISO
+    timestamps the two agree, but "agree" there is a property of a collation this
+    repository does not control, and a permutation must not cost a scientist their
+    runs. Order is not load-bearing anyway: the restored document is parsed back
+    through ``Experiment.from_state``, which re-sorts. So entries are matched
+    WITHIN their run id, which keeps the check O(runs) rather than O(runs²) and
+    keeps a duplicated id — which `isaac_runs`' primary key cannot produce —
+    comparing as the multiset it is.
+    """
+    unmatched: dict[str, list[dict]] = {}
+    for entry in document_runs:
+        unmatched.setdefault(str(entry.get("id")), []).append(entry)
+    for run_id, row_document in run_rows:
+        bucket = unmatched.get(run_id)
+        if not bucket:
+            return False
+        for index, candidate in enumerate(bucket):
+            if candidate == row_document:
+                del bucket[index]
+                break
+        else:
+            return False
+    return not any(unmatched.values())
+
+
+def resolve_run_authority(
+    state: Mapping[str, Any],
+    projection: tuple[int | None, Any] | None,
+    run_rows: list[tuple[str, dict | None]],
+    *,
+    tables_present: bool,
+) -> tuple[str, list[dict] | None]:
+    """THE FOUR-STATE PREDICATE, AND THE MISMATCH RULE, IN ONE PLACE.
+
+    Returns ``(state, runs)`` where ``state`` is one of
+    :data:`RUN_AUTHORITY_STATES` and ``runs`` is the list the restored document's
+    ``runs`` key must hold — or ``None``, meaning USE THE DOCUMENT.
+
+    PURE, AND DELIBERATELY CALLABLE WITHOUT A DATABASE. Everything that decides
+    whether a scientist's runs are replaced is decided here, from values, so it can
+    be exhaustively tested without a connection and so there is exactly one place
+    to read.
+
+    THE ORDER OF THE CHECKS IS THE CONTRACT'S §2.1 TABLE, top to bottom, and
+    ``None`` is never treated as a match at any of them:
+
+    * ``tables_present`` false -> UNAVAILABLE. `0005` (or `0002`) is not applied
+      here, so the tables say nothing about anything.
+    * no projection row -> NEVER PROJECTED. Absence of the row is absence of the
+      claim; it is NOT "zero runs".
+    * the pair differs -> STALE. Both keys, never ``rev`` alone: ``generation`` is
+      what makes a delete-and-recreate distinguishable at rev 0.
+    * the pair matches, but the rows do not reproduce the document -> MISMATCH.
+    * otherwise -> COMPLETE, and the rows are returned.
+
+    THE COMPARISON IS OF THE FULL RUN DOCUMENTS, not of their ids.
+    ~~"THE COMPARISON IS BY RUN ID, as contract §7.4 rule 1 specifies"~~ —
+    **SUPERSEDED 2026-08-27, and the contract is being corrected to match this
+    function rather than the reverse.** §7.4 rule 1 said "by run id" and rule 2
+    said "on disagreement, use the DOCUMENT"; the two disagreed, and the
+    implementation of rule 1 measured the consequence: with matching id sets and
+    divergent row CONTENT, the row's document was written over the scientist's and
+    nothing was disclosed. Rule 2 is the one that governs, because the document is
+    the side the compare-and-swap protects and the side a scientist's last write
+    landed in. See :func:`_rows_reproduce_the_document` for what is compared and
+    for the four things that deliberately are NOT normalised.
+
+    IT IS STILL A MULTISET COMPARISON RATHER THAN A SET ONE, and the id-shaped
+    refusals are all kept. A stored document carrying the same run id twice is a
+    document `isaac_runs` cannot reproduce — ``run_id`` is that table's primary
+    key — so a set comparison would call it equal and then write the de-duplicated
+    row version over it. Sorted id lists make that a MISMATCH, which keeps the
+    document, which is exactly today's behaviour for a document nobody should have
+    written.
+
+    A ROW WHOSE DOCUMENT DOES NOT CARRY ITS OWN ``run_id`` IS ALSO A MISMATCH.
+    `0002_runs`' ``isaac_runs_document_identity`` CHECK forbids that pairing, so a
+    row of this shape means the CHECK was bypassed; substituting its document for a
+    run filed under a different id is the one substitution that could rename a
+    scientist's run.
+    """
+    if not tables_present:
+        return RUN_AUTHORITY_UNAVAILABLE, None
+    if projection is None:
+        return RUN_AUTHORITY_NEVER_PROJECTED, None
+    stamped_rev, stamped_generation = projection
+    document_rev = _as_projected_rev(state.get("rev"))
+    document_generation = state.get("generation")
+    if stamped_rev is None or document_rev is None or stamped_rev != document_rev:
+        return RUN_AUTHORITY_STALE, None
+    if not isinstance(document_generation, str) or not document_generation:
+        # A stamped generation is NOT NULL and has no default, so a document that
+        # cannot state its own generation cannot be matched by one. STALE rather
+        # than MISMATCH: nothing has been compared yet, and the honest reading is
+        # that this claim does not describe this document.
+        return RUN_AUTHORITY_STALE, None
+    if stamped_generation != document_generation:
+        return RUN_AUTHORITY_STALE, None
+    document_runs = _document_runs(state)
+    if document_runs is None:
+        return RUN_AUTHORITY_MISMATCH, None
+    if any(document is None for _, document in run_rows):
+        return RUN_AUTHORITY_MISMATCH, None
+    if any(document.get("id") != run_id for run_id, document in run_rows):
+        return RUN_AUTHORITY_MISMATCH, None
+    if sorted(run_id for run_id, _ in run_rows) != sorted(
+        str(entry.get("id")) for entry in document_runs
+    ):
+        return RUN_AUTHORITY_MISMATCH, None
+    if not _rows_reproduce_the_document(run_rows, document_runs):
+        # THE CONTENT CHECK, AND IT IS LAST BECAUSE IT IS THE MOST EXPENSIVE.
+        # Everything above refuses on a shape the rows could never have produced;
+        # this refuses on a shape they could have produced yesterday and no longer
+        # do. Contract §7.4 rule 2: the DOCUMENT wins, and rule 3: it is counted.
+        return RUN_AUTHORITY_MISMATCH, None
+    return RUN_AUTHORITY_COMPLETE, [document for _, document in run_rows]
+
+
+#: WHAT THE MOST RECENT HYDRATION PASS OBSERVED, or ``None`` if no pass has
+#: classified anything yet. Module-level for the reason :data:`_storage_failure` is:
+#: :func:`ordinary_store` builds a new store per call, so per-instance state would
+#: be state nobody could read.
+#:
+#: COUNTS ONLY — no ids, no titles, no record content, and nothing derived from a
+#: scientific value. It is an aggregate about THIS APPLICATION'S OWN tables, not
+#: about the production-derived ``records`` table, so gates G2 and G3 are untouched
+#: by it.
+#:
+#: IT IS RECORDED ONLY BY A PASS THAT ACTUALLY CLASSIFIED SOMETHING, and that is a
+#: truthfulness decision rather than an optimisation. ``hydrate`` runs on every
+#: ordinary list and normally has nothing to restore; overwriting this with an
+#: all-zero distribution on each of those would erase the one pass that carries
+#: information — the post-restart pass, where every record is missing and every
+#: record is therefore classified.
+_last_run_authority: dict[str, int] | None = None
+
+
+def run_authority_summary() -> dict | None:
+    """The distribution the most recent classifying hydration pass measured.
+
+    ``None`` means no pass has classified an experiment in this process — which is
+    the honest answer, and is distinguishable from "a pass ran and found nothing".
+    """
+    return dict(_last_run_authority) if _last_run_authority is not None else None
+
+
+def _record_run_authority(counts: Mapping[str, int]) -> None:
+    """Record one pass's distribution. Called only when it classified something."""
+    global _last_run_authority
+    _last_run_authority = {state: int(counts.get(state, 0)) for state in RUN_AUTHORITY_STATES}
+
+
+def forget_run_authority() -> None:
+    """Drop the recorded distribution. For tests, exactly as
+    :func:`forget_run_table_presence` is — a process-wide observation needs a
+    process-wide reset or one case inherits another's."""
+    global _last_run_authority
+    _last_run_authority = None
+
+
+# --- DISCARD: the three deletes, in foreign-key dependency order ---------------
+#
+# WHAT THESE THREE STATEMENTS ARE, AND — MORE IMPORTANTLY — WHAT THEY ARE NOT.
+# They remove ONE experiment this application created, together with the two
+# writer-maintained projections OF that experiment, inside ONE transaction. They
+# are the durable half of `POST /api/experiments/{id}/discard`, whose whole
+# authorization is the project owner's narrow one: **explicit Discard semantics
+# for unsubmitted Draft/capture state only.**
+#
+# THEY ARE NOT A GENERIC DELETE PRIMITIVE AND MUST NOT BECOME ONE. There is no
+# statement here that takes a table name, a predicate, or anything but one
+# experiment id; each is a module-level constant with `%s` placeholders, exactly
+# like every other statement in this application, because `db_write`'s primary
+# guarantee is that no caller-supplied SQL exists anywhere in the write path.
+#
+# THREE TABLES, AND THE FIVE THAT ARE DELIBERATELY ABSENT. These name
+# `isaac_run_projection`, `isaac_runs` and `isaac_experiments` and nothing else.
+# `isaac_experiment_revisions`, `isaac_run_revisions`, `isaac_revision_changes`,
+# `isaac_submissions` and `isaac_submission_runs` are APPEND-ONLY HISTORY: no
+# statement in this application may ever UPDATE or DELETE one, which is the whole
+# of that guarantee because the database cannot provide it (a trigger needs a
+# dollar-quoted body, which `db_migrate.split_statements` refuses; `REVOKE` is a
+# forbidden verb). `test_submission_store.test_no_submission_statement_updates_or_deletes_history`
+# already scans every `Q_*` in this package for exactly that, and
+# `test_discard_an_experiment.py` states the same property over THIS module's
+# constants specifically, so the guard names the place a future delete would be
+# written.
+#
+# `records` IS UNREACHABLE FROM HERE BY TWO INDEPENDENT MECHANISMS, and neither is
+# this comment: `db_write._FORBIDDEN_TABLES` refuses any statement whose token
+# stream contains the identifier at all, and `OWNED_TABLES` does not list it.
+#
+# THE ORDER IS CHILDREN FIRST, AND IT IS A REQUIREMENT RATHER THAN A PREFERENCE.
+# No migration in this repository writes an `ON DELETE` clause anywhere, so the
+# SQL default `NO ACTION` applies to every foreign key into `isaac_experiments`:
+# PostgreSQL REFUSES to delete a parent row that still has children. Issuing the
+# experiment delete first would abort the transaction every time the record had a
+# single run. The two projections go first, the experiment last.
+#
+# AND THE ORDER IS ALSO THE BACKSTOP. Because the experiment delete goes LAST,
+# and because ~~`0003`/`0004` declare four more foreign keys into the same parent
+# with the same `NO ACTION`~~ — **TWO, re-measured; see
+# :class:`DiscardRefusedByHistory` for the count and for why the guarantee is
+# unchanged** — `isaac_experiment_revisions_experiment_fk` and
+# `isaac_submissions_experiment_fk` name `isaac_experiments` directly with the same
+# `NO ACTION`, and every other history row requires a parent in one of those two
+# tables — a record that still carries a revision or a
+# submission is refused BY THE SERVER at that final statement, and the two
+# deletes already issued roll back with it. The route refuses long before this;
+# this is what holds if the route's reasoning is ever wrong. See
+# :class:`DiscardRefusedByHistory`.
+
+#: The completeness claim for this experiment's run rows (`0005`). Removed first
+#: because it is the leaf: nothing references it, and it is meaningless once the
+#: rows it describes are gone. A superseded completeness claim is not evidence of
+#: anything — it describes a row set that no longer exists.
+Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT = (
+    "DELETE FROM isaac_run_projection WHERE experiment_id = %s"
+)
+
+#: Every run row of this experiment (`0002`).
+#:
+#: DISTINCT FROM :data:`Q_DELETE_ABSENT_RUNS`, WHICH IS THE SHADOW-WRITE DIFF. That
+#: statement removes the rows a still-existing experiment no longer names, and its
+#: predicate is the COMPLEMENT of a desired set; this one removes them all, for an
+#: experiment that is about to stop existing. Reusing the diff with an empty id
+#: array would work and would be a false economy: the two say different things, and
+#: a reader of either deserves to see which.
+Q_DELETE_RUNS_FOR_EXPERIMENT = "DELETE FROM isaac_runs WHERE experiment_id = %s"
+
+#: The experiment row itself (`0001`). LAST, for both reasons above.
+#:
+#: `rowcount` over this statement is MEASURED and returned, never assumed: it is
+#: how the caller learns whether a durable row was there at all, which is not the
+#: same question as whether a workspace directory was.
+Q_DELETE_EXPERIMENT = "DELETE FROM isaac_experiments WHERE experiment_id = %s"
 
 # --- is the table even there yet? the deployment-order guard -------------------
 
@@ -1389,11 +2038,15 @@ class PostgresOrdinaryStore:
         separable.
 
         IT ALSO WRITES THE RUN ROWS, AND THAT IS WHY THIS METHOD IS THE ONLY PLACE
-        THEY CAN BE WRITTEN FROM. `isaac_runs` is a SHADOW of the experiment
+        THEY CAN BE WRITTEN FROM. `isaac_runs` is a PROJECTION of the experiment
         document: after this returns, the rows of that table for this experiment
-        equal ``exp.sorted_runs()``, while ``to_state()`` still carries ``runs`` and
-        remains the authoritative copy that every read path uses. See
-        :data:`Q_EXPERIMENT_RUN_ROWS` and the three statements beside it.
+        equal ``exp.sorted_runs()``, while ``to_state()`` still carries ``runs``.
+        ~~"and remains the authoritative copy that every read path uses"~~ —
+        CORRECTED FOR STAGE 2b: it remains the authoritative copy for every read
+        path EXCEPT :meth:`hydrate`, which builds a restored document's ``runs``
+        from the rows when the projection is COMPLETE, and which falls back to the
+        document in all three other states and on any mismatch. See
+        :data:`Q_EXPERIMENT_RUN_ROWS` and the statements beside it.
 
         IT WRITES THEM ONLY IF THE TABLE IS THERE, AND THAT IS A DEPLOYMENT FACT
         RATHER THAN A DEFENSIVE HABIT. The image rolls out on merge and an operator
@@ -1656,6 +2309,100 @@ class PostgresOrdinaryStore:
             (exp.id, exp.rev, exp.generation, run_count, projector),
         )
 
+    # -- discard ---------------------------------------------------------------
+
+    def discard(self, exp: "ws.Experiment") -> int:
+        """REMOVE one ordinary-scope experiment's durable state. Nothing else.
+
+        Returns how many ``isaac_experiments`` rows were removed — MEASURED from
+        the server's own ``rowcount``, so ``0`` is the honest answer for a record
+        this deployment never persisted (created before the migration was applied,
+        or written while the database was unreachable) and is not an error.
+
+        WHAT IT REMOVES, EXHAUSTIVELY: this experiment's row, its ``isaac_runs``
+        rows, and its ``isaac_run_projection`` claim. The three statements are
+        named above, in foreign-key dependency order, and the whole reasoning about
+        why that order is a requirement rather than a preference lives there.
+
+        WHAT IT NEVER REMOVES: any row of the five submission-lifecycle tables, and
+        anything at all in ``records``. No statement here names one, which is the
+        whole of the guarantee — see the comment above the statements for why the
+        database cannot provide it and which test states it.
+
+        ONE TRANSACTION, so the three deletes are all-or-nothing. A record that
+        still carries history therefore loses NOTHING: the final statement is
+        refused by the server's foreign key and the two run-side deletes roll back
+        with it.
+
+        RAISES :class:`NotPersistable` before opening anything, for a worked-example
+        record or a canonical example id — the same guard :meth:`persist` runs, in
+        the same place, for the same reason. It is a permanent property of the
+        record and must never be reported as, or recorded as, a storage failure.
+        In practice this is unreachable from ``workspace.discard_experiment``,
+        which resolves no store at all for a session scope; it is asserted here
+        because this class is what a future caller would reach for.
+
+        RAISES :class:`DiscardRefusedByHistory` when the server refuses the
+        experiment delete with a foreign-key violation. That is the backstop
+        firing, it is not an outage, and it is deliberately NOT recorded as one.
+
+        RAISES :class:`StorageUnavailable` for every other failure, carrying
+        :data:`STORAGE_DISCARD_FAILED_MESSAGE` rather than the write wording — a
+        reader told "nothing was saved" about a failed discard would conclude the
+        discard had worked.
+
+        THERE IS NO COMPARE-AND-SWAP HERE, AND THAT IS A STATEMENT ABOUT WHERE THE
+        PRECONDITION LIVES RATHER THAN AN OMISSION. ``If-Match`` is checked by the
+        route, inside the same ``record_lock`` critical section as this call, over
+        an experiment re-read inside that lock. A durable predicate as well would
+        need the delete to name a ``rev`` — and the honest failure mode of getting
+        that wrong is the opposite of the one the upsert guards: an upsert that
+        loses a race writes stale science, while a delete that loses one removes a
+        record whose new content the deleter never saw. That case is bounded here
+        by the fact that this process serialises on the record and by the route's
+        own re-read; a cross-process delete race would need the same treatment
+        ``Q_UPSERT_EXPERIMENT`` gets, and is named as not-done rather than implied.
+        """
+        self.refuse_if_not_persistable(exp)
+        removed = 0
+        try:
+            with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
+                # THE TABLE-PRESENCE PROBES ARE THE SAME ONES THE WRITE PATH MAKES,
+                # for the same deployment reason: the image rolls out on merge and
+                # the operator applies migrations by hand afterwards, so this build
+                # routinely runs against a database where `0002` and/or `0005` are
+                # still pending. Naming an absent relation would abort the
+                # transaction and take the experiment delete down with it — a
+                # discard that fails for a table NOTHING READS.
+                if _table_available(cursor, policy, PROJECTION_TABLE):
+                    cursor.execute(
+                        policy.check(Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT), (exp.id,)
+                    )
+                if _table_available(cursor, policy, RUN_TABLE):
+                    cursor.execute(
+                        policy.check(Q_DELETE_RUNS_FOR_EXPERIMENT), (exp.id,)
+                    )
+                cursor.execute(policy.check(Q_DELETE_EXPERIMENT), (exp.id,))
+                count = cursor.rowcount
+                removed = int(count) if isinstance(count, int) and count > 0 else 0
+        except Exception as exc:  # noqa: BLE001 - classified, then re-raised as ours
+            if is_foreign_key_violation(exc):
+                # The round trip WORKED and the server behaved exactly as designed.
+                # Recording an outage here would send an operator to look at a
+                # healthy database and would make `/api/health` claim durability
+                # had failed.
+                _note_storage_success()
+                raise DiscardRefusedByHistory(exp.id) from exc
+            if is_undefined_table(exc):
+                # A positive cache the server has just contradicted stops being
+                # believed — the operator rolled a migration back under a running
+                # pod. This is NOT a recovery: the transaction is already aborted
+                # and this discard is already lost. See `forget_run_table_presence`.
+                forget_run_table_presence()
+            raise _unavailable(exc, STORAGE_DISCARD_FAILED_MESSAGE) from exc
+        _note_storage_success()
+        return removed
+
     # -- restore ---------------------------------------------------------------
 
     def hydrate(self) -> int:
@@ -1671,6 +2418,22 @@ class PostgresOrdinaryStore:
         deliberate (a re-read must not silently overwrite local state), and it is
         the reason a refused durable write adopts the winner's document into the
         workspace file itself — see ``ws.Experiment._adopt_winner_locally``.
+
+        THIS IS ALSO THE ONE PLACE STAGE 2b MOVES, AND IT MOVES ONE KEY. For an
+        experiment whose projection is COMPLETE, the restored document's ``runs``
+        is built from ``isaac_runs`` rows rather than from the stored document's
+        own ``runs`` — see :func:`resolve_run_authority` for the four-state
+        predicate and the mismatch rule, and the section above it for what
+        deliberately does NOT move. On STALE, NEVER PROJECTED, UNAVAILABLE or a
+        mismatch the document is written exactly as it was stored, which is what
+        every build before this one did for every experiment. Fallback is normal
+        operation, not an error path.
+
+        THE ADDED READS ARE SKIPPED ENTIRELY WHEN THERE IS NOTHING TO RESTORE, and
+        that bound is the reason this is affordable on a per-request path: this
+        method runs on every ordinary ``GET /api/experiments``, and on a warm pod
+        every ``experiment.json`` is already present, so the candidate list is
+        empty and no statement naming either table is issued.
 
         It writes ONLY into ``workspace_root()``. The tutorial namespace is never
         addressed: there is no session id anywhere in this method, and a stored
@@ -1733,15 +2496,90 @@ class PostgresOrdinaryStore:
         root = ws.workspace_root()
         restored = 0
         skipped = 0
+        authoritative = run_rows_authoritative(self.env)
+        projections: dict[str, tuple[int | None, Any]] = {}
+        run_rows: dict[str, list[tuple[str, dict | None]]] = {}
+        tables_present = False
         try:
             with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
                 cursor.execute(policy.check(Q_ALL_EXPERIMENTS))
                 rows = cursor.fetchall() or []
+                # WHICH ROWS THIS PASS WILL ACTUALLY RESTORE, decided from the id
+                # and the filesystem alone — NO JSON IS PARSED IN HERE. That
+                # placement is deliberate and is not tidiness: everything inside
+                # this `try` is relabelled below as a database outage, and a
+                # malformed stored document is not one. Parsing it here would set
+                # the process-wide `durable: false` bit over a database that
+                # answered perfectly, and would report `store_unavailable` for a
+                # record this application simply cannot read.
+                candidates = [
+                    rid
+                    for rid in (str(row[0] or "").strip() for row in rows)
+                    if ws.is_record_id(rid)
+                    and rid not in ws.CANONICAL_IDS
+                    and not (root / rid / "experiment.json").exists()
+                ]
+                # ── STAGE 2b, AND THE GUARD THAT KEEPS IT FREE IN THE STEADY
+                # ── STATE. ──────────────────────────────────────────────────────
+                # `hydrate` runs on EVERY ordinary `GET /api/experiments`, and it
+                # RESTORES rather than refreshes — so on a warm pod `candidates`
+                # is empty and neither statement below is issued at all. The added
+                # cost is bounded by how many records are genuinely missing, which
+                # is normally zero and is "all of them" exactly once, after a
+                # restart. The kill switch is read here too, so an operator's
+                # `ISAAC_RUN_ROWS_AUTHORITATIVE=0` stops the statements from being
+                # issued rather than merely stopping their answer from being used.
+                if candidates and authoritative:
+                    try:
+                        tables_present = _table_available(
+                            cursor, policy, RUN_TABLE
+                        ) and _table_available(cursor, policy, PROJECTION_TABLE)
+                        if tables_present:
+                            cursor.execute(
+                                policy.check(Q_RUN_PROJECTIONS_FOR_EXPERIMENTS),
+                                (candidates,),
+                            )
+                            projections = _stored_projections(cursor.fetchall())
+                            cursor.execute(
+                                policy.check(Q_RUN_ROWS_FOR_EXPERIMENTS),
+                                (candidates,),
+                            )
+                            run_rows = _grouped_run_rows(cursor.fetchall())
+                    except Exception as exc:  # noqa: BLE001 - classified, then degraded
+                        # THE ONE PLACE THIS READER IS ALLOWED TO SWALLOW, AND IT
+                        # SWALLOWS EXACTLY ONE THING. `undefined_table` here means
+                        # the operator rolled `0002` or `0005` back under a running
+                        # pod AFTER this process had cached "the table is there".
+                        # Before Stage 2b that environment served the list fine;
+                        # letting this propagate would turn a working My
+                        # Experiments into a disclosed-incomplete one for a table
+                        # whose whole contract says its absence is normal
+                        # operation. Degrading to UNAVAILABLE reads the document,
+                        # which is what that environment did yesterday.
+                        #
+                        # NOTHING FURTHER IS ISSUED ON THIS TRANSACTION. A failed
+                        # statement poisons it, so the arm below runs no SQL — it
+                        # only forgets a positive cache the server has just
+                        # contradicted, exactly as `persist` does. The commit that
+                        # follows is an empty one the server turns into a rollback.
+                        #
+                        # ANY OTHER EXCEPTION RE-RAISES and is classified as the
+                        # outage it is. Narrowing this to one SQLSTATE is what
+                        # keeps "the table is absent" and "the read is broken"
+                        # distinguishable.
+                        if not is_undefined_table(exc):
+                            raise
+                        forget_run_table_presence()
+                        tables_present = False
+                        projections = {}
+                        run_rows = {}
         except Exception as exc:  # noqa: BLE001 - any driver/server failure, classified
             if is_undefined_table(exc):
                 raise _not_provisioned(exc) from exc
             raise _unavailable(exc, STORAGE_READ_FAILED_MESSAGE) from exc
         _note_storage_success()
+        counts = dict.fromkeys(RUN_AUTHORITY_STATES, 0)
+        classified = 0
         for row in rows:
             rid = str(row[0] or "").strip()
             if not ws.is_record_id(rid) or rid in ws.CANONICAL_IDS:
@@ -1761,8 +2599,34 @@ class PostgresOrdinaryStore:
                 # complete, which is the whole defect this counter closes.
                 skipped += 1
                 continue
+            if authoritative:
+                # ── THE ONE LINE STAGE 2b ADDS TO THE RESTORE ────────────────────
+                # `resolve_run_authority` returns the runs the rows prove, or
+                # `None` meaning USE THE DOCUMENT. Three of the four states and
+                # every mismatch return `None`, and that is NORMAL OPERATION — the
+                # document is the side the compare-and-swap protects and the side a
+                # scientist's last write landed in.
+                authority, resolved = resolve_run_authority(
+                    state,
+                    projections.get(rid),
+                    run_rows.get(rid, []),
+                    tables_present=tables_present,
+                )
+                counts[authority] += 1
+                classified += 1
+                if resolved is not None:
+                    # A SHALLOW COPY, so the row's parsed document is not mutated:
+                    # `rows` is still being iterated and nothing else may observe a
+                    # `runs` key this method substituted.
+                    state = dict(state)
+                    state["runs"] = resolved
             ws.atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
             restored += 1
+        if classified:
+            # ONLY A PASS THAT CLASSIFIED SOMETHING PUBLISHES A DISTRIBUTION. See
+            # `_last_run_authority` for why an all-zero overwrite on every warm
+            # list would destroy the one measurement that carries information.
+            _record_run_authority(counts)
         if skipped:
             # AFTER the loop, deliberately: every restorable row has been restored
             # by now, so refusing one row costs only that row. See the docstring.
@@ -2008,6 +2872,32 @@ def storage_status(env: Mapping[str, str] | None = None) -> dict:
     Both limits of the observation — it is process-local, and the first read after
     a process start is optimistic because nothing has been attempted — are stated
     in this module's docstring. Neither is hidden behind a reassuring value here.
+
+    IT ALSO CARRIES THE STAGE-2b ``run_projection`` BLOCK, and the placement is a
+    DELIBERATE DEPARTURE FROM WHAT THE CONTRACT ASKED FOR — reported rather than
+    made quietly. `docs/isaac-runs-stage-2-contract.md` §7.6 says the distribution
+    goes in ``/api/health``'s ``database`` block. That block's own comment in
+    ``routes.py`` says it is about the read-only diagnostic over the
+    PRODUCTION-DERIVED sample and that "conflating them would be the kind of error
+    this file has made before", while ``experiment_storage`` is about where THIS
+    APPLICATION'S OWN experiments are stored. The distribution is an aggregate over
+    ``isaac_runs`` and ``isaac_run_projection``, which are this application's own
+    tables — §7.6 says so itself, in the sentence that explains why gates G2 and G3
+    are untouched by it — so it belongs in the second block, not the first. Moving
+    it is a one-line change if the contract's author prefers the literal reading.
+
+    ``authoritative`` IS CONFIGURATION AND ``last_pass`` IS AN OBSERVATION, kept
+    apart for the reason the rest of this function keeps them apart. The first is
+    the kill switch, read from the environment on every call so an operator's edit
+    takes effect without a redeploy; the second is what the most recent classifying
+    hydration pass measured, and it is ``None`` until one has run. Neither opens a
+    connection.
+
+    THE COUNTS ARE COUNTS. No id, no title, no record content, nothing derived from
+    a scientific value. And nothing here may ever be read as "the cutover is
+    complete": until an operator applies `0005` the honest distribution is every
+    experiment ``unavailable``, and between `0005` and the backfill it is every
+    experiment ``never_projected``. Both are the reader working correctly.
     """
     env = os.environ if env is None else env
     configured = database_configured(env)
@@ -2035,4 +2925,8 @@ def storage_status(env: Mapping[str, str] | None = None) -> dict:
         "backend": BACKEND_POSTGRES if selected else BACKEND_FILESYSTEM,
         "durable": durable,
         "state": state,
+        "run_projection": {
+            "authoritative": run_rows_authoritative(env),
+            "last_pass": run_authority_summary(),
+        },
     }

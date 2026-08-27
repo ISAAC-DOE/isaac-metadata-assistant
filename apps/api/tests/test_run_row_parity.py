@@ -59,12 +59,14 @@ teardown. The precedent for the fix is one package away:
 accident" — and ``db_recon`` only READS.
 
 A LOOPBACK CHECK IS ALSO APPLIED, AND ITS LIMIT IS STATED RATHER THAN IMPLIED.
-:func:`_is_loopback_target` refuses a ``PGHOST`` that is not a loopback literal, a
-unix socket path, or ``localhost``. That is defence in depth against a hostname
-target — it is **NOT** a defence against the port-forward case, because a
-port-forward IS on ``localhost`` and passes it. The opt-in is what closes that
-case; the loopback check only narrows what an opt-in can then reach. Do not
-describe it as making the suite safe.
+:func:`_is_loopback_target` splits ``PGHOST`` on ``,`` — libpq accepts a multi-host
+list and tries the elements in order — and requires EVERY element to be a loopback
+IP literal or ``localhost``. A unix-socket directory is refused; see
+:func:`_is_loopback_element` for why that was narrowed rather than kept. That is
+defence in depth against a hostname target — it is **NOT** a defence against the
+port-forward case, because a port-forward IS on ``localhost`` and passes it. The
+opt-in is what closes that case; the loopback check only narrows what an opt-in can
+then reach. Do not describe it as making the suite safe.
 
 **A SKIP IS ONLY HONEST IF SOMETHING SOMEWHERE REFUSES TO ACCEPT IT.** A suite that
 silently skips in the one environment that can run it is worse than no suite,
@@ -126,24 +128,110 @@ REQUIRE_ENV = "ISAAC_REQUIRE_REAL_ENGINE_PARITY"
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
 
 
+def _is_loopback_element(element: str) -> bool:
+    """Is ONE comma-separated ``PGHOST`` element a loopback IP literal or name?
+
+    A LEADING ``/`` — a unix-socket directory — IS REFUSED, AND THAT IS A DELIBERATE
+    NARROWING rather than an oversight. It used to return ``True`` "local by
+    construction", which is true of the socket itself and was the premise the
+    multi-host hole was built on. Three reasons it is refused now:
+
+    1. **Nothing here uses one.** CI's ``postgres-migration`` job sets
+       ``PGHOST: 127.0.0.1`` (``.github/workflows/ci.yml``), and no other environment
+       in this repository sets ``PGHOST`` at all. Accepting a shape nothing uses buys
+       no capability and only widens the predicate.
+    2. **It is the one shape whose safety rests on libpq's interpretation rules
+       rather than on the string.** A path is not a target this function can reason
+       about; it is an instruction to libpq about how to read the rest.
+    3. **``sslmode`` is silently inert on it.** libpq does not negotiate TLS over a
+       unix socket, so ``connect_psycopg2``'s ``sslmode=require`` default — a real
+       part of the write path's defence — provides nothing on a value of this shape,
+       and the check would be quietly admitting the one target where it does not
+       apply.
+
+    The cost of the narrowing is a SKIP with a stated reason for anyone who genuinely
+    runs a local engine over a socket, which is a visible non-result; and in CI it
+    cannot be silent at all, because :data:`REQUIRE_ENV` turns an unreachable engine
+    into a failure.
+    """
+    element = element.strip()
+    if not element:
+        return False
+    if element.startswith("/"):
+        return False
+    if element.lower() in _LOOPBACK_NAMES:
+        return True
+    try:
+        parsed = ipaddress.ip_address(element.strip("[]"))
+    except ValueError:
+        return False
+    # AN IPv4-MAPPED IPv6 LITERAL IS REFUSED OUTRIGHT, AND NOT BECAUSE IT IS
+    # DANGEROUS — BECAUSE `is_loopback` DISAGREES ABOUT IT BETWEEN INTERPRETERS.
+    #
+    # Measured, same string, same call:
+    #
+    #     python 3.12 (this host)  ipaddress.ip_address('::ffff:127.0.0.1').is_loopback -> False
+    #     python 3.11 (CI)         same expression                                      -> True
+    #
+    # The test below pins `False`; it passed locally and FAILED in CI on the first run
+    # after this predicate was rewritten, which is how the split was found rather than
+    # reasoned about.
+    #
+    # Either answer is defensible for a NETWORK question — `::ffff:127.0.0.1` really
+    # does reach the loopback interface. Neither is defensible for a GATE. This one
+    # decides whether a suite that WRITES may open a connection, and a gate whose
+    # verdict depends on the interpreter is not a gate: it would admit on one machine
+    # what it refuses on another, silently, with no diagnostic naming the difference.
+    #
+    # So the second spelling is refused on both, explicitly, rather than left to
+    # `is_loopback`. That is the same narrowing this function already applies to a
+    # unix-socket directory, for the same reason and with the same cost: a stated skip
+    # for anyone who genuinely names their local engine that way, which is a visible
+    # non-result, and in CI not even that, because `REQUIRE_ENV` turns an unreachable
+    # engine into a failure.
+    if getattr(parsed, "ipv4_mapped", None) is not None:
+        return False
+    return parsed.is_loopback
+
+
 def _is_loopback_target(host: str) -> bool:
     """Is ``PGHOST`` a local target, decided from the STRING alone?
 
-    True for a unix-socket directory (a path), for ``localhost``, and for any IP
-    literal the standard library calls loopback (``127.0.0.0/8``, ``::1``). False
-    for every hostname — which is the one shape the hosted database would take.
+    ``True`` only when EVERY comma-separated element is a loopback IP literal
+    (``127.0.0.0/8``, ``::1``) or one of :data:`_LOOPBACK_NAMES`. ``False`` for every
+    hostname — the one shape the hosted database would take — and for a unix-socket
+    directory, per :func:`_is_loopback_element`.
+
+    ── ``PGHOST`` IS A LIST, AND THIS FUNCTION USED TO READ IT AS A SCALAR. ──────────
+    Measured by an independent security review. libpq accepts a comma-separated
+    multi-host ``PGHOST`` and tries the elements in order until one answers. The old
+    predicate returned ``True`` for anything starting with ``/`` and never split, so:
+
+        '/tmp,hosted.example'                 -> True   <- PASSED the gate
+        '/var/run/postgresql,hosted.example'  -> True   <- PASSED
+        '/../../hosted.example'               -> True   <- PASSED
+
+    The whole string reaches libpq verbatim. With no socket at ``/tmp``, the first
+    element fails and libpq falls through to ``hosted.example`` — and this suite
+    WRITES. The comma cases that were already refused (``'localhost,hosted.example'``,
+    ``'127.0.0.1,hosted.example'``) were refused only because ``'localhost,…'`` is not
+    equal to ``'localhost'`` and is not a parseable IP: an accident of scalar
+    comparison, not a rule, and one that gave no protection to the path branch that
+    returned early.
+
+    Splitting first and requiring ALL is what makes it a rule. An empty element is
+    refused rather than skipped, because ``PGHOST=',hosted.example'`` means "use the
+    default for the first" and a default this function cannot see is not a target it
+    can vouch for.
+
+    NEITHER THIS NOR ``PGHOSTADDR`` IS THE GATE. ``ISAAC_RUN_REAL_ENGINE_PARITY`` is,
+    and it is checked first. This is defence in depth on a check that, on three
+    measured inputs, did not defend.
     """
     host = (host or "").strip()
     if not host:
         return False
-    if host.startswith("/"):  # a unix domain socket directory: local by construction
-        return True
-    if host.lower() in _LOOPBACK_NAMES:
-        return True
-    try:
-        return ipaddress.ip_address(host.strip("[]")).is_loopback
-    except ValueError:
-        return False
+    return all(_is_loopback_element(element) for element in host.split(","))
 
 
 def _probe_engine(env: Mapping[str, str] | None = None) -> tuple[bool, str]:
@@ -338,9 +426,59 @@ def test_the_opt_in_alone_does_not_admit_a_non_loopback_target(monkeypatch):
     assert available is False
     assert "PGHOST" in reason
 
+    # ── `PGHOST` IS A LIST, AND THE PREDICATE READ IT AS A SCALAR. ───────────────────
+    # Measured by an independent security review. libpq accepts a comma-separated
+    # multi-host `PGHOST` and tries the elements in order until one answers; the whole
+    # string reaches it verbatim. The predicate returned True for ANYTHING starting
+    # with `/` and never split, so the first three below PASSED the gate — with no
+    # socket at `/tmp`, libpq falls straight through to `hosted.example`, and this
+    # suite WRITES. The last two were refused, but only by the accident that
+    # `'localhost,…'` is neither equal to `'localhost'` nor a parseable IP address:
+    # scalar comparison, not a rule, and it protected the path branch not at all.
+    #
+    # A SECOND REASON THE PATH SHAPE IS NOW REFUSED OUTRIGHT: libpq does not negotiate
+    # TLS over a unix socket, so `connect_psycopg2`'s `sslmode=require` default is
+    # inert on a leading-slash value.
+    for smuggled in (
+        "/tmp,hosted.example",
+        "/var/run/postgresql,hosted.example",
+        "/../../hosted.example",
+        "localhost,hosted.example",
+        "127.0.0.1,hosted.example",
+        # ...and the mixed-order forms, so the rule is "every element", not "the first".
+        "hosted.example,127.0.0.1",
+        "127.0.0.1,10.0.0.5",
+        # An EMPTY element means "use the default", which this function cannot see.
+        ",hosted.example",
+        "127.0.0.1,",
+    ):
+        assert _is_loopback_target(smuggled) is False, smuggled
+        available, reason = _probe_engine(dict(consented, PGHOST=smuggled))
+        assert available is False, smuggled
+        assert "loopback" in reason, reason
+
+    # ALREADY REFUSED BEFORE THE SPLIT, AND STILL REFUSED AFTER IT. Each is a shape
+    # that reads as loopback to a human and is not one to `ipaddress`:
+    # `::ffff:127.0.0.1` is an IPv4-mapped IPv6 address and `is_loopback` is False for
+    # it; `0.0.0.0` is unspecified, not loopback; `0177.0.0.1` is an octal spelling
+    # `ipaddress` refuses outright; and `localhost.` is the fully-qualified root form,
+    # which is not the string `localhost`. Pinned so the multi-host change cannot
+    # loosen any of them.
+    for refused in ("::ffff:127.0.0.1", "0.0.0.0", "0177.0.0.1", "localhost."):
+        assert _is_loopback_target(refused) is False, refused
+        available, reason = _probe_engine(dict(consented, PGHOST=refused))
+        assert available is False, refused
+        assert "loopback" in reason, reason
+
+    # A UNIX-SOCKET DIRECTORY IS NOW REFUSED TOO, deliberately — see
+    # `_is_loopback_element`. Nothing in this repository sets such a `PGHOST` (CI sets
+    # `127.0.0.1`), so the narrowing costs a stated skip and no capability.
+    for socket_dir in ("/var/run/pg", "/tmp", "/var/run/postgresql"):
+        assert _is_loopback_target(socket_dir) is False, socket_dir
+
     # THE LIMIT. A loopback target gets past every string gate and is refused only
     # by the connection attempt itself — here, by the raiser standing in for it.
-    for local in ("127.0.0.1", "127.0.0.53", "::1", "[::1]", "localhost", "/var/run/pg"):
+    for local in ("127.0.0.1", "127.0.0.53", "::1", "[::1]", "localhost", "LocalHost"):
         assert _is_loopback_target(local) is True, local
         available, reason = _probe_engine(dict(consented, PGHOST=local))
         assert available is False, local
@@ -498,8 +636,10 @@ def test_connect_psycopg2_pins_hostaddr_so_libpq_cannot_fill_it_from_the_environ
 # is that every statement the WRITE PATH issues is a module-level constant in the
 # application, and adding a test-only read to `experiment_repository` would put a
 # statement in the application that the application never issues — and would make
-# the "no read path names isaac_runs" enumeration in
-# `test_0002_is_now_written_by_the_write_path_and_by_nothing_else` false. They
+# the enumeration in
+# `test_0002_is_now_written_by_the_write_path_and_by_nothing_else` false. (That
+# enumeration used to be "no read path names isaac_runs"; since Stage 2b it names
+# the two reads that may, so a test-only third would still break it.) They
 # still go through `policy.check(...)`, so they are bound by the same owned-table
 # and forbidden-verb rules as everything else.
 
@@ -561,6 +701,47 @@ def _execute(sql: str, params: tuple | None = None) -> int:
     """Run one out-of-band statement. Used ONLY by the oracle's control tests."""
     with dbw.write_transaction(os.environ) as (cursor, policy):
         cursor.execute(policy.check(sql), params)
+        return cursor.rowcount
+
+
+def _teardown_planted_history(sql: str, params: tuple) -> int:
+    """Remove a history row THIS TEST PLANTED, bypassing the statement policy.
+
+    ── WHY A BYPASS EXISTS AT ALL, AND WHY IT IS THIS NARROW ────────────────────
+    `WriteStatementPolicy` now refuses any `DELETE` or `UPDATE` naming the five
+    append-only history tables. That is deliberate and it is a real hardening: the
+    guarantee used to live only in a test that enumerated the application's `Q_*`
+    constants, so the first branch to add a statement was the branch that removed
+    it. It is now enforced at the seam every application write already passes
+    through.
+
+    The policy is about what THE APPLICATION may issue. These scenarios plant a
+    history row out of band — the application cannot create one here, which is the
+    whole point of planting it — and must remove it again, or every later run in
+    the same database inherits it. Routing that teardown through the policy asked
+    it to permit, in general, exactly what it exists to forbid.
+
+    So the teardown goes around it, and the narrowness IS the safety argument:
+
+    * it accepts only a `DELETE` naming one of the two tables these tests plant into;
+    * it requires a `WHERE` and a bound parameter, so it cannot become "delete the
+      table";
+    * it is called only from a `finally`, only with an id this module minted.
+
+    It is NOT a general escape and must not become one. The application has no
+    access to it: it lives in a test module, and `db_write`'s own policy is
+    untouched — a production statement of this shape is still refused.
+    """
+    lowered = sql.lower()
+    assert lowered.startswith("delete from "), sql
+    assert any(
+        f"delete from {table} " in lowered
+        for table in ("isaac_experiment_revisions", "isaac_submissions")
+    ), sql
+    assert " where " in lowered and "%s" in sql, sql
+    assert params, "a teardown with no bound id could remove more than it planted"
+    with dbw.write_transaction(os.environ) as (cursor, _policy):
+        cursor.execute(sql, params)
         return cursor.rowcount
 
 
@@ -1016,11 +1197,19 @@ def test_parity_survives_a_pod_restart_and_hydration_leaves_the_rows_untouched(
     """A POD RESTART, AND THE PROPERTY IS "UNCHANGED", NOT "REBUILT".
 
     ``PostgresOrdinaryStore.hydrate`` reads ``isaac_experiments`` and writes FILES.
-    It does not read ``isaac_runs`` and it does not write it — nothing in this
-    application reads that table at all. So the honest property after a restart is
-    that the rows are exactly as the last save left them, byte for byte including
-    the server-side stamps, and that the restored working copy still agrees with
-    them.
+    ~~"It does not read ``isaac_runs`` and it does not write it — nothing in this
+    application reads that table at all."~~ — **THE FIRST AND THIRD CLAUSES ARE NO
+    LONGER TRUE, and they are corrected in place rather than reworded because this
+    paragraph is the one a reader consults for what hydration does.** Stage 2b
+    added a READ: when an experiment's projection is COMPLETE, hydration builds the
+    restored document's ``runs`` from these rows (contract §7.1). It still does not
+    WRITE the table, which is the clause this test was ever defending.
+
+    So the honest property after a restart is UNCHANGED and is now load-bearing in
+    a second way: the rows are exactly as the last save left them, byte for byte
+    including the server-side stamps, and the restored working copy still agrees
+    with them. A reader that "helpfully" repaired a row would break the first half;
+    a reader that dropped or reordered a run would break the second.
 
     Asserting "the rows were rebuilt" would be asserting a behaviour that does not
     exist and should not; asserting "unchanged" is what actually protects the
@@ -1550,18 +1739,39 @@ def test_this_suite_reads_isaac_runs_only_as_a_test_and_never_on_the_apps_behalf
 
     **WHAT THIS TEST CHECKS, precisely.** It builds the set of ``Q_``-prefixed
     module-level values of ``db_write`` and ``experiment_repository`` and asserts
-    that none of the five TEST statements below is among them, and that each still
-    passes the application's own ``WriteStatementPolicy``. So a future slice that
-    MOVES one of these statements into either of those two modules trips here.
+    that none of FOUR of the five TEST statements below is among them, and that each
+    still passes the application's own ``WriteStatementPolicy``. So a future slice
+    that MOVES one of them into either of those two modules trips here.
+
+    **IT WAS FIVE, AND ONE OF THEM COLLIDED — RECORDED RATHER THAN QUIETLY
+    EXEMPTED.** ``Q_TEST_DELETE_RUNS_OF`` is
+    ``DELETE FROM isaac_runs WHERE experiment_id = %s``, and the DISCARD slice gave
+    ``experiment_repository`` a statement with exactly those bytes
+    (``Q_DELETE_RUNS_FOR_EXPERIMENT``) — for its own authorized reason, removing an
+    unsubmitted experiment's run rows before the experiment row itself. Nothing was
+    MOVED: two statements arrived at one string independently.
+
+    So for that one the assertion is INVERTED rather than dropped, which is the
+    stronger of the two available readings: it is pinned EQUAL to the application
+    constant it collides with, by name. A change to either side trips here and names
+    the other, where a bare exemption would have gone quiet forever. What is lost is
+    real and is stated: this file can no longer tell "the test's own delete" from
+    "the application's delete" by text, so the enumeration that keeps
+    ``isaac_runs`` a write-path-only table is
+    ``test_0002_is_now_written_by_the_write_path_and_by_nothing_else``'s, not this
+    one's.
 
     **WHAT IT DOES NOT CHECK, and this is stated because the claim was once made
     more broadly than the code supports.** It is NOT a reachability proof. It would
     not notice a run-row read added to ``routes.py``, ``db_provider.py`` or any
     other module; it would not notice a constant that is not prefixed ``Q_``; and it
-    would not notice inline SQL built at a call site. The property that no read path
-    names ``isaac_runs`` does hold today, but the evidence for it is
-    ``test_0002_is_now_written_by_the_write_path_and_by_nothing_else``'s enumeration
-    plus review — not this assertion.
+    would not notice inline SQL built at a call site. ~~"The property that no read
+    path names ``isaac_runs`` does hold today"~~ — **CORRECTED FOR STAGE 2b: it does
+    not, and it is not supposed to.** Exactly two reads name the table, they are
+    enumerated by name in
+    ``test_0002_is_now_written_by_the_write_path_and_by_nothing_else``, and the
+    evidence for "no THIRD one" is that enumeration plus review — not this
+    assertion, whose limits above are unchanged.
 
     The one thing this test contributes to that wider property is negative: it
     confirms the five statements here are not part of the application's constant
@@ -1576,13 +1786,23 @@ def test_this_suite_reads_isaac_runs_only_as_a_test_and_never_on_the_apps_behalf
         Q_TEST_ALL_RUN_ROWS,
         Q_TEST_RUN_ROWS_FOR,
         Q_TEST_SHIFT_ORDINALS,
-        Q_TEST_DELETE_RUNS_OF,
         Q_TEST_TAMPER_WITH_A_RUN_LABEL,
     ):
         assert sql not in application_statements, sql
         # ...and each is still bound by the same policy every application
         # statement is: owned tables only, no forbidden verb.
         assert dbw.WriteStatementPolicy().check(sql) == sql
+
+    # THE COLLISION, PINNED BY NAME rather than exempted. See the docstring: the
+    # discard slice's `Q_DELETE_RUNS_FOR_EXPERIMENT` is byte-identical to this
+    # file's out-of-band control, arrived at independently. Asserting the equality
+    # means a change to EITHER side fails here and names the other.
+    assert Q_TEST_DELETE_RUNS_OF == repo.Q_DELETE_RUNS_FOR_EXPERIMENT
+    assert Q_TEST_DELETE_RUNS_OF in application_statements
+    assert (
+        dbw.WriteStatementPolicy().check(Q_TEST_DELETE_RUNS_OF)
+        == Q_TEST_DELETE_RUNS_OF
+    )
 
     # The application's read of the table remains the ONE inside the write path.
     assert repo.Q_EXPERIMENT_RUN_ROWS in application_statements
@@ -1759,15 +1979,22 @@ def test_parity_removing_a_run_over_HTTP_removes_its_row_and_moves_no_other(work
     assert_parity(ws.load_experiment(exp.id))
 
 
-def test_FAKE_hydration_issues_no_statement_naming_isaac_runs(workspace):
+def test_FAKE_hydration_WRITES_no_statement_naming_isaac_runs(workspace):
     """FAKE-DRIVER. The read half of the pod-restart property, stated as a shape.
 
-    ``hydrate`` reads ``isaac_experiments`` and writes FILES. The real-engine test
-    asserts the OUTCOME — not one run row moved. This asserts the MECHANISM: the
-    hydration transaction issues exactly one application statement and it is
-    ``Q_ALL_EXPERIMENTS``. A future hydration that started "helpfully" rebuilding
-    run rows would be a second, unowned write path into the shadow table, and it
-    would fail here.
+    AMENDED FOR STAGE 2b, AND THE OLD NAME IS RECORDED. It was
+    ``test_FAKE_hydration_issues_no_statement_naming_isaac_runs`` and it asserted
+    that hydration issues NO statement naming ``isaac_runs`` at all. That property
+    was true while the table was write-only and it is not the property this test
+    was defending: its own docstring says what it is for — *"a future hydration
+    that started 'helpfully' REBUILDING run rows would be a second, unowned WRITE
+    PATH into the shadow table"*. Stage 2b adds a READ, deliberately and under
+    review; it adds no writer. So the assertion is narrowed from "no statement" to
+    "no WRITE statement", which is the guarantee that was ever at stake, and the
+    reads it now permits are enumerated by name rather than by count.
+
+    The real-engine test asserts the OUTCOME — not one run row moved. This asserts
+    the MECHANISM.
     """
     exp = _bare_experiment()
     exp.add_run(label="a run the row set already holds")
@@ -1778,6 +2005,14 @@ def test_FAKE_hydration_issues_no_statement_naming_isaac_runs(workspace):
     before = dict(conn.runs)
     store.hydrate()
 
-    assert [sql for sql, _ in conn.statements if "isaac_runs" in sql.lower()] == []
-    assert repo.Q_RUN_TABLE_PRESENT not in [sql for sql, _ in conn.statements]
+    naming = [sql for sql, _ in conn.statements if "isaac_runs" in sql.lower()]
+    # ENUMERATED, NOT COUNTED. Every statement hydration issues against either run
+    # table is a `SELECT`; a fifth statement, or a non-SELECT, fails here.
+    assert set(naming) <= {
+        repo.Q_RUN_ROWS_FOR_EXPERIMENTS,
+        repo.Q_RUN_PROJECTIONS_FOR_EXPERIMENTS,
+    }, naming
+    for sql in naming:
+        assert sql.lower().startswith("select"), sql
     assert conn.runs == before, "hydration wrote to the shadow table"
+    assert conn.projections == {}, "hydration stamped a completeness claim"

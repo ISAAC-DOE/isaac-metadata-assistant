@@ -479,6 +479,45 @@ describe('Connect Your Agent — the draft-write confirmation, whose claim it is
       "it is the caller's assertion that the scientist confirmed it, not this server's",
     );
   });
+
+  /*
+   * THE EVIDENCE ROW CARRIED TWO CLAIMS THE TOOL ITSELF HAD ALREADY WITHDRAWN.
+   *
+   * `inspect-evidence` read *"Read the field-by-field trail for a record: each
+   * value, the kind of support behind it, and the source cited"* while
+   * `mcp/tools.py`'s own `isaac_inspect_evidence` description said, in the same
+   * checkout, that a block-level entry carries `value: null` and that on a record
+   * with runs the trail is the record's own only. Measured through the registry:
+   * a record whose spectrum, verdict and descriptor were answered on a run — the
+   * only level the API permits once runs exist, per its own `409
+   * belongs_to_a_run` — serves `{"evidence": []}`.
+   *
+   * SO THIS IS A ONE-DIRECTION PARITY AND IT IS DELIBERATE. The backend sentences
+   * are the authority; this asserts the page has not drifted BACK to promising
+   * more than they do. It pins the two limits rather than the row's wording, so
+   * the copy can be rewritten and only a re-broadened CLAIM fails.
+   */
+  it('the evidence row states both limits the backend tool states, and promises no value', () => {
+    // The backend's own words, whitespace-collapsed like everything else here.
+    expect(TOOLS_SOURCE).toContain(
+      'A BLOCK-LEVEL entry — a `qc:`, `series:`, `descriptors:`, `attribution:` or `links:` key — carries its support with `value: null`',
+    );
+    expect(TOOLS_SOURCE).toContain(
+      "on a record with RUNS this returns the record's own trail only — each run's evidence is not in it",
+    );
+
+    const evidenceRow = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'inspect-evidence');
+    expect(evidenceRow, 'the inspect-evidence row').toBeDefined();
+    const detail = evidenceRow!.detail;
+
+    // Limit 1: a block entry resolves no value. The row must not say otherwise.
+    expect(detail).toMatch(/carries no value of its own/i);
+    // Limit 2: the runs boundary, which is the one that empties the trail entirely.
+    expect(detail).toMatch(/each run’s evidence is not in it/i);
+    // The withdrawn promise, in the shape it was actually made. A row that says
+    // "each value" again is claiming exactly what the tool description denies.
+    expect(detail).not.toMatch(/trail for a record: each value/i);
+  });
 });
 
 // --- accessibility -------------------------------------------------------------

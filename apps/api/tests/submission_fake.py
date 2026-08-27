@@ -312,6 +312,12 @@ class FakeSubmissionCursor:
             self.rowcount = 1
             return
 
+        if sql == rhist.Q_SUBMISSION_COUNT_FOR_EXPERIMENT:
+            total = sum(1 for r in conn.submissions if r["experiment_id"] == params[0])
+            self._pending = [(total,)]
+            self.rowcount = 1
+            return
+
         if sql == rhist.Q_REVISION_BY_NO:
             experiment_id, revision_no = params
             match = [

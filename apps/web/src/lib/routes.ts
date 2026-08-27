@@ -179,6 +179,25 @@ export const RECORD_COMPARE_PARAM = 'compare';
  */
 export const RUN_COMPARE_MAX = 2;
 
+/**
+ * WHICH ADDRESS A LINK INTO FOCUS RUN IS ABOUT — `?at=field:sample.material.name`.
+ *
+ * A SCROLL TARGET AND NOTHING ELSE, and the limit is the point. Compare Runs links
+ * every differing cell back to the run it was read from; before this the
+ * destination knew only WHICH RUN, so a reader following a difference at one
+ * address landed on a card carrying every address and had to find it again. The
+ * section brings the matching `[data-address]` element into view and marks it.
+ *
+ * IT SELECTS, FILTERS AND CHANGES NOTHING. An address the focused run does not
+ * render — a stale link, a cleared override, a different record — leaves the page
+ * exactly as it would have been without the parameter, which is why it needs no
+ * validation and can never produce a dead route. It is deliberately NOT read as
+ * "show only this address": hiding the rest would answer a narrower question than
+ * the reader asked, and would do it on the strength of a query parameter they may
+ * not have noticed following.
+ */
+export const RECORD_ADDRESS_PARAM = 'at';
+
 export const ROUTES = {
   experiments: '/experiments',
   load: '/load',

@@ -103,6 +103,16 @@ const STATE_ICON = {
 } as const;
 
 /**
+ * How many run findings are DRAWN. See the long note in the component for why the
+ * bound is ordered by state rather than by position, and for the measurement that
+ * made it necessary (22,267 DOM nodes at 1,000 runs, essentially all of it this list).
+ *
+ * 50 matches `serialize.PENDING_WINDOW` and `runPaging.RUNS_PAGE_SIZE` — the number
+ * this product already means by "a page of runs" — rather than inventing a third.
+ */
+export const RUN_FINDINGS_WINDOW = 50;
+
+/**
  * What each state's clause says in the count line. Never a percentage.
  *
  * `fail` deliberately reads "did not pass" and NOT "failed the official ISAAC
@@ -154,6 +164,57 @@ export function RunFindings({
     .map((state) => `${tally(state)} ${STATE_CLAUSE[state]}`);
 
   /*
+   * ── THE LIST IS BOUNDED, AND THE BOUND IS ORDERED BY STATE. ─────────────────
+   *
+   * MEASURED, not anticipated: at 1,000 runs this screen settled at **22,267 DOM
+   * nodes**, of which `run-finding` and its twelve sibling classes were 1,000 each
+   * and `mono` was 4,002 — i.e. essentially all of it. The record screen beside it
+   * was 1,186. That is the SAME defect `docs/run-scale-measurements.md` §1 records
+   * and fixed on the record screen's "Fields Need Your Confirmation" banner; the fix
+   * never reached this screen, and here it is LARGER than the 16,134 §1 calls "THE
+   * DEFECT". `docs/evidence/scale-envelope-2026-08-27.md` has the attribution.
+   *
+   * WHY NOT "THE FIRST 50", WHICH IS WHAT THE BANNER DOES. The banner's list is
+   * homogeneous — every entry is an open question, so the first ten are a fair
+   * sample. THESE ENTRIES ARE NOT INTERCHANGEABLE: this list's whole purpose is to
+   * say WHICH runs did not pass, and a record with 40 passing runs before its first
+   * failure would have shown a scientist fifty green rows and hidden every failure
+   * behind a bound. Truncating by position would have been a silent truncation of
+   * blockers wearing a disclosure.
+   *
+   * So when the bound engages, the entries a scientist needs come first: `fail`,
+   * then `unavailable`, then `pass`. The sort is STABLE, so within a state the
+   * server's order is untouched.
+   *
+   * IT ENGAGES ONLY ABOVE THE BOUND. At or below `RUN_FINDINGS_WINDOW` the rendered
+   * order is exactly the server's, unchanged — so no existing record's screen is
+   * reordered by this, and the change is invisible until it is needed.
+   *
+   * THE ORIGINAL INDEX TRAVELS WITH EACH ENTRY. `adviceFor(run, i)` is POSITIONAL
+   * into `warningRuns` and its comment explains at length why (both lists come from
+   * `exp.export_units()` in the same order). Sorting the runs while passing the loop
+   * index would have handed run 900's advisory to run 3 — a wrong attribution of the
+   * exact kind that comment exists to prevent — so `i` below is the ORIGINAL index,
+   * never the position in the drawn list. The React key uses it too, so keys stay
+   * stable and unique across a reorder.
+   *
+   * NOTHING IS HIDDEN SILENTLY: `clauses` above is computed over the FULL array and
+   * is unchanged, and the withheld entries are named by state under the list.
+   */
+  const bounded = runs.length > RUN_FINDINGS_WINDOW;
+  const order: Record<RunFindingState, number> = { fail: 0, unavailable: 1, pass: 2 };
+  const entries = runs.map((run, i) => ({ run, i, state: states[i] }));
+  const ordered = bounded
+    ? [...entries].sort((a, b) => order[a.state] - order[b.state])
+    : entries;
+  const drawn = bounded ? ordered.slice(0, RUN_FINDINGS_WINDOW) : ordered;
+  const withheld = bounded ? ordered.slice(RUN_FINDINGS_WINDOW) : [];
+  const withheldClauses = (['fail', 'unavailable', 'pass'] as const)
+    .map((state) => [state, withheld.filter((e) => e.state === state).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([state, n]) => `${n} ${STATE_CLAUSE[state]}`);
+
+  /*
    * Advice for the run at THIS POSITION, and only if it names the same record.
    *
    * Both lists come from `exp.export_units()` in the same order, so position is
@@ -187,8 +248,7 @@ export function RunFindings({
       </p>
 
       <ul className="run-findings-list">
-        {runs.map((run, i) => {
-          const state = states[i];
+        {drawn.map(({ run, i, state }) => {
           const Icon = STATE_ICON[state];
           const label = labelFor(run);
           const advice = adviceFor(run, i);
@@ -307,6 +367,23 @@ export function RunFindings({
           );
         })}
       </ul>
+      {/*
+        WHAT WAS NOT DRAWN, NAMED BY STATE — never a bare "and N more".
+        `docs/run-scale-measurements.md` §2 is explicit that "a truncated list that read
+        as complete would be worse than a slow one", and a count alone would leave a
+        scientist unable to tell whether the 950 rows they cannot see contain a failure.
+        The clauses reuse `STATE_CLAUSE`, so this sentence and the count line above
+        cannot drift apart into two vocabularies for the same three states.
+
+        `role="status"`, matching the count line it qualifies: both are re-rendered by
+        Re-Validate and by the live-sync refetch, and both are figures that changed.
+      */}
+      {withheld.length > 0 && (
+        <p className="run-findings-withheld" role="status">
+          Showing {drawn.length} of {runs.length} runs, the ones needing attention first.{' '}
+          {withheldClauses.join(' · ')} {withheld.length === 1 ? 'is' : 'are'} not listed.
+        </p>
+      )}
     </section>
   );
 }
