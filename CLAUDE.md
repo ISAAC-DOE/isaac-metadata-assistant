@@ -836,6 +836,109 @@ Current state:
   was **also** 5,000 ms, so the raised budget was unreachable and the failure read `Test timed
   out in 5000ms`, naming neither the query nor the DOM.
 
+- **Session of 2026-08-26/27 — six PRs (#179, #182–#185, #187), and the recurring finding moved
+  from "a surface claimed what it had not done" to "a claim was published without being
+  measured."** Org `main` at `da889cb`. Backend tests **5,368 → 5,437**; frontend **4,390 →
+  ~4,410**. Nothing about the hosted deployment, the external authorizations, gates **G2**/**G3**,
+  or Dean's **D1–D9** deferral changed, and no agent touched a database. What a future session
+  must not re-derive:
+
+  **A `.venv` SYMLINK WAS COMMITTED TO `main` AND DESTROYED THE READER'S VIRTUALENV.** An agent
+  working in a git worktree created it so its tests could find an interpreter; `git add -A` swept
+  it in; it merged. `.gitignore` carried **`.venv/`** — with a trailing slash, which matches a
+  **directory and not a symlink of the same name** — so it was never ignored and the mistake was
+  invisible at every stage. `git checkout main` then replaced the real virtualenv **directory**
+  with a symlink pointing at **itself**, and every `.venv/bin/python` failed with *"too many
+  levels of symbolic links"* until the environment was rebuilt. **This broke tooling mid-session,
+  twice** — the second time when `git stash` restored the tracked symlink over the freshly rebuilt
+  venv. Rebuilding on the wrong Python (3.14 rather than the **3.12** this tree expects) then
+  produced a `UnicodeEncodeError` at collection, which is a separate trap worth remembering. Fixed
+  in #187: untracked, the **bare `.venv`** added to `.gitignore` beside `.venv/`, and a guard
+  asserting **no tracked entry has git mode `120000`** — stated over the recorded mode, not over a
+  filename, because the next one will not be called `.venv`.
+
+  **AND THAT GUARD'S SECOND ASSERTION WAS WRITTEN, MEASURED, AND WITHDRAWN.** It forbade any
+  tracked text file from embedding an absolute path under a home directory. Run, it flagged
+  **twelve files, every one legitimate** — synthetic fixture paths (`/Users/someone/`,
+  `/Users/me/`, `/Users/fake/`) and documentation examples — including
+  `test_memory_graph_detail.py`'s `("home_absolute", "/Users/krishverma/secret.py")`, which is a
+  **negative control proving redaction works**. Keeping it meant twelve exemptions on day one,
+  the cries-wolf-then-gets-suppressed outcome its own comment predicted. **The withdrawal is
+  recorded in the file** so nobody re-derives it and reaches the same twelve.
+
+  **THE RESET DESTROYED RECORDS, REFUSED FOREVER, AND TOLD THE OPERATOR TO RETRY.** #183 made the
+  list read tolerant while `_current_plan_row` stayed strict, so a malformed document entered the
+  plan and the execute aborted **partway through the mutation loop**: preview said `refused:
+  false, final_count: 5`, execute returned `412 plan_digest_stale` with `removed_count: 1` — the
+  managed-legacy record destroyed, the malformed canonical not restored — and every retry with a
+  fresh digest refused identically. `plan_digest_stale`'s documented meaning is *"recoverable in
+  one further request"*. **And the reviewer's suggested predicate covered only 4 of 7 cases**:
+  `draft`, `source` and `answer_log` set to a wrong-typed truthy value hydrate **strictly without
+  error** and still diverge, so a raise-based test looks complete because the four loudest cases
+  pass. **The predicate is reader disagreement.** The fix is a preflight inside `_reset_lock`
+  before the mutation loop, answering **409 `malformed_records_present`** and naming ids only.
+  **Both rows are built from ONE read** — reading twice would let a concurrent write masquerade as
+  "malformed", a permanent-sounding reason for a transient condition.
+
+  **AND #183'S OWN CLAIM WAS WITHDRAWN, NOT REWORDED.** It said the change was *"fail-closed, and
+  strictly better than the preview 500 it replaces."* Fail-closed is true; **strictly better is
+  false — the branch was strictly worse.** `main` returned 500 and destroyed nothing. The branch
+  asserted success, destroyed, failed to restore, and misdirected. **The lesson generalises:
+  fail-closed describes the DECISION, not its TIMING, and on a destructive path the timing is the
+  whole thing.**
+
+  **THE WIRE COULD NOT SAY WHETHER THE OFFICIAL VALIDATOR HAD RUN** (#185), which is why the same
+  conflation recurred four times. `official_validator_ran` is now published, derived at the route
+  from `official_report is not None`. Two payloads that differ only in that field were shown to be
+  **identical on every other key**, asserted as a property. **The sixth consumer was invisible to
+  every prior sweep**: `lib/experimentGraph.ts` contains **2 NUL bytes**, so `rg`/`grep` dropped it
+  and exited 0. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
+  through an adapter that returns a *different type*, was rendering **"FAIL — Invalid against
+  official ISAAC schema v1.05"** about a record `validate_official` never opened.
+
+  **A MEASUREMENT THAT CONTRADICTS THE OBVIOUS ORDERING RULE, worth carrying forward:** an
+  unanswered freshly-created record reports `official_validator_ran: **true**` with `'descriptors'
+  is a required property`, and its `draft.ok` is **true**. Anyone hand-writing the rule would have
+  guessed the opposite on the most common failing payload in the product.
+
+  **`ok and official_validator_ran` IS AN EQUIVALENT MUTANT** — it moves no verdict anywhere,
+  because a pass is unreachable without the validator having run. That *is* §12's
+  warning-cannot-turn-PASS-into-FAIL invariant demonstrated, and it is why that mutation had to be
+  split into an inert one and a real one.
+
+  **A PANEL TOLD THE SCIENTIST TO ENTER A VALUE ON 25 FIELDS, AND 7 ACCEPT NONE** (#182). Measured
+  over all 25 paths × 5 write routes: **5** writable via `PATCH .../runs/{id}`, **13** via
+  `/overrides`, **7** refused by all five — and **on a record with no runs, none of the 25 is
+  writable**, because both accepting routes are a run's. The copy is now per path. `block:attribution`
+  accepted a contributor that **could never export**; the write now records the
+  `user_confirmation` evidence it had already earned, reusing `complete.py`'s exact four-key shape,
+  and stays fail-closed on contributor shapes the route does not check.
+
+  **`system.domain` HAS NO WRITE PATH ANYWHERE**, which is why setting `technique` or a facility
+  field makes a record un-exportable-until-cleared. Declined deliberately: the correct fix is the
+  stored derivation applied in `Experiment.resolved_run_draft`, and **the repository holds TWO
+  stored expressions of that one rule with opposite confirmation postures** (`draft_builder`
+  stores it directly; `inferability.system_domain` requires user confirmation and has no
+  production caller). Deriving `domain` from `technique` would mean authoring a **37-entry**
+  scientific classification that exists nowhere here — §5 forbids it.
+
+  **A SCIENTIST CAN NOW RENAME A RECORD** (#184, `PATCH /api/experiments/{id}`, operations 69 →
+  70). **Discard was NOT built, and the reason is the finding:** §15 enumerates, per table, only
+  `INSERT`s and `UPSERT`s — **no committed sentence permits a `DELETE`** — while
+  `db_write.WriteStatementPolicy` **does not refuse one** (measured: `DELETE` against all eight
+  app-owned tables is accepted; only `records` is refused). **Mechanical permission is not
+  authorization.** A hard delete would also need **eight statements in dependency order across
+  seven referencing tables, six of them append-only history**, none carrying `ON DELETE`.
+
+  **Named rather than implied, and still not done:** the `.section-tab` contrast fix is written
+  but its **~40 Linux baseline cells need a CI round-trip** to transcribe (PR #186); `isaac_runs`
+  Stage 2b; an apply route for `POST /ingestion/csv/preview` — **which is NOT residual work but a
+  committed human decision** (*"Option 1 — reconciliation-only … a deliberate authority boundary,
+  NOT a defect"*); the Evidence Graph / Compare Runs cross-feature work; the human responsive /
+  200%-zoom sign-off, which **no CDP method, flag or API can drive** and is therefore not
+  automatable at all; personal-deploy retirement; and **every hosted QA** — `/krish` sits behind an
+  Authentik edge this environment cannot authenticate to.
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
