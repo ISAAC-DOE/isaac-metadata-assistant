@@ -1752,7 +1752,21 @@ def test_REAL_ENGINE_a_planted_SUBMISSION_alone_refuses_the_discard(
     target.add_run(label="run A")
     assert target.save_versioned() is True
     decoy = _new_experiment("discard: the decoy that owns the revision")
-    assert decoy.save_versioned() is True
+    # NO SECOND SAVE, and this line is the one that failed on this scenario's FIRST
+    # EXECUTION ANYWHERE. It read `assert decoy.save_versioned() is True`, copied from
+    # the target above — but the target is MUTATED first (`add_run`), and the decoy is
+    # not. `_new_experiment` goes through `repository.create()`, which already
+    # persists; a `save_versioned()` over a byte-identical document is a correct no-op
+    # and returns False. The assertion was wrong, not the product.
+    #
+    # What the decoy is actually for is that `isaac_experiments` holds its id, so the
+    # planted revision's foreign key resolves — and `create()` is what guarantees that.
+    # So the row is asserted directly, which is both the real precondition and a
+    # stronger check than a save that had nothing to save.
+    assert _query(Q_TEST_EXPERIMENT_ROWS, (decoy.id,)), (
+        "the decoy must exist in isaac_experiments, or the planted revision's "
+        "foreign key could not resolve and this scenario would prove nothing"
+    )
 
     revision_id = "01REALENGINESUBMITREV0001"
     submission_id = "01REALENGINESUBMITSUB0001"
