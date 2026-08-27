@@ -5272,20 +5272,60 @@ def _load_all_experiments(session_id: str | None = None) -> list[Experiment]:
     return out
 
 
-def _remove_experiment_dir(exp_dir: Path, *, session_id: str | None = None) -> None:
-    """Delete a single experiment directory after proving it is safe.
+def _assert_removable_experiment_dir(
+    exp_dir: Path, *, session_id: str | None = None
+) -> None:
+    """Prove ``exp_dir`` is safe to delete, or raise. Deletes nothing itself.
 
-    Path-safety guard: the target must resolve to a DIRECT child of that SCOPE's
-    root — ``scope_root(session_id)``, never the root itself, never a nested or
-    ``..`` escape, and never a directory belonging to a different scope. Anything
-    else raises rather than deleting.
+    The target must resolve to a DIRECT child of that SCOPE's root —
+    ``scope_root(session_id)``, never the root itself, never a nested or ``..``
+    escape, and never a directory belonging to a different scope.
+
+    WHY THIS IS A SEPARATE FUNCTION FROM THE DELETE IT GUARDS. It used to live
+    inside :func:`_remove_experiment_dir`, which is the LAST step of
+    :func:`discard_experiment` — and the step before it is a durable DELETE that
+    has already committed by the time this ran. Measured over HTTP, with a scope
+    root reached through a symlink: the durable delete committed, this raised, and
+    the caller got an **untyped 500** with the record still readable and still
+    listed. Every retry did the same thing, because the condition is a property of
+    the filesystem and not of the moment — so the ``discard_experiment`` docstring's
+    promise that "re-issuing the discard converges" was true of a transient store
+    failure and false of this one, and nothing distinguished them to a caller.
+
+    A guard that runs after the destruction it guards is not a guard. This one is
+    now ALSO called before the first destructive step, so a directory this refuses
+    is refused while the record is still whole. It stays inside
+    :func:`_remove_experiment_dir` as well: the reset path
+    (:func:`remove_experiment`) reaches that function by its own route, and a guard
+    that only one of two callers performs is the shape this defect had.
+
+    NO ABSOLUTE PATH IN THE MESSAGE. It used to interpolate the fully resolved
+    ``target``, which put an absolute server path into an exception that is logged
+    and, before the fix above, into a 500. ``CLAUDE.md`` forbids that, and
+    ``workspace``'s own logging note is explicit that a message is an exfiltration
+    surface. The name alone is the experiment id, which this module already treats
+    as loggable — and it is taken from the REQUESTED ``exp_dir`` rather than from
+    the resolved target, so a symlink cannot report the name of whatever it points
+    at either.
     """
     root = scope_root(session_id).resolve()
     target = exp_dir.resolve()
     if target == root or target.parent != root:
         raise ValueError(
-            f"refusing to remove {target} — not a direct child of the scope root"
+            f"refusing to remove {exp_dir.name!r} — not a direct child of the "
+            "scope root"
         )
+
+
+def _remove_experiment_dir(exp_dir: Path, *, session_id: str | None = None) -> None:
+    """Delete a single experiment directory after proving it is safe.
+
+    The proof is :func:`_assert_removable_experiment_dir`; see it for what is
+    checked and why the check is also performed earlier by
+    :func:`discard_experiment`.
+    """
+    _assert_removable_experiment_dir(exp_dir, session_id=session_id)
+    target = exp_dir.resolve()
     # Tolerate an already-removed dir: two concurrent resets (e.g. two browser
     # tabs) can each snapshot the same managed-legacy dir, and losing the race to
     # delete it is benign — the dir being gone IS the desired end state. Only this
@@ -5360,6 +5400,19 @@ def discard_experiment(exp: Experiment) -> dict:
         raise ValueError(
             f"refusing to discard the canonical example record {exp.id!r}"
         )
+    # THE PATH-SAFETY GUARD RUNS BEFORE THE FIRST DESTRUCTIVE STEP, NOT AFTER IT.
+    # It used to run only inside `_remove_experiment_dir` — the LAST step below —
+    # so a directory that failed it failed AFTER the durable delete had committed,
+    # leaving the record readable, the rows gone, and every retry refusing
+    # identically. See `_assert_removable_experiment_dir` for the measurement.
+    #
+    # THE CHECK IS DELIBERATELY PERFORMED TWICE. This is not belt-and-braces for its
+    # own sake: `_remove_experiment_dir` is also reached by the reset path, which
+    # never comes through here, so removing it from there would move the hole rather
+    # than close it. Running it twice costs two `resolve()` calls and cannot change
+    # the outcome — the predicate is pure and the second call is the one that
+    # actually gates the `rmtree`.
+    _assert_removable_experiment_dir(exp.dir, session_id=exp.session_id)
     store = _ordinary_store(exp.session_id)
     durable_rows_removed = 0
     if store is not None:

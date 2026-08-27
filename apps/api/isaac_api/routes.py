@@ -22,6 +22,7 @@ from typing import Annotated, Any, Literal, Mapping, Sequence
 import logging
 
 from fastapi import APIRouter, Body, Depends, Header, Path, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -531,6 +532,112 @@ async def storage_unavailable_handler(request, exc) -> JSONResponse:
     )
 
 
+#: The deepest client-supplied value this application will ECHO BACK inside a
+#: ``422`` validation body.
+#:
+#: DERIVED, NOT PICKED, and deliberately a second number rather than a reuse of
+#: :data:`_MAX_VALUE_DEPTH`. That constant's own docstring says in as many words:
+#: *"IF THIS GUARD IS EVER REUSED FOR ANOTHER FIELD SET, re-derive it"* — it is
+#: measured headroom for five run-level SCALARS, and this bounds a whole REQUEST
+#: BODY, which legitimately wraps such a value in one or two more containers. What
+#: is shared is the PREDICATE (:func:`_value_depth_within`), which is the part that
+#: must not exist twice; the limit is a property of what is being bounded.
+#:
+#: THE TWO NUMBERS IT SITS BETWEEN, BOTH MEASURED ON THIS APPLICATION.
+#:
+#: * The floor: no legitimate body approaches it. The deepest whole document
+#:   anywhere in this repository nests 7, and a stored value is already capped at
+#:   :data:`_MAX_VALUE_DEPTH` (32) by ``_is_storable_value``, so 64 is double the
+#:   deepest value the store will accept, before counting the body around it.
+#: * The ceiling: bisected over HTTP against this application, the shallowest
+#:   top-level body that crashed the encoder was **972**. 64 sits ~15x below it.
+#:
+#: It bounds only what is ECHOED. Nothing here decides whether a request is valid;
+#: the validators do that, exactly as before.
+_MAX_ECHOED_BODY_DEPTH = 64
+
+
+async def request_validation_error_handler(request, exc) -> JSONResponse:
+    """FastAPI's ``422``, made unable to crash on the body it is describing.
+
+    THE DEFECT, MEASURED OVER HTTP. A request body of ~1,000-deep nested JSON
+    returned an unhandled **500** on most POSTs in this application, ``.../discard``
+    among them. The crash was NOT in any route: it was in
+    ``fastapi.exception_handlers.request_validation_exception_handler``, which
+    renders the ``422`` by calling ``jsonable_encoder`` over ``exc.errors()`` — and
+    each error echoes the offending ``input`` back to the caller. ``jsonable_encoder``
+    recurses per level, so the handler that exists to REFUSE a bad body was itself
+    destroyed by it, before the route function was ever entered.
+
+    SO THE SEVERITY IS ERROR-SHAPE AND AVAILABILITY, NOT INTEGRITY, and saying so
+    precisely matters because the two have different remedies. The record survives at
+    every depth — verified at 50, 100, 200, 500, 1,000 and 2,000 — because the body
+    never reaches a handler. What the caller loses is the typed refusal: a ``500``
+    with no ``detail`` says "this server is broken" where the truth is "your body is
+    not one this operation accepts", and it says it on a path where an operator would
+    then go looking for a defect in the route.
+
+    THE FIX BOUNDS WHAT IS ECHOED, NOT WHAT IS ACCEPTED. Every error whose ``input``
+    is deeper than :data:`_MAX_ECHOED_BODY_DEPTH` has that member — and only that
+    member — replaced by a marker naming the reason and the limit. ``type``, ``loc``,
+    ``msg`` and ``url`` are untouched, so the caller still learns exactly which
+    validator refused and where. For every other request this handler is
+    BYTE-IDENTICAL to FastAPI's default, which is the property that lets it be
+    registered application-wide without renegotiating the ``422`` contract of ~70
+    operations: the substitution is reachable only on inputs that previously produced
+    a ``500``, so no response that used to be a ``422`` changes at all.
+
+    IT REUSES THE APPLICATION'S EXISTING DEPTH PREDICATE and does not add a second
+    one. :func:`_value_depth_within` is iterative precisely so that it cannot raise
+    ``RecursionError`` on the input it is measuring — "a guard that crashes on the
+    attack it guards against is not a guard", as its own docstring puts it — which is
+    what makes it usable here, where a recursive depth check would simply move the
+    crash one function earlier.
+
+    THE ``except RecursionError`` IS A BACKSTOP AND IS NOT THE MECHANISM. The bound
+    above is what closes the measured defect. This catches the residual case the
+    bound does not reach — a deeply nested value arriving somewhere other than
+    ``input`` (a ``ctx`` member, say) — and turns it into a typed ``422`` rather than
+    a ``500``. It is deliberately narrow: a bare ``except Exception`` here would
+    convert a genuine defect in this application into a client-blaming ``422``, which
+    is the trade ``_PROBE_STRUCTURAL_ERRORS`` refuses one file over, for the same
+    reason.
+    """
+    bounded = []
+    for error in exc.errors():
+        if (
+            isinstance(error, dict)
+            and "input" in error
+            and not _value_depth_within(error["input"], _MAX_ECHOED_BODY_DEPTH)
+        ):
+            error = {
+                **error,
+                "input": {
+                    "omitted": "too_deeply_nested",
+                    "max_depth": _MAX_ECHOED_BODY_DEPTH,
+                },
+            }
+        bounded.append(error)
+    try:
+        content = {"detail": jsonable_encoder(bounded)}
+    except RecursionError:
+        # The value could not be rendered at all. Report the refusal without it,
+        # naming nothing the encoder could not reach.
+        content = {
+            "detail": [
+                {
+                    "type": "too_deeply_nested",
+                    "loc": ["body"],
+                    "msg": (
+                        "The request body is nested too deeply to validate or to "
+                        "describe. Nothing was read and nothing was written."
+                    ),
+                }
+            ]
+        }
+    return JSONResponse(status_code=422, content=content)
+
+
 async def durable_write_conflict_handler(request, exc) -> JSONResponse:
     """The LAST RESORT for a refused durable write: still a 412, never a 500.
 
@@ -757,6 +864,95 @@ def _malformed_if_match(exp) -> JSONResponse:
     )
 
 
+def _is_wildcard_if_match(if_match: str | None) -> bool:
+    """Is this header the RFC 9110 wildcard, ``*``?
+
+    ONE DEFINITION, deliberately, and it is why this is a function rather than a
+    comparison written twice. :func:`_check_if_match` normalises with ``.strip()``
+    before testing for ``*``, and the discard route has to ask the same question one
+    step earlier in order to refuse it. Two copies of ``raw == "*"`` would be two
+    normalisations free to drift, and the direction they would drift in is the bad
+    one: a header this predicate stopped recognising is a wildcard the destructive
+    path would then WAVE THROUGH, because its refusal is written as an early return
+    and ``_check_if_match`` would go on returning ``None`` for it. So the two
+    callers share the test rather than agreeing about it.
+
+    ``None`` is not a wildcard — an ABSENT header is a different condition with a
+    different status (``428``), decided by :func:`_check_if_match`.
+    """
+    return if_match is not None and if_match.strip() == "*"
+
+
+def _wildcard_precondition_refused(exp) -> JSONResponse:
+    """``400`` for ``If-Match: *`` on an operation that cannot be undone.
+
+    WHY THIS EXISTS AT ALL, AND WHY IT IS NOT A GENERAL TIGHTENING. ``*`` is
+    accepted everywhere else in this API and that is deliberate, documented RFC 9110
+    behaviour: it matches *if the resource exists*, so it compares no revisions and a
+    caller may overwrite a record it never read. ``test_mcp_if_match_wildcard.py``
+    pins that acceptance as a contract and explicitly instructs that it must not be
+    "made consistent" by tightening — and it is not tightened here. Run removal and
+    asset removal keep accepting ``*`` for the reason that test gives: both are
+    recoverable by re-adding, and both already refuse a published artifact with a
+    ``409``.
+
+    DISCARD IS THE ONE OPERATION WHERE THAT REASONING DOES NOT REACH, on its own
+    published words. Its description ends *"There is no undo. That is why the
+    confirmation and the precondition are both required."* ``*`` satisfies the
+    precondition without the client holding a validator at all, which makes the
+    second half of that sentence vacuous while the sentence goes on claiming it —
+    a copy/behaviour mismatch, not a hardening preference. Measured over HTTP
+    before this refusal existed: the same client that got ``412 stale_write`` from a
+    stale real ETag got ``200`` from ``*``, and the ``discarded_title`` it reported
+    was the title a CONCURRENT writer had just committed — the discard destroyed an
+    edit it had not read and could not have read.
+
+    ``*`` IS ALSO THE IDIOM FOR *"I HOLD NO VALIDATOR"*, which is precisely the
+    state in which an irreversible removal must not proceed.
+
+    WHY ``400`` AND NOT ``428``, DECIDED RATHER THAN DEFAULTED.
+
+    * ``428 precondition_required`` states that the header was OMITTED. A client
+      that sent ``If-Match: *`` did supply one, and answering "precondition
+      required" to a request that carries a precondition sends the caller looking
+      for a header they already set. The ``428`` body here is
+      ``precondition_required``, which would be a false statement about the request.
+    * ``412 stale_write`` states that a validator was compared and lost, and its
+      body carries ``expected_rev`` / ``expected_version``. ``*`` carries no
+      version — :func:`_first_client_token` returns ``None`` for it, by design — so
+      a ``412`` would echo nulls into the two fields a client reads to recover, and
+      would assert a staleness that does not exist. Worse, ``412`` promises that a
+      re-read and a retry converge; re-reading changes nothing about ``*``.
+    * ``400`` states that the header supplied is not a usable precondition FOR THIS
+      OPERATION. That is exactly the fact. It is also the status this route already
+      publishes for the neighbouring condition (a header that is not one or more
+      strong quoted validators), so refusing ``*`` adds no new status code to the
+      contract — only a new typed ``error`` inside one that was already declared.
+
+    THE ``error`` IS ITS OWN VALUE AND NOT ``malformed_if_match``, and the
+    difference is not cosmetic. ``If-Match: *`` is well-formed under RFC 9110;
+    telling a client their header is malformed would be a false statement about a
+    correct header, and it would send a caller hunting a syntax bug that is not
+    there. The remedy differs too — a malformed header is respelt, a wildcard is
+    REPLACED by a validator the client must first go and read — so one name for the
+    two would be one name for two repairs.
+    """
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "wildcard_precondition_refused",
+            **_precondition_identity(exp),
+            "message": (
+                "If-Match: * is not a usable precondition for this operation, "
+                "because this operation cannot be undone. `*` carries no validator: "
+                "it asserts only that the record exists, so it would let a discard "
+                "destroy a version it has never read. Send the record's current "
+                "ETag, exactly as a read returned it."
+            ),
+        },
+    )
+
+
 def _stale_write(exp, expected_token: str | None) -> JSONResponse:
     resp = JSONResponse(
         status_code=412,
@@ -866,8 +1062,12 @@ def _check_if_match(if_match: str | None, exp) -> JSONResponse | None:
             return _precondition_required(exp)
         return None
     raw = if_match.strip()
-    if raw == "*":
-        return None  # matches iff the resource exists — and we loaded it
+    if _is_wildcard_if_match(if_match):
+        # Matches iff the resource exists — and we loaded it. UNCHANGED, and it is
+        # the shared predicate that keeps it unchanged: the one route that refuses
+        # `*` refuses it BEFORE calling this, so this branch stays exactly as wide
+        # as it has always been for every other operation.
+        return None
     # RFC 9110 #-list: recipients ignore empty list elements, so a trailing comma
     # or an empty element is tolerated. A header that reduces to NO tags (e.g. just
     # "," or whitespace) is malformed.
@@ -2706,14 +2906,29 @@ _R_DISCARD_REFUSED: dict = {
     },
 }
 
-#: The 503 for "this deployment could not establish whether the record was ever
-#: submitted".
+#: THE WHOLE `503` FOR THIS OPERATION, AND IT DESCRIBES TWO DIFFERENT FACTS.
 #:
-#: IT IS NOT A 409, AND THE DIFFERENCE IS THE WHOLE POINT. A 409 states a fact
-#: about the record. This states a fact about the SERVER: the history could not be
-#: read, so the one question that decides whether discarding is allowed has no
-#: answer. Nothing was removed. It is resolved by an operator or by a retry, never
-#: by editing the record.
+#: **IT IS THE MERGE WINNER AND MUST THEREFORE DESCRIBE EVERY `503` THIS ROUTE CAN
+#: ANSWER.** The decorator below spreads `_R_STORAGE_UNAVAILABLE` and then this
+#: dict, and both are keyed `503`, so the later one REPLACES the earlier one
+#: outright in the published contract. That is not a bug in the merge — it is how
+#: `/experiments/{id}/pending` and `/experiments/{id}/submit` already resolve their
+#: own collisions — but it makes this description the only one a client ever reads,
+#: and a corrected version of it is what an independent review had to add.
+#:
+#: ~~"`error` is `submission_history_unreadable`"~~ — **FALSE AS A FLAT STATEMENT,
+#: and kept struck through because it was a definite claim about a destructive
+#: path's error code.** Measured over HTTP: a durable store that refuses the removal
+#: answers `503 {"error": "experiment_storage_unavailable"}`, which this description
+#: named nowhere while asserting the other value unconditionally. The route's own
+#: test comment already said the `503` "carries TWO DIFFERENT FACTS"; the published
+#: contract carried one.
+#:
+#: NEITHER IS A 409, AND THE DIFFERENCE IS THE WHOLE POINT. A 409 states a fact
+#: about the RECORD. Both of these state a fact about the SERVER — either the one
+#: question that decides whether discarding is allowed has no answer, or the
+#: database would not accept the removal. Nothing was removed on either. Both are
+#: resolved by an operator or by a retry, never by editing the record.
 #:
 #: ~~"the history tables exist and could not be read"~~ — corrected before it
 #: shipped, because it claimed more than the branch knows. The read can fail at the
@@ -2724,10 +2939,63 @@ _R_DISCARD_REFUSED: dict = {
 _R_DISCARD_HISTORY_UNREADABLE: dict = {
     503: {
         "description": (
-            "This deployment stores submission history in its own database and could "
-            "not read it, so it cannot prove this record was never submitted. "
-            "Nothing was removed. `error` is `submission_history_unreadable`. The "
-            "response names no host, path, credential or driver message."
+            "This server could not carry out the discard, and NOTHING WAS REMOVED. "
+            "Two different facts about the SERVER reach this status, and the typed "
+            "`error` says which:\n\n"
+            "* `submission_history_unreadable` — this deployment stores submission "
+            "history in its own database and could not read it, so it cannot prove "
+            "this record was never submitted. The question that decides whether "
+            "discarding is allowed has no answer, so the operation fails closed "
+            "rather than guessing.\n"
+            "* `experiment_storage_unavailable` — this deployment stores experiments "
+            "in its own database and that database did not accept the removal. The "
+            "experiment is still there, in the workspace and in the database.\n\n"
+            "Neither response names a host, path, credential or driver message. "
+            "Both are usually worth retrying; neither is fixed by editing the record."
+        )
+    },
+}
+
+
+#: The precondition statuses AS THIS OPERATION ANSWERS THEM, overriding the two
+#: entries in :data:`_R_PRECONDITION` that are not true here.
+#:
+#: IT MUST BE SPREAD AFTER ``_R_PRECONDITION`` AND THAT IS LOAD-BEARING, not a
+#: style choice — a later key REPLACES an earlier one outright, which is the same
+#: merge rule ``_R_DISCARD_HISTORY_UNREADABLE`` relies on for its ``503`` one
+#: constant above. Spread first, these would be silently discarded and the route
+#: would publish a ``428`` that promises ``If-Match: *`` is accepted here, which is
+#: exactly the claim this operation stopped honouring.
+#:
+#: ``412`` IS DELIBERATELY NOT OVERRIDDEN. It means the same thing here as
+#: everywhere else and its shared wording is correct as it stands; restating it
+#: would be a second copy free to drift from the one every other write publishes.
+_R_DISCARD_PRECONDITION: dict = {
+    400: {
+        "description": (
+            "`If-Match` was supplied but cannot serve as this operation's "
+            "precondition, and NOTHING WAS REMOVED. Two typed `error` values:\n\n"
+            "* `malformed_if_match` — the header is not one or more strong quoted "
+            "validators. This is the same condition, with the same meaning, that "
+            "every other write answers `400` for.\n"
+            "* `wildcard_precondition_refused` — the header was `If-Match: *`. "
+            "**This operation is the only one in this API that refuses it.** `*` is "
+            "well-formed and is accepted everywhere else, where it means what RFC "
+            "9110 says it means; it is refused here because it carries no validator "
+            "at all, and this is the one operation with no undo. Re-reading and "
+            "retrying does not clear it — send the `ETag` a read returned."
+        )
+    },
+    428: {
+        "description": (
+            "`If-Match` was omitted, and nothing was removed. Send the record's "
+            "current `ETag`.\n\n"
+            "**THE API-WIDE EXCEPTION FOR `If-Match: *` DOES NOT APPLY TO THIS "
+            "OPERATION.** Every other write accepts `*` and lets a caller overwrite "
+            "a record it has never read; that is deliberate and unchanged. Here `*` "
+            "is refused with `400 wildcard_precondition_refused`, because a request "
+            "that holds no validator must not be able to destroy the version it "
+            "never read."
         )
     },
 }
@@ -2873,6 +3141,18 @@ _DISCARD_DESCRIPTION = (
     "`If-Match`. Omitted is `428`, malformed is `400`, and stale is `412` — each "
     "with nothing removed. The precondition is checked inside the same critical "
     "section as the removal, over the record as it is at that instant.\n\n"
+    "**`If-Match: *` is refused here with `400 wildcard_precondition_refused`, and "
+    "this is the only operation in this API that refuses it.** Everywhere else `*` "
+    "is accepted and means what RFC 9110 says — *if the resource exists* — so a "
+    "caller may overwrite a record it has never read; that is deliberate and is "
+    "unchanged, including for the two removals that are recoverable by re-adding "
+    "(`POST .../runs/{run_id}/remove` and `POST .../assets/{asset_id}/remove`). It "
+    "is refused on this operation because `*` carries no validator at all — it is "
+    "the client stating it holds no version — and there is no undo here, so "
+    "accepting it would let a request destroy a version it had never read and "
+    "could not have read. It is `400` rather than `412`, because nothing is stale "
+    "and re-reading changes nothing, and rather than `428`, because a header WAS "
+    "sent. Nothing is removed.\n\n"
     "**Repeating a discard is `404`, not a second `200`**, matching the precedent "
     "`POST .../runs/{run_id}/remove` sets: this operation is addressed to a record, "
     "and every other record operation answers `404` for an id this workspace does "
@@ -2902,6 +3182,8 @@ _DISCARD_DESCRIPTION = (
         **_R_DISCARD_REFUSED,
         **_R_DISCARD_HISTORY_UNREADABLE,
         **_R_PRECONDITION,
+        # LAST, so its 400 and 428 win. See the constant's own note.
+        **_R_DISCARD_PRECONDITION,
     },
 )
 def post_experiment_discard(
@@ -3062,6 +3344,15 @@ def post_experiment_discard(
             return history_refusal
 
         # -- the precondition, inside this same critical section ---------------
+        # `*` FIRST, AND ONLY HERE. `_check_if_match` returns `None` for `*` by
+        # design, so this refusal has to come BEFORE it or it cannot exist at all.
+        # It is scoped to this one call site rather than folded into the shared
+        # helper precisely so that run removal, asset removal and every other write
+        # go on accepting `*` exactly as `test_mcp_if_match_wildcard.py` requires.
+        # See `_wildcard_precondition_refused` for why an irreversible removal is
+        # the one operation that is different, and why the status is 400.
+        if _is_wildcard_if_match(if_match):
+            return _wildcard_precondition_refused(exp)
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
             return precondition

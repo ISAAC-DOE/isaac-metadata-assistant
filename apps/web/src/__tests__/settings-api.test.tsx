@@ -1868,7 +1868,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // changed, and `test_contract_description_parity.py` proves that rather than
     // leaving it asserted here. Re-measured from the served document, never
     // arithmetic over a branch's delta.
-    expect(total).toBe(100212);
+    // RE-MEASURED 2026-08-27, same day, after `POST .../discard` began REFUSING
+    // `If-Match: *`. 100,212 -> 101,071 (+859): one existing description changed —
+    // discard's — and no other. The added prose states the refusal, names the
+    // `wildcard_precondition_refused` error, and says why the code is `400` rather
+    // than `428` (which would claim the header was omitted) or `412` (whose body
+    // carries `expected_version`/`expected_rev`, both `None` for `*`, so it would
+    // echo nulls into the two fields a client reads to recover).
+    //
+    // ~~"The PARAGRAPH count below does NOT move, because the sentences were written
+    // INTO existing paragraphs rather than appended as new ones."~~ **That was
+    // written without measuring and it is wrong — the paragraph count DOES move,
+    // 206 -> 207.** The refusal is its own appended paragraph. Recorded rather than
+    // quietly corrected, because the reason these two aggregates are asserted
+    // separately is precisely that neither can be inferred from the other, and
+    // guessing one from the other is the mistake the separation exists to prevent.
+    // Both are re-measured from the served document, never arithmetic over a delta.
+    expect(total).toBe(101071);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1887,7 +1903,9 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // four post-lead paragraphs. No existing description moved, and
     // `test_contract_description_parity.py` proves that rather than leaving it
     // asserted here. RE-MEASURED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(206);
+    // 206 -> 207 (+1): `POST .../discard` APPENDED one paragraph — the `If-Match: *`
+    // refusal. RE-MEASURED from the served document.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(207);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

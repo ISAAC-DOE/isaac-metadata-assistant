@@ -70,10 +70,66 @@ from .policy import OPERATIONS, Operation
 
 __all__ = ["ApiRefusal", "ApiResult", "AsgiApiClient", "IsaacApiClient"]
 
-#: Path-parameter character class. Deliberately narrow: ULIDs and the run ids this
-#: application mints are alphanumeric, and the three extra characters are there so
-#: a legitimate id shape change does not require a security review.
-_PATH_PARAM = re.compile(r"^[A-Za-z0-9._~-]{1,128}$")
+#: Path-parameter predicate: the id shape, not a character class.
+#:
+#: ~~``re.compile(r"^[A-Za-z0-9._~-]{1,128}$")``~~ — **REPLACED, because it admitted
+#: ``.`` and ``..`` and those are not characters, they are PATH SEGMENTS.** The old
+#: comment called the class "deliberately narrow" and said the three extra
+#: characters were there "so a legitimate id shape change does not require a
+#: security review"; ``.`` was one of the three, and admitting it is what let a dot
+#: segment through. Measured, twice, before this changed:
+#:
+#: * ``isaac_get_run(run_id="..")`` returned ``isError: false`` and handed the agent
+#:   the **record** detail — ``httpx`` resolved ``/api/experiments/{id}/runs/..``
+#:   to ``/api/experiments/{id}`` — so a run read silently became a record read.
+#: * ``isaac_get_run(run_id=".")`` likewise reached ``GET .../runs``, the LIST.
+#: * ``isaac_update_draft(run_id="..")`` reached ``PATCH /api/experiments/{id}``,
+#:   **a route that is not in** :data:`~.policy.OPERATIONS` **at all**. It was inert
+#:   only because that route's body model happened to reject the payload with a
+#:   ``422`` — an accident of two unrelated schemas, not a boundary.
+#:
+#: EVERY EXISTING REJECTION CASE MISSED IT, and that is the useful part.
+#: ``test_the_client_refuses_a_path_parameter_it_would_have_had_to_escape`` and
+#: ``test_a_path_parameter_cannot_be_bent_into_another_route`` between them try
+#: ``../../etc/passwd``, ``abc/../../x``, ``%2e%2e%2f``, ``../export``,
+#: ``..%2fexport``, ``x/../../export``, ``a b``, ``a\nb`` and ``""`` — and every
+#: one of them fails on the ``/``, the ``%``, the space, the newline or the
+#: emptiness. **Not one of them fails on the dot**, so a bare ``..`` walked
+#: through a suite that looked like it was testing exactly this.
+#:
+#: THE SHAPE IS VERIFIED, NOT ASSUMED. Both placeholders this layer can render —
+#: measured over every entry in :data:`~.policy.OPERATIONS`, which declares
+#: ``experiment_id`` and ``run_id`` and no other — name ids that
+#: ``isaac_records.ids.new_record_id`` minted, and ``workspace`` creates a run with
+#: the same function it uses for a record. So this is the workspace's own
+#: ``RECORD_ID_RE``, not an approximation of it.
+#:
+#: IT IS RESTATED RATHER THAN IMPORTED, AND THAT IS NOT AN OVERSIGHT.
+#: ``test_nothing_in_the_mcp_package_imports_the_truth_path`` forbids this package
+#: from importing ``isaac_records`` at all (``CLAUDE.md`` §13): the MCP layer
+#: reaches ISAAC only through ISAAC's own HTTP routes, so that a tool can never
+#: call a validator, an exporter or a writer around the route that decides whether
+#: it may. Importing one regex would be a small breach of a boundary whose value is
+#: that it has no small breaches. The copy is instead pinned to the original BY
+#: TEST — ``test_mcp_path_parameters_are_record_ids.py`` asserts this pattern and
+#: ``isaac_records.ids.RECORD_ID_RE`` accept and reject exactly the same strings —
+#: which is the same trade every other deliberate duplicate in this repository
+#: makes, and it is the one that keeps the drift visible in a diff.
+#:
+#: ``\A…\Z`` AND NOT ``^…$``, for the reason ``isaac_records.ids`` gives at length:
+#: Python's ``$`` also matches immediately before a trailing newline, so ``^…$``
+#: would admit a 27-character id ending in ``\n`` at the boundary whose whole job
+#: is to decide what a path segment may contain.
+#:
+#: WHAT THIS DELIBERATELY DOES NOT DO. It does not touch the HTTP routes'
+#: ``ExperimentId``, which stays a 128-character bound and answers ``404`` for a
+#: well-formed id this workspace does not hold — an id-FORMAT check on a public
+#: route is a product change, and ``routes._EXPERIMENT_ID_MAX_LENGTH``'s own note
+#: says so. The MCP boundary is allowed to be strictly narrower than the API it
+#: calls; that is what a boundary is for.
+_PATH_PARAM = re.compile(r"\A[0-9A-Z]{26}\Z")
+
+_PATH_PARAM_DESCRIPTION = "a 26-character Crockford-base32 record or run id"
 
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 
@@ -199,7 +255,9 @@ class AsgiApiClient:
             if not isinstance(value, str) or not _PATH_PARAM.match(value):
                 raise ApiRefusal(
                     "invalid_path_parameter",
-                    f"{name!r} must be 1–128 characters from [A-Za-z0-9._~-]. The "
+                    f"{name!r} must be {_PATH_PARAM_DESCRIPTION} — 26 characters "
+                    "from [0-9A-Z], and nothing else. `.` and `..` are refused "
+                    "because they are path segments rather than id characters. The "
                     "value was refused before a request was built; it was not "
                     "escaped and retried.",
                     data={"operation_id": operation.id, "parameter": name},

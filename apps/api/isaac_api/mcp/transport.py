@@ -577,11 +577,33 @@ def _credential_from(headers: _Headers) -> Credential | None:
     "somebody sent authentication material" is the fact the binding needs;
     discarding it would silently downgrade the request to anonymous, which is the
     wrong direction.
+
+    THE SCHEMELESS CASE IS SPLIT OUT, AND THE CODE USED TO CONTRADICT THE
+    PARAGRAPH ABOVE IT. ``str.partition(" ")`` returns ``(whole, "", "")`` when
+    there is no delimiter, so a header carrying a BARE token — ``Authorization:
+    eyJhbGciOi…`` , a raw JWT or an opaque secret with no ``Bearer`` in front of it,
+    which is a shape real clients send — put the ENTIRE CREDENTIAL into ``scheme``
+    and left ``token`` empty. That is the exact opposite of the sentence three lines
+    up, and it mattered because ``scheme`` is the one member the refusal path is
+    allowed to report: ``LocalLoopbackBinding.authenticate`` puts it in the ``data``
+    of a ``credential_not_verifiable`` refusal, so the whole bare token came back to
+    the caller in the body of the ``401``. Measured before this fix: a 48-character
+    stand-in JWT appeared verbatim in the response.
+
+    A value with no delimiter has NO scheme, so it is reported as none and the
+    whole value is carried as the token — where it is opaque, never echoed, and
+    handed only to a binding. ``deployment._reportable_scheme`` independently
+    refuses to publish anything that is not a syntactic ``auth-scheme``, so this and
+    that are two conditions and not one written twice: this one gets the PARSE
+    right, that one bounds what may be PUBLISHED however the parse turns out.
     """
     raw = headers.get("authorization")
     if raw is None or not raw.strip():
         return None
-    scheme, _, token = raw.strip().partition(" ")
+    raw = raw.strip()
+    scheme, delimiter, token = raw.partition(" ")
+    if not delimiter:
+        return Credential(scheme="", token=raw)
     return Credential(scheme=scheme.strip(), token=token.strip())
 
 

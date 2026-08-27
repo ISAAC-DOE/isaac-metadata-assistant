@@ -102,6 +102,7 @@ rather than inheriting ``False`` for them.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Mapping, Protocol
 
@@ -160,12 +161,59 @@ RESERVED_BINDING_NAMES: Mapping[str, str] = {
 }
 
 
+#: A syntactic ``auth-scheme`` and nothing else: RFC 9110 defines it as a ``token``,
+#: and every scheme anyone actually sends (``Bearer``, ``Basic``, ``Negotiate``,
+#: ``DPoP``) is a short alphabetic word. The 32-character bound is far above every
+#: registered scheme and far below any credential worth exfiltrating.
+_AUTH_SCHEME = re.compile(r"\A[A-Za-z][A-Za-z0-9+.\-]{0,31}\Z")
+
+
+def _reportable_scheme(scheme: str) -> str:
+    """The scheme, but only if it IS one. Anything else reports as ``""``.
+
+    THE SECOND OF TWO INDEPENDENT CONDITIONS, and it exists because the first one
+    was not enough on its own. ``transport._credential_from`` now parses a
+    delimiter-less ``Authorization`` header as a bare TOKEN with no scheme, which
+    closes the shape that was measured leaking. This bounds what may be PUBLISHED
+    whatever the parse produces — a header like ``<very-long-secret> trailing``
+    does have a delimiter, and would otherwise put the secret in ``scheme`` by a
+    different route.
+
+    Written as an allowlist rather than as a length cap, deliberately: a cap alone
+    would still publish the first 32 characters of a secret, which is not a
+    redaction. A value that is not a scheme is not truncated to look like one; it
+    is replaced, so a reader cannot mistake a fragment for the real header.
+    """
+    return scheme if _AUTH_SCHEME.match(scheme or "") else ""
+
+
 @dataclass(frozen=True)
 class Credential:
     """Transport-level authentication material, as a binding would receive it.
 
-    Deliberately opaque and deliberately never logged or echoed: the refusal
-    bodies in this module name the *scheme* at most, never the token.
+    Deliberately opaque and deliberately never logged.
+
+    ~~"the refusal bodies in this module name the *scheme* at most, never the
+    token"~~ — **THIS WAS FALSE WHEN IT WAS WRITTEN, and it is struck rather than
+    reworded because it read as a guarantee about a credential.** It described
+    intent accurately and behaviour inaccurately, and the gap was entirely in a
+    parse two modules away: ``transport._credential_from`` split on the first
+    space, so an ``Authorization`` header carrying a BARE token — no ``Bearer``, no
+    space, which is a shape real clients send — assigned the whole credential to
+    ``scheme``. :meth:`LocalLoopbackBinding.authenticate` then reported that
+    "scheme" in the ``data`` of its ``credential_not_verifiable`` refusal, so the
+    token came back to the caller **in full, in the body of the 401**. Measured: a
+    48-character stand-in JWT appeared verbatim in the response text.
+
+    ``test_mcp_transport.py``'s credential test could not see it — it sends
+    ``"Bearer s3cret-value"``, the well-formed shape, and asserts the token is not
+    echoed. That assertion was true of the shape it tested and of no other.
+
+    **The claim now holds, and is enforced at two independent points rather than
+    asserted**: the parse assigns no scheme when there is no delimiter, and
+    :func:`_reportable_scheme` refuses to publish anything that is not a syntactic
+    ``auth-scheme`` however the parse turned out. The token member is still never
+    logged and never echoed by anything in this package.
     """
 
     scheme: str
@@ -400,7 +448,11 @@ class LocalLoopbackDeployment:
                 "The local-loopback binding cannot verify a credential and will not "
                 "accept one. It exists for in-process development and tests, where "
                 "there is no transport to carry a credential in the first place.",
-                data={"binding": self.name, "scheme": credential.scheme},
+                data={
+                    "binding": self.name,
+                    # NEVER `credential.scheme` raw — see `_reportable_scheme`.
+                    "scheme": _reportable_scheme(credential.scheme),
+                },
             )
         return Principal(
             subject="local-loopback-development",

@@ -1092,6 +1092,158 @@ def test_the_history_precheck_reads_TWO_COUNTS_and_no_document(workspace, wired,
 # 7. the statement set — what discard CANNOT express
 # =============================================================================
 
+# --- ADDED BY INDEPENDENT REVIEW -------------------------------------------
+#
+# Two claims this slice made that nothing in it checked, and one of which was
+# false in the PUBLISHED contract. Both are pinned here as measurements rather
+# than restated as prose, because prose is what was wrong.
+
+
+def test_the_503_description_names_BOTH_facts_it_can_report(workspace):
+    """THE PUBLISHED `503` DESCRIBED ONE OF ITS TWO BRANCHES.
+
+    ``responses=`` spreads ``_R_STORAGE_UNAVAILABLE`` and then
+    ``_R_DISCARD_HISTORY_UNREADABLE``, both keyed ``503``, so the later one
+    REPLACES the earlier one outright — which is fine and is how
+    ``/experiments/{id}/pending`` and ``/experiments/{id}/submit`` already resolve
+    their own collisions, but it makes the winner the only text a client reads.
+    The winner asserted *"`error` is `submission_history_unreadable`"* flatly,
+    while the route reachably answers ``503 {"error":
+    "experiment_storage_unavailable"}`` — measured below over HTTP, not argued.
+    ``test_about_and_openapi``'s own comment for this route already said the 503
+    "carries TWO DIFFERENT FACTS"; the contract carried one.
+
+    Asserted over the SERVED document and over both reachable branches, so a
+    future edit that drops either half fails here rather than at a reader.
+    """
+    from isaac_api.app import create_app
+
+    served = (
+        create_app()
+        .openapi()["paths"]["/api/experiments/{experiment_id}/discard"]["post"]
+        ["responses"]["503"]["description"]
+    )
+    assert "submission_history_unreadable" in served
+    assert "experiment_storage_unavailable" in served
+    # And the winner really is the discard-specific dict, not the shared one — if
+    # the spread order were ever reversed this would catch it, because the shared
+    # storage description names neither error value.
+    assert "NOTHING WAS REMOVED" in served
+
+    # BRANCH 2, REACHED FOR REAL. Branch 1 has its own test above
+    # (`test_an_UNREADABLE_history_is_a_503_and_discards_NOTHING`).
+    class _RefusingStore:
+        def discard(self, exp):
+            raise repo.StorageUnavailable(repo.STORAGE_DISCARD_FAILED_MESSAGE)
+
+    _make()
+    client = _client()
+    import isaac_api.workspace as _ws
+
+    original = _ws._ordinary_store
+    _ws._ordinary_store = lambda session_id: _RefusingStore()
+    try:
+        response = _discard(client)
+    finally:
+        _ws._ordinary_store = original
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "experiment_storage_unavailable"
+    assert ws.load_experiment(EXPERIMENT_ID) is not None
+
+
+def test_the_FK_BACKSTOP_is_TWO_direct_keys_and_the_rest_are_TRANSITIVE():
+    """THE BACKSTOP'S OWN COUNT, MEASURED FROM THE MIGRATION SQL.
+
+    Two docstrings in `experiment_repository` said `0003`/`0004` declare "four
+    more foreign keys into the same parent". They declare SIX between them and
+    exactly TWO name `isaac_experiments`; the claim overstated the direct backstop
+    in the one place that argues for it. The guarantee is unchanged and is
+    TRANSITIVE — every other history table reaches `isaac_experiments` through one
+    of those two — which is why the miscount was never a hole, and which is
+    exactly the part a bare number could not have told a reader.
+
+    (The reviewer's own first correction said FIVE and was wrong by one. That is
+    recorded here rather than tidied away: a count nobody executes is a guess
+    however carefully it is reasoned, and this test is the execution.)
+
+    Measured over the SQL with comment lines stripped, because every `ON DELETE`
+    string in these files lives in a comment explaining why there is none.
+    """
+    import re
+
+    migrations = Path(repo.__file__).parent / "migrations"
+    tables = (
+        "isaac_experiments",
+        "isaac_runs",
+        "isaac_run_projection",
+        *_HISTORY_TABLES,
+    )
+    #: child table -> the parent tables it declares a foreign key into.
+    edges: dict[str, set[str]] = {}
+    declared_by_0003_0004: list[str] = []
+    for path in sorted(migrations.glob("0*.sql")):
+        if "rollback" in path.name:
+            continue
+        body = "\n".join(
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("--")
+        )
+        # THE WHOLE BACKSTOP RESTS ON THIS: no `ON DELETE`, so `NO ACTION` applies.
+        # Asserted over the SQL body only — every `ON DELETE` string in these files
+        # lives in a comment explaining why there is none, so a scan over the raw
+        # text would report the opposite of the truth.
+        assert not re.search(r"\bON\s+DELETE\b", body, re.I), path.name
+        assert not re.search(r"\bON\s+UPDATE\b", body, re.I), path.name
+        for match in re.finditer(
+            r"CONSTRAINT\s+(\w+)\s*\n?\s*REFERENCES\s+(\w+)\s*\(", body
+        ):
+            constraint, parent = match.group(1), match.group(2)
+            # The constraint name is prefixed with its own table's name; the
+            # LONGEST match wins so `isaac_run_revisions_*` is not read as
+            # `isaac_runs_*`.
+            child = max(
+                (t for t in tables if constraint.startswith(t + "_")),
+                key=len,
+                default=None,
+            )
+            assert child is not None, constraint
+            edges.setdefault(child, set()).add(parent)
+            if path.name.startswith(("0003", "0004")):
+                declared_by_0003_0004.append(constraint)
+
+    assert len(declared_by_0003_0004) == 6, sorted(declared_by_0003_0004)
+    direct = sorted(
+        constraint
+        for constraint in declared_by_0003_0004
+        if "isaac_experiments"
+        in edges[
+            max((t for t in tables if constraint.startswith(t + "_")), key=len)
+        ]
+        and constraint.endswith("_experiment_fk")
+    )
+    assert direct == [
+        "isaac_experiment_revisions_experiment_fk",
+        "isaac_submissions_experiment_fk",
+    ], direct
+
+    # THE TRANSITIVE HALF, which is what makes two enough: every history table
+    # reaches `isaac_experiments` by following foreign keys, so no history row can
+    # exist without a row that directly blocks the experiment delete.
+    for table in _HISTORY_TABLES:
+        seen: set[str] = set()
+        frontier = {table}
+        while frontier:
+            current = frontier.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            frontier |= edges.get(current, set())
+        assert "isaac_experiments" in seen, (table, sorted(seen))
+
+
+
+
 #: Every table whose rows must never be updated or deleted by this application.
 _HISTORY_TABLES = (
     "isaac_experiment_revisions",
@@ -1365,6 +1517,45 @@ Q_TEST_UNPLANT_A_REVISION = (
     "DELETE FROM isaac_experiment_revisions WHERE revision_id = %s"
 )
 
+# --- ADDED BY INDEPENDENT REVIEW: the OTHER direct foreign key ----------------
+#
+# TWO foreign keys name `isaac_experiments` from the history side —
+# `isaac_experiment_revisions_experiment_fk` and `isaac_submissions_experiment_fk`
+# — and the four scenarios above exercise ONLY THE FIRST. The planted row is always
+# a revision, so the key that protects a SUBMISSION, which is the artifact this
+# operation's authorization names first among the things it may not erase, is
+# proven by nothing on any engine. `CLAUDE.md` §15 records that
+# `isaac_submissions_experiment_fk` is one of the FIVE declared constraints the
+# migration job's coverage step drives no refusal off either, so this is not
+# covered elsewhere in CI.
+#
+# THE SUBMISSION'S PARENT REVISION IS PLANTED ON A DIFFERENT EXPERIMENT, which is
+# what makes the scenario isolating rather than duplicative: `isaac_submissions`
+# carries its OWN `experiment_id` foreign key, independent of the revision's, so a
+# submission of experiment A may name a revision of experiment B. A then has a
+# submission row and NO revision row, and the only key that can refuse its delete
+# is the one under test.
+#
+# IT ALSO GIVES `Q_SUBMISSION_COUNT_FOR_EXPERIMENT` ITS FIRST REAL EXECUTION. That
+# statement is new in this slice and is otherwise matched only by an in-process
+# double that compares it by string equality, so a wrong column or table name in it
+# is invisible to every test in this repository.
+
+Q_TEST_PLANT_A_SUBMISSION = (
+    "INSERT INTO isaac_submissions"
+    " (submission_id, experiment_id, revision_id, content_signature, unit_count,"
+    " subject, trust_basis)"
+    " VALUES (%s, %s, %s, %s, 1, NULL, 'unattributed')"
+)
+
+Q_TEST_UNPLANT_A_SUBMISSION = (
+    "DELETE FROM isaac_submissions WHERE submission_id = %s"
+)
+
+Q_TEST_SUBMISSIONS_OF = (
+    "SELECT submission_id FROM isaac_submissions WHERE experiment_id = %s"
+)
+
 #: A value that SATISFIES `isaac_experiment_revisions_signature_shape`
 #: (`CHECK (content_signature ~ '^[0-9a-f]{64}$')`) and is unmistakably not a
 #: digest of anything: 64 hex characters of `dead`/`beef`. The CHECK is why a
@@ -1531,3 +1722,124 @@ def test_REAL_ENGINE_a_discard_after_the_history_row_is_gone_succeeds(
     assert repo.ordinary_store().discard(exp) == 1
     assert _query(Q_TEST_EXPERIMENT_ROWS, (exp.id,)) == []
     assert _query(Q_TEST_RUN_ROWS_OF, (exp.id,)) == []
+
+
+
+@real_engine
+def test_REAL_ENGINE_a_planted_SUBMISSION_alone_refuses_the_discard(
+    tmp_path, monkeypatch
+):
+    """THE SECOND DIRECT FOREIGN KEY, AND NOTHING ELSE PROVES IT BEHAVES.
+
+    See the comment above `Q_TEST_PLANT_A_SUBMISSION`. The submission names a
+    revision of a DIFFERENT experiment, so the target carries a submission row and
+    no revision row and `isaac_submissions_experiment_fk` is the only constraint
+    that can refuse the delete.
+
+    It also asserts the route's own precheck over the real engine: `presence`
+    reports `revision_count: 0` and `submission_count: 1`, which is the exact
+    combination the precheck exists to distinguish and the first execution
+    `Q_SUBMISSION_COUNT_FOR_EXPERIMENT` has ever had against a server.
+
+    Both planted rows are removed in a `finally`, submission first, because the
+    submission references the revision.
+    """
+    if not _history_tables_present():
+        pytest.skip("0003_revisions / 0004_submissions are not applied on this engine")
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    target = _new_experiment("discard: the submission backstop")
+    target.add_run(label="run A")
+    assert target.save_versioned() is True
+    decoy = _new_experiment("discard: the decoy that owns the revision")
+    assert decoy.save_versioned() is True
+
+    revision_id = "01REALENGINESUBMITREV0001"
+    submission_id = "01REALENGINESUBMITSUB0001"
+    _execute(
+        Q_TEST_PLANT_A_REVISION,
+        (
+            revision_id,
+            decoy.id,  # the DECOY owns it — the target must have no revision row
+            decoy.generation,
+            _SYNTHETIC_SIGNATURE,
+            json.dumps({"id": decoy.id, "synthetic": True}),
+        ),
+    )
+    try:
+        _execute(
+            Q_TEST_PLANT_A_SUBMISSION,
+            (submission_id, target.id, revision_id, _SYNTHETIC_SIGNATURE),
+        )
+        try:
+            # The target really does have a submission and NO revision.
+            assert not _query(Q_TEST_REVISIONS_OF, (target.id,))
+            assert len(_query(Q_TEST_SUBMISSIONS_OF, (target.id,))) == 1
+
+            # THE PRECHECK, over the real engine: two counts, one transaction.
+            presence = rhist.reader().presence(target.id)
+            assert presence == {
+                "tables_present": True,
+                "revision_count": 0,
+                "submission_count": 1,
+            }, presence
+
+            # AND THE BACKSTOP BEHIND IT, with the revision key out of the picture.
+            with pytest.raises(repo.DiscardRefusedByHistory):
+                repo.ordinary_store().discard(target)
+
+            # Nothing was removed, all three tables read back from the server.
+            assert _query(Q_TEST_EXPERIMENT_ROWS, (target.id,))
+            assert len(_query(Q_TEST_RUN_ROWS_OF, (target.id,))) == 1
+            assert _query(Q_TEST_PROJECTION_OF, (target.id,))
+            assert len(_query(Q_TEST_SUBMISSIONS_OF, (target.id,))) == 1
+        finally:
+            _execute(Q_TEST_UNPLANT_A_SUBMISSION, (submission_id,))
+    finally:
+        _execute(Q_TEST_UNPLANT_A_REVISION, (revision_id,))
+
+
+def test_the_planted_submission_names_every_column_the_DDL_requires():
+    """THE SHAPE CHECK THAT RUNS WITHOUT AN ENGINE.
+
+    The scenario above cannot execute on a developer machine — this repository has
+    no container runtime and no PostgreSQL — so its `INSERT` would otherwise reach
+    CI unexamined, and a missing `NOT NULL` column would fail there as a red build
+    with no local reproduction. This parses `0004_submissions.sql` and asserts the
+    statement names every column that is `NOT NULL` and carries no `DEFAULT`, which
+    is the error that shape of statement actually makes.
+
+    It cannot prove the SQL is valid PostgreSQL — nothing here can. It removes the
+    one class of mistake that is checkable without a server.
+    """
+    import re
+
+    ddl = (Path(repo.__file__).parent / "migrations" / "0004_submissions.sql").read_text(
+        encoding="utf-8"
+    )
+    body = "\n".join(
+        line for line in ddl.splitlines() if not line.lstrip().startswith("--")
+    )
+    start = body.index("CREATE TABLE IF NOT EXISTS isaac_submissions")
+    end = body.index("CREATE INDEX", start)
+    table = body[start:end]
+    # One entry per column declaration line: `    name  type  ...`
+    required = []
+    for match in re.finditer(
+        r"^    (\w+)\s+(text|bigint|jsonb|timestamptz)\b(.*?)(?=^    \w+\s+(?:text|bigint|jsonb|timestamptz)\b|^    CONSTRAINT|\Z)",
+        table,
+        re.S | re.M,
+    ):
+        name, _type, rest = match.groups()
+        declaration = " ".join((match.group(0)).split())
+        if "NOT NULL" in declaration and "DEFAULT" not in declaration:
+            required.append(name)
+    assert required, table  # the parse itself must not be vacuous
+    named = set(
+        re.search(r"\(([^)]*)\)\s*VALUES", Q_TEST_PLANT_A_SUBMISSION.replace(
+            "INSERT INTO isaac_submissions", ""
+        ), re.S).group(1).replace("\n", " ").split(",")
+    )
+    named = {n.strip() for n in named}
+    missing = [column for column in required if column not in named]
+    assert not missing, (missing, sorted(named))

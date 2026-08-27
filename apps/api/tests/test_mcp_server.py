@@ -385,7 +385,15 @@ def test_get_run_reports_an_unknown_run_as_the_apis_own_refusal(reader):
         reader,
         "isaac_get_run",
         experiment_id=a_record(reader),
-        run_id="01NOTAREALRUNID0000000000",
+        # 26 CHARACTERS, and it was 25 until this line was corrected. The id is
+        # meant to be WELL-FORMED BUT UNKNOWN — that is the whole premise of
+        # "the API's own refusal", which can only be observed if the request is
+        # actually made. `01NOTAREALRUNID0000000000` is 25 characters and so is
+        # not a ULID at all; it reached the route only because `client._PATH_PARAM`
+        # used to accept any 1-128 characters from a permissive class. Now that the
+        # boundary checks the id SHAPE, a 25-character value is refused before a
+        # request is built and this test would assert a 404 it never asked for.
+        run_id="01NOTAREALRUNID00000000000",
     )
     assert result["isError"] is True
     assert result["structuredContent"]["status"] == 404
@@ -1155,7 +1163,15 @@ def test_check_run_reports_an_unknown_run_as_the_apis_own_refusal(reader):
         reader,
         "isaac_check_run",
         experiment_id=a_record(reader),
-        run_id="01NOTAREALRUNID0000000000",
+        # 26 CHARACTERS, and it was 25 until this line was corrected. The id is
+        # meant to be WELL-FORMED BUT UNKNOWN — that is the whole premise of
+        # "the API's own refusal", which can only be observed if the request is
+        # actually made. `01NOTAREALRUNID0000000000` is 25 characters and so is
+        # not a ULID at all; it reached the route only because `client._PATH_PARAM`
+        # used to accept any 1-128 characters from a permissive class. Now that the
+        # boundary checks the id SHAPE, a 25-character value is refused before a
+        # request is built and this test would assert a 404 it never asked for.
+        run_id="01NOTAREALRUNID00000000000",
     )
     assert result["isError"] is True
     assert result["structuredContent"]["status"] == 404
