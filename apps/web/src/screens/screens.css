@@ -316,13 +316,31 @@
   margin: 18px 0 16px;
   border-bottom: 1px solid var(--border-faint);
 }
+/* FINDING A16 fix — the inactive tab label, at an AA-passing token.
+   `--text-tertiary` #78838f at 12.5px/500 computes to 3.86:1 on #ffffff
+   (3.76:1 on --surface-subtle #fbfcfd, 3.56:1 on --screen-base #f4f6f9), and
+   WCAG 1.4.3 requires 4.5:1 below 18.66px bold. `--text-muted` #5b6570 is
+   5.93:1 / 5.78:1 / 5.48:1 on the same three grounds.
+
+   THE TOKEN IS NOT CHANGED, only which token this component asks for.
+   `styles/tokens.css:3-5` forbids editing values there, and A3 — the app-wide
+   1,610-node contrast failure — is a palette decision that is not this slice's
+   to make. The identical substitution has in-repo precedent twice already:
+   `.onramp-tagline` (a11y-baseline.ts, 2026-08-03) and the Statistics chart
+   axis ticks. `.stat-card-note` and the other `--text-tertiary` consumers are
+   deliberately left alone; they belong to A3.
+
+   Ratios pinned by `src/__tests__/a11y-landmarks-headings-and-tabs.test.tsx`,
+   which recomputes them from the committed hex values rather than quoting the
+   figures above, and carries a vacuity guard proving the discarded token really
+   did fail and that 12.5px/500 really is below the WCAG large-text boundary. */
 .section-tab {
   padding: 7px 12px;
   border: 0;
   background: none;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }

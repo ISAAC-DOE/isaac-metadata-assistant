@@ -514,8 +514,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * file is forced to write a one-platform reading, because its guard rejects a pair
        * whose halves are equal, and the header already records the compromise.
        */
-      'evidence@desktop-1280x800': { darwin: 70, linux: 102 },
-      'evidence@laptop-1024x768': { darwin: 70, linux: 102 },
+      'evidence@desktop-1280x800': { darwin: 69, linux: 101 },
+      'evidence@laptop-1024x768': { darwin: 69, linux: 101 },
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
       // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
       // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
@@ -526,9 +526,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
       // `.record-file`. The element was always painted; only measurement
       // changed. Linux is the authority and may differ.
-      'evidence@tablet-768x1024': { darwin: 70, linux: 102 },
-      'evidence@mobile-375x812': { darwin: 68, linux: 100 },
-      'evidence@zoom-200': { darwin: 68, linux: 100 },
+      'evidence@tablet-768x1024': { darwin: 69, linux: 101 },
+      'evidence@mobile-375x812': { darwin: 67, linux: 99 },
+      'evidence@zoom-200': { darwin: 67, linux: 99 },
       /*
        * ── `evidence-graph`, MEASURED: 24 nodes at desktop, 2026-08-16 ────────────
        *
@@ -560,13 +560,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * the header and several notes below already record. If a darwin run
        * disagrees, split the key and correct the total; never loosen the assertion.
        */
-      'evidence-graph@desktop-1280x800': 25,
-      'evidence-graph@laptop-1024x768': 30,
-      'evidence-graph@tablet-768x1024': 30,
-      'evidence-graph@mobile-375x812': 29,
-      'evidence-graph@zoom-200': 29,
-      'evidence-graph@width-390': 29,
-      'evidence-graph@width-320': 29,
+      'evidence-graph@desktop-1280x800': 24,
+      'evidence-graph@laptop-1024x768': 29,
+      'evidence-graph@tablet-768x1024': 29,
+      'evidence-graph@mobile-375x812': 28,
+      'evidence-graph@zoom-200': 28,
+      'evidence-graph@width-390': 28,
+      'evidence-graph@width-320': 28,
       /*
        * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
        * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
@@ -675,11 +675,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'export-readiness-done@tablet-768x1024': 11,
       'export-readiness-done@mobile-375x812': 8,
       'export-readiness-done@zoom-200': 9,
-      'governance@desktop-1280x800': 4,
-      'governance@laptop-1024x768': 4,
-      'governance@tablet-768x1024': 4,
-      'governance@mobile-375x812': 3,
-      'governance@zoom-200': 3,
+      'governance@desktop-1280x800': 2,
+      'governance@laptop-1024x768': 2,
+      'governance@tablet-768x1024': 2,
+      'governance@mobile-375x812': 1,
+      'governance@zoom-200': 1,
       'guided-completion@desktop-1280x800': 10,
       'guided-completion@laptop-1024x768': 9,
       // Linux 11 -> 10, MEASURED by CI run 30691557697 on `7e9a387`: a genuine
@@ -774,16 +774,16 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'load@tablet-768x1024': 2,
       'load@mobile-375x812': 1,
       'load@zoom-200': 1,
-      'memory@desktop-1280x800': 18,
-      'memory@laptop-1024x768': 18,
-      'memory@tablet-768x1024': 18,
-      'memory@mobile-375x812': 17,
-      'memory@zoom-200': 17,
-      'memory-graph@desktop-1280x800': 31,
-      'memory-graph@laptop-1024x768': 31,
-      'memory-graph@tablet-768x1024': 23,
-      'memory-graph@mobile-375x812': 16,
-      'memory-graph@zoom-200': { darwin: 21, linux: 22 },
+      'memory@desktop-1280x800': 15,
+      'memory@laptop-1024x768': 15,
+      'memory@tablet-768x1024': 15,
+      'memory@mobile-375x812': 14,
+      'memory@zoom-200': 14,
+      'memory-graph@desktop-1280x800': 28,
+      'memory-graph@laptop-1024x768': 28,
+      'memory-graph@tablet-768x1024': 20,
+      'memory-graph@mobile-375x812': 13,
+      'memory-graph@zoom-200': { darwin: 18, linux: 19 },
       /* The Record Detail rows grew by one node when the `Graph` tab landed, and
          the extra node is the tab control itself:
 
@@ -908,8 +908,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * a stale number that says where it came from can be corrected by the next
        * darwin run; a fresh number nobody measured cannot be caught at all.
        */
-      'record-detail@desktop-1280x800': { darwin: 15, linux: 22 },
-      'record-detail@laptop-1024x768': { darwin: 15, linux: 22 },
+      'record-detail@desktop-1280x800': { darwin: 14, linux: 21 },
+      'record-detail@laptop-1024x768': { darwin: 14, linux: 21 },
       /* linux 15 -> 14: the 320px clipping fix (min-width/overflow-wrap on
          `.fg-summary`, scoped to `.record-view-panel`) let the summary WRAP
          instead of running past its clip, and one contrast node stopped firing
@@ -917,14 +917,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          loosening. darwin measured 16 on the same commit and is unchanged —
          the two faces wrap at different words, which is the entire reason this
          file has two columns. */
-      'record-detail@tablet-768x1024': { darwin: 15, linux: 22 },
-      'record-detail@mobile-375x812': { darwin: 13, linux: 20 },
-      'record-detail@zoom-200': { darwin: 13, linux: 20 },
-      'schema-reference@desktop-1280x800': 19,
-      'schema-reference@laptop-1024x768': 19,
-      'schema-reference@tablet-768x1024': 17,
-      'schema-reference@mobile-375x812': 22,
-      'schema-reference@zoom-200': 25,
+      'record-detail@tablet-768x1024': { darwin: 14, linux: 21 },
+      'record-detail@mobile-375x812': { darwin: 12, linux: 19 },
+      'record-detail@zoom-200': { darwin: 12, linux: 19 },
+      'schema-reference@desktop-1280x800': 17,
+      'schema-reference@laptop-1024x768': 17,
+      'schema-reference@tablet-768x1024': 15,
+      'schema-reference@mobile-375x812': 20,
+      'schema-reference@zoom-200': 23,
       // R0 · +1 color-contrast node on EVERY Settings surface at EVERY viewport,
       // because Settings gained a "Help & Tutorial" tab.
       //
@@ -1061,34 +1061,34 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        */
       /* The seven `settings-connect` cells, transcribed from CI run 31968866824
          (linux). See the dated block above for what fired and what did not. */
-      'settings-connect@desktop-1280x800': 22,
-      'settings-connect@laptop-1024x768': 22,
-      'settings-connect@tablet-768x1024': 23,
-      'settings-connect@mobile-375x812': 22,
-      'settings-connect@zoom-200': 22,
-      'settings-connect@width-390': 21,
-      'settings-connect@width-320': 22,
-      'settings@desktop-1280x800': 17,
-      'settings@laptop-1024x768': 17,
-      'settings@tablet-768x1024': 17,
-      'settings@mobile-375x812': 16,
-      'settings@zoom-200': 16,
-      'settings-about@desktop-1280x800': 16,
-      'settings-about@laptop-1024x768': 16,
-      'settings-about@tablet-768x1024': 16,
+      'settings-connect@desktop-1280x800': 16,
+      'settings-connect@laptop-1024x768': 16,
+      'settings-connect@tablet-768x1024': 17,
+      'settings-connect@mobile-375x812': 16,
+      'settings-connect@zoom-200': 16,
+      'settings-connect@width-390': 15,
+      'settings-connect@width-320': 16,
+      'settings@desktop-1280x800': 11,
+      'settings@laptop-1024x768': 11,
+      'settings@tablet-768x1024': 11,
+      'settings@mobile-375x812': 10,
+      'settings@zoom-200': 10,
+      'settings-about@desktop-1280x800': 10,
+      'settings-about@laptop-1024x768': 10,
+      'settings-about@tablet-768x1024': 10,
       // 14 -> 13 at 375 only, MEASURED in the tutorial-scope slice (2026-08-04).
       // A genuine improvement, lowered rather than left stale. The About tab
       // renders a workspace-derived line that is shorter now that the ordinary
       // workspace is empty, and at 375 the shorter string stops wrapping — so one
       // rendered text node fewer exists to fail. The other four projects are
       // unchanged, which is what a wrap-boundary effect looks like.
-      'settings-about@mobile-375x812': 14,
-      'settings-about@zoom-200': 15,
-      'settings-api@desktop-1280x800': 19,
-      'settings-api@laptop-1024x768': 19,
-      'settings-api@tablet-768x1024': 19,
-      'settings-api@mobile-375x812': 18,
-      'settings-api@zoom-200': 18,
+      'settings-about@mobile-375x812': 8,
+      'settings-about@zoom-200': 9,
+      'settings-api@desktop-1280x800': 13,
+      'settings-api@laptop-1024x768': 13,
+      'settings-api@tablet-768x1024': 13,
+      'settings-api@mobile-375x812': 12,
+      'settings-api@zoom-200': 12,
       /*
        * ── RUN VERTICAL SLICE, 2026-08-10: THE SAME CLIPPED-LIST DISPLACEMENT, AND
        *    A DARWIN COLUMN THAT TURNED OUT TO HAVE BEEN STALE ─────────────────
@@ -1222,8 +1222,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // are equal ("write a bare number instead"). The scalar is therefore two
       // measurements agreeing, not one measurement asserted twice. Laptop stays a
       // pair — darwin 50 is carried forward untouched and unmeasured at this commit.
-      'settings-explorer@desktop-1280x800': 49,
-      'settings-explorer@laptop-1024x768': { darwin: 50, linux: 49 },
+      'settings-explorer@desktop-1280x800': 43,
+      'settings-explorer@laptop-1024x768': { darwin: 44, linux: 43 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -1286,7 +1286,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Transcribed from CI job 96347581055's IMPROVED messages, never from a macOS
          run. An IMPROVED message is a FAILURE in this suite on purpose: a stale high
          number re-admits the defect it was meant to catch. */
-      'settings-explorer@tablet-768x1024': 65,
+      'settings-explorer@tablet-768x1024': 59,
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1351,7 +1351,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // converged on it, and the guard rejects a pair with equal halves.
       // ASSISTANT SEAM OPERATION, 2026-08-20: linux 58 -> 56, collapsing to a
       // scalar for the reason given at `settings-explorer@tablet-768x1024` above.
-      'settings-explorer@mobile-375x812': 56,
+      'settings-explorer@mobile-375x812': 50,
       /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
          FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
          same change moved linux DOWN one and darwin not at all.
@@ -1377,12 +1377,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // scalar for the reason given at `settings-explorer@tablet-768x1024` above.
       // The 200%-zoom projection reflows to a narrow width, so it moves with the
       // narrow cells rather than with the desktop ones.
-      'settings-explorer@zoom-200': 59,
-      'settings-privacy@desktop-1280x800': 9,
-      'settings-privacy@laptop-1024x768': 9,
-      'settings-privacy@tablet-768x1024': 9,
-      'settings-privacy@mobile-375x812': 8,
-      'settings-privacy@zoom-200': 8,
+      'settings-explorer@zoom-200': 53,
+      'settings-privacy@desktop-1280x800': 3,
+      'settings-privacy@laptop-1024x768': 3,
+      'settings-privacy@tablet-768x1024': 3,
+      'settings-privacy@mobile-375x812': 2,
+      'settings-privacy@zoom-200': 2,
       /*
        * ── STATISTICS-TAB SLICE, 2026-08-04 ──────────────────────────────────
        *
@@ -1515,11 +1515,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * project starts, so all five projects measure the same page; that is why
        * `desktop-1280x800` moves here even though CI reported it green.
        */
-      'statistics@desktop-1280x800': 3,
-      'statistics@laptop-1024x768': 3,
-      'statistics@tablet-768x1024': 3,
-      'statistics@mobile-375x812': 2,
-      'statistics@zoom-200': 2,
+      'statistics@desktop-1280x800': 2,
+      'statistics@laptop-1024x768': 2,
+      'statistics@tablet-768x1024': 2,
+      'statistics@mobile-375x812': 1,
+      'statistics@zoom-200': 1,
       /*
        * THE POPULATED Statistics page, at the same route inside a worked-example
        * session — ADDED 2026-08-04 to close a gap the tutorial-scope slice left open.
@@ -1585,11 +1585,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * `desktop-1280x800` moves for the determinism reason given there: CI
        * reported it green only because it ran before the sweep landed.
        */
-      'statistics-example@desktop-1280x800': 5,
-      'statistics-example@laptop-1024x768': 5,
-      'statistics-example@tablet-768x1024': 5,
-      'statistics-example@mobile-375x812': 4,
-      'statistics-example@zoom-200': 4,
+      'statistics-example@desktop-1280x800': 4,
+      'statistics-example@laptop-1024x768': 4,
+      'statistics-example@tablet-768x1024': 4,
+      'statistics-example@mobile-375x812': 3,
+      'statistics-example@zoom-200': 3,
       /*
        * THE MY STATS TAB — a NEW surface (`/statistics?tab=mine`), added with the
        * tab restructure because neither `statistics` nor `statistics-example` opens
@@ -1607,16 +1607,16 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * UNMEASURED — this environment cannot run the Linux system face — so the
        * five values are written as scalars and flagged here. CI is the authority.
        */
-      'statistics-mine@desktop-1280x800': 3,
-      'statistics-mine@laptop-1024x768': 3,
-      'statistics-mine@tablet-768x1024': 3,
-      'statistics-mine@mobile-375x812': 2,
-      'statistics-mine@zoom-200': 2,
-      'validator@desktop-1280x800': 9,
-      'validator@laptop-1024x768': 9,
-      'validator@tablet-768x1024': 9,
-      'validator@mobile-375x812': 8,
-      'validator@zoom-200': { darwin: 6, linux: 7 },
+      'statistics-mine@desktop-1280x800': 2,
+      'statistics-mine@laptop-1024x768': 2,
+      'statistics-mine@tablet-768x1024': 2,
+      'statistics-mine@mobile-375x812': 1,
+      'statistics-mine@zoom-200': 1,
+      'validator@desktop-1280x800': 7,
+      'validator@laptop-1024x768': 7,
+      'validator@tablet-768x1024': 7,
+      'validator@mobile-375x812': 6,
+      'validator@zoom-200': { darwin: 4, linux: 5 },
     
       /* NARROW-WIDTH SWEEP, added 2026-08-08. The 320 and 390 narrow-width sweep (`specs/a11y-narrow.spec.ts`). These widths were
        never scanned by the five Playwright projects (1280/1024/768/375/640@DPR2), and 320 is
@@ -1628,8 +1628,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Every number MEASURED on BOTH platforms on the same commit and merged by
          `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
          run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': { darwin: 68, linux: 100 },
-      'evidence@width-390': { darwin: 68, linux: 100 },
+      'evidence@width-320': { darwin: 67, linux: 99 },
+      'evidence@width-390': { darwin: 67, linux: 99 },
       'experiments-example@width-320': 9,
       'experiments-example@width-390': 9,
       'experiments@width-320': 2,
@@ -1638,8 +1638,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'export-readiness-done@width-390': 9,
       'export-readiness@width-320': 1,
       'export-readiness@width-390': 1,
-      'governance@width-320': 3,
-      'governance@width-390': 3,
+      'governance@width-320': 1,
+      'governance@width-390': 1,
       'guided-completion@width-320': 7,
       'guided-completion@width-390': 7,
       'load@width-320': 1,
@@ -1647,26 +1647,26 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // guard rejects a pair whose halves are equal. See the `load@desktop-1280x800`
       // note for the layout-concealing-a-contrast-defect sequence.
       'load@width-390': 1,
-      'memory-graph@width-320': 14,
-      'memory-graph@width-390': 16,
-      'memory@width-320': 17,
-      'memory@width-390': 17,
+      'memory-graph@width-320': 11,
+      'memory-graph@width-390': 13,
+      'memory@width-320': 14,
+      'memory@width-390': 14,
       /* UNMAPPED NOTES (PR #146), 2026-08-16: linux 13 -> 14 at BOTH narrow
          widths, the notes panel's empty state — same +1 as the five project
          cells. Both were SCALARS and both SPLIT rather than being raised onto an
          unmeasured darwin; the precedent is `settings-explorer@width-320` just
          below. Full reasoning, including what this figure does NOT measure, is in
          the block above `record-detail@desktop-1280x800`. */
-      'record-detail@width-320': { darwin: 13, linux: 20 },
+      'record-detail@width-320': { darwin: 12, linux: 19 },
       /* SPLIT, and CI is what established it. I measured darwin 13 after the
          Graph tab landed and recorded it as a bare number, saying in the commit
          that linux was not yet measured and CI would adjudicate. It did: linux
          stayed at 12. So the tab's extra node is measurable on the darwin face
          at 390 and not on the linux one — the two wrap at different words, which
          is the whole reason this file has two columns. */
-      'record-detail@width-390': { darwin: 13, linux: 20 },
-      'schema-reference@width-320': 20,
-      'schema-reference@width-390': 22,
+      'record-detail@width-390': { darwin: 12, linux: 19 },
+      'schema-reference@width-320': 18,
+      'schema-reference@width-390': 20,
       /* SPLIT 2026-08-16, and it is a fall rather than a rise. CI run 31968866824
          measured linux 14 -> 13 here and 15 -> 14 on `settings@width-320`. Those
          are the exact two cells the review of this branch singled out as the two
@@ -1679,10 +1679,10 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          `settings-explorer@width-320` below is split — CI measures linux only,
          darwin is carried forward UNMEASURED, and a bare number would assert a
          macOS reading nobody took. */
-      'settings-about@width-320': { darwin: 14, linux: 13 },
-      'settings-about@width-390': 15,
-      'settings-api@width-320': 18,
-      'settings-api@width-390': 18,
+      'settings-about@width-320': { darwin: 8, linux: 7 },
+      'settings-about@width-390': 9,
+      'settings-api@width-320': 12,
+      'settings-api@width-390': 12,
       // linux 56 -> 54 on BOTH, 2026-08-10, CI run 31446324340. The two narrow widths
       // move by 2 where the five wide ones move by 1 — see the RUN OVERRIDE ROUTES
       // note above `settings-explorer@desktop-1280x800` for the cause (two new API
@@ -1747,22 +1747,22 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // story above; the expectation survives it, the named cause does not.) A
       // fresh number nobody measured cannot be caught, while a stale one that says
       // where it came from can be corrected by the next darwin run.
-      'settings-explorer@width-320': 57,
-      'settings-explorer@width-390': { darwin: 59, linux: 57 },
-      'settings-privacy@width-320': 8,
-      'settings-privacy@width-390': 8,
+      'settings-explorer@width-320': 51,
+      'settings-explorer@width-390': { darwin: 53, linux: 51 },
+      'settings-privacy@width-320': 2,
+      'settings-privacy@width-390': 2,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
          `settings-about@width-320` above; darwin carried forward unmeasured. */
-      'settings@width-320': { darwin: 15, linux: 14 },
-      'settings@width-390': 16,
-      'statistics-example@width-320': 4,
-      'statistics-example@width-390': 4,
-      'statistics-mine@width-320': 2,
-      'statistics-mine@width-390': 2,
-      'statistics@width-320': 2,
-      'statistics@width-390': 2,
-      'validator@width-320': 8,
-      'validator@width-390': 8,
+      'settings@width-320': { darwin: 9, linux: 8 },
+      'settings@width-390': 10,
+      'statistics-example@width-320': 3,
+      'statistics-example@width-390': 3,
+      'statistics-mine@width-320': 1,
+      'statistics-mine@width-390': 1,
+      'statistics@width-320': 1,
+      'statistics@width-390': 1,
+      'validator@width-320': 6,
+      'validator@width-390': 6,
     },
   },
   /*
@@ -1783,81 +1783,114 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
    * rather than zeroing: 346 nodes of recorded debt came off the total below,
    * and the suite now proves the fix on every run.
    */
-  {
-    rule: 'scrollable-region-focusable',
-    impact: 'serious',
-    note:
-      'FINDING A11Y-04. `div.preview-lines.scroll-x` (Evidence source-file preview) and ' +
-      'a `<pre>` code sample on API Access scroll horizontally but are not keyboard ' +
-      'focusable, so a keyboard-only user cannot scroll them. Genuinely ' +
-      'width-conditional: whether the content overflows depends on the column width, so ' +
-      'it fires on Evidence at 1280 and at 375 but NOT at 1024/768/640, and on API ' +
-      'Access only at 375. The earlier `projects: "*"` scoping claimed all ten pairs; ' +
-      'only these three were ever real.',
-    targetPattern: '^(\\.preview-lines|pre)$',
-    // 3 nodes across 3 (surface, project) pairs.
-    counts: {
-      'evidence@desktop-1280x800': 1,
-      'evidence@mobile-375x812': 1,
-      'settings-api@mobile-375x812': 1,
-    
-      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (1 node per pair).
-
-         Every number MEASURED on BOTH platforms on the same commit and merged by
-         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
-         run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': 1,
-      'evidence@width-390': 1,
-      'settings-api@width-320': 1,
-    },
-  },
-  {
-    rule: 'page-has-heading-one',
-    impact: 'moderate',
-    note:
-      'FINDING A11Y-05. `/load` (Load Materials) renders no `<h1>`. Every other routed ' +
-      'surface has one. axe reports this against `html`, so it is one node per scan.',
-    targetPattern: '^html$',
-    // 5 nodes across 5 (surface, project) pairs.
-    counts: {
-      'load@desktop-1280x800': 1,
-      'load@laptop-1024x768': 1,
-      'load@tablet-768x1024': 1,
-      'load@mobile-375x812': 1,
-      'load@zoom-200': 1,
-    
-      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (1 node).
-
-         Every number MEASURED on BOTH platforms on the same commit and merged by
-         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
-         run rather than guessing the other. Nobody retyped a count. */
-      'load@width-320': 1,
-      'load@width-390': 1,
-    },
-  },
+  /*
+   * ── A11Y-04 and A11Y-05 DELETED, 2026-08-26 — those two defects are GONE ──
+   *
+   * ~~"A11Y-04, A11Y-05 and A11Y-06 DELETED — the defects are GONE"~~ —
+   * **CORRECTED 2026-08-27 from CI run 33025558592, and kept struck rather than
+   * rewritten because it is the exact failure this file's ratchet exists to
+   * catch.** A11Y-06 was deleted on the strength of a `note` that turned out to
+   * misdescribe its own two nodes. Only ONE of the two was a `role="search"`
+   * landmark; the other was, and still is, a duplicate `region`. CI measured
+   * **1** node still firing on all seven `settings-explorer` pairs, so the
+   * deletion asserted a zero that was false. The residue is re-recorded as an
+   * entry below — see `landmark-unique` — rather than left as a false zero that
+   * would keep the sweep permanently red.
+   *
+   * Same rule as the deletions above: an absent entry expects ZERO nodes on
+   * every pair, so if either of the two regresses it reads as `new` and fails
+   * the sweep. Zeroing an entry would have tolerated it silently.
+   *
+   * Both remaining fixes are STRUCTURAL — an attribute added to an element — so
+   * the post-fix count is 0 on BOTH platforms by construction, not by
+   * measurement. That is why these two could be deleted from a machine that
+   * cannot run the Linux face: font metrics can move a wrap boundary and
+   * therefore a text-node count, but they cannot make a focusable element
+   * unfocusable or an `<h1>` absent. Contrast the `color-contrast` entry
+   * above, where every number is a per-platform measurement.
+   *
+   * The correction does NOT weaken the "structural fixes are platform-free"
+   * argument, and it is worth saying which half of it failed: the reasoning
+   * about PLATFORM was right (nothing here differs between darwin and linux).
+   * What was wrong was the claim about WHICH NODES the entry had been counting
+   * — a `note` was trusted where the `targetPattern` already contradicted it. It
+   * read `^(\\.card|\\.topbar-search-region)$`: two different elements, while the
+   * `note` described two instances of one kind.
+   *
+   *   * `scrollable-region-focusable` (FINDING A11Y-04, 6 nodes across 6 pairs:
+   *     `evidence@desktop-1280x800`, `evidence@mobile-375x812`,
+   *     `evidence@width-320`, `evidence@width-390`,
+   *     `settings-api@mobile-375x812`, `settings-api@width-320`). The two
+   *     offending elements — `div.preview-lines.scroll-x`
+   *     (`src/components/SourcePreview.tsx`) and `pre.api-samples-code`
+   *     (`src/screens/settings/ApiDocs.tsx`) — now carry `tabIndex={0}` with
+   *     `role="group"` and an `aria-label`, following `.rc-tablewrap` in
+   *     `src/components/RunCompare.tsx`. `role="group"` and not `region`: a
+   *     region is a landmark, and an extra landmark here would re-create
+   *     A11Y-06 while closing A11Y-04.
+   *   * `page-has-heading-one` (FINDING A11Y-05, 5 nodes across 5 pairs plus
+   *     `load@width-320` and `load@width-390`, 7 in total). `/load` renders
+   *     `<h1 class="sr-only">Load Materials</h1>`
+   *     (`src/screens/LoadMaterials.tsx`), the same pattern four other screens
+   *     already use. `sr-only` text is not `isVisibleOnScreen`, so axe's
+   *     `color-contrast` rule does not evaluate it and no `load@*` contrast
+   *     count moves. `surfaces.ts` drops `expectH1: false` in the same change,
+   *     which is what `specs/structure.spec.ts` instructs.
+   *   * `landmark-unique` (FINDING A11Y-06) — **HALF closed, and the entry is
+   *     RESTORED at 1 below rather than deleted.** The A11Y-06 fix is real and
+   *     stands: the name now sits ON each landmark rather than on the button
+   *     inside one of them (`aria-label="Site search"` on the TopBar region in
+   *     `src/components/SearchDialog.tsx`, `aria-label="Endpoint search"` on
+   *     the endpoint filter in `src/screens/settings/ApiDocs.tsx`). That closed
+   *     the `.topbar-search-region` node. The OTHER node per pair was never a
+   *     `role="search"` landmark at all — see the restored entry for what it
+   *     actually is — so 7 of the 14 nodes remain.
+   *
+   * 20 nodes of recorded debt come off both totals below (27 deleted, 7
+   * restored): darwin 2559 -> 2539, linux 2829 -> 2809 — before the
+   * `color-contrast` transcription in the same change takes another 378 off
+   * each. Final figures and their full arithmetic are at
+   * `A11Y_BASELINE_TOTAL_NODES`. The 27-node subtraction is exact rather than
+   * estimated because every one of the 20 deleted keys was a SCALAR, i.e.
+   * asserted the identical number on both platforms.
+   */
   {
     rule: 'landmark-unique',
     impact: 'moderate',
     note:
-      'FINDING A11Y-06. Two `role="search"` landmarks coexist with no distinguishing ' +
-      'accessible name: the TopBar trigger (`SearchDialog.tsx:290`) and the endpoint ' +
-      'filter (`settings/ApiDocs.tsx:333`). Both are reported, so the count is 2.',
-    targetPattern: '^(\\.card|\\.topbar-search-region)$',
-    // 10 nodes across 5 (surface, project) pairs.
+      'FINDING A11Y-06, RESIDUE. The two `role="search"` landmarks are fixed and are NOT ' +
+      'what this entry counts any more — read the count as 1, not 2. TRANSCRIBED from CI run ' +
+      '33025558592 (job "browser accessibility and responsive baseline", head 2da0c71), which ' +
+      'reported `new:landmark-unique ... fired on 1 node(s)` on all seven `settings-explorer` ' +
+      'pairs after the search landmarks were named. ROOT CAUSE, identified in source rather ' +
+      'than inferred: `/settings?tab=explorer` renders TWO `region` landmarks with the SAME ' +
+      'accessible name, "Endpoint Explorer". The outer one is `SettingsCard` ' +
+      '(`src/screens/SettingsPage.tsx:326`, `<section class="card placeholder-card ' +
+      'settings-card" aria-labelledby="settings-apidocs-heading">`, whose `<h2>` reads ' +
+      '"Endpoint Explorer"); the inner one is `<section class="api-explorer" ' +
+      'aria-labelledby="settings-api-explorer-heading">` (`src/screens/settings/ApiDocs.tsx:357`), ' +
+      'whose `<h3>` reads "Endpoint Explorer" as well. axe blames the outer `.card`. This is ' +
+      'PRE-EXISTING, not introduced here: the pre-fix entry\'s own `targetPattern` was ' +
+      '`^(\\.card|\\.topbar-search-region)$`, so a `.card` node was already failing on `main` ' +
+      'and the pre-fix `note` — which claimed both nodes were the two search regions — was ' +
+      'wrong about the second one. THE FIX IS ONE LINE and is deliberately not taken here, ' +
+      'because it changes product DOM and this environment cannot run Playwright to confirm ' +
+      'the resulting count: give one of the two regions a distinct name, or stop the inner ' +
+      '`<section>` being a landmark (drop its `aria-labelledby`, keeping the `<h3>`).',
+    targetPattern: '^\\.card$',
+    // 7 nodes across 7 (surface, project) pairs — 1 each. MEASURED on linux;
+    // the darwin column is REASONED (see `A11Y_BASELINE_TOTAL_NODES`): a
+    // duplicated landmark NAME is a DOM/ARIA fact with no text measurement in
+    // it, so no font metric can change this count between platforms. Written as
+    // scalars for that reason, exactly as the pre-fix entry's 2s were.
     counts: {
-      'settings-explorer@desktop-1280x800': 2,
-      'settings-explorer@laptop-1024x768': 2,
-      'settings-explorer@tablet-768x1024': 2,
-      'settings-explorer@mobile-375x812': 2,
-      'settings-explorer@zoom-200': 2,
-    
-      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (2 nodes), so purely width-invariant.
-
-         Every number MEASURED on BOTH platforms on the same commit and merged by
-         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
-         run rather than guessing the other. Nobody retyped a count. */
-      'settings-explorer@width-320': 2,
-      'settings-explorer@width-390': 2,
+      'settings-explorer@desktop-1280x800': 1,
+      'settings-explorer@laptop-1024x768': 1,
+      'settings-explorer@tablet-768x1024': 1,
+      'settings-explorer@mobile-375x812': 1,
+      'settings-explorer@zoom-200': 1,
+      'settings-explorer@width-320': 1,
+      'settings-explorer@width-390': 1,
     },
   },
 ];
@@ -2648,7 +2681,99 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // A darwin browser run DID independently measure five failures on `load` before the
   // colour fix and two after on the narrow sweep, which agrees in direction — but the
   // authoritative figures are CI's, and these five are transcribed from CI.
-  darwin: 2559,
+  //
+  // ── A11Y-04 / A11Y-05 / A11Y-06 CLOSURE, 2026-08-26: darwin 2559 -> 2532 (-27). ──
+  //
+  // Three whole entries deleted, 20 keys, all SCALARS — so the identical -27
+  // applies to both columns as arithmetic over the deleted cells, not as a guess
+  // about a platform this environment cannot run. Per-entry breakdown at the
+  // deletion comment inside `A11Y_BASELINE`:
+  //
+  //   scrollable-region-focusable   6 cells x 1 node   = -6
+  //   page-has-heading-one          7 cells x 1 node   = -7
+  //   landmark-unique               7 cells x 2 nodes  = -14
+  //                                                net = -27
+  //
+  // These three are the only kind of a11y delta a laptop may write into the linux
+  // column: each fix adds an ATTRIBUTE, and no font metric can make a focusable
+  // element unfocusable, an `<h1>` absent, or a named landmark unnamed. The
+  // `.section-tab` contrast fix that ships alongside them is the opposite case —
+  // it moves `color-contrast` TEXT-NODE counts on roughly forty cells, none of
+  // which is transcribed here because none of them has been measured. The
+  // `browser-a11y` job will report those as `improved` with exact figures; that
+  // is the transcription source, and this constant must be corrected again from
+  // it in the same change as the cells.
+  //
+  // ── THE ROUND-TRIP THE NOTE ABOVE ASKED FOR, 2026-08-27: 2532 -> 2161. ──
+  //
+  // SOURCE: CI run 33025558592, job "browser accessibility and responsive
+  // baseline", head 2da0c71 — the run that failed BY DESIGN so its output could
+  // be transcribed. 119 failed / 864 passed. Extracted mechanically, not by eye:
+  //
+  //   gh run view 33025558592 --log-failed > run.log
+  //   grep -oE 'IMPROVED [a-z0-9-]+ @ [a-z0-9-]+ on [a-z]+: rule "[a-z-]+" \
+  //     fell from [0-9]+ to [0-9]+ node\(s\) \(-[0-9]+\)' run.log | sort -u
+  //
+  // 119 unique cells, and 119 is also the failed-test count, so no cell was
+  // missed. 17 surfaces x exactly 7 scan projects each. Per-surface delta,
+  // constant across all 7 projects of each surface — which is the signature of a
+  // fixed number of `.section-tab` elements per surface rather than of anything
+  // width- or font-dependent:
+  //
+  //   settings, settings-about, settings-api, settings-connect,
+  //   settings-explorer, settings-privacy   6 surfaces x 7 x -6 = -252
+  //   memory, memory-graph                  2 surfaces x 7 x -3 =  -42
+  //   governance, schema-reference,
+  //   validator                             3 surfaces x 7 x -2 =  -42
+  //   evidence, evidence-graph, record-detail,
+  //   statistics, statistics-example,
+  //   statistics-mine                       6 surfaces x 7 x -1 =  -42
+  //                                                          net = -378
+  //
+  //   -378 (color-contrast, above) +7 (landmark-unique residue, restored) = -371
+  //   2532 - 371 = 2161.
+  //
+  // ── WHICH COLUMN IS MEASURED AND WHICH IS REASONED ──
+  //
+  // The 119 linux cell counts and the 7 landmark-unique cells are MEASURED: every
+  // one is the "to" number CI printed, and the transcription asserted CI's "fell
+  // from" against the number already in this file for all 119 before writing
+  // anything — all 119 agreed, which is why the mapping from message to cell is
+  // not a guess.
+  //
+  // THE DARWIN COLUMN IS REASONED, NOT MEASURED, AND THIS IS THE FIRST TIME THIS
+  // FILE HAS DONE THAT FOR `color-contrast`. Stated plainly so nobody later reads
+  // 2161 as a reading. Each of the 119 darwin cells is its previous darwin value
+  // minus the SAME per-surface delta CI measured on linux. Why that is defensible
+  // here and is NOT the "never fix one platform by copying the other's number"
+  // that `docs/browser-accessibility-testing.md` forbids:
+  //
+  //   * what is copied is the DELTA, not the number. 20 of the 119 cells keep a
+  //     genuine `{darwin, linux}` split with an unchanged gap between the columns;
+  //     none collapses to equal, so no fake platform-specificity is created and
+  //     none is erased.
+  //   * the change is a TOKEN SWAP on one CSS class — `.section-tab` from
+  //     `--text-tertiary` #78838f (3.86:1) to `--text-muted` #5b6570 (5.93:1).
+  //     Font metrics move a WRAP BOUNDARY, which is why linux and darwin
+  //     text-node counts differ at all. `.section-tab` is a single-line 12.5px
+  //     tab label that does not wrap, its computed foreground and background are
+  //     the same hexes on both platforms, and 12.5px/500 is below the 18.66px-bold
+  //     large-text threshold on both — so the same nodes stop failing on both.
+  //   * the number of `.section-tab` elements on a surface is set by that screen's
+  //     tab structure, not by type rendering. That is what the "constant delta
+  //     across all 7 projects of each surface" table above demonstrates
+  //     empirically: a font- or width-sensitive count would not be constant across
+  //     320px, 375px, 768px, 1024px, 1280px and 200% zoom.
+  //
+  // THE ALTERNATIVE — leaving darwin stale and letting a later CI run correct it —
+  // IS NOT AVAILABLE, and was checked rather than assumed: `.github/workflows/`
+  // contains no macOS runner at all (`grep -rn 'macos\|darwin' .github/workflows/`
+  // returns nothing; every `runs-on:` in `ci.yml` is `ubuntu-latest`). No CI run
+  // will ever judge the darwin column. It is corrected only when a developer runs
+  // the suite on a Mac, and until someone does, these 119 darwin numbers are
+  // reasoned. If such a run disagrees, IT wins for darwin and this note is the
+  // record of why the reasoning was wrong.
+  darwin: 2161,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -2812,7 +2937,28 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // arithmetic is written out so the total can be checked against the cells rather
   // than trusted. `load@width-320` does NOT appear: it was already 1 and did not move,
   // which is the check that both narrow cells behaved as one cause predicts.
-  linux: 2829,
+  //
+  // ── A11Y-04 / A11Y-05 / A11Y-06 CLOSURE, 2026-08-26: linux 2829 -> 2802 (-27). ──
+  //
+  // Same 20 deleted scalar keys as the darwin note above; see it for the per-entry
+  // arithmetic and for why a structural fix is the one case where this environment
+  // may move the linux column without a CI run.
+  //
+  // ── `.section-tab` TRANSCRIPTION, 2026-08-27: linux 2802 -> 2431 (-371). ──
+  //
+  // MEASURED, unlike its darwin counterpart. Every one of the 119 `color-contrast`
+  // cells is the exact "to" figure printed by CI run 33025558592 (job "browser
+  // accessibility and responsive baseline", head 2da0c71, 119 failed / 864
+  // passed), and the +7 is the `landmark-unique` residue that same run reported as
+  // `new ... fired on 1 node(s)` on seven pairs. The per-surface arithmetic, the
+  // extraction command, and the reason the DARWIN column beside this one is
+  // reasoned rather than measured are all at the `darwin` note above; they are
+  // written there once rather than twice so the two cannot drift apart.
+  //
+  //   2802 - 378 (color-contrast) + 7 (landmark-unique restored) = 2431
+  //
+  // Nothing here is a guess: this is the column CI judges, and CI produced it.
+  linux: 2431,
 };
 
 /**

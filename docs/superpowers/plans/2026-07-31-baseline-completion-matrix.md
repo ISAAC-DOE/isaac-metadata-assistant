@@ -347,7 +347,7 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 | **Responsive baseline (4 viewports)** | **yes** | **done** — 1280×800, 1024×768, 768×1024, 375×812 | orch | — |
 | **200% zoom — layout-level model, automated** | **yes** | **done as a model, not as the thing.** The `zoom-200` project is `{640×400, DPR 2}`, asserted not assumed. Probed directly: DPR contributes **nothing** to CSS layout (DPR 2 and DPR 1 measured byte-identically), and **no CDP method, launch flag or Playwright API can drive Chrome's own zoom control** — so viewport-halving is the correct *and only available* model | orch | — |
 | **Real browser zoom at 200% (`Cmd`/`Ctrl`-`+`)** | **yes** | **OPEN — human only.** Not automatable in Chromium at all; not a deferral of effort | **Krish** | **G4**; automation cannot close it |
-| Accessibility defects found (A1–A8 below) | **yes** — recorded | **partial** — **A1 and A2 (both critical) FIXED**, baseline entries deleted so a regression fails as `new`; **A3–A8 OPEN and deliberately deferred**, each still baselined at an exact node count | orch | §3B; the 4 open a11y findings are serious/moderate, the 2 open layout findings are unrated |
+| Accessibility defects found (A1–A8 below) | **yes** — recorded | **partial** — **A1, A2 (both critical), A4 and A5 FIXED**, baseline entries deleted so a regression fails as `new`; **A6 HALF fixed** (~~"and A6 FIXED"~~ — corrected 2026-08-27 from CI run 33025558592: the search half closed, 7 nodes remain and the entry is restored at 1); **A3, A7 and A8 OPEN and deliberately deferred**, each still baselined at an exact node count | orch | §3B. A3 is a PALETTE DECISION and is the owner's, not a slice's (`styles/tokens.css:3-5`) — though one `.section-tab` USAGE of a low token moved on 2026-08-26, −378 nodes across 119 cells, transcribed from CI; A7/A8 are the record-chrome reflow slice. Two a11y findings remain open (A3 serious, A6 residue moderate), the 2 open layout findings are unrated |
 | Cached-validator correctness — D1 | **yes** | **done** — PR #30, merge `91b74f8` | orch | — |
 | Vocabulary-cache keying correctness — D2 | **yes** | **done** — PR #30 | orch | — |
 | `POST /api/uploads` OpenAPI description accuracy — D3 | **yes** | **done** — PR #30 | orch | — |
@@ -558,9 +558,9 @@ less serious because closing the phase would look tidier.
 | **A1** | `button-name` | **critical** | **FIXED** | The global search trigger had **no accessible name at all** at 375px and at 200% zoom (`chrome.css:503` hides the label and kbd hint; the SVG is `aria-hidden`, no `aria-label`). **Fix:** `aria-label="Search"` on the trigger in `apps/web/src/components/SearchDialog.tsx`; **no CSS changed**, so the name no longer depends on a media query. **Baseline impact:** entry deleted, **−36 nodes** |
 | **A2** | `aria-allowed-attr` / `aria-allowed-role` | **critical** | **FIXED** | 31 Evidence Trail entries were `<button role="listitem" aria-pressed>` — the role killed the button role and forbids `aria-pressed`, so selection state was not exposed. **Fix:** in `apps/web/src/components/EvidenceTrailPanel.tsx` the `role="listitem"` moved onto a wrapper `<div class="trail-item">`, leaving a plain `<button>` with its implicit role and a now-valid `aria-pressed`. **Baseline impact:** both entries deleted, **−310 nodes** (155 per rule) |
 | **A3** | `color-contrast` | **serious** | **OPEN — deferred** | 1,610 nodes, every surface. **Three causes, not one**: `--text-disabled #c0c8d0` rendered as Evidence line numbers at **1.56:1**; genuinely low tokens; and **five `opacity` composites of tokens that pass at full strength** — darkening tokens will not fix those |
-| **A4** | `scrollable-region-focusable` | **serious** | **OPEN — deferred** | 3 pairs: `evidence` desktop/mobile, `settings-api` mobile |
-| **A5** | `page-has-heading-one` | moderate | **OPEN — deferred** | `/load` has no `<h1>` |
-| **A6** | `landmark-unique` | moderate | **OPEN — deferred, and explicitly NOT closed by A1** | Two unnamed `role="search"` landmarks on Endpoint Explorer. The `aria-label` added for A1 sits on the `<button>`, **not** on the `role="search"` wrapper `<div>`, so it does not name the landmark — naming one requires `aria-label`/`aria-labelledby` on the landmark element itself. Its 10-node baseline entry is unchanged |
+| **A4** | `scrollable-region-focusable` | **serious** | **FIXED 2026-08-26** | was 6 pairs once the narrow sweep landed (`evidence` desktop/mobile/320/390, `settings-api` mobile/320). `div.preview-lines.scroll-x` and `pre.api-samples-code` now carry `tabIndex={0}` + `role="group"` + `aria-label`, following `.rc-tablewrap`. Baseline entry DELETED, **−6 nodes on both platforms** |
+| **A5** | `page-has-heading-one` | moderate | **FIXED 2026-08-26** | was 7 pairs. `/load` renders `<h1 class="sr-only">Load Materials</h1>`; `expectH1: false` dropped from `e2e/surfaces.ts`. `sr-only` text is not `isVisibleOnScreen`, so no `load@*` `color-contrast` count moves. Baseline entry DELETED, **−7 nodes on both platforms** |
+| **A6** | `landmark-unique` | moderate | **HALF FIXED 2026-08-26 — 7 nodes still OPEN** ~~FIXED 2026-08-26~~ | Two unnamed `role="search"` landmarks on Endpoint Explorer. The `aria-label` added for A1 sat on the `<button>`, **not** on the `role="search"` wrapper `<div>`. Both landmarks now carry their own `aria-label` — "Site search" (`SearchDialog.tsx`) and "Endpoint search" (`settings/ApiDocs.tsx`). ~~"Its baseline entry — 14 nodes once the narrow sweep landed — is DELETED, −14 nodes on both platforms"~~ — **CORRECTED 2026-08-27 from CI run 33025558592.** Only ONE of the two nodes per pair was a search landmark. The other is a duplicate `region`: `/settings?tab=explorer` renders **two regions both named "Endpoint Explorer"**, the `SettingsCard` wrapper (`SettingsPage.tsx:326`) and `<section class="api-explorer">` (`settings/ApiDocs.tsx:357`). PRE-EXISTING, not a regression — the pre-fix `targetPattern` `^(\.card\|\.topbar-search-region)$` names two different elements, so the old `note` was simply wrong about the second. Entry **RESTORED at 1 × 7 pairs**, net **−7 nodes on both platforms**, not −14. One-line fix available (distinct name, or drop the inner section's `aria-labelledby`); not taken because it changes product DOM and needs a browser run to confirm |
 | **A7** | LAYOUT-01 | — | **OPEN — deferred** | Record StatusBar does not reflow: 575px of content in a 353px box at 375px, clipped and overlapping |
 | **A8** | LAYOUT-02 | — | **OPEN — deferred** | Record-context chip clipped: `chip-draft` on Evidence (macOS+Linux) and `chip-exported` on Export Readiness (**Linux only** — SF Pro hid it). One `.record-context` fix closes both |
 
@@ -576,13 +576,24 @@ than trusted. A3–A8 are not like that:
 - **A4** changes keyboard-focus semantics of scroll containers (adding `tabindex="0"` introduces new
   tab stops); **A5** adds a heading to `/load` and must also drop `expectH1: false` from its surfaces
   entry; **A6** names two landmarks and needs the two names to be *meaningfully* distinct, which is
-  copy, not markup.
+  copy, not markup. **A4 and A5 were closed on 2026-08-26; A6 was half closed** (~~"All three were
+  closed"~~ — corrected 2026-08-27, see its row). The reasoning here is kept rather than deleted,
+  because each concern was real and each shows in the fix: the new tab stops are unconditional and
+  documented at the call site, `expectH1: false` went in the same change as the heading, and the two
+  landmark names were chosen for distinctness after a first attempt that reused one string for two
+  elements had to be withdrawn. **And A6's residue is the lesson this bullet did not anticipate:**
+  the concern recorded here was about the two names being distinct, and they are — what was missed is
+  that the entry had never been counting only those two elements. Its own `targetPattern` said so and
+  its `note` did not, and the `note` was believed.
 - **A7 / A8** are CSS reflow changes to shared record chrome, which move layout on **every** record
   surface at **every** viewport and would move axe counts on **both** platforms — one of which cannot
   be measured from a laptop at all (§6.1 of the browser/a11y doc). That is a slice with a CI
   round-trip in it, not a closure-slice add-on.
 
-**Baseline impact of leaving A3–A8 open:** each remains enumerated in `e2e/a11y-baseline.ts` or
+**Baseline impact of leaving A3, A6's residue, A7 and A8 open** (A4 and A5 are closed; the sentence
+used to read "A3–A8", was corrected to "A4–A6 are closed", and is corrected again on 2026-08-27
+because A6 is only half closed — both corrections kept rather than deleted so the changes of status
+are visible): each remains enumerated in `e2e/a11y-baseline.ts` or
 `e2e/layout-baseline.ts` at an exact per-`surface@project` node count, with an identity guard, and
 the ratchet fails on `new`, `grew`, `improved`, `new-target` and `new-foreground`. Nothing is
 suppressed and no axe rule is disabled. The debt is **measured and cannot silently grow** — which is
@@ -592,7 +603,7 @@ the property baseline actually requires.
 **Critical** findings are now closed. The remaining findings are serious/moderate and unrated-layout,
 they are pre-existing, and baseline work **discovered and documented them where nothing previously
 measured them at all**. Going from no measurement to a ratcheted, per-node baseline is the
-foundational improvement; leaving A3–A8 open is a known, owned, bounded debt with a named next slice
+foundational improvement; leaving A3, A7 and A8 open is a known, owned, bounded debt with a named next slice
 — not a foundational ambiguity. They do **not** block the verdict in §7. What blocks it is stated
 there, and it is not this.
 

@@ -66,7 +66,31 @@ export function SourcePreview({
               </span>
               <span className="preview-readonly">{LABELS.readOnly}</span>
             </div>
-            <div className="preview-lines scroll-x">
+            {/*
+              FINDING A11Y-04 fix. `.scroll-x` is `overflow-x: auto` and every
+              `.preview-line` is `white-space: nowrap`, so this box scrolls
+              sideways whenever a source line is wider than the column. A
+              scrollable region that cannot take keyboard focus can be SEEN but
+              not SCROLLED without a pointer, which is what axe
+              `scrollable-region-focusable` reports.
+
+              `role="group"` + `aria-label`, not `role="region"`: a region is a
+              landmark, and a second unnamed-or-duplicate landmark is exactly the
+              A11Y-06 defect fixed in the same slice. The precedent is
+              `RunCompare.tsx`'s `.rc-tablewrap`, which reasons the same way.
+
+              The tab stop is UNCONDITIONAL rather than applied only when the
+              content overflows: whether it overflows depends on the column
+              width and on the file, so a conditional stop would appear and
+              disappear as the window is resized, and no keyboard user could
+              rely on it.
+            */}
+            <div
+              className="preview-lines scroll-x"
+              tabIndex={0}
+              role="group"
+              aria-label={`Source lines of ${preview.name}`}
+            >
               {preview.lines.map((line) => {
                 const isCited = cited.has(line.n);
                 return (
@@ -88,7 +112,11 @@ export function SourcePreview({
 
       {tab === 'record' &&
         (recordJson ? (
-          <pre className="preview-json scroll-x">{recordJson}</pre>
+          /* A11Y-04: see the note on `.preview-lines` above. `white-space: pre`
+             plus `overflow-x: auto` makes this a scroll container, so it needs a
+             tab stop and a name. The child stays on the opening line because
+             `<pre>` is whitespace-sensitive. */
+          <pre className="preview-json scroll-x" tabIndex={0} role="group" aria-label={LABELS.tabRecord}>{recordJson}</pre>
         ) : (
           <p className="preview-empty" role="note">
             Not exported yet — the official ISAAC record is written on export.
@@ -97,7 +125,11 @@ export function SourcePreview({
 
       {tab === 'sidecar' &&
         (sidecarJson ? (
-          <pre className="preview-json scroll-x">{sidecarJson}</pre>
+          /* A11Y-04: see the note on `.preview-lines` above. `white-space: pre`
+             plus `overflow-x: auto` makes this a scroll container, so it needs a
+             tab stop and a name. The child stays on the opening line because
+             `<pre>` is whitespace-sensitive. */
+          <pre className="preview-json scroll-x" tabIndex={0} role="group" aria-label={LABELS.tabSidecar}>{sidecarJson}</pre>
         ) : (
           <p className="preview-empty" role="note">
             Not exported yet — the evidence sidecar is written on export. The draft

@@ -60,6 +60,12 @@ const API_LIST_HEADING_ID = 'settings-api-endpoints-heading';
 const CONNECT_SUMMARY_ID = 'settings-api-connect-summary';
 /** The tab-level Auth legend, referenced by every detail pane's Auth flag. */
 const AUTH_LEGEND_ID = 'settings-api-auth-legend';
+/**
+ * Names the endpoint-filter `role="search"` landmark — FINDING A11Y-06 below.
+ * It must differ from the TopBar region's "Site search"
+ * (`components/SearchDialog.tsx`), which is the whole point of naming either.
+ */
+const API_SEARCH_LANDMARK = 'Endpoint search';
 
 const slug = (value: string) => value.replace(/[^a-zA-Z0-9]+/g, '-');
 const endpointRowId = (key: string) => `settings-api-row-${slug(key)}`;
@@ -237,7 +243,22 @@ function QuickStart({
               onCopied={onCopied}
             />
           </div>
-          <pre className="mono api-samples-code">{firstSample.code}</pre>
+          {/*
+            FINDING A11Y-04 fix. `.api-samples-code` is `overflow: auto` with
+            `white-space: pre` and a 280px `max-height`, so a long curl line
+            scrolls sideways and a long sample scrolls down. Without a tab stop
+            a keyboard-only reader can see the first ~227px of a 2000px command
+            and reach no more of it (`e2e/helpers/layout.ts:116` measured
+            exactly that). `role="group"` rather than `region`, because a
+            landmark here would collide with the two `role="search"` landmarks
+            this slice is naming for A11Y-06.
+          */}
+          <pre
+            className="mono api-samples-code"
+            tabIndex={0}
+            role="group"
+            aria-label={`First request sample, ${first.method} ${first.path}`}
+          >{firstSample.code}</pre>
           <p className="api-quickstart-note">
             {first.authRequired
               ? 'Every read operation in this contract documents a 401, so this one needs a credential too.'
@@ -338,7 +359,23 @@ function ApiBrowser({
         Endpoint Explorer
       </h3>
 
-      <div className="settings-search" role="search">
+      {/*
+        FINDING A11Y-06 fix. This is the second of the two `role="search"`
+        landmarks that coexist on the Endpoint Explorer tab; the other is the
+        TopBar trigger in `components/SearchDialog.tsx`. Two same-role landmarks
+        with no names are indistinguishable in a screen reader's landmark list.
+
+        `aria-label`, NOT `aria-labelledby` pointing at the visible label below.
+        That was the first attempt and it is recorded because it looked like the
+        tidier choice: reusing the visible string means one copy to keep true.
+        But it makes ONE string the accessible name of TWO different things —
+        the landmark and the text box inside it — and any name-based lookup then
+        resolves to both. Three existing tests broke on exactly that
+        (`Found multiple elements with the text of: Search endpoints`), and they
+        were right to: a reader searching by name would have found the region
+        where they meant the input. The landmark gets its own name.
+      */}
+      <div className="settings-search" role="search" aria-label={API_SEARCH_LANDMARK}>
         <label className="settings-search-label" htmlFor="api-docs-search">
           Search endpoints
         </label>
@@ -914,7 +951,16 @@ function ContentBlocks({
                     <span className="api-browser-reftag mono">{resolved.resolvedFrom}</span>
                   )}
                 </summary>
-                <pre className="mono api-browser-json">{stringify(resolved.value)}</pre>
+                {/* A11Y-04: `.api-browser-json` is `overflow: auto` + `white-space: pre`
+                    with a 260px cap, i.e. the same scroll container as the code samples.
+                    It sits inside a collapsed `<details>`, so no axe scan has ever
+                    measured it — that is a coverage fact, not evidence it is reachable. */}
+                <pre
+                  className="mono api-browser-json"
+                  tabIndex={0}
+                  role="group"
+                  aria-label={`Technical schema for ${mediaType}`}
+                >{stringify(resolved.value)}</pre>
               </details>
             )}
             {examples.map((ex) => (
@@ -923,7 +969,12 @@ function ContentBlocks({
                   Example
                   <span className="api-browser-reftag mono">{ex.name}</span>
                 </summary>
-                <pre className="mono api-browser-json">{stringify(ex.value)}</pre>
+                <pre
+                  className="mono api-browser-json"
+                  tabIndex={0}
+                  role="group"
+                  aria-label={`Example ${ex.name} for ${mediaType}`}
+                >{stringify(ex.value)}</pre>
               </details>
             ))}
           </div>
@@ -984,7 +1035,13 @@ function CodeSamples({ row, onCopied }: { row: ApiEndpoint; onCopied: (what: str
             onCopied={onCopied}
           />
         </div>
-        <pre className="mono api-samples-code">{current.code}</pre>
+        {/* A11Y-04: the same scroll container as the Quick Start sample above. */}
+        <pre
+          className="mono api-samples-code"
+          tabIndex={0}
+          role="group"
+          aria-label={`${current.label} sample`}
+        >{current.code}</pre>
       </div>
     </details>
   );
