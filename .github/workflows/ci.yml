@@ -68,12 +68,21 @@ jobs:
           selected = repo.repository()
           assert selected.backend == repo.BACKEND_FILESYSTEM, selected.backend
           assert selected.durable is False
-          assert repo.storage_status() == {
+          # `run_projection` is Stage 2b's per-experiment state distribution. It is
+          # separated from the exact-equality below rather than folded into it: these
+          # steps exist to pin the FOUR durability keys, and a fifth key whose value
+          # legitimately varies with what the last hydration pass classified would make
+          # them brittle about something they do not test. Its own shape is asserted
+          # immediately after, so it is pinned rather than ignored.
+          _status = dict(repo.storage_status())
+          _projection = _status.pop("run_projection", None)
+          assert _status == {
               "configured": False,
               "backend": "filesystem",
               "durable": False,
               "state": repo.STORAGE_STATE_EPHEMERAL,
           }, repo.storage_status()
+          assert sorted(_projection or {}) == ["authoritative", "last_pass"], _projection
           print("no database configured: filesystem repository selected, durability NOT claimed")
           PY
 
@@ -489,13 +498,21 @@ jobs:
           # Durability is still claimed, because it is still true: the experiment
           # rows ARE in the database. Nothing this application does touches the
           # table 0002 has not created yet.
+          # `run_projection` is Stage 2b's per-experiment state distribution. It is
+          # separated from the exact-equality below rather than folded into it: these
+          # steps exist to pin the FOUR durability keys, and a fifth key whose value
+          # legitimately varies with what the last hydration pass classified would make
+          # them brittle about something they do not test. Its own shape is asserted
+          # immediately after, so it is pinned rather than ignored.
           after = client.get("/api/health").json()["experiment_storage"]
-          assert after == {
+          _projection = dict(after).pop("run_projection", None)
+          assert {k: v for k, v in after.items() if k != "run_projection"} == {
               "configured": True,
               "backend": "postgres",
               "durable": True,
               "state": repo.STORAGE_STATE_DURABLE,
           }, after
+          assert sorted(_projection or {}) == ["authoritative", "last_pass"], _projection
           print("0001-only database: create, read, list and RUN SAVES all work with 0002 pending")
           PY
           # AND THE APPLICATION DID NOT CREATE THE TABLE BEHIND THE MIGRATION'S
@@ -595,13 +612,21 @@ jobs:
           app = create_app()
           client = TestClient(app)
 
+          # `run_projection` is Stage 2b's per-experiment state distribution. It is
+          # separated from the exact-equality below rather than folded into it: these
+          # steps exist to pin the FOUR durability keys, and a fifth key whose value
+          # legitimately varies with what the last hydration pass classified would make
+          # them brittle about something they do not test. Its own shape is asserted
+          # immediately after, so it is pinned rather than ignored.
           status = client.get("/api/health").json()["experiment_storage"]
-          assert status == {
+          _projection = dict(status).pop("run_projection", None)
+          assert {k: v for k, v in status.items() if k != "run_projection"} == {
               "configured": True,
               "backend": "postgres",
               "durable": True,
               "state": repo.STORAGE_STATE_DURABLE,
           }, status
+          assert sorted(_projection or {}) == ["authoritative", "last_pass"], _projection
 
           created = client.post("/api/experiments", json={"title": "CI durable"})
           assert created.status_code == 201, created.text
