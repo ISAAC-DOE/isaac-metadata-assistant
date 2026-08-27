@@ -1857,7 +1857,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // re-measured from the served document at every merge, never arithmetic over the
     // two branches' deltas — adding them would have given 96,159 and been wrong by the
     // bytes the merge itself moved.
-    expect(total).toBe(96161);
+    expect(total).toBe(97555);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and

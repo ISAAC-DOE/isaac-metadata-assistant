@@ -1893,8 +1893,14 @@ describe('Check Run names WHICH document it read (review finding)', () => {
      * missing from `ApiRunCheckVerdict`, which is what hid the mislabel from tsc.
      */
     const card = await check({ ok: false, dry_run: false, errors: [{ message: 'boom' }] });
-    expect(card.textContent).toContain('Official schema (the record already written)');
+    // ~~`toContain('Official schema (the record already written)')`~~ — ONE STRING
+    // CARRYING TWO CLAIMS, which is how correcting the source half silently deleted
+    // the document half. They are two lines now, with two independent derivations,
+    // and both are asserted here so neither can disappear again.
+    expect(card.textContent).toContain('Official ISAAC schema findings');
+    expect(card.textContent).toContain('Checked the written official record.');
     expect(card.textContent).not.toContain('(dry run)');
+    expect(card.textContent).not.toContain('candidate record');
   });
 
   it('does NOT name the official schema on a dry run — INVERTED, it used to require that', async () => {
@@ -1918,12 +1924,53 @@ describe('Check Run names WHICH document it read (review finding)', () => {
      * "ISAAC v1.05"` over them. `CLAUDE.md` §12: no surface may report an exactness
      * refusal as an official-schema error.
      */
+    // A LEGACY RESPONSE, carrying `dry_run` and no discriminator. The rule the old
+    // heading encoded is now the FALLBACK rather than the rule, and it is still
+    // conservative in the same direction: nothing is named.
     const card = await check({ ok: false, dry_run: true, errors: [{ message: 'boom' }] });
-    expect(card.textContent).toContain('Findings on this candidate record — source not named');
+    expect(card.textContent).toContain('Findings — source not named');
+    expect(card.textContent).toContain('Checked an in-memory candidate record');
     // The finding itself is still shown — withholding the attribution must not
     // withhold the finding.
     expect(card.textContent).toContain('boom');
-    expect(card.textContent).not.toContain('Official schema');
+    expect(card.textContent).not.toContain('Official ISAAC schema findings');
+  });
+
+  /*
+   * THE TWO CASES THE OLD RULE COULD NOT TELL APART, which is the whole reason the
+   * server now sends `official_validator_ran`. Both are `dry_run: true` and the old
+   * heading gave them the same words — "Findings on this candidate record — source not
+   * named" — so a scientist could not learn from this card whether the vendored schema
+   * had examined their record. One of these two really is the schema's verdict.
+   *
+   * Separate `it` blocks rather than three `check()` calls in one: the helper mounts
+   * the record screen, so a second mount in the same test leaves two cards in the DOM
+   * and every query becomes ambiguous.
+   */
+  it('a dry-run failure the OFFICIAL SCHEMA produced is now named as the schema’s', async () => {
+    const card = await check({
+      ok: false,
+      dry_run: true,
+      official_validator_ran: true,
+      errors: [{ message: 'boom' }],
+    });
+    expect(card.textContent).toContain('Official ISAAC schema findings');
+    expect(card.textContent).toContain('Checked an in-memory candidate record');
+    expect(card.textContent).toContain('boom');
+  });
+
+  it('a dry-run failure it NEVER SAW is named as ISAAC’s export gate, never the schema’s', async () => {
+    const card = await check({
+      ok: false,
+      dry_run: true,
+      official_validator_ran: false,
+      errors: [{ message: 'boom' }],
+    });
+    expect(card.textContent).toContain('ISAAC export-gate findings');
+    expect(card.textContent).toContain('the official schema did not run');
+    expect(card.textContent).toContain('boom');
+    // THE POLARITY: the schema is never named as the producer where it did not produce.
+    expect(card.textContent).not.toContain('Official ISAAC schema findings');
   });
 
   it('claims neither the source nor the document when the flag is absent — INVERTED', async () => {
@@ -1937,11 +1984,16 @@ describe('Check Run names WHICH document it read (review finding)', () => {
      * schema's name.
      */
     const card = await check({ ok: false, errors: [{ message: 'boom' }] });
-    expect(card.textContent).toContain('Findings — neither the source nor the document named');
+    // ~~'Findings — neither the source nor the document named'~~ — the two claims are
+    // two lines now, so the heading names the source alone and the document line is
+    // simply absent. Absence is the honest rendering of "the response does not say";
+    // a sentence claiming that in words would be a claim about the server.
+    expect(card.textContent).toContain('Findings — source not named');
     expect(card.textContent).toContain('boom');
-    expect(card.textContent).not.toContain('Official schema');
+    expect(card.textContent).not.toContain('Official ISAAC schema findings');
     expect(card.textContent).not.toContain('(dry run)');
     expect(card.textContent).not.toContain('already written');
+    expect(card.textContent).not.toContain('candidate record');
   });
 
   it('an EXACTNESS finding on a dry run is not called a schema error anywhere on the card', async () => {
@@ -1967,8 +2019,8 @@ describe('Check Run names WHICH document it read (review finding)', () => {
       errors: [{ path: 'descriptors.outputs.0.name', message }],
     });
     expect(card.textContent).toContain(message);
-    expect(card.textContent).toContain('Findings on this candidate record — source not named');
-    expect(card.textContent).not.toContain('Official schema');
+    expect(card.textContent).toContain('Findings — source not named');
+    expect(card.textContent).not.toContain('Official ISAAC schema findings');
     expect(card.textContent).not.toContain('ISAAC v1.05');
     // Not "invalid against", not "schema error" — no phrasing that attributes it.
     expect(card.textContent ?? '').not.toMatch(/schema error|invalid against/i);
@@ -2048,7 +2100,12 @@ describe('Check Run names WHICH document it read (review finding)', () => {
     const card = cardFor('RUNAAA');
     expect(card.textContent).toContain('exactness gate');
     expect(card.textContent).toContain('official ISAAC schema');
-    expect(card.textContent).toContain('candidate record assembled from this run');
+    // ~~'candidate record assembled from this run'~~ — the sentence is the shared
+    // module's now, so all five renderers of this payload word the pass identically;
+    // it says "on a candidate record" without the per-surface tail. The CLAIM is
+    // unchanged and is what this test is for: three gates named, nothing filed.
+    expect(card.textContent).toContain('on a candidate record');
+    expect(card.textContent).toContain('Nothing was written');
     // And it does not claim anything was filed.
     expect(card.textContent).not.toContain('already written');
   });
@@ -2079,7 +2136,12 @@ describe('Check Run names WHICH document it read (review finding)', () => {
       fireEvent.click(within(cardFor('RUNAAA')).getByRole('button', { name: 'Check Run' }));
     });
     const card = cardFor('RUNAAA');
-    expect(card.textContent).toContain('the record already written for this run');
+    // ~~'the record already written for this run'~~ — shared-module wording, same
+    // claim, no per-surface tail.
+    expect(card.textContent).toContain('on the record already written');
+    expect(card.textContent).toContain('official ISAAC schema');
+    // AND STILL NOT ISAAC's own gate: `check_exactness` lives inside `export_draft`
+    // and never runs on a materialised unit, so claiming it here would be false.
     expect(card.textContent).not.toContain('exactness gate');
   });
 

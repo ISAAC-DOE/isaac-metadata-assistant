@@ -330,6 +330,54 @@ describe('S6 · Ready to Export (live)', () => {
     expect(blocked.textContent).toMatch(/exactness gate/);
   });
 
+  it('and with the server’s own discriminator it says the schema did NOT run', async () => {
+    /*
+     * THE SAME PAYLOAD THE SERVER ACTUALLY SENDS NOW. The fixture above carries no
+     * `official_validator_ran`, which is a LEGACY response — a cached body or a pod
+     * mid-rollout — and the assertions there pin the conservative fallback.
+     *
+     * Measured over HTTP on a record whose `tags[0]` is "campaign\n":
+     *
+     *     {"ok": false, "schema": "ISAAC v1.05", "dry_run": true,
+     *      "official_validator_ran": false, "errors": [<the exactness message>]}
+     *
+     * The screen may now say something STRONGER than "source not named": the official
+     * schema did not produce this, ISAAC's export gate did. It still declines to say
+     * which of ISAAC's two gates refused, because `export.py` folds the no-guessing
+     * findings and the exactness findings into one list and the wire cannot separate
+     * them — naming one would be the same §12 defect one level finer.
+     */
+    const exactnessMessage =
+      "value is accepted by the schema pattern '^[A-Za-z0-9_.-]+$' only because " +
+      "Python's '$' also matches before a trailing newline";
+    stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      'POST /api/experiments/demo/validate': {
+        body: {
+          ok: false,
+          dry_run: true,
+          official_validator_ran: false,
+          schema: 'ISAAC v1.05',
+          errors: [
+            { path: 'descriptors.outputs.0.descriptors.0.name', message: exactnessMessage },
+          ],
+        },
+      },
+    });
+    const { findByText, container } = renderAt('/record/demo/export');
+    expect(await findByText('Would Not Validate Yet')).toBeInTheDocument();
+    const blocked = container.querySelector('.preexport-blocked') as HTMLElement;
+
+    expect(blocked.textContent).toContain(exactnessMessage);
+    expect(blocked.textContent).toMatch(/Export stays gated/);
+    expect(blocked.textContent).toMatch(/ISAAC’s own export gate refused/);
+    expect(blocked.textContent).toMatch(/not the schema’s/);
+    // THE POLARITY, unchanged: the refusal is never reported as the schema's.
+    expect(blocked.textContent).not.toMatch(
+      /does not pass the official ISAAC schema|invalid against/i,
+    );
+  });
+
   it('the READY sentence names all three gates a dry-run pass clears', async () => {
     /*
      * M2 — the same omission on the other branch of the same payload, and the

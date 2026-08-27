@@ -231,7 +231,22 @@ describe('experiment graph — producers', () => {
     expect(fails.length).toBe(2);
     const onField = fails.find((e) => e.source === nodeIds.field('sample.material.formula'));
     expect(onField).toBeDefined();
-    expect(onField!.why).toContain('dry run against the official ISAAC schema');
+    /*
+     * ~~`toContain('dry run against the official ISAAC schema')`~~ — INVERTED, because
+     * the string it required was the defect. That suffix was appended whenever
+     * `validate.dry_run` was true, which is precisely the branch on which `export.py`
+     * may have returned `official_report=None` and the official validator never ran.
+     * `CLAUDE.md` §1 makes the vendored schema not ours to speak for; §12 forbids
+     * reporting an ISAAC gate refusal as an official-schema error. This test was
+     * REQUIRING the attribution.
+     *
+     * The edge now names the producer the SERVER reported. The fixture carries no
+     * `official_validator_ran`, so the honest answer is that the source is not named —
+     * and asserting the absence of the old claim is the half that must not regress.
+     */
+    expect(onField!.why).not.toContain('dry run against the official ISAAC schema');
+    expect(onField!.why).toContain('reported by:');
+    expect(onField!.why).toContain('source not named');
 
     const precedes = graph.edges.filter((e) => e.kind === 'precedes');
     expect(precedes.length).toBe(4); // 5 canonical steps → 4 links

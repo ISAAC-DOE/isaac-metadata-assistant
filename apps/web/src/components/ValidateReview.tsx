@@ -4,6 +4,12 @@ import { Check, TriangleAlert, CircleHelp } from './icons';
 import { FindingList } from './RunFindingList';
 import { runFindingState, type RunFindingState } from './RunFindings';
 import { count } from '../lib/assistantPaths';
+import {
+  officialCheckedDocument,
+  officialDocumentSentence,
+  officialFindingSource,
+  officialFindingsHeading,
+} from '../lib/officialAttribution';
 import { api } from '../lib/api';
 import type {
   ApiEvidenceClassification,
@@ -587,6 +593,10 @@ function UnitGroup({
   onCheckDetail?: () => void;
 }) {
   const state = runFindingState(unit.verdict);
+  /* The two questions, asked once each and never conflated: WHO produced the findings,
+     and WHICH document was read. See `lib/officialAttribution.ts`. */
+  const source = officialFindingSource(unit.verdict);
+  const documentSentence = officialDocumentSentence(officialCheckedDocument(unit.verdict));
   const Icon = STATE_ICON[state];
   const errors = unit.verdict.errors;
   // `undefined` advice is NOT an empty advice list — see {@link adviceFor}. The
@@ -621,14 +631,15 @@ function UnitGroup({
       {/* WHICH DOCUMENT WAS CHECKED, and NOT CLAIMED AT ALL for a no-verdict unit.
           `_validate_unit`'s materialised-unreadable branch returns `dry_run: false`
           to say NO DRY RUN HAPPENED — it is returned precisely because the written
-          record could not be read — so rendering this line there would turn a
-          refusal into a claim that the unopened document was checked. */}
-      {state !== 'unavailable' && (
-        <p className="vr-unit-subject">
-          {unit.verdict.dry_run
-            ? 'Checked an in-memory candidate record — nothing was written.'
-            : 'Checked the written official record.'}
-        </p>
+          record could not be read — so claiming the unopened document was checked
+          would turn a refusal into a claim. `officialCheckedDocument` returns `null`
+          on exactly that branch and `officialDocumentSentence` renders nothing for it,
+          so the guard is in the shared module rather than in this component's `state`
+          check — which is what let `RunCard` and `evidenceGraph` each get the same
+          branch wrong once. The DOCUMENT and the SOURCE are deliberately separate
+          questions there; conflating them is the original defect in miniature. */}
+      {documentSentence !== null && (
+        <p className="vr-unit-subject">{documentSentence}</p>
       )}
 
       <p className="vr-unit-counts">
@@ -644,17 +655,17 @@ function UnitGroup({
 
       {state !== 'pass' && errors.length > 0 && (
         <>
-          {/* WHOSE FINDINGS THESE ARE. Two different claims, and only one of them
-              is supported on a dry run: `_validate_unit` returns `export_draft`'s
-              errors there, which may be the no-guessing report's — including an
-              anchored-pattern exactness refusal, which `export.py` folds into it —
-              with no discriminator on the wire. Naming the official schema there
-              would attribute an ISAAC gate to an upstream document. */}
+          {/* WHOSE FINDINGS THESE ARE. ~~"with no discriminator on the wire"~~ —
+              there is one now: `official_validator_ran`, read by
+              `officialFindingSource`. This heading used to branch on `dry_run`, which
+              answers a different question (which DOCUMENT), and so could only ever
+              be conservative: it declined to name the official schema for every dry
+              run, including the ones the official schema really did produce. It now
+              names the actual producer in both directions, and the phrasing is the
+              shared module's so this surface and the four others cannot drift. */}
           {state === 'fail' && (
             <h4 className="vr-group-title">
-              {unit.verdict.dry_run
-                ? `Blocks export · ${errors.length} finding${errors.length === 1 ? '' : 's'} on this candidate record — source not named`
-                : `Blocks export · ${errors.length} official ISAAC schema error${errors.length === 1 ? '' : 's'} on the written record`}
+              {`Blocks export · ${count(errors.length, 'finding')} · ${officialFindingsHeading(source)}`}
             </h4>
           )}
           <ul className="vr-errors mono">
