@@ -23,8 +23,14 @@ import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
-import { answerValuePreview, pendingItemToBlocker } from '../lib/adapt';
+import {
+  answerValuePreview,
+  isAnswerablePendingItem,
+  pendingItemToBlocker,
+  pendingSummary,
+} from '../lib/adapt';
 import type {
+  ApiAnswerablePendingItem,
   ApiAnswersResponse,
   ApiExperimentDetail,
   ApiInvalidation,
@@ -474,13 +480,37 @@ function LoadedCompletion({
      `id`, which is correct for a record with no runs (the two are equal there) and
      degrades to the pre-existing collision only where the server itself did not
      distinguish the owners. */
-  const itemKey = (p: ApiPendingItem) => p.blocker_key ?? p.id;
-  const currentItem = useMemo(
-    () => pending.find((p) => !skipped.has(itemKey(p))),
-    [pending, skipped],
+  const itemKey = (p: ApiAnswerablePendingItem) => p.blocker_key ?? p.id;
+  /*
+   * THE QUEUE HOLDS ONLY THE ENTRIES A PERSON CAN ANSWER; THE COUNTERS STILL HOLD ALL
+   * OF THEM. That split is the whole point and getting it wrong inverts an honesty
+   * guarantee, so it is written out rather than left to a reader of `filter`.
+   *
+   * `GET /pending` serves one entry per stored blocker, and a blocker the server could
+   * not read as a question arrives with `unavailable: true` and `id`/`kind`/`question`
+   * all null (`serialize._unreadable_blocker`). Rendered through the prompt path it
+   * became a question labelled "Null" with a free-text box that no submission could
+   * close, and — because `itemKey` was null for every such entry — skipping one skipped
+   * all of them.
+   *
+   * `remaining`, `total`, `notShown` and the "all resolved" branch keep reading
+   * `pendingTotal`, which is the SERVER's count and includes the unreadable entries. So
+   * a record whose only open blocker is unreadable can never reach "All blockers
+   * resolved · ready to export": there is nothing to answer here and the record is
+   * still, truthfully, not finished. Filtering the counters too would have produced
+   * exactly that false claim, which is why the filter is applied here and nowhere else.
+   */
+  const answerable = useMemo(() => pending.filter(isAnswerablePendingItem), [pending]);
+  const unreadable = useMemo(
+    () => pending.filter((p) => !isAnswerablePendingItem(p)),
+    [pending],
   );
-  const skippedItems = pending.filter((p) => skipped.has(itemKey(p)));
-  const upcomingItems = pending.filter(
+  const currentItem = useMemo(
+    () => answerable.find((p) => !skipped.has(itemKey(p))),
+    [answerable, skipped],
+  );
+  const skippedItems = answerable.filter((p) => skipped.has(itemKey(p)));
+  const upcomingItems = answerable.filter(
     (p) => itemKey(p) !== (currentItem ? itemKey(currentItem) : null) && !skipped.has(itemKey(p)),
   );
 
@@ -698,8 +728,22 @@ function LoadedCompletion({
       .getPendingPage(id, { offset: walked, limit: PENDING_PAGE })
       .then((next) => {
         setPending((prev) => {
-          const held = new Set(prev.map(itemKey));
-          return [...prev, ...next.pending.filter((p) => !held.has(itemKey(p)))];
+          // DEDUPED ON WHAT HAS AN IDENTITY, AND AN UNREADABLE ENTRY HAS NONE.
+          // `itemKey` is `blocker_key ?? id`, and both are null for an entry the server
+          // could not read — so a single `Set` over the raw list would key every such
+          // entry as `null` and drop all but the first. Two outcomes were available and
+          // this is the less dishonest one: a duplicated unreadable row is redundant
+          // (it is not answerable, so it cannot be answered twice), whereas dropping
+          // one would hide a blocker the record is still refused for. The disclosure
+          // below counts what is held, so the redundancy is visible rather than
+          // silently changing a number.
+          const held = new Set(prev.filter(isAnswerablePendingItem).map(itemKey));
+          return [
+            ...prev,
+            ...next.pending.filter(
+              (p) => !isAnswerablePendingItem(p) || !held.has(itemKey(p)),
+            ),
+          ];
         });
         if (next.page) {
           setPendingTotal(next.page.total);
@@ -1247,6 +1291,64 @@ function LoadedCompletion({
         </div>
       ))}
 
+      {/* THE ENTRIES THAT ARE NOT QUESTIONS, DISCLOSED RATHER THAN DROPPED.
+          The queue above holds only what a person can answer, so without this the
+          reader would see a count they could not account for — or, on a record whose
+          only blocker is unreadable, an empty screen over a record that is still
+          refused. The REASON is the server's own words (`unavailable_reason`); this
+          screen adds no interpretation of what the stored value was meant to be, and
+          offers no control, because no answer submitted here could close it.
+          Deliberately NOT presented as an error state: nothing the reader did caused
+          it, and every other question on the record is still answerable. */}
+      {unreadable.length > 0 && (
+        /* `role="status"`, MATCHING ITS SIBLING BELOW — and the mismatch it replaces
+           was not cosmetic. This block is NOT initial-render-only: it appears after
+           "Show more questions" fetches a page containing such an entry, and it can
+           appear after an answer changes the list. Under `role="note"` none of that was
+           announced, so a screen-reader user heard "N more open questions are not shown
+           here" (a live `status` region) and did NOT hear "this record stays blocked",
+           which is the more consequential of the two. The region also had no accessible
+           name; it has one now. */
+        <div
+          className="upcoming-more"
+          role="status"
+          aria-label="Stored questions that cannot be answered here"
+        >
+          <span className="upcoming-more-text">
+            {/* THE COPY SAYS ONLY WHAT IS TRUE OF EVERY ENTRY IT COUNTS. It used to
+                read "could not be read", which is true of a stored number or string and
+                FALSE of the other class the server marks `unavailable`: an entry whose
+                prose ISAAC read perfectly well and is showing in the list beside this
+                sentence, which is unanswerable only because it names no kind and so has
+                no answer key. "Cannot be answered here" is true of both, and the
+                per-entry reason below is the server's own words for which one it is. */}
+            {unreadable.length === 1
+              ? '1 stored question cannot be answered here, so this record stays blocked.'
+              : `${unreadable.length} stored questions cannot be answered here, so this record stays blocked.`}
+          </span>
+          {/* THE SCIENTIST'S OWN QUESTION, WHEN THE SERVER SENT ONE — and it used to
+              appear NOWHERE. These entries are excluded from the queue above, so before
+              this the only text on screen about them was the count and the reason;
+              a record whose stored question read "Which detector was used?" showed the
+              reader nothing but "could not be read". `pendingSummary` supplies the
+              prose when there is prose and the generic label when there is not, and the
+              REASON is always the server's, never this screen's interpretation. */}
+          <ul className="upcoming-unreadable">
+            {unreadable.map((item, i) => {
+              const summary = pendingSummary(item);
+              return (
+                <li key={`unreadable-${i}`}>
+                  <span className="upcoming-unreadable-label">{summary.label}</span>
+                  {summary.locator && (
+                    <span className="upcoming-unreadable-reason">{summary.locator}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       {/* THE WITHHELD QUESTIONS, NAMED AND REACHABLE. This screen holds a page of the
           record's open questions, and a page that did not say so would be exactly the
           silent truncation the bounded contract exists to prevent. The count is the
@@ -1287,7 +1389,17 @@ function LoadedCompletion({
           record the panel would have claimed the reader had reviewed everything with
           2,950 questions never shown to them. The disclosure above carries the truth
           in that state, and its button is how the reader gets to the rest. */}
-      {!blocker && skippedItems.length > 0 && notShown === 0 && (
+      {/* `unreadable.length === 0` IS THE SECOND HALF OF THAT SAME ARGUMENT, AND IT WAS
+          MISSING. The reasoning above rests on `!blocker` accounting for every question
+          on the page — which stopped being true the moment `blocker` and `skippedItems`
+          began deriving from `answerable` rather than from `pending`. Measured: 2
+          answerable questions plus 1 unreadable entry, both answerable ones skipped, a
+          single page (`notShown === 0`) — `!blocker` is true, and the panel claimed
+          "Every question reviewed this visit · 2 you don't know" over a THIRD entry the
+          reader was never shown here and which is still blocking the record. The
+          filtering commit's mutation set targeted "counters filtered too" and missed
+          this, because it is not a counter; it is a premise. */}
+      {!blocker && skippedItems.length > 0 && notShown === 0 && unreadable.length === 0 && (
         <div className="completion-allskipped" role="note">
           {/* KEPT NO LONGER THAN THE COPY IT REPLACED, and that is a hard constraint,
               not a style preference. The first scoping draft ran several lines longer;

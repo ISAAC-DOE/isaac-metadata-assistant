@@ -68,11 +68,25 @@ export type EvidenceView = {
  *  older caller or a fixture that omits it still typechecks, which is correct: a record
  *  with no runs has no run-owned questions. */
 export type PendingItem = {
-  id: string;
+  /**
+   * The answer key — and `null` when there is none. An entry the server could not read
+   * as a question has no key an answer could be submitted under
+   * (`serialize._unreadable_blocker`), and inventing one here would be inventing the
+   * one string a write is addressed to. Every lookup below compares it to a string, so
+   * a null id matches no proposal, which is the correct outcome.
+   */
+  id: string | null;
   label: string;
+  /**
+   * True when this entry is not a question anybody can answer. Set from the server's
+   * own `unavailable` discriminator by `useRecordSession.toPendingItems`, which keeps
+   * such an entry in the list on purpose: dropping it made the assistant report a
+   * blocked record as having nothing pending.
+   */
+  unreadable?: boolean;
   run_id?: string | null;
   /** Unique across owners; `id` is not. See `Proposal.blockerKey`. */
-  blocker_key?: string;
+  blocker_key?: string | null;
 };
 
 /**
@@ -422,6 +436,26 @@ const REGISTRY: Record<string, (ctx: AgentContext, opts: AgentOpts) => IntentRes
         text:
           'There are no pending fields — none is currently blocking. The deterministic ' +
           'audit remains the authority on completeness.',
+      };
+    }
+    if (next.unreadable) {
+      /*
+       * AN UNREADABLE ENTRY IS NOT A FIELD THE ASSISTANT CAN OFFER TO STAGE.
+       *
+       * The sentence below promises the assistant "can stage a value you supply for
+       * confirmation", and for this entry that is false in a way the reader would only
+       * discover by trying: there is no answer key to submit a value under (`id` is
+       * null — see `serialize._unreadable_blocker`), so nothing could be staged and
+       * nothing could be applied. Saying so, and saying the record therefore stays
+       * blocked, is the honest answer; `next.label` carries the SERVER's own reason
+       * rather than any guess about what the stored entry was meant to be.
+       */
+      return {
+        text:
+          `The next entry blocking this record is not a question the assistant can ` +
+          `read: ${next.label}. It cannot be answered here, and the record stays ` +
+          `blocked until the stored document is repaired. Nothing about it is guessed ` +
+          `— that is the whole reason it is reported rather than filled in.`,
       };
     }
     return {

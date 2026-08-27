@@ -164,9 +164,33 @@ def apply_answers(draft: dict, answers: dict) -> dict:
     asset_sha256 = answers.get("asset_sha256") or {}
 
     draft.setdefault("assets", [])
-    remaining_pending: list[dict] = []
+    # `list`, not `list[dict]`: a stored entry that is NOT a mapping is kept here
+    # verbatim (see the guard at the top of the loop below), so the annotation would
+    # be a claim about the contents that the code deliberately does not enforce.
+    remaining_pending: list = []
 
     for entry in draft.get("pending") or []:
+        # AN ENTRY THAT IS NOT A QUESTION IS KEPT, UNANSWERED — the same answer the
+        # `Unknown blocker kind` branch at the bottom of this loop already gives, and
+        # for the same reason: this writer never silently drops a stored blocker.
+        #
+        # THE MEASURED DEFECT. `entry.get("kind")` raised on any non-mapping entry, so
+        # ONE junk entry made every OTHER question on the record unanswerable. Measured
+        # over HTTP on `1ad1f8f`, with `pending = [<a well-formed qc blocker>, 7]`
+        # persisted and a valid `qc` answer submitted: `POST
+        # /api/experiments/{id}/answers` -> **500** (`AttributeError: 'int' object has
+        # no attribute 'get'`, at the `entry.get("kind")` line below). After: **200**,
+        # the qc answer applied, and `7` still in `pending`.
+        #
+        # NOTHING IS REPAIRED AND NOTHING IS INVENTED. The entry is appended to
+        # `remaining_pending` BY VALUE, so `draft["pending"]` keeps it exactly as
+        # stored; it is unanswerable, so it keeps blocking export, which is the truthful
+        # outcome for a blocker nothing can read. `serialize.pending_to_list` serves it
+        # as `unavailable` with the shape that was found, so a reader is told why their
+        # record cannot finish rather than being left with a question that never closes.
+        if not isinstance(entry, dict):
+            remaining_pending.append(entry)
+            continue
         kind = entry.get("kind")
 
         if kind == "asset":
@@ -297,8 +321,24 @@ def apply_answers(draft: dict, answers: dict) -> dict:
     # keeping the original derivation note.
     edge = answers.get("edge")
     if edge is not None:
+        # `isinstance(imp, dict)` IS THE ROUTE'S OWN PREDICATE, and stating it here is
+        # what stops the two from disagreeing. `routes._edge_derivations_in` decides
+        # whether this write may proceed with
+        # `if isinstance(entry, dict) and entry.get("about") == "edge"`, and its
+        # docstring calls that predicate "`complete.apply_answers`'s OWN, restated as a
+        # question this module can ask BEFORE calling it" — while this loop did not
+        # have the isinstance half. So a draft holding a junk implicit item BESIDE a
+        # readable edge derivation passed the route's gate and crashed here: measured
+        # over HTTP on `1ad1f8f` with `implicit = [7, <edge derivation>]` and
+        # `{"edge": "L3"}`, `POST /api/experiments/{id}/answers` -> **500**
+        # (`AttributeError`, this line). After: **200**, the edge confirmed on the entry
+        # that carries the derivation.
+        #
+        # Nothing is dropped or repaired: this loop only ever WRITES INTO an entry it
+        # matches, and an item that is not a mapping cannot be the edge derivation —
+        # which is precisely the fact the route already relies on.
         for imp in draft.get("implicit") or []:
-            if imp.get("about") == "edge":
+            if isinstance(imp, dict) and imp.get("about") == "edge":
                 imp["value"] = edge
                 imp.setdefault("evidence", [])
                 imp["evidence"].append(
@@ -636,8 +676,13 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
     # -- edge: overwrite the implicit edge value + append confirmation --
     edge = answers.get("edge")
     if edge is not None:
+        # THE SAME PREDICATE AS `apply_answers`, for the reason `_supersede_qc_evidence`
+        # states about a different rule: "Two callers cannot disagree about a rule
+        # neither of them owns." Measured on `1ad1f8f`, `implicit = [7, <edge
+        # derivation>]` with `{"edge": "L3"}`: `POST /api/experiments/{id}/edit` ->
+        # **500** here, exactly as the answering writer did.
         for imp in draft.get("implicit") or []:
-            if imp.get("about") == "edge" and imp.get("value") != edge:
+            if isinstance(imp, dict) and imp.get("about") == "edge" and imp.get("value") != edge:
                 imp["value"] = edge
                 imp.setdefault("evidence", [])
                 imp["evidence"].append(

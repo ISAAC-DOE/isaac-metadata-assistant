@@ -1070,24 +1070,37 @@ def test_a_malformed_element_is_preserved_by_a_library_write(experiment_id, clie
     )
 
 
-def test_a_malformed_stored_asset_already_breaks_the_truth_paths_read(client, experiment_id):
-    """A PRE-EXISTING DEFECT, PINNED SO IT IS NOT MISTAKEN FOR THIS SLICE'S.
+def test_a_malformed_stored_asset_is_now_a_FINDING_not_a_crash(client, experiment_id):
+    """**INVERTED, NOT DELETED — and this test asked for exactly that.**
 
-    ``validate_draft`` calls ``.get`` on every element of ``draft["assets"]`` without a
-    type guard, so a record whose stored asset list holds a non-object raises out of
-    the truth core on an ordinary read — long before any asset route is involved. This
-    slice deliberately does NOT fix it: ``src/isaac_records/draft_validator.py`` is
-    truth-path and out of this slice's scope.
+    ~~``test_a_malformed_stored_asset_already_breaks_the_truth_paths_read``: "A
+    PRE-EXISTING DEFECT, PINNED SO IT IS NOT MISTAKEN FOR THIS SLICE'S. ``validate_draft``
+    calls ``.get`` on every element of ``draft["assets"]`` without a type guard, so a
+    record whose stored asset list holds a non-object raises out of the truth core on an
+    ordinary read … This slice deliberately does NOT fix it … The test asserts the
+    CURRENT behaviour so that a later slice which fixes it sees a red test naming the
+    decision, rather than this limitation quietly persisting."~~
 
-    The test asserts the CURRENT behaviour so that a later slice which fixes it sees a
-    red test naming the decision, rather than this limitation quietly persisting.
+    This is that later slice, and this is that red test. ``validate_draft`` now files a
+    finding at ``assets[0]`` naming the shape it found and does not walk the item
+    (``draft_validator._mapping_items``), disclosed under §13 in
+    ``_DISCLOSED_TRUTH_PATH_CHANGES``. The old text is quoted rather than dropped because
+    it is the record of a limitation being carried deliberately and then discharged.
+
+    The record is still REFUSED — the point was never that a malformed asset becomes
+    acceptable, only that reading it must not take the reader's record away.
     """
     store = client_ws(client)
     exp = store.load_experiment(experiment_id)
     exp.draft["assets"] = ["not an object"]
     exp.save()
-    with pytest.raises(AttributeError):
-        validate_draft(store.load_experiment(experiment_id).draft)
+
+    report = validate_draft(store.load_experiment(experiment_id).draft)  # must not raise
+    assert report.ok is False
+    assert any(where == "assets[0]" for where, _ in report.errors), report.errors
+    # The stored value is not echoed back into the finding — see
+    # `tests/test_malformed_draft_containers_are_reported_not_raised.py`.
+    assert not any("not an object" in message for _, message in report.errors), report.errors
 
 
 def test_export_reach_none_is_measured_against_the_real_export_composition(client):

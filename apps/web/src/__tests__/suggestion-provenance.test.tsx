@@ -4,7 +4,7 @@ import { GuidedPrompt } from '../components/GuidedPrompt';
 import { pendingItemToBlocker, sanitizeInferability, toExperimentSummary } from '../lib/adapt';
 import type {
   ApiExperimentSummary,
-  ApiPendingItem,
+  ApiAnswerablePendingItem,
   Inferability,
   PendingBlocker,
 } from '../lib/types';
@@ -308,7 +308,7 @@ describe('the adapter does not manufacture values', () => {
   });
 
   it('passes the inferability decision through without re-deciding it', () => {
-    const item: ApiPendingItem = {
+    const item: ApiAnswerablePendingItem = {
       id: 'series',
       kind: 'series',
       question: 'Provide the reduced spectrum.',
@@ -390,7 +390,7 @@ describe('the adapter does not manufacture values', () => {
   });
 
   it('carries an example answer’s provenance rather than re-deriving it', () => {
-    const item: ApiPendingItem = {
+    const item: ApiAnswerablePendingItem = {
       id: 'series',
       kind: 'series',
       question: 'Provide the reduced spectrum.',

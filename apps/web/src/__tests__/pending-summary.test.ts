@@ -11,20 +11,20 @@ import type { ApiPendingItem } from '../lib/types';
  * not mutate the pending item, and the underlying question is unchanged.
  */
 
-const asset: ApiPendingItem = {
+const asset = {
   id: 'ssrl-archive://BL15-2/2099_run_000/raw/',
   kind: 'asset',
   question: 'What is the sha256 of ssrl-archive://BL15-2/2099_run_000/raw/?',
   about: 'ssrl-archive://BL15-2/2099_run_000/raw/',
-};
+} satisfies ApiPendingItem;
 
-const descriptor: ApiPendingItem = {
+const descriptor = {
   id: 'd1',
   kind: 'descriptor',
   question:
     'Provide at least one descriptor (e.g. XANES inflection-point energy + uncertainty) — an evidence record requires descriptors.',
   about: 'required_for_evidence_record',
-};
+} satisfies ApiPendingItem;
 
 describe('pendingSummary — P33 S4 (D9/C2)', () => {
   it('asset: concise structured label (not the raw question echo) + locator surfaced once', () => {

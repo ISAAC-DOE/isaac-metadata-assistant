@@ -41,11 +41,22 @@ THREE THINGS THAT WERE REJECTED, each because it would tell the reader something
 * **Coercion — parsing, wrapping, or repairing the stored value.** That turns a broken
   document into a plausible one, which ``CLAUDE.md`` §5 exists to prevent.
 
-WHAT THIS DELIBERATELY DOES NOT FIX, pinned at the bottom so it is visible rather than
+~~WHAT THIS DELIBERATELY DOES NOT FIX, pinned at the bottom so it is visible rather than
 implied: ``serialize.pending_to_list`` calls ``entry.get("kind")`` and so still 500s on
 a non-dict entry. That is a PRE-EXISTING defect of the malformed-ENTRY case
 (``pending: [7]``), not of this one, and the last test asserts the two now behave
-IDENTICALLY — which is the whole claim this change makes.
+IDENTICALLY — which is the whole claim this change makes.~~
+
+**THE RESIDUE NAMED ABOVE IS CLOSED, and the paragraph is struck rather than deleted so
+a reader can see that this file's claim was scoped rather than wrong.** The malformed
+ENTRY now serves as one entry marked ``unavailable`` with a reason naming the shape
+(``serialize._unreadable_blocker``), so ``GET /pending`` answers **200** where every row
+of the table above was **500**. The equality test at the bottom is UNCHANGED and still
+passing — which is exactly what it said would happen: "if the shared behaviour is later
+fixed — it will still pass, and it will still be pinning the thing this change actually
+did." The new behaviour, its rejected alternatives and the two write-path refusals that
+are still 500 are pinned in
+``apps/api/tests/test_a_malformed_pending_entry_is_served_not_500.py``.
 """
 
 from __future__ import annotations
@@ -248,11 +259,15 @@ def test_the_non_iterable_case_now_behaves_EXACTLY_like_the_malformed_entry_case
 ):
     """THE CLAIM THIS CHANGE MAKES, asserted as an equality rather than as a status code.
 
-    ``GET /pending`` renders entries through ``serialize.pending_to_list``, which calls
+    ~~``GET /pending`` renders entries through ``serialize.pending_to_list``, which calls
     ``entry.get("kind")`` and so fails on ANY non-dict entry. That is a pre-existing
     defect of the malformed-ENTRY case and is deliberately NOT fixed here — fixing it
     means deciding what a client is shown for an unreadable blocker, which is a response
-    contract, not a read guard.
+    contract, not a read guard.~~ **That decision has since been made** — the response
+    contract is ``unavailable`` + ``unavailable_reason`` on a served entry
+    (``serialize._unreadable_blocker``) — so both cases are now **200** here. The
+    paragraph is struck rather than rewritten because it is the reason this test was
+    written as an EQUALITY, and the next paragraph is what makes that survive the fix.
 
     What this change is entitled to claim is CONVERGENCE: ``pending: 7`` is no longer a
     separate, worse failure than ``pending: [7]``. Asserting the two are equal keeps the
