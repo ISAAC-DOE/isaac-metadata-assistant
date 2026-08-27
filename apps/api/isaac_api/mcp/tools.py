@@ -962,9 +962,26 @@ def _tools() -> tuple[Tool, ...]:
                 "`blocker_key` is a display and de-duplication key. It is "
                 "`<run_id>:<id>` for a run-owned question and the bare `id` for a "
                 "record-level one, so on a record with no runs the two are equal. The "
-                "answer key is always `id`, and the run is named separately. A record "
+                "answer key is `id` WHENEVER THERE IS ONE, and the run is named "
+                "separately. A record "
                 "with two runs lists the same `id` twice with different `run_id`s, and "
                 "they are different questions about different measurements.\n\n"
+                "**AN ENTRY MAY CARRY `unavailable: true`, AND THEN `id` IS `null` AND "
+                "THERE IS NO ANSWER KEY.** This list reports one entry per stored "
+                "blocking question, INCLUDING one this application could not present "
+                "as an answerable question — a stored value that is not a question at "
+                "all, or one that names no kind. Such an entry is served rather than "
+                "dropped, because dropping it would shorten the list below the "
+                "record's own `pending_count` and make a still-blocked record look "
+                "finished. It carries `unavailable_reason` in this application's own "
+                "words, and `id`, `kind` and `blocker_key` are `null` — no answer key "
+                "is invented for it, because a fabricated one is refused by "
+                "`isaac_answer_questions` with `422 unrecognized_field`. BRANCH ON "
+                "`unavailable`, never on a pattern of nulls: skip such an entry when "
+                "answering, count it when reporting what the record still owes, and "
+                "surface the reason to a person — nothing an agent can send will close "
+                "it, and the record stays blocked until the stored document is "
+                "corrected.\n\n"
                 "For the built-in worked examples a question may carry a clearly "
                 "labelled `demo_answer`. It is a suggestion for a person to read and "
                 "is never applied automatically — sending it back is asserting that "
@@ -1196,9 +1213,23 @@ def _tools() -> tuple[Tool, ...]:
             # message. CLAUDE.md §12: the gate is ISAAC's, not upstream's, and no
             # surface may report an exactness refusal as an official-schema error.
             # The vocabulary is `POST /api/validate/record`'s, which already names
-            # `schema_ok` and `exactness` separately. See `routes._validate_unit` for
-            # why a discriminator on the wire is the durable fix and why it is not in
-            # this slice.
+            # `schema_ok` and `exactness` separately.
+            #
+            # THE DISCRIMINATOR NOW EXISTS AND IS NAMED BELOW. The previous revision
+            # of this comment ended "see `routes._validate_unit` for why a
+            # discriminator on the wire is the durable fix and why it is not in this
+            # slice" — it is in the payload now, as
+            # `official.official_validator_ran`, so an agent no longer has to
+            # reconstruct the answer from `dry_run` plus an ordering rule it would
+            # have had to read `export.py` to learn. THIS DESCRIPTION IS PART OF THE
+            # FIX AND WAS THE PART THAT GOT MISSED LAST TIME: the earlier slice
+            # corrected three React renderers and left both machine-readable
+            # contracts — these tool descriptions and two OpenAPI descriptions —
+            # stating the withdrawn claim. `test_official_verdict_attribution.py` now
+            # DERIVES the guarded surface set from the routes that build an official
+            # verdict and from `Tool.operation_ids`, rather than from a hand-kept
+            # list, so a tool over such a route cannot be added without this
+            # disclosure.
             description=(
                 "Check the official record one run WOULD export — its own content "
                 "plus what it inherits — and return the no-guessing draft verdict, "
@@ -1210,12 +1241,24 @@ def _tools() -> tuple[Tool, ...]:
                 "stopped the export before it could — the no-guessing draft check, "
                 "or ISAAC's own anchored-pattern exactness gate, which refuses a "
                 "value that satisfies one of the schema's `^...$` patterns only "
-                "because Python's `$` also matches before a trailing newline. Those "
+                "because Python's `$` also matches before a trailing newline. "
+                "`official.official_validator_ran` SAYS WHICH, and it is the field "
+                "to branch on: `true` means the official validator examined the "
+                "document these `errors` describe, `false` means the export was "
+                "refused before it was reached. Both kinds "
                 "arrive under the same `errors` key, so `official.ok: false` is not "
-                "by itself evidence that the official schema rejected anything; "
+                "by itself evidence that the official schema rejected anything — and "
+                "`official.dry_run` does not answer it, because a dry-run PASS does "
+                "require official validation while a dry-run FAILURE may never have "
+                "reached it. `official_validator_ran: false` is NOT a verdict: it "
+                "says the vendored schema did not speak, never that it refused, so "
+                "report it as \"the export gate refused\" and not as \"the official "
+                "schema rejected it\" — **unless `official.unavailable` is `true`, "
+                "which is the case to read FIRST**: there no gate refused either, "
+                "because no verdict could be produced at all (the written record "
+                "could not be read, or the check itself failed). "
                 "`official.schema` names the schema this deployment would validate "
-                "against and is stamped on every response. A dry-run PASS does mean "
-                "official validation ran and passed.\n\n"
+                "against and is stamped on every response.\n\n"
                 "Both verdicts come from the same deterministic core the "
                 "command line uses; an advisory warning never turns a pass into a "
                 "failure."

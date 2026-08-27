@@ -469,9 +469,25 @@ def _run_clause(entry: dict) -> str:
 
 
 def _pending_labels(pending_items: list) -> list:
+    """One label per open question, on a ladder that ends at the server's own words.
+
+    ``unavailable_reason`` IS A RUNG, and it used to be discarded. ``GET /pending``
+    serves an entry this application could not present as an answerable question —
+    ``unavailable: true`` plus a reason naming what was found — and every earlier rung
+    (``about``, ``question``, ``id``) is ``null`` for the unreadable class. So the
+    ladder fell through to the literal *"unnamed pending field"*, which describes the
+    entry LESS accurately than the response beside it already did: the reason is the one
+    thing anybody knows about it, and it is what an operator needs in order to repair
+    the stored document.
+
+    It is the LAST rung rather than the first because an entry that has a locator or
+    prose is better named by those — including the readable-but-unanswerable class,
+    which carries prose and is named by it. The literal remains as the floor, so this
+    never returns an empty label and never invents a name.
+    """
     labels = []
     for p in pending_items:
-        for key in ("about", "question", "id"):
+        for key in ("about", "question", "id", "unavailable_reason"):
             v = p.get(key)
             if isinstance(v, str) and v.strip():
                 labels.append(v.strip() + _run_clause(p))

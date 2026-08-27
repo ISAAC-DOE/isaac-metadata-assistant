@@ -189,7 +189,25 @@ export interface DemoAnswer {
 export interface PendingBlocker {
   id: string; // uri for assets, else kind
   kind: BlockerKind;
-  question: string; // verbatim from draft.pending[]
+  /**
+   * Verbatim from `draft.pending[]` — and `null` when the stored entry carries none.
+   *
+   * The server authors no question text it was not given, so an entry with a kind and
+   * no prose arrives as `null`. Widened rather than defaulted to `''`: the two render
+   * identically (React draws nothing for either), and an empty string would be this
+   * client asserting the draft holds an empty question when it holds no question at all.
+   *
+   * ~~"The KIND label above the prose carries the identity in that case."~~ **STRUCK —
+   * measured false, and it was the stated mitigation for the widening.** `label` reaches
+   * exactly ONE render site, `GuidedPrompt.tsx:443`, and it is an `aria-label` on the
+   * input. Nothing VISIBLE above the prose carries it, so a prose-less blocker renders
+   * an empty `<h2 className="guided-question">` on the prompt card. What IS true, and is
+   * a different surface: the QUEUE rows go through `adapt.pendingSummary`, whose
+   * `KIND_LABEL[item.kind] ?? item.question ?? item.id` ladder does name such an entry —
+   * so it is identified in the list and unnamed on the card. Giving the card a visible
+   * label is a `GuidedPrompt.tsx` change and is named as residue rather than made here.
+   */
+  question: string | null;
   label: string; // short Title Case label for the question
   path: string; // JSON path token
   about?: string;
@@ -769,20 +787,96 @@ export interface ApiDemoAnswer {
   provenance?: ExampleAnswerProvenance;
 }
 
+/**
+ * ONE ENTRY OF `GET /pending`, INCLUDING THE ONE THAT IS NOT A QUESTION.
+ *
+ * `id`, `kind` and `question` are nullable because the server serves an entry it cannot
+ * present as an answerable question rather than failing the whole request: one stored
+ * blocker in, one served entry out, marked `unavailable: true` with an
+ * `unavailable_reason` saying why, and the entry stays COUNTED so the record keeps
+ * being refused. See `serialize._unreadable_blocker` for the measured 500s this
+ * replaced and for the alternatives that were rejected.
+ *
+ * TWO DIFFERENT CASES ARRIVE ON THAT ONE FLAG, and conflating them was a shipped
+ * defect:
+ *
+ *  - **Unreadable.** The stored entry is not a question at all (a number, a string, a
+ *    mapping whose `kind` is unhashable). Nothing is invented — every field is `null`
+ *    — and `unavailable_reason` names the SHAPE that was found.
+ *  - **Readable but unanswerable.** The stored entry carries prose and no `kind`. The
+ *    server read it, so `question` IS present; but the answer key is the kind, so there
+ *    is no key to submit under, and the reason says exactly that. Rendering
+ *    "could not be read" over this entry — while the same response carried the
+ *    scientist's own sentence — is the defect `pendingSummary` was corrected for.
+ *
+ * A consumer that needs an answerable question uses `adapt.isAnswerablePendingItem`,
+ * which narrows to `ApiAnswerablePendingItem` below. Widening these three fields rather
+ * than declaring them non-null is deliberate: it makes every consumer decide what it
+ * does with an unreadable entry instead of discovering `"Null"` on screen. **That claim
+ * was measurably NOT true for one consumer** — `assistantComposer.explain_pending_item`
+ * interpolated `${item.question}` under a comment asserting the field was non-optional,
+ * which the widening commit had itself deleted, and `tsc` passed because a template
+ * literal accepts `null`. Widening a type does not force a template literal to handle
+ * it; only a test does. `assistant-composer-null-safety.test.ts` is that test.
+ */
 export interface ApiPendingItem {
-  id: string; // uri for assets, else kind
-  kind: BlockerKind;
-  question: string;
+  id: string | null; // uri for assets, else kind; `null` when `unavailable`
+  kind: BlockerKind | null;
+  question: string | null;
   about?: string | null;
   // Example-scope records ONLY. `null`/absent on every ordinary record.
   demo_answer?: ApiDemoAnswer | null;
-  inferability?: Inferability;
+  // `null` on an unreadable entry: no inferability decision is made about a blocker
+  // this server could not read, and asserting one would be inventing a refusal about a
+  // field nobody can name. Every other entry carries the real decision.
+  inferability?: Inferability | null;
   // Present when a RUN owns this question. `null` for a record-level one.
   run_id?: string | null;
   run_label?: string | null;
   // Unique across owners; `id` is not. See `PendingBlocker.key`.
-  blocker_key?: string;
+  blocker_key?: string | null;
+  /**
+   * THE SERVER'S DISCRIMINATOR for an entry it could not read as a question. Optional
+   * because it is absent on every ordinary entry — its presence, not a pattern of
+   * nulls, is what a consumer branches on.
+   */
+  unavailable?: boolean;
+  /**
+   * The server's own words for WHAT SHAPE was found — never the stored value, which is
+   * arbitrary content and is deliberately never echoed back.
+   */
+  unavailable_reason?: string | null;
 }
+
+/**
+ * A pending entry that IS a question: `id` and `kind` proved present, and `question`
+ * proved to be prose or absent.
+ *
+ * Produced only by `adapt.isAnswerablePendingItem`. Everything that renders a prompt,
+ * derives an input type, or submits an answer takes this type.
+ *
+ * ~~"so an unreadable entry cannot reach any of them by accident — it is a compile
+ * error rather than a `"Null"` label on screen"~~ — **struck, because it was FALSE FOR
+ * `question` in the commit that wrote it, and the falsity was worse than the label it
+ * described.** The narrowing covered `id` and `kind` only, so
+ * `{"kind": "qc", "question": {"a": 1}}` — an entry the API genuinely accepts an answer
+ * for (measured: `POST /answers` with key `qc` answers **200**) — satisfied the
+ * predicate and put an OBJECT into `<h2>{blocker.question}</h2>`. React throws
+ * "Objects are not valid as a React child", there is no ErrorBoundary anywhere in this
+ * application, and the whole page blanks. A `null` label is a bad row; a thrown render
+ * is no application.
+ *
+ * `question` is `string | null` here rather than `string`, and that is deliberate
+ * rather than a leftover: a stored entry may legitimately carry a kind and no prose,
+ * and the server authors none it was not given. What the type now guarantees is that it
+ * is never anything ELSE. `undefined` is admitted for recorded fixtures that omit the
+ * key entirely.
+ */
+export type ApiAnswerablePendingItem = ApiPendingItem & {
+  id: string;
+  kind: BlockerKind;
+  question: string | null;
+};
 
 /**
  * THE SELF-DESCRIPTION A BOUNDED QUESTION LIST CARRIES.
@@ -832,6 +926,44 @@ export interface ApiValidateResult {
   errors: { path: string; message: string }[];
   schema: string; // "ISAAC v1.05"
   dry_run: boolean; // true until the record is exported
+  /**
+   * DID THE OFFICIAL VALIDATOR PRODUCE THE `errors` BESIDE THIS VERDICT?
+   *
+   * The discriminator four surfaces needed and none of them had. `dry_run` does not
+   * answer it — a dry-run PASS does require `validate_official`, a dry-run FAILURE may
+   * never have reached it, because `export.py` returns `official_report=None` on the
+   * two paths that precede it (a failed no-guessing report, and ISAAC's own
+   * anchored-pattern exactness gate, whose findings it folds into `draft_report`). So
+   * `errors` carried three kinds of finding under one key and `schema: "ISAAC v1.05"`
+   * was stamped over all of them.
+   *
+   * `false` IS NOT A VERDICT. It says the vendored schema did not speak — never that
+   * it refused. `CLAUDE.md` §1 makes that schema not ours to speak for, and §12: "no
+   * surface may report an exactness refusal as an official-schema error."
+   *
+   * DO NOT READ THIS FIELD DIRECTLY. `lib/officialAttribution.ts` is the one place it
+   * is read, and `__tests__/official-attribution-discriminator.test.ts` fails if a
+   * second file reads it. Fixing this defect surface-by-surface has already recurred
+   * four times; one decision point is the fix.
+   *
+   * Optional because a response predating the field carries neither it nor any
+   * substitute — `officialFindingSource` degrades to the old ordering rule and, where
+   * even that is silent, answers `unnamed` rather than guessing.
+   */
+  official_validator_ran?: boolean;
+  /**
+   * NO VERDICT COULD BE PRODUCED, AT THE TOP LEVEL — the same claim the `runs[]`
+   * entries below have always carried, and it was MISSING here while the route
+   * returned the state it describes.
+   *
+   * `post_validate` returns it on two branches: an exported record whose written
+   * artifact cannot be read, and an exception during the dry run. Both were
+   * previously indistinguishable from "one of ISAAC's own gates refused", because
+   * `official_validator_ran: false` is true of a gate refusal too. Absent on every
+   * verdict that IS a verdict; `ok` stays `false` either way, so this explains a
+   * refusal without softening it. Read through `officialFindingSource`.
+   */
+  unavailable?: boolean;
   // Present ONLY for a record whose runs each export their own official record:
   // one verdict per run, because a flat list of N records' errors is not
   // addressable. `ok` above is true only when every entry is; `dry_run` above is
@@ -843,6 +975,10 @@ export interface ApiValidateResult {
     ok: boolean;
     errors: { path: string; message: string }[];
     dry_run: boolean;
+    // PER UNIT, describing THAT unit's `errors`. The top-level flag above describes
+    // the top-level `errors`, which are the FIRST FAILING unit's — so for a specific
+    // run's findings, read the run's own flag. See `lib/officialAttribution.ts`.
+    official_validator_ran?: boolean;
     // NO VERDICT COULD BE PRODUCED — set by `_validate_unit` on the two branches
     // whose own comment reads "no verdict, not a schema violation": an unreadable
     // written artifact, and an exception during the dry run. `ok` is `false` on
@@ -2104,6 +2240,31 @@ export interface ApiRunCheckVerdict {
    * REASON legible without turning a non-verdict into a pass.
    */
   unavailable?: boolean;
+  /**
+   * DID THE OFFICIAL VALIDATOR PRODUCE THE `errors` BESIDE THIS VERDICT?
+   *
+   * The discriminator four surfaces needed and none of them had. `dry_run` does not
+   * answer it — a dry-run PASS does require `validate_official`, a dry-run FAILURE may
+   * never have reached it, because `export.py` returns `official_report=None` on the
+   * two paths that precede it (a failed no-guessing report, and ISAAC's own
+   * anchored-pattern exactness gate, whose findings it folds into `draft_report`). So
+   * `errors` carried three kinds of finding under one key and `schema: "ISAAC v1.05"`
+   * was stamped over all of them.
+   *
+   * `false` IS NOT A VERDICT. It says the vendored schema did not speak — never that
+   * it refused. `CLAUDE.md` §1 makes that schema not ours to speak for, and §12: "no
+   * surface may report an exactness refusal as an official-schema error."
+   *
+   * DO NOT READ THIS FIELD DIRECTLY. `lib/officialAttribution.ts` is the one place it
+   * is read, and `__tests__/official-attribution-discriminator.test.ts` fails if a
+   * second file reads it. Fixing this defect surface-by-surface has already recurred
+   * four times; one decision point is the fix.
+   *
+   * Optional because a response predating the field carries neither it nor any
+   * substitute — `officialFindingSource` degrades to the old ordering rule and, where
+   * even that is silent, answers `unnamed` rather than guessing.
+   */
+  official_validator_ran?: boolean;
 }
 
 export interface ApiRunCheckResponse {

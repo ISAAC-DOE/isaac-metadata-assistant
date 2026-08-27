@@ -74,6 +74,13 @@ import {
   type GraphViewport,
 } from './graphModel';
 import { ROUTES } from './routes';
+import {
+  OFFICIAL_SOURCE_LABEL,
+  officialCheckedDocument,
+  officialDocumentDetailValue,
+  officialFindingSource,
+  officialFindingsNote,
+} from './officialAttribution';
 import { titleCase } from './labels';
 
 export { MAX_SCALE, MIN_SCALE, VIEW_EXTENT };
@@ -204,7 +211,12 @@ export const NODE_PRODUCERS: Readonly<Record<ExperimentNodeKind, string>> = Obje
   evidence: 'one entry of evidence[].evidence[] (GET /api/experiments/{id}/evidence)',
   source_file: 'evidence entry source_file',
   workflow_step: 'workflow.ordered_steps (workflow.CANONICAL_ORDER — 5 steps)',
-  issue: 'official-schema validation error path (POST /api/experiments/{id}/validate)',
+  // NOT NECESSARILY THE OFFICIAL SCHEMA'S, and this string said it was. See the
+  // `issueSourceLabel` note below: the same payload carries findings from three
+  // producers, and `official_validator_ran` is what says which. The producer line
+  // now names the OPERATION, which is true of every branch; the source is stated
+  // per node, from the flag.
+  issue: 'the validation error list (POST /api/experiments/{id}/validate)',
   warning: 'portal_warnings advisory code (GET /api/experiments/{id}/warnings)',
   linked_record: 'record.links[].target in the exported official record',
   rule: 'evidence entry rule (source_type: derivation)',
@@ -1001,11 +1013,34 @@ export function buildExperimentGraph(
   }
 
   // ── 7. validation issues ──────────────────────────────────────────────────
-  if (validate.dry_run && validate.errors.length > 0) {
-    b.note(
-      'dry_run_validation',
-      'Validation here is a DRY RUN against the official ISAAC schema — the record has not been exported, so these are the issues an export would hit.',
-    );
+  // WHO produced them and WHICH document was read, asked once each through the one
+  // shared derivation. Neither is inferred from `dry_run` any more; see
+  // `lib/officialAttribution.ts` and the note below.
+  const issueSource = officialFindingSource(validate);
+  const issueDocument = officialCheckedDocument(validate);
+  /*
+   * THIS FILE WAS THE FIFTH CONSUMER OF THIS PAYLOAD AND WAS MISSED BY EVERY SWEEP,
+   * FOR A REASON WORTH RECORDING: it contains NUL bytes, so `grep`/`rg` without
+   * `--text` silently drop every hit in it and still exit 0. Three slices corrected
+   * the official-schema conflation in `RunCard`, `evidenceGraph`, `RunFindings`,
+   * `ValidateReview` and `ExportReadiness` while this module — which builds the
+   * Project Memory experiment graph — kept the plainest form of it, gated on exactly
+   * the ambiguous case. It was found by a byte-level scan, not by a text search.
+   *
+   * WHAT IT SAID: "Validation here is a DRY RUN against the official ISAAC schema",
+   * emitted on `validate.dry_run && errors.length > 0` — i.e. precisely the branch in
+   * which `export.py` may have returned `official_report=None` and the official
+   * validator never ran. Every issue node's `producer` said the same thing
+   * unconditionally, and every `fails` edge appended "(dry run against the official
+   * ISAAC schema)".
+   *
+   * `officialFindingSource` now answers it from the server's own
+   * `official_validator_ran`, and the note is only emitted where there is something
+   * true to say about the document. `CLAUDE.md` §1/§12.
+   */
+  if (validate.errors.length > 0) {
+    const note = officialFindingsNote(issueSource);
+    if (note !== null) b.note('dry_run_validation', note);
   }
   validate.errors.forEach((err, index) => {
     const normalized = normalizeIssuePath(err.path);
@@ -1017,8 +1052,14 @@ export function buildExperimentGraph(
       detail: [
         { term: 'Path', value: err.path },
         { term: 'Message', value: err.message },
-        { term: 'Schema', value: validate.schema },
-        { term: 'Dry run', value: validate.dry_run ? 'yes' : 'no' },
+        /* `Reported by` FIRST among the derived rows, and `Schema` is deliberately
+           relabelled. `validate.schema` is stamped on every response and names the
+           schema this deployment WOULD validate against — it is not a claim that the
+           schema produced the finding above it, which is exactly how a reader took it
+           while the row was called "Schema". */
+        { term: 'Reported by', value: OFFICIAL_SOURCE_LABEL[issueSource] },
+        { term: 'Schema this deployment validates against', value: validate.schema },
+        { term: 'Dry run', value: officialDocumentDetailValue(issueSource, issueDocument) },
       ],
       jump: { label: 'Review Export Readiness', to: ROUTES.export(detail.id) },
     });
@@ -1031,9 +1072,7 @@ export function buildExperimentGraph(
       source: owner,
       target: id,
       kind: 'fails',
-      why: `Validation issue at ${err.path} — ${err.message}${
-        validate.dry_run ? ' (dry run against the official ISAAC schema)' : ''
-      }`,
+      why: `Validation issue at ${err.path} — ${err.message} (reported by: ${OFFICIAL_SOURCE_LABEL[issueSource]})`,
       label: null,
     });
   });
