@@ -1,0 +1,143 @@
+/*
+ * Discard — the one visual treatment for "clear what I typed here, before it was sent".
+ *
+ * EVERY VALUE IS AN EXISTING TOKEN. Nothing new is minted: the trigger is `--text-muted`
+ * on the panel's own surface, the confirm step is the `--surface-subtle` / `--border-strong`
+ * pairing every inline form on these screens already uses, and the two buttons are the
+ * shipped `.btn-danger-quiet` / `.btn-secondary` rungs.
+ *
+ * `--text-muted` (#5b6570, 5.93:1 on white) RATHER THAN `--text-tertiary` (#78838f), which
+ * is the obvious pick for a quiet secondary control and measures 3.86:1 at this size —
+ * below the 4.5:1 body-text floor, and the subject of a still-open contrast item in
+ * `CLAUDE.md` §11 against `.section-tab`. The in-repo precedent for the fix is
+ * `components/runner.css`'s `.drop-target`, which moved between exactly these two tokens
+ * for exactly this reason. Adding a sixth site to a known defect to save one shade is not
+ * a saving.
+ *
+ * THE RESTING TREATMENT IS FLAT — no border, no fill — so the control sits below Confirm,
+ * Save, Capture and Finalize in the same row without a second boxed shape competing with
+ * them. The border and surface appear only on hover, which is where it needs to read as a
+ * button.
+ */
+
+/*
+ * THE ROW RESERVES ITS HEIGHT WHETHER OR NOT THE TRIGGER IS IN IT.
+ *
+ * The trigger is absent while nothing is staged (never disabled — see `DiscardStaged.tsx`),
+ * so without a reserved height the whole form below would step down on the first keystroke
+ * and back up on the last backspace. `min-height` matches the trigger's own box exactly.
+ *
+ * `align-items: flex-end` right-aligns the trigger and lets the confirm step, which sets
+ * its own width, span the column.
+ */
+.discard-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  min-height: 32px;
+  margin-top: 8px;
+}
+
+/* Programmatic focus only (`tabIndex={-1}`), as the announced landing place after a
+   discard. It is not in the tab order and does not draw a ring for a pointer user. */
+.discard-slot:focus {
+  outline: none;
+}
+
+.discard-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+/*
+ * WCAG 2.5.8 — the EFFECTIVE pointer target, without reserving the space.
+ *
+ * The visible control is 32px tall, which clears the 24px AA floor already. The 44px
+ * enhanced target is bought with an inset overlay rather than with height, because the
+ * alternative is 44px of reserved empty row in four panels, most of the time, for a
+ * control most readers never press.
+ *
+ * THE VERTICAL INSET IS THE SMALLER OF THE TWO, and the reason is a correction rather
+ * than a preference: an earlier version justified a symmetric one on the grounds that
+ * "the confirm step is never mounted at the same time as the trigger", which stopped
+ * being true when the trigger was kept mounted as a real disclosure. The step now sits
+ * 8px below the trigger (`.discard-slot`'s `gap`), so a 6px overlay stays clear of it
+ * while the horizontal one, which has nothing beside it in a column, can be larger.
+ */
+.discard-trigger::after {
+  content: '';
+  position: absolute;
+  inset: -6px -10px;
+}
+
+.discard-trigger:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.discard-trigger:active {
+  background: var(--screen-base);
+  border-color: var(--text-tertiary);
+}
+
+/* The trigger stays mounted while the step is open (see `DiscardStaged.tsx`), and reads
+   as the pressed disclosure it is while it does. */
+.discard-trigger[aria-expanded='true'] {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+/*
+ * THE CONFIRM STEP. Full width of the slot, so the sentence gets a readable measure
+ * rather than a 200px column hanging off the right edge.
+ */
+.discard-confirm {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+
+.discard-confirm-text {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.discard-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Narrow: the two decision buttons are the ones a thumb has to hit, and here the height
+   IS affordable — the step is open, so nothing is being reserved for a control that is
+   not on screen. */
+@media (max-width: 640px) {
+  .discard-confirm-actions .btn {
+    min-height: 44px;
+  }
+}

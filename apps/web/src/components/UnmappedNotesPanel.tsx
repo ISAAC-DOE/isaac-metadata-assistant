@@ -40,6 +40,8 @@ import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import type { ApiNote, ApiNoteState, ApiNotesResponse } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
+import { DiscardStaged } from './DiscardStaged';
+import { DISCARD_COPY } from '../lib/discardContent';
 import './unmappedNotes.css';
 
 /** Same narrowing `RunsSection` uses — a non-`ApiError` throw still renders a panel. */
@@ -405,7 +407,14 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
         </div>
       )}
 
-      <CaptureNote onCapture={capture} disabled={version === null} />
+      <CaptureNote
+        onCapture={capture}
+        disabled={version === null}
+        /* THIS PANEL'S ONE ACT-ANNOUNCEMENT CHANNEL, above. A discard is an act the
+           reader took and its outcome belongs in the same region every other act's
+           does — not in a second polite region competing with it. */
+        onAnnounce={setAnnouncement}
+      />
 
       {list.status === 'loading' && (
         <LoadingPanel label="Loading this record's unmapped notes…" />
@@ -493,14 +502,18 @@ function EmptyNotes({
 function CaptureNote({
   onCapture,
   disabled,
+  onAnnounce,
 }: {
   onCapture: (text: string, source: string) => Promise<void>;
   disabled: boolean;
+  /** Push a sentence into the panel's own `role="status"` region. */
+  onAnnounce: (text: string) => void;
 }) {
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
   const textId = useId();
   const hintId = useId();
+  const boxRef = useRef<HTMLTextAreaElement>(null);
 
   const submit = async () => {
     if (!text.trim() || saving) return;
@@ -528,6 +541,7 @@ function CaptureNote({
       </label>
       <textarea
         id={textId}
+        ref={boxRef}
         className="notes-capture-input"
         aria-describedby={hintId}
         rows={2}
@@ -547,6 +561,22 @@ function CaptureNote({
       >
         {saving ? 'Capturing…' : 'Capture Note'}
       </button>
+      {/*
+        THE ONE BOX ON THIS PANEL WITH NO WAY OUT OF IT — until now. The three review
+        forms on each note card each have a `Cancel` that clears them, and the panel's
+        own copy tells the reader so; this box, which is where every typed note in the
+        application starts, had neither. It is offered only while something is typed,
+        and never while a capture is in flight: a control that emptied the box during a
+        request would leave the reader unable to tell whether the note they no longer
+        see was stored.
+      */}
+      <DiscardStaged
+        staged={text !== '' && !saving}
+        copy={DISCARD_COPY.noteCapture}
+        onDiscard={() => setText('')}
+        onAnnounce={onAnnounce}
+        onFocusAfterDiscard={() => boxRef.current?.focus()}
+      />
     </div>
   );
 }

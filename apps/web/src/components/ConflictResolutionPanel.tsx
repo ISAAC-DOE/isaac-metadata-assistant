@@ -75,6 +75,8 @@ import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import { SourceTypeToken } from './EvidenceRow';
+import { DiscardStaged } from './DiscardStaged';
+import { DISCARD_COPY } from '../lib/discardContent';
 import type {
   ApiConflict,
   ApiConflictCandidate,
@@ -563,6 +565,10 @@ function ConflictBrowser({ experimentId }: { experimentId: string }) {
                       busy={busyKey === key || version === null}
                       failure={failure?.key === key ? failure : null}
                       onSubmit={submit}
+                      /* THIS PANEL'S ONE ACT-ANNOUNCEMENT CHANNEL, above. Discarding a
+                         decision form is an act, and its outcome belongs in the same
+                         region a recorded decision's does. */
+                      onAnnounce={setAnnouncement}
                     />
                   </li>
                 );
@@ -601,6 +607,7 @@ function ConflictRow({
   busy,
   failure,
   onSubmit,
+  onAnnounce,
 }: {
   conflict: ApiConflict;
   /** `null` when this address belongs to the record's own fields. */
@@ -617,6 +624,8 @@ function ConflictRow({
     },
     announce: string,
   ) => Promise<void>;
+  /** Push a sentence into the panel's own `role="status"` region. */
+  onAnnounce: (text: string) => void;
 }) {
   /*
    * NOTHING IS SELECTED, AND NOTHING EVER BECOMES SELECTED WITHOUT AN ACT.
@@ -654,6 +663,34 @@ function ConflictRow({
       (choice.kind === 'edited' && editedReady));
 
   const revising = conflict.resolution !== null;
+
+  /*
+   * THE FOUR INPUTS OF THIS FORM, AND ONE CONTROL THAT EMPTIES THEM.
+   *
+   * There was no way to put this form back to its resting state. Every input is
+   * deliberately sticky — nothing is pre-selected, a refusal clears nothing (the empty
+   * `catch` below is the whole mechanism by which a refusal is not also a data loss),
+   * and the only path that clears them is a decision the server RECORDED. So a reader
+   * who selected an answer, typed a value and wrote a paragraph of reasoning, and then
+   * decided they were not the person to decide this, had to undo each of the four by
+   * hand — and could not unselect a radio at all.
+   *
+   * `confirmed` is reset with the rest. It is the "I am recording this decision myself"
+   * attestation, and leaving it ticked over emptied inputs would carry an assertion
+   * across an act that withdrew everything it was about.
+   *
+   * NOTHING IS SENT. The decision this clears was never recorded, so there is nothing
+   * to withdraw at the server and no request that would mean anything — see
+   * `DiscardStaged`, which cannot make one.
+   */
+  const hasStagedDecision =
+    choice.kind !== 'none' || editedValue !== '' || rationale !== '' || confirmed;
+  const discardStagedDecision = () => {
+    setChoice(NO_CHOICE);
+    setEditedValue('');
+    setRationale('');
+    setConfirmed(false);
+  };
 
   const run = async () => {
     if (!ready) return;
@@ -791,6 +828,15 @@ function ConflictRow({
       >
         {revising ? 'Record a Revised Decision' : 'Record This Decision'}
       </button>
+
+      {/* BELOW the primary, quiet: the two are not peers. Recording a decision is the
+          act this card exists for; emptying the form is the way out of it. */}
+      <DiscardStaged
+        staged={hasStagedDecision && !busy}
+        copy={DISCARD_COPY.conflictDecision}
+        onDiscard={discardStagedDecision}
+        onAnnounce={onAnnounce}
+      />
 
       {conflict.resolution !== null && (
         <RecordedDecision resolution={conflict.resolution} />
