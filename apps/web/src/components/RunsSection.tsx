@@ -63,7 +63,12 @@ import { LoadingPanel, BackendDown } from './FetchStates';
 import { Plus } from './icons';
 import { api, ApiError } from '../lib/api';
 import { disposeRun } from '../lib/runAutosaveStore';
-import { RECORD_COMPARE_PARAM, RECORD_RUN_PARAM, RUN_COMPARE_MAX } from '../lib/routes';
+import {
+  RECORD_ADDRESS_PARAM,
+  RECORD_COMPARE_PARAM,
+  RECORD_RUN_PARAM,
+  RUN_COMPARE_MAX,
+} from '../lib/routes';
 import type { ApiRunView } from '../lib/types';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import { mutationFailureCopy } from '../lib/mutationErrors';
@@ -184,6 +189,15 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const focusRunId = searchParams.get(RECORD_RUN_PARAM);
+  /*
+   * THE ADDRESS A LINK INTO FOCUS RUN IS ABOUT — see `RECORD_ADDRESS_PARAM`.
+   *
+   * Compare Runs writes it so that following a difference lands on the address it
+   * was about rather than on a card carrying every address. It is a SCROLL TARGET
+   * AND NOTHING ELSE: nothing is filtered, nothing is selected, and an address the
+   * focused run does not render leaves the page exactly as it would otherwise be.
+   */
+  const focusAddress = searchParams.get(RECORD_ADDRESS_PARAM);
 
   /*
    * THE COMPARISON SELECTION IS THE URL, and `getAll` is why the parameter repeats
@@ -975,6 +989,37 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
     : focus.status === 'fetched'
       ? focus.run
       : loaded?.runs.find((r) => r.id === focusRunId);
+
+  /*
+   * BRING THE ADDRESS A COMPARISON LINKED TO INTO VIEW, and mark it.
+   *
+   * `RunInheritedPanel` already renders `data-address` on every resolved row, so
+   * this needs no change there and no new contract between the two: it queries the
+   * attribute the panel already publishes. `focusedRun` is in the dependencies
+   * because the card is not in the DOM until the run resolves — a deep link's read
+   * lands after the first paint, and scrolling before it would scroll to nothing.
+   *
+   * EVERY PART OF IT IS OPTIONAL BEHAVIOUR AND NONE OF IT CHANGES WHAT IS SHOWN.
+   * An address the run does not render finds no element and does nothing;
+   * `scrollIntoView` is feature-detected because jsdom does not implement it; the
+   * mark is removed on cleanup so a second link does not leave two.
+   */
+  useEffect(() => {
+    if (!focused || focusAddress === null || focusAddress === '' || focusedRun === undefined) {
+      return;
+    }
+    const target = document.querySelector(
+      `[data-address="${CSS.escape(focusAddress)}"]`,
+    );
+    if (target === null) return;
+    target.setAttribute('data-linked-address', 'true');
+    if (typeof (target as HTMLElement).scrollIntoView === 'function') {
+      (target as HTMLElement).scrollIntoView({ block: 'center' });
+    }
+    return () => {
+      target.removeAttribute('data-linked-address');
+    };
+  }, [focused, focusAddress, focusedRun]);
 
   const countFocus: CountFocus = !focused
     ? 'none'

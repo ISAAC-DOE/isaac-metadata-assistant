@@ -47,6 +47,38 @@ import { runFixture, runsPage, stubFetchRoutes, type RouteEntry } from '../test/
 
 configure({ asyncUtilTimeout: 5_000 });
 
+/*
+ * THE HARNESS DEADLINE, RAISED SO THE BUDGET ABOVE CAN ACTUALLY BE SPENT.
+ *
+ * `vite.config.ts` declares no `testTimeout`, so vitest's own per-test deadline is
+ * ALSO 5,000 ms. Two equal budgets make the raised one unreachable: a `findBy*` here
+ * can never spend its five seconds, because the harness kills the test at the same
+ * instant — and the failure then reads `Test timed out in 5000ms`, which names neither
+ * the query nor the DOM. The full argument, the CI measurements and the scaled proof
+ * are written out once at `run-workspace.test.tsx:67-112` rather than five times.
+ *
+ * 30,000 ms is a HARNESS limit, NOT a performance claim. It is the number this
+ * repository already uses for its mount-heavy suites (`run-workspace`,
+ * `experiment-graph`, `evidence-graph`, `graph-real-artifact`, `memory-status`). Every
+ * `find*`/`waitFor` still resolves as soon as the DOM is ready, and the strict 5,000 ms
+ * default still stands in every other file of the suite.
+ *
+ * IT CANNOT TURN A RED ASSERTION GREEN, and that was checked rather than assumed. The
+ * two budgets bound different things: `testTimeout` bounds the TEST, `asyncUtilTimeout`
+ * bounds each individual `waitFor`/`findBy*`. Raising only the former gives no single
+ * query one millisecond more than it already had, so a value that never arrives still
+ * never arrives. THE ONE SITE THAT LOOKS RISKY AND IS NOT is the file's single
+ * `await waitFor(() => expect(screen.queryByRole('table')).toBeNull())` — a poll for a
+ * DISAPPEARANCE. Its budget is `asyncUtilTimeout`, which this change does not touch, so
+ * a table that never goes away still fails after the same 5,000 ms; only the wording of
+ * the failure improves. The file's other FOUR negatives are synchronous `queryBy*` calls
+ * evaluated at their own point in the test — three `queryByRole('table')` and one
+ * `queryByText(/Reported for Run 1 only/)`. They are named by their expression rather
+ * than by line number on purpose: this file was under concurrent edit when the audit was
+ * done, and a line reference that drifts is worse than none.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 const ID = 'demo';
 const BASE = `/api/experiments/${ID}`;
 
@@ -299,16 +331,33 @@ describe('inherited and overridden stay legible', () => {
     expect(inherited.textContent).toContain('overridden on this run');
   });
 
-  it('same value, same source, different record-keeping is neither a value nor a provenance difference', async () => {
+  /*
+   * RECLASSIFIED, AND THE RECLASSIFICATION IS THE ASSERTION.
+   *
+   * This row used to be `evidence` — same value, same source, one side citing
+   * nothing and the other citing one entry — and it is now `review`. That is not a
+   * relabelling: `lib/provenance.ts`'s rule is that `supported` needs BOTH a
+   * verified status AND at least one citation, so Run 1 (verified, no citation)
+   * reads `needs_review` while Run 2 (verified, one citation) reads `supported`.
+   * What ESTABLISHES the value differs, and the review axis outranks the count.
+   *
+   * The `evidence` axis is still reachable and is still its own category — see
+   * "the evidence axis compares WHICH entries" below, where two sides cite one
+   * entry each, land in the same review state, and differ only in what they cite.
+   */
+  it('same value, same source, different review state is neither a value nor a provenance difference', async () => {
     mount([runA(), runB()]);
     await selectTwo();
-    expect(category('field:sample.form')).toBe('evidence');
+    expect(category('field:sample.form')).toBe('review');
     const cell = row('field:sample.form');
-    expect(cell.textContent).toContain('Same value, different record-keeping');
-    expect(cell.textContent).toContain('no evidence entries');
-    expect(cell.textContent).toContain('1 evidence entry');
-    // Counted, never judged.
-    expect(cell.textContent).toContain('This counts entries; it does not weigh them');
+    expect(cell.textContent).toContain('Same value, different review state');
+    expect(cell.textContent).toContain('needs review');
+    expect(cell.textContent).toContain('supported');
+    // A review state is not a verdict, and the row says so rather than implying it.
+    expect(cell.textContent).toContain(
+      'neither is a schema, completion or export verdict',
+    );
+    expect(cell.textContent).not.toContain('Different values');
   });
 
   it('a run with no overrides produces no provenance rows at all', async () => {
@@ -432,8 +481,15 @@ describe('agreement is reported, not only difference', () => {
     expect(summary).toContain('6 addresses listed');
     expect(summary).toContain('0 differ in some way');
     expect(summary).toContain('6 the same on both runs');
+    /*
+      THE CLAIM WIDENED WITH THE COMPARISON, and it had to. The sentence used to
+      say "with the same status and the same number of evidence entries" while the
+      table now also compares the review state and WHICH entries are cited; leaving
+      it would have understated what was checked, which is the mirror image of the
+      overstatement this whole summary is written against.
+    */
     expect(summary).toContain(
-      'These two runs record the same value, from the same source, with the same status and the same number of evidence entries, at every one of the 6 addresses this table was able to compare.',
+      'These two runs record the same value, from the same source, in the same review state, with the same status and the same cited entries, at every one of the 6 addresses this table was able to compare.',
     );
     // The honest limit of the claim, which is the half a "these runs are identical"
     // banner would drop.
@@ -658,8 +714,14 @@ describe('a difference links back to where it was read', () => {
     expect(cell.textContent).toContain('Not compared here');
     expect(cell.textContent).toContain('A list or an object — not shown in one line');
 
-    // Whole blocks are named and excluded, not silently dropped.
-    expect(screen.getByText(/whole-block address/).textContent).toContain('measurement');
+    // Whole blocks are named and excluded, not silently dropped — and the
+    // disclosure now says what each run records inside one, by key name.
+    const blocks = document.querySelector('.rc-blocks') as HTMLElement;
+    expect(blocks.textContent).toContain('whole-block address');
+    expect(blocks.textContent).toContain('measurement');
+    expect(blocks.textContent).toContain('records it with no keys');
+    // Key PRESENCE only. Nothing claims the two payloads are equal or unequal.
+    expect(blocks.textContent).not.toContain('identical');
 
     showAgreeing();
     expect(within(row('context.environment')).queryAllByRole('link')).toEqual([]);
@@ -795,7 +857,7 @@ describe('no causal or evaluative language', () => {
     fireEvent.click(compareButton('Run 2'));
     await screen.findByRole('table');
     expect(new Set([...document.querySelectorAll('.rc-row')].map((r) => r.getAttribute('data-category')))).toEqual(
-      new Set(['value', 'absent-on-one', 'provenance', 'evidence', 'incomparable']),
+      new Set(['value', 'absent-on-one', 'provenance', 'review', 'incomparable']),
     );
     expect(forbiddenIn(perceivableText(view.container))).toEqual([]);
 
@@ -840,10 +902,839 @@ describe('no causal or evaluative language', () => {
     expect(screen.getByText(/Reported for both runs/).textContent).toContain('1');
     expect(screen.getByText(/Reported for Run 2 only/)).toBeInTheDocument();
     expect(screen.queryByText(/Reported for Run 1 only/)).toBeNull();
+    /*
+      THE SENTENCE NARROWED BECAUSE THE BEHAVIOUR DID. It used to end "no finding
+      below is connected to any row in the table above", and a finding that carries
+      its own `path` now IS shown on that row — so the old sentence would have been
+      the panel denying what the table does one element away. What it still refuses
+      is the part that mattered: an attachment is an address match, never a reason.
+    */
     expect(view.container.textContent).toContain(
-      'Neither check examined the other run, and no finding below is connected to any row in the table above',
+      'Neither check examined the other run.',
     );
+    expect(view.container.textContent).toContain(
+      'that is an address match and nothing more; no finding here is offered as the reason two runs differ',
+    );
+    // These findings are bare strings and name no address, so none is attached.
+    expect(view.container.textContent).toContain('3 findings name no address');
     expect(view.container.textContent).toContain('Read-only check of run version r1.0');
     expect(forbiddenIn(perceivableText(view.container))).toEqual([]);
+  });
+});
+
+/* ── 7. the record context, and the four dimensions that needed one ────────── */
+
+/*
+ * WHAT THE WIDENING ADDED, AND WHAT IT MUST NOT HAVE ADDED.
+ *
+ * Four dimensions arrived: WHICH entries support each value, the two provenance
+ * dimensions, the server's recorded conflicts and the decisions about them, and
+ * each run's open questions. Three of them cost nothing — they are computed from
+ * the run view this panel already holds — and the fourth costs exactly two bounded
+ * requests per run, once per compared pair.
+ *
+ * The tests below are written against the ways that could go wrong rather than
+ * against the happy path:
+ *
+ *   · A CONFLICT BECOMING A DIFFERENCE. The single most damaging outcome. A
+ *     recorded conflict is within ONE run's own citations; a value difference is
+ *     between two runs. Asserted in the counts, in the row category, and in the
+ *     words.
+ *   · AN UNREAD RESPONSE READING AS "THERE IS NONE". Asserted for both reads.
+ *   · A FINDING PRESENTED AS AN EXPLANATION. A finding reaches a row only where it
+ *     names that row's path, and the panel says so in those words.
+ *   · THE PICKER'S READ DISCIPLINE QUIETLY LOST. The request log is asserted
+ *     directly, exactly as it is for the listing.
+ */
+
+const conflictsBody = (over: Record<string, unknown> = {}) => ({
+  experiment_id: ID,
+  run_id: 'RUN001',
+  record_rev: 7,
+  scope: 'run',
+  conflicts: [],
+  counts: { conflicting_addresses: 0, resolved: 0, deferred: 0, stale: 0, unresolved: 0 },
+  resolutions_without_conflict: [],
+  unreadable_resolution_entries: 0,
+  outcomes: ['resolved', 'deferred'],
+  chosen_from_values: ['candidate', 'other'],
+  states: ['absent', 'current', 'stale', 'deferred'],
+  experiment_version: 'v1',
+  ...over,
+});
+
+const conflictAt = (address: string, over: Record<string, unknown> = {}) => ({
+  address,
+  run_id: 'RUN001',
+  candidates: [],
+  distinct_value_count: 2,
+  evidence_count: 3,
+  unavailable: false,
+  explanation: 'Two distinct answers are cited at this address.',
+  resolution_state: 'absent',
+  resolved: false,
+  resolution_stale: false,
+  resolution: null,
+  ...over,
+});
+
+const pendingBody = (
+  items: Record<string, unknown>[],
+  page: Record<string, unknown> = {},
+) => ({
+  pending: items,
+  pending_page: {
+    total: items.length,
+    returned: items.length,
+    offset: 0,
+    limit: 5,
+    withheld: 0,
+    complete: true,
+    run_id: 'RUN001',
+    record_total: items.length,
+    ...page,
+  },
+});
+
+/** Both context reads for both runs, so nothing falls through to the stub's throw. */
+function contextRoutes(over: Record<string, RouteEntry> = {}): Record<string, RouteEntry> {
+  return {
+    [`GET ${BASE}/conflicts?run=RUN001`]: { body: conflictsBody() },
+    [`GET ${BASE}/conflicts?run=RUN002`]: { body: conflictsBody({ run_id: 'RUN002' }) },
+    [`GET ${BASE}/pending?run_id=RUN001&limit=5`]: { body: pendingBody([]) },
+    [`GET ${BASE}/pending?run_id=RUN002&limit=5`]: { body: pendingBody([]) },
+    ...over,
+  };
+}
+
+/** Wait for the context band to have settled, either way. */
+const contextBand = async () =>
+  (await screen.findByText(/What else this record holds about each run/)).closest(
+    '.rc-context',
+  ) as HTMLElement;
+
+describe('what else the record holds about each run', () => {
+  it('reads exactly two bounded requests per run, once, and never lists runs', async () => {
+    const { calls } = mount([runA(), runB()], `/record/${ID}`, contextRoutes());
+    await selectTwo();
+    await contextBand();
+
+    const context = calls.filter((c) => c.includes('/conflicts') || c.includes('/pending'));
+    expect(context.sort()).toEqual([
+      `GET ${BASE}/conflicts?run=RUN001`,
+      `GET ${BASE}/conflicts?run=RUN002`,
+      `GET ${BASE}/pending?run_id=RUN001&limit=5`,
+      `GET ${BASE}/pending?run_id=RUN002&limit=5`,
+    ]);
+    // BOUNDED, and the bound is in the request rather than in what is rendered. A
+    // reader cannot tell an unbounded read that shows five entries apart from a
+    // bounded one that shows five.
+    for (const call of context.filter((c) => c.includes('/pending'))) {
+      expect(call).toContain('limit=5');
+      expect(call).toContain('run_id=');
+    }
+    // The read discipline the whole panel is built on is unchanged.
+    expect(calls).not.toContain(`GET ${BASE}/runs`);
+    expect(calls.filter((c) => /\/runs\/RUN\d+$/.test(c))).toEqual([]);
+  });
+
+  it('states each run’s open questions and recorded conflicts without comparing them', async () => {
+    mount(
+      [runA(), runB()],
+      `/record/${ID}`,
+      contextRoutes({
+        [`GET ${BASE}/pending?run_id=RUN001&limit=5`]: {
+          body: pendingBody(
+            [
+              { id: 'series', kind: 'series', question: 'Confirm the measurement series.' },
+              { id: 'qc', kind: 'qc', question: 'Record a QC verdict.' },
+            ],
+            { total: 3, withheld: 1, complete: false, record_total: 9 },
+          ),
+        },
+        [`GET ${BASE}/conflicts?run=RUN002`]: {
+          body: conflictsBody({
+            run_id: 'RUN002',
+            conflicts: [conflictAt('sample.material.name')],
+            counts: {
+              conflicting_addresses: 1,
+              resolved: 0,
+              deferred: 0,
+              stale: 0,
+              unresolved: 1,
+            },
+          }),
+        },
+      }),
+    );
+    await selectTwo();
+    const band = await contextBand();
+
+    expect(band.textContent).toContain('3 open questions owned by this run');
+    expect(band.textContent).toContain('Confirm the measurement series.');
+    expect(band.textContent).toContain('1 further open question on this run are not listed here');
+    expect(band.textContent).toContain('9 open on the whole record');
+    expect(band.textContent).toContain('0 open questions owned by this run');
+    expect(band.textContent).toContain('1 address on this run cite more than one answer');
+    // The run's own revision, so a stale screen is recognisable as one.
+    expect(band.textContent).toContain('Revision 0');
+    expect(band.textContent).toContain('r1.0');
+
+    // NEITHER NUMBER IS SUBTRACTED FROM THE OTHER. Two runs' outstanding work is
+    // stated side by side; "Run 2 is further along" is the sentence this refuses.
+    expect(band.textContent).not.toMatch(/further along|ahead of|behind Run/);
+
+    // THE SCOPE OF THE READ IS STATED. Without this, an empty conflict line reads
+    // as "there are none anywhere", which neither read supports.
+    expect(band.textContent).toContain(
+      'Conflicts recorded against the record rather than against a run are not read here',
+    );
+  });
+
+  it('a read that did not complete says so, for that run, and claims nothing', async () => {
+    mount(
+      [runA(), runB()],
+      `/record/${ID}`,
+      contextRoutes({
+        [`GET ${BASE}/conflicts?run=RUN001`]: { status: 500, body: { detail: 'nope' } },
+        [`GET ${BASE}/pending?run_id=RUN002&limit=5`]: { status: 500, body: { detail: 'nope' } },
+      }),
+    );
+    await selectTwo();
+    const band = await contextBand();
+
+    expect(band.textContent).toContain('Recorded conflicts could not be read for this run');
+    expect(band.textContent).toContain('says nothing either way about them');
+    expect(band.textContent).toContain('Open questions could not be read for this run');
+    expect(band.textContent).toContain('Nothing is claimed about how many are outstanding');
+
+    // ONE READ FAILING DOES NOT TAKE THE OTHER DOWN. Run 1's questions and Run 2's
+    // conflicts both arrived and are both reported.
+    expect(band.textContent).toContain('0 open questions owned by this run');
+    expect(band.textContent).toContain('0 addresses on this run cite more than one answer');
+
+    // ...and the summary says, once, that the table below is silent on conflicts.
+    expect(document.querySelector('.rc-summary')?.textContent).toContain(
+      'Recorded conflicts were not read for at least one of these runs',
+    );
+  });
+
+  it('two reads at different record revisions are disclosed, not merged in silence', async () => {
+    mount(
+      [runA(), runB()],
+      `/record/${ID}`,
+      contextRoutes({
+        [`GET ${BASE}/conflicts?run=RUN002`]: {
+          body: conflictsBody({ run_id: 'RUN002', record_rev: 8 }),
+        },
+      }),
+    );
+    await selectTwo();
+    const band = await contextBand();
+    expect(band.textContent).toContain('answered at different revisions of the record');
+    expect(band.textContent).toContain('Run 1 at revision 7');
+    expect(band.textContent).toContain('Run 2 at revision 8');
+    expect(band.textContent).toContain('Read again');
+  });
+
+  it('Read again issues the four reads a second time', async () => {
+    const { calls } = mount([runA(), runB()], `/record/${ID}`, contextRoutes());
+    await selectTwo();
+    await contextBand();
+    const before = calls.filter((c) => c.includes('/conflicts')).length;
+    expect(before).toBe(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read again' }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.includes('/conflicts')).length).toBe(before + 2),
+    );
+  });
+
+  it('a read still in flight when Focus Run opens is not thrown away by it', async () => {
+    /*
+     * THE DEFECT, MEASURED BEFORE IT WAS FIXED. `hidden` is in the context
+     * effect's dependencies, so opening a run TORE THE EFFECT DOWN mid-read. The
+     * cleanup set `alive = false` and discarded the answer, while the ref that
+     * de-duplicates the read went on saying it had been issued — so coming back
+     * matched the ref, returned, and left the panel on `{ status: 'loading' }`
+     * for the rest of the session. It said "Reading what else this record holds"
+     * with nothing in flight, the conflicts axis stayed `unknown` on every row,
+     * and there was no way out: `Read again` lives in the band that the loading
+     * branch replaces.
+     *
+     * The response is matched by KEY now. Revert to the `alive` flag and this
+     * goes red on both assertions at once — the band never arrives, and no
+     * fifth request is issued to replace what was dropped.
+     */
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    const held: RouteEntry = async () => {
+      await gate;
+      return { body: conflictsBody() };
+    };
+    const { calls } = mount([runA(), runB()], `/record/${ID}`, {
+      ...contextRoutes(),
+      [`GET ${BASE}/conflicts?run=RUN001`]: held,
+      [`GET ${BASE}/conflicts?run=RUN002`]: held,
+    });
+    await selectTwo();
+    await waitFor(() => expect(calls.filter((c) => c.includes('/conflicts')).length).toBe(2));
+    expect(document.body.textContent).toContain('Reading what else this record holds');
+
+    // Open a run while both conflict reads are still outstanding, then come back.
+    fireEvent.click(screen.getByRole('button', { name: 'Focus run Run 1' }));
+    await screen.findByText(/Viewing one run/);
+    release!();
+    fireEvent.click(screen.getByRole('button', { name: /Back to all runs/ }));
+
+    // The band arrives from the read that was already in flight...
+    await contextBand();
+    expect(document.body.textContent).not.toContain('Reading what else this record holds');
+    // ...and nothing was re-requested to get it.
+    expect(calls.filter((c) => c.includes('/conflicts')).length).toBe(2);
+  });
+});
+
+/* ── 8. a recorded conflict is never a difference between the runs ─────────── */
+
+describe('a recorded conflict and a value difference stay different things', () => {
+  /** Both runs identical apart from a conflict recorded on Run 1's own citations. */
+  function withConflictOnAgreeingAddress(over: Record<string, unknown> = {}) {
+    const twin = { ...runA(), id: 'RUN002', label: 'Run 2', ordinal: 2, version: 'r2.0' };
+    return mount(
+      [runA(), twin as Run],
+      `/record/${ID}`,
+      contextRoutes({
+        [`GET ${BASE}/conflicts?run=RUN001`]: {
+          body: conflictsBody({
+            conflicts: [conflictAt('sample.material.name', over)],
+            counts: {
+              conflicting_addresses: 1,
+              resolved: 'resolution_state' in over && over.resolution_state === 'current' ? 1 : 0,
+              deferred: 0,
+              stale: 0,
+              unresolved:
+                'resolution_state' in over && over.resolution_state === 'current' ? 0 : 1,
+            },
+          }),
+        },
+      }),
+    );
+  }
+
+  it('lists an address the two runs agree on, and does not count it as a difference', async () => {
+    withConflictOnAgreeingAddress();
+    await selectTwo();
+    await contextBand();
+
+    // The row is on screen in the DIFFERENCES-ONLY view...
+    await waitFor(() => expect(category('field:sample.material.name')).toBe('same'));
+    const cell = row('field:sample.material.name');
+    expect(cell.textContent).toContain('A conflict is recorded on Run 1 here');
+    // ...and its category is untouched: the two runs record the same thing.
+    expect(cell.textContent).toContain('Same value, same source');
+
+    const summary = document.querySelector('.rc-summary')?.textContent ?? '';
+    expect(summary).toContain('0 differ in some way');
+    expect(summary).toContain(
+      '1 address carry a conflict recorded against one of these runs’ own citations',
+    );
+    expect(summary).toContain('1 still awaiting a decision');
+    expect(summary).toContain('That is not a disagreement between the two runs');
+    // THE COUNT NEVER MOVES INTO `differing`. Fold it in and this goes red.
+    expect(summary).not.toContain('1 differ in some way');
+
+    // The caption's own exception, so it does not describe a table the reader can
+    // see contradicts it.
+    expect(screen.getByRole('table').querySelector('caption')?.textContent).toContain(
+      'except 1 listed anyway: a conflict is recorded at it',
+    );
+  });
+
+  it('says what is recorded about the conflict without offering a value or a choice', async () => {
+    withConflictOnAgreeingAddress();
+    await selectTwo();
+    await contextBand();
+    await waitFor(() => expect(document.querySelector('.rc-conflict')).not.toBeNull());
+
+    fireEvent.click(
+      within(row('field:sample.material.name')).getByRole('button', {
+        name: /^Show what each run records here/,
+      }),
+    );
+    const detail = document.querySelector('[data-detail-for="field:sample.material.name"]')!;
+    expect(detail.textContent).toContain('Recorded conflict on this run');
+    expect(detail.textContent).toContain('2 different answers are cited here, across 3 entries');
+    expect(detail.textContent).toContain('No decision is recorded');
+    expect(detail.textContent).toContain('Two distinct answers are cited at this address.');
+    // READ-ONLY, AND IT SAYS SO. Showing the candidates would invite a choice this
+    // panel cannot record.
+    expect(detail.textContent).toContain('The competing answers are not listed here');
+    // NO COMPETING VALUE ANYWHERE IN THE DETAIL. The row above shows the run's own
+    // value; nothing here reproduces an answer the reader would then be tempted to
+    // choose between on a panel that cannot record a choice.
+    expect(detail.textContent).not.toContain('cannot both be right');
+    expect(within(detail as HTMLElement).queryAllByRole('button')).toEqual([]);
+  });
+
+  it('a decided conflict reads as decided and is not counted as awaiting one', async () => {
+    withConflictOnAgreeingAddress({
+      resolution_state: 'current',
+      resolved: true,
+      resolution: { outcome: 'resolved' },
+    });
+    await selectTwo();
+    await contextBand();
+    await waitFor(() => expect(document.querySelector('.rc-conflict')).not.toBeNull());
+
+    expect(document.querySelector('.rc-conflict')?.getAttribute('data-state')).toBe('current');
+    const summary = document.querySelector('.rc-summary')?.textContent ?? '';
+    expect(summary).toContain('0 still awaiting a decision');
+
+    fireEvent.click(
+      within(row('field:sample.material.name')).getByRole('button', {
+        name: /^Show what each run records here/,
+      }),
+    );
+    expect(
+      document.querySelector('[data-detail-for="field:sample.material.name"]')?.textContent,
+    ).toContain('that decision still covers exactly these answers');
+  });
+
+  it('an unread conflicts response never renders as "there is none"', async () => {
+    // No conflicts route is registered at all, so both reads fail.
+    mount([runA(), runB()]);
+    await selectTwo();
+    await contextBand();
+    expect(document.querySelector('.rc-summary')?.textContent).toContain(
+      'nothing below says either way whether one is stored at an address',
+    );
+    // ...and the claim is made ONCE, not on every row of the table.
+    expect(document.querySelectorAll('.rc-conflict')).toHaveLength(0);
+  });
+});
+
+/* ── 9. what each run records, and where a difference leads ────────────────── */
+
+describe('the expanded detail describes support without weighing it', () => {
+  it('lists the entries each run cites, by source, file and locator', async () => {
+    mount([runA(), runB()], `/record/${ID}`, contextRoutes());
+    await selectTwo();
+    await contextBand();
+
+    fireEvent.click(
+      within(row('field:sample.form')).getByRole('button', {
+        name: /^Show what each run records here/,
+      }),
+    );
+    const detail = document.querySelector('[data-detail-for="field:sample.form"]')!;
+    expect(detail.textContent).toContain('Where it came from');
+    // TWO SEPARATE FACTS, NEVER RUN TOGETHER: what the citations say produced the
+    // value, and whether this run holds it or reads the record's.
+    expect(detail.textContent).toContain('How this run holds it');
+    expect(detail.textContent).toContain('What establishes it');
+    expect(detail.textContent).not.toContain(
+      'Inherited from the record · inherited from record',
+    );
+    // NAMED AS THIS BUILD'S OWN READING OF THE CITATIONS, not as a decision.
+    expect(detail.textContent).toContain(
+      'read from the citations stored on this run, not a decision anybody recorded',
+    );
+    expect(detail.textContent).toContain('Needs review');
+    expect(detail.textContent).toContain('Supported');
+    // Run 2's one entry records no source kind, and is described as exactly that
+    // rather than being dropped or given a plausible one.
+    expect(detail.textContent).toContain('an entry this build could not read');
+    expect(detail.textContent).toContain('could not be read by this build');
+  });
+
+  it('the disclosure is a real one, and the table keeps four columns', async () => {
+    mount([runA(), runB()], `/record/${ID}`, contextRoutes());
+    await selectTwo();
+    await contextBand();
+
+    const toggle = within(row('context.temperature_K')).getByRole('button', {
+      name: /^Show what each run records here/,
+    });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(document.querySelector('[data-detail-for="context.temperature_K"]')).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle.getAttribute('aria-controls')).toBe(
+      document
+        .querySelector('[data-detail-for="context.temperature_K"] .rc-detail')
+        ?.getAttribute('id'),
+    );
+
+    // FOUR DIMENSIONS, FOUR COLUMNS — the widening went into progressive disclosure
+    // rather than into a wider table. Add a column and this goes red.
+    const headers = within(screen.getByRole('table'))
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent);
+    expect(headers.slice(0, 4)).toEqual(['Address', 'Run 1', 'Run 2', 'Comparison']);
+  });
+
+  it('every differing cell links to its own run AND to the address it is about', async () => {
+    mount([runA(), runB()], `/record/${ID}`, contextRoutes());
+    await selectTwo();
+    await contextBand();
+
+    const links = within(row('field:system.instrument.name')).getAllByRole('link');
+    for (const link of links) {
+      // The destination now knows WHICH ADDRESS, not only which run — the
+      // difference between a link and a hint on a record with many addresses.
+      expect(link.getAttribute('href')).toContain('at=field%3Asystem.instrument.name');
+    }
+    expect(links[0].getAttribute('href')).toContain(`${RECORD_RUN_PARAM}=RUN001`);
+    expect(links[1].getAttribute('href')).toContain(`${RECORD_RUN_PARAM}=RUN002`);
+  });
+
+  it('the linked address is marked once Focus Run has it on screen', async () => {
+    mount(
+      [runA(), runB()],
+      `/record/${ID}?${RECORD_RUN_PARAM}=RUN002&at=field%3Asample.material.name`,
+      contextRoutes(),
+    );
+    await screen.findByText(/Viewing one run/);
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-address="field:sample.material.name"]'),
+      ).not.toBeNull(),
+    );
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector('[data-address="field:sample.material.name"]')
+          ?.getAttribute('data-linked-address'),
+      ).toBe('true'),
+    );
+    // A SCROLL TARGET AND NOTHING ELSE: the other addresses are still on screen.
+    expect(
+      document.querySelectorAll('[data-address]').length,
+    ).toBeGreaterThan(1);
+  });
+
+  it('an address the focused run does not render changes nothing', async () => {
+    mount(
+      [runA(), runB()],
+      `/record/${ID}?${RECORD_RUN_PARAM}=RUN002&at=field%3Anot.an.address`,
+      contextRoutes(),
+    );
+    await screen.findByText(/Viewing one run/);
+    expect(document.querySelector('[data-linked-address]')).toBeNull();
+    // No alert, no empty state, no filtering — the page is what it would have been.
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+/* ── 10. findings reach the row they name, and only that row ───────────────── */
+
+describe('a finding is attached where it names an address, and nowhere else', () => {
+  const verdict = (errors: unknown[], version: string) => ({
+    ok: false,
+    draft: { ok: false, errors },
+    official: { ok: false, errors: [], dry_run: true },
+    blockers: [],
+    checked_run_version: version,
+  });
+
+  async function checked() {
+    const view = mount(
+      [runA(), runB()],
+      `/record/${ID}`,
+      contextRoutes({
+        [`POST ${BASE}/runs/RUN001/check`]: {
+          body: verdict(
+            [
+              {
+                path: 'system.instrument.name',
+                message: 'system.instrument.name needs confirmation',
+              },
+              // NAMES NO PATH, so it can reach no row. It stays in the panel.
+              'the record has no measurement series',
+            ],
+            'r1.0',
+          ),
+        },
+        [`POST ${BASE}/runs/RUN002/check`]: { body: verdict([], 'r2.0') },
+      }),
+    );
+    await selectTwo();
+    await contextBand();
+    fireEvent.click(screen.getByRole('button', { name: 'Check both runs' }));
+    await screen.findByText(/Reported for Run 1 only/);
+    return view;
+  }
+
+  it('shows the finding on the row whose address it names, on the right run', async () => {
+    await checked();
+    const cell = row('field:system.instrument.name');
+    expect(cell.textContent).toContain('1 finding at this address');
+
+    fireEvent.click(
+      within(cell).getByRole('button', { name: /^Show what each run records here/ }),
+    );
+    const detail = document.querySelector('[data-detail-for="field:system.instrument.name"]')!;
+    expect(detail.textContent).toContain('Reported by the last check of this run, at this address');
+    expect(detail.textContent).toContain('system.instrument.name needs confirmation');
+
+    // The OTHER run's check reported nothing, and its side says nothing.
+    const sides = detail.querySelectorAll('.rc-detail-side');
+    expect(sides[0].textContent).toContain('system.instrument.name needs confirmation');
+    expect(sides[1].textContent).not.toContain('needs confirmation');
+  });
+
+  it('a finding that names no address stays in the panel and is counted there', async () => {
+    const { view } = await checked();
+    expect(view.container.textContent).toContain('1 finding name no address');
+    // It is nowhere in the table.
+    expect(screen.getByRole('table').textContent).not.toContain('no measurement series');
+  });
+
+  it('never offers a finding as the reason two runs differ', async () => {
+    const { view } = await checked();
+    expect(view.container.textContent).toContain(
+      'that is an address match and nothing more; no finding here is offered as the reason two runs differ',
+    );
+    expect(forbiddenIn(perceivableText(view.container))).toEqual([]);
+  });
+
+  it('the attachment is evicted with the pair, never re-labelled onto new runs', async () => {
+    /*
+     * THE DEFECT THIS GUARDS is the one the old React `key` on `CompareFindings`
+     * was added for, now reachable one element further: verdicts computed for
+     * Run 1 + Run 2 being drawn onto the rows of Run 1 + Run 3. A finding is
+     * attached by ADDRESS, and both pairs resolve the same addresses — so a stale
+     * attachment would look entirely plausible on screen.
+     */
+    const view = mount(
+      [runA(), runB(), plainRun(3)],
+      `/record/${ID}`,
+      contextRoutes({
+        [`GET ${BASE}/conflicts?run=RUN003`]: { body: conflictsBody({ run_id: 'RUN003' }) },
+        [`GET ${BASE}/pending?run_id=RUN003&limit=5`]: { body: pendingBody([]) },
+        [`POST ${BASE}/runs/RUN001/check`]: {
+          body: verdict(
+            [{ path: 'system.instrument.name', message: 'system.instrument.name needs confirmation' }],
+            'r1.0',
+          ),
+        },
+        [`POST ${BASE}/runs/RUN002/check`]: { body: verdict([], 'r2.0') },
+      }),
+    );
+    await selectTwo();
+    await contextBand();
+    fireEvent.click(screen.getByRole('button', { name: 'Check both runs' }));
+    await screen.findByText(/Reported for Run 1 only/);
+    expect(row('field:system.instrument.name').textContent).toContain('1 finding at this address');
+
+    // Swap the second run for a third. The pair changes, so the verdicts do not
+    // describe it any more.
+    fireEvent.click(screen.getByRole('button', { name: /^Comparing run Run 2/ }));
+    await waitFor(() => expect(screen.queryByRole('table')).toBeNull());
+    fireEvent.click(await screen.findByRole('button', { name: /^Compare run Run 3/ }));
+    await screen.findByRole('table');
+    expect(screen.getByRole('table').textContent).not.toContain('finding at this address');
+    // The reader is offered the check again rather than shown a stale one.
+    expect(screen.getByRole('button', { name: 'Check both runs' })).toBeInTheDocument();
+    expect(view.view.container.textContent).not.toContain('Reported for Run 1 only');
+  });
+});
+
+/* ── 11. the vocabulary control, over the widened states ───────────────────── */
+
+describe('no causal or evaluative language in the widened states', () => {
+  it('renders no forbidden word with context, conflicts, findings and detail on screen', async () => {
+    const twin = { ...runA(), id: 'RUN002', label: 'Run 2', ordinal: 2, version: 'r2.0' };
+    const { view } = mount(
+      [runA(), twin as Run],
+      `/record/${ID}`,
+      contextRoutes({
+        [`GET ${BASE}/conflicts?run=RUN001`]: {
+          body: conflictsBody({
+            conflicts: [
+              conflictAt('sample.material.name'),
+              conflictAt('sample.form', { resolution_state: 'stale', resolution_stale: true }),
+              conflictAt('descriptors.notes', { unavailable: true }),
+            ],
+            counts: {
+              conflicting_addresses: 3,
+              resolved: 0,
+              deferred: 0,
+              stale: 1,
+              unresolved: 3,
+            },
+            unreadable_resolution_entries: 2,
+            resolutions_without_conflict: [
+              { address: 'context.environment', run_id: 'RUN001', outcome: 'deferred', resolution_id: 'X', orphaned_run: false },
+            ],
+          }),
+        },
+        [`GET ${BASE}/pending?run_id=RUN001&limit=5`]: {
+          body: pendingBody([
+            { id: 'series', kind: 'series', question: 'Confirm the measurement series.' },
+            { id: null, kind: null, question: null, unavailable: true, unavailable_reason: 'a shape this build does not recognise' },
+          ]),
+        },
+      }),
+    );
+    await selectTwo();
+    await contextBand();
+    await waitFor(() => expect(document.querySelector('.rc-conflict')).not.toBeNull());
+    expect(forbiddenIn(perceivableText(view.container))).toEqual([]);
+
+    // Expand every disclosure the table offers, so no branch of the detail escapes
+    // the scan.
+    for (const toggle of screen.getAllByRole('button', {
+      name: /^Show what each run records here/,
+    })) {
+      fireEvent.click(toggle);
+    }
+    expect(forbiddenIn(perceivableText(view.container))).toEqual([]);
+
+    // Unreadable content is disclosed rather than dropped, and says so plainly.
+    expect(view.container.textContent).toContain('2 stored decisions could not be read');
+    expect(view.container.textContent).toContain(
+      'An entry this build could not read — a shape this build does not recognise',
+    );
+    expect(view.container.textContent).toContain(
+      'names an address this run carries no conflict at',
+    );
+    expect(forbiddenIn(live())).toEqual([]);
+  });
+
+  it('the live region speaks the conflict count separately from the differences', async () => {
+    const twin = { ...runA(), id: 'RUN002', label: 'Run 2', ordinal: 2, version: 'r2.0' };
+    mount(
+      [runA(), twin as Run],
+      `/record/${ID}`,
+      contextRoutes({
+        [`GET ${BASE}/conflicts?run=RUN001`]: {
+          body: conflictsBody({
+            conflicts: [conflictAt('sample.material.name')],
+            counts: { conflicting_addresses: 1, resolved: 0, deferred: 0, stale: 0, unresolved: 1 },
+          }),
+        },
+      }),
+    );
+    await selectTwo();
+    await contextBand();
+    await waitFor(() => expect(live()).toContain('carry a conflict'));
+    expect(live()).toContain('0 of 10 addresses differ');
+    expect(live()).toContain(
+      "1 of them carry a conflict recorded against one run's own citations",
+    );
+    // The two numbers are spoken separately. A reader who cannot see the panel is
+    // never told a difference count that quietly includes a conflict.
+    expect(live()).not.toContain('1 of 10 addresses differ');
+  });
+});
+
+/* ── 12. the negative control for this slice ───────────────────────────────── */
+
+/**
+ * PROOF THAT THE ASSERTIONS ABOVE HAVE THE RIGHT POLARITY.
+ *
+ * `apps/web/src/__tests__/upload-claim-parity.test.tsx` exists because a parity
+ * test in this repository once passed an INVERTED disclosure: every assertion
+ * green, the claim backwards. The three checks below run the same queries against
+ * a state where each answer must be the OTHER one, so a `toContain` that would
+ * match anything, or a query that silently finds nothing, fails here.
+ */
+describe('negative control: these assertions distinguish the two answers', () => {
+  it('"no conflict was read" and "no conflict is stored" are not the same screen', async () => {
+    // (a) nothing read — no conflicts route is registered.
+    const unread = mount([runA(), runB()], `/record/${ID}`, {
+      [`GET ${BASE}/pending?run_id=RUN001&limit=5`]: { body: pendingBody([]) },
+      [`GET ${BASE}/pending?run_id=RUN002&limit=5`]: { body: pendingBody([]) },
+    });
+    await selectTwo();
+    await contextBand();
+    const unreadText = unread.view.container.textContent ?? '';
+    expect(unreadText).toContain('Recorded conflicts could not be read for this run');
+    expect(unreadText).toContain('nothing below says either way');
+    unread.view.unmount();
+    vi.unstubAllGlobals();
+    __resetRunAutosaveStore();
+
+    // (b) read, and empty. The SAME two queries must now find the opposite.
+    const read = mount([runA(), runB()], `/record/${ID}`, contextRoutes());
+    await selectTwo();
+    await contextBand();
+    const readText = read.view.container.textContent ?? '';
+    expect(readText).not.toContain('Recorded conflicts could not be read for this run');
+    expect(readText).not.toContain('nothing below says either way');
+    expect(readText).toContain('0 addresses on this run cite more than one answer');
+  });
+
+  it('the findings sentence the panel no longer makes is genuinely gone', async () => {
+    /*
+     * The retired claim was "no finding below is connected to any row in the table
+     * above". If the panel had kept it beside a table that now attaches findings,
+     * every other assertion in this file would still pass — which is exactly the
+     * shape of the inverted-disclosure defect. Asserted as an absence AND as the
+     * presence of the narrower claim, so neither half can drift alone.
+     *
+     * THE CHECK IS RUN FIRST, AND THAT IS THE WHOLE TEST. An earlier version of
+     * this case asserted the absence over a screen where `FindingsResult` had
+     * never mounted — `Check both runs` had not been clicked, so the panel was
+     * showing its idle invitation and the retired sentence could not have been
+     * present whatever the source said. Measured: re-inserting the retired
+     * sentence verbatim into `FindingsResult` left this test GREEN. A negative
+     * control that passes against the wrong implementation is not a control.
+     */
+    const { view } = mount([runA(), runB()], `/record/${ID}`, {
+      ...contextRoutes(),
+      [`POST ${BASE}/runs/RUN001/check`]: {
+        body: {
+          ok: false,
+          draft: { ok: false, errors: ['sample.material.name needs confirmation'] },
+          official: { ok: false, errors: [], dry_run: true },
+          blockers: [],
+          checked_run_version: 'r1.0',
+        },
+      },
+      [`POST ${BASE}/runs/RUN002/check`]: {
+        body: {
+          ok: true,
+          draft: { ok: true, errors: [] },
+          official: { ok: true, errors: [], dry_run: true },
+          blockers: [],
+          checked_run_version: 'r2.0',
+        },
+      },
+    });
+    await selectTwo();
+    await contextBand();
+    fireEvent.click(screen.getByRole('button', { name: 'Check both runs' }));
+    // The panel is on screen, which is the precondition the assertion below needs.
+    await screen.findByText(/Reported for Run 1 only/);
+
+    expect(view.container.textContent).not.toContain(
+      'no finding below is connected to any row in the table above',
+    );
+    // ...and the narrower claim that replaced it IS there, so the absence above
+    // cannot be satisfied by the sentence having gone missing altogether.
+    expect(view.container.textContent).toContain(
+      'that is an address match and nothing more; no finding here is offered as the reason two runs differ',
+    );
+  });
+
+  it('the scanner would catch the sentences this slice was most at risk of writing', async () => {
+    // A scanner that matched nothing would pass every vocabulary assertion above.
+    expect(
+      forbiddenIn('Run 1 is better supported, therefore its value should be preferred'),
+    ).toEqual(expect.arrayContaining(['better', 'therefore', 'preferred']));
+    expect(
+      forbiddenIn('The conflict on Run 1 explains why the two runs differ'),
+    ).toEqual(expect.arrayContaining(['explains']));
+    // ...and the sentences this surface DOES render are clean.
+    expect(forbiddenIn('A conflict is recorded on Run 1 here')).toEqual([]);
+    expect(
+      forbiddenIn('2 different answers are cited here, across 3 entries. No decision is recorded.'),
+    ).toEqual([]);
   });
 });
