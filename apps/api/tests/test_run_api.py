@@ -3607,9 +3607,10 @@ def unraising(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "payload",
     [
-        # `_check_envelope` does `[e for e in (env.get("evidence") or []) if …]`
-        # (`draft_validator.py:94`): a TRUTHY NON-ITERABLE gets past the `or []` and
-        # raises `TypeError: 'int' object is not iterable`.
+        # `_check_envelope` used to do `[e for e in (env.get("evidence") or []) if …]`:
+        # a TRUTHY NON-ITERABLE got past the `or []` and raised `TypeError: 'int' object
+        # is not iterable`, which this route caught (`_PROBE_STRUCTURAL_ERRORS`). It is
+        # now a FINDING at `fields.<path>` instead — see the assertion below.
         {"evidence": 7},
         {"status": "missing", "evidence": 1},
         {"value": "x", "status": "verified", "evidence": True},
@@ -3619,12 +3620,31 @@ def unraising(tmp_path, monkeypatch):
 def test_a_field_envelope_whose_evidence_is_not_a_list_is_422_and_never_a_500(
     unraising, payload
 ):
+    """THE REFUSAL IS UNCHANGED; ONLY ITS WORDS MOVED, and that is asserted rather than
+    assumed.
+
+    This test used to require the literal ``["must be a field envelope"]`` — the
+    stand-in the ``except _PROBE_STRUCTURAL_ERRORS`` branch supplies when the probe
+    CANNOT REACH A VERDICT. ``draft_validator._cited_sources`` now files a real finding
+    at ``fields.<path>``, which is exactly the address this route's field probe
+    collects, so the probe reaches a verdict and the refusal is the validator's own
+    words. Requiring the stand-in would have been requiring the crash: the literal is
+    only ever produced when the truth core raises.
+
+    What must NOT move, and is what this test is really for: **422**, the
+    ``invalid_envelope`` error name, nothing stored, and the run still readable.
+    """
     client, experiment_id = unraising
     run = _create_run(client, experiment_id)
     response = _set_override(client, experiment_id, run["id"], _MATERIAL_ADDRESS, payload)
     assert response.status_code == 422, response.text
     assert response.json()["error"] == "invalid_envelope"
-    assert response.json()["findings"] == ["must be a field envelope"]
+    findings = response.json()["findings"]
+    assert findings, response.text
+    # The validator's own words for THIS payload — and never a crash stand-in, which
+    # would mean the truth core raised again.
+    assert any("evidence must be a list of source entries" in f for f in findings), findings
+    assert "must be a field envelope" not in findings, findings
     assert _stored_run(client, experiment_id, run["id"]).overrides == {}
     assert client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
 
@@ -4396,6 +4416,135 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "including a negative control that the committed synthetic XANES draft's "
         "verdict is byte-identical, and two tests pinning what was deliberately NOT "
         "widened). Delete this entry once landed."
+        "\n\n"
+        "SECOND, SEPARATE CHANGE TO THE SAME FILE (this branch): a wrong-typed ITEM "
+        "inside a well-formed top-level LIST container is now a FINDING too. The "
+        "container guard above did not reach items, so `{\"assets\": [7]}` still "
+        "reached `asset.get(\"sha256\")` and raised. Measured on `1ad1f8f`, "
+        "`validate_draft` raising `AttributeError` for `{\"assets\": [7]}`, "
+        "`{\"descriptors_outputs\": [7]}`, `{\"implicit\": [7]}`, `{\"series\": [7]}` "
+        "and `{\"links\": [7]}`; over HTTP that was 500 on `GET /api/experiments/{id}`, "
+        "which was pinned NOWHERE at the route layer and now is "
+        "(apps/api/tests/test_a_malformed_pending_entry_is_served_not_500.py). WHAT "
+        "CHANGED: a `_mapping_items` generator yields the items that ARE mappings and "
+        "files an error at `<container>[<index>]` for each item that is not, naming the "
+        "shape and never quoting the stored value. The item is NOT walked (per-position "
+        "claims invented out of a number are the fabricated partial success "
+        "serialize.py's note warns about), NOT coerced and NOT repaired; the walk "
+        "CONTINUES, so findings from later containers still land. Only the five LIST "
+        "containers are covered — a dict container's items are its VALUES, which each "
+        "reader already type-checks (`fields` files \"must be a field envelope\"). "
+        "NESTED items still raise, deliberately and for the same reason as above: "
+        "`routes._refuse_override_payload` probes an override payload through "
+        "`validate_draft` and catches `_PROBE_STRUCTURAL_ERRORS` to answer a typed 422, "
+        "and its two measured cases (`fields.*.evidence`, `attribution.contributors`) "
+        "are nested inside top-level DICT containers, while the only overridable "
+        "addresses are `field:<path>`, `block:attribution` and `block:tags` — so no "
+        "probe draft can name one of the five list containers and neither `except` "
+        "branch becomes dead. Asserted in both directions "
+        "(test_a_nested_malformed_payload_still_raises..., and the override route still "
+        "answering 422 over HTTP). VERDICT MOVEMENT: a draft with such an item moves "
+        "PASS -> FAIL only where it previously RAISED, i.e. it had no verdict at all; "
+        "no draft that previously validated clean changes. EXPORTED RECORD BEHAVIOUR: "
+        "UNCHANGED — `export_draft` validates first and returns early, so such a draft "
+        "is a clean refusal instead of a crash, and `transform` is never reached; "
+        "nothing that previously exported stops, nothing new starts. OFFICIAL SCHEMA "
+        "COMPLIANCE: UNCHANGED — the vendored schema is not edited (§1) and "
+        "`validate_official` is not touched. Covered by the 17 new tests in "
+        "tests/test_malformed_draft_containers_are_reported_not_raised.py (including a "
+        "guard that the five list containers are exactly the declared ones, an "
+        "isolation test that the readable items beside a bad one are still walked, and "
+        "one that the walk reaches the END of the draft) plus the HTTP symptom above. "
+        "~~All 14 guards in this slice were mutation-tested.~~ WITHDRAWN: an "
+        "independent review looked for the harness that produced the number and there "
+        "is none in the repository, so the count was unverifiable by a reader. It is "
+        "replaced below by a claim that names its own evidence."
+        "\n\n"
+        "THIRD CHANGE TO THE SAME FILE (review closure): a wrong-typed value NESTED "
+        "INSIDE a container is now a FINDING too, and TWO CLAIMS THIS ENTRY ALREADY "
+        "MADE WERE FALSE. (a) The second block above says a dict container's items "
+        "'are its VALUES, which each reader already type-checks' and cites "
+        "`block_evidence` going 'through `_claim_covered`'. `_claim_covered` was "
+        "`any(isinstance(e, dict) for e in (entries or []))` — it ITERATED rather than "
+        "type-checked, so `block_evidence = {\"series:s\": 7}` raised `TypeError: 'int' "
+        "object is not iterable` and `GET /api/experiments/{id}` answered 500. The "
+        "`fields` half of that sentence was and remains true. (b) The absolute 'PASS -> "
+        "FAIL only where it previously RAISED' is NOT extended to this change; see "
+        "VERDICT MOVEMENT below, which states the one exception rather than repeating "
+        "the absolute. "
+        "MEASURED OVER HTTP AT `724ce58`, one value at a time in the persisted state of "
+        "a record created through `POST /api/experiments`, `GET /api/experiments/{id}` "
+        "-> 500 with the list and pending routes both 200: `assets[0].sha256 = 7` "
+        "(TypeError out of `_SHA256_RE.match`), `assets[0].evidence = 7`, "
+        "`implicit[0].evidence = 7`, `block_evidence[\"series:s\"] = 7`, "
+        "`fields[\"a.b\"].evidence = 7` (all TypeError out of `_claim_covered` / the "
+        "envelope comprehension), `descriptors_outputs[0].descriptors = [7]` "
+        "(AttributeError), and `series[0].series_id = {\"a\": 1}` (TypeError: "
+        "unhashable type). A CORRECTION TO THE REVIEW'S OWN LIST, re-measured here: "
+        "`series[0].series_id = {}` answers 200 and always did — `{}` is falsy and "
+        "takes the 'series has no series_id' branch — so the reproducing value is a "
+        "TRUTHY unhashable one. "
+        "WHAT CHANGED: `_cited_sources` returns the cited sources of a claim or `None` "
+        "when the stored value is not a list, filing a shape finding at the claim's own "
+        "address; `_block_uncited` wraps it for the three block-evidence gates so no "
+        "SECOND finding is derived from a value just refused (the same rule the qc gate "
+        "follows); `_nested_list` guards the two nested lists this module walks; "
+        "`_mapping_items` gained a `where` so a nested item files at its real position; "
+        "sha256 and `series_id` are type-checked before being matched and keyed. "
+        "THE `series`/`qc` GATE IS FIXED ONE LEVEL DOWN, which is #177's own defect "
+        "returning: #177 moved the gate from `draft.get(\"series\")` to the guarded "
+        "`series` and left a comment saying a truthy-but-unreadable value 'used to' "
+        "satisfy it. `_container` returns `[7]` unchanged, so `if series:` was still "
+        "true and `validate_draft({\"series\": [7]})` reported `['series[0]', 'qc']` — "
+        "the second a claim about the QC verdict of a spectrum it had just refused to "
+        "read. The gate now reads `series_items`, the items that ARE readable spectra. "
+        "WHAT IS DELIBERATELY UNCHANGED AND STILL RAISES: "
+        "`attribution[\"contributors\"]`, a non-list or a list of non-mappings. "
+        "`routes._refuse_override_payload`'s BLOCK probe catches exactly those two "
+        "exceptions to answer `422 invalid_block_payload` and then filters the report "
+        "to `UPLOADED_BY_PATH` alone, so a finding at `attribution.contributors[i]` "
+        "would be DISCARDED and the malformed override STORED with 200. Closing it "
+        "needs a paired `routes.py` change and is named as residue, pinned in both "
+        "directions. The `fields.*.evidence` half of that rationale DID move: the FIELD "
+        "probe collects findings at `fields.<path>`, which is exactly where "
+        "`_cited_sources` files, so the same payload is still refused `422 "
+        "invalid_envelope` — with the validator's own words instead of the `except` "
+        "branch's stand-in. That route's field-probe `except` branch is now unreachable "
+        "from this module; it is named rather than removed, because removing it is a "
+        "`routes.py` change. "
+        "VERDICT MOVEMENT, STATED WITH ITS ONE EXCEPTION RATHER THAN AS AN ABSOLUTE. "
+        "Almost every shape above previously RAISED, so it had no verdict to move. Two "
+        "did not raise and are FAIL both before and after, with only the MESSAGE "
+        "changing: an evidence value that is a string or an object (both iterable) "
+        "answered `False` and produced the caller's 'no evidence' error. THE ONE REAL "
+        "PASS -> FAIL is a HASHABLE non-string `series_id` — `{\"series\": "
+        "[{\"series_id\": 7}]}` with `block_evidence` carrying a covered `\"series:7\"` "
+        "key previously validated clean, because `f\"series:{series_id}\"` coerced the "
+        "number into the key. It is refused now: the key is what an evidence entry is "
+        "filed under, and str()-ing a number into it invents a name the draft never "
+        "wrote (CLAUDE.md §5). Nothing in this repository's fixtures or corpus uses a "
+        "non-string `series_id`; the full suite is green. "
+        "EXPORTED RECORD BEHAVIOUR: UNCHANGED — `export_draft` validates first and "
+        "returns early, so every shape above is a clean refusal instead of a crash and "
+        "`transform` is never reached. OFFICIAL SCHEMA COMPLIANCE: UNCHANGED — the "
+        "vendored schema is not edited (§1) and `validate_official` is not touched. "
+        "COVERED BY apps/api/tests/test_a_wrong_typed_nested_value_is_served_not_500.py "
+        "(56 tests: the HTTP symptom in both pending states, a no-coercion check, the "
+        "qc finding set pinned with `==` rather than `any`, the nested position pinned "
+        "with `==`, the `series_id` correction table, a `_would_have_passed_before` "
+        "reconstruction proving the one PASS -> FAIL and proving no OTHER draft moves — "
+        "the same method #177's `_pre_change_raised` used, which an independent review "
+        "noted #179 had reused the CONCLUSION of without extending the PROOF — a "
+        "negative control over the committed synthetic XANES fixture, and the "
+        "contributors residue pinned in both directions) plus the inverted "
+        "tests/test_malformed_draft_containers_are_reported_not_raised.py. "
+        "MUTATION EVIDENCE, REPLACING THE WITHDRAWN COUNT ABOVE: 20 mutations — 8 in "
+        "`draft_validator.py`, 4 in `serialize.py`, 8 across `adapt.ts`, "
+        "`assistantComposer.ts`, `useRecordSession.ts` and `GuidedCompletion.tsx` — "
+        "each disabling ONE guard by exact substitution; all 20 killed. Four SURVIVED "
+        "the first run (the nested position, the preserved prose, the non-string "
+        "question, the non-string locator) and tests were added for each, which is the "
+        "only reason the number means anything. Delete this entry once landed."
     ),
 }
 

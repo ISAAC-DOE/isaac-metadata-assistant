@@ -44,6 +44,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
+import { UNREADABLE_BLOCKER_LABEL, isAnswerablePendingItem } from './adapt';
 import { useRecordSync } from './useRecordSync';
 import {
   invalidateStaleProposals,
@@ -212,16 +213,47 @@ function deriveRev(
   return detail?.rev;
 }
 
+/**
+ * The agent's view of the open questions.
+ *
+ * AN UNREADABLE ENTRY IS KEPT, AND THAT IS THE DELIBERATE CHOICE. `GET /pending` serves
+ * one entry per stored blocker, including a blocker it could not read as a question
+ * (`unavailable: true`, `id`/`kind`/`question` null — see
+ * `serialize._unreadable_blocker`). Filtering those out here was the smaller change and
+ * would have made the assistant answer "there are no pending fields — none is currently
+ * blocking" over a record that is refused for exactly that entry
+ * (`assistantAgent.identify_next_missing_field`). So it is carried, with `id` null —
+ * there IS no answer key — and `unreadable: true`, which is the flag that branch reads
+ * instead of offering to stage a value nothing could apply.
+ *
+ * **ONE PREDICATE, AND IT IS `adapt.isAnswerablePendingItem`.** ~~`p.unavailable ===
+ * true || p.id === null`~~ was a SECOND, divergent definition of the same question, and
+ * an independent review measured both ways it diverged. (i) For an entry carrying prose
+ * and no kind — which the server marks `unavailable` — the two disagreed, so
+ * `GuidedCompletion` said "cannot be answered" while this hook said `unreadable: false`
+ * and `assistantAgent` offered to stage a value under the answer key `"blocker"`, which
+ * `POST /answers` refuses **422 `unrecognized_field`**: an offer that could never be
+ * fulfilled. (ii) On a truthy-non-boolean `unavailable` the shared predicate fails
+ * CLOSED (`if (item.unavailable) return false`) and `=== true` failed OPEN. And the
+ * `p.id === null` half was an INFERENCE from a pattern of nulls — exactly what
+ * `serialize._unreadable_blocker` serves a wire field to avoid, and what this
+ * repository's post-check-payload rule forbids.
+ */
 function toPendingItems(pending: ApiPendingItem[] | undefined): PendingItem[] {
   if (!pending) return [];
   return pending.map((p) => ({
     id: p.id,
+    unreadable: !isAnswerablePendingItem(p),
     // The agent renders a human label; prefer the same about → question → id
     // ladder the composer uses so the two never disagree on a field's name.
+    // For an unreadable entry every rung is null, so the ladder ends at the server's
+    // own reason — never at an invented name for a question nobody could read.
     label:
       (typeof p.about === 'string' && p.about.trim() !== '' && p.about) ||
       (typeof p.question === 'string' && p.question.trim() !== '' && p.question) ||
-      p.id,
+      p.id ||
+      p.unavailable_reason ||
+      UNREADABLE_BLOCKER_LABEL,
     // CARRIED, because `confirmProposal` routes a run-owned answer to the run and reads
     // ownership from here. Dropped, it sent every answer to the record route, which
     // refuses a run-owned key with `409 belongs_to_a_run` once a record has runs.
