@@ -59,12 +59,14 @@ teardown. The precedent for the fix is one package away:
 accident" — and ``db_recon`` only READS.
 
 A LOOPBACK CHECK IS ALSO APPLIED, AND ITS LIMIT IS STATED RATHER THAN IMPLIED.
-:func:`_is_loopback_target` refuses a ``PGHOST`` that is not a loopback literal, a
-unix socket path, or ``localhost``. That is defence in depth against a hostname
-target — it is **NOT** a defence against the port-forward case, because a
-port-forward IS on ``localhost`` and passes it. The opt-in is what closes that
-case; the loopback check only narrows what an opt-in can then reach. Do not
-describe it as making the suite safe.
+:func:`_is_loopback_target` splits ``PGHOST`` on ``,`` — libpq accepts a multi-host
+list and tries the elements in order — and requires EVERY element to be a loopback
+IP literal or ``localhost``. A unix-socket directory is refused; see
+:func:`_is_loopback_element` for why that was narrowed rather than kept. That is
+defence in depth against a hostname target — it is **NOT** a defence against the
+port-forward case, because a port-forward IS on ``localhost`` and passes it. The
+opt-in is what closes that case; the loopback check only narrows what an opt-in can
+then reach. Do not describe it as making the suite safe.
 
 **A SKIP IS ONLY HONEST IF SOMETHING SOMEWHERE REFUSES TO ACCEPT IT.** A suite that
 silently skips in the one environment that can run it is worse than no suite,
@@ -126,24 +128,83 @@ REQUIRE_ENV = "ISAAC_REQUIRE_REAL_ENGINE_PARITY"
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
 
 
+def _is_loopback_element(element: str) -> bool:
+    """Is ONE comma-separated ``PGHOST`` element a loopback IP literal or name?
+
+    A LEADING ``/`` — a unix-socket directory — IS REFUSED, AND THAT IS A DELIBERATE
+    NARROWING rather than an oversight. It used to return ``True`` "local by
+    construction", which is true of the socket itself and was the premise the
+    multi-host hole was built on. Three reasons it is refused now:
+
+    1. **Nothing here uses one.** CI's ``postgres-migration`` job sets
+       ``PGHOST: 127.0.0.1`` (``.github/workflows/ci.yml``), and no other environment
+       in this repository sets ``PGHOST`` at all. Accepting a shape nothing uses buys
+       no capability and only widens the predicate.
+    2. **It is the one shape whose safety rests on libpq's interpretation rules
+       rather than on the string.** A path is not a target this function can reason
+       about; it is an instruction to libpq about how to read the rest.
+    3. **``sslmode`` is silently inert on it.** libpq does not negotiate TLS over a
+       unix socket, so ``connect_psycopg2``'s ``sslmode=require`` default — a real
+       part of the write path's defence — provides nothing on a value of this shape,
+       and the check would be quietly admitting the one target where it does not
+       apply.
+
+    The cost of the narrowing is a SKIP with a stated reason for anyone who genuinely
+    runs a local engine over a socket, which is a visible non-result; and in CI it
+    cannot be silent at all, because :data:`REQUIRE_ENV` turns an unreachable engine
+    into a failure.
+    """
+    element = element.strip()
+    if not element:
+        return False
+    if element.startswith("/"):
+        return False
+    if element.lower() in _LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(element.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
 def _is_loopback_target(host: str) -> bool:
     """Is ``PGHOST`` a local target, decided from the STRING alone?
 
-    True for a unix-socket directory (a path), for ``localhost``, and for any IP
-    literal the standard library calls loopback (``127.0.0.0/8``, ``::1``). False
-    for every hostname — which is the one shape the hosted database would take.
+    ``True`` only when EVERY comma-separated element is a loopback IP literal
+    (``127.0.0.0/8``, ``::1``) or one of :data:`_LOOPBACK_NAMES`. ``False`` for every
+    hostname — the one shape the hosted database would take — and for a unix-socket
+    directory, per :func:`_is_loopback_element`.
+
+    ── ``PGHOST`` IS A LIST, AND THIS FUNCTION USED TO READ IT AS A SCALAR. ──────────
+    Measured by an independent security review. libpq accepts a comma-separated
+    multi-host ``PGHOST`` and tries the elements in order until one answers. The old
+    predicate returned ``True`` for anything starting with ``/`` and never split, so:
+
+        '/tmp,hosted.example'                 -> True   <- PASSED the gate
+        '/var/run/postgresql,hosted.example'  -> True   <- PASSED
+        '/../../hosted.example'               -> True   <- PASSED
+
+    The whole string reaches libpq verbatim. With no socket at ``/tmp``, the first
+    element fails and libpq falls through to ``hosted.example`` — and this suite
+    WRITES. The comma cases that were already refused (``'localhost,hosted.example'``,
+    ``'127.0.0.1,hosted.example'``) were refused only because ``'localhost,…'`` is not
+    equal to ``'localhost'`` and is not a parseable IP: an accident of scalar
+    comparison, not a rule, and one that gave no protection to the path branch that
+    returned early.
+
+    Splitting first and requiring ALL is what makes it a rule. An empty element is
+    refused rather than skipped, because ``PGHOST=',hosted.example'`` means "use the
+    default for the first" and a default this function cannot see is not a target it
+    can vouch for.
+
+    NEITHER THIS NOR ``PGHOSTADDR`` IS THE GATE. ``ISAAC_RUN_REAL_ENGINE_PARITY`` is,
+    and it is checked first. This is defence in depth on a check that, on three
+    measured inputs, did not defend.
     """
     host = (host or "").strip()
     if not host:
         return False
-    if host.startswith("/"):  # a unix domain socket directory: local by construction
-        return True
-    if host.lower() in _LOOPBACK_NAMES:
-        return True
-    try:
-        return ipaddress.ip_address(host.strip("[]")).is_loopback
-    except ValueError:
-        return False
+    return all(_is_loopback_element(element) for element in host.split(","))
 
 
 def _probe_engine(env: Mapping[str, str] | None = None) -> tuple[bool, str]:
@@ -338,9 +399,59 @@ def test_the_opt_in_alone_does_not_admit_a_non_loopback_target(monkeypatch):
     assert available is False
     assert "PGHOST" in reason
 
+    # ── `PGHOST` IS A LIST, AND THE PREDICATE READ IT AS A SCALAR. ───────────────────
+    # Measured by an independent security review. libpq accepts a comma-separated
+    # multi-host `PGHOST` and tries the elements in order until one answers; the whole
+    # string reaches it verbatim. The predicate returned True for ANYTHING starting
+    # with `/` and never split, so the first three below PASSED the gate — with no
+    # socket at `/tmp`, libpq falls straight through to `hosted.example`, and this
+    # suite WRITES. The last two were refused, but only by the accident that
+    # `'localhost,…'` is neither equal to `'localhost'` nor a parseable IP address:
+    # scalar comparison, not a rule, and it protected the path branch not at all.
+    #
+    # A SECOND REASON THE PATH SHAPE IS NOW REFUSED OUTRIGHT: libpq does not negotiate
+    # TLS over a unix socket, so `connect_psycopg2`'s `sslmode=require` default is
+    # inert on a leading-slash value.
+    for smuggled in (
+        "/tmp,hosted.example",
+        "/var/run/postgresql,hosted.example",
+        "/../../hosted.example",
+        "localhost,hosted.example",
+        "127.0.0.1,hosted.example",
+        # ...and the mixed-order forms, so the rule is "every element", not "the first".
+        "hosted.example,127.0.0.1",
+        "127.0.0.1,10.0.0.5",
+        # An EMPTY element means "use the default", which this function cannot see.
+        ",hosted.example",
+        "127.0.0.1,",
+    ):
+        assert _is_loopback_target(smuggled) is False, smuggled
+        available, reason = _probe_engine(dict(consented, PGHOST=smuggled))
+        assert available is False, smuggled
+        assert "loopback" in reason, reason
+
+    # ALREADY REFUSED BEFORE THE SPLIT, AND STILL REFUSED AFTER IT. Each is a shape
+    # that reads as loopback to a human and is not one to `ipaddress`:
+    # `::ffff:127.0.0.1` is an IPv4-mapped IPv6 address and `is_loopback` is False for
+    # it; `0.0.0.0` is unspecified, not loopback; `0177.0.0.1` is an octal spelling
+    # `ipaddress` refuses outright; and `localhost.` is the fully-qualified root form,
+    # which is not the string `localhost`. Pinned so the multi-host change cannot
+    # loosen any of them.
+    for refused in ("::ffff:127.0.0.1", "0.0.0.0", "0177.0.0.1", "localhost."):
+        assert _is_loopback_target(refused) is False, refused
+        available, reason = _probe_engine(dict(consented, PGHOST=refused))
+        assert available is False, refused
+        assert "loopback" in reason, reason
+
+    # A UNIX-SOCKET DIRECTORY IS NOW REFUSED TOO, deliberately — see
+    # `_is_loopback_element`. Nothing in this repository sets such a `PGHOST` (CI sets
+    # `127.0.0.1`), so the narrowing costs a stated skip and no capability.
+    for socket_dir in ("/var/run/pg", "/tmp", "/var/run/postgresql"):
+        assert _is_loopback_target(socket_dir) is False, socket_dir
+
     # THE LIMIT. A loopback target gets past every string gate and is refused only
     # by the connection attempt itself — here, by the raiser standing in for it.
-    for local in ("127.0.0.1", "127.0.0.53", "::1", "[::1]", "localhost", "/var/run/pg"):
+    for local in ("127.0.0.1", "127.0.0.53", "::1", "[::1]", "localhost", "LocalHost"):
         assert _is_loopback_target(local) is True, local
         available, reason = _probe_engine(dict(consented, PGHOST=local))
         assert available is False, local

@@ -62,6 +62,7 @@ has changed. The two helpers below are how:
 from __future__ import annotations
 
 import functools
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,6 +71,125 @@ from isaac_api import experiment_repository as _repo
 from isaac_api import memory
 from isaac_api import workspace as _ws
 from isaac_api.routes import TUTORIAL_SESSION_HEADER
+
+
+#: CONSENT TO CONNECT, and the ONE signal that keeps the libpq environment intact.
+#: The name and the required value are ``test_run_row_parity.OPT_IN_ENV`` and
+#: ``OPT_IN_VALUE``; they are re-declared here rather than imported because
+#: importing a test module from a conftest executes that module's own
+#: ``_probe_engine()`` at conftest-import time, which is the one moment this file
+#: exists to make uninteresting. The two declarations are pinned equal by
+#: ``test_no_ambient_database.py::test_the_opt_in_this_conftest_honours_is_the_suites_own``,
+#: so they cannot drift apart silently.
+REAL_ENGINE_OPT_IN = "ISAAC_RUN_REAL_ENGINE_PARITY"
+REAL_ENGINE_OPT_IN_VALUE = "1"
+
+
+def libpq_variable_names(env) -> list[str]:
+    """Every ``PG``-prefixed name in ``env``, ENUMERATED BY PREFIX rather than listed.
+
+    libpq reads its connection parameters from a documented set of ``PG*``
+    variables, and the set is not closed: ``PGHOST``, ``PGHOSTADDR``, ``PGPORT``,
+    ``PGUSER``, ``PGPASSWORD``, ``PGDATABASE``, ``PGSSLMODE``, ``PGSERVICE``,
+    ``PGSERVICEFILE``, ``PGPASSFILE``, ``PGOPTIONS``, ``PGCONNECT_TIMEOUT``,
+    ``PGSSLROOTCERT``, ``PGREQUIRESSL``, ``PGCHANNELBINDING``, ``PGTARGETSESSIONATTRS``
+    and more, with new ones added by new libpq releases. A HAND-WRITTEN LIST WOULD BE
+    A GUARD THAT IS CORRECT ON THE DAY IT IS WRITTEN AND SILENTLY INCOMPLETE
+    AFTERWARDS — and ``PGSERVICE``/``PGSERVICEFILE`` alone can name a complete
+    connection without ``PGHOST`` appearing anywhere. So the rule is the prefix.
+
+    Over-clearing is the safe direction and is intended: an unrelated ``PG``-prefixed
+    variable that this suite does not use loses nothing by being absent, while one
+    this suite does not KNOW ABOUT is exactly the case a list would miss.
+    """
+    return sorted(name for name in env if name.startswith("PG"))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_ambient_database():
+    """A BARE ``pytest`` MUST NOT CONNECT THE WRITE PATH TO WHATEVER ``PGHOST`` NAMES.
+
+    THE ACCIDENT, MEASURED RATHER THAN FEARED. ``db_write.database_configured`` is
+    effectively ``bool(PGHOST)``, and that alone selects the PostgreSQL repository
+    over the filesystem one — that is the deployment's documented feature switch, and
+    it is why it needs no second variable in the pod. ``pyproject.toml``'s
+    ``testpaths`` includes ``apps/api/tests``. And ``docs/postgres-test-db-guide.md``
+    §"port-forward" tells anyone holding a SLAC cluster context to export exactly
+    ``PGHOST``/``PGPORT``/``PGUSER``/``PGPASSWORD``/``PGDATABASE`` in their shell. Put
+    those three facts together and ``CLAUDE.md`` §14's own documented developer
+    command — ``.venv/bin/pytest`` — becomes a write client for whatever that
+    environment points at.
+
+    Measured in this repository with a counting double at ``db_write.connect_psycopg2``
+    and those five variables exported (nothing was connected to; the double answers in
+    process). ``apps/api/tests/test_pending_reads_are_boundable.py`` alone opened **70**
+    connections and issued **11,633** mutating statements — ``INSERT``s and ``UPDATE``s
+    against ``isaac_experiments``, ``isaac_runs`` and ``isaac_run_projection`` — on a
+    DSN carrying ``application_name=isaac_app_write``. Across the whole suite the
+    figures are in the report this fixture's proof test regenerates.
+
+    WHY THE EXISTING GUARDS DID NOT COVER IT, stated precisely, because each of them
+    reads as though it did:
+
+    * ``.github/workflows/ci.yml``'s ``test`` job asserts ``PGHOST`` is unset. That is a
+      guard on CI's environment. It says nothing about a developer's shell, and it is
+      not weakened, duplicated or replaced here.
+    * ``test_run_row_parity.py``'s ``ISAAC_RUN_REAL_ENGINE_PARITY`` opt-in (2026-08-24)
+      closed this accident **for that one file**. Its own docstring describes the
+      accident in the general terms that made it read as closed everywhere. It was
+      never in scope for the other files that write through the same repository, and
+      that belief is what made this dangerous rather than merely open. MEASURED:
+      **35** files in this package opened a connection, and none of them is that one.
+
+    WHAT THIS DOES. Unless the suite has explicitly consented via
+    :data:`REAL_ENGINE_OPT_IN`, every ``PG``-prefixed variable is removed from
+    ``os.environ`` for the whole session, so ``database_configured`` answers ``False``
+    and every write lands on the filesystem repository the tests are written for.
+
+    WHY SESSION-SCOPED, AND WHY THAT IS NOT A SHORTCUT. Higher-scoped fixtures are set
+    up before lower-scoped ones, so this runs ahead of any module- or class-scoped
+    fixture that builds an app and saves a record — a function-scoped fixture would
+    not. It also must NOT restore the variables between tests: a test that wants a
+    libpq environment sets one itself with ``monkeypatch.setenv``, which runs later and
+    wins, and is undone by monkeypatch afterwards.
+
+    COLLECTION TIME IS NOT COVERED BY A FIXTURE, and was measured rather than assumed:
+    ``pytest --collect-only`` with the five variables exported opened **0**
+    connections. The one module that probes at import — ``test_run_row_parity`` —
+    checks its opt-in before it reads anything else, which is exactly why that file's
+    fix is the precedent for this one and not a duplicate of it.
+
+    THE OPT-IN PASSES THE ENVIRONMENT THROUGH UNTOUCHED. CI's ``postgres-migration``
+    job sets it for both of its ``pytest`` invocations (the parity oracle and the
+    discard suite), so those keep seeing the service container exactly as before. It
+    is not a libpq variable and no guide asks anyone to export it, so exporting the
+    documented five does not set it.
+
+    THE RESIDUAL RISK, NAMED RATHER THAN IMPLIED AWAY. An opt-in that is honoured is
+    an opt-in that can be given, and a developer who exported
+    ``ISAAC_RUN_REAL_ENGINE_PARITY=1`` once for a local throwaway engine and left it
+    in a shell profile restores the whole exposure — and restores it WIDER, because
+    the whole package writes rather than one file. That is not a reason to remove the
+    passthrough: without it CI's two real-engine steps cannot run, and a guard that
+    breaks the only job that can execute those oracles is not a guard. What makes the
+    residual narrow is that the variable is ISAAC-specific, is set in exactly two
+    places in this repository (both CI steps), and is documented at its declaration
+    as consent to connect. It is NOT narrowed by the loopback check in
+    ``test_run_row_parity``: that check lives in the suite, not here, and this fixture
+    deliberately does not import it — doing so would run that module's
+    ``_probe_engine()`` at conftest-import time in every invocation, including CI's
+    discard step, which does not collect that file today.
+    """
+    if (os.environ.get(REAL_ENGINE_OPT_IN) or "").strip() == REAL_ENGINE_OPT_IN_VALUE:
+        yield {}
+        return
+    removed = {name: os.environ[name] for name in libpq_variable_names(os.environ)}
+    for name in removed:
+        del os.environ[name]
+    try:
+        yield removed
+    finally:
+        os.environ.update(removed)
 
 
 @pytest.fixture(autouse=True)
