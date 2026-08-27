@@ -1,4 +1,79 @@
-# Session handoff — 2026-08-26
+# Session handoff — 2026-08-26, **CLOSED OUT 2026-08-27**
+
+> ## READ THIS BOX FIRST — the document below is a SNAPSHOT OF A SESSION THAT HAS SINCE FINISHED
+>
+> This file was written when a session stopped on a usage limit with one unreviewed PR and four
+> unverified `wip/*` branches. **All of that is now resolved.** Everything the box below records is
+> what a reader needs; the rest of the document is kept for its evidence and its reasoning, not as
+> a description of current state.
+>
+> **`main` is `1dd28ad`. Zero open PRs. Zero `wip/` branches. Working tree clean, 0 ahead / 0
+> behind.** Image `v0.0.177`. Backend **5,784 passed / 34 skipped**; frontend **4,469 passed / 173
+> files**; `tsc -b` clean; snapshot `--check` clean on both artifacts. All measured on `1dd28ad`.
+>
+> **Every PR §3 and §4 were waiting on has merged**, each with an independent review and green CI
+> on its exact head SHA: **#179** (the unreviewed one — its review returned DO NOT SHIP on four
+> Critical findings, all closed), **#182** capture surfaces, **#183** five reachable 500s + the
+> `record_id` path escape + a Critical reset fix, **#184** rename, **#185** the
+> `official_validator_ran` wire discriminator, **#186** three a11y items + 119 transcribed Linux
+> baseline cells, **#187** the committed `.venv` symlink, **#188** the session record.
+>
+> **The four `wip/*` branches §4 told you not to merge were not merged.** Each slice was re-run
+> from its brief and re-measured from scratch; the snapshots are kept as
+> `preserve/*-wip-superseded` for their history. **§4's warning was right and is worth keeping**:
+> two of them looked finished and were not — the rename snapshot called `exp.save()` instead of
+> `_save_versioned`, so **a rename never bumped `rev`** and a concurrent client's stale precondition
+> would have passed; the discriminator snapshot had **9 real frontend assertion failures** and a
+> false claim in its own comment.
+>
+> **Everything in §6 — what is Dean's, Krish's or Angel's — is UNCHANGED and still theirs.**
+> Nothing in this session touched a database, a credential, the hosted deployment, or any external
+> authorization.
+>
+> **What §5 listed as implementable and is now DONE:** §5.1 all five reachable 500s and the
+> `record_id` path escape · §5.2 D1 and D3 (D2 declined with a measured basis — see below) · §5.3
+> rename (**discard declined, and that is the finding**) · §5.4 the wire discriminator · §5.5's
+> undocumented items · the automatable half of the accessibility work.
+>
+> **What is still open, and it is a short list:**
+> - **`system.domain` has no write path anywhere** (§5.2 D2). Declined deliberately: the fix
+>   belongs in `Experiment.resolved_run_draft`, and **the repository holds two stored expressions
+>   of the same derivation with opposite confirmation postures** — `draft_builder` stores it
+>   directly, `inferability.system_domain` requires user confirmation and has no production caller.
+>   Which posture governs is a decision, not a mechanical step. Deriving `domain` from `technique`
+>   would mean authoring a **37-entry scientific classification that exists nowhere here**, which
+>   §5 forbids.
+> - **Discard an experiment.** §15 enumerates only `INSERT`s and `UPSERT`s, so no committed
+>   sentence permits a `DELETE` — while `db_write.WriteStatementPolicy` **does not refuse one**
+>   (`delete` is absent from `_FORBIDDEN_KEYWORDS`; verified). **Mechanical permission is not
+>   authorization.** A hard delete needs eight statements across seven referencing tables, six of
+>   them append-only history, none carrying `ON DELETE`. **Owner's call.**
+> - **A11Y-06's residue**: `/settings?tab=explorer` renders two `region` landmarks both named
+>   "Endpoint Explorer". Baselined at the measured 1×7 with the one-line fix named; taking it costs
+>   another CI round-trip.
+> - **The a11y darwin column is REASONED, not measured**, and CI runs no macOS at all
+>   (`grep -rn 'macos\|darwin' .github/workflows/` returns nothing). If anyone runs the suite on a
+>   Mac, that reading wins.
+> - `isaac_runs` Stage 2b · the Evidence Graph / Compare Runs cross-feature work · the residues each
+>   merged PR names in its own body.
+>
+> **One correction to §5 itself:** it lists an apply route for `POST /ingestion/csv/preview` as
+> outstanding. **It is not.** It is a committed human decision — *"Option 1 —
+> reconciliation-only … a deliberate authority boundary, NOT a defect"*. Do not build it.
+>
+> **Three operational traps this session paid for, all now guarded or recorded:**
+> 1. **A `.venv` symlink reached `main` and destroyed the reader's virtualenv.** `.gitignore` had
+>    `.venv/` — trailing slash, which matches a directory and **not a symlink of the same name**.
+>    Guarded in #187 by asserting no tracked entry has git mode `120000`. Rebuild on **Python
+>    3.12**, not 3.14: 3.14 fails collection with a `UnicodeEncodeError`.
+> 2. **Every merge to `main` conflicts every other open PR on the memory snapshot.** Resolve by
+>    taking a side **and then regenerating** — doing only the first leaves CI red on indexed-source
+>    drift, which happened here once.
+> 3. **The OpenAPI aggregates in `settings-api.test.tsx` must be RE-MEASURED at every merge, never
+>    added.** They moved four times in one session (93,478 → 98,335). Re-transcribe `apiFixtures.ts`
+>    **by script** with `ensure_ascii=False`; hand-editing has broken it three separate ways.
+>
+> The durable record of all of this is `CLAUDE.md` §11, *"Session of 2026-08-26/27"*.
 
 **Written at the end of a session that stopped on a usage limit, not at a natural boundary.**
 Read this before doing anything else, then verify every fact in it with the commands in §1.
