@@ -8,6 +8,14 @@ examples/*
 
 # python
 .venv/
+# ...AND `.venv` WITHOUT THE SLASH, because the pattern above does not match a
+# SYMLINK of that name. On 2026-08-26 an agent working in a git worktree created
+# `.venv` as a symlink to the main checkout's interpreter so its tests could run,
+# `git add -A` swept it in, and it reached `main` through a merged PR. Checking
+# main out then REPLACED the real virtualenv directory with a symlink pointing at
+# itself — every `.venv/bin/python` invocation failed with "too many levels of
+# symbolic links" until the venv was rebuilt from scratch.
+.venv
 __pycache__/
 *.pyc
 *.egg-info/
