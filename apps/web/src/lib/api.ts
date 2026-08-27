@@ -954,6 +954,45 @@ export const api = {
     return getJson<ApiExperimentDetail>(`/experiments/${enc(id)}`);
   },
 
+  /**
+   * Correct an experiment's title. The FIRST operation that can change one.
+   *
+   * `title` was written exactly once — by `createExperiment` — and until
+   * `PATCH /api/experiments/{id}` shipped no route could change it, so on a
+   * deployment with a durable database a typo was permanent.
+   *
+   * IT SENDS ONLY THE TITLE, and the omission is the contract rather than an
+   * oversight. The create operation also takes a free-text `description`, and the
+   * rename operation deliberately refuses that key with a 422: the server stores it
+   * at `source.description`, which it also reads as the provenance marker deciding
+   * whether a record belongs to the managed example dataset. Sending it here would
+   * be refused, so this signature cannot express it.
+   *
+   * `If-Match` IS THE RECORD'S TOKEN, not a run's — the same trap `updateRun`'s own
+   * comment names, in the other direction. Guarded on truthiness exactly as every
+   * other mutation here is: a blank version must send NO header (→ a 428 naming the
+   * missing precondition) rather than `If-Match: ""`, which is malformed (→ 400) and
+   * would report a client bug as a server disagreement.
+   *
+   * A 412 MEANS THE RENAME DID NOT HAPPEN. `mutationError` attaches the parsed body,
+   * so the caller can tell a stale validator from an unreachable server and re-read
+   * before retrying.
+   */
+  async renameExperiment(
+    id: string,
+    title: string,
+    version: string,
+  ): Promise<ApiExperimentDetail> {
+    const path = `/experiments/${enc(id)}`;
+    const res = await request(path, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+      ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiExperimentDetail>(res, path);
+    throw await mutationError(res, path);
+  },
+
   // P27.6 — the client half of revision-aware live-sync. A conditional GET sends
   // the held ETag as `If-None-Match: "<version>"`; the backend answers 304 (no
   // body) when the record is unchanged or 200 + the fresh detail (+ new ETag)
