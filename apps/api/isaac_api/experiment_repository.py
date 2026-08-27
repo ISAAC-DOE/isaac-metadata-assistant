@@ -386,6 +386,44 @@ class DurableWriteConflict(RuntimeError):
             return fallback
 
 
+
+class DiscardRefusedByHistory(RuntimeError):
+    """The database ANSWERED, and it refused to delete an experiment row.
+
+    THE FOURTH FAILURE, AND IT IS THE FOREIGN-KEY BACKSTOP FIRING. Discard is
+    gated in the route: it refuses before writing anything if any revision or
+    submission row exists for the record. That precheck is the mechanism; THIS is
+    what happens if the precheck is ever wrong.
+
+    No migration in this repository writes an ``ON DELETE`` clause, so the SQL
+    default ``NO ACTION`` applies to every foreign key into ``isaac_experiments``
+    — including the four that ``0003_revisions`` and ``0004_submissions``
+    declare. Deleting an experiment row that still has a revision or a submission
+    is therefore REFUSED BY THE SERVER, the whole transaction rolls back, and the
+    two run-side deletes issued before it are undone with it. Append-only history
+    survives a defect in this application's own reasoning, which is the only kind
+    of guarantee worth having about it.
+
+    IT IS NOT RECORDED AS A STORAGE FAILURE, for :class:`DurableWriteConflict`'s
+    reason: the round trip worked and the server behaved exactly as designed, so
+    ``/api/health`` must not start reporting an outage over it.
+
+    IT DELIBERATELY CARRIES NO ROW COUNT AND NO ROW. The refusal proves that at
+    least one referencing row exists; it does not say how many, in which table, or
+    what they contain, and this application must not go looking — reading
+    submission history to explain a refusal is a different operation with a
+    different authorization.
+    """
+
+    def __init__(self, experiment_id: str | None = None) -> None:
+        super().__init__(
+            "the database refused to remove this experiment because history rows "
+            "still reference it; nothing was removed"
+        )
+        #: The id whose removal was refused. Known at the raise site.
+        self.experiment_id = experiment_id
+
+
 # --- the degradation this process has actually observed -----------------------
 #
 # ONE MODULE GLOBAL, and it holds an exception CLASS NAME — never a message, a
@@ -482,6 +520,16 @@ STORAGE_RESTORE_FAILED_MESSAGE = (
     "so it cannot say whether this record exists. Nothing was changed. Retrying "
     "may not clear this on its own — if it persists, it needs a server-side fix."
 )
+#: THE FOURTH, AND IT IS THE ONLY ONE THAT DESCRIBES A REMOVAL. The write wording
+#: ends "Nothing was saved", which is exactly backwards for an operation whose
+#: whole purpose is to stop something being saved: a reader told "nothing was
+#: saved" about a failed discard would reasonably conclude the discard had worked.
+#: Fixed and path-free for the same reason the other three are.
+STORAGE_DISCARD_FAILED_MESSAGE = (
+    "This deployment stores experiments in its own database, and that "
+    "database did not accept the removal. Nothing was discarded, and the "
+    "experiment is still there."
+)
 
 
 def _unavailable(exc: BaseException, message: str = STORAGE_WRITE_FAILED_MESSAGE) -> StorageUnavailable:
@@ -545,6 +593,39 @@ def is_undefined_table(exc: BaseException) -> bool:
     diagnostics = getattr(exc, "diag", None)
     return (
         str(getattr(diagnostics, "sqlstate", "") or "").strip() == SQLSTATE_UNDEFINED_TABLE
+    )
+
+
+#: PostgreSQL's SQLSTATE for ``foreign_key_violation``. The server's own code for
+#: the one refusal that means A ROW STILL REFERENCES THIS ONE — which, for the
+#: discard path, means append-only history exists for a record the route had
+#: concluded had none.
+SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
+
+
+def is_foreign_key_violation(exc: BaseException) -> bool:
+    """Whether ``exc`` POSITIVELY identifies a foreign-key refusal.
+
+    Written as an exact copy of :func:`is_undefined_table`'s mechanism rather than
+    as a variation on it, and for the same three reasons: the SQLSTATE is the
+    SERVER's statement, it needs no driver import, and it is spelled identically
+    across ``psycopg2`` and ``psycopg`` 3. A message match is not used and must not
+    be added.
+
+    IT FAILS CLOSED, and the closed direction here is the opposite of the one
+    :func:`is_undefined_table` chooses, because the consequences are opposite. An
+    exception carrying no recognisable SQLSTATE returns ``False`` and is therefore
+    reported as a storage OUTAGE (``503``) rather than as a history refusal
+    (``409``). Both answers say the same operational thing — nothing was removed —
+    so the cost of the wrong one is a misdirected diagnosis, never a destroyed row.
+    """
+    for attribute in ("pgcode", "sqlstate"):
+        if str(getattr(exc, attribute, "") or "").strip() == SQLSTATE_FOREIGN_KEY_VIOLATION:
+            return True
+    diagnostics = getattr(exc, "diag", None)
+    return (
+        str(getattr(diagnostics, "sqlstate", "") or "").strip()
+        == SQLSTATE_FOREIGN_KEY_VIOLATION
     )
 
 
@@ -1026,6 +1107,79 @@ Q_UPSERT_RUN_PROJECTION = (
 #: :data:`RUN_TABLE`.
 PROJECTION_TABLE = "isaac_run_projection"
 
+
+
+# --- DISCARD: the three deletes, in foreign-key dependency order ---------------
+#
+# WHAT THESE THREE STATEMENTS ARE, AND — MORE IMPORTANTLY — WHAT THEY ARE NOT.
+# They remove ONE experiment this application created, together with the two
+# writer-maintained projections OF that experiment, inside ONE transaction. They
+# are the durable half of `POST /api/experiments/{id}/discard`, whose whole
+# authorization is the project owner's narrow one: **explicit Discard semantics
+# for unsubmitted Draft/capture state only.**
+#
+# THEY ARE NOT A GENERIC DELETE PRIMITIVE AND MUST NOT BECOME ONE. There is no
+# statement here that takes a table name, a predicate, or anything but one
+# experiment id; each is a module-level constant with `%s` placeholders, exactly
+# like every other statement in this application, because `db_write`'s primary
+# guarantee is that no caller-supplied SQL exists anywhere in the write path.
+#
+# THREE TABLES, AND THE FIVE THAT ARE DELIBERATELY ABSENT. These name
+# `isaac_run_projection`, `isaac_runs` and `isaac_experiments` and nothing else.
+# `isaac_experiment_revisions`, `isaac_run_revisions`, `isaac_revision_changes`,
+# `isaac_submissions` and `isaac_submission_runs` are APPEND-ONLY HISTORY: no
+# statement in this application may ever UPDATE or DELETE one, which is the whole
+# of that guarantee because the database cannot provide it (a trigger needs a
+# dollar-quoted body, which `db_migrate.split_statements` refuses; `REVOKE` is a
+# forbidden verb). `test_submission_store.test_no_submission_statement_updates_or_deletes_history`
+# already scans every `Q_*` in this package for exactly that, and
+# `test_discard_an_experiment.py` states the same property over THIS module's
+# constants specifically, so the guard names the place a future delete would be
+# written.
+#
+# `records` IS UNREACHABLE FROM HERE BY TWO INDEPENDENT MECHANISMS, and neither is
+# this comment: `db_write._FORBIDDEN_TABLES` refuses any statement whose token
+# stream contains the identifier at all, and `OWNED_TABLES` does not list it.
+#
+# THE ORDER IS CHILDREN FIRST, AND IT IS A REQUIREMENT RATHER THAN A PREFERENCE.
+# No migration in this repository writes an `ON DELETE` clause anywhere, so the
+# SQL default `NO ACTION` applies to every foreign key into `isaac_experiments`:
+# PostgreSQL REFUSES to delete a parent row that still has children. Issuing the
+# experiment delete first would abort the transaction every time the record had a
+# single run. The two projections go first, the experiment last.
+#
+# AND THE ORDER IS ALSO THE BACKSTOP. Because the experiment delete goes LAST,
+# and because `0003`/`0004` declare four more foreign keys into the same parent
+# with the same `NO ACTION`, a record that still carries a revision or a
+# submission is refused BY THE SERVER at that final statement — and the two
+# deletes already issued roll back with it. The route refuses long before this;
+# this is what holds if the route's reasoning is ever wrong. See
+# :class:`DiscardRefusedByHistory`.
+
+#: The completeness claim for this experiment's run rows (`0005`). Removed first
+#: because it is the leaf: nothing references it, and it is meaningless once the
+#: rows it describes are gone. A superseded completeness claim is not evidence of
+#: anything — it describes a row set that no longer exists.
+Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT = (
+    "DELETE FROM isaac_run_projection WHERE experiment_id = %s"
+)
+
+#: Every run row of this experiment (`0002`).
+#:
+#: DISTINCT FROM :data:`Q_DELETE_ABSENT_RUNS`, WHICH IS THE SHADOW-WRITE DIFF. That
+#: statement removes the rows a still-existing experiment no longer names, and its
+#: predicate is the COMPLEMENT of a desired set; this one removes them all, for an
+#: experiment that is about to stop existing. Reusing the diff with an empty id
+#: array would work and would be a false economy: the two say different things, and
+#: a reader of either deserves to see which.
+Q_DELETE_RUNS_FOR_EXPERIMENT = "DELETE FROM isaac_runs WHERE experiment_id = %s"
+
+#: The experiment row itself (`0001`). LAST, for both reasons above.
+#:
+#: `rowcount` over this statement is MEASURED and returned, never assumed: it is
+#: how the caller learns whether a durable row was there at all, which is not the
+#: same question as whether a workspace directory was.
+Q_DELETE_EXPERIMENT = "DELETE FROM isaac_experiments WHERE experiment_id = %s"
 
 # --- is the table even there yet? the deployment-order guard -------------------
 
@@ -1655,6 +1809,100 @@ class PostgresOrdinaryStore:
             policy.check(Q_UPSERT_RUN_PROJECTION),
             (exp.id, exp.rev, exp.generation, run_count, projector),
         )
+
+    # -- discard ---------------------------------------------------------------
+
+    def discard(self, exp: "ws.Experiment") -> int:
+        """REMOVE one ordinary-scope experiment's durable state. Nothing else.
+
+        Returns how many ``isaac_experiments`` rows were removed — MEASURED from
+        the server's own ``rowcount``, so ``0`` is the honest answer for a record
+        this deployment never persisted (created before the migration was applied,
+        or written while the database was unreachable) and is not an error.
+
+        WHAT IT REMOVES, EXHAUSTIVELY: this experiment's row, its ``isaac_runs``
+        rows, and its ``isaac_run_projection`` claim. The three statements are
+        named above, in foreign-key dependency order, and the whole reasoning about
+        why that order is a requirement rather than a preference lives there.
+
+        WHAT IT NEVER REMOVES: any row of the five submission-lifecycle tables, and
+        anything at all in ``records``. No statement here names one, which is the
+        whole of the guarantee — see the comment above the statements for why the
+        database cannot provide it and which test states it.
+
+        ONE TRANSACTION, so the three deletes are all-or-nothing. A record that
+        still carries history therefore loses NOTHING: the final statement is
+        refused by the server's foreign key and the two run-side deletes roll back
+        with it.
+
+        RAISES :class:`NotPersistable` before opening anything, for a worked-example
+        record or a canonical example id — the same guard :meth:`persist` runs, in
+        the same place, for the same reason. It is a permanent property of the
+        record and must never be reported as, or recorded as, a storage failure.
+        In practice this is unreachable from ``workspace.discard_experiment``,
+        which resolves no store at all for a session scope; it is asserted here
+        because this class is what a future caller would reach for.
+
+        RAISES :class:`DiscardRefusedByHistory` when the server refuses the
+        experiment delete with a foreign-key violation. That is the backstop
+        firing, it is not an outage, and it is deliberately NOT recorded as one.
+
+        RAISES :class:`StorageUnavailable` for every other failure, carrying
+        :data:`STORAGE_DISCARD_FAILED_MESSAGE` rather than the write wording — a
+        reader told "nothing was saved" about a failed discard would conclude the
+        discard had worked.
+
+        THERE IS NO COMPARE-AND-SWAP HERE, AND THAT IS A STATEMENT ABOUT WHERE THE
+        PRECONDITION LIVES RATHER THAN AN OMISSION. ``If-Match`` is checked by the
+        route, inside the same ``record_lock`` critical section as this call, over
+        an experiment re-read inside that lock. A durable predicate as well would
+        need the delete to name a ``rev`` — and the honest failure mode of getting
+        that wrong is the opposite of the one the upsert guards: an upsert that
+        loses a race writes stale science, while a delete that loses one removes a
+        record whose new content the deleter never saw. That case is bounded here
+        by the fact that this process serialises on the record and by the route's
+        own re-read; a cross-process delete race would need the same treatment
+        ``Q_UPSERT_EXPERIMENT`` gets, and is named as not-done rather than implied.
+        """
+        self.refuse_if_not_persistable(exp)
+        removed = 0
+        try:
+            with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
+                # THE TABLE-PRESENCE PROBES ARE THE SAME ONES THE WRITE PATH MAKES,
+                # for the same deployment reason: the image rolls out on merge and
+                # the operator applies migrations by hand afterwards, so this build
+                # routinely runs against a database where `0002` and/or `0005` are
+                # still pending. Naming an absent relation would abort the
+                # transaction and take the experiment delete down with it — a
+                # discard that fails for a table NOTHING READS.
+                if _table_available(cursor, policy, PROJECTION_TABLE):
+                    cursor.execute(
+                        policy.check(Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT), (exp.id,)
+                    )
+                if _table_available(cursor, policy, RUN_TABLE):
+                    cursor.execute(
+                        policy.check(Q_DELETE_RUNS_FOR_EXPERIMENT), (exp.id,)
+                    )
+                cursor.execute(policy.check(Q_DELETE_EXPERIMENT), (exp.id,))
+                count = cursor.rowcount
+                removed = int(count) if isinstance(count, int) and count > 0 else 0
+        except Exception as exc:  # noqa: BLE001 - classified, then re-raised as ours
+            if is_foreign_key_violation(exc):
+                # The round trip WORKED and the server behaved exactly as designed.
+                # Recording an outage here would send an operator to look at a
+                # healthy database and would make `/api/health` claim durability
+                # had failed.
+                _note_storage_success()
+                raise DiscardRefusedByHistory(exp.id) from exc
+            if is_undefined_table(exc):
+                # A positive cache the server has just contradicted stops being
+                # believed — the operator rolled a migration back under a running
+                # pod. This is NOT a recovery: the transaction is already aborted
+                # and this discard is already lost. See `forget_run_table_presence`.
+                forget_run_table_presence()
+            raise _unavailable(exc, STORAGE_DISCARD_FAILED_MESSAGE) from exc
+        _note_storage_success()
+        return removed
 
     # -- restore ---------------------------------------------------------------
 

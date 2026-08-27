@@ -1550,9 +1550,27 @@ def test_this_suite_reads_isaac_runs_only_as_a_test_and_never_on_the_apps_behalf
 
     **WHAT THIS TEST CHECKS, precisely.** It builds the set of ``Q_``-prefixed
     module-level values of ``db_write`` and ``experiment_repository`` and asserts
-    that none of the five TEST statements below is among them, and that each still
-    passes the application's own ``WriteStatementPolicy``. So a future slice that
-    MOVES one of these statements into either of those two modules trips here.
+    that none of FOUR of the five TEST statements below is among them, and that each
+    still passes the application's own ``WriteStatementPolicy``. So a future slice
+    that MOVES one of them into either of those two modules trips here.
+
+    **IT WAS FIVE, AND ONE OF THEM COLLIDED — RECORDED RATHER THAN QUIETLY
+    EXEMPTED.** ``Q_TEST_DELETE_RUNS_OF`` is
+    ``DELETE FROM isaac_runs WHERE experiment_id = %s``, and the DISCARD slice gave
+    ``experiment_repository`` a statement with exactly those bytes
+    (``Q_DELETE_RUNS_FOR_EXPERIMENT``) — for its own authorized reason, removing an
+    unsubmitted experiment's run rows before the experiment row itself. Nothing was
+    MOVED: two statements arrived at one string independently.
+
+    So for that one the assertion is INVERTED rather than dropped, which is the
+    stronger of the two available readings: it is pinned EQUAL to the application
+    constant it collides with, by name. A change to either side trips here and names
+    the other, where a bare exemption would have gone quiet forever. What is lost is
+    real and is stated: this file can no longer tell "the test's own delete" from
+    "the application's delete" by text, so the enumeration that keeps
+    ``isaac_runs`` a write-path-only table is
+    ``test_0002_is_now_written_by_the_write_path_and_by_nothing_else``'s, not this
+    one's.
 
     **WHAT IT DOES NOT CHECK, and this is stated because the claim was once made
     more broadly than the code supports.** It is NOT a reachability proof. It would
@@ -1576,13 +1594,23 @@ def test_this_suite_reads_isaac_runs_only_as_a_test_and_never_on_the_apps_behalf
         Q_TEST_ALL_RUN_ROWS,
         Q_TEST_RUN_ROWS_FOR,
         Q_TEST_SHIFT_ORDINALS,
-        Q_TEST_DELETE_RUNS_OF,
         Q_TEST_TAMPER_WITH_A_RUN_LABEL,
     ):
         assert sql not in application_statements, sql
         # ...and each is still bound by the same policy every application
         # statement is: owned tables only, no forbidden verb.
         assert dbw.WriteStatementPolicy().check(sql) == sql
+
+    # THE COLLISION, PINNED BY NAME rather than exempted. See the docstring: the
+    # discard slice's `Q_DELETE_RUNS_FOR_EXPERIMENT` is byte-identical to this
+    # file's out-of-band control, arrived at independently. Asserting the equality
+    # means a change to EITHER side fails here and names the other.
+    assert Q_TEST_DELETE_RUNS_OF == repo.Q_DELETE_RUNS_FOR_EXPERIMENT
+    assert Q_TEST_DELETE_RUNS_OF in application_statements
+    assert (
+        dbw.WriteStatementPolicy().check(Q_TEST_DELETE_RUNS_OF)
+        == Q_TEST_DELETE_RUNS_OF
+    )
 
     # The application's read of the table remains the ONE inside the write path.
     assert repo.Q_EXPERIMENT_RUN_ROWS in application_statements

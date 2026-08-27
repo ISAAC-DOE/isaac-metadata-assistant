@@ -116,6 +116,27 @@ Q_REVISION_COUNT = (
     "SELECT count(*) FROM isaac_experiment_revisions WHERE experiment_id = %s"
 )
 
+#: How many SUBMISSIONS this experiment has, asked directly rather than inferred
+#: from the revision count.
+#:
+#: WHY BOTH ARE COUNTED, WHEN EVERY SUBMISSION THIS APPLICATION WRITES CARRIES A
+#: REVISION. ``record_submission`` writes the revision and the submission in ONE
+#: transaction, so through this API the revision count is already the superset and
+#: this statement can only ever agree with it. The reason it exists anyway is that
+#: the question the discard path asks is not "did this application submit this
+#: record" but "does any row anywhere still reference this experiment" — and
+#: ``isaac_submissions.experiment_id`` is its OWN foreign key into
+#: ``isaac_experiments``, declared by ``0004`` independently of ``0003``'s. A
+#: precheck that counted only revisions would be reasoning about one of the two
+#: parents' children and calling it both. Rows written by a ``psql`` session are
+#: reachable in exactly that way; the FK backstop would catch it, and a precheck
+#: that has to be caught by its own backstop is a precheck that is wrong.
+#:
+#: A SELECT, like every statement in this module. Nothing here removes anything.
+Q_SUBMISSION_COUNT_FOR_EXPERIMENT = (
+    "SELECT count(*) FROM isaac_submissions WHERE experiment_id = %s"
+)
+
 #: One revision, INCLUDING its stored document.
 #:
 #: The document is fetched because the diff is computed from it. It is not fetched
@@ -180,6 +201,26 @@ Q_SUBMISSION_RUNS_FOR_SUBMISSION = (
 
 
 # --- row helpers --------------------------------------------------------------
+
+
+def _count(row: Any) -> int:
+    """One ``count(*)`` row as a non-negative integer, or ``0``.
+
+    FAILS TOWARDS ZERO DELIBERATELY, AND THAT IS SAFE ONLY BECAUSE OF WHERE IT IS
+    USED. A ``count(*)`` always returns exactly one row and never ``NULL``, so
+    every branch below is defensive; if one were ever reached, ``0`` would mean
+    "no history" to the discard precheck, which is the PERMISSIVE direction. It is
+    acceptable here — and only here — because the foreign-key backstop refuses the
+    delete anyway when a referencing row exists, so a wrong ``0`` costs a
+    misdirected error message and never a destroyed history row.
+    """
+    if not row:
+        return 0
+    try:
+        value = int(row[0])
+    except (TypeError, ValueError, IndexError):  # pragma: no cover - defensive
+        return 0
+    return value if value > 0 else 0
 
 
 def _revision_row(row: Any, *, with_state: bool) -> dict:
@@ -381,6 +422,50 @@ class PostgresRevisionReader:
             "revisions": revisions,
             "total": total,
             "current_submission": current_submission,
+        }
+
+    def presence(self, experiment_id: str) -> dict:
+        """DOES ANY HISTORY ROW EXIST FOR THIS EXPERIMENT? Counts only.
+
+        Returns ``{"tables_present", "revision_count", "submission_count"}``.
+
+        THIS IS NOT A HISTORY READ AND MUST NOT GROW INTO ONE. It returns two
+        integers and a boolean; it never fetches a ``state`` document, a subject, a
+        signature or a change row. Its one caller is the discard precheck, which
+        needs to know whether ANY history exists — a question a count answers
+        exactly — and which has no business reading the content of history it is
+        about to refuse to touch.
+
+        BOTH COUNTS COME FROM ONE TRANSACTION, so they describe one instant. Two
+        round trips can report a combination that never existed, and the caller is
+        about to make a destructive decision on the pair.
+
+        ``tables_present: False`` IS NOT ``0``, AND THE CALLER MUST NOT COLLAPSE
+        THEM. "This deployment has no history tables, so nothing can ever have been
+        submitted here" and "the tables are there and this record has no rows" are
+        both safe answers for a discard — but the counts are only meaningful on the
+        second, and a caller that read ``0`` off an unmigrated deployment would be
+        reading a number nobody computed. The same distinction ``revision`` draws
+        between "there is no revision 4" and "this deployment cannot see the
+        history".
+        """
+        with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
+            if not self._tables_present(cursor, policy):
+                return {
+                    "tables_present": False,
+                    "revision_count": 0,
+                    "submission_count": 0,
+                }
+            cursor.execute(policy.check(Q_REVISION_COUNT), (experiment_id,))
+            revision_row = cursor.fetchone()
+            cursor.execute(
+                policy.check(Q_SUBMISSION_COUNT_FOR_EXPERIMENT), (experiment_id,)
+            )
+            submission_row = cursor.fetchone()
+        return {
+            "tables_present": True,
+            "revision_count": _count(revision_row),
+            "submission_count": _count(submission_row),
         }
 
     def revision(self, experiment_id: str, revision_no: int) -> dict:

@@ -5313,6 +5313,60 @@ def remove_experiment(exp: Experiment) -> None:
     _remove_experiment_dir(exp.dir, session_id=exp.session_id)
 
 
+
+def discard_experiment(exp: Experiment) -> dict:
+    """DISCARD one experiment: its durable rows first, then its own directory.
+
+    Returns ``{"durable_rows_removed": int}`` — MEASURED from the server, not
+    asserted. ``0`` is the honest and normal answer on a deployment with no
+    database, and also for a record that was created before the migration reached
+    this deployment.
+
+    THIS IS NOT :func:`remove_experiment`, AND THE TWO MUST NOT BE MERGED. That
+    one exists for the guarded worked-example RESET, and it refuses anything that
+    does not classify ``managed_legacy`` — which every record a scientist creates
+    does not, by construction (:data:`NEW_EXPERIMENT_SOURCE_DESCRIPTION` is
+    deliberately not the demo provenance marker). Its guard is right for the reset
+    and wrong here, and weakening it to admit this operation would widen what a
+    reset may destroy. So this is a second, separately-guarded entry point that
+    shares the one thing worth sharing: :func:`_remove_experiment_dir`, and
+    therefore the direct-child path check against the record's OWN scope root.
+
+    THE AUTHORIZATION IS NARROW AND THIS FUNCTION DOES NOT ENFORCE ALL OF IT. The
+    project owner authorized "explicit Discard semantics for unsubmitted
+    Draft/capture state only", and the checks that establish *unsubmitted* — no
+    revision, no submission, no exported run, no published artifact — live in the
+    route, because they need a database read and an HTTP refusal to report. What
+    is enforced HERE is the one invariant that must not depend on a caller getting
+    the order right: a canonical example record is never discarded.
+
+    THE DURABLE DELETE GOES FIRST, mirroring :meth:`Experiment.save`, and the
+    order is load-bearing in the same way. If the database refuses or is
+    unavailable this raises and the directory is NOT removed, so the record is
+    still there and the reader is told the discard did not happen. The other
+    ordering loses the directory and leaves a durable row that hydration would
+    write straight back — a discard that silently undoes itself at the next pod
+    restart. If the durable delete succeeds and the directory removal then fails,
+    the record is still listed (the filesystem is what reads answer from) and
+    re-issuing the discard converges: the second durable delete removes zero rows
+    and the directory removal is retried.
+
+    SCOPE IS THE GATE, exactly as it is in :meth:`Experiment.save`.
+    :func:`_ordinary_store` returns ``None`` for any record belonging to a
+    worked-example session, so a session record's discard never reaches the
+    database — there is nothing of it there to reach.
+    """
+    if exp.id in CANONICAL_IDS:
+        raise ValueError(
+            f"refusing to discard the canonical example record {exp.id!r}"
+        )
+    store = _ordinary_store(exp.session_id)
+    durable_rows_removed = 0
+    if store is not None:
+        durable_rows_removed = store.discard(exp)
+    _remove_experiment_dir(exp.dir, session_id=exp.session_id)
+    return {"durable_rows_removed": durable_rows_removed}
+
 def _canonical_state_counts(session_id: str | None = None) -> dict:
     """Workflow-state distribution over the canonical experiments present IN ONE SCOPE.
 

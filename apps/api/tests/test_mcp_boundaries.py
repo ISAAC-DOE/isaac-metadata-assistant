@@ -37,6 +37,7 @@ from isaac_api.mcp.deployment import (
 )
 from isaac_api.mcp.policy import (
     ALLOWED_METHODS,
+    DESTRUCTIVE_TOKENS,
     FORBIDDEN_PATH_TOKENS,
     FORBIDDEN_TOOL_TOKENS,
     OPERATIONS,
@@ -157,6 +158,60 @@ def test_the_operation_allowlist_cannot_express_a_deletion_or_a_finalisation():
         lowered = operation.path_template.lower()
         for token in FORBIDDEN_PATH_TOKENS:
             assert token not in lowered, f"{operation.id} targets {token!r}"
+
+
+def test_every_destructive_verb_is_refused_at_BOTH_layers_not_only_one():
+    """THE ASYMMETRY THIS EXISTS TO CLOSE WAS REAL, AND IT WAS MEASURED.
+
+    ``policy.py``'s comment above :data:`FORBIDDEN_PATH_TOKENS` claimed the path
+    set was "the same refusal as ``FORBIDDEN_TOOL_TOKENS`` applied one layer down".
+    For the destructive verbs it was not: ``delete``, ``destroy``, ``drop``,
+    ``purge`` and ``remove`` were in the TOOL set and none of them was in the PATH
+    set, while ``POST .../runs/{run_id}/remove`` and
+    ``POST .../assets/{asset_id}/remove`` already existed as routes. A tool with an
+    innocuous name pointed at either would have passed this layer in silence.
+
+    IT DELIBERATELY DOES NOT ASSERT THE TWO SETS ARE EQUAL. They are legitimately
+    different in both directions and making them equal would be wrong, not tidy:
+    ``database``, ``uploads``, ``verification``, ``demo`` and ``tutorial/sessions``
+    name subject matter and belong only to paths; ``approve``, ``publish``,
+    ``revoke`` and the rest name acts and belong only to tool names. The checkable
+    property is the narrower one — the DESTRUCTIVE class must be in both — and it
+    is asserted over a set with a name so the class has a definition rather than
+    living inside this test's literal.
+    """
+    assert DESTRUCTIVE_TOKENS <= FORBIDDEN_TOOL_TOKENS, sorted(
+        DESTRUCTIVE_TOKENS - FORBIDDEN_TOOL_TOKENS
+    )
+    assert DESTRUCTIVE_TOKENS <= FORBIDDEN_PATH_TOKENS, sorted(
+        DESTRUCTIVE_TOKENS - FORBIDDEN_PATH_TOKENS
+    )
+    # And the class really is the destructive one rather than whatever happened to
+    # be in both sets already — `discard` names the operation this slice added.
+    assert {"delete", "discard", "remove"} <= DESTRUCTIVE_TOKENS
+
+
+def test_the_discard_operation_is_not_reachable_through_MCP_by_TWO_mechanisms():
+    """``POST /api/experiments/{id}/discard`` cannot be called by an agent.
+
+    Stated as TWO independent facts rather than one, because either alone would be
+    a single point of failure and the whole point of the layering is that neither
+    has to be right on its own.
+
+    1. THE REGISTRY IS CLOSED AND HAND-WRITTEN. ``mcp/tools.py`` names its tools
+       one at a time; nothing derives a tool from the route table, so a new route
+       cannot appear as a tool by itself. Asserted here by reading the operation
+       allowlist, which is the table the client resolves a tool against.
+    2. THE PATH TOKEN IS REFUSED. Even if an operation for it were added,
+       ``discard`` is in :data:`FORBIDDEN_PATH_TOKENS` and ``policy._validated``
+       raises at IMPORT time — so the failure is a server that will not start, not
+       a tool that quietly works.
+    """
+    assert not any(
+        "discard" in operation.path_template.lower() for operation in OPERATIONS.values()
+    )
+    assert "discard" in FORBIDDEN_PATH_TOKENS
+    assert "discard" in FORBIDDEN_TOOL_TOKENS
 
 
 def test_every_mutating_operation_costs_the_write_scope_and_needs_a_precondition():

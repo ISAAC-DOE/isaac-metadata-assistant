@@ -496,6 +496,11 @@ class FakeCursor:
             self._pending = []
             refused = bool(params) and params[0] in self._connection.refuse_upsert
             self.rowcount = 0 if refused else 1
+            if params and not refused:
+                # The row now EXISTS. Recorded so a later `DELETE`'s `rowcount` is a
+                # fact about this table rather than a constant; nothing else reads it,
+                # so no existing case's behaviour changes.
+                self._connection.experiments.add(params[0])
         elif sql == repo.Q_ONE_EXPERIMENT:
             state = self._connection.stored.get(params[0]) if params else None
             self._pending = [] if state is None else [(json.dumps(state),)]
@@ -552,6 +557,46 @@ class FakeCursor:
                 del self._connection.runs[run_id]
             self._pending = []
             self.rowcount = len(doomed)
+        elif sql == repo.Q_UPSERT_RUN_PROJECTION:
+            # MODELLED ONLY SO THE DISCARD CAN BE SEEN TO REMOVE IT. Nothing in the
+            # application reads this table, so the row's CONTENT is deliberately not
+            # modelled — only that a claim exists for this experiment.
+            self._connection.projections.add(params[0])
+            self._pending = []
+            self.rowcount = 1
+        elif sql == repo.Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT:
+            existed = params[0] in self._connection.projections
+            self._connection.projections.discard(params[0])
+            self._pending = []
+            self.rowcount = 1 if existed else 0
+        elif sql == repo.Q_DELETE_RUNS_FOR_EXPERIMENT:
+            doomed = [
+                run_id
+                for run_id, row in self._connection.runs.items()
+                if row[0] == params[0]
+            ]
+            for run_id in doomed:
+                del self._connection.runs[run_id]
+            self._pending = []
+            self.rowcount = len(doomed)
+        elif sql == repo.Q_DELETE_EXPERIMENT:
+            # THE FOREIGN-KEY BACKSTOP, MODELLED AT ITS MECHANISM. `0003` and `0004`
+            # declare four foreign keys into `isaac_experiments` and NO migration in
+            # this repository writes an `ON DELETE` clause, so the SQL default
+            # `NO ACTION` applies: a parent row with children is REFUSED. A fake that
+            # deleted it regardless would let a discard that destroys history pass
+            # here and fail against a real engine — which is the one thing this
+            # operation must never do.
+            if params[0] in self._connection.history_for:
+                raise ForeignKeyViolation(
+                    'update or delete on table "isaac_experiments" violates '
+                    "foreign key constraint"
+                )
+            existed = params[0] in self._connection.experiments
+            self._connection.experiments.discard(params[0])
+            self._connection.stored.pop(params[0], None)
+            self._pending = []
+            self.rowcount = 1 if existed else 0
         else:
             self._pending = []
             if sql == dbm.Q_RECORD_VERSION and params:
@@ -618,6 +663,21 @@ class FakeConnection:
         #: property the shadow write actually promises. The two server-side row
         #: stamps are not modelled: nothing in the application reads them.
         self.runs: dict = dict(runs or {})
+        #: ``isaac_experiments``, as a SET OF IDS. The row CONTENT lives in
+        #: ``stored`` (which only carries a document when a test set one, because
+        #: that is the winner's-document read-back and nothing else reads it); this
+        #: is the row's mere EXISTENCE, which is what a `DELETE`'s `rowcount` is
+        #: about. Populated by an ACCEPTED upsert and by ``stored``, so a test that
+        #: seeded a winner document has a row to delete without saying so twice.
+        self.experiments: set = set(self.stored)
+        #: ``isaac_run_projection``, as a set of experiment ids. Existence only —
+        #: nothing in the application reads this table.
+        self.projections: set = set()
+        #: Experiment ids that a HISTORY row still references. Deleting one raises
+        #: :class:`ForeignKeyViolation`, which is what a real server does for a
+        #: parent row with children under the `NO ACTION` default every migration
+        #: here leaves in place. Mutable, so one test can submit and then discard.
+        self.history_for: set = set()
         self.autocommit = True  # the write path must set this False itself
         self.statements: list = []
         self.cursors: list[FakeCursor] = []
@@ -632,7 +692,12 @@ class FakeConnection:
         # would be a counter and "the run writes and the experiment upsert are in
         # ONE transaction" could only be asserted as a protocol shape, never as an
         # outcome.
-        self._snapshot = (dict(self.stored), dict(self.runs))
+        self._snapshot = (
+            dict(self.stored),
+            dict(self.runs),
+            set(self.experiments),
+            set(self.projections),
+        )
         cur = FakeCursor(self)
         self.cursors.append(cur)
         return cur
@@ -644,7 +709,9 @@ class FakeConnection:
     def rollback(self):
         self.rollbacks += 1
         if self._snapshot is not None:
-            self.stored, self.runs = self._snapshot
+            # ALL FOUR, or "the three deletes are one transaction" would be a
+            # protocol shape rather than an outcome a test can assert.
+            self.stored, self.runs, self.experiments, self.projections = self._snapshot
             self._snapshot = None
 
     def close(self):
@@ -793,6 +860,19 @@ _WRITE_STATEMENTS = [
     # property rather than a promise. See
     # `test_0005_is_written_by_the_write_path_and_read_by_nothing`.
     repo.Q_UPSERT_RUN_PROJECTION,
+    # ── THE DISCARD DELETES. Three WRITES, and the first `DELETE`s this
+    # ── application has ever declared against `isaac_experiments`. ──────────────
+    # They are the durable half of `POST /api/experiments/{id}/discard`, whose
+    # authorization is narrow and explicit: Discard semantics for UNSUBMITTED
+    # draft/capture state only, and NOT a generic destructive DELETE primitive.
+    # They name three tables and no others; `test_discard_an_unsubmitted_experiment`
+    # states over this module's `Q_*` constants that none of them names one of the
+    # five append-only submission-lifecycle tables, which is the guard that keeps
+    # "discard cannot erase history" a property of the statement set rather than of
+    # a route's control flow.
+    repo.Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT,
+    repo.Q_DELETE_RUNS_FOR_EXPERIMENT,
+    repo.Q_DELETE_EXPERIMENT,
 ]
 _ALL_STATEMENTS = _READ_STATEMENTS + _WRITE_STATEMENTS
 
@@ -2735,10 +2815,17 @@ def test_0002_is_now_written_by_the_write_path_and_by_nothing_else():
                 assert getattr(module, name) in _ALL_STATEMENTS, f"{module.__name__}.{name}"
 
     naming = [sql for sql in _ALL_STATEMENTS if "isaac_runs" in sql.lower()]
+    # THREE -> FOUR. The discard adds `Q_DELETE_RUNS_FOR_EXPERIMENT`, which is a
+    # different statement from `Q_DELETE_ABSENT_RUNS` and deliberately not a reuse
+    # of it: that one removes the rows a still-existing experiment no longer names
+    # (its predicate is the COMPLEMENT of a desired set), this one removes them all
+    # for an experiment that is about to stop existing. Still a WRITE-path-only
+    # table: the read assertion below is unchanged.
     assert naming == [
         repo.Q_EXPERIMENT_RUN_ROWS,
         repo.Q_UPSERT_RUN,
         repo.Q_DELETE_ABSENT_RUNS,
+        repo.Q_DELETE_RUNS_FOR_EXPERIMENT,
     ], naming
     # No read of EXPERIMENT state, and no migration bookkeeping, touches the table.
     for sql in _READ_STATEMENTS:
@@ -2795,15 +2882,30 @@ def test_0005_is_written_by_the_write_path_and_read_by_nothing():
     second statement cannot appear without appearing here.
     """
     naming = [sql for sql in _ALL_STATEMENTS if "isaac_run_projection" in sql.lower()]
-    assert naming == [repo.Q_UPSERT_RUN_PROJECTION], naming
+    # ONE -> TWO, and the second is a DELETE. ~~"exactly ONE statement in this
+    # application names `isaac_run_projection`"~~ stopped being true when discard
+    # shipped, and the docstring above is corrected rather than reworded because the
+    # sentence was load-bearing: it was the mechanical form of "nothing can be
+    # depending on this table yet". THE PART THAT MATTERS IS UNCHANGED and is what
+    # the loop below still asserts — NOTHING READS IT. A claim is written when the
+    # rows it describes are written, and removed when the experiment it describes is
+    # removed; a superseded completeness claim describes a row set that no longer
+    # exists, so leaving one behind for a deleted experiment would be the stale row
+    # the whole table exists to prevent.
+    assert naming == [
+        repo.Q_UPSERT_RUN_PROJECTION,
+        repo.Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT,
+    ], naming
     for sql in _READ_STATEMENTS:
         assert "isaac_run_projection" not in sql.lower(), sql
-    # NO UPDATE AND NO DELETE ANYWHERE, which is what makes the upsert the single
-    # writer. The rollback's DROP lives in a file `load_migrations` never loads.
+    # NO UPDATE ANYWHERE, and the only DELETE is the discard's — which removes a
+    # claim WITH the experiment it describes, never on its own. The rollback's DROP
+    # lives in a file `load_migrations` never loads.
     for sql in _ALL_STATEMENTS:
         lowered = sql.lower()
         if "isaac_run_projection" in lowered:
-            assert lowered.startswith("insert into"), sql
+            assert lowered.startswith(("insert into", "delete from")), sql
+            assert not lowered.startswith("update"), sql
     # And the probe reaches it by PARAMETER, exactly as it reaches `isaac_runs` —
     # pinned here so the projection table cannot become a second writer unnoticed.
     assert repo.PROJECTION_TABLE == "isaac_run_projection"
@@ -3360,6 +3462,31 @@ class UndefinedTable(Exception):
     """
 
     pgcode = repo.SQLSTATE_UNDEFINED_TABLE
+
+
+class ForeignKeyViolation(Exception):
+    """Stands in for ``psycopg2.errors.ForeignKeyViolation``, AT ITS MECHANISM.
+
+    ``23503`` is PostgreSQL's ``foreign_key_violation``, exposed exactly as
+    ``42P01`` is — ``.pgcode`` / ``.diag.sqlstate`` on psycopg2, ``.sqlstate`` on
+    psycopg 3. A real driver class is still not imported, for
+    :class:`UndefinedTable`'s reason: psycopg2 is absent from the venv this file is
+    normally run in, so a test that imported it would skip rather than run.
+
+    WHAT IT LETS A TEST SEE. The discard path issues three deletes in dependency
+    order and the experiment's own goes LAST, so a record that still carries a
+    revision or a submission is refused BY THE SERVER at that final statement and
+    the whole transaction rolls back. That is the backstop behind the route's
+    precheck, and without a fake that refuses the way the server refuses it could
+    only be asserted as prose.
+
+    THIS FILE STILL PROVES NOTHING ABOUT POSTGRESQL. Whether the committed foreign
+    keys really behave this way is `.github/workflows/ci.yml`'s `postgres-migration`
+    job against a real `postgres:18`, and where the two could disagree CI is the
+    authority.
+    """
+
+    pgcode = repo.SQLSTATE_FOREIGN_KEY_VIOLATION
 
 
 class ConnectionFailure(Exception):

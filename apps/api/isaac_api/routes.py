@@ -2638,6 +2638,466 @@ def rename_experiment(
         return detail
 
 
+
+# --- 4b. discard --------------------------------------------------------------
+#
+# WHAT THIS IS, AND THE SENTENCE THAT AUTHORIZES IT. `POST /api/experiments`
+# created a record and nothing took one away: a scientist who created a record by
+# mistake owned it forever, and the reset one file over says in its own description
+# that "there is deliberately no general per-experiment delete operation". That
+# sentence is still true and this operation does not contradict it. The project
+# owner authorized, narrowly, **explicit Discard semantics for unsubmitted
+# Draft/capture state only** — and explicitly NOT a generic destructive DELETE
+# primitive, and explicitly not a way to erase an official submitted ISAAC record,
+# an immutable submitted revision, revision history, submission history, a
+# published evidence sidecar, historical conflict evidence, or audit history.
+#
+# SO IT IS A DOMAIN OPERATION AND NOT AN HTTP `DELETE`. It is `POST .../discard`,
+# the same shape the three narrow removals this codebase already ships use
+# (`.../runs/{id}/remove`, `.../assets/{id}/remove`, `.../overrides/clear`). A
+# `DELETE` verb on `/experiments/{id}` would say the resource is generically
+# deletable, which is exactly the thing that was not authorized, and it would say it
+# in the published contract where a client reads it.
+#
+# MECHANICAL PERMISSION IS NOT AUTHORIZATION, AND THAT IS WHY THE PREVIOUS SESSION
+# DECLINED TO BUILD THIS. `db_write._FORBIDDEN_KEYWORDS` does not contain `delete`,
+# so a `DELETE` against any owned table has always been mechanically accepted by the
+# statement policy. Nothing about that changed here and nothing about it is
+# evidence: the authorization is the owner's sentence above, and it covers only the
+# never-submitted case.
+
+
+#: The refusals this operation can answer with, as its published contract.
+#:
+#: EVERY 409 HERE IS A REASON THE RECORD IS NOT DISCARDABLE, and they are separate
+#: `error` values rather than one `not_discardable` because they are separate facts
+#: with separate remedies — and because a scientist told only "no" cannot tell a
+#: record that was submitted from one that merely has an exported run.
+_R_DISCARD_REFUSED: dict = {
+    409: {
+        "description": (
+            "This experiment is not discardable, and NOTHING WAS REMOVED. The typed "
+            "`error` says which of SIX reasons applies — five decided by this "
+            "server before anything is touched, and one the database itself "
+            "decides:\n\n"
+            "* `submitted` — at least one revision or submission row exists for this "
+            "record. A submission is an attributable declaration a person made and "
+            "its history is append-only; discard never erases one. `revision_count` "
+            "and `submission_count` report what was found.\n"
+            "* `experiment_exported` — the record itself has produced an official "
+            "ISAAC record under its own identity. `record_id` names it.\n"
+            "* `runs_exported` — at least one run has produced an official ISAAC "
+            "record. `run_ids` names the runs that block it and `record_stems` the "
+            "artifacts they keep claimed.\n"
+            "* `published_artifacts_present` — an official record and/or an evidence "
+            "sidecar is on disk under this experiment, whatever the state says. "
+            "`record_stems` names them. This is the same disk-not-only-state "
+            "question `POST .../runs/{run_id}/remove` asks, asked of the whole "
+            "record.\n"
+            "* `canonical_example_record` — a built-in worked example. Those are "
+            "fixed teaching material; the worked-example reset is the operation for "
+            "them.\n"
+            "* `history_rows_present` — the database itself refused to "
+            "remove the experiment row because a history row still references it. "
+            "The whole transaction rolled back, so nothing at all was removed. That "
+            "is the foreign-key backstop firing behind the `submitted` check above, "
+            "and reaching it means this server's own precheck was wrong."
+        )
+    },
+}
+
+#: The 503 for "this deployment could not establish whether the record was ever
+#: submitted".
+#:
+#: IT IS NOT A 409, AND THE DIFFERENCE IS THE WHOLE POINT. A 409 states a fact
+#: about the record. This states a fact about the SERVER: the history could not be
+#: read, so the one question that decides whether discarding is allowed has no
+#: answer. Nothing was removed. It is resolved by an operator or by a retry, never
+#: by editing the record.
+#:
+#: ~~"the history tables exist and could not be read"~~ — corrected before it
+#: shipped, because it claimed more than the branch knows. The read can fail at the
+#: CONNECTION, before the table-presence probe runs at all, and then whether the
+#: tables exist is exactly as unknown as everything else. "Absent tables" is a
+#: DIFFERENT and safe answer that returns `None` and lets the discard proceed; only
+#: "could not establish" reaches here.
+_R_DISCARD_HISTORY_UNREADABLE: dict = {
+    503: {
+        "description": (
+            "This deployment stores submission history in its own database and could "
+            "not read it, so it cannot prove this record was never submitted. "
+            "Nothing was removed. `error` is `submission_history_unreadable`. The "
+            "response names no host, path, credential or driver message."
+        )
+    },
+}
+
+
+def _discard_refusal(error: str, message: str, experiment_id: str, **extra) -> JSONResponse:
+    """One typed 409 for a record this operation will not discard.
+
+    Every one of them writes nothing, and every one of them says so in the message
+    rather than leaving a reader to infer it from the status code.
+    """
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": error,
+            "experiment_id": experiment_id,
+            "message": message,
+            **extra,
+        },
+    )
+
+
+def _published_stems(exp: Experiment) -> list[str]:
+    """Every official-record STEM present on disk under this experiment, sorted.
+
+    THE DISK, NOT THE STATE, AND THAT IS THE SAME LESSON `_run_published_stem`
+    RECORDS. An export writes the official record and its evidence sidecar BEFORE
+    it persists the state, so a refused state save leaves a published PAIR on disk
+    that no `record_id` names. A discard decided from state alone would delete
+    exactly that pair — an official ISAAC record, removed by an operation whose
+    authorization explicitly forbids removing one.
+
+    IT IS DELIBERATELY BROADER THAN THE TWO STATE CHECKS BESIDE IT rather than a
+    replacement for them: it catches an ORPHAN pair as well — a record left behind
+    by a run that was itself removed — which neither `exp.record_id` nor any current
+    run can see. The state checks stay because they can name WHICH run blocks the
+    discard, which this cannot.
+
+    `_artifact_stem` IS REUSED RATHER THAN RE-DERIVED. It is the one definition of
+    what counts as an artifact filename, shared with the export prune's candidate
+    scan, and a second copy here would be free to drift on the day one is fixed.
+
+    NO PATH IS RETURNED OR LOGGED. A stem is a record id, which this API already
+    publishes; a directory is a server path, which it never does.
+    """
+    records_dir = exp.records_dir
+    if not records_dir.is_dir():
+        return []
+    stems = set()
+    for path in sorted(records_dir.iterdir()):
+        if not path.is_file():
+            continue
+        stem = _artifact_stem(path.name)
+        if stem is not None:
+            stems.add(stem)
+    return sorted(stems)
+
+
+def _submission_history_refusal(experiment_id: str, scope: str | None) -> JSONResponse | None:
+    """`None` if this record provably has no history; a refusal otherwise.
+
+    THREE ANSWERS, AND COLLAPSING ANY TWO OF THEM WOULD BE A DEFECT.
+
+    * **Provably none.** Either this is a worked-example session — where a
+      submission is impossible by three independent enforcements, the first of which
+      is `post_submit`'s own scope refusal, and where
+      `PostgresOrdinaryStore.refuse_if_not_persistable` means no row of any kind
+      was ever written for that record — or this deployment has no database at all
+      (`revision_history.reader()` is `None`, gated on the SAME
+      `repo._postgres_available` the submit path gates on, so a deployment that
+      cannot record a submission is exactly a deployment that cannot hold one), or
+      the history tables are not there. Returns `None`; the discard may proceed.
+    * **History exists.** A 409 naming the counts. The discard is refused.
+    * **Could not be established.** A 503. NOT a 409 and NOT a silent pass: the
+      question that decides whether this record may be destroyed has no answer, so
+      the fail-closed direction is to refuse and say why. Every failure the read can
+      raise is caught, including the driver's own, and only the exception CLASS
+      would ever be reported — never its message, which psycopg2 fills with the
+      host, the user and the connection string.
+
+    IT OPENS ONE SHORT READ TRANSACTION AND FETCHES TWO INTEGERS. It never reads a
+    revision document, a subject, or a signature: this operation has no business
+    reading the content of history it is about to refuse to touch.
+    """
+    if scope is not None:
+        return None
+    selected = revision_history.reader()
+    if selected is None:
+        return None
+    try:
+        presence = selected.presence(experiment_id)
+    except _HISTORY_READ_FAILURES as failure:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "submission_history_unreadable",
+                "experiment_id": experiment_id,
+                "failure": type(failure).__name__,
+                "message": (
+                    "This deployment stores submission history in its own database "
+                    "and could not read it just now, so it cannot establish whether "
+                    "this record has ever been submitted. Nothing was removed."
+                ),
+            },
+        )
+    if not presence["tables_present"]:
+        return None
+    revisions = int(presence["revision_count"])
+    submissions_recorded = int(presence["submission_count"])
+    if revisions == 0 and submissions_recorded == 0:
+        return None
+    return _discard_refusal(
+        "submitted",
+        (
+            "This record has been submitted, so it cannot be discarded. A "
+            "submission is an attributable declaration, and its revision and "
+            "submission history are append-only — nothing here removes one. "
+            "Nothing was removed."
+        ),
+        experiment_id,
+        revision_count=revisions,
+        submission_count=submissions_recorded,
+    )
+
+
+_DISCARD_DESCRIPTION = (
+    "Discards one experiment that has never been submitted and has never published "
+    "anything: the record, its runs, its answers, its notes and its assets, in the "
+    "workspace and in this deployment's own database. It exists because "
+    "`POST /api/experiments` could create a record and nothing could take one away, "
+    "so a record created by mistake was permanent.\n\n"
+    "**IT IS NOT A GENERAL DELETE, AND IT CANNOT REACH HISTORY.** It refuses with "
+    "`409` — writing nothing — when this record has ever been submitted (any "
+    "revision or submission row exists for it), when the record itself has been "
+    "exported, when any run has produced an official ISAAC record, when an official "
+    "record or evidence sidecar is present on disk under this experiment whatever "
+    "the state says, or when it is one of the built-in worked examples. Revision "
+    "history, submission history and published artifacts are never removed, "
+    "rewritten or marked by this operation on any path — and the database's own "
+    "foreign keys refuse the removal as a backstop if this server's precheck is "
+    "ever wrong, rolling the whole transaction back.\n\n"
+    "It requires `confirmed_by_user: true` and the record's current `ETag` in "
+    "`If-Match`. Omitted is `428`, malformed is `400`, and stale is `412` — each "
+    "with nothing removed. The precondition is checked inside the same critical "
+    "section as the removal, over the record as it is at that instant.\n\n"
+    "**Repeating a discard is `404`, not a second `200`**, matching the precedent "
+    "`POST .../runs/{run_id}/remove` sets: this operation is addressed to a record, "
+    "and every other record operation answers `404` for an id this workspace does "
+    "not hold. A `200` would additionally require claiming a record \"was "
+    "discarded\" for an id that may never have existed.\n\n"
+    "There is no undo. That is why the confirmation and the precondition are both "
+    "required, and why the operation refuses anything that has published or "
+    "declared something."
+)
+
+
+@router.post(
+    "/experiments/{experiment_id}/discard",
+    tags=[TAG_EXPERIMENTS],
+    summary="Discard an Unsubmitted Experiment",
+    description=_DISCARD_DESCRIPTION,
+    response_description=(
+        "What was discarded — the record's id and title, how many runs went with "
+        "it, and how many durable rows this deployment removed (`0` where "
+        "experiments are not stored in a database, which is the normal answer "
+        "there). No `ETag` is returned: the record no longer exists."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_DISCARD_REFUSED,
+        **_R_DISCARD_HISTORY_UNREADABLE,
+        **_R_PRECONDITION,
+    },
+)
+def post_experiment_discard(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    body: dict = Body(
+        ...,
+        description="`{\"confirmed_by_user\": true}`. Nothing else is read.",
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it."
+        ),
+    ),
+):
+    """Discard one unsubmitted experiment. THE ORDER OF THE FIVE REFUSALS IS THE
+    CONTRACT.
+
+    It is `post_run_remove`'s order, deliberately, because the two are the same
+    shape of act: exists -> confirmed -> domain refusal -> precondition -> write.
+
+    THE PRECONDITION IS CHECKED INSIDE THE SAME CRITICAL SECTION AS THE MUTATION.
+    This repository has a written history of exactly that defect on the reset path,
+    so it is worth stating rather than assuming: both `_check_if_match` and the
+    removal happen under one `record_lock`, over an experiment re-read INSIDE that
+    lock. The copy read by the existence pre-check above is never mutated.
+
+    THE DOMAIN REFUSALS ARE ORDERED CHEAPEST-FIRST, AND THAT ORDERING IS AN
+    OPTIMISATION RATHER THAN A CONTRACT. All five are refusals that write nothing,
+    so which one a record hits first changes only the message. The local checks —
+    the canonical id, the record's own `record_id`, its runs, its records directory
+    — need no database, so a record already blocked by one of them never opens a
+    read transaction to be told the same "no" a second way.
+
+    IDEMPOTENCY IS 404, NOT A SECOND 200, matching `post_run_remove`'s stated
+    precedent for the same reasons: the retry is told the truth about the record
+    rather than being sent to re-read a version in order to remove something that
+    no longer exists, and a 200 would claim a record "was discarded" for an id that
+    may never have existed.
+
+    THE SCOPE IS THREADED, NOT REFUSED, and one consequence is stated rather than
+    left to be discovered: every record a worked-example session can hold is a
+    canonical example, and canonical examples are refused, so a discard inside a
+    session always answers `409 canonical_example_record` in this build. Threading
+    the scope is still what makes that refusal correct — it is a refusal about THAT
+    session's record. A session header can never reach an ordinary record, and an
+    ordinary request can never reach a session's; each resolves in its own scope or
+    answers 404.
+    """
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does it,
+    # so a bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # discarded in the pre-check->lock window
+        if exp.id != experiment_id:
+            # THE DOCUMENT MUST CLAIM THE ADDRESS IT WAS READ FROM, and on the only
+            # destructive path in this API that is checked rather than assumed.
+            #
+            # `_readable_experiment_state` resolves `id` as `state["id"] or
+            # <directory name>` — the DOCUMENT wins and the address is only the
+            # fallback — while `Experiment.dir` is `scope_root / self.id`. So a
+            # stored document under `<root>/A` whose own `id` reads `B` hydrates to
+            # a record addressed as A and pointed at B, and every step below would
+            # then be asking about a DIFFERENT record than the one this request
+            # named: `_published_stems` would scan B's records directory rather than
+            # A's, the history precheck (which takes the path id) would count A's
+            # rows while the durable delete takes B's, and `_remove_experiment_dir`
+            # would remove `<root>/B` — up to and including B's published official
+            # records and evidence sidecars, which is the single act this
+            # operation's authorization names first among the things it may not do.
+            #
+            # NOTHING IN THIS APPLICATION CAN PRODUCE THAT DOCUMENT — `save` writes
+            # `self.id` into the file it writes under `self.dir`, hydration refuses a
+            # row filed under an id its own state does not carry, and
+            # `_heal_from_conflict` skips a winner whose `state["id"]` disagrees — so
+            # this is defence in depth and not a live hole, for exactly the reason
+            # `_run_published_stem` gives for the identical guard one step down: an
+            # asymmetry between a read path that tolerates the mismatch and a
+            # destructive path that acts on it stops being harmless after a later
+            # change.
+            #
+            # 404, AND NO NEW REFUSAL CODE. This workspace holds no record whose id
+            # is `experiment_id`; it holds a directory whose document claims to be
+            # something else, and a destructive operation that cannot say which
+            # record it is addressed to must not proceed. The record is not reachable
+            # under its self-claimed id either (there is no directory of that name),
+            # so the fail-closed outcome is that a document in this state cannot be
+            # discarded at all — which is the correct direction for a removal.
+            return _not_found(experiment_id)
+        if not isinstance(body, dict) or body.get("confirmed_by_user") is not True:
+            return _confirmation_required("discard an experiment")
+
+        # -- domain refusals: is this record discardable at all? ----------------
+        if exp.id in ws.CANONICAL_IDS:
+            return _discard_refusal(
+                "canonical_example_record",
+                (
+                    "This is one of the built-in worked examples. They are fixed "
+                    "teaching material that the worked-example reset restores; they "
+                    "are not a record anyone created and they are not discarded. "
+                    "Nothing was removed."
+                ),
+                experiment_id,
+            )
+        if exp.record_id is not None:
+            return _discard_refusal(
+                "experiment_exported",
+                (
+                    "This record has already produced an official ISAAC record "
+                    "under its own identity. Published artifacts are never removed "
+                    "or rewritten by this application. Nothing was removed."
+                ),
+                experiment_id,
+                record_id=exp.record_id,
+            )
+        blocking_runs = [
+            (run.id, stem)
+            for run, stem in (
+                (run, _run_published_stem(exp, run)) for run in exp.sorted_runs()
+            )
+            if stem is not None
+        ]
+        if blocking_runs:
+            return _discard_refusal(
+                "runs_exported",
+                (
+                    "At least one run of this record has produced an official ISAAC "
+                    "record. Published artifacts are never removed or rewritten by "
+                    "this application, and the runs are what keep them claimed. "
+                    "Nothing was removed."
+                ),
+                experiment_id,
+                run_ids=[run_id for run_id, _ in blocking_runs],
+                record_stems=sorted({stem for _, stem in blocking_runs}),
+            )
+        stems = _published_stems(exp)
+        if stems:
+            return _discard_refusal(
+                "published_artifacts_present",
+                (
+                    "An official ISAAC record and/or an evidence sidecar is present "
+                    "on disk under this experiment. Either one alone is enough: "
+                    "published artifacts are never removed by this application, "
+                    "whatever the record's own state says about them. Nothing was "
+                    "removed."
+                ),
+                experiment_id,
+                record_stems=stems,
+            )
+        history_refusal = _submission_history_refusal(experiment_id, scope)
+        if history_refusal is not None:
+            return history_refusal
+
+        # -- the precondition, inside this same critical section ---------------
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        # -- the write ---------------------------------------------------------
+        # READ BEFORE THE REMOVAL, because afterwards there is no record to name.
+        discarded_title, discarded_run_count = exp.title, len(exp.runs)
+        try:
+            outcome = ws.discard_experiment(exp)
+        except experiment_repository.DiscardRefusedByHistory:
+            # THE FOREIGN-KEY BACKSTOP FIRED, which means the precheck above was
+            # wrong. The whole transaction rolled back — the run rows and the
+            # projection claim are still there with the experiment — and the
+            # workspace directory was never touched, because the durable delete
+            # goes first for exactly this reason.
+            return _discard_refusal(
+                "history_rows_present",
+                (
+                    "This deployment's database refused to remove this experiment "
+                    "because history rows still reference it. The whole removal was "
+                    "rolled back and nothing was removed. Submission history is "
+                    "append-only and is never destroyed by this operation."
+                ),
+                experiment_id,
+            )
+        return {
+            "discarded_experiment_id": experiment_id,
+            "discarded_title": discarded_title,
+            "discarded_run_count": discarded_run_count,
+            # MEASURED FROM THE SERVER, never assumed. `0` is the normal, honest
+            # answer on a deployment that stores experiments on the filesystem, and
+            # also for a record written before the migration reached this
+            # deployment — neither is an error and neither is hidden.
+            "durable_rows_removed": outcome["durable_rows_removed"],
+        }
+
 # --- 5. draft (grouped) -------------------------------------------------------
 
 
