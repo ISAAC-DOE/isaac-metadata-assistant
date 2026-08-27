@@ -13,6 +13,7 @@ import {
   TUTORIAL_SESSION_ID,
   demoResetPreviewClean,
   demoResetPreviewAmbiguous,
+  demoResetPreviewMalformed,
   demoResetExecuteOk,
   demoResetExecuteStale,
   demoResetExecuteDigestRequired,
@@ -556,6 +557,56 @@ describe('P26.0b · Reset Worked Example — ambiguous refusal', () => {
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
     const action = d.getByRole('button', { name: CONFIRM_ACTION });
+    fireEvent.click(action);
+    expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
+  });
+});
+
+// --- the malformed-record refusal names ITS OWN reason ------------------------
+//
+// `malformed_records_present` (2026-08-26) is the second reason a PREVIEW can carry.
+// Until it existed, this screen's refusal paragraph hardcoded "because an ambiguous
+// record is present", which was true of the only reason there was. With two, a
+// hardcoded sentence is a false statement about a destructive operation on the one
+// surface that explains it — the same defect class as the backend route that
+// hardcoded `ambiguous_records_present` for every non-stale refusal.
+
+describe('Reset Worked Example — the malformed-record refusal', () => {
+  it('names the malformed record rather than claiming an ambiguous one', async () => {
+    const view = await renderInSession(
+      resetDemoRoutes({ preview: demoResetPreviewMalformed }).routes,
+    );
+    await openReset(view);
+    const text = (dialog(view).textContent ?? '').toLowerCase();
+
+    expect(text).toMatch(/refused for safety/);
+    // THE ASSERTION THAT FAILS WITHOUT THE FIX. The fixture has `ambiguous_count: 0`,
+    // so a screen that says "ambiguous" is sending the operator to look for a record
+    // this session does not contain.
+    expect(text).toContain('cannot read');
+    expect(text).not.toContain('ambiguous record is present');
+  });
+
+  it('still says an ambiguous refusal is ambiguous', async () => {
+    const view = await renderInSession(
+      resetDemoRoutes({ preview: demoResetPreviewAmbiguous }).routes,
+    );
+    await openReset(view);
+    const text = (dialog(view).textContent ?? '').toLowerCase();
+
+    expect(text).toContain('ambiguous record is present');
+    expect(text).not.toContain('cannot read');
+  });
+
+  it('offers no bypass and never issues an execute', async () => {
+    const view = await renderInSession(
+      resetDemoRoutes({ preview: demoResetPreviewMalformed }).routes,
+    );
+    await openReset(view);
+    const d = within(dialog(view));
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
     fireEvent.click(action);
     expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
   });

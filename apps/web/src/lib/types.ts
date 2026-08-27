@@ -1681,15 +1681,21 @@ export interface ApiHealth {
 // 200/403/409/412/428. Every field is a server-derived count/id; the client renders
 // them, it never computes a reset decision.
 
-/** Why the server declined. The five reasons are NOT interchangeable: two of them
- *  are recoverable by looking again, one by typing correctly, and two are dead ends.
- *  `null` on success. Mirrors `DemoResetRefusal` in routes.py. */
+/** Why the server declined. The six reasons are NOT interchangeable: two of them
+ *  are recoverable by looking again, one by typing correctly, and three are dead ends.
+ *  `null` on success. Mirrors `DemoResetRefusal` in routes.py.
+ *
+ *  `malformed_records_present` is deliberately NOT a variant of `plan_digest_stale`,
+ *  even though the server used to answer the latter for it: `plan_digest_stale` means
+ *  "preview again and retry", and for a malformed record the retry can never succeed.
+ *  `malformed_ids` names the records. */
 export type ApiDemoResetRefusal =
   | 'not_synthetic_only'
   | 'confirmation_required'
   | 'plan_digest_required'
   | 'plan_digest_stale'
-  | 'ambiguous_records_present';
+  | 'ambiguous_records_present'
+  | 'malformed_records_present';
 
 /** The confirmed work a reset would discard. Server-DERIVED from persisted state
  *  (the answer log, each example's content versus its original, exported records) —
@@ -1708,6 +1714,11 @@ export interface ApiDemoResetResult {
   canonical_count: number;
   legacy_count: number;
   ambiguous_count: number;
+  /** The ids whose stored document the reset's two readers disagree about; `[]` on
+   *  every other outcome. Server-derived, ids only — never a title, which for a
+   *  malformed document comes from the read path's fallbacks and not from the
+   *  document. */
+  malformed_ids: string[];
   removed_count: number;
   final_count: number;
   canonical_ids: string[];
