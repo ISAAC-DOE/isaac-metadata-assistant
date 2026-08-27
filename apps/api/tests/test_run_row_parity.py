@@ -704,6 +704,47 @@ def _execute(sql: str, params: tuple | None = None) -> int:
         return cursor.rowcount
 
 
+def _teardown_planted_history(sql: str, params: tuple) -> int:
+    """Remove a history row THIS TEST PLANTED, bypassing the statement policy.
+
+    ── WHY A BYPASS EXISTS AT ALL, AND WHY IT IS THIS NARROW ────────────────────
+    `WriteStatementPolicy` now refuses any `DELETE` or `UPDATE` naming the five
+    append-only history tables. That is deliberate and it is a real hardening: the
+    guarantee used to live only in a test that enumerated the application's `Q_*`
+    constants, so the first branch to add a statement was the branch that removed
+    it. It is now enforced at the seam every application write already passes
+    through.
+
+    The policy is about what THE APPLICATION may issue. These scenarios plant a
+    history row out of band — the application cannot create one here, which is the
+    whole point of planting it — and must remove it again, or every later run in
+    the same database inherits it. Routing that teardown through the policy asked
+    it to permit, in general, exactly what it exists to forbid.
+
+    So the teardown goes around it, and the narrowness IS the safety argument:
+
+    * it accepts only a `DELETE` naming one of the two tables these tests plant into;
+    * it requires a `WHERE` and a bound parameter, so it cannot become "delete the
+      table";
+    * it is called only from a `finally`, only with an id this module minted.
+
+    It is NOT a general escape and must not become one. The application has no
+    access to it: it lives in a test module, and `db_write`'s own policy is
+    untouched — a production statement of this shape is still refused.
+    """
+    lowered = sql.lower()
+    assert lowered.startswith("delete from "), sql
+    assert any(
+        f"delete from {table} " in lowered
+        for table in ("isaac_experiment_revisions", "isaac_submissions")
+    ), sql
+    assert " where " in lowered and "%s" in sql, sql
+    assert params, "a teardown with no bound id could remove more than it planted"
+    with dbw.write_transaction(os.environ) as (cursor, _policy):
+        cursor.execute(sql, params)
+        return cursor.rowcount
+
+
 def _full_rows(experiment_id: str | None = None) -> dict[str, tuple]:
     """``run_id -> every column``, with ``state`` parsed. The whole table, or one
     experiment's slice of it.

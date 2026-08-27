@@ -1493,6 +1493,7 @@ from test_run_row_parity import (  # noqa: E402 - after the fixtures it reuses
     _execute,
     _new_experiment,
     _query,
+    _teardown_planted_history,
     real_engine,
 )
 
@@ -1687,7 +1688,7 @@ def test_REAL_ENGINE_a_planted_HISTORY_ROW_refuses_the_discard_and_rolls_back(
         # And the history row itself is untouched, which is the whole point.
         assert _query(Q_TEST_REVISIONS_OF, (exp.id,))
     finally:
-        _execute(Q_TEST_UNPLANT_A_REVISION, (revision_id,))
+        _teardown_planted_history(Q_TEST_UNPLANT_A_REVISION, (revision_id,))
 
 
 @real_engine
@@ -1717,7 +1718,7 @@ def test_REAL_ENGINE_a_discard_after_the_history_row_is_gone_succeeds(
     )
     with pytest.raises(repo.DiscardRefusedByHistory):
         repo.ordinary_store().discard(exp)
-    _execute(Q_TEST_UNPLANT_A_REVISION, (revision_id,))
+    _teardown_planted_history(Q_TEST_UNPLANT_A_REVISION, (revision_id,))
 
     assert repo.ordinary_store().discard(exp) == 1
     assert _query(Q_TEST_EXPERIMENT_ROWS, (exp.id,)) == []
@@ -1768,8 +1769,8 @@ def test_REAL_ENGINE_a_planted_SUBMISSION_alone_refuses_the_discard(
         "foreign key could not resolve and this scenario would prove nothing"
     )
 
-    revision_id = "01REALENGINESUBMITREV0001"
-    submission_id = "01REALENGINESUBMITSUB0001"
+    revision_id = "01REALENGINESUBMITREV00001"
+    submission_id = "01REALENGINESUBMITSUB00001"
     _execute(
         Q_TEST_PLANT_A_REVISION,
         (
@@ -1808,9 +1809,9 @@ def test_REAL_ENGINE_a_planted_SUBMISSION_alone_refuses_the_discard(
             assert _query(Q_TEST_PROJECTION_OF, (target.id,))
             assert len(_query(Q_TEST_SUBMISSIONS_OF, (target.id,))) == 1
         finally:
-            _execute(Q_TEST_UNPLANT_A_SUBMISSION, (submission_id,))
+            _teardown_planted_history(Q_TEST_UNPLANT_A_SUBMISSION, (submission_id,))
     finally:
-        _execute(Q_TEST_UNPLANT_A_REVISION, (revision_id,))
+        _teardown_planted_history(Q_TEST_UNPLANT_A_REVISION, (revision_id,))
 
 
 def test_the_planted_submission_names_every_column_the_DDL_requires():
