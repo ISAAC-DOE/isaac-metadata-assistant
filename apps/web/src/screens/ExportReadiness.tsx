@@ -19,6 +19,14 @@ import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
 import { ROUTES } from '../lib/routes';
+import {
+  mayNameOfficialSchema,
+  officialCheckedDocument,
+  officialCleanSentence,
+  officialExportBlockedSentence,
+  officialFindingSource,
+  officialNoVerdictOnWrittenRecordSentence,
+} from '../lib/officialAttribution';
 import { LABELS } from '../lib/labels';
 import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
@@ -377,6 +385,29 @@ function LoadedExport({
     : detail.exported && !validate.dry_run
       ? toValidationResult(validate)
       : null;
+  /*
+   * MAY `VerdictCard` SPEAK FOR THE OFFICIAL SCHEMA ABOUT THIS RECORD?
+   *
+   * `realValidation` still feeds the status bar on every branch — a pass/fail chip is
+   * a verdict, not an attribution, and `ok: false` is true on every branch here. What
+   * this decides is only whether the RESERVED SCHEMA CARD may be rendered, because
+   * `ValidationResult` carries no way to say "the schema did not speak": `adapt`'s
+   * `toValidationResult` sets no `schemaOk`, so `VerdictCard` falls back to `ok` and
+   * says "Invalid against official ISAAC schema v1.05".
+   *
+   * That is FALSE on exactly one reachable payload, measured over HTTP on an exported
+   * record whose written artifact was deleted out of band:
+   *
+   *     {"ok": false, "dry_run": false, "official_validator_ran": false,
+   *      "unavailable": true, "schema": "ISAAC v1.05",
+   *      "errors": [{"path": "$", "message": "Validation could not be completed."}]}
+   *
+   * `CLAUDE.md` §12 — the schema is not ours to speak for, and §12 records this exact
+   * sentence shipping once before. An in-session export is the other direction and is
+   * `true` by construction: that validation is `export_draft`'s own official report,
+   * which only exists because `validate_official` ran.
+   */
+  const officialMaySpeak = inSession !== null || mayNameOfficialSchema(validate);
   const coverage = audit.records.length > 0 ? toAuditResult(audit) : 'pending';
   const advisory = toAdvisoryResult(warnings);
 
@@ -493,11 +524,37 @@ function LoadedExport({
       {/* Post-export: the real, reserved verdict + the two export artifacts. */}
       {exported && realValidation && (
         <>
-          <VerdictCard
-            result={realValidation}
-            onRevalidate={() => onRefresh()}
-            onBackToComplete={() => navigate(ROUTES.complete(id))}
-          />
+          {officialMaySpeak ? (
+            <VerdictCard
+              result={realValidation}
+              onRevalidate={() => onRefresh()}
+              onBackToComplete={() => navigate(ROUTES.complete(id))}
+            />
+          ) : (
+            /* NOT the reserved verdict treatment, on purpose. `signals.css` reserves
+               the filled green/red for the hard gate, and there is no gate verdict
+               here — the official validator never examined this record. The findings
+               are still shown in full and export stays refused; only the attribution
+               is withheld. See `officialNoVerdictOnWrittenRecordSentence`. */
+            <section className="preexport-blocked card" role="status" aria-label="No verdict">
+              <h2>No Verdict</h2>
+              <p className="preexport-text">
+                {officialNoVerdictOnWrittenRecordSentence(officialFindingSource(validate))}
+              </p>
+              {validate.errors.length > 0 && (
+                <ul className="preexport-errors mono">
+                  {validate.errors.map((e, i) => (
+                    <li key={`${e.path}-${i}`}>
+                      <span className="preexport-error-path">{e.path}</span> — {e.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={() => onRefresh()}>
+                {LABELS.actionRevalidate}
+              </button>
+            </section>
+          )}
 
           {realValidation.verdict === 'pass' && (
             <>
@@ -643,10 +700,13 @@ function LoadedExport({
                 silence look like evasion rather than precision.
               */}
               <p className="preexport-text">
-                All blockers are resolved, and on an in-memory candidate record the no-guessing
-                checks, ISAAC&rsquo;s own anchored-pattern exactness gate and the official ISAAC
-                schema all pass. Exporting runs the real, gated validation and writes the official
-                record + evidence sidecar. There is no override and no portal submission.
+                All blockers are resolved.{' '}
+                {officialCleanSentence(
+                  officialFindingSource(validate),
+                  officialCheckedDocument(validate),
+                )}{' '}
+                Exporting runs the real, gated validation and writes the official record +
+                evidence sidecar. There is no override and no portal submission.
               </p>
               <button
                 type="button"
@@ -689,19 +749,25 @@ function LoadedExport({
                 upstream's — §1 makes the schema not ours to speak for, so no surface may
                 report an exactness refusal as an official-schema error."
 
-                THE DISCRIMINATOR IS `ValidateReview`'s, reused exactly as `RunCard` now
-                reuses it rather than restated a fourth way: name the official ISAAC
-                schema ONLY where `dry_run === false`; otherwise report the findings and
-                say plainly that the source is not named. The gate sentence keeps its full
-                force either way — what is withheld is the attribution, never the
-                refusal. The Standalone Validator on Governance & Safety is the one
-                surface that reports `schema_ok`, `exactness_errors` and `ok` separately,
-                and it is named so the reader has somewhere to go.
+                ~~"THE DISCRIMINATOR IS `ValidateReview`'s ... name the official ISAAC
+                schema ONLY where `dry_run === false`"~~ — SUPERSEDED. That rule was the best
+                available while the wire carried nothing to branch on, and it was conservative
+                in ONE direction: it refused to name the official schema for EVERY dry run,
+                including the ones the schema really did produce. The server now says which
+                (`official_validator_ran`), and the copy comes from
+                `lib/officialAttribution.ts` so this screen and the other renderers of this
+                payload cannot drift — the reason this was the FOURTH screen to make the claim
+                is that there were four independent copies of one rule.
+
+                The gate sentence keeps its full force on every branch — what is withheld is
+                the attribution, never the refusal — and the Standalone Validator is still
+                named so the reader has somewhere to go.
               */}
               <p className="preexport-text">
-                {validate.dry_run === false
-                  ? 'The record already written does not pass the official ISAAC schema, so export stays gated. Nothing was written. Resolve these in the draft, then return.'
-                  : 'A candidate record assembled from this draft did not pass. Export stays gated and nothing was written. This check does not record which findings came from the no-guessing checks, which from ISAAC’s own anchored-pattern exactness gate, and which from the official ISAAC schema, so none is claimed — the Standalone Validator on Governance & Safety reports those separately. Resolve these in the draft, then return.'}
+                {officialExportBlockedSentence(
+                  officialFindingSource(validate),
+                  officialCheckedDocument(validate),
+                )}
               </p>
               <ul className="preexport-errors mono">
                 {validate.errors.map((e, i) => (

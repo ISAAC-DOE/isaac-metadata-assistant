@@ -521,8 +521,8 @@ describe('evidence graph · derivation from stored state', () => {
       errors: [{ path: 'descriptors.outputs.0.name', message }],
     });
     const reportedBy = node.detail.find((d) => d.term === 'Reported by');
-    expect(reportedBy?.value).toBe('Candidate-record check — source not named');
-    expect(edge.label).toBe('Candidate-record check — source not named');
+    expect(reportedBy?.value).toBe('Check finding — source not named');
+    expect(edge.label).toBe('Check finding — source not named');
     // Every string the node and its edge carry, checked at once — the attribution
     // must not survive anywhere, including in `why`.
     //
@@ -547,7 +547,7 @@ describe('evidence graph · derivation from stored state', () => {
     expect(all).toContain(message);
     // And the `Dry run` line that already existed is still there beside it.
     expect(node.detail.find((d) => d.term === 'Dry run')?.value).toBe(
-      'yes — a candidate record was checked',
+      'yes — an in-memory candidate record, nothing written',
     );
   });
 
@@ -560,9 +560,9 @@ describe('evidence graph · derivation from stored state', () => {
     // The one branch where the label is EARNED: `_validate_unit` validated the
     // record already written, through `validate_official` and nothing else.
     expect(node.detail.find((d) => d.term === 'Reported by')?.value).toBe(
-      'Official schema check',
+      'Official ISAAC schema check',
     );
-    expect(edge.label).toBe('Official schema check');
+    expect(edge.label).toBe('Official ISAAC schema check');
   });
 
   it('a NO-VERDICT unit is attributed to no validator at all', () => {
@@ -595,7 +595,7 @@ describe('evidence graph · derivation from stored state', () => {
     // just withheld: `dry_run: false` here means NO DRY RUN HAPPENED, not that a
     // written record was read.
     expect(node.detail.find((d) => d.term === 'Dry run')?.value).toBe(
-      'neither — no verdict could be produced for this run',
+      'neither — no verdict could be produced',
     );
     const all = [
       ...node.detail.map((d) => `${d.term}: ${d.value}`),
