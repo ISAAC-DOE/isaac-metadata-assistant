@@ -698,7 +698,13 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // segment with no product word behind it, and the two guards below would have gone
     // red over a route this panel already covers. Read out of this test's own failure
     // output, not derived by adding a delta.
-    expect(experimentPathLiterals.length).toBe(40);
+    // 40 -> 41: `renameExperiment`, the RENAME. It writes the SAME bare
+    // `/experiments/${…}` literal `getExperiment` and `checkRecordVersion` already
+    // write, so this array — which counts OCCURRENCES — gains one while
+    // `SUB_READ_SUFFIXES` and `SUB_READ_SEGMENTS` do not move at all: there is no
+    // sub-path below the record, because a rename PATCHes the record itself. Read out
+    // of this test's own failure output (`- 40 / + 41`), not derived by adding a delta.
+    expect(experimentPathLiterals.length).toBe(41);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this

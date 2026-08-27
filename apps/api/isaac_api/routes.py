@@ -2345,6 +2345,228 @@ def get_experiment(
     return detail
 
 
+# --- 4b. rename ---------------------------------------------------------------
+#
+# THE FIRST OPERATION THAT LETS A SCIENTIST CORRECT WHAT THEY NAMED SOMETHING.
+# Until this route existed, ``title`` was written exactly once — by
+# ``POST /api/experiments`` — and no operation could change it. ``0001_experiments``
+# is applied to the hosted database, so a typo made at create time was durable and
+# permanent. That is the whole reason this route exists.
+#
+# WHY ``PATCH`` AND NOT ``POST .../rename``. The neighbouring run operation
+# (``PATCH .../runs/{run_id}``) already renames a run through a ``PATCH`` on the
+# resource itself. A second spelling for the same act on the parent resource would
+# be two names for one idea. ``POST .../runs/{run_id}/remove`` is a POST because it
+# is not a field write; a rename is.
+#
+# WHY THE TITLE ONLY, AND NOT THE NOTE BESIDE IT ON THE CREATE FORM. This is the
+# one design decision in this slice that was made against the obvious symmetry, so
+# it is written down rather than left to be re-derived. ``POST /api/experiments``
+# stores its optional ``description`` at ``source.description`` — and that key is
+# not a free-text note. It is a PROVENANCE MARKER that
+# ``workspace.classify_experiment`` reads as proof that this application generated
+# a record from its own committed fixtures, and ``managed_legacy`` is the one
+# bucket ``workspace.remove_experiment`` will delete. Making it editable would put
+# a deletion classifier under a text box.
+#
+# MEASURED, over HTTP, on ``origin/main``, rather than reasoned about: creating an
+# experiment whose ``description`` is exactly ``ws.MANAGED_SOURCE_DESCRIPTION``
+# returns ``201`` and the record then classifies ``managed_legacy``. That hazard
+# already exists on the create path; this route deliberately does not widen it, and
+# deliberately does not silently fix a published contract it was not asked to
+# change. It is reported as a finding instead. Correcting a mistyped note therefore
+# still has no route, and the honest fix is to give the note a home of its own
+# rather than to let a rename write the classifier — which is a data-model decision
+# and not this slice's to take.
+#
+# NO ``confirmed_by_user`` FLAG, and that is a considered difference from the run
+# PATCH beside it rather than an omission. That flag exists because the run PATCH
+# writes DRAFT FIELD VALUES, and storing one records a user confirmation that later
+# stands as the record's evidence for that value. A title is explicitly "not a
+# scientific claim" (``CreateExperimentRequest.title``'s own description), it
+# reaches no exported record, and requiring a confirmation for it would train a
+# reader to send the flag without reading what it means.
+#
+# IT REFUSES INSIDE A WORKED-EXAMPLE SESSION, mirroring ``POST /api/experiments``'s
+# ``409``. The five built-in examples are fixed teaching material: renaming one
+# would make the tutorial's own narrative disagree with the screen, and
+# ``POST /api/demo/reset`` would revert it at the next reset — a write reported as
+# applied and then undone by an unrelated act. Refusing is the honest answer, and it
+# keeps the tutorial-isolation invariant (``CLAUDE.md`` §15) untouched: this route
+# reaches no seeding path and no canonical id.
+#
+# THERE IS NO DISCARD HERE, AND THE ABSENCE IS DELIBERATE RATHER THAN UNFINISHED.
+# A scientist still cannot remove an experiment they created. ``CLAUDE.md`` §15's
+# 2026-08-07 write lift enumerates, per table, exactly what writing each one covers,
+# and every one of those enumerations is an INSERT/UPSERT: the five
+# submission-lifecycle tables are covered for "writing them through
+# ``submission_store.py``'s append-only ``INSERT``s", and ``isaac_run_projection``
+# for "the ONE statement ``Q_UPSERT_RUN_PROJECTION``". No committed sentence
+# permits a ``DELETE`` against any of them. Four foreign keys point at
+# ``isaac_experiments`` and none carries an ``ON DELETE``, so a hard delete would
+# also have to remove rows from tables whose append-only guarantee is pinned by
+# test. §15's own standing rule applies: a slice that cannot cite a committed
+# sentence permitting what it does has not established its authorization basis. The
+# decision is the owner's, not this route's; see the slice report.
+
+
+class RenameExperimentRequest(BaseModel):
+    """A new title for an experiment that already exists.
+
+    ``extra="forbid"`` is the load-bearing line, exactly as it is on
+    :class:`CreateExperimentRequest`: it makes "this operation writes the title and
+    nothing else" a property of the CONTRACT rather than of this handler
+    remembering not to read a second field. A body naming ``description``,
+    ``draft``, ``record_id``, ``rev`` or ``id`` is a ``422``, not a silent partial
+    write — and for ``description`` in particular that refusal is the point, since
+    that key is a deletion classifier and not a note (see the block above).
+
+    ``max_length=200`` MATCHES ``CreateExperimentRequest.title`` EXACTLY, and the
+    match is deliberate rather than incidental. A rename that were stricter than
+    create would leave a title this application accepted impossible to correct,
+    which is the failure this whole route exists to remove.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        min_length=1,
+        max_length=200,
+        description=(
+            "The new name. Required. It is not a scientific claim and reaches no "
+            "exported record. Empty or whitespace-only is `422`: a record always "
+            "has a name."
+        ),
+    )
+
+
+@router.patch(
+    "/experiments/{experiment_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Rename an Experiment",
+    description=(
+        "Changes an experiment's title, and returns the refreshed detail bundle. "
+        "Nothing else about the record is touched.\n\n"
+        "A title is not a scientific claim and reaches no exported record, so no "
+        "evidence is attached and no confirmation is recorded. Because the "
+        "exported-artifact freshness signal compares record CONTENT rather than the "
+        "revision number, renaming an already-exported record leaves its artifact "
+        "`current`: a rename never asks anyone to re-export.\n\n"
+        "Requires the record's current `ETag` in `If-Match`. Omitted is `428`, "
+        "malformed is `400`, and stale is `412` with nothing written and the "
+        "record's current `ETag` echoed.\n\n"
+        "A blank or whitespace-only title is `422`, and any field other than "
+        "`title` is rejected outright. In particular the free-text note taken by "
+        "`POST /api/experiments` is NOT editable here: it is stored as the record's "
+        "source description, which this application also reads as the provenance "
+        "marker that identifies a record generated from its own committed fixtures. "
+        "A text box over that classifier is not something this operation offers.\n\n"
+        "Re-sending the title the record already holds is a no-op: it rewrites "
+        "nothing, does not advance the revision, and returns the same `ETag`.\n\n"
+        "It refuses with `409` when the `X-Isaac-Tutorial-Session` header is "
+        "present, and writes nothing. The built-in worked examples are fixed "
+        "teaching material, and a reset would revert the change anyway."
+    ),
+    response_description="The refreshed experiment detail bundle, with the record's `ETag`.",
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+        409: {
+            "description": (
+                "The request carried a worked-example session header. This "
+                "operation acts only on the ordinary workspace. Nothing was changed."
+            )
+        },
+    },
+)
+def rename_experiment(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: RenameExperimentRequest = Body(
+        ...,
+        description=(
+            "`{\"title\": \"<new name>\"}`. Any other key is `422`, including the "
+            "`description` the create operation accepts."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a record read "
+            "operation returned it."
+        ),
+    ),
+):
+    if scope is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "ordinary_scope_required",
+                "operation": "PATCH /api/experiments/{experiment_id}",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "Experiments are renamed in the ordinary workspace. The "
+                    "built-in worked examples are fixed teaching material and a "
+                    "reset would revert the change. Nothing was changed."
+                ),
+            },
+        )
+    # Existence pre-check OUTSIDE the lock, as every other mutation does.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check->lock window
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        title = body.title.strip()
+        if not title:
+            # `min_length=1` accepts a string of spaces, exactly as it does on the
+            # create path, and a name that is only whitespace names nothing. Same
+            # typed shape `create_experiment_route` returns, so a client handles one
+            # refusal rather than two spellings of it.
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "invalid_title",
+                    "message": (
+                        "An experiment needs a title. Nothing was changed."
+                    ),
+                },
+            )
+
+        exp.title = title
+        # `save_versioned`, NOT `save`. The difference is the whole `If-Match`
+        # contract: `title` is inside `_authoritative_signature`, so this is what
+        # bumps `rev` and moves the ETag when the name actually changes, and what
+        # writes nothing and leaves the ETag alone when the client re-sent the name
+        # the record already had. Calling `save` here would rename the record while
+        # leaving its validator unmoved — a second client holding the pre-rename
+        # ETag would then pass its own precondition and silently overwrite this
+        # write, which is the exact loss the precondition exists to prevent.
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale
+        # The full detail bundle, the same shape `POST /api/experiments` and
+        # `GET /api/experiments/{id}` return, so a client replaces its state in one
+        # hop instead of patching a field by hand. Its cost is disclosed rather than
+        # assumed: on a fully-answered record this pays one `dry_run_verdict`, which
+        # `pending_count() > 0` short-circuits on every record that still owes
+        # questions. A rename is a rare, human-paced act, not the per-answer hot
+        # path the response-bounding work was about.
+        detail = _detail(exp)
+        detail.update(vc.version_fields(exp))
+        response.headers["ETag"] = exp.etag()
+        return detail
+
+
 # --- 5. draft (grouped) -------------------------------------------------------
 
 
