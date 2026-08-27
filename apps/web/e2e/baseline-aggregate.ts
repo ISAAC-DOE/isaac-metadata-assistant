@@ -154,7 +154,9 @@ export interface DarwinProvenance {
  *
  * The defect this answers is recorded in full at `DARWIN_CARRIED_FORWARD` in
  * `a11y-baseline.ts`: a carried-forward darwin half is indistinguishable from a
- * measured one, and 14 cells were wrong for eleven days because of it, with every run
+ * measured one, and 15 cells were wrong for eleven days because of it (~~14~~; corrected
+ * in independent review 2026-08-27 — `settings@width-320` collapsed too, and 19 of the
+ * 168 cells moved in all, the other four being residual real differences), with every run
  * agreeing with every number. This does not FIX that — only a darwin run can — but it
  * makes the size of the exposure a number a reviewer can see.
  *

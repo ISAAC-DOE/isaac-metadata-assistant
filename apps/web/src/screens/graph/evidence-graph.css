@@ -527,9 +527,40 @@
   color: var(--text-heading);
 }
 
+/*
+ * THE THREE RULES BELOW WERE MOVED OFF `--text-quaternary`/`--text-tertiary`,
+ * AND THE REASON IS A MEASUREMENT RATHER THAN A PREFERENCE.
+ *
+ * When this view began reading the conflicts, notes, provenance and asset
+ * routes it drew MORE of the things these three classes style — three more
+ * tree rows, one more detail term, and up to three more connection rows — and
+ * the automated contrast scan grew by 5 nodes at desktop and 7 at every other
+ * viewport, on `color-contrast` alone. The growth was NOT in any of the styling
+ * that commit added: every new declaration there is a stroke, a fill or a
+ * swatch, and not one of them failed. It was these three long-standing classes
+ * rendering new content, each already below the AA floor:
+ *
+ *   .evgraph-row-kind       #9aa4af on #ffffff  2.53:1   (2.39:1 on a selected row)
+ *   .evgraph-detail-row dt  #78838f on #ffffff  3.86:1
+ *   .evgraph-conn-kind      #9aa4af on #fbfcfd  2.46:1
+ *
+ * AA needs 4.50:1 and none of them is large text (10.5px and 11.5px), so
+ * AA-large's 3.00:1 does not apply either. `--text-muted` (#5b6570) clears the
+ * floor against every ground these three actually meet — 5.93:1 on white,
+ * 5.61:1 on the selected-row tint, 5.77:1 on the connection tint — and it is
+ * the token `.section-tab` was moved to for exactly this reason. No new token
+ * is introduced and no element is hidden, shrunk or removed: every label these
+ * rules style still says what it said.
+ *
+ * WHAT IS DELIBERATELY LEFT ALONE. The rest of this file's `--text-tertiary`
+ * and `--text-quaternary` usages still fail, and they are the systemic token
+ * debt `e2e/a11y-baseline.ts` already assigns to a queued design-system slice.
+ * Fixing them here would hide that slice's effect behind a graph change, which
+ * that file asks in as many words not to do.
+ */
 .evgraph-row-kind {
   font-size: 10.5px;
-  color: var(--text-quaternary);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -777,7 +808,8 @@
 
 .evgraph-detail-row dt {
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  /* See the note above `.evgraph-row-kind`. */
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
@@ -904,7 +936,8 @@
 .evgraph-conn-kind {
   font-size: 10.5px;
   font-weight: 500;
-  color: var(--text-quaternary);
+  /* See the note above `.evgraph-row-kind`. */
+  color: var(--text-muted);
 }
 
 .evgraph-conn-why {

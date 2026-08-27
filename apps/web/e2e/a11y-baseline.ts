@@ -578,13 +578,67 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * the header and several notes below already record. If a darwin run
        * disagrees, split the key and correct the total; never loosen the assertion.
        */
-      'evidence-graph@desktop-1280x800': 24,
-      'evidence-graph@laptop-1024x768': 29,
-      'evidence-graph@tablet-768x1024': 29,
-      'evidence-graph@mobile-375x812': 28,
-      'evidence-graph@zoom-200': 28,
-      'evidence-graph@width-390': 28,
-      'evidence-graph@width-320': 28,
+      /*
+       * ── `evidence-graph`, 2026-08-27: 24/29/29/28/28/28/28 -> 11/11/11/10/10/10/10 ──
+       *
+       * THIS IS A CONTRAST FIX, NOT A RE-MEASUREMENT, AND IT REPLACES THE NOTE
+       * ABOVE RATHER THAN CONTRADICTING IT. That note said the 24 was systemic
+       * `--text-tertiary`/`--text-quaternary` debt and that a design-system slice
+       * would one day lower it. Three of the classes carrying that debt have now
+       * been moved to `--text-muted` in `src/screens/graph/evidence-graph.css`, and
+       * the numbers below are what an axe scan measures with that change in place.
+       *
+       * WHY THOSE THREE AND NOT THE PALETTE. This branch's evidence-graph work made
+       * the surface read four more routes, so it draws more of the things those three
+       * classes style — three more tree rows, one more detail term, up to three more
+       * connection rows. CI (job 98470544956) reported the surface GREW by +5 at
+       * desktop and +7 at every other viewport. An A/B on darwin, taken by passing
+       * the four new sub-fetches as `undefined` and re-scanning, reproduced the
+       * pre-branch figures EXACTLY (24/29/29/28/28) and then the CI figures EXACTLY
+       * (29/36/36/35/35) — so the growth was located rather than guessed, and the
+       * new styling that commit added contributed NONE of it: every declaration it
+       * introduced is a stroke, a fill or a swatch, and not one failed. The carriers
+       * were three long-standing classes, each already below the AA floor:
+       *
+       *   .evgraph-row-kind       #9aa4af on #ffffff   2.53:1  (2.39:1 selected row)
+       *   .evgraph-detail-row dt  #78838f on #ffffff   3.86:1
+       *   .evgraph-conn-kind      #9aa4af on #fbfcfd   2.46:1
+       *
+       * all now `--text-muted` #5b6570 — 5.93:1, 5.61:1 and 5.77:1 against those
+       * same grounds. Raising the baseline instead would have recorded a real
+       * accessibility regression as expected debt.
+       *
+       * THE DROP IS LARGER THAN THE GROWTH, deliberately: a class fix reaches every
+       * instance, not only the new ones, so the pre-existing instances of those three
+       * classes went away too (-18 at most viewports against a +7 regression). The
+       * 10-11 that remain are the SAME systemic token debt the note above describes
+       * and are still owned by that queued slice — `.evgraph-counts`,
+       * `.evgraph-freshness`, `.evgraph-search-label`, `.evgraph-focus-label`, the
+       * legend, `.evgraph-kind-count`, `#evgraph-tree-label`, `.evgraph-detail-kind`,
+       * `.evgraph-detail-producer-term`, the panel `h4`, and `kbd.topbar-search-kbd`
+       * (which is app chrome and not this screen's at all; it is the one node absent
+       * at `mobile-375x812`, `zoom-200` and the two narrow widths, which is the whole
+       * of the 11-vs-10 difference).
+       *
+       * HONEST LIMIT ON THE PLATFORM, and it is the same limit `settings-explorer`
+       * records above. THESE SEVEN NUMBERS ARE DARWIN-MEASURED ONLY; this environment
+       * cannot run the linux face. They stay SCALARS — which assert both columns —
+       * because darwin and linux have agreed on this surface at every measurement so
+       * far, in BOTH states: pre-branch 24/29/29/28/28/28/28 on both, and post-branch
+       * 29/36/36/35/35/35/35 on both (the second pair is CI's own GREW report against
+       * the darwin A/B above). That is agreement observed twice, not assumed — but it
+       * is not a linux reading of THIS code. If the first linux run disagrees, split
+       * the cell into `{ darwin: <this number>, linux: <measured> }` and do NOT change
+       * the darwin half to match: it was measured separately, on 2026-08-27, by
+       * `npx playwright test e2e/specs/a11y-axe.spec.ts e2e/specs/a11y-narrow.spec.ts`.
+       */
+      'evidence-graph@desktop-1280x800': 11,
+      'evidence-graph@laptop-1024x768': 11,
+      'evidence-graph@tablet-768x1024': 11,
+      'evidence-graph@mobile-375x812': 10,
+      'evidence-graph@zoom-200': 10,
+      'evidence-graph@width-390': 10,
+      'evidence-graph@width-320': 10,
       /*
        * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
        * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
@@ -698,7 +752,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'governance@tablet-768x1024': 2,
       'governance@mobile-375x812': 1,
       'governance@zoom-200': 1,
-      'guided-completion@desktop-1280x800': 10,
+      /* DISCARD SLICE, 2026-08-27: 10 -> 9. Linux measured by CI job 98470544956
+         (IMPROVED, -1); darwin re-measured here the same day and agrees, so this
+         stays a scalar — two measurements agreeing, not one assumed. Nothing on this
+         screen was restyled by that branch; the surface is `record-complete` for a
+         seeded record and the one node that stopped failing is not identified,
+         because this suite records counts and CI's IMPROVED message names none.
+         Lowered rather than left stale: a high number re-admits the defect. */
+      'guided-completion@desktop-1280x800': 9,
       'guided-completion@laptop-1024x768': 9,
       // Linux 11 -> 10, MEASURED by CI run 30691557697 on `7e9a387`: a genuine
       // IMPROVEMENT on Linux only, lowered rather than left stale. darwin stays
@@ -1257,8 +1318,20 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // are equal ("write a bare number instead"). The scalar is therefore two
       // measurements agreeing, not one measurement asserted twice. Laptop stays a
       // pair — darwin 50 is carried forward untouched and unmeasured at this commit.
-      'settings-explorer@desktop-1280x800': { darwin: 44, linux: 43 },
-      'settings-explorer@laptop-1024x768': { darwin: 45, linux: 43 },
+      /* ── DISCARD OPERATION, 2026-08-27. BOTH CELLS COLLAPSE TO SCALARS. ───────
+         `PATCH`-then-`POST /api/experiments/{id}/discard` takes the served contract
+         from 70 operations to 71, and the Endpoint Explorer lists every one of them.
+         Linux 43 -> 44 at both, measured by CI job 98470544956 (run 33058311910).
+         darwin was ALREADY 44 at desktop and 45 at laptop; re-measured here on
+         2026-08-27 it reads 44 at both — so laptop is a genuine darwin -1 and desktop
+         did not move at all. Both halves are now equal and the well-formedness guard
+         rejects a pair whose halves are equal, so both become scalars. A scalar here
+         is two independent measurements agreeing, not a linux figure asserted about
+         darwin. The mechanism is the unexplained one recorded at
+         `settings-explorer@tablet-768x1024` below — do not quote the clipping story
+         as the cause. */
+      'settings-explorer@desktop-1280x800': 44,
+      'settings-explorer@laptop-1024x768': 44,
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -1321,7 +1394,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Transcribed from CI job 96347581055's IMPROVED messages, never from a macOS
          run. An IMPROVED message is a FAILURE in this suite on purpose: a stale high
          number re-admits the defect it was meant to catch. */
-      'settings-explorer@tablet-768x1024': 59,
+      /* DISCARD OPERATION, 2026-08-27: 59 -> 58, and the direction is the same
+         unexplained one this block already documents — one more operation, one FEWER
+         failing node. Linux from CI job 98470544956 (IMPROVED, -1); darwin
+         re-measured the same day and agrees, so it stays a scalar. Not an
+         accessibility improvement: no violation was fixed. */
+      'settings-explorer@tablet-768x1024': 58,
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1386,7 +1464,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // converged on it, and the guard rejects a pair with equal halves.
       // ASSISTANT SEAM OPERATION, 2026-08-20: linux 58 -> 56, collapsing to a
       // scalar for the reason given at `settings-explorer@tablet-768x1024` above.
-      'settings-explorer@mobile-375x812': 50,
+      /* DISCARD OPERATION, 2026-08-27: SPLITS to { darwin: 51, linux: 50 }, and this
+         is the one cell in this family where the two faces went OPPOSITE ways. CI job
+         98470544956 reported no change here, so linux stays 50; a darwin run the same
+         day reads 51 (GREW +1). Same trigger as the four cells around it — the 71st
+         operation — and the same unexplained direction problem, in both directions at
+         once. The darwin half is measured, not carried forward. */
+      'settings-explorer@mobile-375x812': { darwin: 51, linux: 50 },
       /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
          FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
          same change moved linux DOWN one and darwin not at all.
@@ -1799,7 +1883,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // asymmetry is unexplained for the same reason the -2 above is: no per-node
       // output exists on both faces.
       'settings-explorer@width-320': 51,
-      'settings-explorer@width-390': { darwin: 52, linux: 51 },
+      /* DISCARD OPERATION, 2026-08-27: linux 51 -> 52, COLLAPSING to a scalar.
+         darwin was already 52 and a darwin run the same day still reads 52, so the
+         pair no longer marks a measured difference and the guard rejects equal
+         halves. `settings-explorer@width-320` did NOT move on either face, so the two
+         narrow widths again did not behave alike — the asymmetry noted above is
+         unchanged and still unexplained. */
+      'settings-explorer@width-390': 52,
       'settings-privacy@width-320': 2,
       'settings-privacy@width-390': 2,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -2978,8 +3068,33 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // WHAT NOW STOPS THIS RECURRING: `DARWIN_CARRIED_FORWARD` below, and the
   // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` literal beside it. A carried-forward
   // darwin half used to be indistinguishable from a measured one — which is the
-  // whole reason 14 cells sat wrong for eleven days with every run agreeing.
-  darwin: 2435,
+  // whole reason 15 cells sat wrong for eleven days with every run agreeing (~~14~~;
+  // re-counted by independent review 2026-08-27 — see `DARWIN_CARRIED_FORWARD` below).
+  //
+  // ── 2026-08-27, DISCARD + EVIDENCE-GRAPH BRANCH: darwin 2435 -> 2312 (-123). ──
+  //
+  // DERIVED, not typed: 2312 is the number `sumA11yNodes(A11Y_BASELINE).darwin`
+  // reports, read out of the failure message of
+  // `e2e/invariants/baseline-aggregate.invariant.test.ts` before this literal was
+  // changed — the same method the note above describes. Every summand is a darwin
+  // reading taken on this host on 2026-08-27 with
+  // `npx playwright test e2e/specs/a11y-axe.spec.ts e2e/specs/a11y-narrow.spec.ts`.
+  //
+  //   evidence-graph        desktop/laptop/tablet  24,29,29 -> 11,11,11   = -49
+  //   evidence-graph        mobile/zoom/390/320    28,28,28,28 -> 10 each = -72
+  //   settings-explorer     laptop-1024x768        45 -> 44               =  -1
+  //   settings-explorer     tablet-768x1024        59 -> 58               =  -1
+  //   settings-explorer     mobile-375x812         50 -> 51               =  +1
+  //   guided-completion     desktop-1280x800       10 ->  9               =  -1
+  //                                                                  net   -123
+  //
+  //   2435 - 123 = 2312
+  //
+  // The 121 that come from `evidence-graph` are a CONTRAST FIX in
+  // `src/screens/graph/evidence-graph.css`, not a re-measurement — see the long note
+  // at those seven cells. The other four are the 71st operation and the client
+  // Discard slot; none of them is this branch restyling those screens.
+  darwin: 2312,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -3176,7 +3291,27 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   //   2802 - 378 (color-contrast) + 7 (landmark-unique restored) = 2431
   //
   // Nothing here is a guess: this is the column CI judges, and CI produced it.
-  linux: 2431,
+  //
+  // ── 2026-08-27, DISCARD + EVIDENCE-GRAPH BRANCH: linux 2431 -> 2311 (-120). ──
+  //
+  // MIXED PROVENANCE, and the split is stated rather than blurred:
+  //
+  //   * the five `settings-explorer`/`guided-completion` movements are TRANSCRIBED
+  //     from CI job 98470544956 (run 33058311910) — desktop 43 -> 44, laptop
+  //     43 -> 44, width-390 51 -> 52, tablet 59 -> 58, guided-completion desktop
+  //     10 -> 9. Net +1. `settings-explorer@mobile-375x812` did NOT move on linux.
+  //   * the seven `evidence-graph` cells are DARWIN-MEASURED and asserted about linux
+  //     by the scalar form, for the reasons set out in full at those cells. Net -121.
+  //
+  //   2431 + 1 - 121 = 2311
+  //
+  // So this column is not wholly a linux reading this time, which is a departure from
+  // the rule the note above states and is flagged rather than hidden. The departure is
+  // confined to one surface, it is the only way this file can express a one-platform
+  // measurement, and it is the same choice `settings-explorer@width-390` made in
+  // 2026-08-10. If CI disagrees, split those cells and correct this literal from its
+  // output — do not adjust the darwin halves to match.
+  linux: 2311,
 };
 
 /**
@@ -3185,6 +3320,20 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
  * A provenance stamp rather than an assertion — nothing enforces it, and it is here
  * so a reader can tell how old the darwin column is without reading every note in
  * this file. See `A11Y_BASELINE_TOTAL_NODES`' 2026-08-27 block for the run itself.
+ */
+/*
+ * AMENDED 2026-08-27, and the amendment is here rather than in the fields because the
+ * fields describe ONE run and the column now carries readings from two.
+ *
+ * 155 of the 168 cells still carry the sweep below. THIRTEEN were re-measured later the
+ * same day, on the discard/evidence-graph branch, by two consecutive runs of the same
+ * command that agreed (0 failed / 184 skipped / 171 passed each time): the seven
+ * `evidence-graph@*` cells, `settings-explorer@` desktop, laptop, tablet and
+ * mobile-375x812, `settings-explorer@width-390`, and
+ * `guided-completion@desktop-1280x800`. Each of the thirteen states its own provenance
+ * at the cell. `commit` below is deliberately NOT moved to the branch head: it would
+ * then be wrong for the 155, which is the larger and older claim, and this file's own
+ * warning is that a freshness field speaks "only loosely".
  */
 export const DARWIN_MEASUREMENT = {
   /** Local date of the run whose readings the `darwin` column carries. */
@@ -3204,7 +3353,12 @@ export const DARWIN_MEASUREMENT = {
  *
  * Until 2026-08-27 a carried-forward darwin half was INDISTINGUISHABLE from a
  * measured one. Both are just a number in a `{ darwin, linux }` pair. The reason it
- * mattered is not hypothetical: 14 of the 20 recorded "platform splits" in this file
+ * mattered is not hypothetical: 15 of the 20 recorded "platform splits" in this file
+ * (~~14~~ — corrected by independent review 2026-08-27, which found `settings@width-320`
+ * had collapsed too; 19 of the 168 cells moved in all, the other four being residual
+ * real differences. The same correction is carried in `baseline-aggregate.ts` and in
+ * `invariants/baseline-aggregate.invariant.test.ts`, and it is kept struck rather than
+ * overwritten because an undercount of stale cells reads as reassurance)
  * were not platform differences at all — they were a stale darwin column, created by
  * four separate linux-only transcriptions that each wrote a linux delta into one half
  * of a pair and left the other half at a number nothing had measured since. Every one

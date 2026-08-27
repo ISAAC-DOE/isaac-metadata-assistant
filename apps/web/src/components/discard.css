@@ -45,6 +45,30 @@
   outline: none;
 }
 
+/*
+ * …BUT IT MUST DRAW ONE FOR A KEYBOARD USER, and the rule above alone did not.
+ *
+ * `GuidedPrompt` is the one mount that passes neither `onFocusAfterDiscard` nor
+ * `onAnnounce`, so after a discard there focus lands HERE. With only the `:focus`
+ * reset, a reader who committed the discard from the keyboard was moved to an element
+ * with no visible indicator — WCAG 2.4.7, and the exact defect `schema-browser.css`'s
+ * P36R S10 note records against `.schema-fields-detailpane`, which was "the only one of
+ * the phase's three master-detail panes with no visible ring". Same remedy, same
+ * declaration.
+ *
+ * `:focus-visible` rather than `:focus` is what keeps the pointer case unchanged: per
+ * the heuristic `record-validator.css:30-49` measures, a programmatic focus matches only
+ * when the previously focused element did — i.e. when the commit button was reached by
+ * keyboard. A mouse click on it still lands here with no ring.
+ *
+ * Declared AFTER the reset deliberately: the two selectors have equal specificity, so
+ * source order is what decides.
+ */
+.discard-slot:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
 .discard-trigger {
   position: relative;
   display: inline-flex;
