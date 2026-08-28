@@ -35,10 +35,67 @@
  *    without its bounds is the same over-claim in the other direction.
  *    `__tests__/db-recon-truthfulness.test.tsx` enforces both halves per
  *    concept, and re-scans every frontend source file for the same claim class.
- *  - `persistence: "ephemeral"` is a fixed literal about deployment intent, not
- *    a process-lifetime guarantee. Workspace state is written to files under a
- *    server-side working directory, so it outlives the process; only the
- *    deployment's temporary storage bounds it.
+ *  - `persistence` IS NO LONGER A FIXED LITERAL, and no sentence here may treat
+ *    it as one. `GET /api/about` used to serve `"ephemeral"` unconditionally.
+ *    On the hosted deployment that was FALSE, and the same process said so:
+ *    `GET /api/health` reported `experiment_storage.state: "durable"`, and two
+ *    experiments created eighteen and seventeen days earlier were still being
+ *    served (`docs/evidence/hosted-qa-2026-08-27.md` §3). The field is now
+ *    DERIVED from that same block, so it carries one of three states —
+ *    `durable`, `ephemeral`, `unavailable` — and every sentence below that
+ *    depends on it branches on all three plus an unrecognised value.
+ *
+ *    THE DEFENCE THAT USED TO SIT ON THIS LINE IS WITHDRAWN, not reworded. It
+ *    read: "a fixed literal about deployment intent, not a process-lifetime
+ *    guarantee". That was a defence of the FIELD, and the rendered sentences
+ *    were not asserting intent — they asserted MECHANISM ("the workspace is
+ *    files on the server, not a database") and FATE ("is discarded"). No intent
+ *    reading rescues either. The direction of the error is why this comment is
+ *    long: it UNDERSTATED persistence, on the data-governance screen, telling a
+ *    scientist their work is transient while it was durably stored.
+ *
+ *    TWO FACTS ARE TRUE AT ONCE AND THE COPY MUST STATE BOTH, never one
+ *    composite made of half of each:
+ *      · EXPERIMENT RECORDS — titles, drafts, the answers you confirm, runs —
+ *        are written to the application's own database when the state is
+ *        `durable`, and survive a restart. `experiment_repository`'s module
+ *        docstring: "Postgres is the system of record for authoritative
+ *        experiment state, and the workspace directory is a cache of it."
+ *      · THE WORKSPACE DIRECTORY IS STILL A DIRECTORY, in every state. Exported
+ *        record files and evidence sidecars live ONLY there and are NOT in the
+ *        database — the same docstring states that limit plainly ("Exported
+ *        ARTIFACTS ... live only in the workspace directory and are NOT in the
+ *        database"), and says a restart restores an exported record's state
+ *        including its `record_id` while the artifact files are gone, which the
+ *        readers report as `stale`. On the pod that directory is an `emptyDir`
+ *        (`docs/deployment.md`).
+ *    The copy was written when both lived in the workspace. The durable
+ *    persistence work moved one of them and the copy did not follow.
+ *
+ *    `unavailable` IS NOT A SOFTER `ephemeral` and must never render as one. It
+ *    means a database IS configured and experiment records are not reaching it.
+ *
+ *    ~~"so `POST /api/experiments` returns 503 having written nothing. Nothing is
+ *    kept for a while and then lost; nothing is kept at all."~~ — WITHDRAWN, and
+ *    struck rather than deleted because this is the RULE that generated the false
+ *    sentences on three cards below, so deleting it would remove the evidence of
+ *    where they came from.
+ *
+ *    `unavailable` HAS TWO CAUSES and they behave OPPOSITELY —
+ *    `experiment_repository.storage_status`'s own comment says so ("because the
+ *    PGDATABASE gate refused it, or because it stopped answering"). Measured over
+ *    HTTP with no database contacted (outbound connections stubbed to raise, and
+ *    pinned by `apps/api/tests/test_about_and_openapi.py`'s two-cause pair):
+ *
+ *      · gate refused the configured NAME -> `backend: "filesystem"`, and
+ *        `POST /api/experiments` answers **201** into the working directory.
+ *      · database selected and not answering -> `backend: "postgres"`, and the
+ *        create answers **503** having written nothing.
+ *
+ *    THE RULE FOR THIS MODULE, WHICH IS GIVEN ONLY `persistence` (the state) AND
+ *    NOT `backend`: assert the invariant that holds under both — nothing created
+ *    in this state is durable — and say outright that this screen is not told
+ *    which outcome applies. Do not restore a sentence that picks one.
  *  - the app cannot tell whether the deployment restricts access. The optional
  *    shared key the backend can require is configured outside the browser, so
  *    the client may state the uncertainty but never a status.
@@ -68,6 +125,14 @@
 /** The `GET /api/about` values the copy is allowed to depend on. */
 export interface SettingsFacts {
   dataRegime: string;
+  /**
+   * Where this deployment stores EXPERIMENT RECORDS: `durable`, `ephemeral` or
+   * `unavailable`. It is `GET /api/health`'s `experiment_storage.state`, served
+   * by `/api/about` so the two cannot disagree — see the header note. Typed as
+   * `string` on purpose: an unrecognised value must reach the copy and be NAMED,
+   * not narrowed away at the type level into a branch that would then assert
+   * something the backend never said.
+   */
   persistence: string;
   recordSchemaVersion: string;
 }
@@ -141,7 +206,32 @@ export interface SettingsConcept {
 export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
   const { dataRegime, persistence, recordSchemaVersion } = facts;
   const syntheticOnly = dataRegime === 'synthetic-only';
+  /*
+   * THREE STATES, NOT A BOOLEAN. `const ephemeral = persistence === 'ephemeral'`
+   * used to be the whole of it, and every card that branched on it therefore had
+   * exactly two arms: the ephemeral copy, and a fallback naming the reported
+   * value. That was survivable only while the field was a literal that could not
+   * be anything else. Now that it is derived, `durable` and `unavailable` are
+   * both reachable and both meant something the ephemeral arm asserted the
+   * opposite of, so each gets its own arm and the fallback keeps its job — an
+   * UNRECOGNISED value is named, never routed into the nearest-looking branch.
+   */
   const ephemeral = persistence === 'ephemeral';
+  const durable = persistence === 'durable';
+  const unavailable = persistence === 'unavailable';
+
+  /*
+   * The walkthrough half of "what is stored" is identical in every state, so it
+   * is composed once rather than pasted into four arms that could drift apart —
+   * which is the defect this whole module exists to prevent.
+   *
+   * "never written to a database" is the backend's invariant, not a hope:
+   * `workspace.Experiment.save`'s durable hook fires only when `session_id is
+   * None`, `PostgresOrdinaryStore.persist` RAISES on a non-null one, and it
+   * raises again on a canonical example id in any scope.
+   */
+  const walkthroughStorage =
+    'There is also a temporary directory the server creates for each worked-example walkthrough: opening one writes that walkthrough its own copy of the five built-in example records, and every answer, edit and exported artifact you produce inside it is written there rather than into the workspace. A walkthrough is never written to a database, whichever way this deployment stores experiments. The app discards that directory when the walkthrough ends; if that request does not reach the server the directory simply expires, and an expired one is removed the next time a walkthrough is opened.';
 
   return [
     {
@@ -303,15 +393,70 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       //
       // Also NOT stated: any filesystem path. No other product surface names one,
       // and `POST /api/demo/reset` deliberately keeps paths out of its response.
+      // CORRECTED FOR THE DERIVED `persistence`. Both strings below said the
+      // stored things are "both as files on the server", which is a claim about
+      // MECHANISM and was false on any deployment reporting `durable`: there the
+      // experiment records themselves are in the application's own database and
+      // the workspace copy is rebuilt from it. The `more` disclosure was the
+      // sharpest version of the same error — it listed "Experiments, their
+      // drafts, the answers you confirm" alongside "exported records, and
+      // evidence sidecars" as one undifferentiated list of what the workspace
+      // holds, when the first three have a durable home and the last two do not.
+      // That distinction is now stated, because it is the one a reader acts on.
+      //
+      // AND THE FIRST VERSION OF THAT CORRECTION INTRODUCED A NEW FALSE CLAIM ON
+      // THE `unavailable` ARM, which is recorded here rather than quietly
+      // replaced, because it is the same defect class this whole change exists to
+      // fix — re-created on the arm nobody could previously reach. It read
+      // "Creating an experiment fails outright rather than storing one
+      // temporarily, so nothing is put somewhere for a while and then lost."
+      //
+      // `unavailable` HAS TWO CAUSES AND THEY BEHAVE OPPOSITELY. The state's own
+      // comment says so (`experiment_repository.storage_status`): "because the
+      // PGDATABASE gate refused it, or because it stopped answering." Measured
+      // over HTTP, with no database contacted (outbound connections stubbed to
+      // raise):
+      //
+      //  · `PGHOST` set and `PGDATABASE` wrong -> `_postgres_available()` is
+      //    false -> `repository()` is `FilesystemExperimentRepository` ->
+      //    `state: "unavailable"`, `backend: "filesystem"`, and
+      //    `POST /api/experiments` answers **201**; the record is listed and sits
+      //    in the working directory. `_postgres_available`'s own docstring
+      //    documents this as the intended degradation.
+      //  · `PGHOST` set, `PGDATABASE` right, the database not answering ->
+      //    `state: "unavailable"`, `backend: "postgres"`, and
+      //    `POST /api/experiments` answers **503 experiment_storage_unavailable**
+      //    having written nothing.
+      //
+      // So the old sentence denied exactly what the first cause does, and a
+      // scientist whose operator mistyped `PGDATABASE` would read "it fails
+      // outright", get a 201, and conclude their work was stored durably.
+      //
+      // THIS MODULE CANNOT TELL THE TWO APART AND MUST NOT PRETEND TO.
+      // `SettingsFacts` carries `/api/about` values, and `/api/about` publishes
+      // `persistence` — the `state` — and not `backend`. So the copy states the
+      // one thing true of both causes (nothing created here is durable) and says
+      // outright that it does not know which of the two outcomes applies. The
+      // wire CAN distinguish them, via `GET /api/health`'s
+      // `experiment_storage.backend`; branching on it would be a new rendering
+      // contract and is deliberately not done here.
       id: 'what-is-stored',
       heading: 'What Is Stored',
-      summary:
-        'The workspace, plus a temporary directory for each walkthrough that is opened.',
-      detail:
-        'Two things are stored, both as files on the server for this deployment, and neither is shared between deployments. The first is the workspace itself. The second is a temporary directory the server creates for each worked-example walkthrough: opening one writes that walkthrough its own copy of the five built-in example records, and every answer, edit and exported artifact you produce inside it is written there rather than into the workspace. The app discards that directory when the walkthrough ends; if that request does not reach the server the directory simply expires, and an expired one is removed the next time a walkthrough is opened.',
+      summary: durable
+        ? 'Experiment records in this deployment’s database, the workspace files around them, and a temporary directory for each walkthrough that is opened.'
+        : 'The workspace, plus a temporary directory for each walkthrough that is opened.',
+      detail: durable
+        ? `Two places hold what you produce, and neither is shared between deployments. The first is this deployment’s own database, which holds the experiment records — their titles, drafts, the answers you confirm, and their runs. The second is the workspace: a working directory of files on the server holding a copy of those records, plus the official records and evidence sidecars you export. Only the database copy outlives the working directory; the exported files are not in the database. ${walkthroughStorage}`
+        : unavailable
+          ? `Two things are stored, both as files on the server for this deployment, and neither is shared between deployments. One is the workspace itself. ${walkthroughStorage} A database is configured for this deployment and experiment records are not reaching it, which is what the backend means by reporting persistence as unavailable. Nothing you create in this state is durable, and this screen is not told which of the two ways that happens: the attempt either fails outright and writes nothing at all, or it succeeds into the workspace above and lasts only as long as that directory does.`
+          : ephemeral
+            ? `Two things are stored, both as files on the server for this deployment, and neither is shared between deployments. One is the workspace itself. ${walkthroughStorage}`
+            : `The workspace is stored as files on the server for this deployment, and is not shared between deployments. ${walkthroughStorage} Whether experiment records are additionally stored in a database depends on this deployment, and the backend reports that as "${persistence}", which this screen does not recognise — so it states nothing further about it.`,
       more: {
         label: 'What the Workspace Contains',
-        text: 'Experiments, their drafts, the answers you confirm, exported records, and evidence sidecars.',
+        text: durable
+          ? 'Experiments, their drafts, the answers you confirm, exported records, and evidence sidecars. The first three are a working copy of what is in the database. The exported records and evidence sidecars are not in any database and exist only here, so a restart can leave an experiment still marked as exported while the exported files themselves are gone; the app then reports that artifact as stale rather than serving it.'
+          : 'Experiments, their drafts, the answers you confirm, exported records, and evidence sidecars.',
       },
     },
     {
@@ -334,12 +479,59 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       // bounds are stated, and none of them is weaker than the full paragraph.
       id: 'what-resets',
       heading: 'What Resets',
-      summary: ephemeral
-        ? "The workspace is files on the server, not a database — discarded with the deployment's temporary storage."
-        : `The backend reports persistence as "${persistence}".`,
-      detail: ephemeral
-        ? "The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it. The backend reports that storage as ephemeral: it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
-        : `The backend reports persistence as "${persistence}". This screen states only what the backend reports.`,
+      //
+      // THE TWO-ARM VERSION OF THIS CARD WAS THE MOST CONSEQUENTIAL SITE OF THE
+      // `persistence` defect, and it is worth naming why. Its ephemeral arm did
+      // not merely omit the database — it asserted the negation twice, in the
+      // two registers a reader trusts most: mechanism ("files on the server, not
+      // a database") and fate ("is discarded"). On a `durable` deployment both
+      // were false about the reader's experiment records, and the fallback arm
+      // could not save it, because `"ephemeral"` was a literal and the fallback
+      // was therefore unreachable.
+      //
+      // Each arm below keeps the clause the isolated SLAC test database needs —
+      // it is not the workspace's storage, nothing from it is written here —
+      // because "what resets" is exactly the question a reader would otherwise
+      // carry to that database. Under `durable` that clause has to do MORE work,
+      // not less: there are now two databases in the reader's mind and only one
+      // of them holds their records, so the sentence names both and separates
+      // them.
+      //
+      // TWO CORRECTIONS TO THE FIRST VERSION OF THAT REWRITE, both found by
+      // independent review and both recorded rather than silently replaced:
+      //
+      //  · THE `durable` SUMMARY DROPPED A HEDGE THE OTHER TWO ARMS KEEP. It read
+      //    "the workspace files around them, including anything you exported, do
+      //    not [survive a restart]" — a flat claim about the storage class of
+      //    `ISAAC_UI_WORKSPACE`, which `persistence: "durable"` says NOTHING
+      //    about: it is a claim about experiment records only. The `durable`
+      //    DETAIL below already hedged it ("this screen cannot say when that will
+      //    be") and both other arms keep "restarting the backend process does not
+      //    by itself clear it", so one card was asserting opposite things about
+      //    the same directory — and the unhedged half was the SUMMARY, which is
+      //    what Overview -> Boundaries renders. It is not hypothetical: this
+      //    project has run a deployment whose workspace sat on a persistent
+      //    volume (`docs/personal-deployment-retirement.md`). The summary now
+      //    carries the same hedge, in the same words, rather than a third variant.
+      //  · THE `unavailable` ARMS ASSERTED THAT THE CREATE FAILS. See the long
+      //    note on `what-is-stored` for the measurement: that is true of one of
+      //    the state's two causes and false of the other, where the create
+      //    answers 201 into the workspace. Both arms now state the invariant that
+      //    holds either way and say outright that this screen is not told which.
+      summary: durable
+        ? 'Experiment records are in this deployment’s database and survive a restart; the workspace files around them, including anything you exported, are not in it and go with the temporary storage it sits on — this screen cannot say when that will be.'
+        : unavailable
+          ? 'A database is configured for this deployment and experiment records are not reaching it, so nothing created here is durable; the workspace is files on the server, discarded with the deployment’s temporary storage.'
+          : ephemeral
+            ? "The workspace is files on the server, not a database — discarded with the deployment's temporary storage."
+            : `The backend reports persistence as "${persistence}".`,
+      detail: durable
+        ? "Experiment records survive a restart. The backend reports persistence as durable, which means their titles, drafts, the answers you confirm and their runs are written to this deployment's own database. The workspace is not stored in a database: it is a working directory of files on the server, it is not shared between deployments, and it is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. One consequence is worth stating plainly, because it is the part that surprises: the official records and evidence sidecars you export are written to that directory and are not in the database, so a restart can restore an experiment that is still marked as exported while the exported files themselves are gone, and the app reports that artifact as stale rather than serving it. The isolated SLAC test database that the protected, read-only diagnostic may read is neither of these — it is not the workspace's storage and it is not where your experiment records go: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
+        : unavailable
+          ? "The backend reports persistence as unavailable: a database is configured for this deployment and experiment records are not reaching it, so nothing you create here is durable. This screen is not told which of the two ways that happens — the attempt either fails outright and writes nothing at all, or it succeeds into the workspace described next and goes when that does. The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it; it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage and is not the database this state is about: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
+          : ephemeral
+            ? "The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it. The backend reports that storage as ephemeral: it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
+            : `The backend reports persistence as "${persistence}". This screen states only what the backend reports.`,
       more: {
         // Was "they exist only in the open browser tab and are never written down or
         // logged." The second half was false: `lib/assistantSession.ts` writes the
@@ -439,9 +631,39 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       //    stays true whichever state is live. The sentence that does assert a
       //    state lives in `lib/labels.ts` and is chosen from
       //    `experiment_storage.state` alone.
-      //  · "NOTHING IS KEPT FOR A WHILE AND THEN LOST" is the precise consequence
-      //    of that 503 and is worth the words: a create that fails writes nothing
-      //    at all, rather than quietly leaving something temporary behind.
+      //
+      //    ~~"this module has never been told which state is live"~~ — SUPERSEDED
+      //    2026-08-27, and struck rather than deleted because the paragraph above
+      //    is a correct account of why the card was written that way and of the
+      //    stale belief it once concealed. IT IS NOW TOLD: `/api/about` derives
+      //    `persistence` from the same `experiment_storage` block, so the fact
+      //    this module lacked has arrived through the field it already had.
+      //
+      //    TWO THINGS FOLLOW, AND ONE OF THEM IS A CORRECTION TO THIS CARD'S OWN
+      //    COPY. The condition-shaped sentence can become a statement, which is
+      //    strictly more useful to a reader asking how long their work lasts. And
+      //    the aside it leaned on — "My Experiments states which before you make
+      //    one" — WAS FALSE on this deployment and had to go: the three-way
+      //    durability sentence in `screens/ExperimentsHome.tsx` renders only
+      //    inside `queue-empty-state`, so on any deployment that already holds an
+      //    experiment it never appears at all, and the reader was being sent to a
+      //    screen that would not answer them. That is measured, not inferred:
+      //    `docs/evidence/hosted-qa-2026-08-27.md` §3.5.
+      //  · ~~"NOTHING IS KEPT FOR A WHILE AND THEN LOST" is the precise
+      //    consequence of that 503 and is worth the words: a create that fails
+      //    writes nothing at all, rather than quietly leaving something temporary
+      //    behind.~~ WITHDRAWN, and struck rather than deleted because it is the
+      //    reasoning that produced the false sentence, not merely the sentence.
+      //    It is the precise consequence of ONE of `unavailable`'s two causes.
+      //    In the other — the `PGDATABASE` gate refusing the configured name —
+      //    `_postgres_available()` is false, the filesystem repository is
+      //    selected, and `POST /api/experiments` answers **201** into the working
+      //    directory. Measured; see the note on `what-is-stored` for the full
+      //    probe. The `unavailable` clause below now states the invariant that
+      //    holds under both causes — nothing created outlasts that directory —
+      //    and says this screen is not told which outcome applies, because
+      //    `/api/about` publishes `persistence` (the state) and not `backend`
+      //    (which is what separates them).
       //
       //  · WHAT THE TWO BROWSER ENTRIES HOLD, itemised rather than promised
       //    away. `tutorialPreference.ts:16-21` states its own exhaustive list —
@@ -463,8 +685,15 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       heading: 'How Long It Is Kept',
       summary:
         'Only a walkthrough has a stated maximum age; everything else lasts as long as the server, the deployment, or the browser holding it.',
-      detail:
-        'Only one thing in this build has a stated maximum age, and it is the worked-example walkthrough: the server sets how long an unfinished one may sit and states that limit to the page when the walkthrough opens, though no screen here shows the number. What Is Stored describes what becomes of one that passes it. Nothing else is kept to a schedule. The workspace has no expiry of its own and lasts as long as the working directory it sits in, which is the directory What Resets is about. The verification report is held in the server process memory for a bounded period before a recomputation is offered, is shown with its own age, and is gone when that process restarts; the protected, read-only diagnostic keeps none of what it reads. How long an experiment lasts depends on where this deployment stores experiments, and My Experiments states which before you make one — where a database is configured but is not accepting the work, nothing is kept for a while and then lost, because the attempt fails and nothing is written. Your browser also keeps two small things on lifetimes of their own.',
+      detail: `Only one thing in this build has a stated maximum age, and it is the worked-example walkthrough: the server sets how long an unfinished one may sit and states that limit to the page when the walkthrough opens, though no screen here shows the number. What Is Stored describes what becomes of one that passes it. Nothing else is kept to a schedule. The workspace has no expiry of its own and lasts as long as the working directory it sits in, which is the directory What Resets is about. The verification report is held in the server process memory for a bounded period before a recomputation is offered, is shown with its own age, and is gone when that process restarts; the protected, read-only diagnostic keeps none of what it reads. ${
+        durable
+          ? 'How long an experiment lasts depends on where this deployment stores experiments, and this one stores them in its own database, so a restart does not take them; what you export from them is not in that database and lasts only as long as the working directory above.'
+          : unavailable
+            ? 'How long an experiment lasts depends on where this deployment stores experiments, and here a database is configured but the records are not reaching it, so nothing you create now outlasts the working directory above — the attempt either fails and writes nothing at all, or leaves a copy there that goes when it does, and this screen is not told which.'
+            : ephemeral
+              ? 'How long an experiment lasts depends on where this deployment stores experiments, and this one keeps them in the working directory above, so they last exactly as long as it does.'
+              : `How long an experiment lasts depends on where this deployment stores experiments, and the backend reports that as "${persistence}", which this screen does not recognise, so it states nothing further about it.`
+      } Your browser also keeps two small things on lifetimes of their own.`,
       more: {
         label: 'What the Browser Keeps',
         text: 'Two things, and they expire differently. Whether this browser has finished the walkthrough is written to localStorage, so it outlives the tab and the browser being restarted and lasts until the site data is cleared; it describes this browser only, is filed under no account, and does not follow you to another device. The pointer to a walkthrough still in progress goes to sessionStorage instead and dies with the tab, as do the assistant conversations described under What Resets. Neither holds a record, a scientific value, or an identity value: the completion entry holds the walkthrough id, a version, a flag and the time you finished, and the pointer holds the session the server minted and which step you had reached.',
@@ -511,15 +740,50 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       //    the session directory and everything in it. It is best effort (see
       //    `what-is-stored`), which is why the expiry fallback is stated there
       //    and not promised again here.
-      //  · WHAT HAS NO DELETE. There is exactly one DELETE operation in the
+      //  · ~~WHAT HAS NO DELETE. There is exactly one DELETE operation in the
       //    whole API (the session discard above); nothing removes the workspace,
-      //    a record, or an exported artifact.
+      //    a record, or an exported artifact.~~
+      //
+      //    FALSE AT HEAD, AND PRE-EXISTING — this clause and the copy it
+      //    justified were both on `origin/main` before the `persistence` slice
+      //    and were not introduced by it. `POST /api/experiments/{id}/discard`
+      //    (`routes.py`, `post_experiment_discard`) removes an individual record
+      //    and its runs. Counting DELETE *verbs* is what made the sentence look
+      //    checked: discard is a POST, so an enumeration of HTTP methods finds
+      //    nothing and reads as evidence. The claim had to be about what an
+      //    operation DOES, not how it is spelled.
+      //
+      //    It is corrected rather than deleted because the sentence sits one card
+      //    away from "Experiment records ... survive a restart", and the pair
+      //    reads as permanence.
+      //
+      //    WRITTEN FROM THE ROUTE, and the refusals are stated because they are
+      //    most of what the operation is. Read in the order the handler checks
+      //    them: a canonical worked example (`ws.CANONICAL_IDS`), a record that
+      //    has produced an official ISAAC record under its own identity
+      //    (`exp.record_id`), any run that has produced one (`_run_published_stem`),
+      //    an official record or evidence sidecar present on disk under the
+      //    experiment whatever the state says (`_published_stems`), and any
+      //    submission or revision history for it (`_submission_history_refusal`)
+      //    — each answering `409` with nothing removed. It further requires
+      //    `confirmed_by_user: true` (`428`) and the record's current `ETag` in
+      //    `If-Match`, refusing `If-Match: *` outright because there is no undo.
+      //    When this deployment cannot READ its own submission history it answers
+      //    `503` rather than guess, and removes nothing. So "a record can be
+      //    deleted" would overstate it in the other direction; the copy names the
+      //    conditions.
+      //
+      //    THE WORKSPACE AND EXPORTED ARTIFACTS KEEP THEIR CLAIM. Nothing removes
+      //    the workspace root, and a record carrying an exported artifact is one
+      //    of the refusals above — so no exported file is ever removed by this
+      //    operation. Those two halves of the old sentence are still true and are
+      //    still stated.
       id: 'reset-and-deletion',
       heading: 'Reset and Deletion',
       summary:
-        'Deliberate removal reaches only a walkthrough — nothing here deletes the workspace, a record, or an exported file.',
+        'Deliberate removal reaches a walkthrough, and one unsubmitted, unexported record at a time — nothing here deletes the workspace or an exported file.',
       detail:
-        "Deliberate removal is narrow in this build, and everything it can reach sits inside a worked-example walkthrough. Reset Worked Example rebuilds that walkthrough's own copies of the built-in example records: it previews the effect without changing anything, requires a typed confirmation, and is checked against the figures you were shown — if the walkthrough moved in between, the server refuses rather than act on figures that no longer describe it, and shows you the refreshed ones. When it does run it permanently discards the confirmed answers, the progress, and the exported artifacts inside that walkthrough, and it also clears the assistant conversations this browser tab is holding. Ending a walkthrough discards its whole temporary directory along with everything in it. Nothing in this build deletes the workspace itself, an individual record, or a single exported artifact — no operation offers it.",
+        "Deliberate removal is narrow in this build. Reset Worked Example rebuilds a walkthrough's own copies of the built-in example records: it previews the effect without changing anything, requires a typed confirmation, and is checked against the figures you were shown — if the walkthrough moved in between, the server refuses rather than act on figures that no longer describe it, and shows you the refreshed ones. When it does run it permanently discards the confirmed answers, the progress, and the exported artifacts inside that walkthrough, and it also clears the assistant conversations this browser tab is holding. Ending a walkthrough discards its whole temporary directory along with everything in it. One other removal exists: an experiment you created can be discarded, which removes that record and its runs. It is deliberately hard to reach by accident and it refuses — removing nothing — if the record has ever been submitted, if it or any of its runs has produced an official ISAAC record, if an official record or evidence sidecar is present on disk under it, or if it is one of the built-in worked examples; it also requires an explicit confirmation and the record's current version, and there is no undo. If this deployment cannot read its own submission history it refuses rather than guess. Submission history and published artifacts are never removed or rewritten by it. Nothing in this build deletes the workspace itself or a single exported artifact.",
     },
     {
       // P2 — EXPORT, which was named only inside `what-is-stored`'s collapsed

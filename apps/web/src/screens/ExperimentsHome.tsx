@@ -87,9 +87,17 @@ function storageSentence(durability: Durability): string | null {
   if (durability === 'durable') return LABELS.storageDurable;
   if (durability === 'ephemeral') return LABELS.storageEphemeral;
   // NOT SILENCE. `unavailable` is the one bad state, and the reader is about to
-  // press a button that will fail — saying so before they press it is the whole
-  // value of the line. It is deliberately not softened into "storage is being
-  // set up": that would be an invented cause.
+  // press a button whose result is not durable — saying so before they press it
+  // is the whole value of the line. It is deliberately not softened into "storage
+  // is being set up": that would be an invented cause.
+  //
+  // ~~"a button that will fail"~~ — corrected with the label itself (pre-existing,
+  // not introduced by the `/api/about` `persistence` slice). `unavailable` has two
+  // causes and only one of them fails the create: when the `PGDATABASE` gate
+  // refuses the configured name the app degrades to the filesystem repository and
+  // `POST /api/experiments` answers 201. `state` alone does not separate them —
+  // only `experiment_storage.backend` does, and this function is given `state`.
+  // See `LABELS.storageUnavailable` for the measurement.
   if (durability === 'unavailable') return LABELS.storageUnavailable;
   // UNKNOWN SAYS NOTHING. Not "checking…", not a hedge — the only honest thing to
   // say about durability that has not been established is nothing, and a hedge

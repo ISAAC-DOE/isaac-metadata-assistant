@@ -333,27 +333,45 @@ describe('My Experiments · where a new experiment is stored', () => {
     expect(line!.textContent).not.toMatch(/database/i);
   });
 
-  it('a configured database that is NOT ANSWERING says so, and promises nothing', async () => {
+  it('a configured database that records are NOT REACHING says so, and promises nothing', async () => {
     /*
      * THE REGRESSION THIS SECTION EXISTS FOR. Before the backend named this state,
      * it reported `durable: true` while every read and write against the database
      * failed — so this line promised durability on the exact deployment where
      * creating an experiment could not work at all.
+     *
+     * THE `/not answering/i` ASSERTION THIS REPLACES PINNED A DEFECT, and is
+     * inverted rather than deleted. `unavailable` has TWO causes —
+     * `experiment_repository.storage_status`'s own comment says so — and "not
+     * answering" is only one of them. In the other, the `PGDATABASE` gate refuses
+     * the configured name, `_postgres_available()` returns false, the FILESYSTEM
+     * repository is selected, and `POST /api/experiments` answers **201** into a
+     * working directory that is not durable (measured; see
+     * `apps/api/tests/test_about_and_openapi.py`'s two-cause pair). So the old
+     * assertion required this line to name a cause it cannot know and to deny
+     * what half of this state actually does. Note the shape of the trap: the
+     * DEGRADED_LEGACY case two tests above describes that very cause correctly,
+     * one screen's worth of code away, and the two never had to agree.
+     *
+     * PINNED ON THE RENDERED TEXT, not on the label constant, for the reason the
+     * ephemeral case states: a matcher reading the constant passes whatever the
+     * constant says. Both directions are asserted — what it must say, and the
+     * false promises it must not make, which now include the retired one.
      */
     await openEmptyState(UNAVAILABLE);
     const line = panel().querySelector<HTMLElement>('.queue-empty-storage');
     expect(line).not.toBeNull();
     expect(line!.dataset.durability).toBe('unavailable');
     expect(line!.textContent).toBe(LABELS.storageUnavailable);
-    /*
-     * PINNED ON THE RENDERED TEXT, not on the label constant, for the reason the
-     * ephemeral case states: a matcher reading the constant passes whatever the
-     * constant says. Both directions are asserted — what it must say, and the two
-     * false promises it must not make.
-     */
-    expect(line!.textContent).toMatch(/not answering/i);
+    // It must still deliver the bad news: a database is meant to hold these and
+    // is not getting them. That is the whole reason the line is not silence.
+    expect(line!.textContent).toMatch(/database/i);
+    expect(line!.textContent).toMatch(/not reaching it/i);
+    // And it must not promise durability...
     expect(line!.textContent).not.toMatch(/stay here across restarts|saved in this/i);
-    expect(line!.textContent).not.toMatch(/cleared when the server restarts/i);
+    // ...nor assert an outcome that is false under the gate-refused cause.
+    expect(line!.textContent).not.toMatch(/not answering/i);
+    expect(line!.textContent).not.toMatch(/will not work until/i);
   });
 
   it('reads the NAMED state even when it disagrees with the boolean fallback', async () => {

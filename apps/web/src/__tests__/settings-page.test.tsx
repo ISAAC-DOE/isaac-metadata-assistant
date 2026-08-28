@@ -626,15 +626,102 @@ describe('Settings — Overview', () => {
     expect(screen.queryByText(/only unmistakably synthetic data is in scope/i)).not.toBeInTheDocument();
   });
 
-  it('drops the ephemeral-storage sentence when the backend reports another persistence', async () => {
+  /*
+   * REPLACED, AND THE REPLACEMENT IS THE POINT OF THE WHOLE SLICE.
+   *
+   * This test used to render `persistence: 'durable'` and assert the WEAK
+   * FALLBACK — `reports persistence as "durable"` — which was the right
+   * assertion while `durable` was an unreachable value that the copy therefore
+   * had nothing to say about. It is reachable: `GET /api/about` served
+   * `"ephemeral"` as a hardcoded literal while `GET /api/health` in the same
+   * hosted process reported `experiment_storage.state: "durable"`
+   * (`docs/evidence/hosted-qa-2026-08-27.md` §3). So a passing version of this
+   * test coexisted with the defect, and would have kept passing after a fix that
+   * only changed the backend.
+   *
+   * Two things are asserted now, and the SECOND is what the defect was:
+   *   1. the durable arm renders instead of the fallback;
+   *   2. it separates RECORD storage from the WORKSPACE DIRECTORY, rather than
+   *      swapping one false composite for the opposite one. A durable
+   *      deployment's exported artifacts really are lost on a restart, and the
+   *      copy must keep saying so.
+   */
+  it('states record durability and workspace impermanence separately when persistence is durable', async () => {
     stubFetchRoutes({
       [ABOUT_URL]: { body: { ...aboutResponse, persistence: 'durable' } },
       [OPENAPI_URL]: { body: openApiFixture },
       [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
     });
     renderSettings();
-    expect(await screen.findByText(/reports persistence as "durable"/i)).toBeInTheDocument();
+    fireEvent.click(tab('Data & Privacy'));
+    const resets = await screen.findByText(/Experiment records survive a restart/i);
+    const text = resets.textContent ?? '';
+    // (1) the durable arm, not the fallback.
+    expect(text).toMatch(/reports persistence as durable/i);
+    expect(screen.queryByText(/reports persistence as "durable"/i)).not.toBeInTheDocument();
+    // (2) the two facts, both stated, neither collapsed into the other.
+    expect(text).toMatch(/written to this deployment's own database/i);
+    expect(text).toMatch(/the workspace is not stored in a database/i);
+    expect(text).toMatch(/are not in the database/i);
+    expect(text).toMatch(/reports that artifact as stale/i);
+    // The retired ephemeral assertions must not survive into this state.
+    expect(text).not.toMatch(/reports that storage as ephemeral/i);
     expect(screen.queryByText(/there is no database/i)).not.toBeInTheDocument();
+  });
+
+  it('names an unrecognised persistence value instead of picking the nearest branch', async () => {
+    stubFetchRoutes({
+      [ABOUT_URL]: { body: { ...aboutResponse, persistence: 'somehow-else' } },
+      [OPENAPI_URL]: { body: openApiFixture },
+      [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+    });
+    renderSettings();
+    fireEvent.click(tab('Data & Privacy'));
+    expect(
+      await screen.findByText(/reports persistence as "somehow-else"/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Experiment records survive a restart/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/reports that storage as ephemeral/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * THIS TEST PINNED A DEFECT AND IS INVERTED RATHER THAN DELETED, which is the
+   * established remedy in this repository for a test that defends a false
+   * sentence.
+   *
+   * It required `/creating an experiment fails outright/`. That is true of ONE of
+   * `unavailable`'s two causes and false of the other: when the `PGDATABASE` gate
+   * refuses the configured name, `_postgres_available()` is false, the filesystem
+   * repository is selected, and `POST /api/experiments` answers **201** into a
+   * working directory that is not durable (measured over HTTP with outbound
+   * connections stubbed to raise; `state: "unavailable"`, `backend:
+   * "filesystem"`). The old assertion therefore made the copy defect
+   * unfixable-without-failing, which is the worst property a test can have.
+   *
+   * WHAT IT NOW PINS IS THE INVARIANT THAT HOLDS UNDER BOTH CAUSES — that nothing
+   * created in this state is durable — plus the honesty that this screen is not
+   * told which outcome applies, because `/api/about` publishes `persistence` (the
+   * state) and not `backend` (which is what separates them). The negative
+   * assertion is kept and a second one is added: the retired sentence must not
+   * come back, and `unavailable` must still not be rendered as `durable`.
+   */
+  it('claims no durability, and does not claim the create fails, when a configured database is not taking records', async () => {
+    stubFetchRoutes({
+      [ABOUT_URL]: { body: { ...aboutResponse, persistence: 'unavailable' } },
+      [OPENAPI_URL]: { body: openApiFixture },
+      [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+    });
+    renderSettings();
+    fireEvent.click(tab('Data & Privacy'));
+    const resets = await screen.findByText(/reports persistence as unavailable/i);
+    const text = resets.textContent ?? '';
+    // The invariant, true under both causes of `unavailable`.
+    expect(text).toMatch(/nothing you create here is durable/i);
+    // And it says outright that it cannot tell which of the two outcomes applies.
+    expect(text).toMatch(/not told which of the two ways that happens/i);
+    // The retired false claim must not return.
+    expect(text).not.toMatch(/fails outright rather than/i);
+    expect(text).not.toMatch(/experiment records survive a restart/i);
   });
 
   /**

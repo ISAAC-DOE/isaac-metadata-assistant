@@ -32,9 +32,59 @@ same deterministic core in a container.
   The ingress serves `path: /krish` (Prefix, no rewrite — the app owns its
   subpath) on `isaac.slac.stanford.edu`, behind Authentik forward auth
   (admin or researcher group, same policy as `/portal`).
-- **State** — an `emptyDir` volume at `ISAAC_UI_WORKSPACE`. Contents are
-  synthetic-only and self-seed deterministically on first read, so pod
-  restarts reset state harmlessly.
+- **State** — TWO STORES, and conflating them is a defect this document has
+  already shipped once. ~~"an `emptyDir` volume at `ISAAC_UI_WORKSPACE`.
+  Contents are synthetic-only and self-seed deterministically on first read, so
+  pod restarts reset state harmlessly."~~ — **corrected 2026-08-27, and struck
+  rather than reworded because "restarts reset state harmlessly" is a claim an
+  operator plans around.** It was written before the 2026-08-07 durable
+  persistence work and describes only the first of these:
+  - **The workspace directory** — still an `emptyDir` volume at
+    `ISAAC_UI_WORKSPACE`, still synthetic-only, still self-seeding
+    deterministically on first read. It holds each experiment's working copy and
+    the official records and evidence sidecars an export writes. **A pod restart
+    does take it**, and for exported artifacts that loss is real: they are not
+    held in a database, so a restored experiment can still be marked as exported
+    with its artifact files gone, which the readers report as `stale`
+    (`apps/api/isaac_api/experiment_repository.py`, module docstring).
+  - **Experiment records** — **NOT** reset by a pod restart on this deployment.
+    Since `0001_experiments` was applied (2026-08-09) the authoritative state of
+    every experiment created through `POST /api/experiments` is written to
+    `isaac_experiments` in the app-owned PostgreSQL database and the workspace
+    copy is rehydrated from it. Measured on `/krish` on 2026-08-27: two
+    experiments created 2026-08-09 and 2026-08-10 were still being served after
+    dozens of image rollouts, alongside `experiment_storage: {"backend":
+    "postgres", "durable": true, "state": "durable"}`
+    ([`evidence/hosted-qa-2026-08-27.md`](evidence/hosted-qa-2026-08-27.md) §2.2).
+
+  Which of the two is in force is not a constant and must not be read as one.
+  `GET /api/health`'s `experiment_storage.state` — mirrored by `GET /api/about`'s
+  `persistence` since 2026-08-27, so the two cannot disagree **within one server
+  process** — reports `durable`, `ephemeral` (no database configured; the
+  workspace is all there is) or `unavailable` (a database is configured and
+  experiment records are **not** reaching it). The bound on "cannot disagree" is
+  not pedantry: part of what `storage_status()` reports is `storage_failure()`,
+  which `experiment_repository`'s module docstring documents as process-local
+  ("each replica observes its own failures"), so with more than one replica two
+  calls can legitimately differ.
+  A worked-example walkthrough is never written to the database in any state.
+
+  **`unavailable` has TWO causes and they behave oppositely** — the state's own
+  comment in `storage_status()` says so ("because the PGDATABASE gate refused it,
+  or because it stopped answering"), and only `experiment_storage.backend`
+  separates them. ~~"in which case `POST /api/experiments` returns `503` having
+  written nothing"~~ is struck rather than reworded, because it is true of one
+  cause and denies exactly what the other does:
+
+  | `backend` | cause | `POST /api/experiments` |
+  |---|---|---|
+  | `postgres` | the configured database is selected and is not answering | **`503 experiment_storage_unavailable`**, having written nothing |
+  | `filesystem` | `PGDATABASE` is not the expected name, so `_postgres_available()` refuses it and the app degrades to the workspace repository (its docstring documents this as the intended degradation) | **`201`** — the record is created and listed, in a working directory that is not durable |
+
+  Measured over HTTP on 2026-08-27 with no database contacted (outbound
+  connections stubbed to raise). What holds under both, and is the only thing a
+  surface given `state` alone may assert, is that **no experiment record created
+  in this state is durable**.
 - **Health** — `GET /krish/api/health`; pod probes hit the container port
   directly (bypassing ingress/auth), and this path stays open even when
   API-key auth is enabled.

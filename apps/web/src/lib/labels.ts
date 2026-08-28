@@ -599,10 +599,41 @@ export const LABELS = {
    * worse than saying it: the reader is about to press a button that will fail,
    * and the honest thing is to tell them before they press it rather than after.
    *
-   * IT DESCRIBES THE CONSEQUENCE ACCURATELY, which took some care. Creating does
-   * not silently produce a temporary record — `POST /api/experiments` returns 503
-   * and writes nothing at all — so "may be lost" would be wrong in the direction
-   * that matters. "Will not work until it does" is what actually happens.
+   * ~~IT DESCRIBES THE CONSEQUENCE ACCURATELY, which took some care. Creating
+   * does not silently produce a temporary record — `POST /api/experiments`
+   * returns 503 and writes nothing at all — so "may be lost" would be wrong in
+   * the direction that matters. "Will not work until it does" is what actually
+   * happens.~~
+   *
+   * THAT WAS FALSE FOR HALF OF THIS STATE, AND IT IS PRE-EXISTING — this comment
+   * and the sentence it justified were both on `origin/main` and were not
+   * introduced by the `/api/about` `persistence` slice; they are corrected here
+   * because they are the same sentence one screen away from that slice's own,
+   * and this one renders on My Experiments.
+   *
+   * `unavailable` HAS TWO CAUSES — `experiment_repository.storage_status` says so
+   * itself: "because the PGDATABASE gate refused it, or because it stopped
+   * answering." They behave OPPOSITELY, measured over HTTP with no database
+   * contacted (outbound connections stubbed to raise):
+   *
+   *  · `PGDATABASE` not the expected name -> `_postgres_available()` is false ->
+   *    `repository()` is the FILESYSTEM repository -> `state: "unavailable"`,
+   *    `backend: "filesystem"`, and `POST /api/experiments` answers **201**. The
+   *    record is created and listed, in a working directory that is not durable.
+   *    `_postgres_available`'s docstring documents this as intended degradation.
+   *  · the database stops answering -> `state: "unavailable"`,
+   *    `backend: "postgres"`, and the create answers **503
+   *    experiment_storage_unavailable** having written nothing.
+   *
+   * So "that database is not answering" described only the second cause, and
+   * "will not work until it does" denied exactly what the first one does. A
+   * scientist whose operator mistyped `PGDATABASE` would be told creating will
+   * not work, get a record, and reasonably conclude it was stored durably.
+   *
+   * THE SENTENCE NOW STATES WHAT HOLDS UNDER BOTH, and does not pretend to know
+   * which applies: this screen branches on `experiment_storage.state`, and only
+   * `experiment_storage.backend` separates the two. It still tells the reader the
+   * bad news before they press the button, which is the whole reason it exists.
    *
    * The two sentences above deliberately never mention this state, and the note
    * on `unknown` above still holds for `unknown` — that one renders nothing,
@@ -610,8 +641,9 @@ export const LABELS = {
    * something bad, which is a different thing from knowing nothing.
    */
   storageUnavailable:
-    'This deployment saves experiments in its own database, and that database is not ' +
-    'answering. Creating an experiment will not work until it does.',
+    'This deployment is set up to save experiments in its own database, and they are not ' +
+    'reaching it. Creating one may fail outright; if it succeeds, the record is kept only in ' +
+    'this server’s workspace and is lost when the server restarts.',
 
   actionLaunchGuidedDemo: 'Launch Guided Demo',
   launchGuidedDemoBody:

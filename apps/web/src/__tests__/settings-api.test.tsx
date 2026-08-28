@@ -1900,7 +1900,46 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `d.description.length` = 102,184 minus 2 per `\n\n` separator (208 x 2 = 416)
     // = 101,768. The entry was re-transcribed from `create_app().openapi()` with
     // `json.dumps(..., ensure_ascii=False)`, never hand-edited.
-    expect(total).toBe(101768);
+    //
+    // RE-MEASURED 2026-08-27 after `GET /api/about` stopped serving `persistence`
+    // as a hardcoded literal. 101,768 -> 102,529 (+761): ONE existing description
+    // changed — about's — and no other, which `test_contract_description_parity.py`
+    // proves rather than leaving it asserted here. The old description claimed
+    // "Every value is reused from the same authoritative source `GET /api/health`
+    // reads, so the two can never disagree", and on the hosted deployment they DID
+    // disagree: `/about` said `ephemeral` while `/health` said `durable` in the same
+    // process. The added prose names `persistence` as `/health`'s own
+    // `experiment_storage.state` (so the sentence is now true by construction rather
+    // than by intention), states its three values, says it is a claim about
+    // EXPERIMENT RECORDS and not about the working directory the exported artifacts
+    // live in, and — the half that had never been published at all — names
+    // `data_regime` and `core` as the fields that ARE still fixed literals.
+    // Re-derived, never incremented: raw sum of `d.description.length` over the 71
+    // operations = 102,949, minus 2 per `\n\n` separator (210 x 2 = 420) = 102,529.
+    //
+    // ~~"101,768 -> 102,521 (+753)"~~ — the PROSE was wrong while both figures it
+    // was describing were right, which is why it is corrected in place rather than
+    // rewritten. The assertion read `102529` and the derivation on the line above
+    // gives 102,949 - 420 = 102,529, so the delta is **+761**. Nothing about the
+    // measurement moved; only the sentence describing it, which had been written
+    // from an earlier draft of the description and never re-read against the
+    // number beneath it.
+    //
+    // RE-MEASURED 2026-08-27, same day, after the review of that same change.
+    // 102,529 -> 103,342 (+813): ONE existing description changed — about's —
+    // and no other, which `test_contract_description_parity.py` proves rather than
+    // leaving it asserted here. Two corrections, both to claims the change itself
+    // had introduced. The "cannot disagree" sentence is now bounded to ONE SERVER
+    // PROCESS, because `storage_status()` reports a process-local observation and
+    // unbounded the sentence was the same shape of over-claim as the literal it
+    // replaced. And a new paragraph names `unavailable`'s TWO causes and their
+    // opposite outcomes (`503` having written nothing, versus `201` into a
+    // non-durable working directory), because three user-facing surfaces had
+    // independently written copy asserting the wrong one from `state` alone.
+    // Re-derived from the served document, never incremented: raw sum over the 71
+    // operations = 103,764, minus 2 per `\n\n` separator (211 x 2 = 422) = 103,342.
+    // The entry was re-transcribed from `create_app().openapi()` by script.
+    expect(total).toBe(103342);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -1928,7 +1967,21 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // total moved would mean the prose had been written into an existing paragraph,
     // which is precisely why these two aggregates are asserted separately and neither
     // is inferred from the other. RE-DERIVED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(208);
+    // 208 -> 210 (+2): `GET /api/about` went from two paragraphs to four. It moves by
+    // exactly two because the new prose was appended as TWO new paragraphs — one for
+    // the derivation and one for the record-versus-workspace scope — rather than woven
+    // into the existing lead. A change that left this at 208 while the character total
+    // moved would mean it had been written into an existing paragraph, which is
+    // precisely why these two aggregates are asserted separately and neither is
+    // inferred from the other. RE-DERIVED from the served document, not incremented.
+    // 210 -> 211 (+1): `GET /api/about` APPENDED one paragraph — `unavailable`'s two
+    // causes and their opposite outcomes. It moves by exactly one because the
+    // "cannot disagree" bound was written INTO the existing second paragraph while
+    // the two-cause prose was appended as a new one; a change that moved this by two
+    // would mean the bound had been appended instead, and one that left it at 210
+    // while the character total moved would mean the two-cause prose had been woven
+    // in. RE-DERIVED from the served document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(211);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather
