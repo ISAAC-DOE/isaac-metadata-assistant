@@ -924,19 +924,52 @@ Current state:
 
   **A PANEL TOLD THE SCIENTIST TO ENTER A VALUE ON 25 FIELDS, AND 7 ACCEPT NONE** (#182). Measured
   over all 25 paths × 5 write routes: **5** writable via `PATCH .../runs/{id}`, **13** via
-  `/overrides`, **7** refused by all five — and **on a record with no runs, none of the 25 is
-  writable**, because both accepting routes are a run's. The copy is now per path. `block:attribution`
+  `/overrides`, **7** refused by all five — and ~~**on a record with no runs, none of the 25 is
+  writable**, because both accepting routes are a run's~~ — **CORRECTED 2026-08-27: exactly one of
+  the 25, `system.technique`, is now writable on a record with no runs**, through the record-level
+  answers/edit operations added in the same session (see the correction two paragraphs below). The
+  other 24 are unchanged and the "7 refused by all five" figure was re-derived and still holds. The copy is now per path. `block:attribution`
   accepted a contributor that **could never export**; the write now records the
   `user_confirmation` evidence it had already earned, reusing `complete.py`'s exact four-key shape,
   and stays fail-closed on contributor shapes the route does not check.
 
-  **`system.domain` HAS NO WRITE PATH ANYWHERE**, which is why setting `technique` or a facility
+  ~~**`system.domain` HAS NO WRITE PATH ANYWHERE**, which is why setting `technique` or a facility
   field makes a record un-exportable-until-cleared. Declined deliberately: the correct fix is the
   stored derivation applied in `Experiment.resolved_run_draft`, and **the repository holds TWO
   stored expressions of that one rule with opposite confirmation postures** (`draft_builder`
   stores it directly; `inferability.system_domain` requires user confirmation and has no
   production caller). Deriving `domain` from `technique` would mean authoring a **37-entry**
-  scientific classification that exists nowhere here — §5 forbids it.
+  scientific classification that exists nowhere here — §5 forbids it.~~
+
+  **REVERSED 2026-08-27, AND THE DECLINE IS KEPT STRUCK RATHER THAN DELETED, because a recorded
+  deliberate decline is exactly the kind of claim a future session acts on.** Both
+  `system.domain` AND `system.technique` now have a record-level write path
+  (`POST /api/experiments/{id}/answers` to answer, `.../edit` to correct). **The decline was not
+  wrong — it was answering a different question.** It declined *deriving* `domain` from
+  `technique`, and that remains declined for exactly the reason given: the 37-entry classification
+  does not exist here and §5 forbids authoring one. Re-measured 2026-08-27: `system.technique`'s
+  enum has **37** values, so the figure was right.
+
+  **What made it buildable was noticing the derivation was never required.** Both fields are
+  **closed enums declared by the official schema itself** (`system.domain` → `["experimental",
+  "computational"]`; `system.technique` → 37 values). A scientist **choosing** from the schema's
+  own enum is a user confirmation over a bounded set, not a guess and not an inference — squarely
+  inside §5. The writable set is **derived from the vendored schema at runtime** by three gates
+  (declares an `enum` ∧ its parent declares it `required` ∧ `workspace.field_level` is
+  experiment-level), which yields exactly those two paths and was re-derived independently by
+  review over all 29 enum leaves. Nothing is transcribed, so it follows a schema refresh; an
+  unreadable schema fails closed to refusing every such write.
+  **Neither field is ever derived from the other, defaulted, or inferred** — a record given only
+  one keeps the other missing, and stays blocked. The two stored expressions of the derivation
+  rule (`draft_builder` vs `inferability.system_domain`) are **untouched**, and choosing between
+  their opposite confirmation postures remains an open decision this did not need to take.
+
+  **Measured before:** all five write routes refused both fields (`422 unrecognized_field`;
+  `not_overridable` for `system.domain` at `/overrides`). **One cell of that table was wrong and
+  is corrected here:** `field:system.technique` IS in `EXPERIMENT_OVERRIDABLE_ADDRESSES` and its
+  run override returns **200 — accepting off-enum values**. That is **pre-existing**, not caused
+  by this change, and is deliberately left alone: closing it breaks `test_run_api.py:2157` and
+  needs its own argument.
 
   **A SCIENTIST CAN NOW RENAME A RECORD** (#184, `PATCH /api/experiments/{id}`, operations 69 →
   70). **Discard was NOT built, and the reason is the finding:** §15 enumerates, per table, only
@@ -1669,8 +1702,8 @@ was written when a session stopped on a usage limit with one unreviewed PR and f
 review and green CI, and each `wip/` slice was re-run from its brief and re-measured rather than
 merged. Its box at the top carries the current state; the body is kept for its evidence and
 reasoning, not as a description of where things stand. **Read it for the still-open list**
-(`system.domain` has no write path; discard needs the owner; A11Y-06's residue; the reasoned darwin
-a11y column) **and for three operational traps that cost real time** — a `.venv` symlink that
+(~~`system.domain` has no write path~~ — **CLOSED 2026-08-27, see the reversal in §11**; discard
+needs the owner; A11Y-06's residue; the reasoned darwin a11y column) **and for three operational traps that cost real time** — a `.venv` symlink that
 reached `main`, the snapshot conflicting every open PR on each merge, and OpenAPI aggregates that
 must be re-measured rather than added. It is a description, not an authorization; verify every fact
 with the commands in its §1.

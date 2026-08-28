@@ -36,13 +36,21 @@
 > undocumented items · the automatable half of the accessibility work.
 >
 > **What is still open, and it is a short list:**
-> - **`system.domain` has no write path anywhere** (§5.2 D2). Declined deliberately: the fix
+> - ~~**`system.domain` has no write path anywhere** (§5.2 D2). Declined deliberately: the fix
 >   belongs in `Experiment.resolved_run_draft`, and **the repository holds two stored expressions
 >   of the same derivation with opposite confirmation postures** — `draft_builder` stores it
 >   directly, `inferability.system_domain` requires user confirmation and has no production caller.
 >   Which posture governs is a decision, not a mechanical step. Deriving `domain` from `technique`
 >   would mean authoring a **37-entry scientific classification that exists nowhere here**, which
->   §5 forbids.
+>   §5 forbids.~~ **CLOSED 2026-08-27 — and the decline is struck rather than deleted because it
+>   was RIGHT about the question it answered.** Deriving `domain` from `technique` is still
+>   declined, for exactly this reason; the 37-entry figure was re-measured and is correct. What
+>   changed is that the derivation turned out never to be required: **both** `system.domain` and
+>   `system.technique` are closed enums declared by the official schema itself, so a scientist
+>   CHOOSING from the schema's own enum is a user confirmation over a bounded set, not an
+>   inference. Both now have a record-level write path. The two stored expressions of the
+>   derivation rule are untouched and choosing between their postures is still an open decision.
+>   See `CLAUDE.md` §11 for the measurement.
 > - **Discard an experiment.** §15 enumerates only `INSERT`s and `UPSERT`s, so no committed
 >   sentence permits a `DELETE` — while `db_write.WriteStatementPolicy` **does not refuse one**
 >   (`delete` is absent from `_FORBIDDEN_KEYWORDS`; verified). **Mechanical permission is not

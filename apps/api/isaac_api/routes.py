@@ -17,6 +17,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
+from types import MappingProxyType
 from typing import Annotated, Any, Literal, Mapping, Sequence
 
 import logging
@@ -3878,6 +3879,358 @@ _SHAPE_SCREENED_ANSWER_KEYS: tuple[str, ...] = ("series", "qc", "descriptor")
 _WRITING_ANSWER_KEYS: frozenset[str] = frozenset({"series", "descriptor", "qc", "edge"})
 
 
+@functools.lru_cache(maxsize=1)
+def _record_enum_fields() -> Mapping[str, tuple]:
+    """Record-level official field paths the schema CLOSES with an enum -> its values.
+
+    THE DEFECT THIS EXISTS TO CLOSE, measured over HTTP on a record created through
+    ``POST /api/experiments`` with one run, at every write route this application has::
+
+        system.domain     /edit 422  /answers 422  PATCH run 422  run/edit 422
+                          run/answers 422          run/overrides 422 not_overridable
+        system.technique  /edit 422  /answers 422  PATCH run 422  run/edit 422
+                          run/answers 422          run/overrides 200
+
+    Both are declared REQUIRED by ``properties.system.required`` in the vendored
+    official schema, and neither could be set ON THE RECORD by any request. The one
+    accepting route is a RUN's override — which records a DIVERGENCE from an inherited
+    value the record does not hold, and which makes that run stop inheriting the
+    record's implicit derivations. It is not a way to say what the record is.
+
+    The consequence was worse than an absence, and ``CLAUDE.md`` §11 already records it:
+    ``system`` is NOT top-level-required, so a record carrying neither field exports
+    cleanly — but a record carrying ``technique`` (or a facility field) and no
+    ``domain`` fails official validation with ``'domain' is a required property`` and
+    could not be repaired except by clearing what had been entered.
+
+    WHY THIS IS NOT THE DERIVATION §5 FORBIDS. Prior sessions declined this work on the
+    premise that ``domain`` would have to be DERIVED from ``technique``, which would
+    mean authoring a 37-entry scientific classification that exists nowhere in this
+    repository. That premise is avoidable and is not adopted here. Both fields are
+    CLOSED ENUMS declared by the official schema itself, and a scientist CHOOSING one
+    of the schema's own values is a user confirmation over a bounded set — not an
+    inference, not a guess, and not a judgement this application makes. Nothing is
+    derived, nothing is defaulted, and neither field is inferred from the other: a
+    record given only one keeps the other missing, and stays blocked, which is correct.
+
+    DERIVED FROM THE SCHEMA, NOT TRANSCRIBED, and the derivation is doing real work
+    rather than showing off. THREE gates, all necessary, all read from the vendored
+    document at runtime:
+
+    1. the node declares ``enum`` — so the admissible values are a closed set the
+       schema itself publishes, and a refusal can name them without this module
+       holding an opinion about what they should be;
+    2. the parent declares the key ``required`` — which is what makes the field worth
+       a write path at all, and what keeps the OPTIONAL enum leaves out (the eleven
+       ``context.electrochemistry.*`` ones, the seven ``computation.method.*`` ones);
+    3. ``workspace.field_level`` classifies the path ``experiment`` — so a RUN-level
+       enum (``context.environment``) and an unclassified one (``record_type``,
+       ``measurement.qc.status``) are excluded here. Those two have their own owners:
+       ``context.environment`` is written on the run by ``PATCH .../runs/{run_id}``,
+       and ``measurement.qc.status`` is the ``qc`` answer key.
+
+    Measured over the vendored v1.05 document, those three gates yield EXACTLY
+    ``system.domain`` and ``system.technique`` — the two paths this slice is about —
+    and ``test_system_enum_fields.py`` re-derives that rather than asserting it, so a
+    schema refresh that adds a fourth is visible instead of silent.
+
+    Transcribing the 37 techniques instead would put a second copy of the schema's
+    vocabulary in this file, free to drift from the document ``CLAUDE.md`` §1 makes the
+    authority. Reading it means the gate FOLLOWS a schema refresh.
+
+    THE CACHE MAKES THE FAIL-CLOSED ANSWER STICK, exactly as :func:`_official_block_type`
+    records for itself, and the direction is why that is acceptable. An unreadable or
+    unparseable schema yields an EMPTY mapping, so no path is recognised, every write is
+    refused as ``unrecognized_field``, and nothing is stored — and ``lru_cache`` will
+    hold that empty answer for the life of the process rather than for one request. That
+    is refusing writes that would have been accepted, never accepting writes that should
+    have been refused. Worth saying out loud so nobody debugs it twice.
+
+    THE RESULT IS READ-ONLY BECAUSE IT IS SHARED. Every call returns the SAME object,
+    which is the point of the cache, and a caller that added a path to it would widen
+    this application's write surface for the life of the process. ``official.py`` records
+    the same hazard for its own loader and accepts it (*"Python cannot prevent that"*)
+    because it hands back a fresh object every time; this one cannot, so the mapping is
+    wrapped and its values are tuples.
+    """
+    try:
+        schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # unreadable or unparseable vendored schema
+        return MappingProxyType({})
+    found: dict[str, tuple] = {}
+
+    def walk(node: object, prefix: str) -> None:
+        if not isinstance(node, dict):
+            return
+        properties = node.get("properties")
+        if not isinstance(properties, dict):
+            return
+        required = node.get("required")
+        required = set(required) if isinstance(required, list) else set()
+        for key, child in properties.items():
+            if not isinstance(key, str) or not isinstance(child, dict):
+                continue
+            path = f"{prefix}.{key}" if prefix else key
+            values = child.get("enum")
+            if (
+                isinstance(values, list)
+                and key in required
+                and ws.field_level(path) == ws.LEVEL_EXPERIMENT
+            ):
+                found[path] = tuple(values)
+            walk(child, path)
+
+    walk(schema, "")
+    return MappingProxyType(found)
+
+
+def _record_enum_field_answers(answers_by_id: dict) -> dict:
+    """The non-blank entries of an answers body that name one of those paths.
+
+    Blank (``None``/``""``) is excluded here for the same reason every other reader of
+    an answers body excludes it: a blank answer is not an answer, and this operation
+    does not CLEAR a field. Clearing a confirmed record-level enum value is deliberately
+    not built by this slice — see :func:`_apply_record_enum_fields`.
+    """
+    known = _record_enum_fields()
+    return {
+        key: value
+        for key, value in (answers_by_id or {}).items()
+        if isinstance(key, str) and key in known and value not in (None, "")
+    }
+
+
+def _record_field_question(path: str) -> str:
+    """The question a RECORD-level field write records itself as answering.
+
+    The sibling of :func:`_run_field_question`, and separate from it because the two
+    say different true things: a run's confirmation is about that run, and this one is
+    about the record every run inherits from. The text is part of the stored evidence
+    entry and is what :func:`_apply_run_field`'s idempotence compares, so a value
+    re-submitted at the same path does not restamp its own provenance.
+    """
+    return f"Value for {path} on this record?"
+
+
+def _enum_field_is_confirmed(draft: dict, path: str) -> bool:
+    """Whether the record already holds a confirmed value at one enum field path.
+
+    THIS IS THE ``/answers`` vs ``/edit`` SPLIT FOR THESE FIELDS, and it is deliberately
+    the same split the rest of this module already draws rather than a second rule.
+    ``/answers`` answers what is OPEN; ``/edit`` corrects what is ANSWERED. For a
+    ``series``/``qc``/``descriptor`` the state is read off ``draft["pending"]``; these
+    paths raise no blocker (nothing in ``extract.draft_builder`` emits one for them), so
+    the same question is asked of the field map instead: a field the record holds a
+    non-null, non-``missing`` value for is answered, and one it does not is open.
+
+    ``draft.get("fields")`` IS TYPE-GUARDED, not read with ``or {}``. A persisted
+    non-dict there is a document a reader did nothing to deserve — ``CLAUDE.md`` §11's
+    read-path doctrine — and the honest answer for it is "no confirmed value", which
+    routes the caller to ``/answers`` and refuses ``/edit``. Neither branch reads or
+    coerces the malformed value.
+    """
+    fields = draft.get("fields")
+    env = fields.get(path) if isinstance(fields, dict) else None
+    return (
+        isinstance(env, dict)
+        and env.get("value") is not None
+        and env.get("status") != "missing"
+    )
+
+
+def _refuse_a_value_the_schema_does_not_allow(
+    enum_answers: dict, identifiers: dict
+) -> JSONResponse | None:
+    """``422 not_an_allowed_value`` for a value outside the schema's own enum, else ``None``.
+
+    A NEW TYPED CODE RATHER THAN ``invalid_field_value``, and the reason is that the
+    existing one is documented to say nothing about the cause: its message *"deliberately
+    states no cause"*, because a cause-naming sentence there was measured being served
+    verbatim about a key it did not describe. That restraint is right for a family of
+    unrelated storage failures and wrong here, where there is exactly one cause and
+    naming it is the whole remedy. A client that reads ``invalid_field_value`` learns to
+    send something else; a client that reads this learns WHAT to send.
+
+    THE FULL ALLOWED SET IS ECHOED, INCLUDING ALL 37 TECHNIQUES, and that is a decision
+    with an argument rather than a default:
+
+    * it is the SCHEMA's own published vocabulary, not caller-supplied content and not
+      scientific data. Every value in it is already served to any client by
+      ``GET /api/schema``, so withholding it here protects nothing and only costs the
+      caller a second request to learn what it may send;
+    * it is BOUNDED and constant — read from the vendored document, so it cannot grow
+      with caller input, and 37 short tokens serialise to well under a kilobyte, which
+      is smaller than several of this operation's existing refusal MESSAGES;
+    * this module's standing convention for a refusal a client must act on is to name
+      what to do next (``answer_at``, ``keys``), not to describe the mistake and stop.
+
+    THE REJECTED VALUE IS NOT ECHOED, which is the same convention every sibling refusal
+    keeps: ``key``/``keys`` are the caller's own key names, which it needs in order to
+    find its mistake; the VALUE is caller-supplied content and an error body is not a
+    reflection surface.
+
+    NOTHING IS WRITTEN, and this runs before any mutation on both operations.
+    """
+    known = _record_enum_fields()
+    offending = sorted(
+        path for path, value in enum_answers.items() if value not in known.get(path, ())
+    )
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "not_an_allowed_value",
+            **identifiers,
+            "key": offending[0],
+            "keys": offending,
+            "allowed": {path: list(known.get(path, ())) for path in offending},
+            "message": (
+                "The official ISAAC schema closes each of these fields with a fixed "
+                "list of values, and what was sent is not one of them. Nothing was "
+                "written, and any value the record already held is unchanged. The "
+                "values the schema allows are in `allowed`, keyed by field."
+            ),
+        },
+    )
+
+
+def _refuse_answering_an_already_confirmed_enum_field(
+    draft: dict, enum_answers: dict, *, edit_at: str, identifiers: dict
+) -> JSONResponse | None:
+    """The ``already_answered`` refusal, for a field whose state lives in the field map.
+
+    THE SAME RULE AND THE SAME ERROR CODE as
+    :func:`_refuse_answering_an_already_answered_key`, deliberately: this operation
+    answers open questions only, and applying a DIFFERENT value to a closed one would
+    discard what the caller sent while reporting no change. A second error code for one
+    rule is how two halves of a contract drift apart.
+
+    IT IS A SEPARATE FUNCTION BECAUSE THE STATE IS READ SOMEWHERE ELSE, not because the
+    rule differs. That one probes with ``apply_corrections`` over ``draft["pending"]``
+    and the blocks each blocker's value lives in; these paths have no blocker and their
+    value lives in ``draft["fields"]``, so the probe would answer about nothing.
+
+    ``answer_at`` IS UNCONDITIONALLY THE RECORD'S CORRECTION OPERATION, and that differs
+    from the sibling for a reason worth stating rather than leaving to be noticed. Every
+    key the sibling can name is RUN-owned, so on a record with runs it must withhold the
+    pointer; these two are EXPERIMENT-level (``workspace.EXPERIMENT_LEVEL_FIELD_PATHS``),
+    the record's own ``/edit`` accepts them whether or not runs exist, and the pointer is
+    therefore provably actionable in every state this refusal is reachable in.
+
+    RESUBMITTING THE IDENTICAL VALUE IS STILL A SUCCESS, exactly as on every other key:
+    the refusal fires only where the two values differ, which is the only case in which
+    something the caller sent would have been lost.
+    """
+    offending = sorted(
+        path
+        for path, value in enum_answers.items()
+        if _enum_field_is_confirmed(draft, path)
+        and ((draft.get("fields") or {}).get(path) or {}).get("value") != value
+    )
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "already_answered",
+            **identifiers,
+            "keys": offending,
+            "answer_at": edit_at,
+            "message": (
+                "Each of these already holds a confirmed value, and the value submitted "
+                "here differs from it. This operation answers open questions only, so "
+                "applying it would have discarded what you sent while reporting no "
+                "change. Nothing was written and the stored value is unchanged. Correct "
+                "it at the operation named in `answer_at` instead — the ids to "
+                "substitute into it are in this same body. Resubmitting the value that "
+                "is already stored is still accepted here."
+            ),
+        },
+    )
+
+
+def _refuse_correcting_an_unconfirmed_enum_field(
+    draft: dict, enum_answers: dict, *, answer_at: str, identifiers: dict
+) -> JSONResponse | None:
+    """The ``not_yet_answered`` refusal, for a field whose state lives in the field map.
+
+    The exact mirror of the function above, and the same-code/different-storage argument
+    applies unchanged. A correction of a field the record holds no value for would store
+    a first value through an operation whose whole contract is that it CORRECTS one —
+    and would do so past the ``already_answered`` redirect that sends a caller here, so
+    the two operations would each accept what the other is documented to own.
+
+    ``answer_at`` is the record's own answers operation, unconditionally, for the reason
+    the sibling gives: these paths are experiment-level, so that operation accepts them
+    on a record with runs and on one without.
+    """
+    offending = sorted(
+        path for path in enum_answers if not _enum_field_is_confirmed(draft, path)
+    )
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "not_yet_answered",
+            **identifiers,
+            "keys": offending,
+            "answer_at": answer_at,
+            "message": (
+                "Each of these is still unanswered on this record, so there is no "
+                "confirmed value to correct. Answer it at the operation named in "
+                "`answer_at` instead — the ids to substitute into it are in this same "
+                "body. Nothing was written."
+            ),
+        },
+    )
+
+
+def _apply_record_enum_fields(draft: dict, enum_answers: dict, timestamp: str) -> list[str]:
+    """Write each confirmed enum value into the RECORD's own field map. What changed.
+
+    THE WRITER IS :func:`_apply_run_field`, REUSED RATHER THAN REIMPLEMENTED, and that
+    is the whole point: it already mints the four-key ``models.user_confirmation``
+    entry ``complete.py`` produces, carries the envelope's prior evidence and its
+    ``unit`` forward, and is IDEMPOTENT — re-applying a value the envelope already
+    records with an equal confirmation leaves it untouched, so a re-submission does not
+    restamp provenance, does not move ``rev``, and does not break the byte-stable no-op
+    ``_save_versioned`` depends on. A second envelope builder here would be a second
+    definition of "what a confirmed field looks like", free to drift from the one the
+    exporter and the draft validator read.
+
+    Only the QUESTION differs, because the two say different true things — see
+    :func:`_record_field_question`.
+
+    ``draft["fields"]`` IS NOT ATTACHED UNTIL SOMETHING IS ACTUALLY WRITTEN, which is
+    ``patch_run``'s discipline for the same map and for the same reason: the field map
+    is part of the record's authoritative signature, and creating an empty one would
+    advance ``rev`` for a request that wrote nothing.
+
+    CLEARING IS NOT BUILT, and is named rather than implied. :func:`_apply_run_field`
+    removes a field when handed ``None``, and this function can never hand it one:
+    :func:`_record_enum_field_answers` drops blanks before they arrive. Un-saying a
+    confirmed record-level classification is a real operation with its own questions —
+    what it means for a run that inherited it, and what the workflow should then say —
+    and inheriting it as a side effect of a blank-tolerant filter would be deciding
+    those questions by accident.
+    """
+    if not enum_answers:
+        return []
+    existing = draft.get("fields")
+    fields = existing if isinstance(existing, dict) else {}
+    written: list[str] = []
+    for path, value in enum_answers.items():
+        if _apply_run_field(
+            fields, path, value, timestamp, question=_record_field_question(path)
+        ):
+            written.append(path)
+    if written and not isinstance(existing, dict):
+        draft["fields"] = fields
+    return written
+
+
 def _answer_asset_uris(draft: dict, *, edit_only: bool) -> set:
     """The asset URIs an answers/edit body may key on, for ONE draft.
 
@@ -3969,8 +4322,29 @@ def _refuse_answers_that_are_not_an_object(
     )
 
 
-def _dropped_answer_keys(answers_by_id: dict, draft: dict, *, edit_only: bool) -> list[str]:
-    """The non-blank keys :func:`_answers_to_apply_shape` will DROP, in submission order.
+def _dropped_answer_keys(
+    answers_by_id: dict,
+    draft: dict,
+    *,
+    edit_only: bool,
+    extra_known: object = (),
+) -> list[str]:
+    """The non-blank keys the record will DROP, in submission order.
+
+    ``extra_known`` NAMES KEYS A CALLER HANDLES ITSELF, and it is how the two
+    RECORD-level operations declare that they write the schema-enum record fields
+    outside :func:`_answers_to_apply_shape`. Without it those keys would be reported as
+    dropped, and :func:`_refuse_a_body_that_names_nothing_answerable` would refuse a
+    body naming only one of them as ``unrecognized_field`` — the route calling a key
+    unknown while it is about to act on it, which is exactly the disagreement
+    :data:`_NAMED_ANSWER_KEYS`' own comment exists to prevent.
+
+    IT IS PASSED BY THE RECORD OPERATIONS AND NOT BY THE RUN ONES, which is the level
+    split and not an oversight. ``system.domain`` and ``system.technique`` are
+    experiment-level (``workspace.EXPERIMENT_LEVEL_FIELD_PATHS``): a run INHERITS them
+    and does not own them, so on a run's answers/edit operation they stay unrecognised
+    exactly as before, and ``PATCH .../runs/{run_id}`` keeps refusing them by the same
+    measurement ``test_run_api`` already pins.
 
     Exists so a route can KNOW that it dropped something, which it previously could not.
     That is the whole mechanism behind the false no-op reason: a key vanished before the
@@ -3982,7 +4356,11 @@ def _dropped_answer_keys(answers_by_id: dict, draft: dict, *, edit_only: bool) -
     key, recognised or not, and that has never been a mistake to report: a blank answer
     is not an answer.
     """
-    known = set(_NAMED_ANSWER_KEYS) | _answer_asset_uris(draft, edit_only=edit_only)
+    known = (
+        set(_NAMED_ANSWER_KEYS)
+        | _answer_asset_uris(draft, edit_only=edit_only)
+        | set(extra_known)
+    )
     return [
         key
         for key, value in (answers_by_id or {}).items()
@@ -4573,6 +4951,130 @@ _ANSWERS_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/an
 _EDIT_OPERATION_RECORD = "POST /api/experiments/{experiment_id}/edit"
 _EDIT_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/edit"
 
+#: THE PIECES THE TWO ANSWERS ``422``s ARE BUILT FROM, hoisted so that every sentence
+#: below exists exactly ONCE and the two blocks differ only by what is composed into
+#: them. They are separate names rather than one finished string because the record-only
+#: prose has to be ABSENT from the run-level block, and slicing it back out of a finished
+#: description would be substring surgery on served copy — the failure mode this module
+#: already avoids for URLs by holding them as constants.
+_ANSWER_REFUSED_HEAD_LEAD: str = (
+    "Either the request body failed framework validation (the "
+    "`HTTPValidationError` shape below), or `confirmed_by_user` was not "
+    "`true` (`confirmation_required`), or `no_derivation_to_confirm`, or "
+    "`unrecognized_field`, or `invalid_field_value`, or "
+)
+_ANSWER_REFUSED_HEAD_TAIL: str = "`already_answered`.\n\n"
+
+#: THE RECORD-ONLY HALVES. ``system.domain`` and ``system.technique`` are
+#: experiment-level, so ``not_an_allowed_value`` is reachable ONLY from the record's
+#: answers and correction operations — ``_refuse_a_value_the_schema_does_not_allow`` is
+#: called at exactly those two sites. The run-level operations answer
+#: ``unrecognized_field`` for those keys and always have. Publishing a code an operation
+#: cannot emit, and telling its caller the two fields are answered THERE, is a sentence
+#: pointing at a locked door: the caller sends a correctly spelled key and is told it
+#: misspelled one.
+_NOT_AN_ALLOWED_VALUE_IN_ANSWER_HEAD: str = "`not_an_allowed_value`, or "
+_NOT_AN_ALLOWED_VALUE_ANSWER_PARAGRAPH: str = (
+    "`not_an_allowed_value` — the body named a record-level field the official "
+    "ISAAC schema closes with a fixed list of values (`system.domain` and "
+    "`system.technique`), and the value sent is not one of them. Nothing was "
+    "written and any value the record already held is unchanged. The body is "
+    "`{error, experiment_id, key, keys, allowed, message}`, where `keys` names "
+    "EVERY offending field and `allowed` maps each one to the complete list the "
+    "schema permits — read from the vendored schema document rather than "
+    "restated here, so it follows a schema refresh. These two fields are "
+    "answered here (and corrected at the correction operation) because the "
+    "schema declares both REQUIRED on `system` and neither had any write path "
+    "at all: a record could carry a technique and no domain, and could then "
+    "never be exported nor repaired. A value is CHOSEN from the schema's own "
+    "enum and recorded as a user confirmation; neither field is ever derived "
+    "from the other, defaulted, or inferred, so a record given only one keeps "
+    "the other missing.\n\n"
+)
+
+#: The refusals BOTH answers operations serve, unchanged by the record-only split.
+_ANSWER_REFUSED_SHARED_BODY: str = (
+    "`unrecognized_field` — the body named a key that is not one of this "
+    "operation's answer keys and not an asset URI this record knows. Nothing "
+    "was written and no question moved. The body is "
+    "`{error, experiment_id, key, keys, message}`, plus `run_id` on the "
+    "run-level operation, and `keys` names EVERY unrecognised key. **THIS IS "
+    "A CHANGE OF CONTRACT, DECLARED RATHER THAN SLIPPED IN.** These operations "
+    "used to state that an unrecognised key *is ignored rather than invented*, "
+    "and they silently dropped it — which made a mistyped key indistinguishable "
+    "from an accepted one, because the resulting `200` explained itself as "
+    "*\"the submitted value was identical\"* about a key the record had never "
+    "held. ~~A key is now either acted on or refused by name.~~ "
+    "**OVERSTATED, AND SCOPED HERE RATHER THAN DELETED** \u2014 a key is acted "
+    "on, refused by name, or, WHEN AT LEAST ONE OTHER KEY IN THE SAME BODY WAS "
+    "RECOGNISED, dropped on a `200` that does not name it. Measured: `{\"qc\": "
+    "<valid>, \"sample.material.nmae\": \"Fe2O3\"}` answers `200` with "
+    "`changed_fields: [\"qc\"]`, and the mistyped key appears nowhere in the "
+    "response. What IS guaranteed for that key, and is the half this change "
+    "actually built: **the `200` withholds the identical-value reason whenever "
+    "anything was dropped**, so no sentence in it can be read as acknowledging "
+    "the key that vanished. Naming dropped keys in the body needs a new response "
+    "field, which is the frontend's contract too, so it belongs to a slice that "
+    "can change both. A BLANK value "
+    "(`null` or `\"\"`) is still dropped at any key, recognised or not: a blank "
+    "answer is not an answer. The correction operations are deliberately "
+    "unchanged and still tolerate a ride-along key.\n\n"
+    "`no_derivation_to_confirm` — the body named `edge`, and this record "
+    "carries no absorption-edge derivation for the answer to confirm. An edge "
+    "is recorded as a confirmation of a value this application derived from a "
+    "source document, and no operation creates that derivation, so there was "
+    "nothing to write into and nothing was written. The body is "
+    "`{error, experiment_id, key, keys, message}`, plus `run_id` on the "
+    "run-level operation. It deliberately names no alternative operation, "
+    "because there is none. The official ISAAC record has no edge field, so no "
+    "exported record is missing a value because of this refusal.\n\n"
+    "`invalid_field_value` — a recognised key carried a value this "
+    "application cannot store: too large, nested too deeply, not renderable as "
+    "JSON (`NaN`, `Infinity`, a lone surrogate), **or not a shape the record "
+    "can hold at that key**. Nothing was written, any value the record already "
+    "held is unchanged, and any question this would have answered is still "
+    "open. The body is `{error, key, keys, message}`, where `keys` names EVERY "
+    "offending key and `message` deliberately states no cause. It is the same "
+    "code the correction operations serve for the same condition, deliberately: "
+    "a client that already branches on `invalid_field_value` should not need a "
+    "second code to learn that a value it sent is too big.\n\n"
+    "~~A wrong-TYPED value is NOT this refusal — it is dropped by the core and "
+    "its question is reported still open in the `200`, which is the behaviour "
+    "this operation has always had.~~ **WITHDRAWN 2026-08-25.** A wrong-typed "
+    "`series`, `qc` or `descriptor` IS this refusal now. The old behaviour "
+    "relied on the `200`'s question list to tell the caller nothing landed, "
+    "while the `invalidation.reason` beside it said the submitted value was "
+    "already stored — so the two halves of one response contradicted each "
+    "other, and a client that followed the documented remedy for an "
+    "already-stored value was sent to the correction operation and refused "
+    "there with `not_yet_answered`. Three named keys are screened: `series`, "
+    "`qc` and `descriptor`. A wrong-typed `descriptor_label` or `edge` is NOT "
+    "screened (the core stores those rather than declining them, so refusing "
+    "them would be a new refusal, not a corrected report), and a MALFORMED "
+    "asset sha256 is deliberately still a `200` with the blocker left open — "
+    "but its `invalidation.reason` no longer claims the value was "
+    "identical.\n\n"
+    "`already_answered` \u2014 the body named a field whose question is already "
+    "CLOSED and supplied a value DIFFERENT from the confirmed one, which this "
+    "operation would have discarded. Nothing was written, the stored value is "
+    "unchanged, and the revision did not move. The body is "
+    "`{error, experiment_id, keys, answer_at, message}`, plus `run_id` on the "
+    "run-level operation, and `keys` names EVERY offending key rather than the "
+    "first.\n\n"
+    "**RESUBMITTING THE IDENTICAL VALUE IS STILL A SUCCESS** and is deliberately "
+    "not this refusal: a client may retry a request it is unsure landed, and "
+    "gets `200` with `changed: false` and an unmoved revision, exactly as "
+    "before. The refusal fires only where the two values differ, which is the "
+    "only case in which anything the caller sent was lost.\n\n"
+    "`answer_at` NAMES THE CORRECTION OPERATION AT THE LEVEL THIS REFUSAL WAS "
+    "RAISED AT \u2014 the record's edit operation for a refusal on the record, "
+    "the RUN's for a refusal on a run. It is a template, and "
+    "`experiment_id`/`run_id` carry the concrete ids, exactly as "
+    "`not_yet_answered` and `belongs_to_a_run` do. It is always present here "
+    "and is provably actionable rather than plausibly so \u2014 see the "
+    "refusal's own notes for why `/edit` cannot refuse what this redirects."
+)
+
 #: The ``422`` BOTH answers operations serve. RENAMED FROM ``_R_ALREADY_ANSWERED``, whose
 #: name had outlived its scope: it described ONE of the refusals in it, and the block now
 #: describes FIVE — ``confirmation_required``, ``no_derivation_to_confirm``,
@@ -4598,99 +5100,39 @@ _EDIT_OPERATION_RUN = "POST /api/experiments/{experiment_id}/runs/{run_id}/edit"
 #: sentence would repeat exactly the gap :data:`_R_CORRECTION_REFUSED` was written to
 #: close, where "the record's ``422`` enumerated three refusals while the route performed
 #: four".
+#:
+#: IT IS THE SHARED BLOCK, AND IT IS THE ONE WITHOUT THE RECORD-ONLY PROSE.
+#: :data:`_R_ANSWER_REFUSED_RECORD` adds ``not_an_allowed_value`` for the record's own
+#: answers operation; this one stays mounted on the RUN's, which cannot emit that code.
 _R_ANSWER_REFUSED: dict = {
     422: {
         "description": (
-            "Either the request body failed framework validation (the "
-            "`HTTPValidationError` shape below), or `confirmed_by_user` was not "
-            "`true` (`confirmation_required`), or `no_derivation_to_confirm`, or "
-            "`unrecognized_field`, or `invalid_field_value`, or "
-            "`already_answered`.\n\n"
-            "`unrecognized_field` — the body named a key that is not one of this "
-            "operation's answer keys and not an asset URI this record knows. Nothing "
-            "was written and no question moved. The body is "
-            "`{error, experiment_id, key, keys, message}`, plus `run_id` on the "
-            "run-level operation, and `keys` names EVERY unrecognised key. **THIS IS "
-            "A CHANGE OF CONTRACT, DECLARED RATHER THAN SLIPPED IN.** These operations "
-            "used to state that an unrecognised key *is ignored rather than invented*, "
-            "and they silently dropped it — which made a mistyped key indistinguishable "
-            "from an accepted one, because the resulting `200` explained itself as "
-            "*\"the submitted value was identical\"* about a key the record had never "
-            "held. ~~A key is now either acted on or refused by name.~~ "
-            "**OVERSTATED, AND SCOPED HERE RATHER THAN DELETED** \u2014 a key is acted "
-            "on, refused by name, or, WHEN AT LEAST ONE OTHER KEY IN THE SAME BODY WAS "
-            "RECOGNISED, dropped on a `200` that does not name it. Measured: `{\"qc\": "
-            "<valid>, \"sample.material.nmae\": \"Fe2O3\"}` answers `200` with "
-            "`changed_fields: [\"qc\"]`, and the mistyped key appears nowhere in the "
-            "response. What IS guaranteed for that key, and is the half this change "
-            "actually built: **the `200` withholds the identical-value reason whenever "
-            "anything was dropped**, so no sentence in it can be read as acknowledging "
-            "the key that vanished. Naming dropped keys in the body needs a new response "
-            "field, which is the frontend's contract too, so it belongs to a slice that "
-            "can change both. A BLANK value "
-            "(`null` or `\"\"`) is still dropped at any key, recognised or not: a blank "
-            "answer is not an answer. The correction operations are deliberately "
-            "unchanged and still tolerate a ride-along key.\n\n"
-            "`no_derivation_to_confirm` — the body named `edge`, and this record "
-            "carries no absorption-edge derivation for the answer to confirm. An edge "
-            "is recorded as a confirmation of a value this application derived from a "
-            "source document, and no operation creates that derivation, so there was "
-            "nothing to write into and nothing was written. The body is "
-            "`{error, experiment_id, key, keys, message}`, plus `run_id` on the "
-            "run-level operation. It deliberately names no alternative operation, "
-            "because there is none. The official ISAAC record has no edge field, so no "
-            "exported record is missing a value because of this refusal.\n\n"
-            "`invalid_field_value` — a recognised key carried a value this "
-            "application cannot store: too large, nested too deeply, not renderable as "
-            "JSON (`NaN`, `Infinity`, a lone surrogate), **or not a shape the record "
-            "can hold at that key**. Nothing was written, any value the record already "
-            "held is unchanged, and any question this would have answered is still "
-            "open. The body is `{error, key, keys, message}`, where `keys` names EVERY "
-            "offending key and `message` deliberately states no cause. It is the same "
-            "code the correction operations serve for the same condition, deliberately: "
-            "a client that already branches on `invalid_field_value` should not need a "
-            "second code to learn that a value it sent is too big.\n\n"
-            "~~A wrong-TYPED value is NOT this refusal — it is dropped by the core and "
-            "its question is reported still open in the `200`, which is the behaviour "
-            "this operation has always had.~~ **WITHDRAWN 2026-08-25.** A wrong-typed "
-            "`series`, `qc` or `descriptor` IS this refusal now. The old behaviour "
-            "relied on the `200`'s question list to tell the caller nothing landed, "
-            "while the `invalidation.reason` beside it said the submitted value was "
-            "already stored — so the two halves of one response contradicted each "
-            "other, and a client that followed the documented remedy for an "
-            "already-stored value was sent to the correction operation and refused "
-            "there with `not_yet_answered`. Three named keys are screened: `series`, "
-            "`qc` and `descriptor`. A wrong-typed `descriptor_label` or `edge` is NOT "
-            "screened (the core stores those rather than declining them, so refusing "
-            "them would be a new refusal, not a corrected report), and a MALFORMED "
-            "asset sha256 is deliberately still a `200` with the blocker left open — "
-            "but its `invalidation.reason` no longer claims the value was "
-            "identical.\n\n"
-            "`already_answered` \u2014 the body named a field whose question is already "
-            "CLOSED and supplied a value DIFFERENT from the confirmed one, which this "
-            "operation would have discarded. Nothing was written, the stored value is "
-            "unchanged, and the revision did not move. The body is "
-            "`{error, experiment_id, keys, answer_at, message}`, plus `run_id` on the "
-            "run-level operation, and `keys` names EVERY offending key rather than the "
-            "first.\n\n"
-            "**RESUBMITTING THE IDENTICAL VALUE IS STILL A SUCCESS** and is deliberately "
-            "not this refusal: a client may retry a request it is unsure landed, and "
-            "gets `200` with `changed: false` and an unmoved revision, exactly as "
-            "before. The refusal fires only where the two values differ, which is the "
-            "only case in which anything the caller sent was lost.\n\n"
-            "`answer_at` NAMES THE CORRECTION OPERATION AT THE LEVEL THIS REFUSAL WAS "
-            "RAISED AT \u2014 the record's edit operation for a refusal on the record, "
-            "the RUN's for a refusal on a run. It is a template, and "
-            "`experiment_id`/`run_id` carry the concrete ids, exactly as "
-            "`not_yet_answered` and `belongs_to_a_run` do. It is always present here "
-            "and is provably actionable rather than plausibly so \u2014 see the "
-            "refusal's own notes for why `/edit` cannot refuse what this redirects."
+            _ANSWER_REFUSED_HEAD_LEAD
+            + _ANSWER_REFUSED_HEAD_TAIL
+            + _ANSWER_REFUSED_SHARED_BODY
         ),
         "content": {
             "application/json": {
                 "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
             }
         },
+    },
+}
+
+#: The RECORD-level answers ``422``: the shared block above plus the two record-only
+#: sentences. ``**_R_ANSWER_REFUSED[422]`` carries the ``HTTPValidationError`` ref, so
+#: the ref cannot be present on one of the two and missing on the other — the same
+#: reason :data:`_R_CORRECTION_REFUSED` merges rather than copies.
+_R_ANSWER_REFUSED_RECORD: dict = {
+    422: {
+        **_R_ANSWER_REFUSED[422],
+        "description": (
+            _ANSWER_REFUSED_HEAD_LEAD
+            + _NOT_AN_ALLOWED_VALUE_IN_ANSWER_HEAD
+            + _ANSWER_REFUSED_HEAD_TAIL
+            + _NOT_AN_ALLOWED_VALUE_ANSWER_PARAGRAPH
+            + _ANSWER_REFUSED_SHARED_BODY
+        ),
     },
 }
 
@@ -4793,7 +5235,11 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
         # described in the published contract — the same gap `_R_NOT_YET_ANSWERED`
         # records for its own refusal, which "reached no generated OpenAPI document,
         # and therefore no machine client that reads the contract before calling it."
-        **_R_ANSWER_REFUSED,
+        #
+        # THE `_RECORD` VARIANT, for the reason the correction operation's note gives:
+        # `not_an_allowed_value` is raised at the two RECORD sites only, so the run's
+        # answers operation keeps the shared block and publishes no code it cannot emit.
+        **_R_ANSWER_REFUSED_RECORD,
     },
 )
 def post_answers(
@@ -4812,7 +5258,16 @@ def post_answers(
             "`series`, `qc` or `descriptor` value the record cannot hold is refused "
             "with `422 invalid_field_value`; and a recognised key whose question is "
             "already closed, submitted with a DIFFERENT value, is refused with `422 "
-            "already_answered`."
+            "already_answered`.\n\n"
+            "TWO RECORD-LEVEL FIELD PATHS ARE ALSO ANSWER KEYS HERE: `system.domain` "
+            "and `system.technique`, the two the official ISAAC schema declares "
+            "required on `system` and closes with a fixed list of values. Send the "
+            "dotted path as the key and one of the schema's own values as the value; "
+            "anything else is refused with `422 not_an_allowed_value`, which carries "
+            "the permitted list. The value is recorded as a user confirmation on the "
+            "record and every run inherits it. Neither is derived from the other, "
+            "defaulted, or inferred: give only one and the other stays missing. They "
+            "are the RECORD's, so a run's answers operation does not accept them."
         ),
     ),
     if_match: str | None = Header(
@@ -4871,10 +5326,31 @@ def post_answers(
         # it does not front-run the depth guard below (the one refusal that must precede
         # anything that walks a submitted value).
         dropped = _dropped_answer_keys(
-            body.get("answers") or {}, exp.draft, edit_only=False
+            body.get("answers") or {},
+            exp.draft,
+            edit_only=False,
+            extra_known=_record_enum_fields(),
         )
         refusal = _refuse_a_body_that_names_nothing_answerable(
             body.get("answers") or {}, dropped, {"experiment_id": exp.id}
+        )
+        if refusal is not None:
+            return refusal
+        # THE RECORD-LEVEL SCHEMA-ENUM FIELDS, handled beside the shaped answers rather
+        # than through them. `complete.apply_answers` has no branch for a dotted field
+        # path — it writes the blocks its blockers name — and it is truth-path code
+        # (`CLAUDE.md` §13) that this slice deliberately does not touch. So the two
+        # paths run side by side inside the same lock, the same precondition and the
+        # same `_save_versioned` compare-and-swap.
+        enum_answers = _record_enum_field_answers(body.get("answers") or {})
+        # FIRST OF THE ENUM REFUSALS, AND ORDERED BY THE ARGUMENT `_refuse_unstorable_answer`
+        # ALREADY MAKES FOR ITS SIZE HALF: a value outside the schema's own enum can be
+        # stored at NO level, so answering "send it to the run" first would spend the
+        # caller's retry on a round trip ending in a refusal. It is also cheap and walks
+        # nothing — membership in a tuple of short strings — so it costs the common path
+        # nothing and cannot front-run the depth guard below.
+        refusal = _refuse_a_value_the_schema_does_not_allow(
+            enum_answers, {"experiment_id": exp.id}
         )
         if refusal is not None:
             return refusal
@@ -4936,15 +5412,38 @@ def post_answers(
         )
         if refusal is not None:
             return refusal
+        # THE SAME RULE FOR THE ENUM FIELDS, whose state lives in `draft["fields"]`
+        # rather than in `draft["pending"]`, so the probe above cannot see it. Placed
+        # beside its sibling deliberately: they are one contract with one error code.
+        refusal = _refuse_answering_an_already_confirmed_enum_field(
+            exp.draft,
+            enum_answers,
+            edit_at=_EDIT_OPERATION_RECORD,
+            identifiers={"experiment_id": exp.id},
+        )
+        if refusal is not None:
+            return refusal
         draft_before = exp.draft
         # `apply_answers` deep-copies its input and returns a NEW draft, so
-        # `draft_before` is the pre-write document and stays that way.
+        # `draft_before` is the pre-write document and stays that way — including for
+        # the enum write below, which mutates only the fresh copy.
         exp.draft = apply_answers(exp.draft, apply_shape)
+        enum_written = _apply_record_enum_fields(exp.draft, enum_answers, timestamp)
         # answer_log is EXCLUDED from the rev signature: log the submission only when it
         # actually changes the authoritative draft, so an identical re-entry is neither
         # logged nor rewritten (byte-stable) and never bumps rev. save_versioned decides
         # by comparing the on-disk authoritative signature.
-        exp.answer_log.append({"applied": apply_shape, "at": timestamp})
+        #
+        # `fields` IS ADDED ONLY WHEN AN ENUM FIELD ACTUALLY LANDED. `answer_log` is the
+        # audit trail `workspace._at_risk_summary` counts before a destructive reset, and
+        # an entry recording an empty `apply_shape` and nothing else would under-describe
+        # confirmed work exactly as the missing run-level entry once did. The key is
+        # additive and the log is already shape-varying (the run path adds `run_id`);
+        # nothing reads it but `len()`.
+        log_entry: dict = {"applied": apply_shape, "at": timestamp}
+        if enum_written:
+            log_entry["fields"] = {path: enum_answers[path] for path in enum_written}
+        exp.answer_log.append(log_entry)
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another replica won the race; this change was not applied
@@ -4965,6 +5464,16 @@ def post_answers(
             if changed
             else []
         )
+        # THE ENUM FIELDS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
+        # `_fields_the_shape_carries` removes every key `apply_shape` does not carry, and
+        # `apply_shape` deliberately never carries these. Without this, a write that
+        # landed would be reported as `Updated 0 field(s)` — the same understatement the
+        # function above exists to prevent in the other direction, arriving from the one
+        # key set it cannot see. `enum_written` is what the writer actually changed, not
+        # what was submitted, so an idempotent re-submission still reports nothing.
+        if changed and enum_written:
+            landed = set(changed_fields) | set(enum_written)
+            changed_fields = [key for key in submitted_fields if key in landed]
         invalidation = dependencies.build_invalidation(
             changed=changed,
             changed_fields=changed_fields,
@@ -5070,6 +5579,56 @@ _R_NOT_YET_ANSWERED: dict = {
     },
 }
 
+#: THE PIECES THE TWO CORRECTION ``422``s ARE BUILT FROM — the exact counterpart of
+#: the answers fragments above, and hoisted for the same reason: every sentence exists
+#: once, and the two blocks differ only by what is composed into them. The ``or`` that
+#: used to sit at the end of the head lead now opens the tail, so both compositions read
+#: exactly as each already published.
+_CORRECTION_REFUSED_HEAD_LEAD: str = (
+    "Either the request body failed framework validation (the "
+    "`HTTPValidationError` shape below), or the correction was refused by "
+    "this operation before anything was written, as an object whose `error` "
+    "names WHICH refusal it is and whose remaining keys depend on that — "
+    "`key` appears on `invalid_field_value` only, and `experiment_id` on "
+    "`not_yet_answered` only. `error` is then "
+    "`confirmation_required` (`confirmed_by_user` was not `true`), "
+    "`unrecognized_field` (no already-answered editable field was named — "
+    "including an asset whose hash is still an open question, which belongs "
+    "to the answers operation), `invalid_field_value` (a recognised field "
+    "carried a value the record cannot store; `key` and `keys` name the "
+    "offending field(s), and `message` deliberately states no cause), "
+    "`no_derivation_to_confirm` (the body named `edge` and this record carries "
+    "no absorption-edge derivation for it to confirm — see the answers "
+    "operation for the full description; it is the same refusal, because it is "
+    "the same structural fact about the draft), "
+)
+_CORRECTION_REFUSED_HEAD_TAIL: str = (
+    "or `not_yet_answered`, described next. Nothing is written on any of "
+    "them.\n\n"
+)
+
+#: THE RECORD-ONLY HALVES, for the same reason the answers ones are separate: the two
+#: schema-enum field paths are experiment-level, ``not_an_allowed_value`` is raised at
+#: exactly the two RECORD sites, and the run-level correction operation answers
+#: ``unrecognized_field`` for those keys. A run contract that named the code, and told
+#: its caller the fields are corrected there, would send a caller with a correctly
+#: spelled key to look for a misspelling.
+_NOT_AN_ALLOWED_VALUE_IN_CORRECTION_HEAD: str = (
+    "`not_an_allowed_value` (the body named `system.domain` or "
+    "`system.technique` — the two record-level fields the official ISAAC schema "
+    "declares required on `system` and closes with a fixed list of values — and "
+    "the value sent is not one of them; `keys` names every offending field and "
+    "`allowed` maps each to the complete list the schema permits, read from the "
+    "vendored schema document rather than restated here), "
+)
+_NOT_YET_ANSWERED_COVERS_THE_ENUM_FIELDS: str = (
+    "`not_yet_answered` ALSO COVERS THOSE TWO FIELDS. This operation corrects a "
+    "value the record already holds; a record that has never been given a domain "
+    "or a technique is answered at the answers operation instead, which "
+    "`answer_at` names. Neither field is ever derived from the other, defaulted, "
+    "or inferred, so a record given only one keeps the other missing.\n\n"
+)
+
 #: The COMPLETE ``422`` that BOTH correction operations serve, built by merging the
 #: refusal above into the three it shares with its sibling.
 #:
@@ -5084,28 +5643,34 @@ _R_NOT_YET_ANSWERED: dict = {
 #:
 #: The merge is ``**_R_NOT_YET_ANSWERED[422]`` rather than a second copy of the schema
 #: ref, so the ref cannot be present on one of the two and missing on the other.
+#:
+#: IT IS THE SHARED BLOCK, AND IT IS THE ONE WITHOUT THE RECORD-ONLY PROSE.
+#: :data:`_R_CORRECTION_REFUSED_RECORD` adds ``not_an_allowed_value`` for the record's
+#: own correction operation; this one stays mounted on the RUN's, which cannot emit it.
 _R_CORRECTION_REFUSED: dict = {
     422: {
         **_R_NOT_YET_ANSWERED[422],
         "description": (
-            "Either the request body failed framework validation (the "
-            "`HTTPValidationError` shape below), or the correction was refused by "
-            "this operation before anything was written, as an object whose `error` "
-            "names WHICH refusal it is and whose remaining keys depend on that — "
-            "`key` appears on `invalid_field_value` only, and `experiment_id` on "
-            "`not_yet_answered` only. `error` is then "
-            "`confirmation_required` (`confirmed_by_user` was not `true`), "
-            "`unrecognized_field` (no already-answered editable field was named — "
-            "including an asset whose hash is still an open question, which belongs "
-            "to the answers operation), `invalid_field_value` (a recognised field "
-            "carried a value the record cannot store; `key` and `keys` name the "
-            "offending field(s), and `message` deliberately states no cause), "
-            "`no_derivation_to_confirm` (the body named `edge` and this record carries "
-            "no absorption-edge derivation for it to confirm — see the answers "
-            "operation for the full description; it is the same refusal, because it is "
-            "the same structural fact about the draft), or "
-            "`not_yet_answered`, described next. Nothing is written on any of "
-            "them.\n\n" + _R_NOT_YET_ANSWERED[422]["description"]
+            _CORRECTION_REFUSED_HEAD_LEAD
+            + _CORRECTION_REFUSED_HEAD_TAIL
+            + _R_NOT_YET_ANSWERED[422]["description"]
+        ),
+    },
+}
+
+#: The RECORD-level correction ``422``: the shared block plus the record-only sentences.
+#: ``**_R_CORRECTION_REFUSED[422]`` carries everything the shared block inherited from
+#: ``**_R_NOT_YET_ANSWERED[422]`` — including the schema ref — so the two cannot diverge
+#: in anything but the description they are here to differ in.
+_R_CORRECTION_REFUSED_RECORD: dict = {
+    422: {
+        **_R_CORRECTION_REFUSED[422],
+        "description": (
+            _CORRECTION_REFUSED_HEAD_LEAD
+            + _NOT_AN_ALLOWED_VALUE_IN_CORRECTION_HEAD
+            + _CORRECTION_REFUSED_HEAD_TAIL
+            + _NOT_YET_ANSWERED_COVERS_THE_ENUM_FIELDS
+            + _R_NOT_YET_ANSWERED[422]["description"]
         ),
     },
 }
@@ -5602,7 +6167,13 @@ def _fields_the_write_landed(
         # one refuses the identical four — see the constant for why one declaration is
         # safer than two, and for the `not_yet_answered` one that was missing from the
         # enumeration here while this route performed it.
-        **_R_CORRECTION_REFUSED,
+        #
+        # THE `_RECORD` VARIANT IS MOUNTED HERE, and only here: it is that shared block
+        # plus `not_an_allowed_value`, which only the two RECORD-level operations can
+        # raise. The run-level correction still mounts the shared block, because a
+        # contract naming a code its operation cannot emit sends a caller with a
+        # correctly spelled key to hunt for a misspelling.
+        **_R_CORRECTION_REFUSED_RECORD,
         **_R_BELONGS_TO_A_RUN,
     },
 )
@@ -5616,7 +6187,14 @@ def post_edit(
             "`{\"confirmed_by_user\": true, \"answers\": {<key>: <value>}}`, where "
             "each key names a field already present in the draft. Omitting "
             "`confirmed_by_user: true`, or naming no recognised editable field, is "
-            "rejected with `422`."
+            "rejected with `422`.\n\n"
+            "`system.domain` and `system.technique` are correctable here once the "
+            "record holds a value for them — the two record-level fields the official "
+            "ISAAC schema declares required on `system` and closes with a fixed list of "
+            "values. A value outside that list is refused with `422 "
+            "not_an_allowed_value`, which carries the permitted list; a field the "
+            "record has never been given is refused with `422 not_yet_answered` and "
+            "answered at the answers operation instead."
         ),
     ),
     if_match: str | None = Header(
@@ -5679,8 +6257,21 @@ def post_edit(
         # would apply that to the key that vanished. `edit_only=True` matches the shape
         # this route actually built.
         dropped = _dropped_answer_keys(
-            body.get("answers") or {}, exp.draft, edit_only=True
+            body.get("answers") or {},
+            exp.draft,
+            edit_only=True,
+            extra_known=_record_enum_fields(),
         )
+        # THE RECORD-LEVEL SCHEMA-ENUM FIELDS — see `post_answers` for why they are
+        # handled beside the shaped answers and not through them. The value screen runs
+        # first here for the same reason it does there: a value outside the schema's own
+        # enum can be stored nowhere, so no other refusal has a more useful answer.
+        enum_answers = _record_enum_field_answers(body.get("answers") or {})
+        refusal = _refuse_a_value_the_schema_does_not_allow(
+            enum_answers, {"experiment_id": exp.id}
+        )
+        if refusal is not None:
+            return refusal
         refusal = _refuse_run_level_on_the_record(exp, apply_shape)
         if refusal is not None:
             return refusal
@@ -5705,8 +6296,26 @@ def post_edit(
         )
         if refusal is not None:
             return refusal
-        if not _has_correction_target(apply_shape):
-            # No recognized field to correct — never invent one.
+        # THE SAME RULE FOR THE ENUM FIELDS, whose state lives in `draft["fields"]` and
+        # is therefore invisible to the pending-list probe above. It runs BEFORE the
+        # "nothing to correct" refusal for the reason that refusal's sibling gives:
+        # "still open" is more specific than "not recognised", and sending a scientist
+        # to look for a misspelling in a correctly spelled field name is the mistake
+        # this module has already made once.
+        refusal = _refuse_correcting_an_unconfirmed_enum_field(
+            exp.draft,
+            enum_answers,
+            answer_at=_ANSWERS_OPERATION_RECORD,
+            identifiers={"experiment_id": exp.id},
+        )
+        if refusal is not None:
+            return refusal
+        if not _has_correction_target(apply_shape) and not enum_answers:
+            # No recognized field to correct — never invent one. `enum_answers` is
+            # consulted beside the apply-shape because this operation now writes a key
+            # set the shape does not carry: without it, a body naming ONLY a confirmed
+            # `system.domain` would be refused as unrecognised by the route that is
+            # about to write it.
             return JSONResponse(
                 status_code=422,
                 content={
@@ -5783,7 +6392,14 @@ def post_edit(
         # invents a value (a malformed sha256 / off-enum qc leaves the value as-is).
         draft_before = exp.draft  # `apply_corrections` deep-copies; this stays pre-write
         exp.draft = apply_corrections(exp.draft, apply_shape)
-        exp.answer_log.append({"edited": apply_shape, "at": timestamp})
+        enum_written = _apply_record_enum_fields(exp.draft, enum_answers, timestamp)
+        # `fields` is added only when an enum field actually landed — see `post_answers`
+        # for the audit-trail argument. A correction that re-submits the stored value is
+        # idempotent in the writer, so it lands nothing and logs nothing extra.
+        log_entry: dict = {"edited": apply_shape, "at": timestamp}
+        if enum_written:
+            log_entry["fields"] = {path: enum_answers[path] for path in enum_written}
+        exp.answer_log.append(log_entry)
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another replica won the race; this change was not applied
@@ -5802,6 +6418,16 @@ def post_edit(
             if changed
             else []
         )
+        # THE ENUM FIELDS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
+        # `_fields_the_shape_carries` removes every key `apply_shape` does not carry, and
+        # `apply_shape` deliberately never carries these. Without this, a write that
+        # landed would be reported as `Updated 0 field(s)` — the same understatement the
+        # function above exists to prevent in the other direction, arriving from the one
+        # key set it cannot see. `enum_written` is what the writer actually changed, not
+        # what was submitted, so an idempotent re-submission still reports nothing.
+        if changed and enum_written:
+            landed = set(changed_fields) | set(enum_written)
+            changed_fields = [key for key in submitted_fields if key in landed]
         invalidation = dependencies.build_invalidation(
             changed=changed,
             changed_fields=changed_fields,
@@ -6684,8 +7310,21 @@ def _is_storable_value(value, *, max_bytes: int = _MAX_VALUE_BYTES) -> bool:
     return len(rendered) <= max_bytes
 
 
-def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
-    """Write (or clear) ONE run-level field. Returns whether anything changed.
+def _apply_run_field(
+    fields: dict, path: str, value, timestamp: str, *, question: str | None = None
+) -> bool:
+    """Write (or clear) ONE draft field. Returns whether anything changed.
+
+    ``question`` OVERRIDES THE TEXT THE CONFIRMATION RECORDS, and defaults to this
+    function's original run-level wording so every existing caller is byte-identical.
+    It exists so :func:`_apply_record_enum_fields` can reuse this writer for a
+    RECORD-level field instead of building a second envelope: the two levels record
+    different true sentences ("on this run" / "on this record"), and everything else
+    about a confirmed field — the envelope shape, the four-key evidence entry, the
+    prior-evidence carry, the unit carry and the idempotence below — is identical and
+    must stay that way. The name is unchanged rather than widened to ``_apply_field``
+    because renaming it would touch every call site for no behavioural gain; the
+    docstring says what it does.
 
     A ``null`` CLEARS the field by REMOVING the key. Not by leaving a null-valued
     envelope behind: the project's rule is that a field nobody supplied stays
@@ -6717,7 +7356,7 @@ def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
     else:
         prior_evidence = []
     answer = _confirmation_answer(value)
-    question = _run_field_question(path)
+    question = _run_field_question(path) if question is None else question
     already = (
         isinstance(existing, dict)
         and existing.get("value") == value
@@ -8229,6 +8868,10 @@ def post_run_override_clear(
         # DECLARED, because it was not, and this operation's `422` previously carried
         # only the framework's "Validation Error" — the same gap its sibling `/edit`
         # had, recorded in that route's own `responses` note.
+        #
+        # THE SHARED BLOCK, NOT THE RECORD ONE: `not_an_allowed_value` is unreachable
+        # from here, because `system.domain` and `system.technique` are experiment-level
+        # and this operation answers `unrecognized_field` for them.
         **_R_ANSWER_REFUSED,
     },
 )
@@ -8289,6 +8932,11 @@ def post_run_answers(
         # before calling found `not_yet_answered`, `unrecognized_field` and
         # `invalid_field_value` described nowhere — and `not_yet_answered` is the one
         # whose body a client is expected to ACT on, by following `answer_at`.
+        #
+        # THE SHARED BLOCK, NOT THE RECORD ONE, and the difference is now load-bearing:
+        # the record's operation additionally declares `not_an_allowed_value`, which
+        # this operation cannot raise — `system.domain` and `system.technique` are
+        # experiment-level, and a run answers `unrecognized_field` for them.
         **_R_CORRECTION_REFUSED,
     },
 )
@@ -9003,14 +9651,48 @@ NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
 #:
 #: TWO THINGS IT DOES NOT PROMISE, and both matter to the copy built on it. It does
 #: not promise the value will be ACCEPTED — a closed enum, a required sibling
-#: property or the no-guessing rules may still refuse the particular value. And every
-#: one of these routes is a RUN's, so a record with no runs yet can write none of
-#: them; membership means "a route exists", not "you can do it right now".
+#: property or the no-guessing rules may still refuse the particular value. And
+#: ~~every one of these routes is a RUN's, so a record with no runs yet can write none
+#: of them~~ — **CORRECTED: TRUE OF 18 OF THE 19, AND FALSE OF ONE.**
+#: ``system.technique`` is now also accepted by ``POST /api/experiments/{id}/answers``
+#: and its correction operation (see :func:`_record_enum_fields`), which are the
+#: RECORD's, so that one path IS writable on a record with no runs. Membership still
+#: means "a route exists", not "you can do it right now".
+#:
+#: **THE SERVED SENTENCE STILL SAYS THE OLD THING, AND THAT IS NAMED RATHER THAN LEFT
+#: TO BE FOUND.** The notes-listing operation's description ends *"Both routes are a
+#: run's, so a record with no runs can write none of them yet"*, which is now false for
+#: ``system.technique``. It is not corrected in this change because
+#: ``apps/web/src/test/apiFixtures.ts`` transcribes that description verbatim and
+#: ``test_contract_description_parity`` compares the two — so the sentence and its
+#: transcription have to move together, and this slice is scoped to the backend. The
+#: defect it leaves is the MILD direction (a reader is told they need a run when they
+#: no longer do), not the direction this repository's disclosure rules exist to
+#: prevent (a sentence pointing at a locked door).
+#:
+#: THE THIRD ROUTE IS IN THE DERIVATION EVEN THOUGH IT CHANGES NO MEMBER TODAY.
+#: ``system.technique`` is already admitted by the override clause and
+#: ``system.domain`` is not in :data:`NOTE_MAPPABLE_FIELD_PATHS` at all, so the set is
+#: byte-identical either way — which is exactly why the clause is written now rather
+#: than when it first matters: this constant's whole discipline is that it is derived
+#: from the routes that enforce it, and a route that accepts a value belongs in the
+#: derivation whether or not it happens to be load-bearing this week.
+#:
+#: IT MOVES THE SCHEMA READ TO IMPORT TIME, which is a real consequence and is stated
+#: rather than discovered. :func:`_record_enum_fields` is otherwise called lazily, on
+#: the first write; this line calls it while the module loads, so a vendored schema
+#: that is unreadable AT BOOT poisons its cache for the whole process rather than for
+#: one request. That is the same fail-closed direction the function already documents
+#: (writes refused, never accepted unchecked), it surfaces the fault at boot instead of
+#: at a scientist's first write, and a process whose vendored schema cannot be read has
+#: already lost official validation and export — this is not the failure that would
+#: matter first.
 NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT: frozenset[str] = frozenset(
     path
     for path in NOTE_MAPPABLE_FIELD_PATHS
     if path in RUN_WRITABLE_FIELD_PATHS
     or ws.field_address(path) in EXPERIMENT_OVERRIDABLE_ADDRESSES
+    or path in _record_enum_fields()
 )
 
 
