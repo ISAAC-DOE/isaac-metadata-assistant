@@ -235,8 +235,40 @@ describe('the darwin column says how much of itself is measured', () => {
    * file's existing encoding for a one-platform reading (see the note at those cells),
    * and minting a split for them would be the exact anti-pattern this guard forbids —
    * a linux half nothing measured.
+   *
+   * The persistence-truthfulness branch (2026-08-28) moved five more, taking the set
+   * from four to seven. Both halves of every cell below were MEASURED at the same
+   * commit `dad8715` — linux from CI run 33134705411 / job 98731972499, darwin from a
+   * local macOS run on this host (Playwright 1.62.1 + bundled Chromium, backend started
+   * as CI starts it) — so nothing here is carried forward and
+   * `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0.
+   *
+   *   REMOVED  settings-explorer@mobile-375x812    {darwin 51, linux 50} -> scalar 66
+   *
+   *     COLLAPSES for the same reason the three above did in 2026-08-27: the two faces
+   *     landed on the same number (66/66). Note this cell has now been a split and a
+   *     scalar twice; that it oscillates is not instability in the app, it is a cell
+   *     sitting one node from a wrap boundary on one face.
+   *
+   *   ADDED    settings-explorer@desktop-1280x800  scalar 44 -> {darwin 53, linux 54}
+   *   ADDED    settings-explorer@laptop-1024x768   scalar 44 -> {darwin 53, linux 54}
+   *   ADDED    settings-explorer@tablet-768x1024   scalar 58 -> {darwin 68, linux 69}
+   *   ADDED    settings-explorer@width-320         scalar 51 -> {darwin 68, linux 67}
+   *
+   *     All four are real, measured, one-node platform differences. `width-320` is the
+   *     one where DARWIN IS THE HIGHER HALF — the opposite direction from the other
+   *     three — which is the concrete reason this branch did not transcribe the linux
+   *     column across. Had it done so, four of these eight cells would have been wrong,
+   *     and this one wrong in a direction no rule of thumb would have caught.
+   *
+   *     The whole family moved for ONE cause, established by controlled experiment and
+   *     not inferred: the `GET /api/about` OpenAPI `description=` grew from 2 paragraphs
+   *     to 6, and the Endpoint Explorer renders operation descriptions as
+   *     `<p class="api-docs-description">`. Reverting `routes.py` alone to `origin/main`,
+   *     with every frontend change still applied, put `desktop-1280x800` back to a
+   *     passing 44. A BACKEND DOCSTRING IS RENDERED PRODUCT TEXT.
    */
-  it('the set of per-platform SPLIT cells is exactly the four measured on both faces', () => {
+  it('the set of per-platform SPLIT cells is exactly the seven measured on both faces', () => {
     const splits: string[] = [];
     for (const entry of A11Y_BASELINE) {
       for (const [key, count] of Object.entries(entry.counts)) {
@@ -254,7 +286,10 @@ describe('the darwin column says how much of itself is measured', () => {
       [
         'color-contrast @ memory-graph@zoom-200',
         'color-contrast @ settings-about@width-320',
-        'color-contrast @ settings-explorer@mobile-375x812',
+        'color-contrast @ settings-explorer@desktop-1280x800',
+        'color-contrast @ settings-explorer@laptop-1024x768',
+        'color-contrast @ settings-explorer@tablet-768x1024',
+        'color-contrast @ settings-explorer@width-320',
         'color-contrast @ validator@zoom-200',
       ].sort()
     );
