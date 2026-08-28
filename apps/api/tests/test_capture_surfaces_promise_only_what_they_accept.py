@@ -203,20 +203,43 @@ def test_the_served_writable_set_is_what_the_write_routes_actually_do(client):
         assert set(observed[path].values()) == {422}, (path, observed[path])
 
 
-def test_the_two_write_routes_that_do_accept_these_paths_are_both_a_runs(client):
-    """A record with NO runs can write none of the 25, and the served set does not lie
-    about that — it says a route exists, not that you can use it right now.
+def test_the_record_level_routes_accept_exactly_the_schema_enum_paths(client):
+    """~~A record with NO runs can write none of the 25~~ — **NO LONGER TRUE OF ONE OF
+    THEM, AND THE TEST IS CORRECTED RATHER THAN DELETED.**
 
-    Recorded because it is the one thing the served key cannot express and the copy
-    therefore must not imply. Both accepting routes are addressed under
-    ``/runs/{run_id}``, so on a record that has no run yet every one of the 25 is
-    refused, including the 18.
+    RENAMED FROM ``test_the_two_write_routes_that_do_accept_these_paths_are_both_a_runs``,
+    because the old name asserted the very fact that changed and a name that outlives its
+    claim is how the next reader believes it. What it measured was TRUE when it was
+    written: both accepting routes were addressed under ``/runs/{run_id}``, so on a record
+    with no run every one of the 25 mappable paths was refused ``422
+    unrecognized_field``. Its own docstring named the mutation that would turn it RED —
+    *"adding either record-level route to the set of routes that accept an official field
+    path"* — and that is exactly what has now been done, deliberately.
 
-    MUTATION: adding either record-level route to the set of routes that accept an
-    official field path would turn this RED.
+    WHAT CHANGED AND WHY. ``system.domain`` and ``system.technique`` are declared REQUIRED
+    by the official schema on ``system`` and had NO write path on the record at all, which
+    made a record carrying a technique and no domain un-exportable and un-repairable. Both
+    are closed enums the schema itself publishes, so a scientist choosing one of its
+    values is a user confirmation over a bounded set rather than a guess. They are now
+    answered at ``POST .../answers`` and corrected at ``POST .../edit``. See
+    ``test_system_enum_fields.py``.
+
+    ``system.domain`` is absent from the 25 (it is not in ``EXTRACTOR_FIELD_MAP``), so of
+    the paths this test walks exactly ONE moved, and the assertion is now per path rather
+    than uniform — a uniform assertion is what let the old one read as a statement about
+    all 25 when it had become a statement about 24.
+
+    THE ``not_an_allowed_value`` HALF IS NOT A WEAKENING: ``"PROBE-VALUE"`` is not one of
+    the schema's 37 techniques, so the record-level route still writes NOTHING here. Both
+    halves of the split are asserted to be non-empty, so neither can pass vacuously.
+
+    MUTATION: adding a record-level route for any OTHER official field path turns this
+    RED, exactly as before.
     """
     experiment_id = _experiment(client)
     exp = f"/api/experiments/{experiment_id}"
+    record_writable = set(routes._record_enum_fields())
+    reached_record_route, refused_by_both = [], []
     for path in sorted(routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT):
         value = _NUMERIC.get(path, "PROBE-VALUE")
         for response in (
@@ -232,7 +255,22 @@ def test_the_two_write_routes_that_do_accept_these_paths_are_both_a_runs(client)
             ),
         ):
             assert response.status_code == 422, (path, response.text)
-            assert response.json()["error"] == "unrecognized_field", path
+            if path in record_writable:
+                # The route recognised the field and refused the VALUE, which is the
+                # distinction this module's own doctrine insists on: a scientist must
+                # never be sent looking for a misspelling that is not there.
+                assert response.json()["error"] == "not_an_allowed_value", path
+                reached_record_route.append(path)
+            else:
+                assert response.json()["error"] == "unrecognized_field", path
+                refused_by_both.append(path)
+
+    assert sorted(set(reached_record_route)) == ["system.technique"]
+    assert refused_by_both, "both polarities must be present or the split is vacuous"
+    # AND NOTHING WAS WRITTEN BY ANY OF IT, which is what makes the corrected claim as
+    # safe as the one it replaces.
+    stored = ws.load_experiment(experiment_id, session_id=None)
+    assert (stored.draft or {}).get("fields") in (None, {})
 
 
 def test_no_surface_still_promises_a_value_can_be_entered_at_every_mapped_path(client):

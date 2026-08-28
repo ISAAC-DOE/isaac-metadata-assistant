@@ -1067,6 +1067,82 @@ def test_update_draft_record_level_takes_ANSWER_KEYS_and_refuses_a_field_path(wr
     assert "Every key in `fields` must be a real official field path" not in described
 
 
+def test_the_two_schema_enum_record_fields_are_answerable_and_correctable_over_mcp(writer):
+    """The two exceptions to "the keys are NOT official field paths", measured over MCP.
+
+    `system.domain` and `system.technique` are declared required on `system` by the
+    official schema and closed with a fixed list of values, and until this slice neither
+    had a write path anywhere — so a record could carry a technique with no domain and
+    then never be exported nor repaired. Both tool descriptions now name the exception;
+    this measures the behaviour so neither description can drift back into being wrong.
+
+    THE READY SEED ALREADY CARRIES BOTH FIELDS (`system.technique: HERFD-XAS`), which is
+    written out because the author of this test measured the opposite first, off a detail
+    response whose `draft` is projected to `{}`. So the first act here is a CORRECTION,
+    and answering a different value WITHOUT `correcting` is the `already_answered`
+    refusal — asserted rather than assumed.
+
+    The `not_an_allowed_value` half is what keeps the exception safe: an agent cannot put
+    a value in a schema-closed field that official validation would then refuse.
+    """
+    stale_answer = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=ws.SEED_READY_ID,
+        if_match=etag_of(writer, ws.SEED_READY_ID),
+        confirmed_by_user=True,
+        answers={"system.technique": "XAS"},
+    )
+    assert stale_answer["isError"] is True
+    assert stale_answer["structuredContent"]["data"]["error"] == "already_answered"
+
+    corrected = payload(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=ws.SEED_READY_ID,
+        if_match=etag_of(writer, ws.SEED_READY_ID),
+        confirmed_by_user=True,
+        correcting=True,
+        answers={"system.technique": "XAS"},
+    )
+    assert corrected["data"]["invalidation"]["changed"] is True
+    assert corrected["data"]["invalidation"]["changed_fields"] == ["system.technique"]
+
+    refused = call(
+        writer,
+        "isaac_answer_questions",
+        experiment_id=ws.SEED_READY_ID,
+        if_match=etag_of(writer, ws.SEED_READY_ID),
+        confirmed_by_user=True,
+        correcting=True,
+        answers={"system.domain": "not-a-domain"},
+    )
+    assert refused["isError"] is True
+    body = refused["structuredContent"]["data"]
+    assert body["error"] == "not_an_allowed_value"
+    assert body["allowed"]["system.domain"] == ["experimental", "computational"]
+
+    # BOTH DESCRIPTIONS NAME THE EXCEPTION.
+    #
+    # ~~"with a negative control against the unqualified claims they replace"~~ —
+    # WITHDRAWN 2026-08-27, and the assertion it justified is REMOVED rather than
+    # reworded. It read
+    # `assert "it takes the same BLOCKING-QUESTION keys" not in update_desc`,
+    # pinning the ABSENCE of a sentence that an independent review then measured to
+    # be TRUE: `isaac_update_draft`'s record branch and `isaac_answer_questions`
+    # still take the same key space, both now including the two enum paths. So the
+    # word "same" was never false, deleting it corrected nothing, and the guard
+    # forbade restoring a true statement — a test pinning a non-defect, which is
+    # the shape this repository has had to invert before.
+    #
+    # The sentence is deliberately NOT restored here: putting it back is a claim
+    # about key-space equality that would need its own measurement, and this change
+    # only removes a guard it should never have earned.
+    answer_desc = TOOLS["isaac_answer_questions"].description
+    update_desc = TOOLS["isaac_update_draft"].description
+    assert "system.technique" in answer_desc and "system.technique" in update_desc
+
+
 def test_answer_questions_passes_a_false_confirmation_through_and_is_refused(writer):
     """Same rule as `isaac_update_draft`, asserted separately because it is a
     separate handler: hard-coding `True` would record a confirmation no user gave,

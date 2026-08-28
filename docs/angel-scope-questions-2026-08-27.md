@@ -18,11 +18,26 @@ reader acts on.** Nothing implements it yet: the branch carrying this document t
 live behaviour. See §3.4.
 
 > **IMPLEMENTATION STATUS, IN ONE PLACE, BECAUSE THIS PAGE ASSERTED THE OPPOSITE IN FOUR OF
-> THEM.** Everything §3.4 and §4 describe as *"ask the scientist"* is a **decision that has been
+> THEM.** ~~Everything §3.4 and §4 describe as *"ask the scientist"* is a **decision that has been
 > taken and NOT YET BUILT**. What runs today is §3.3: `system.domain` has no write path at all,
 > and a record that names a technique cannot be exported and cannot be un-blocked from inside the
-> product. Re-derive rather than trusting this box —
-> `git log --oneline 7668bf8..HEAD -- apps/api/isaac_api/inferability.py` is empty.
+> product.~~ **UPDATED 2026-08-27 — IT IS NOW BUILT, and this box is corrected in place because
+> its whole purpose was to stop a reader acting on a stale implementation claim.** The
+> *"ask the scientist"* behaviour is now the shipped behaviour: **both** `system.domain` and
+> `system.technique` have a record-level write path, and a scientist chooses a value from the
+> official schema's own closed enum. So §3.3's trap — a record that names a technique and can
+> neither export nor be repaired — **is fixed**, and §3.3 should be read as the history of the
+> problem rather than as live behaviour.
+>
+> **This does NOT answer your question, and does not make one waiting on you.** ISAAC still does
+> not *derive* `domain` from `technique`, and deliberately will not: that would require a
+> 37-entry scientific classification this project has no basis to author. It asks instead. Your
+> answer would tell us whether asking is the right long-run design — it is still genuinely
+> optional, and *"leave it as it is"* is still a real answer.
+>
+> Re-derive rather than trusting this box: `apps/api/isaac_api/inferability.py` is **still**
+> untouched (the fix deliberately did not go there), and the write path is in
+> `apps/api/isaac_api/routes.py` with tests in `apps/api/tests/test_system_enum_fields.py`.
 
 ---
 
@@ -128,6 +143,13 @@ touches `inferability.py`. It is recorded here so that a reader who finds both e
 which one runs — `draft_builder`'s, which stores the value directly.
 
 ### 3.3 The defect: the product accepts an input that makes a record un-exportable
+
+> **FIXED 2026-08-27 — READ THIS SECTION AS HISTORY.** Everything below measured the product
+> correctly on the date it was written, and it is kept because the measurement is what justified
+> the fix. It is **no longer live behaviour**: `system.domain` and `system.technique` now have a
+> record-level write path, so the dead end this section documents cannot be reached. Nothing in
+> the reasoning below is withdrawn — only its present tense.
+
 
 Measured end-to-end over HTTP (FastAPI `TestClient` on `create_app()`, a fresh
 `ISAAC_UI_WORKSPACE`), on an experiment created through `POST /api/experiments` with one run.
@@ -250,8 +272,11 @@ Any of these is a complete answer:
 
 And, separately, the six fields above: one word each, or *"still don't know"*.
 
-**One last status note, so it is on the page you are most likely to reply from:** the
+**One last status note, so it is on the page you are most likely to reply from:** ~~the
 *"ask the scientist"* behaviour this page describes is a **decision, not a shipped feature**. As
-of this page's date `system.domain` has no write path in the product at all (§3.3). Your answer
-does not unblock it and nothing is waiting on you — but nor should you read anything here as a
-description of what the software does today.
+of this page's date `system.domain` has no write path in the product at all (§3.3).~~
+**CORRECTED 2026-08-27: it IS now a shipped feature.** Both `system.domain` and
+`system.technique` can be set by a scientist choosing from the official schema's own closed enum,
+so §3.3's dead end no longer exists. Your answer still does not unblock anything and nothing is
+waiting on you — what it would settle is whether *asking* is the right long-run design, since
+ISAAC deliberately still does not derive one field from the other.
