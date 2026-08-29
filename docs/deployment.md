@@ -78,13 +78,33 @@ same deterministic core in a container.
 
   | `backend` | cause | `POST /api/experiments` |
   |---|---|---|
-  | `postgres` | the configured database is selected and is not answering | **`503 experiment_storage_unavailable`**, having written nothing |
+  | `postgres` | the configured database is selected and records are **not reaching it** — it is unreachable, or it is answering but a relation a migration has not created is missing (`_not_provisioned`), or a failure was recorded earlier and has not been cleared | **`503 experiment_storage_unavailable`**, having written nothing — **while that condition is current and on the write path**; otherwise **`201`, durably** (see the correction below) |
   | `filesystem` | `PGDATABASE` is not the expected name, so `_postgres_available()` refuses it and the app degrades to the workspace repository (its docstring documents this as the intended degradation) | **`201`** — the record is created and listed, in a working directory that is not durable |
 
   Measured over HTTP on 2026-08-27 with no database contacted (outbound
-  connections stubbed to raise). What holds under both, and is the only thing a
-  surface given `state` alone may assert, is that **no experiment record created
-  in this state is durable**.
+  connections stubbed to raise).
+
+  **CORRECTED 2026-08-28 — the `postgres` row was as over-narrow as the sentence
+  it replaced, and the correction is kept visible for the same reason.**
+  ~~"the configured database is selected and is not answering"~~ named one fact
+  out of at least three, and an operator diagnosing an unapplied `0003`/`0004`/
+  `0005` would have read the row as not describing their deployment when it does.
+  ~~"**`503`**, having written nothing"~~ is not determined by the state either:
+  `experiment_repository.repository()` branches on `_postgres_available(env)`
+  **alone** and never consults `storage_failure()`, so with `backend: "postgres"`
+  the PostgreSQL repository is still the one that runs. A recorded failure is not
+  re-tested; if it came from a read path, or from `_not_provisioned` while writes
+  work, or the database has simply recovered, the create **succeeds into
+  PostgreSQL and IS durable**, and `_note_storage_success()` then clears the flag.
+
+  ~~What holds under both, and is the only thing a surface given `state` alone may
+  assert, is that **no experiment record created in this state is durable**.~~
+  **That absolute is false on the recovered-write path**, and it errs by
+  understating persistence — the same direction as the defect this section was
+  written to correct. What a surface given `state` alone may assert is narrower:
+  **a database is configured and records are not reaching it, the create may fail
+  outright, and nothing in this state establishes that a record created in it is
+  stored durably.** A caller that needs to know reads the record back.
 - **Health** — `GET /krish/api/health`; pod probes hit the container port
   directly (bypassing ingress/auth), and this path stays open even when
   API-key auth is enabled.

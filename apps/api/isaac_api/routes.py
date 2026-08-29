@@ -17497,14 +17497,21 @@ def post_assistant_memory_query(
         "rather than left implied. `app_version`, `build_commit` and "
         "`runtime_mode` are likewise the same reads `GET /api/health` performs.\n\n"
         "`unavailable` has two causes and they behave differently, which matters "
-        "to anything that renders a consequence: either this deployment's database "
-        "is not answering, in which case `POST /api/experiments` returns `503` "
-        "having written nothing, or its configured database name was refused, in "
+        "to anything that renders a consequence: either this deployment is not "
+        "reaching its database — it may be unreachable, or answering while missing "
+        "a table a migration has not created, or the failure may have been recorded "
+        "earlier and not yet cleared — in which case `POST /api/experiments` "
+        "returns `503` having written nothing for as long as that condition still "
+        "holds on the write path; or its configured database name was refused, in "
         "which case the server degrades to its working directory and "
         "`POST /api/experiments` succeeds into storage that is not durable. "
         "`persistence` does not distinguish them; `GET /api/health`'s "
-        "`experiment_storage.backend` does. What holds in both is that no "
-        "experiment record created in this state is durable.\n\n"
+        "`experiment_storage.backend` does. What holds in both is narrower than it "
+        "looks and is stated as such: this state establishes nothing about the "
+        "durability of a record created in it, and a caller that needs to know must "
+        "read the created record back rather than infer it from here — a database "
+        "that has recovered since the failure was recorded still reports "
+        "`unavailable` and still writes durably.\n\n"
         "`persistence` is a claim about EXPERIMENT RECORDS and nothing else. "
         "Exported record files and their evidence sidecars are written to this "
         "deployment's working directory and are not held in a database, whatever "
@@ -17564,9 +17571,28 @@ def about() -> dict:
     and only `experiment_storage.backend` separates them: `filesystem` means
     `_postgres_available()` refused the configured database NAME and the create
     SUCCEEDS into a non-durable working directory; `postgres` means the database
-    is selected and not answering, and the create returns `503` having written
-    nothing. Publishing that on the operation that serves `persistence` is what
-    stops the next consumer re-deriving it wrongly from the state alone.
+    is selected and the records are not reaching it.
+
+    ~~"`postgres` means the database is selected and not answering, and the
+    create returns `503` having written nothing"~~ CORRECTED 2026-08-28, one
+    commit after it was written, and kept struck because the narrowing it makes
+    is the one an independent review found in the PUBLISHED text as well.
+
+    "Not answering" is one fact out of at least three that reach
+    `backend: "postgres"` + `state: "unavailable"`. `_unavailable()` also records
+    `_not_provisioned` — the server ANSWERING but missing a relation because a
+    migration has not been applied — and a recorded failure is not re-tested, so
+    a third reachable case is a database that has since recovered. The `503` then
+    does not follow from the state at all: `repository()` selects the backend from
+    `_postgres_available(env)` ALONE and never consults `storage_failure()`, so
+    with `backend: "postgres"` the Postgres repository is still the one that runs;
+    a write against a recovered (or read-path-only-broken) database SUCCEEDS,
+    DURABLY, and `_note_storage_success()` clears the flag. The `503` holds while
+    the condition is current and on the write path, and the published clause now
+    says so with that condition attached rather than as an unqualified
+    consequence. Publishing the causes on the operation that serves `persistence`
+    is still what stops the next consumer re-deriving them wrongly from the state
+    alone — it just may not publish a consequence the state does not determine.
 
     WHAT IT DOES NOT COVER, stated here because the copy downstream depends on
     it: exported artifact FILES are not in the database. This module's docstring

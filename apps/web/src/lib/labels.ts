@@ -635,15 +635,44 @@ export const LABELS = {
    * `experiment_storage.backend` separates the two. It still tells the reader the
    * bad news before they press the button, which is the whole reason it exists.
    *
+   * ~~"Creating one may fail outright; if it succeeds, the record is kept only in
+   * this server's workspace and is lost when the server restarts."~~ CORRECTED
+   * 2026-08-28, one commit after it shipped, and struck rather than replaced
+   * because it is the SAME defect class this change exists to fix — it told the
+   * reader their work was ephemeral in a state where it can be durable.
+   *
+   * THE THIRD OUTCOME THE PAIR ABOVE OMITS. The two-cause split is measured and
+   * correct as far as it goes, but it is a split of CAUSES, not of OUTCOMES, and
+   * the success branch of the first cause has two of them. `repository()`
+   * (`experiment_repository.py`) selects the backend from `_postgres_available()`
+   * ALONE — it never consults `storage_failure()` — while `storage_status()`
+   * reports `unavailable` whenever a failure has been RECORDED and not yet
+   * cleared. So with `backend: "postgres"` the Postgres repository is still the
+   * one that runs, and the recorded failure may be stale: it may have come from a
+   * READ path, or from `_not_provisioned` (a migration not applied) while writes
+   * work, or the database may simply have recovered. If that write then succeeds,
+   * the record is IN PostgreSQL and IS durable, and `_note_storage_success()`
+   * clears the flag.
+   *
+   * SO THIS LINE NO LONGER NAMES A STORAGE LOCATION OR A RESTART. What is true
+   * under every one of the three outcomes is narrower than the old sentence and
+   * still worth saying before the button is pressed: a database is meant to hold
+   * these and is not getting them, the attempt may fail outright, and nothing
+   * this screen has read establishes that a record created now is stored
+   * durably. Note that it stops one step short of `settingsContent.ts`'s
+   * "nothing you create in this state is durable" for the same reason — that
+   * absolute is false on the recovered-write path, and understating persistence
+   * is precisely the failure being corrected here.
+   *
    * The two sentences above deliberately never mention this state, and the note
    * on `unknown` above still holds for `unknown` — that one renders nothing,
    * because there the app has established NOTHING. Here it has established
    * something bad, which is a different thing from knowing nothing.
    */
   storageUnavailable:
-    'This deployment is set up to save experiments in its own database, and they are not ' +
-    'reaching it. Creating one may fail outright; if it succeeds, the record is kept only in ' +
-    'this server’s workspace and is lost when the server restarts.',
+    'A database is configured to hold experiments for this deployment, and they are not ' +
+    'reaching it. Creating one may fail outright, and nothing on this screen establishes that ' +
+    'a record created now is stored durably.',
 
   actionLaunchGuidedDemo: 'Launch Guided Demo',
   launchGuidedDemoBody:

@@ -1341,7 +1341,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
 
          THE CAUSE, MEASURED RATHER THAN INFERRED: the `GET /api/about` OpenAPI
          `description=` string in `apps/api/isaac_api/routes.py` grew from 2 paragraphs
-         to 6. The Endpoint Explorer renders operation descriptions as
+         to ~~6~~ **5** (corrected 2026-08-28: the figure was asserted, not counted;
+         measured with `len([p for p in description.split('\n\n') if p.strip()])`, which
+         reads 2 on `origin/main` and 5 here. The node counts either side were measured and
+         are unaffected — it is only this sentence's arithmetic that was wrong, which is
+         exactly the kind of unmeasured number this file exists to refuse).
+         The Endpoint Explorer renders operation descriptions as
          `<p class="api-docs-description">` paragraphs
          (`apps/web/src/screens/settings/ApiDocs.tsx:769-802`, `splitPurpose`), so four
          extra paragraphs of prose become four extra low-contrast text nodes wherever

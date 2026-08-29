@@ -263,10 +263,23 @@ describe('the darwin column says how much of itself is measured', () => {
    *
    *     The whole family moved for ONE cause, established by controlled experiment and
    *     not inferred: the `GET /api/about` OpenAPI `description=` grew from 2 paragraphs
-   *     to 6, and the Endpoint Explorer renders operation descriptions as
+   *     to ~~6~~ **5** — corrected 2026-08-28, having been asserted rather than counted;
+   *     `len([p for p in description.split('\n\n') if p.strip()])` reads 2 on
+   *     `origin/main` and 5 here — and the Endpoint Explorer renders operation
+   *     descriptions as
    *     `<p class="api-docs-description">`. Reverting `routes.py` alone to `origin/main`,
-   *     with every frontend change still applied, put `desktop-1280x800` back to a
-   *     passing 44. A BACKEND DOCSTRING IS RENDERED PRODUCT TEXT.
+   *     with every frontend change still applied, put the surface back to its old
+   *     numbers. A BACKEND DOCSTRING IS RENDERED PRODUCT TEXT.
+   *
+   *     THE CONTROL WAS RUN FOR ALL SEVEN CELLS, not one. An earlier revision of this
+   *     paragraph reported the experiment on `desktop-1280x800` and asserted the other
+   *     six shared its cause; an independent review flagged that as inference wearing
+   *     the word "measured", by the same standard this file applies to a darwin half.
+   *     The control was therefore re-run across the whole family on 2026-08-28, and
+   *     every one of the seven returned to its exact pre-change value — tablet 68 -> 58,
+   *     mobile 66 -> 51, zoom-200 64 -> 53, and so on for the rest. Each of those is the
+   *     number this file held before the change, so the attribution is now a
+   *     measurement on all seven and not an extrapolation from one.
    */
   it('the set of per-platform SPLIT cells is exactly the seven measured on both faces', () => {
     const splits: string[] = [];

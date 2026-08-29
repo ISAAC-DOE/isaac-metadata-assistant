@@ -1939,7 +1939,34 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // Re-derived from the served document, never incremented: raw sum over the 71
     // operations = 103,764, minus 2 per `\n\n` separator (211 x 2 = 422) = 103,342.
     // The entry was re-transcribed from `create_app().openapi()` by script.
-    expect(total).toBe(103342);
+    //
+    // RE-MEASURED 2026-08-28, after the independent review of that same change.
+    // 103,342 -> 103,838 (+496): ONE existing description changed — about's — and
+    // no other, which `test_contract_description_parity.py` proves rather than
+    // leaving it asserted here. The two-cause paragraph the entry above added was
+    // itself over-narrow: it said the `postgres` cause is "this deployment's
+    // database is not answering", which names one fact out of at least three that
+    // reach that state (unreachable; answering but missing a relation a migration
+    // has not created; a failure recorded earlier and not since cleared), and it
+    // stated the `503` as an unconditional consequence when
+    // `experiment_repository.repository()` branches on `_postgres_available()`
+    // alone and a write against a recovered database succeeds DURABLY. The clause
+    // is now widened to "not reaching its database", the `503` carries the
+    // condition under which it holds, and the closing "no record created in this
+    // state is durable" — false on that recovered-write path, in the direction of
+    // understating persistence — is replaced by what the state actually
+    // establishes.
+    //
+    // THE PARAGRAPH COUNT DELIBERATELY DOES NOT MOVE, and that is the point of
+    // asserting the two aggregates separately: every word of this correction was
+    // written INTO the existing third paragraph. A change that moved the remainder
+    // count below would mean it had been appended instead. (It is also a hard
+    // constraint here rather than a preference — the Endpoint Explorer renders each
+    // paragraph as its own `<p class="api-docs-description">`, so a new paragraph
+    // re-baselines seven `settings-explorer` accessibility cells on two platforms.)
+    // RE-DERIVED from the served document, never incremented: raw sum over the 71
+    // operations = 104,260, minus 2 per `\n\n` separator (211 x 2 = 422) = 103,838.
+    expect(total).toBe(103838);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and

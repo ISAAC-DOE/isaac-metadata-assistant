@@ -374,6 +374,54 @@ describe('My Experiments · where a new experiment is stored', () => {
     expect(line!.textContent).not.toMatch(/will not work until/i);
   });
 
+  it('names no storage location and no restart outcome for a state that determines neither', async () => {
+    /*
+     * A RESTORED GUARD, NOT A NEW ONE — and it is restored because deleting the
+     * one that stood here was the mistake.
+     *
+     * `expect(line!.textContent).not.toMatch(/cleared when the server restarts/i)`
+     * used to sit in the ephemeral-vs-unavailable pair. It was removed in the
+     * change that rewrote `LABELS.storageUnavailable`, on a rationale that
+     * addressed a DIFFERENT over-narrowing ("not answering"), and the replacement
+     * copy then made exactly the claim the deleted guard had forbidden: "the
+     * record is kept only in this server's workspace and is lost when the server
+     * restarts."
+     *
+     * THAT CLAIM IS FALSE ON A REACHABLE PATH, and false in the unsafe direction.
+     * `experiment_repository.repository()` selects the backend from
+     * `_postgres_available(env)` ALONE and never consults `storage_failure()`,
+     * while `storage_status()` reports `unavailable` whenever a failure has been
+     * recorded and not cleared. So with `backend: "postgres"` the PostgreSQL
+     * repository is still the one that runs, and the recorded failure may be
+     * stale — a read-path failure, a `_not_provisioned` relation while writes
+     * work, or a database that has recovered. The create then lands in
+     * PostgreSQL and IS durable. Telling that scientist their record is in a
+     * workspace and dies at the next restart UNDERSTATES persistence, which is
+     * the exact defect this whole change exists to remove.
+     *
+     * SO THE GUARD PINS THE INVARIANT RATHER THAN THE SENTENCE. `unavailable`
+     * determines neither where a record goes nor whether it survives a restart —
+     * this screen is handed `state`, and not even `backend` would settle it — so
+     * the copy may not name a location and may not name a restart outcome,
+     * whatever it is reworded to next. NEGATIVE CONTROL: run against the string
+     * this replaces and both assertions fail (verified 2026-08-28 by reverting
+     * the label, running this file, and observing red on `/restart/i` and on the
+     * location matcher; then restored).
+     */
+    await openEmptyState(UNAVAILABLE);
+    const text = panel().querySelector<HTMLElement>('.queue-empty-storage')!.textContent!;
+    // No restart outcome, in either direction — not "is lost when the server
+    // restarts" and not "survives a restart".
+    expect(text).not.toMatch(/restart/i);
+    // No storage location. The workspace, the working directory and the server's
+    // disk are all claims this state does not license.
+    expect(text).not.toMatch(/workspace|working directory|on (this|the) server|on disk|\bfiles?\b/i);
+    // And it still delivers the bad news, so the guard cannot be satisfied by
+    // deleting the line — silence would pass both matchers above.
+    expect(text).toMatch(/database/i);
+    expect(text).toMatch(/not reaching it/i);
+  });
+
   it('reads the NAMED state even when it disagrees with the boolean fallback', async () => {
     /*
      * `DEGRADED` and `DEGRADED_LEGACY` carry identical booleans and differ only in
