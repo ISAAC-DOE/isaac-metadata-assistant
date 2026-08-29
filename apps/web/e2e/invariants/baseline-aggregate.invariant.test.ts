@@ -261,6 +261,33 @@ describe('the darwin column says how much of itself is measured', () => {
    *     column across. Had it done so, four of these eight cells would have been wrong,
    *     and this one wrong in a direction no rule of thumb would have caught.
    *
+   *   ── SECOND MOVE, SAME BRANCH, 2026-08-28 ─────────────────────────────────────
+   *
+   *   The review fix for #192 widened the `/api/about` description's paragraph 3 from
+   *   2,054 to 2,550 characters WITHOUT changing its paragraph count (5 before, 5
+   *   after, computed both times). All seven cells moved anyway. The coupling is
+   *   therefore to description LENGTH, not to paragraph structure — the constraint
+   *   written to prevent this churn was necessary but not sufficient, and that is the
+   *   durable lesson: editing ANY OpenAPI description in this app re-baselines seven
+   *   cells on two platforms, at roughly one CI round-trip each.
+   *
+   *   Both faces re-measured at `c75c42f`: darwin locally on this host, linux from CI
+   *   job 99018666402. The split set churns again, in BOTH directions:
+   *
+   *     desktop-1280x800  {55, 55} -> SCALAR 55   split collapses
+   *     width-320         {73, 73} -> SCALAR 73   split collapses
+   *     mobile-375x812    scalar   -> {71, 72}    scalar becomes split
+   *     width-390         scalar   -> {73, 72}    scalar becomes split, DARWIN HIGHER
+   *     zoom-200          scalar   -> {67, 68}    scalar becomes split
+   *     laptop-1024x768   {55, 57}                a gap of TWO
+   *     tablet-768x1024   {71, 72}
+   *
+   *   Two of these refute rules of thumb this file has entertained before.
+   *   `laptop-1024x768` differs by TWO, so "every one by exactly +/-1, the signature of
+   *   a single wrap boundary" fails again. And `width-390` has darwin as the HIGHER
+   *   half, so the direction is not consistent either. Nothing here was predicted from
+   *   the other column; every number was read off a run.
+   *
    *     The whole family moved for ONE cause, established by controlled experiment and
    *     not inferred: the `GET /api/about` OpenAPI `description=` grew from 2 paragraphs
    *     to ~~6~~ **5** — corrected 2026-08-28, having been asserted rather than counted;
@@ -281,7 +308,7 @@ describe('the darwin column says how much of itself is measured', () => {
    *     number this file held before the change, so the attribution is now a
    *     measurement on all seven and not an extrapolation from one.
    */
-  it('the set of per-platform SPLIT cells is exactly the seven measured on both faces', () => {
+  it('the set of per-platform SPLIT cells is exactly the eight measured on both faces', () => {
     const splits: string[] = [];
     for (const entry of A11Y_BASELINE) {
       for (const [key, count] of Object.entries(entry.counts)) {
@@ -299,10 +326,11 @@ describe('the darwin column says how much of itself is measured', () => {
       [
         'color-contrast @ memory-graph@zoom-200',
         'color-contrast @ settings-about@width-320',
-        'color-contrast @ settings-explorer@desktop-1280x800',
         'color-contrast @ settings-explorer@laptop-1024x768',
+        'color-contrast @ settings-explorer@mobile-375x812',
         'color-contrast @ settings-explorer@tablet-768x1024',
-        'color-contrast @ settings-explorer@width-320',
+        'color-contrast @ settings-explorer@width-390',
+        'color-contrast @ settings-explorer@zoom-200',
         'color-contrast @ validator@zoom-200',
       ].sort()
     );
