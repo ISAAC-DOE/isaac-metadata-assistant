@@ -353,8 +353,42 @@ function ApiBrowser({
     [filtered],
   );
 
+  /*
+   * FINDING A11Y-06, RESIDUE — CLOSED HERE. `aria-labelledby` is deliberately
+   * ABSENT from the `<section className="api-explorer">` below, and its absence
+   * is the fix.
+   *
+   * WHAT WAS WRONG. `/settings?tab=explorer` rendered TWO `region` landmarks
+   * with the IDENTICAL accessible name "Endpoint Explorer", so a reader jumping
+   * by landmark saw the same entry twice with nothing to choose between them.
+   * The outer one is the shared `SettingsCard` wrapper
+   * (`src/screens/SettingsPage.tsx`, `<section class="card placeholder-card
+   * settings-card" aria-labelledby="settings-apidocs-heading">`, whose `<h2>`
+   * reads "Endpoint Explorer"); the inner one was this element, named by its own
+   * `<h3>`, which reads "Endpoint Explorer" as well. axe blamed the OUTER
+   * `.card`, which is why the baseline entry's `targetPattern` is `^\.card$`
+   * even though the element that had to change is this one.
+   *
+   * WHY THIS SIDE AND NOT THE CARD. `SettingsCard` is shared chrome for every
+   * Settings tab — seven tabs, five viewports plus two narrow widths — so a
+   * change there moves DOM on every one of them. This panel is one tab.
+   *
+   * WHY REMOVING THE NAME RATHER THAN RENAMING IT. A second landmark here earns
+   * nothing: it wraps the entire body of a card that already announces itself
+   * under the same title, so a distinct name would only add a second stop
+   * saying what the first one said. A `<section>` with no accessible name is
+   * not a landmark at all (it maps to `generic`), which is the correct outcome
+   * — and the `<h3>` STAYS, so the heading outline, the visible title and the
+   * `heading-order` rule are all untouched. Its `id` is kept as a stable DOM
+   * hook even though nothing points at it now; deleting it would be an
+   * unrelated change.
+   *
+   * Pinned by `src/__tests__/a11y-landmarks-headings-and-tabs.test.tsx` —
+   * "exactly one region named Endpoint Explorer", plus a negative control that
+   * fails if a second one comes back.
+   */
   return (
-    <section className="api-explorer" aria-labelledby="settings-api-explorer-heading">
+    <section className="api-explorer">
       <h3 id="settings-api-explorer-heading" className="api-section-title">
         Endpoint Explorer
       </h3>

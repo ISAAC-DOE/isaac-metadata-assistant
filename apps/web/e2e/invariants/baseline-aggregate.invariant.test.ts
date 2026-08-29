@@ -307,8 +307,53 @@ describe('the darwin column says how much of itself is measured', () => {
    *     mobile 66 -> 51, zoom-200 64 -> 53, and so on for the rest. Each of those is the
    *     number this file held before the change, so the attribution is now a
    *     measurement on all seven and not an extrapolation from one.
+   *
+   *   ── THIRD MOVE, 2026-08-29, AND THE ONLY ONE WHERE HALF THE SET IS *NOT*
+   *      MEASURED ON BOTH FACES ────────────────────────────────────────────────
+   *
+   *   The base commit `542d757` edited `routes.py`'s `GET /api/about` description AND
+   *   `settingsContent.ts` and did NOT re-baseline — the third time in four days that an
+   *   OpenAPI description moved these seven cells, and the second time it was committed
+   *   without them. The 2026-08-29 slice measured DARWIN only (a local macOS sweep, and
+   *   the settings-explorer figures additionally reproduced in an isolated
+   *   `-g "Endpoint Explorer"` re-run) and, per this file's own rule, did not touch the
+   *   linux column: this is a TEXT-LENGTH change, the wrap-dependent case where deriving
+   *   the other platform is forbidden.
+   *
+   *     desktop-1280x800  scalar 55 -> {darwin 57, linux 55}   scalar becomes split
+   *     width-320         scalar 73 -> {darwin 76, linux 73}   scalar becomes split
+   *     mobile-375x812    {71, 72}  -> {darwin 73, linux 72}
+   *     zoom-200          {67, 68}  -> {darwin 70, linux 68}
+   *     width-390         {73, 72}  -> {darwin 74, linux 72}
+   *     laptop-1024x768   {55, 57}  -> SCALAR 57                split collapses
+   *     tablet-768x1024   {71, 72}  -> SCALAR 72                split collapses
+   *
+   *   READ THE FIVE SPLITS DIFFERENTLY FROM EVERY OTHER SPLIT IN THIS FILE. The name of
+   *   this test says the set is "measured on both faces", and for these five that is NOT
+   *   true: the darwin half is a 2026-08-29 reading and the linux half is a 2026-08-28
+   *   reading of a source state that has since changed. They are KNOWN-STALE linux
+   *   halves, not measured platform differences, and CI will report five GREW messages
+   *   naming its own figures — transcribe those.
+   *
+   *   THE REGISTER THAT WOULD RECORD THIS DOES NOT EXIST, and that is stated rather than
+   *   invented around. `DARWIN_CARRIED_FORWARD` exists because the usual direction is
+   *   "CI handed us a linux figure and the darwin half was left standing". This is the
+   *   MIRROR case and there is no `LINUX_CARRIED_FORWARD`. Adding one is a real change
+   *   to this file's machinery and was out of that slice's scope; the file's own
+   *   precedent for the mirror case is prose at the cells (see the 2026-08-03 note,
+   *   "THE LINUX COLUMN IN THESE 26 ENTRIES IS THE PRE-FIX NUMBER AND IS KNOWN TO BE TOO
+   *   HIGH"), and that is what was done. `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays
+   *   0, correctly: every DARWIN half here is a reading.
+   *
+   *   THE TWO COLLAPSES ARE NOT MEASUREMENTS EITHER, and they are the sharper case. At
+   *   laptop and tablet the NEW darwin number happens to equal the OLD linux number (57
+   *   and 72), and `auditEntryShapes` rejects a per-platform pair whose halves are equal
+   *   — so a scalar was the only legal expression, and a scalar in this file MEANS
+   *   "identical on both platforms". Those two cells therefore assert a linux value no
+   *   run has produced since `542d757`. That is the type system's limitation, already
+   *   recorded in `a11y-baseline.ts`'s 2026-08-04 note, and not a claim about linux.
    */
-  it('the set of per-platform SPLIT cells is exactly the eight measured on both faces', () => {
+  it('the set of per-platform SPLIT cells is exactly the eight recorded, and no others', () => {
     const splits: string[] = [];
     for (const entry of A11Y_BASELINE) {
       for (const [key, count] of Object.entries(entry.counts)) {
@@ -326,9 +371,11 @@ describe('the darwin column says how much of itself is measured', () => {
       [
         'color-contrast @ memory-graph@zoom-200',
         'color-contrast @ settings-about@width-320',
-        'color-contrast @ settings-explorer@laptop-1024x768',
+        // The five below carry a MEASURED darwin half beside a KNOWN-STALE linux one
+        // (2026-08-29; see the note above). They are not platform differences yet.
+        'color-contrast @ settings-explorer@desktop-1280x800',
         'color-contrast @ settings-explorer@mobile-375x812',
-        'color-contrast @ settings-explorer@tablet-768x1024',
+        'color-contrast @ settings-explorer@width-320',
         'color-contrast @ settings-explorer@width-390',
         'color-contrast @ settings-explorer@zoom-200',
         'color-contrast @ validator@zoom-200',
