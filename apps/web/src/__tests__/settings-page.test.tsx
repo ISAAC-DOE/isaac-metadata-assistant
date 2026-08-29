@@ -698,14 +698,28 @@ describe('Settings — Overview', () => {
    * "filesystem"`). The old assertion therefore made the copy defect
    * unfixable-without-failing, which is the worst property a test can have.
    *
-   * WHAT IT NOW PINS IS THE INVARIANT THAT HOLDS UNDER BOTH CAUSES — that nothing
-   * created in this state is durable — plus the honesty that this screen is not
-   * told which outcome applies, because `/api/about` publishes `persistence` (the
-   * state) and not `backend` (which is what separates them). The negative
-   * assertion is kept and a second one is added: the retired sentence must not
-   * come back, and `unavailable` must still not be rendered as `durable`.
+   * ~~WHAT IT NOW PINS IS THE INVARIANT THAT HOLDS UNDER BOTH CAUSES — that
+   * nothing created in this state is durable~~ — STRUCK AND INVERTED AGAIN
+   * 2026-08-28, one commit later, because that "invariant" is not one. Two
+   * CAUSES are not two OUTCOMES: `repository()` selects the backend from
+   * `_postgres_available()` alone and never consults `storage_failure()`, so
+   * `state: "unavailable"` with `backend: "postgres"` leaves the Postgres
+   * repository running over a failure that may be stale (a READ path, a
+   * `_not_provisioned` table, or a database that has since recovered). A write
+   * that then succeeds is IN PostgreSQL and IS durable. So there is a third
+   * outcome, "nothing … is durable" is false under it, and "the two ways"
+   * enumerated two of three. This test asserted both of those, so it had once
+   * again made the copy defect unfixable-without-failing — the second time in
+   * two commits, which is why the guard below stopped pinning sentences and
+   * started pinning the shape of the claim.
+   *
+   * WHAT IT PINS NOW is what the screen ESTABLISHES rather than what is: the bad
+   * news is still delivered before the button is pressed, and no durability
+   * verdict is asserted in either direction. `/api/about` publishes `persistence`
+   * (the state) and not `backend` (which is what separates the causes), so this
+   * module still cannot tell them apart and still must not pretend to.
    */
-  it('claims no durability, and does not claim the create fails, when a configured database is not taking records', async () => {
+  it('claims no durability verdict, and does not claim the create fails, when a configured database is not taking records', async () => {
     stubFetchRoutes({
       [ABOUT_URL]: { body: { ...aboutResponse, persistence: 'unavailable' } },
       [OPENAPI_URL]: { body: openApiFixture },
@@ -715,13 +729,107 @@ describe('Settings — Overview', () => {
     fireEvent.click(tab('Data & Privacy'));
     const resets = await screen.findByText(/reports persistence as unavailable/i);
     const text = resets.textContent ?? '';
-    // The invariant, true under both causes of `unavailable`.
-    expect(text).toMatch(/nothing you create here is durable/i);
-    // And it says outright that it cannot tell which of the two outcomes applies.
-    expect(text).toMatch(/not told which of the two ways that happens/i);
-    // The retired false claim must not return.
+    // The bad news, still stated before the reader acts.
+    expect(text).toMatch(/to hold experiment records and they are not reaching it/i);
+    expect(text).toMatch(/creating one may fail outright/i);
+    // What the screen establishes, rather than what is.
+    expect(text).toMatch(
+      /nothing this screen has read establishes that a record created now is stored durably/i,
+    );
+    // The two retired false claims must not return.
     expect(text).not.toMatch(/fails outright rather than/i);
+    expect(text).not.toMatch(/nothing you create here is durable/i);
+    expect(text).not.toMatch(/which of the two ways/i);
     expect(text).not.toMatch(/experiment records survive a restart/i);
+  });
+
+  /*
+   * THE INVARIANT GUARD, over the whole card set rather than over one card.
+   *
+   * The two sentence-level guards above were each written to defend one
+   * corrected string, and each was then found to be defending a false one. The
+   * SHAPE that keeps recurring is what this pins instead, across EVERY concept
+   * `settingsConcepts` produces under `unavailable` — summary, detail and the
+   * `more` disclosure alike — so a fourth site added later is covered without
+   * anyone remembering to extend a list:
+   *
+   *  1. no absolute non-durability claim. False under outcome (c), the
+   *     stale-or-recovered failure, where the write lands in PostgreSQL.
+   *  2. no promised FATE for a record created in this state, unless hedged. The
+   *     screen is given `persistence` and not `backend`, so it cannot know
+   *     whether a success went to the workspace or to the database.
+   *  3. no enumeration of exactly two outcomes. There are three.
+   *
+   * (2) IS DELIBERATELY NOT A KEYWORD BAN, because a keyword ban is what an
+   * independent review defeated on the sibling guard in
+   * `create-experiment.test.tsx`: that one matched `/restart/i` and a list of
+   * location nouns, and "held in temporary storage, discarded when the pod is
+   * replaced" evades both while making exactly the forbidden claim. So the rule
+   * here is conditional — a SENTENCE that talks about a record being created and
+   * also uses fate/location vocabulary must carry a hedge — which catches novel
+   * phrasings rather than the ones someone happened to think of. The workspace
+   * and walkthrough sentences are unaffected: they are true regardless of the
+   * outcome of a create, and they do not mention one.
+   *
+   * Asserted over the pure content function, not the rendered page, because the
+   * defect is in the copy and a renderer change must not be able to hide it.
+   * Every matcher below was individually driven RED by a temporary mutation of
+   * `settingsContent.ts` before this was committed; vitest stops at the first
+   * failing assertion, so a matcher never exercised alone is a matcher never
+   * tested.
+   */
+  it('never asserts an absolute non-durability, an unhedged fate, or two outcomes under `unavailable`', () => {
+    const concepts = settingsConcepts({
+      dataRegime: 'synthetic-only',
+      persistence: 'unavailable',
+      recordSchemaVersion: '1.05',
+    });
+    expect(concepts.length).toBeGreaterThan(0);
+
+    const strings = concepts.flatMap((c) =>
+      [c.summary, c.detail, c.more?.text ?? ''].filter(Boolean),
+    );
+    // The FOUR `unavailable` sites are all present in that set. Three were
+    // enumerated in the brief for this change; the fourth (`how-long-it-is-kept`)
+    // was found by this guard, having evaded the text sweep that found the
+    // others because it said "outlasts the working directory" rather than
+    // "durable" — which is the whole argument for a shape guard over a list.
+    expect(strings.filter((t) => /are not reaching it/i.test(t))).toHaveLength(4);
+
+    /** A clause that talks about a record being created in this state. */
+    const CREATE_RECORD =
+      /creating one|creating an experiment|you create\b|a record created|created here|created in this state|it succeeds/i;
+    /** Vocabulary that asserts where such a record goes, or how long it lasts. */
+    const FATE =
+      /workspace|database|files on the server|temporary storage|discarded|\bpod\b|goes away|restart|lost|lasts|survive|durabl|\bkept\b|only as long as|deleted|erased/i;
+    /** The hedges that make such a clause honest under all three outcomes. */
+    const HEDGE = /may fail outright|nothing this screen has read establishes/i;
+
+    for (const text of strings) {
+      // (1) an absolute verdict about durability, in any of its phrasings.
+      expect(text).not.toMatch(
+        /nothing (?:you )?create[ds]? (?:here|in this state) is (?:not )?durable/i,
+      );
+      // (3) a two-outcome enumeration, in the two forms it has already taken.
+      expect(text).not.toMatch(/(?:which of )?the two ways/i);
+      expect(text).not.toMatch(/either .* or it succeeds/i);
+      // The specific promised destination the retired copy made.
+      expect(text).not.toMatch(/succeeds into the workspace/i);
+
+      // (2) sentence by sentence, so a true workspace clause beside a create
+      // clause does not have to carry the create clause's hedge.
+      for (const sentence of text.split(/(?<=[.;])\s+/)) {
+        if (CREATE_RECORD.test(sentence) && FATE.test(sentence)) {
+          expect(sentence).toMatch(HEDGE);
+        }
+      }
+    }
+
+    // And the corrected claim is actually there — so deleting the sentence
+    // outright cannot pass this test in place of correcting it.
+    expect(
+      strings.filter((t) => /nothing this screen has read establishes/i.test(t)),
+    ).toHaveLength(4);
   });
 
   /**

@@ -104,7 +104,16 @@ same deterministic core in a container.
   written to correct. What a surface given `state` alone may assert is narrower:
   **a database is configured and records are not reaching it, the create may fail
   outright, and nothing in this state establishes that a record created in it is
-  stored durably.** A caller that needs to know reads the record back.
+  stored durably.** ~~A caller that needs to know reads the record back.~~
+  **Struck 2026-08-28, one commit after it was written, by independent review:
+  the read-back returns `200` for a record that is NOT durable.** Every route
+  reads through `ws.load_experiment` from the working directory
+  (`experiment_repository.py:20-26`, "THE FILESYSTEM IS STILL THE WORKING COPY"),
+  so under the degraded-to-filesystem cause the record is there and readable while
+  being exactly the thing the sentence warns about. The remedy failed in the
+  UNSAFE direction — it answers "fine" in the one outcome it exists to catch.
+  A caller that needs to know reads `GET /api/health`'s `experiment_storage`,
+  whose `backend` separates the two causes; `persistence` alone does not.
 - **Health** — `GET /krish/api/health`; pod probes hit the container port
   directly (bypassing ingress/auth), and this path stays open even when
   API-key auth is enabled.

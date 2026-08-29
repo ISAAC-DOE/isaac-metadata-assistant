@@ -434,12 +434,77 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       //
       // THIS MODULE CANNOT TELL THE TWO APART AND MUST NOT PRETEND TO.
       // `SettingsFacts` carries `/api/about` values, and `/api/about` publishes
-      // `persistence` — the `state` — and not `backend`. So the copy states the
-      // one thing true of both causes (nothing created here is durable) and says
-      // outright that it does not know which of the two outcomes applies. The
+      // `persistence` — the `state` — and not `backend`. So the copy says
+      // outright that it does not know which outcome applies. The
       // wire CAN distinguish them, via `GET /api/health`'s
       // `experiment_storage.backend`; branching on it would be a new rendering
       // contract and is deliberately not done here.
+      //
+      // ~~"So the copy states the one thing true of both causes (nothing created
+      // here is durable)"~~ — STRUCK 2026-08-28. It is not true of both causes,
+      // and the sentence it authorised is the next correction.
+      //
+      // AND THE SECOND VERSION OF THIS ARM WAS FALSE TOO — CORRECTED 2026-08-28,
+      // IN THE SAME PR THAT MADE THE ARM REACHABLE AT ALL. Before this PR
+      // `/api/about`'s `persistence` was the hardcoded literal `"ephemeral"`, so
+      // nothing here could ever render `unavailable`. This PR derived the value
+      // AND wrote the sentence below, which is the same defect class the PR
+      // exists to remove, re-made one commit after it was corrected in
+      // `lib/labels.ts`. Struck rather than replaced:
+      //
+      // ~~"Two things are stored, both as files on the server for this
+      // deployment, and neither is shared between deployments. One is the
+      // workspace itself. … Nothing you create in this state is durable, and
+      // this screen is not told which of the two ways that happens: the attempt
+      // either fails outright and writes nothing at all, or it succeeds into the
+      // workspace above and lasts only as long as that directory does."~~
+      //
+      // TWO CAUSES, BUT THREE OUTCOMES. `repository()`
+      // (`experiment_repository.py`) selects the backend from
+      // `_postgres_available()` ALONE and never consults `storage_failure()`,
+      // while `storage_status()` reports `unavailable` whenever a failure has
+      // been RECORDED and not yet cleared. So `state: "unavailable"` with
+      // `backend: "postgres"` leaves the POSTGRES repository running, and the
+      // recorded failure may be STALE. Two routes to that, both verified in
+      // `experiment_repository.py` rather than assumed:
+      //
+      //  · a READ path recorded it. `_not_provisioned` is raised at `:2578` and
+      //    `:2705` ONLY — `hydrate` and the all-experiments read — and it calls
+      //    `_note_storage_failure`, so an absent table on a READ marks the whole
+      //    deployment `unavailable` while a write against a table that DOES
+      //    exist still succeeds.
+      //  · the database recovered since the failure was recorded, and nothing
+      //    has re-read it. `storage_status()` opens no connection.
+      //
+      // A THIRD ROUTE WAS CLAIMED IN AN EARLIER DRAFT OF THIS NOTE AND IS FALSE:
+      // "a migration not applied while writes still work" is NOT a route to a
+      // durable write. `persist` classifies EVERY failure — undefined table
+      // included — through `_unavailable` at `:2181`, so an absent table on the
+      // WRITE path is a 503, which is outcome (b). `_not_provisioned` is a
+      // read-path raiser and must not be cited as anything else.
+      //
+      // If the write then succeeds, the record is IN PostgreSQL and IS durable,
+      // and `_note_storage_success()` clears the flag. The outcomes are:
+      //
+      //  (a) `backend: "filesystem"` -> **201** into a working directory that is
+      //      not durable;
+      //  (b) `backend: "postgres"`, genuinely not answering -> **503**, nothing
+      //      written;
+      //  (c) `backend: "postgres"`, stale or recovered failure -> the write
+      //      succeeds into PostgreSQL and IS durable.
+      //
+      // So "nothing you create in this state is durable" is false under (c), and
+      // "the two ways" enumerated two of three. The opening clause was false
+      // under (c) as well: with the record in the database, the stored things are
+      // not "both as files on the server".
+      //
+      // THE ARM NOW ASSERTS WHAT THIS SCREEN ESTABLISHES RATHER THAN WHAT IS,
+      // which is exactly the move `LABELS.storageUnavailable` made. It
+      // enumerates nothing: the screen cannot tell which outcome applies, and
+      // three named outcomes would be a longer way of saying so. It still tells
+      // the reader the bad news — a database is meant to hold these and is not
+      // getting them, and the attempt may fail outright — which is the whole
+      // reason the arm exists.
       id: 'what-is-stored',
       heading: 'What Is Stored',
       summary: durable
@@ -448,7 +513,7 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       detail: durable
         ? `Two places hold what you produce, and neither is shared between deployments. The first is this deployment’s own database, which holds the experiment records — their titles, drafts, the answers you confirm, and their runs. The second is the workspace: a working directory of files on the server holding a copy of those records, plus the official records and evidence sidecars you export. Only the database copy outlives the working directory; the exported files are not in the database. ${walkthroughStorage}`
         : unavailable
-          ? `Two things are stored, both as files on the server for this deployment, and neither is shared between deployments. One is the workspace itself. ${walkthroughStorage} A database is configured for this deployment and experiment records are not reaching it, which is what the backend means by reporting persistence as unavailable. Nothing you create in this state is durable, and this screen is not told which of the two ways that happens: the attempt either fails outright and writes nothing at all, or it succeeds into the workspace above and lasts only as long as that directory does.`
+          ? `The workspace is stored as files on the server for this deployment, and is not shared between deployments. ${walkthroughStorage} A database is configured for this deployment to hold experiment records and they are not reaching it, which is what the backend means by reporting persistence as unavailable. Creating one may fail outright, and nothing this screen has read establishes where a record created now is stored, or that it is stored durably.`
           : ephemeral
             ? `Two things are stored, both as files on the server for this deployment, and neither is shared between deployments. One is the workspace itself. ${walkthroughStorage}`
             : `The workspace is stored as files on the server for this deployment, and is not shared between deployments. ${walkthroughStorage} Whether experiment records are additionally stored in a database depends on this deployment, and the backend reports that as "${persistence}", which this screen does not recognise — so it states nothing further about it.`,
@@ -516,19 +581,43 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       //  · THE `unavailable` ARMS ASSERTED THAT THE CREATE FAILS. See the long
       //    note on `what-is-stored` for the measurement: that is true of one of
       //    the state's two causes and false of the other, where the create
-      //    answers 201 into the workspace. Both arms now state the invariant that
-      //    holds either way and say outright that this screen is not told which.
+      //    answers 201 into the workspace.
+      //
+      // AND THE FIX FOR THAT WAS ITSELF FALSE ON BOTH ARMS — CORRECTED
+      // 2026-08-28, one commit after `lib/labels.ts` corrected the identical
+      // defect, and in the same PR that made these arms reachable at all
+      // (`/api/about`'s `persistence` was the hardcoded literal `"ephemeral"`
+      // until this PR derived it). Struck rather than replaced:
+      //
+      //  · summary: ~~"so nothing created here is durable"~~
+      //  · detail: ~~"so nothing you create here is durable. This screen is not
+      //    told which of the two ways that happens — the attempt either fails
+      //    outright and writes nothing at all, or it succeeds into the workspace
+      //    described next and goes when that does."~~
+      //
+      // `unavailable` has two causes but THREE outcomes, and the third is a
+      // durable write — `repository()` never consults `storage_failure()`, so a
+      // stale or recovered failure leaves the Postgres repository running and a
+      // succeeding write lands IN the database. The full measurement is in the
+      // `what-is-stored` note above. So the absolute was false, and "the two
+      // ways" enumerated two of three.
+      //
+      // Both arms now assert what this screen ESTABLISHES rather than what is,
+      // matching `LABELS.storageUnavailable`, and enumerate nothing. Everything
+      // else on both arms is untouched — in particular the workspace clauses and
+      // the isolated SLAC test database clause, neither of which depends on the
+      // outcome of a create.
       summary: durable
         ? 'Experiment records are in this deployment’s database and survive a restart; the workspace files around them, including anything you exported, are not in it and go with the temporary storage it sits on — this screen cannot say when that will be.'
         : unavailable
-          ? 'A database is configured for this deployment and experiment records are not reaching it, so nothing created here is durable; the workspace is files on the server, discarded with the deployment’s temporary storage.'
+          ? 'A database is configured for this deployment to hold experiment records and they are not reaching it, and nothing this screen has read establishes that a record created now is stored durably; the workspace is files on the server, discarded with the deployment’s temporary storage.'
           : ephemeral
             ? "The workspace is files on the server, not a database — discarded with the deployment's temporary storage."
             : `The backend reports persistence as "${persistence}".`,
       detail: durable
         ? "Experiment records survive a restart. The backend reports persistence as durable, which means their titles, drafts, the answers you confirm and their runs are written to this deployment's own database. The workspace is not stored in a database: it is a working directory of files on the server, it is not shared between deployments, and it is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. One consequence is worth stating plainly, because it is the part that surprises: the official records and evidence sidecars you export are written to that directory and are not in the database, so a restart can restore an experiment that is still marked as exported while the exported files themselves are gone, and the app reports that artifact as stale rather than serving it. The isolated SLAC test database that the protected, read-only diagnostic may read is neither of these — it is not the workspace's storage and it is not where your experiment records go: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
         : unavailable
-          ? "The backend reports persistence as unavailable: a database is configured for this deployment and experiment records are not reaching it, so nothing you create here is durable. This screen is not told which of the two ways that happens — the attempt either fails outright and writes nothing at all, or it succeeds into the workspace described next and goes when that does. The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it; it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage and is not the database this state is about: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
+          ? "The backend reports persistence as unavailable: a database is configured for this deployment to hold experiment records and they are not reaching it. Creating one may fail outright, and nothing this screen has read establishes that a record created now is stored durably. The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it; it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage and is not the database this state is about: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
           : ephemeral
             ? "The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it. The backend reports that storage as ephemeral: it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
             : `The backend reports persistence as "${persistence}". This screen states only what the backend reports.`,
@@ -659,11 +748,29 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       //    `_postgres_available()` is false, the filesystem repository is
       //    selected, and `POST /api/experiments` answers **201** into the working
       //    directory. Measured; see the note on `what-is-stored` for the full
-      //    probe. The `unavailable` clause below now states the invariant that
+      //    probe. ~~The `unavailable` clause below now states the invariant that
       //    holds under both causes — nothing created outlasts that directory —
-      //    and says this screen is not told which outcome applies, because
-      //    `/api/about` publishes `persistence` (the state) and not `backend`
-      //    (which is what separates them).
+      //    and says this screen is not told which outcome applies~~ — STRUCK
+      //    2026-08-28, because that is not an invariant either, and the clause it
+      //    authorised was the FOURTH site of the same defect in this file.
+      //    `unavailable` has two CAUSES but three OUTCOMES: `repository()` never
+      //    consults `storage_failure()`, so a stale or recovered failure leaves
+      //    the Postgres repository running and a succeeding write lands IN the
+      //    database, which does outlast that directory. The full measurement, and
+      //    the two routes by which a recorded failure goes stale, are in the
+      //    `what-is-stored` note. So "nothing you create now outlasts the working
+      //    directory above" was false, and "the attempt either fails and writes
+      //    nothing at all, or leaves a copy there" enumerated two of three.
+      //
+      //    THIS SITE WAS MISSED BY THE TEXT SWEEP THAT FOUND THE OTHER THREE,
+      //    and that is the durable lesson: it says "outlasts the working
+      //    directory" rather than "durable" and "either fails … or leaves a copy"
+      //    rather than "the two ways", so neither search term reached it. It was
+      //    found by the SHAPE guard in `__tests__/settings-page.test.tsx`, which
+      //    is why that guard checks the shape of the claim and not a list of
+      //    sentences. The clause now asserts what this screen establishes, and
+      //    enumerates nothing — `/api/about` publishes `persistence` (the state)
+      //    and not `backend` (which is what separates the causes).
       //
       //  · WHAT THE TWO BROWSER ENTRIES HOLD, itemised rather than promised
       //    away. `tutorialPreference.ts:16-21` states its own exhaustive list —
@@ -689,7 +796,7 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
         durable
           ? 'How long an experiment lasts depends on where this deployment stores experiments, and this one stores them in its own database, so a restart does not take them; what you export from them is not in that database and lasts only as long as the working directory above.'
           : unavailable
-            ? 'How long an experiment lasts depends on where this deployment stores experiments, and here a database is configured but the records are not reaching it, so nothing you create now outlasts the working directory above — the attempt either fails and writes nothing at all, or leaves a copy there that goes when it does, and this screen is not told which.'
+            ? 'How long an experiment lasts depends on where this deployment stores experiments, and here a database is configured to hold them but the records are not reaching it, so creating one may fail outright and nothing this screen has read establishes how long a record created now lasts.'
             : ephemeral
               ? 'How long an experiment lasts depends on where this deployment stores experiments, and this one keeps them in the working directory above, so they last exactly as long as it does.'
               : `How long an experiment lasts depends on where this deployment stores experiments, and the backend reports that as "${persistence}", which this screen does not recognise, so it states nothing further about it.`

@@ -1087,7 +1087,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 69 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 71 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1965,8 +1965,15 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // paragraph as its own `<p class="api-docs-description">`, so a new paragraph
     // re-baselines seven `settings-explorer` accessibility cells on two platforms.)
     // RE-DERIVED from the served document, never incremented: raw sum over the 71
-    // operations = 104,260, minus 2 per `\n\n` separator (211 x 2 = 422) = 103,838.
-    expect(total).toBe(103838);
+    // operations = 104,467, minus 2 per `\n\n` separator (211 x 2 = 422) = 104,045.
+    // 103,838 -> 104,045 (+207): the two `unavailable`-cause descriptions
+    // (`GET /api/about`, `POST /api/assistant/memory/query`) each gained the
+    // sentence refusing the read-back remedy. Written INTO the existing paragraph,
+    // so the paragraph count below does not move. (The raw sum read 104,260 for one
+    // commit after the assertion moved to 104,045 — the arithmetic was left behind
+    // by the edit that changed its inputs, which is the exact failure this test's
+    // own header lectures about. Re-measured over `create_app().openapi()`.)
+    expect(total).toBe(104045);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
