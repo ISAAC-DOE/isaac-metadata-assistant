@@ -1966,10 +1966,16 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // re-baselines seven `settings-explorer` accessibility cells on two platforms.)
     // RE-DERIVED from the served document, never incremented: raw sum over the 71
     // operations = 104,467, minus 2 per `\n\n` separator (211 x 2 = 422) = 104,045.
-    // 103,838 -> 104,045 (+207): the two `unavailable`-cause descriptions
-    // (`GET /api/about`, `POST /api/assistant/memory/query`) each gained the
-    // sentence refusing the read-back remedy. Written INTO the existing paragraph,
-    // so the paragraph count below does not move. (The raw sum read 104,260 for one
+    // 103,838 -> 104,045 (+207): ~~the two `unavailable`-cause descriptions
+    // (`GET /api/about`, `POST /api/assistant/memory/query`) each gained~~ —
+    // CORRECTED 2026-08-29 by independent review. **ONE** description changed,
+    // `GET /api/about`, gaining all 207 characters; grepping the served document
+    // for `READING THE RECORD BACK` returns exactly one operation, and the commit
+    // has one `routes.py` description hunk and one changed `apiFixtures.ts` line.
+    // The second name came from the diff's hunk header, which shows the ENCLOSING
+    // function (`post_assistant_memory_query`) rather than the edited literal.
+    // Written INTO the existing third paragraph, so the `\n\n` count is unchanged
+    // at 211 and the paragraph count below does not move. (The raw sum read 104,260 for one
     // commit after the assertion moved to 104,045 — the arithmetic was left behind
     // by the edit that changed its inputs, which is the exact failure this test's
     // own header lectures about. Re-measured over `create_app().openapi()`.)

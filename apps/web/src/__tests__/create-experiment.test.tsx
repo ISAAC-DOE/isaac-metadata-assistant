@@ -367,6 +367,13 @@ describe('My Experiments · where a new experiment is stored', () => {
     // is not getting them. That is the whole reason the line is not silence.
     expect(line!.textContent).toMatch(/database/i);
     expect(line!.textContent).toMatch(/not reaching it/i);
+    // ...and it delivers it as a RECORDED OBSERVATION, not as a live fact. The
+    // present tense is false under the third outcome — a stale recorded failure
+    // over a database that is answering, where the write lands in PostgreSQL and
+    // IS durable. Added 2026-08-29; this file's own sibling guard passed the
+    // present-tense form for one commit because `/not reaching it/i` matches both.
+    expect(line!.textContent).toMatch(/has recorded that they were not reaching it/i);
+    expect(line!.textContent).not.toMatch(/records? (?:are|is) not reaching it|and they are not reaching it/i);
     // And it must not promise durability...
     expect(line!.textContent).not.toMatch(/stay here across restarts|saved in this/i);
     // ...nor assert an outcome that is false under the gate-refused cause.
@@ -420,6 +427,8 @@ describe('My Experiments · where a new experiment is stored', () => {
     // deleting the line — silence would pass both matchers above.
     expect(text).toMatch(/database/i);
     expect(text).toMatch(/not reaching it/i);
+    // As above: a recorded observation, never a present-tense live fact.
+    expect(text).not.toMatch(/records? (?:are|is) not reaching it|and they are not reaching it/i);
   });
 
   it('reads the NAMED state even when it disagrees with the boolean fallback', async () => {

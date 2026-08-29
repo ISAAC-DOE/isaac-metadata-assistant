@@ -729,8 +729,16 @@ describe('Settings — Overview', () => {
     fireEvent.click(tab('Data & Privacy'));
     const resets = await screen.findByText(/reports persistence as unavailable/i);
     const text = resets.textContent ?? '';
-    // The bad news, still stated before the reader acts.
-    expect(text).toMatch(/to hold experiment records and they are not reaching it/i);
+    // The bad news, still stated before the reader acts — but as a RECORDED
+    // OBSERVATION, not as a live fact. The literal that used to be pinned here
+    // ("...and they are not reaching it") was itself false under outcome (c),
+    // where the recorded failure is stale and records ARE reaching the database.
+    // Pinning it had re-created the "unfixable-without-failing" property this
+    // file's own docstring calls the worst a test can have — one level down.
+    expect(text).toMatch(/to hold experiment records and the backend has recorded/i);
+    // The unhedged PRESENT-TENSE antecedent must not come back, in either voice.
+    expect(text).not.toMatch(/records? (?:are|is) not reaching it/i);
+    expect(text).not.toMatch(/and they are not reaching it/i);
     expect(text).toMatch(/creating one may fail outright/i);
     // What the screen establishes, rather than what is.
     expect(text).toMatch(
@@ -760,16 +768,16 @@ describe('Settings — Overview', () => {
    *     whether a success went to the workspace or to the database.
    *  3. no enumeration of exactly two outcomes. There are three.
    *
-   * (2) IS DELIBERATELY NOT A KEYWORD BAN, because a keyword ban is what an
-   * independent review defeated on the sibling guard in
-   * `create-experiment.test.tsx`: that one matched `/restart/i` and a list of
-   * location nouns, and "held in temporary storage, discarded when the pod is
-   * replaced" evades both while making exactly the forbidden claim. So the rule
-   * here is conditional — a SENTENCE that talks about a record being created and
-   * also uses fate/location vocabulary must carry a hedge — which catches novel
-   * phrasings rather than the ones someone happened to think of. The workspace
-   * and walkthrough sentences are unaffected: they are true regardless of the
-   * outcome of a create, and they do not mention one.
+   * ~~(2) IS DELIBERATELY NOT A KEYWORD BAN ... which catches novel phrasings
+   * rather than the ones someone happened to think of.~~ **STRUCK 2026-08-29.**
+   * The first version of rule (2) WAS still a keyword ban — it merely had two
+   * hand-written alternations instead of one, and an independent review drove
+   * four false claims of the retired class through it green. The vocabulary gate
+   * is now gone (see the note on its removal below), and rule (2) is
+   * unconditional within this arm: any sentence about creating a record must
+   * carry a hedge. The workspace and walkthrough sentences are unaffected — they
+   * are true regardless of the outcome of a create, and they do not mention one,
+   * which is why the check is per SENTENCE and not per string.
    *
    * Asserted over the pure content function, not the rendered page, because the
    * defect is in the copy and a renderer change must not be able to hide it.
@@ -794,14 +802,42 @@ describe('Settings — Overview', () => {
     // was found by this guard, having evaded the text sweep that found the
     // others because it said "outlasts the working directory" rather than
     // "durable" — which is the whole argument for a shape guard over a list.
-    expect(strings.filter((t) => /are not reaching it/i.test(t))).toHaveLength(4);
+    expect(strings.filter((t) => /were not reaching it/i.test(t))).toHaveLength(4);
 
     /** A clause that talks about a record being created in this state. */
     const CREATE_RECORD =
       /creating one|creating an experiment|you create\b|a record created|created here|created in this state|it succeeds/i;
-    /** Vocabulary that asserts where such a record goes, or how long it lasts. */
-    const FATE =
-      /workspace|database|files on the server|temporary storage|discarded|\bpod\b|goes away|restart|lost|lasts|survive|durabl|\bkept\b|only as long as|deleted|erased/i;
+    /*
+     * ~~A second gate, `FATE`, used to narrow rule (2) to sentences that also used
+     * location/permanence vocabulary.~~ REMOVED 2026-08-29 by independent review,
+     * which drove FOUR false claims of the retired class through it GREEN:
+     *
+     *   · "It succeeds into the working directory above and goes when it does."
+     *        — `FATE` listed `workspace` but NOT `working directory`, which is the
+     *          exact phrase the retired `how-long-it-is-kept` copy used.
+     *   · "Anything you create now is gone the next time this deployment is
+     *     rolled out."            — `gone`/`rolled out` were in neither list.
+     *   · "A record created now will not be here tomorrow."
+     *                             — no `FATE` token at all.
+     *   · "There are exactly two possibilities and this screen is not told which."
+     *                             — reworded past rule (3)'s two patterns.
+     *
+     * The claim that the conditional structure "catches novel phrasings rather
+     * than the ones someone happened to think of" was OVERSTATED: it improved
+     * precision, not recall, and the one novel phrasing it had been tested against
+     * happened to contain two `FATE` tokens. That is exactly the shape of error
+     * this test exists to catch, made by the test.
+     *
+     * THE GATE IS GONE. In the `unavailable` arm — the only arm scanned here —
+     * EVERY sentence that talks about creating a record must carry a hedge, with
+     * no vocabulary condition to evade. That is a true invariant of this arm
+     * rather than a wider ban: this screen is given `persistence` and not
+     * `backend`, so it cannot know the fate of ANY record created in this state,
+     * and a sentence about creating one therefore has nothing unhedged to say.
+     * It is checked per sentence, so the workspace and walkthrough clauses —
+     * which are true regardless of a create and do not mention one — are
+     * unaffected.
+     */
     /** The hedges that make such a clause honest under all three outcomes. */
     const HEDGE = /may fail outright|nothing this screen has read establishes/i;
 
@@ -810,16 +846,18 @@ describe('Settings — Overview', () => {
       expect(text).not.toMatch(
         /nothing (?:you )?create[ds]? (?:here|in this state) is (?:not )?durable/i,
       );
-      // (3) a two-outcome enumeration, in the two forms it has already taken.
+      // (3) a two-outcome enumeration. Four forms now: the two it has taken, plus
+      // the two an independent review reworded past them.
       expect(text).not.toMatch(/(?:which of )?the two ways/i);
       expect(text).not.toMatch(/either .* or it succeeds/i);
+      expect(text).not.toMatch(/exactly two|one of two|two (?:possibilities|outcomes|ways)/i);
       // The specific promised destination the retired copy made.
       expect(text).not.toMatch(/succeeds into the workspace/i);
 
       // (2) sentence by sentence, so a true workspace clause beside a create
       // clause does not have to carry the create clause's hedge.
       for (const sentence of text.split(/(?<=[.;])\s+/)) {
-        if (CREATE_RECORD.test(sentence) && FATE.test(sentence)) {
+        if (CREATE_RECORD.test(sentence)) {
           expect(sentence).toMatch(HEDGE);
         }
       }

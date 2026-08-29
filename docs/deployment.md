@@ -101,19 +101,36 @@ same deterministic core in a container.
   assert, is that **no experiment record created in this state is durable**.~~
   **That absolute is false on the recovered-write path**, and it errs by
   understating persistence — the same direction as the defect this section was
-  written to correct. What a surface given `state` alone may assert is narrower:
-  **a database is configured and records are not reaching it, the create may fail
-  outright, and nothing in this state establishes that a record created in it is
-  stored durably.** ~~A caller that needs to know reads the record back.~~
-  **Struck 2026-08-28, one commit after it was written, by independent review:
-  the read-back returns `200` for a record that is NOT durable.** Every route
-  reads through `ws.load_experiment` from the working directory
-  (`experiment_repository.py:20-26`, "THE FILESYSTEM IS STILL THE WORKING COPY"),
-  so under the degraded-to-filesystem cause the record is there and readable while
-  being exactly the thing the sentence warns about. The remedy failed in the
-  UNSAFE direction — it answers "fine" in the one outcome it exists to catch.
-  A caller that needs to know reads `GET /api/health`'s `experiment_storage`,
-  whose `backend` separates the two causes; `persistence` alone does not.
+  written to correct.
+
+  ~~What a surface given `state` alone may assert is narrower: **a database is
+  configured and records are not reaching it**, the create may fail outright, and
+  nothing in this state establishes that a record created in it is stored
+  durably.~~ **The ANTECEDENT was corrected 2026-08-29, one commit later, by a
+  second independent review — and while it stood this page CONTRADICTED ITSELF
+  within eight lines.** `:96-99` above says the database may have "simply
+  recovered" and the create then "succeeds into PostgreSQL and IS durable"; this
+  sentence nonetheless licensed a surface to assert, in the PRESENT TENSE, that
+  records **are** not reaching it. They may be. `storage_status()` reads a
+  RECORDED failure and opens no connection, and `repository()` never consults
+  that record at all.
+
+  **What a surface given `state` alone may assert, corrected:** a database is
+  configured, **the backend HAS RECORDED that records were not reaching it**, the
+  create may fail outright, and nothing in this state establishes that a record
+  created in it is stored durably. Only the consequence clause was hedged the
+  first time; the antecedent asserted a live fact from a stored observation.
+
+  ~~A caller that needs to know reads the record back.~~ **Struck 2026-08-28, one
+  commit after it was written, by independent review: the read-back returns `200`
+  for a record that is NOT durable.** Every route reads through
+  `ws.load_experiment` from the working directory (`experiment_repository.py:20-27`,
+  "THE FILESYSTEM IS STILL THE WORKING COPY"), so under the degraded-to-filesystem
+  cause the record is there and readable while being exactly the thing the sentence
+  warns about. The remedy failed in the UNSAFE direction — it answers "fine" in the
+  one outcome it exists to catch. A caller that needs to know reads
+  `GET /api/health`'s `experiment_storage`, whose `backend` separates the two
+  causes; `persistence` alone does not.
 - **Health** — `GET /krish/api/health`; pod probes hit the container port
   directly (bypassing ingress/auth), and this path stays open even when
   API-key auth is enabled.

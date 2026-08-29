@@ -669,10 +669,25 @@ export const LABELS = {
    * because there the app has established NOTHING. Here it has established
    * something bad, which is a different thing from knowing nothing.
    */
+  /*
+   * THE ANTECEDENT WAS CORRECTED 2026-08-29, one commit after this string was
+   * written, by independent review. ~~"and they are not reaching it"~~ is a
+   * PRESENT-TENSE assertion, and it is FALSE under the third outcome the same
+   * PR discovered: `storage_status()` reads a RECORDED failure and opens no
+   * connection, while `repository()` never consults that record at all, so a
+   * stale or recovered failure leaves the Postgres repository running and a
+   * succeeding write IS durable. The consequence clause was hedged and the
+   * antecedent was not — which is the same defect one clause to the left.
+   *
+   * This site was ALSO missed by the sweep that found the four in
+   * `settingsContent.ts`, because the phrase is split across a `+`
+   * concatenation and no single-line grep reaches it. That is the second time
+   * in this PR a text sweep has missed a site for a mechanical reason.
+   */
   storageUnavailable:
-    'A database is configured to hold experiments for this deployment, and they are not ' +
-    'reaching it. Creating one may fail outright, and nothing on this screen establishes that ' +
-    'a record created now is stored durably.',
+    'A database is configured to hold experiments for this deployment, and the backend has ' +
+    'recorded that they were not reaching it. Creating one may fail outright, and nothing on ' +
+    'this screen establishes that a record created now is stored durably.',
 
   actionLaunchGuidedDemo: 'Launch Guided Demo',
   launchGuidedDemoBody:
