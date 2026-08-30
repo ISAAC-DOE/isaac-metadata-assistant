@@ -9554,19 +9554,34 @@ def post_run_remove(
 #
 # WHAT THESE FOUR OPERATIONS ARE FOR. A scientist captures things that no rule can
 # place: a sentence about why a scan was repeated, a column heading nothing
-# recognises, an aside in a transcript. Today every pipeline in this repository
-# still drops such content, silently — NOTHING WAS REWIRED TO FEED THESE
-# OPERATIONS. They are the destination that now exists, and the only producer is a
-# person typing into the panel: `POST .../notes` has exactly one caller in the
-# application, the capture box, which always sends `source: "typed_note"` with no
-# run and no candidate. The intended FIRST automatic producer is
-# `providers/extraction.py`'s `unrecognised_labels`, which is computed and then
-# discarded; wiring it is a later slice, and until it lands no `csv_column`,
-# `transcript`, `file_listing_line` or `extraction_residue` note is ever created,
-# no note carries a `run_id`, and no note carries a `candidate_field_path`. The
-# governing rule for what DOES arrive here is that NOTHING CAPTURED IS EVER
-# SILENTLY DISCARDED — there is no DELETE here, and there will not be one.
-# Dismissal is a state.
+# recognises, an aside in a transcript.
+#
+# ~~"Today every pipeline in this repository still drops such content, silently —
+# NOTHING WAS REWIRED TO FEED THESE OPERATIONS. They are the destination that now
+# exists, and the only producer is a person typing into the panel … until it lands
+# no `csv_column`, `transcript`, `file_listing_line` or `extraction_residue` note
+# is ever created, no note carries a `run_id`, and no note carries a
+# `candidate_field_path`."~~ — **CORRECTED 2026-08-29: THERE IS A SECOND PRODUCER
+# AND IT IS IN THIS FILE.** `post_transcript` calls `Experiment.capture_note` once
+# per transcript segment with `source="transcript"`, the capture's `run_id`, and
+# the segment's `candidate_field_path`/`candidate_rule` when the reader proposed
+# exactly one — so all three of the enumerated absences are false. Measured over
+# HTTP: a finalized three-sentence transcript on a record with one run stores three
+# `transcript` notes, all three carrying that `run_id`, one carrying
+# `candidate_field_path="context.temperature_K"`. Struck rather than rewritten
+# because this exact sentence stood in FOUR places at once and a reader who
+# remembers any one of them will otherwise re-derive the wrong conclusion.
+#
+# WHAT REMAINS TRUE, and is why the paragraph existed. `POST .../notes` still has
+# exactly one caller in the application — the capture box, which always sends
+# `source: "typed_note"` with no run and no candidate. `csv_column`,
+# `file_listing_line` and `extraction_residue` still have no producer at all: the
+# intended FIRST automatic one is `providers/extraction.py`'s
+# `unrecognised_labels`, which is computed and then discarded, and wiring it is
+# still a later slice. So the note vocabulary is still wider than its producers —
+# by three members, not four. The governing rule for what DOES arrive here is that
+# NOTHING CAPTURED IS EVER SILENTLY DISCARDED — there is no DELETE here, and there
+# will not be one. Dismissal is a state.
 #
 # WHAT THEY ARE NOT. None of them writes a scientific value, mints evidence, or
 # confirms anything. `isaac_api.notes.Note` cannot even REPRESENT a confirmed value
@@ -9623,11 +9638,23 @@ NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
 #: description and the ``review`` operation's said the same thing in prose. The first
 #: half is true of all 25. The second half describes an ACTION, and for seven of them
 #: no request can perform it. Measured over HTTP on a record created through ``POST
-#: /api/experiments``, with one run, against every write route this application has —
-#: ``POST .../answers``, ``POST .../edit``, ``POST .../runs/{id}/answers``, ``PATCH
-#: .../runs/{id}`` and ``POST .../runs/{id}/overrides`` — the six
-#: ``system.configuration.*`` paths and ``timestamps.created_utc`` are refused by ALL
-#: FIVE (``422 unrecognized_field`` from the four field routes, ``422
+#: /api/experiments``, with one run, against every write route this application has:
+#:
+#: ~~``POST .../answers``, ``POST .../edit``, ``POST .../runs/{id}/answers``, ``PATCH
+#: .../runs/{id}`` and ``POST .../runs/{id}/overrides`` — … refused by ALL FIVE (``422
+#: unrecognized_field`` from the four field routes, ``422 not_overridable`` from the
+#: override route)~~ — **CORRECTED 2026-08-29: THE ENUMERATION WAS FIVE ROUTES AND
+#: THERE ARE SIX.** ``POST .../runs/{run_id}/edit`` was missing, in the one paragraph
+#: whose whole claim is that the measurement was exhaustive — and
+#: :func:`_record_enum_fields`'s own table, in this same file, has listed six all
+#: along, so two places one module apart disagreed about how many write routes exist.
+#: The conclusion is UNCHANGED and was re-measured rather than reasoned: ``POST
+#: .../runs/{run_id}/edit`` answers ``422 unrecognized_field`` at all 25 paths, so it
+#: adds no member and removes none. That is exactly why the correction matters — a set
+#: derived from an incomplete route enumeration is only ACCIDENTALLY right, and the
+#: next route added would have been omitted the same way. Re-measured over all six:
+#: the six ``system.configuration.*`` paths and ``timestamps.created_utc`` are refused
+#: by ALL SIX (``422 unrecognized_field`` from the five field routes, ``422
 #: not_overridable`` from the override route). The sentence pointed at a locked door,
 #: on the one screen whose purpose is to stop captured content being thrown away.
 #:
@@ -9647,28 +9674,51 @@ NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
 #: this one, in the same import, so the served answer and the enforced answer cannot
 #: drift. ``test_note_value_writability_is_measured_not_asserted`` re-derives it the
 #: only way that actually proves it: by sending a write at every one of the 25 paths
-#: to every one of the five routes and comparing the observed statuses to this set.
+#: to every one of the ~~five~~ **six** routes and comparing the observed statuses to
+#: this set. (Five until 2026-08-29; see the correction above for why the missing
+#: sixth changed no member and was still worth fixing.)
 #:
 #: TWO THINGS IT DOES NOT PROMISE, and both matter to the copy built on it. It does
 #: not promise the value will be ACCEPTED — a closed enum, a required sibling
 #: property or the no-guessing rules may still refuse the particular value. And
 #: ~~every one of these routes is a RUN's, so a record with no runs yet can write none
-#: of them~~ — **CORRECTED: TRUE OF 18 OF THE 19, AND FALSE OF ONE.**
+#: of them~~ — **CORRECTED: TRUE OF ~~18 OF THE 19~~ 17 OF THE 18, AND FALSE OF ONE.**
 #: ``system.technique`` is now also accepted by ``POST /api/experiments/{id}/answers``
 #: and its correction operation (see :func:`_record_enum_fields`), which are the
 #: RECORD's, so that one path IS writable on a record with no runs. Membership still
 #: means "a route exists", not "you can do it right now".
 #:
-#: **THE SERVED SENTENCE STILL SAYS THE OLD THING, AND THAT IS NAMED RATHER THAN LEFT
-#: TO BE FOUND.** The notes-listing operation's description ends *"Both routes are a
-#: run's, so a record with no runs can write none of them yet"*, which is now false for
-#: ``system.technique``. It is not corrected in this change because
-#: ``apps/web/src/test/apiFixtures.ts`` transcribes that description verbatim and
-#: ``test_contract_description_parity`` compares the two — so the sentence and its
-#: transcription have to move together, and this slice is scoped to the backend. The
-#: defect it leaves is the MILD direction (a reader is told they need a run when they
+#: (The **19** was arithmetic, not a measurement, and it was wrong in the correction
+#: that fixed a different false claim — re-measured 2026-08-29, this set has **18**
+#: members, of which one is the record-level exception, leaving **17**. Struck rather
+#: than silently swapped because a wrong count inside a paragraph headed "CORRECTED"
+#: is the hardest kind to doubt. Both halves are now measured by
+#: ``test_the_served_record_writable_set_is_what_the_record_routes_actually_do``, so
+#: neither number can drift again without a test moving.)
+#:
+#: ~~**THE SERVED SENTENCE STILL SAYS THE OLD THING, AND THAT IS NAMED RATHER THAN
+#: LEFT TO BE FOUND.** The notes-listing operation's description ends *"Both routes
+#: are a run's, so a record with no runs can write none of them yet"* … It is not
+#: corrected in this change because ``apps/web/src/test/apiFixtures.ts`` transcribes
+#: that description verbatim … and this slice is scoped to the backend.~~ —
+#: **CLOSED 2026-08-29.** The served sentence no longer says it: the description now
+#: names the record-level pair beside the two run routes, and the transcription in
+#: ``apps/web/src/test/apiFixtures.ts`` moved in the same change, which is what the
+#: deferral was waiting for. Kept struck rather than deleted because "the served
+#: sentence is false" is exactly the claim a future session would otherwise re-derive
+#: from scratch — and because the reason it was deferred (two files that must move
+#: together) is the reason it stayed false for a while, which is worth remembering.
+#: The defect it left was the MILD direction (a reader told they need a run when they
 #: no longer do), not the direction this repository's disclosure rules exist to
-#: prevent (a sentence pointing at a locked door).
+#: prevent (a sentence pointing at a locked door) — that is why deferring it was
+#: defensible and why closing it is still the right end state.
+#:
+#: **AND THE PER-PATH ANSWER IS NOW SERVED TOO, not left to the reader's arithmetic.**
+#: A client cannot tell WHICH of the 18 is the record-level one from
+#: ``value_writable_field_paths`` alone, and the panel's hint is read about one field.
+#: :data:`NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD` is the subset a RECORD-level
+#: operation accepts, served as ``record_writable_field_paths`` — derived here, never
+#: transcribed into the frontend, for the same reason this constant is.
 #:
 #: THE THIRD ROUTE IS IN THE DERIVATION EVEN THOUGH IT CHANGES NO MEMBER TODAY.
 #: ``system.technique`` is already admitted by the override clause and
@@ -9693,6 +9743,43 @@ NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT: frozenset[str] = frozenset(
     if path in RUN_WRITABLE_FIELD_PATHS
     or ws.field_address(path) in EXPERIMENT_OVERRIDABLE_ADDRESSES
     or path in _record_enum_fields()
+)
+
+
+#: OF THOSE, THE ONES A **RECORD**-LEVEL OPERATION ACCEPTS — so a surface can say WHERE.
+#:
+#: **IT EXISTS BECAUSE "ON A RUN OF THIS RECORD" BECAME FALSE FOR ONE OF THE 18.**
+#: ``UnmappedNotesPanel``'s hint, and this operation's description, both said the value
+#: is entered *on a run* — true of every member when it was written, because both
+#: accepting routes were addressed under ``/runs/{run_id}``. ``system.technique`` is now
+#: also answered at ``POST /api/experiments/{id}/answers`` and corrected at ``POST
+#: /api/experiments/{id}/edit``, which are the RECORD's. Measured over HTTP on a record
+#: with **zero runs**: ``{"system.technique": "XAS"}`` at ``.../answers`` returns ``200``
+#: and the value is stored; the record still has no runs afterwards.
+#:
+#: WITHOUT THIS THE FRONTEND WOULD HAVE TO TRANSCRIBE THE ANSWER, which is the one thing
+#: :data:`NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT`'s whole discipline forbids: a
+#: client-side list of "which of these is the record-level one" is free to drift the
+#: moment :func:`_record_enum_fields` yields a different set, and nothing would fail.
+#: Deriving it here means the sentence a scientist reads and the route that enforces it
+#: have ONE definition.
+#:
+#: IT IS AN INTERSECTION, NOT A SECOND DERIVATION. Every member is a member of the set
+#: above by construction, so a path can never be reported record-writable while being
+#: reported unwritable — a contradiction the panel would render as two sentences about
+#: one field. ``system.domain`` is in :func:`_record_enum_fields` and NOT in
+#: :data:`NOTE_MAPPABLE_FIELD_PATHS`, so the intersection is doing real work rather than
+#: restating its input.
+#:
+#: IT PROMISES NOTHING MORE THAN THE SET IT NARROWS: not that the particular value will
+#: be accepted (these are closed enums — an off-enum value is ``422
+#: not_an_allowed_value``), and not that the run routes stop working for it.
+#: ``system.technique`` is accepted by ``POST .../runs/{run_id}/overrides`` as well;
+#: membership here says a record-level route ALSO exists, never that it is the only one.
+NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD: frozenset[str] = frozenset(
+    path
+    for path in NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT
+    if path in _record_enum_fields()
 )
 
 
@@ -9870,6 +9957,13 @@ def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
         # to drift from what the routes enforce. See
         # `NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT` for the measurement.
         "value_writable_field_paths": sorted(NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT),
+        # AND THE SERVER'S OWN ANSWER TO "WHERE — ON A RUN, OR ON THE RECORD?", which is
+        # a THIRD question and has a different answer for exactly one of the 18 today.
+        # A hint is read about the field in front of the reader, so "on a run of this
+        # record" has to be true of THAT path or it sends them to the wrong screen. See
+        # `NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD`. Served rather than transcribed
+        # for the same reason the two lines above are.
+        "record_writable_field_paths": sorted(NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD),
         "sources": sorted(notes.NOTE_SOURCES),
         "experiment_version": exp.version_token(),
     }
@@ -9913,15 +10007,28 @@ _NOTE_LIST_DESC = (
         "write operation in this build accepts a value at — `PATCH "
         "/api/experiments/{experiment_id}/runs/{run_id}` for a run's own field, "
         "`POST /api/experiments/{experiment_id}/runs/{run_id}/overrides` for a "
-        "record-level one. MAPPING A NOTE AND ENTERING ITS VALUE ARE DIFFERENT "
+        "record-level one, and the record's own pair named at the end of this "
+        "paragraph for the paths the official schema closes with an enum. "
+        "MAPPING A NOTE AND ENTERING ITS VALUE ARE DIFFERENT "
         "ACTS, and for 7 of the 25 mappable paths the second one has no route at "
         "all: every write operation refuses them. Mapping to such a path is still "
         "correct and still keeps the content on the record in full — this key "
         "says only that no request can then put a value there, so a client must "
         "not tell a person to go and do it. It promises nothing about a value "
         "being ACCEPTED: a closed enum, a required sibling property or the "
-        "no-guessing rules may still refuse the particular value. Both routes are "
-        "a run's, so a record with no runs can write none of them yet.\n\n"
+        "no-guessing rules may still refuse the particular value. AND NOT EVERY "
+        "ACCEPTING ROUTE IS A RUN'S — this sentence used to end \"Both routes are "
+        "a run's, so a record with no runs can write none of them yet\", which "
+        "stopped being true when the record-level enum write shipped. "
+        "`record_writable_field_paths` is the sub-subset a RECORD-level operation "
+        "also accepts — `POST /api/experiments/{experiment_id}/answers` to answer "
+        "and `POST /api/experiments/{experiment_id}/edit` to correct, for the "
+        "paths the official schema closes with an enum. A path in it can be given "
+        "a value on a record that has no runs at all; a path outside it needs a "
+        "run first. The two keys are served separately because a client that "
+        "tells a person WHERE to enter the value must be right about the path in "
+        "front of them, and that answer cannot be inferred from the wider "
+        "subset.\n\n"
         "`unreadable_entries` counts stored entries this build cannot present as "
         "notes. There are two kinds and the count does not separate them: an "
         "entry the note model refused, and an entry whose id another note already "

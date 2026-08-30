@@ -176,11 +176,28 @@ SOURCE_TYPE_ORIGIN: dict[str, str] = {
 #: ``'typed_note'``. But ``POST /api/experiments/{id}/notes`` validates ``source``
 #: against ``NOTE_SOURCES`` and accepts ANY member of it, so a direct API caller
 #: CAN create a ``transcript`` note today and this module WILL report
-#: :data:`ORIGIN_VOICE` for it. What does not exist is a transcription producer:
-#: nothing in this build records speech, transcribes anything, or writes such a
-#: note on its own. So "unreachable" is false at the API boundary and true of the
-#: application — and no surface may present voice capture as a feature that
-#: exists. The same holds for ``csv_column``, ``file_listing_line`` and
+#: :data:`ORIGIN_VOICE` for it.
+#:
+#: ~~"What does not exist is a transcription producer: nothing in this build records
+#: speech, transcribes anything, or writes such a note on its own. So 'unreachable' is
+#: false at the API boundary and true of the application"~~ — **HALF CORRECTED
+#: 2026-08-29, and the two halves must not be collapsed back together.** *"Writes such
+#: a note on its own"* is FALSE: ``routes.post_transcript`` (``POST
+#: /api/experiments/{id}/transcript``) writes one ``source="transcript"`` note per
+#: segment of a finalized transcript, so ``transcript`` is reachable inside the
+#: APPLICATION, not merely at the API boundary. *"Transcribes anything"* is STILL
+#: TRUE — that route reads text a person already finalized, and ``POST
+#: /api/transcription`` answers ``501 no_provider_configured`` in every deployment.
+#: *"Records speech"* is the half to state carefully rather than repeat:
+#: ``TranscriptCapturePanel`` ships ``MediaRecorder``/``getUserMedia`` and is mounted,
+#: so audio CAN be captured in the browser — it simply reaches no transcriber.
+#: (``test_provenance.py`` has carried that correction since 2026-08-24; this file had
+#: not, which is how one sweep's finding stays local to the file it was found in.)
+#: **So no surface may present voice capture as a feature that exists**, which is what
+#: this note was for and is unchanged; what it may no longer say is that nothing in
+#: the application creates a ``transcript`` note.
+#:
+#: The unqualified form DOES still hold for ``csv_column``, ``file_listing_line`` and
 #: ``extraction_residue``: accepted by the route, produced by nothing.
 NOTE_SOURCE_ORIGIN: dict[str, str] = {
     # Someone typed it into this application.
