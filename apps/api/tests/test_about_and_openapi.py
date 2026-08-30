@@ -921,6 +921,38 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # nothing is written. There is NO DELETE: a decision is revised, which appends.
     ("/api/experiments/{experiment_id}/conflicts", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/conflicts/resolve", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    # PERSISTENT INGESTION PROPOSALS. The split is the Notes API's, for the Notes
+    # API's reason: a proposal is stored INSIDE the experiment's own document, so
+    # creating one and reviewing one both REWRITE THE RECORD and carry the record's
+    # `If-Match` with the whole 400/412/428 set. There is deliberately no per-proposal
+    # validator, and deliberately NO DELETE — rejecting, superseding and withdrawing
+    # are review acts on the review operation, so they appear here as a `200` on a
+    # POST and not as a `204` anywhere.
+    #
+    # THE CREATE IS THE ONE POST IN THIS TABLE THAT CREATES AND DOES NOT ANSWER `201`,
+    # and that is deliberate rather than an oversight — see the comment above the
+    # route. It has TWO outcomes: it mints a proposal, or it finds one already
+    # carrying the caller's `client_request_key` and mints nothing. An operation-level
+    # `201` would assert that this operation creates, which is false of the second, and
+    # `test_every_success_response_has_its_own_description` (rightly) refuses the two
+    # success codes that would let it say both. The status says the request succeeded;
+    # the body's `deduplicated` says which happened.
+    #
+    # The review POST's `409` carries four distinct refusals — `human_actor_required`,
+    # `proposal_stale`, `target_run_removed` and `target_scope_mismatch` — and every
+    # one of them writes nothing. The two reads take no `If-Match` because they write
+    # nothing; the list's `422` is its own `unknown_cursor` refusal as well as the
+    # framework's parameter validation, which is why the operation declares it.
+    ("/api/experiments/{experiment_id}/proposals", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/proposals", "post"): [
+        "200", "400", "401", "404", "412", "422", "428", "503",
+    ],
+    ("/api/experiments/{experiment_id}/proposals/{proposal_id}", "get"): [
+        "200", "401", "404", "422", "503",
+    ],
+    ("/api/experiments/{experiment_id}/proposals/{proposal_id}/review", "post"): [
+        "200", "400", "401", "404", "409", "412", "422", "428", "503",
+    ],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],

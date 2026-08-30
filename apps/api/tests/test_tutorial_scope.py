@@ -35,6 +35,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import isaac_api.proposals as proposals
+import isaac_api.submissions as submissions
 import isaac_api.workspace as ws
 from isaac_api.routes import TUTORIAL_SESSION_HEADER
 
@@ -966,10 +968,51 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
         # a ``Note`` has an ``experiment_id`` and no ``session_id``, and the scope
         # stays a property of the directory the state was read from.
         "notes",
+        # ``proposals`` was added with persistent ingestion proposals, and it is
+        # ADMITTED HERE DELIBERATELY rather than because a test went red. It belongs
+        # for exactly the reason ``notes`` does: a proposal is a suggestion made
+        # against THIS record, stored beside ``notes`` and outside ``draft``, so it
+        # is part of the record's own document. And it satisfies the property this
+        # test actually defends — an ``IngestionProposal`` has an ``experiment_id``
+        # and NO ``session_id``, so the scope stays a property of the directory the
+        # state was read from and a state file cannot record a scope that goes stale
+        # when the directory moves. The per-proposal assertion below is what checks
+        # that rather than this comment.
+        "proposals",
     }
     assert "session_id" not in state and "scope" not in state and "root" not in state
     assert len(state["runs"]) == 1, "the per-run assertion below must not be vacuous"
     assert all("session_id" not in r and "scope" not in r for r in state["runs"])
+    # A PROPOSAL IS ADDED FOR THE SAME REASON THE RUN IS: without one,
+    # ``state["proposals"]`` is empty and the per-proposal assertion is vacuous —
+    # ``all(...)`` over an empty list cannot fail, so it would look like coverage
+    # while testing nothing. It is built directly rather than through the route,
+    # because the route needs a note, a writable target path and the record's ETag,
+    # none of which this test is about.
+    exp.capture_note(text="the pellet was CuO2", source="typed_note")
+    exp.add_proposal(
+        proposals.new_proposal(
+            proposal_id="01JQZZ2PROPOSAL0000000000",
+            experiment_id=exp.id,
+            note_id=exp.notes[0].id,
+            target_field_path="sample.material.name",
+            proposed_value="CuO2",
+            rule="the token after `the pellet was` matched a material label",
+            source="typed_note",
+            proposed_utc="2026-07-12T00:00:04Z",
+            base_rev=0,
+            target_digest="0" * 64,
+            trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+            run_id=exp.runs[0].id,
+        )
+    )
+    state = exp.to_state()
+    assert len(state["proposals"]) == 1, (
+        "the per-proposal assertion below must not be vacuous"
+    )
+    assert all(
+        "session_id" not in p and "scope" not in p for p in state["proposals"]
+    )
     # A round trip defaults to the ordinary scope unless the reader says otherwise.
     assert ws.Experiment.from_state(state).session_id is None
     assert ws.Experiment.from_state(state, session_id="b" * 22).session_id == "b" * 22

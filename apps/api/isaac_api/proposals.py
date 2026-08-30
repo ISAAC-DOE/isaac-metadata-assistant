@@ -167,11 +167,9 @@ __all__ = [
     "STATE_REJECTED",
     "STATE_SUPERSEDED",
     "STATE_WITHDRAWN",
-    "TERMINAL_STATES",
     "UnsupportedProposal",
     "accept_proposal",
     "excerpt_of",
-    "find",
     "find_by_client_request_key",
     "new_proposal",
     "proposal_view",
@@ -207,7 +205,21 @@ STATE_KEY = "proposals"
 PROPOSAL_STATUS = "ingestion_proposal"
 
 #: Nobody has acted on this proposal. The state every proposal opens in, and the
-#: ONLY state a review act may be performed from — see :data:`TERMINAL_STATES`.
+#: ONLY state a review act may be performed from — see :func:`_refuse_a_closed_proposal`,
+#: which is the single place that rule is enforced.
+#:
+#: THAT IS A DECISION RATHER THAN AN INEVITABILITY, and it is made in the direction
+#: that cannot lose a fact: a proposal that has been rejected and is then accepted
+#: would have a history saying both, and a reader would have to know the ordering
+#: rule to say which one stands. Re-proposing is expressible — it is a NEW proposal,
+#: with its own id, its own digest and its own audit trail — and that keeps every
+#: recorded judgement about the old one readable exactly as it was made.
+#:
+#: **A `TERMINAL_STATES` CONSTANT USED TO SIT BELOW THIS AND IS DELETED.** It was
+#: exported and documented and NOTHING READ IT — including the enforcement above,
+#: which tests `state != STATE_OPEN` directly. A named set that reads as the rule
+#: while enforcing none of it is worse than no set at all: the next reader adds a
+#: state, updates the constant, and believes they have changed a behaviour.
 STATE_OPEN = "open"
 #: A person accepted the value AND it was applied through the manual writer that
 #: owns its target. Contract §3 and §6: acceptance-without-application is
@@ -234,16 +246,6 @@ PROPOSAL_STATES: tuple[str, ...] = (
     STATE_SUPERSEDED,
     STATE_WITHDRAWN,
 )
-
-#: Every state but :data:`STATE_OPEN`. A review act is refused from any of them.
-#:
-#: This is a decision rather than an inevitability, and it is made in the direction
-#: that cannot lose a fact: a proposal that has been rejected and is then accepted
-#: would have a history saying both, and a reader would have to know the ordering
-#: rule to say which one stands. Re-proposing is expressible — it is a NEW proposal,
-#: with its own id, its own digest and its own audit trail — and that keeps every
-#: recorded judgement about the old one readable exactly as it was made.
-TERMINAL_STATES: frozenset[str] = frozenset(PROPOSAL_STATES) - {STATE_OPEN}
 
 #: The opening entry in every proposal's history, as ``capture`` is for a note. Not
 #: a review act: it is what makes the history complete from the first moment rather
@@ -870,10 +872,6 @@ class IngestionProposal:
     def attributed(self) -> bool:
         return self.trust_basis != _unattributed()
 
-    @property
-    def open(self) -> bool:
-        return self.state == STATE_OPEN
-
     def to_state(self) -> dict:
         """The persistence AND wire shape, the four constants and ``applied`` included.
 
@@ -1062,7 +1060,14 @@ def _appended(
 def _refuse_a_closed_proposal(proposal: IngestionProposal, action: str) -> None:
     """A review act reaches an OPEN proposal or it reaches none.
 
-    See :data:`TERMINAL_STATES` for why this is a decision rather than an
+    THE ONLY PLACE **THIS MODULE** ENFORCES IT — precisely stated, because
+    ``routes.post_proposal_review`` checks the same condition itself and answers
+    ``422 proposal_not_open`` before ever calling one of these acts, so a break here
+    is invisible from every route. That is why the guard has a test of its own that
+    drives all four acts directly rather than over HTTP.
+
+    It tests :data:`STATE_OPEN` directly rather than membership of a set of the
+    others — see :data:`STATE_OPEN` for why this is a decision rather than an
     inevitability, and for what a caller does instead (mint a new proposal).
     """
     if proposal.state != STATE_OPEN:
@@ -1247,21 +1252,14 @@ def withdraw_proposal(
     )
 
 
-def find(
-    proposals: Iterable[IngestionProposal], proposal_id: str
-) -> IngestionProposal | None:
-    """THE proposal with that id, or ``None``. The last match wins.
-
-    Deterministic on a hand-edited document holding two rows for one id, and never a
-    silent merge — ``conflict_resolution.find``'s rule. In practice
-    ``workspace._hydrate_proposals`` files a duplicate id as unreadable, exactly as
-    it does for notes, so this branch is unreachable through any route.
-    """
-    found = None
-    for proposal in proposals:
-        if proposal.proposal_id == proposal_id:
-            found = proposal
-    return found
+# A ``find(proposals, proposal_id)`` helper used to sit here, mirroring
+# ``conflict_resolution.find``, and it is DELETED rather than kept for symmetry:
+# nothing called it. ``Experiment.get_proposal`` is what every route uses, and it is
+# the only lookup that can be correct here — it searches the experiment that HOLDS
+# the proposal, where the deleted helper searched whatever iterable a caller passed.
+# Its "last match wins" tie-break was also unreachable by construction:
+# ``workspace._hydrate_proposals`` files a duplicate ``proposal_id`` as unreadable, so
+# no hydrated list can contain two.
 
 
 def find_by_client_request_key(

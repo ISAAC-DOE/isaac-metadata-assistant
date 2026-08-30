@@ -1988,7 +1988,33 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // than leaving it asserted here. RE-DERIVED from the served document and never
     // incremented: raw sum over the 75 operations = 115,429, minus 2 per `\n\n`
     // separator (235 x 2 = 470) = 114,959.
-    expect(total).toBe(114959);
+    // 114,959 -> 117,038 (+2,079): THREE descriptions were corrected and NO operation
+    // was added — the count above stays at 75. Per operation, re-derived rather than
+    // apportioned: `POST .../proposals` 2,781 -> 3,205 (+424, the `201`/`200` and
+    // precondition-ordering corrections), `POST .../proposals/{id}/review` 3,971 ->
+    // 5,096 (+1,125, the fourth `409` and the disclosed accept-before-precondition
+    // ordering), `POST .../transcript` 2,580 -> 3,110 (+530, its `accept_contract`
+    // prose no longer claims a candidate can become a value ONLY through
+    // `PATCH .../runs/{run_id}` now that a second write path exists for the same note
+    // content).
+    //
+    // THE PARAGRAPH COUNT DELIBERATELY DOES NOT MOVE, and it was written that way on
+    // purpose rather than happening to: every one of the three corrections was woven
+    // INTO an existing paragraph. Appending would have re-baselined the
+    // `settings-explorer` accessibility cells on two platforms — the Endpoint Explorer
+    // renders each paragraph as its own `<p class="api-docs-description">` — which the
+    // 104,045 entry above already names as a hard constraint rather than a preference.
+    // Per operation the remainder counts are unchanged at 7, 8 and 6.
+    //
+    // RE-DERIVED from the served document three ways, never incremented:
+    //   · the splitPurpose rule transcribed into Python over `create_app().openapi()`,
+    //     restricted to the 75 operations this array names: total 117,038, rest 235;
+    //   · the same rule over the transcribed array: the same two numbers;
+    //   · internal consistency: raw sum of `d.description.length` = 117,508, minus 2
+    //     per `\n\n` separator (235 x 2 = 470) = 117,038.
+    // The array's own copy was re-transcribed FROM `create_app().openapi()` and
+    // `test_contract_description_parity.py` proves it matches, in both directions.
+    expect(total).toBe(117038);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and

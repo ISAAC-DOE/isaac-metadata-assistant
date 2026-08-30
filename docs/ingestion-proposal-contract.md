@@ -218,8 +218,8 @@ per-proposal validator**: a second concurrency scheme with no consumer is a trap
 |---|---|---|---|
 | List | `GET /api/experiments/{id}/proposals` | none; returns `ETag` | `404 experiment_not_found`; `503 experiment_storage_unavailable` |
 | Read one | `GET .../proposals/{proposal_id}` | none; returns `ETag` | `404 proposal_not_found` (new, modelled on `note_not_found`, `routes.py:9751-9767` — "the record was read successfully and holds no such thing") |
-| Create | `POST .../proposals` | **required** | `422 unrecognized_field` (unknown body key, or a target outside the permitted set); `422 unknown_run`; `422 invalid_field_value`; `422 unrepresentable_value` (value JSON cannot round-trip); `422 unsupported_proposal` (model refusal relayed, never a 500 — `routes.py:10110-10115`); `428 precondition_required`; `400 malformed_if_match`; `412 stale_write`; `409 wildcard_precondition_refused` (`If-Match: *`) |
-| Review | `POST .../proposals/{id}/review` — `{confirmed_by_user, action: accept\|reject\|supersede\|withdraw, value?, accepted_from?, reason?}` | **required** | `422 confirmation_required`; `422 unknown_proposal_action`; `422 not_an_allowed_value` (enum target); `409 human_actor_required` (§5); `422 no_write_path_for_field` (§6); `409 target_run_removed` (new — see below); `412 stale_write`; `409 proposal_stale` (new — `base_rev` moved; the accept re-reads and refuses rather than overwriting) |
+| Create | `POST .../proposals` | **required** | `422 unrecognized_field` (unknown body key, or a target outside the permitted set); `422 unknown_run`; `422 invalid_field_value`; `422 unrepresentable_value` (value JSON cannot round-trip); `422 unsupported_proposal` (model refusal relayed, never a 500 — `routes.py:10110-10115`); `422 too_many_proposals`; **`422 proposals_too_large`** (added 2026-08-30, see below); `428 precondition_required`; `400 malformed_if_match`; `412 stale_write`; `409 wildcard_precondition_refused` (`If-Match: *`) |
+| Review | `POST .../proposals/{id}/review` — `{confirmed_by_user, action: accept\|reject\|supersede\|withdraw, value?, accepted_from?, reason?}` | **required** | `422 confirmation_required`; `422 unknown_proposal_action`; `422 not_an_allowed_value` (enum target); `409 human_actor_required` (§5); `422 no_write_path_for_field` (§6); `409 target_run_removed` (new — see below); **`409 target_scope_mismatch`** (added 2026-08-30, see below); `412 stale_write`; `409 proposal_stale` (new — ~~`base_rev` moved~~ **the TARGET DIGEST moved; `base_rev` is not the staleness key and never was — see §10 DEC-1, which supersedes this parenthetical and was written after it**; the accept re-reads and refuses rather than overwriting) |
 | — | **There is no DELETE, and there will not be one.** `routes.py:10254-10259` | | |
 
 **Every operation takes `scope: TutorialScopeDep` as its first parameter**, exactly as `post_note`
@@ -238,6 +238,31 @@ that inference in its most damaging form. The proposal stays readable, its note 
 person may `withdraw` it. Creation-time `422 unknown_run` covers only the run that never existed;
 these are different failures and must not share a code.
 
+**`409 target_scope_mismatch` (added 2026-08-30).** `_proposal_writer_for` is re-evaluated at
+REVIEW time over a `run_id` that was fixed at CREATE time, so the create route's scope check cannot
+bind a later read. Two ways they come apart, and the first was **measured as a reachable HTTP 500**:
+a stored proposal naming a run-scoped `target_field_path` with `run_id: null` reached
+`run.draft.get("fields")` with `run` at `None` (`AttributeError: 'NoneType' object has no attribute
+'draft'`); and a schema refresh, or a change to any of the three sets the dispatch reads, can move a
+path between writer classes — or out of all of them — after proposals for it are already stored.
+`IngestionProposal.from_state` accepts such a document because this model performs no schema lookup
+and deliberately does not learn to, so the shape is reachable through a hand edit or a legacy
+document. It is now a typed **409** naming the path, the proposal's scope and the writer's, modelled
+on `target_run_removed`: the body was fine and the record's own stored state is what refuses. Like
+`target_run_removed` it gates **`accept` alone** — rejecting, superseding and withdrawing write
+nothing, and gating them would leave a proposal no operation could ever clear.
+
+**`422 proposals_too_large` (added 2026-08-30).** DEC-4 bounds ONE proposal and DEC-5 bounds the ROW
+COUNT, and **the two do not compose**: their product is a **262 MB** experiment document that every
+individual refusal admits. `load_experiment` parses the whole document on every read and
+`_authoritative_signature` hashes the whole of it on every save, so a bound on rows that a client can
+defeat by making each row large is not a bound. A total-bytes ceiling over `state["proposals"]` now
+refuses at create — **never trims**, because the oldest proposal is a recorded judgement. **The
+number is a JUDGEMENT and not a measurement, and the code says so**: nothing here has measured a
+parse or a hash cost at any document size. It gates **create only**; refusing an *acceptance* because
+the audit trail would not fit would leave a proposal permanently un-acceptable, which is DEC-9's
+unclearable-queue defect one feature over.
+
 **Concurrent acceptance of the same field.** Two accepts naming one target serialise on the record
 lock and on the record's `If-Match`: the first wins and moves `rev`; the second finds its
 `base_rev` behind and is refused **`409 proposal_stale`** with nothing written — never `412`, which
@@ -252,6 +277,25 @@ is resolved before the precondition is checked** (`routes.py:10036-10038`,
 `routes.py:15995-15999`), so a malformed body is a 422 regardless of validator freshness and a
 refused request can never leave a partial act behind. The whole review runs inside
 `ws.record_lock` (`routes.py:10233`; the capture route takes it at `routes.py:10023`).
+
+**THE FIRST IMPLEMENTATION BROKE THAT RULE IN TWO PLACES ON THE CREATE ROUTE, AND IS FIXED
+(2026-08-30).** The `client_request_key` deduplication branch and the per-record ceiling both ran
+*before* `_check_if_match`, so a create with **no `If-Match` at all** could be answered `200` (an
+existing proposal, `deduplicated: true`) or `422 too_many_proposals` — while the operation's own
+published description said an omitted header is `428`. Nothing was written by either, so this was a
+false CLAIM rather than corruption; it is corrected by moving both checks after the precondition,
+which is what this paragraph's rule required. A retrying client that presents the `ETag` it held
+*before* its first attempt now meets `412` and re-reads, and the deduplication branch answers its
+second attempt — **the exactly-once guarantee of DEC-13 is unchanged and is now delivered by two
+mechanisms rather than one.** The BODY is still resolved first: that is this paragraph's rule and it
+is a different rule from the state checks, which are questions about the record and may only be
+answered for a caller holding the record's current version.
+
+**The create operation declares ONE success code, `200`, and it is the only creating `POST` in this
+API that does not answer `201`.** It has two outcomes and only one of them creates, so an
+operation-level `201` would be an operation-wide claim that it creates; the repository's own contract
+test refuses two success codes for exactly that ambiguity. The status says the request succeeded and
+the body's `deduplicated` says which of the two happened.
 
 **MCP: no new tool.** `PERMITTED_TOOL_NAMES` is closed at 10 (`mcp/policy.py:683-699`) and
 `forbidden_tool_reason` turns "we decided not to" into an `ImportError` (`mcp/policy.py:31-37`).
@@ -456,6 +500,29 @@ strictly better, and it makes invariant **I2** structural rather than asserted.
 `resolved_run_draft`. If a future slice wants proposals to influence a submission, that is a new
 decision requiring its own argument — it is not implied here.
 
+**CORRECTION, 2026-08-30 — THAT LIST READS AS COMPLETE AND OMITS THE ONE ENTRY THAT POINTS THE OTHER
+WAY.** All three statements above were re-verified and all three are true. What the enumeration does
+not say is that `submission_store.record_submission` does
+`json.dumps(exp.to_state(), sort_keys=True)` (`submission_store.py:504`) and writes the result into
+`isaac_experiment_revisions.state`. `Experiment.to_state()` includes `proposals.STATE_KEY`, so
+**every proposal — its proposed value, its `rule`, its `client_request_key` and its full audit
+history — is copied verbatim into an owner-approved-but-unapplied lifecycle table at every submit.**
+
+Three qualifications travel with that, so it is neither over- nor under-stated:
+
+* **It is not new behaviour and it is not a defect.** `state["notes"]` has done exactly the same
+  since notes were added, and a whole-document snapshot is what a revision row is *for* — a revision
+  that stored only the export units could not answer "what did this record look like when it was
+  submitted".
+* **It does not move the content signature**, so it changes no submission identity; see §10 DEC-10
+  as corrected.
+* **No deployed system writes it today.** `0003_revisions` and `0004_submissions` are approved by
+  the project owner and **applied to the hosted database nowhere** (`CLAUDE.md` §15).
+
+It is recorded because an enumeration presented as complete is itself a checkable claim, and this
+one was incomplete in the single direction a reader would rely on it for: it lists three places a
+proposal does not reach, in a section arguing that the storage location has no leak to disclose.
+
 ---
 
 ## 8. WHAT THIS CONTRACT DOES NOT COVER
@@ -492,12 +559,23 @@ decision requiring its own argument — it is not implied here.
    the two negative constraints in §5 and §6 (no Accept control that can only be refused).
 9. **Expiry, scheduling, background sweeps, change feeds, cursors, event logs, and Undo.** ~~None
    exists in this repository and none is designed here.~~ **The FIRST HALF was independently
-   re-measured on 2026-08-29 and is TRUE — `rg` for `get_changes_since|change_feed|changes_since|
+   re-measured on 2026-08-29 and is TRUE — ~~`rg` for `get_changes_since|change_feed|changes_since|
    next_cursor|watermark|event_log` over `apps/api/isaac_api/**/*.py` returns nothing but DB-API
-   cursor objects. The SECOND half is superseded: a bounded cursor change feed IS authorized as of
+   cursor objects.~~ The SECOND half is superseded: a bounded cursor change feed IS authorized as of
    2026-08-29 (§10) and is designed in its own contract.** Expiry, background sweeps and Undo remain
    out of scope, and expiry for the reason this document already gives: nothing in this build runs
    on a timer, so a stored `expires_utc` no process enforces is a promise the system cannot keep.
+
+   **THE `rg` CLAIM IS FALSE AT HEAD, AND IT WAS THIS CONTRACT'S OWN IMPLEMENTATION THAT FALSIFIED
+   IT — corrected 2026-08-30, struck rather than deleted, because it was TRUE when it was measured
+   and a reader must be able to see that it expired rather than that it drifted.**
+   `GET .../proposals` serves **`next_cursor`** (contract §10 DEC-5's bounded window), so that
+   alternation now matches `apps/api/isaac_api/routes.py`. Re-measured at this branch's HEAD:
+   `next_cursor` is the **only** one of the six that matches — `get_changes_since`, `change_feed`,
+   `changes_since`, `watermark` and `event_log` still return nothing but DB-API cursor objects. The
+   substantive claim the sentence was making is therefore **unchanged**: this repository still has
+   no change feed, no watermark and no event log. What it has gained is one paginated list's cursor,
+   which is the foundation DEC-5 named and is not the feed.
 10. **Measurement.** No count, size, or timing in this document was measured against a running
     deployment. The path counts in §6 and the 15-member reading of
     `EXPERIMENT_OVERRIDABLE_ADDRESSES` in §5 were derived at HEAD by importing the constants;
@@ -564,7 +642,7 @@ separately, not only here.**
 | **DEC-7** | **Proposals are excluded from the MCP-reachable detail payload, by test.** `mcp/client.py` is bound to the OPERATION allowlist, not to a response shape, so a new `proposals` key would widen external-agent reads with no reviewed decision. | §4 "no new tool" |
 | **DEC-8** | **`accepted` is terminal, and a DERIVED `still_current` is published beside it.** The target can be corrected afterwards through `/edit`, `/overrides` or `PATCH .../runs/{id}`; without this an accepted proposal reads as a standing claim about the record's present content. Derived at read by re-digesting the target — never stored. | §3 |
 | **DEC-9** | **Reject/withdraw require no actor, and the asymmetry is DISCLOSED rather than discovered.** In a default deployment no verifier reads a request, so any caller past `ApiKeyAuthMiddleware` can withdraw any proposal, recorded `unattributed`. Gating them would leave the queue permanently unclearable — the exact defect `conflict_resolution.py:8-17` exists to fix. | §5 I4 |
-| **DEC-10** | **Adding `"proposals"` to `_experiment_signature` moves `rev` and the ETag, so a proposal act DOES create a revision at the next submit. That is INTENDED** — a proposal act changes what the record holds and a stale second writer must be refused. This document asserted the safe half (proposals stay out of `submissions.content_signature`) and was silent on the half that moves. | §7.5 |
+| **DEC-10** | **Adding `"proposals"` to the experiment's authoritative signature (`workspace._authoritative_signature`, which §7.5 calls `_experiment_signature`) moves `rev` and the ETag. That is INTENDED** — a proposal act changes what the record holds and a stale second writer must be refused. ~~**so a proposal act DOES create a revision at the next submit**~~ — **MEASURED FALSE 2026-08-30, and struck in place rather than reworded, because that clause is the kind of claim a future slice acts on.** The sentence joined two different mechanisms and only the first is true. `rev` moves; **the revision does not.** A submission's identity is `submissions.content_signature`, computed over the EXPORT UNITS, and no export unit contains a proposal — proposals live at `state["proposals"]`, outside `draft`, which is the property §7 chose the location FOR. So proposing, rejecting, superseding or withdrawing leaves the content signature exactly where it was, and the next `POST .../submit` answers **`409 already_submitted`** rather than recording a revision. The claim holds for **`accept` alone**, and even there the revision comes from the VALUE WRITE the acceptance performs through the manual writer — not from the proposal act. This document asserted the safe half (proposals stay out of `submissions.content_signature`) and then contradicted it one decision later; **the safe half is the one that holds.** | §7.5 |
 | **DEC-11** | **Drop `unit`** — the one no-guessing breach the review found. | §2 `unit` |
 | **DEC-12** | **No new table and no `0006`.** §7's argument is mechanically sound and is adopted. **Decisive additional reason:** a feature needing `0006` would not work until an operator acts, and applying a hosted migration is a hard stop no authorization lifts. `db_write.OWNED_TABLES` is UNCHANGED — the first scope extension in §15 that adds no table, deliberately, because §15 records four occasions on which a table reached that list before any committed sentence named it. | — (confirms §7) |
 | **DEC-13** | **An idempotency key IS required, and the decline was answering a different question.** §2 argued every write is idempotent by content — true of APPLYING, false of CREATING: two identical `POST`s mint two `proposal_id`s, so a retrying MCP client duplicates. Create accepts an optional `client_request_key`; inside `record_lock` a key already present returns the EXISTING proposal. Exactly-once within a scope with no uniqueness constraint, because every write to one experiment holds that lock. | §2 `idempotency key` |

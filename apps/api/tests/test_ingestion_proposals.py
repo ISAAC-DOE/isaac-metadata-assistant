@@ -177,7 +177,7 @@ def _create(client, exp, *, path=OVERRIDE_PATH, value="Cu2O", **body):
 
 def _created(client, exp, **body) -> dict:
     response = _create(client, exp, **body)
-    assert response.status_code == 201, response.text
+    assert response.status_code == 200, response.text
     return response.json()["proposal"]
 
 
@@ -841,7 +841,7 @@ def test_I7_a_tutorial_proposal_is_invisible_to_the_ordinary_scope(workspace):
     exp = store.load_experiment(exp.id)
 
     created = _create(tclient, exp)
-    assert created.status_code == 201, created.text
+    assert created.status_code == 200, created.text
     pid = created.json()["proposal"]["proposal_id"]
 
     assert tclient.get(f"/api/experiments/{exp.id}/proposals").json()["total"] == 1
@@ -1300,7 +1300,7 @@ def test_DEC4_the_per_record_count_is_bounded_at_create(client, experiment, monk
     """
     monkeypatch.setattr(routes, "_MAX_PROPOSALS_PER_RECORD", 2)
     for index in range(2):
-        assert _create(client, experiment, value=f"Cu{index}O").status_code == 201
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
     refused = _create(client, experiment, value="one too many")
     assert refused.status_code == 422, refused.text
     assert refused.json()["error"] == "too_many_proposals"
@@ -1324,7 +1324,7 @@ def test_DEC5_omitting_limit_returns_a_window_and_not_everything(client, experim
     """
     monkeypatch_window = routes._PROPOSAL_WINDOW_DEFAULT
     for index in range(monkeypatch_window + 3):
-        assert _create(client, experiment, value=f"Cu{index}O").status_code == 201
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
 
     response = client.get(f"/api/experiments/{experiment.id}/proposals")
     assert response.status_code == 200, response.text
@@ -1337,7 +1337,7 @@ def test_DEC5_omitting_limit_returns_a_window_and_not_everything(client, experim
 
 def test_DEC5_the_cursor_walks_the_whole_list_exactly_once(client, experiment):
     for index in range(7):
-        assert _create(client, experiment, value=f"Cu{index}O").status_code == 201
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
 
     seen: list[str] = []
     cursor = None
@@ -1781,7 +1781,7 @@ def test_DEC13_a_repeated_create_with_one_key_mints_exactly_one_proposal(
     went RED.
     """
     first = _create(client, experiment, client_request_key="retry-1")
-    assert first.status_code == 201, first.text
+    assert first.status_code == 200, first.text
     assert first.json()["deduplicated"] is False
 
     second = _create(client, experiment, client_request_key="retry-1")
@@ -2142,7 +2142,7 @@ def test_the_record_validator_is_required_and_a_stale_one_writes_nothing(
     if op == "create":
         absent = _create(client, experiment)
         # `_create` supplies a fresh tag, so drive the absent/stale cases directly.
-        assert absent.status_code == 201
+        assert absent.status_code == 200
         body = {
             "note_id": experiment.notes[0].id,
             "target_field_path": OVERRIDE_PATH,
@@ -2305,3 +2305,782 @@ def test_the_operation_descriptions_do_not_overstate_what_this_build_does(client
     ]
     assert "A PROPOSAL IS NOT A CONFIRMED VALUE" in listing
     assert re.search(r"NOT a statement about the official ISAAC schema", listing)
+
+
+# ==============================================================================
+# THE CLOSURE SLICE, 2026-08-30
+# ==============================================================================
+#
+# Everything below was added when this branch was completed. Two kinds of test, and
+# the split matters:
+#
+#   * FIVE tests for guarantees this module STATES and NOTHING CHECKED. An auditor
+#     broke each one in production code and the whole 123-test suite stayed green.
+#     Each carries its own ``MUTATION:`` line with the break that was actually run.
+#   * Tests for behaviour this slice CHANGED — the reachable 500 on the write path,
+#     the precondition ordering on create, `reason` on accept, and the per-record
+#     byte ceiling.
+
+
+def _force(proposal, **changes):
+    """Rewrite fields ``revise_proposal`` holds immutable, to build a stored document
+    only a HAND EDIT (or a schema refresh) could produce.
+
+    ``object.__setattr__`` reaches any frozen dataclass FIELD, here as everywhere —
+    ``IMMUTABLE_PROPOSAL_FIELDS``'s own docstring says so and says what the guard is
+    worth. That is exactly the property these tests need: the write path must be
+    correct about a document it did not write, and no route can produce one.
+    """
+    for name, value in changes.items():
+        object.__setattr__(proposal, name, value)
+    return proposal
+
+
+# --- the model's closed-state guard -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "act",
+    [
+        proposals.accept_proposal,
+        proposals.reject_proposal,
+        proposals.supersede_proposal,
+        proposals.withdraw_proposal,
+    ],
+)
+def test_the_model_refuses_every_review_act_on_a_closed_proposal(act):
+    """``_refuse_a_closed_proposal`` is the model's own guard, and it had no test.
+
+    The ROUTE's ``422 proposal_not_open`` is covered; this is the layer beneath it,
+    which is the layer that has to hold for a caller that is not this route — the MCP
+    surface, a later slice, or a test reaching the pure functions directly. All four
+    acts are driven, because ``accept_proposal`` calls the guard on its own line while
+    the other three reach it through ``_closed``: a break in either place leaves the
+    other three passing.
+
+    MUTATION: made ``_refuse_a_closed_proposal`` a no-op (``return`` as its whole
+    body). Measured over THIS FILE — the scope that was actually run, not the whole
+    backend suite: **4 failed, 161 passed**, and the four failures were these four
+    parameters. Everything else in the file stayed green, including
+    ``test_a_review_act_reaches_an_open_proposal_or_it_reaches_none``, because the
+    route checks ``proposal.state != STATE_OPEN`` itself before ever calling the model.
+    """
+    opened = proposals.new_proposal(
+        proposal_id="01JQZZ2CLOSED000000000000",
+        experiment_id="01JQZZ2EXPERIMENT00000000",
+        note_id="01JQZZ2NOTE00000000000000",
+        target_field_path=RUN_PATH,
+        proposed_value=300.0,
+        rule="a rule",
+        source="typed_note",
+        proposed_utc="2026-08-30T00:00:00Z",
+        base_rev=1,
+        target_digest="d" * 64,
+        trust_basis=proposals._unattributed(),
+        run_id="01JQZZ2RUN000000000000000",
+    )
+    closed = proposals.withdraw_proposal(opened, at="2026-08-30T00:00:01Z")
+    assert closed.state == proposals.STATE_WITHDRAWN
+
+    extra = {}
+    if act is proposals.accept_proposal:
+        extra = {
+            "accepted_value": 300.0,
+            "accepted_from": proposals.ACCEPTED_FROM_CANDIDATE,
+            "applied_via": proposals.APPLIED_VIA_RUN_FIELD,
+            "applied_rev": 1,
+            "applied_target_digest": "e" * 64,
+            "actor_trust_basis": proposals._unattributed(),
+        }
+    with pytest.raises(proposals.UnsupportedProposal) as refusal:
+        act(closed, at="2026-08-30T00:00:02Z", **extra)
+    assert "already" in str(refusal.value)
+    # And the closed proposal is untouched — the acts are pure, so a refusal cannot
+    # have half-applied anything, and this says so rather than assuming it.
+    assert closed.state == proposals.STATE_WITHDRAWN
+    assert len(closed.history) == 2
+
+
+# --- excerpt_of never quotes words nobody wrote --------------------------------
+
+
+def test_an_out_of_range_span_yields_no_excerpt_and_never_a_clamped_one():
+    """``excerpt_of``'s stated guarantee: *"a clamped excerpt is a quotation of words
+    nobody wrote, which is worse than no quotation at all"*.
+
+    The runtime behaviour was already correct and NOTHING ASSERTED IT. Both
+    out-of-range shapes are driven — a span past the end of the text, and a span into
+    a note this build could not find at all — because a clamp would answer a string
+    for the first and the second is the ``None``-note path beside it.
+
+    MUTATION: replaced the ``if proposal.end_char > len(note_text): return None``
+    branch with ``note_text[proposal.start_char : proposal.end_char]`` — i.e. let
+    Python's own slice clamping stand. Python does not raise on an out-of-range
+    slice; it returns a SHORTER string. Measured over THIS FILE, which is the scope
+    that was run: **1 failed, 164 passed**, and the one failure was this test.
+    """
+    text = "the pellet was CuO2"
+    proposal = proposals.new_proposal(
+        proposal_id="01JQZZ2EXCERPT0000000000",
+        experiment_id="01JQZZ2EXPERIMENT00000000",
+        note_id="01JQZZ2NOTE00000000000000",
+        target_field_path=OVERRIDE_PATH,
+        proposed_value="CuO2",
+        rule="a rule",
+        source="typed_note",
+        proposed_utc="2026-08-30T00:00:00Z",
+        base_rev=1,
+        target_digest="d" * 64,
+        trust_basis=proposals._unattributed(),
+        run_id="01JQZZ2RUN000000000000000",
+        start_char=15,
+        end_char=19,
+    )
+    # In range: the words are derived, which is what makes the negative cases below
+    # a statement about the guard rather than about a function that returns nothing.
+    assert proposals.excerpt_of(proposal, text) == "CuO2"
+
+    # PAST THE END. `text[15:400]` is `"CuO2"` in Python — a shorter string, not an
+    # error — so a clamp here would answer a quotation the note does not support.
+    past_the_end = _force(
+        proposals.new_proposal(
+            proposal_id="01JQZZ2EXCERPT0000000001",
+            experiment_id="01JQZZ2EXPERIMENT00000000",
+            note_id="01JQZZ2NOTE00000000000000",
+            target_field_path=OVERRIDE_PATH,
+            proposed_value="CuO2",
+            rule="a rule",
+            source="typed_note",
+            proposed_utc="2026-08-30T00:00:00Z",
+            base_rev=1,
+            target_digest="d" * 64,
+            trust_basis=proposals._unattributed(),
+            run_id="01JQZZ2RUN000000000000000",
+            start_char=15,
+            end_char=400,
+        )
+    )
+    assert text[15:400] == "CuO2", "the clamp this guard exists to refuse is real"
+    assert proposals.excerpt_of(past_the_end, text) is None
+
+    # A shorter note than the one the offsets were taken against — `notes.edit_note`
+    # stores a corrected wording beside the immutable capture, and a client may pass
+    # either.
+    assert proposals.excerpt_of(proposal, "the pellet") is None
+    # No note at all is `None` and not `""`: "the note is unavailable" and "the note
+    # says nothing there" are different facts.
+    assert proposals.excerpt_of(proposal, None) is None
+
+
+# --- new_proposal deep-copies what was proposed --------------------------------
+
+
+def test_the_proposed_value_is_deep_copied_and_a_later_edit_cannot_rewrite_it():
+    """``new_proposal``'s stated reason for copying: *"a stored reference to a live
+    envelope would let a later in-place edit rewrite what was proposed, and this
+    record's whole value is that it says what was proposed at the time"*.
+
+    NOTHING CHECKED IT. Every route test passes a literal built inline and then drops
+    the reference, so a shared reference is invisible to all of them.
+
+    MUTATION: removed ``copy.deepcopy`` from ``new_proposal`` (stored
+    ``proposed_value`` directly). Measured over THIS FILE, which is the scope that was
+    run: **1 failed, 164 passed**, and the one failure was this test, on the nested
+    mutation.
+    """
+    live = {"value": "CuO2", "evidence": [{"kind": "user_confirmation"}]}
+    proposal = proposals.new_proposal(
+        proposal_id="01JQZZ2DEEPCOPY000000000",
+        experiment_id="01JQZZ2EXPERIMENT00000000",
+        note_id="01JQZZ2NOTE00000000000000",
+        target_field_path=OVERRIDE_PATH,
+        proposed_value=live,
+        rule="a rule",
+        source="typed_note",
+        proposed_utc="2026-08-30T00:00:00Z",
+        base_rev=1,
+        target_digest="d" * 64,
+        trust_basis=proposals._unattributed(),
+        run_id="01JQZZ2RUN000000000000000",
+    )
+    # A NESTED mutation, not a top-level rebind: `live["value"] = ...` would also be
+    # caught by a shallow copy, so it would not distinguish the two and the guarantee
+    # the docstring makes is about depth.
+    live["evidence"][0]["kind"] = "rewritten_after_the_fact"
+    live["value"] = "something else"
+
+    assert proposal.proposed_value == {
+        "value": "CuO2",
+        "evidence": [{"kind": "user_confirmation"}],
+    }
+    assert proposal.proposed_value is not live
+    assert proposal.history[0].to_state_dict()["accepted_value"] is None
+
+    # `accept_proposal` copies too, and for the same reason — the accepted value is
+    # what the writer was handed, and an audit row that a caller can rewrite is not
+    # an audit row.
+    accepted_live = {"value": "Cu2O"}
+    accepted = proposals.accept_proposal(
+        proposal,
+        at="2026-08-30T00:00:01Z",
+        accepted_value=accepted_live,
+        accepted_from=proposals.ACCEPTED_FROM_EDITED,
+        applied_via=proposals.APPLIED_VIA_RUN_OVERRIDE,
+        applied_rev=1,
+        applied_target_digest="e" * 64,
+        actor_trust_basis=proposals._unattributed(),
+    )
+    accepted_live["value"] = "rewritten"
+    assert accepted.accepted_value == {"value": "Cu2O"}
+    assert accepted.history[-1].accepted_value == {"value": "Cu2O"}
+
+
+# --- an accepted proposal must say HOW it was applied ---------------------------
+
+
+def test_an_accepted_proposal_cannot_be_constructed_without_saying_which_writer_ran():
+    """``__post_init__``'s accepted-state requirement, which contract §5 **I3** rests
+    on: *"``accepted`` is terminal-and-applied here, so a row that cannot say how the
+    value was written would be claiming an application that may never have happened"*.
+
+    NOTHING CHECKED IT. Every route path supplies ``applied_via`` from
+    ``_apply_accepted_proposal``, so no test could reach the missing case.
+
+    Each of the four accepted-state requirements is driven separately, because they
+    are four different claims and a test that dropped all four at once could not say
+    which one the model still enforces.
+
+    MUTATION: deleted the ``if self.applied_via not in APPLIED_VIA_VALUES: raise``
+    branch. Measured over THIS FILE, which is the scope that was run: **1 failed, 164
+    passed** — this test, on its ``applied_via`` case, while its other four cases and
+    everything else in the file stayed green. That is why the five requirements are
+    driven in a loop rather than by one construction.
+    """
+    base = dict(
+        proposal_id="01JQZZ2APPLIEDVIA0000000",
+        experiment_id="01JQZZ2EXPERIMENT00000000",
+        note_id="01JQZZ2NOTE00000000000000",
+        target_field_path=RUN_PATH,
+        proposed_value=300.0,
+        rule="a rule",
+        source="typed_note",
+        proposed_utc="2026-08-30T00:00:00Z",
+        base_rev=1,
+        target_digest="d" * 64,
+        trust_basis=proposals._unattributed(),
+        state=proposals.STATE_ACCEPTED,
+        accepted_value=300.0,
+        accepted_from=proposals.ACCEPTED_FROM_CANDIDATE,
+        applied_via=proposals.APPLIED_VIA_RUN_FIELD,
+        applied_rev=1,
+        applied_target_digest="e" * 64,
+    )
+    # The complete row constructs, or the four refusals below would prove nothing.
+    assert proposals.IngestionProposal(**base).applied is True
+
+    for omitted, expected in (
+        ("accepted_value", "must record the value that was written"),
+        ("accepted_from", "accepted_from must be one of"),
+        ("applied_via", "must record WHICH writer applied it"),
+        ("applied_rev", "the revision the write was applied on top of"),
+        ("applied_target_digest", "what its target held after the"),
+    ):
+        with pytest.raises(proposals.UnsupportedProposal) as refusal:
+            proposals.IngestionProposal(**{**base, omitted: None})
+        assert expected in str(refusal.value), omitted
+
+    # And a writer name this build does not have is refused as firmly as a missing
+    # one: `applied_via` is a claim about WHICH function ran.
+    with pytest.raises(proposals.UnsupportedProposal):
+        proposals.IngestionProposal(**{**base, "applied_via": "some_other_writer"})
+
+
+# --- an unaccepted proposal carries no trace of an application ------------------
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        proposals.STATE_OPEN,
+        proposals.STATE_REJECTED,
+        proposals.STATE_SUPERSEDED,
+        proposals.STATE_WITHDRAWN,
+    ],
+)
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("accepted_value", 300.0),
+        ("accepted_from", proposals.ACCEPTED_FROM_CANDIDATE),
+        ("applied_via", proposals.APPLIED_VIA_RUN_FIELD),
+        ("applied_run_id", "01JQZZ2RUN000000000000000"),
+        ("applied_rev", 1),
+        ("applied_target_digest", "e" * 64),
+    ],
+)
+def test_an_unaccepted_proposal_carries_no_trace_of_an_application(state, field, value):
+    """``__post_init__``'s stated honesty invariant: *"'Nobody accepted this' and
+    'somebody accepted it and we filed it as open' are different facts, and a record
+    that could hold both would make the state unreadable"*.
+
+    SIX FIELDS × FOUR STATES, ALL TWENTY-FOUR, and none of them had a test. This is
+    the guarantee that makes ``state`` readable at all, and it is enforced in one
+    ``for`` loop — so a break there is a single edit that no route test can see,
+    because no route constructs an unaccepted proposal carrying any of the six.
+
+    MUTATION: deleted the ``else:`` branch containing that loop. Measured over THIS
+    FILE, which is the scope that was run: **24 failed, 141 passed** — every one of
+    the 24 parameters, and nothing else in the file.
+    """
+    base = dict(
+        proposal_id="01JQZZ2NOTRACE0000000000",
+        experiment_id="01JQZZ2EXPERIMENT00000000",
+        note_id="01JQZZ2NOTE00000000000000",
+        target_field_path=RUN_PATH,
+        proposed_value=300.0,
+        rule="a rule",
+        source="typed_note",
+        proposed_utc="2026-08-30T00:00:00Z",
+        base_rev=1,
+        target_digest="d" * 64,
+        trust_basis=proposals._unattributed(),
+        state=state,
+    )
+    # The row without the application trace constructs, so the refusal below is about
+    # the ONE field and not about the state.
+    assert proposals.IngestionProposal(**base).applied is False
+
+    with pytest.raises(proposals.UnsupportedProposal) as refusal:
+        proposals.IngestionProposal(**{**base, field: value})
+    assert field in str(refusal.value)
+    assert f"state {state!r}" in str(refusal.value)
+
+
+# --- C3: the write path's reachable 500, now a typed 409 ------------------------
+
+
+@pytest.mark.parametrize(
+    "scenario,path,keeps_run",
+    [
+        # A run-scoped target stored with `run_id: null`. This is the shape that
+        # MEASURED as `AttributeError: 'NoneType' object has no attribute 'draft'`
+        # -> HTTP 500, from `run.draft.get("fields")` inside `_apply_accepted_proposal`.
+        ("run_scoped_path_with_no_run", RUN_PATH, False),
+        # The mirror image: the one record-scoped target, stored naming a run. The
+        # record-level writer ignores the run entirely, so this would have written the
+        # RECORD's own field for a proposal that says it is about one run.
+        ("record_scoped_path_naming_a_run", RECORD_PATH, True),
+        # A path no write route in this build owns at all — what a schema refresh, or
+        # a change to any of the three sets `_proposal_writer_for` dispatches on,
+        # leaves behind. `_PROPOSAL_WRITER_SCOPE[None]` is a `KeyError`, which is the
+        # same 500 through a different door.
+        ("path_with_no_writer_at_all", "system.configuration.gas_flow", False),
+    ],
+)
+def test_a_stored_proposal_whose_scope_its_writer_cannot_serve_is_a_typed_409(
+    armed_client, experiment, scenario, path, keeps_run
+):
+    """A **409**, never a 500, and nothing written.
+
+    `_proposal_writer_for` is re-evaluated at REVIEW time over a `run_id` fixed at
+    CREATE time, so the create route's scope check cannot bind this read. The read
+    path already handles the class correctly — `_hydrate_proposals` files a pair-shape
+    it cannot represent as unreadable rather than raising — and the write path now
+    matches it.
+
+    THE STORED DIGEST IS RESTAMPED TO WHAT THE FLIPPED TARGET ACTUALLY HOLDS. Without
+    that the request meets `409 proposal_stale` first and this test would pass while
+    never reaching the branch it names — the digest and the scope are two different
+    preconditions and only one of them is under test here.
+
+    MUTATION: reverted the scope guard at the top of `_apply_accepted_proposal`. All
+    three parameters went RED, and the three failures were NOT the same failure — this
+    is what was actually observed rather than what the three cases look like from the
+    outside:
+
+    * `run_scoped_path_with_no_run` answered **500 Internal Server Error**
+      (`AttributeError: 'NoneType' object has no attribute 'draft'`). This is the
+      reachable crash on the write path that the guard exists for.
+    * `record_scoped_path_naming_a_run` answered **200**, with
+      `applied_via: "record_enum_fields"` and `applied_run_id` set to the run — it
+      wrote the RECORD's own field and then recorded, in the audit row, that it had
+      applied it to a run. The worst of the three, because nothing reports it.
+    * `path_with_no_writer_at_all` answered **422 `no_write_path_for_field`**, from
+      `set_run_override` raising `NotOverridable` on an address that is not
+      experiment-level. So this one was already refused — with the WRONG code and the
+      wrong meaning: a `422` tells the caller to fix the body, and there is nothing in
+      the body to fix. **An earlier version of this docstring claimed it answered
+      `500 KeyError`; that was reasoned from `_PROPOSAL_WRITER_SCOPE[None]` and is
+      corrected here, because it was never run.** The `KeyError` is what the NEW guard
+      would raise if it indexed rather than used `.get`, which is why it uses `.get`.
+    """
+    # CREATED AT A PATH THIS BUILD ADMITS, then forced. The third scenario's path is
+    # one of the seven the create route refuses outright with
+    # `no_write_path_for_field` — which is the create-side guard working — so the only
+    # way a proposal reaches review carrying it is a stored document this application
+    # did not write, which is exactly the case under test.
+    creation = _create(
+        armed_client,
+        experiment,
+        path=RECORD_PATH if keeps_run else RUN_PATH,
+        value=RECORD_VALUE if keeps_run else 301.0,
+    )
+    assert creation.status_code == 200, creation.text
+    pid = creation.json()["proposal"]["proposal_id"]
+
+    exp = _stored(experiment.id)
+    stored = exp.get_proposal(pid)
+    _force(
+        stored,
+        run_id=exp.runs[0].id if keeps_run else None,
+        target_field_path=path,
+    )
+    # Restamp the precondition so the ONLY thing wrong with this document is the
+    # scope. `_current_target_digest` is the route's own helper, so the value is the
+    # one the route will compute rather than one this test composed.
+    _force(stored, target_digest=routes._current_target_digest(exp, stored))
+    exp.save_versioned()
+
+    before = _authoritative_snapshot(_stored(experiment.id))
+    response = _review(
+        armed_client,
+        experiment.id,
+        pid,
+        action="accept",
+        accepted_from="candidate",
+        value=RECORD_VALUE if keeps_run else 301.0,
+    )
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["error"] == "target_scope_mismatch", body
+    assert body["key"] == path
+    assert "Nothing was written" in body["message"]
+
+    after = _stored(experiment.id)
+    assert _authoritative_snapshot(after) == before, (
+        f"{scenario}: the refused acceptance moved scientific content"
+    )
+    assert after.get_proposal(pid).state == proposals.STATE_OPEN
+    assert after.get_proposal(pid).applied_via is None
+
+
+def test_the_scope_mismatch_refusal_does_not_gate_the_three_non_writing_acts(
+    client, experiment
+):
+    """A dangling proposal must stay CLEARABLE, which is `target_run_removed`'s rule
+    one step earlier and is the same rule here.
+
+    `target_scope_mismatch` says there is nowhere to WRITE the value. Withdrawing
+    writes nothing — it records that nobody wants the proposal — so gating it would
+    leave a proposal no route could ever clear, in a build with no delete. The first
+    version of the `target_run_removed` refusal gated all four acts and made §4's
+    "a person may withdraw it" false; this is that lesson applied before the fact.
+    """
+    creation = _create(client, experiment, path=RUN_PATH, value=301.0)
+    assert creation.status_code == 200, creation.text
+    pid = creation.json()["proposal"]["proposal_id"]
+
+    exp = _stored(experiment.id)
+    _force(exp.get_proposal(pid), run_id=None)
+    exp.save_versioned()
+
+    response = _review(client, experiment.id, pid, action="withdraw")
+    assert response.status_code == 200, response.text
+    assert response.json()["proposal"]["state"] == proposals.STATE_WITHDRAWN
+
+
+# --- I1: the precondition precedes both state checks ---------------------------
+
+
+def test_the_precondition_precedes_the_deduplication_branch(client, experiment):
+    """The published description says an omitted `If-Match` is `428`. It said so while
+    the deduplication branch answered **200** without the header being looked at.
+
+    Nothing was written by that 200 — it returned an existing row — so this was a
+    false CLAIM rather than corruption: a success reported for a request that never
+    presented the precondition the operation says it requires.
+
+    MUTATION: moved `_check_if_match` back below both state checks — the shape this
+    route shipped with. Measured over THIS FILE, which is the scope that was run:
+    **2 failed, 163 passed**, and the two failures were this test and
+    `test_the_precondition_precedes_the_per_record_ceiling` below. ONE mutation
+    catches both because there is one ordering, which is why they are two tests over
+    one seam rather than one test asserting two things.
+    """
+    first = _create(client, experiment, client_request_key="ordering-1")
+    assert first.status_code == 200, first.text
+    minted = first.json()["proposal"]["proposal_id"]
+
+    body = {
+        "note_id": experiment.notes[0].id,
+        "target_field_path": OVERRIDE_PATH,
+        "proposed_value": "Cu2O",
+        "rule": "the token after `the pellet was` matched a material label",
+        "run_id": experiment.runs[0].id,
+        "client_request_key": "ordering-1",
+    }
+
+    absent = client.post(f"/api/experiments/{experiment.id}/proposals", json=body)
+    assert absent.status_code == 428, absent.text
+
+    stale = client.post(
+        f"/api/experiments/{experiment.id}/proposals",
+        json=body,
+        headers={"If-Match": '"nope"'},
+    )
+    assert stale.status_code in (400, 412), stale.text
+
+    # And with the current tag the branch still does its job — the exactly-once
+    # guarantee is unchanged, which is the half a reordering could have broken.
+    current = client.post(
+        f"/api/experiments/{experiment.id}/proposals",
+        json=body,
+        headers={"If-Match": _etag(client, experiment.id)},
+    )
+    assert current.status_code == 200, current.text
+    assert current.json()["deduplicated"] is True
+    assert current.json()["proposal"]["proposal_id"] == minted
+    assert len(_stored(experiment.id).proposals) == 1
+
+
+def test_the_precondition_precedes_the_per_record_ceiling(
+    client, experiment, monkeypatch
+):
+    """The same ordering, for the other state check.
+
+    `too_many_proposals` answered `422` without the header being looked at, so a
+    client with no `If-Match` at all learned about a ceiling instead of about the
+    precondition it had omitted.
+
+    MUTATION: the same single move as the test above — `_check_if_match` back below
+    both state checks. Measured over THIS FILE: **2 failed, 163 passed**; this test
+    failed with `422 too_many_proposals` where it requires `428`.
+    """
+    monkeypatch.setattr(routes, "_MAX_PROPOSALS_PER_RECORD", 1)
+    assert _create(client, experiment, value="CuO").status_code == 200
+
+    body = {
+        "note_id": experiment.notes[0].id,
+        "target_field_path": OVERRIDE_PATH,
+        "proposed_value": "one too many",
+        "rule": "a rule",
+        "run_id": experiment.runs[0].id,
+    }
+    absent = client.post(f"/api/experiments/{experiment.id}/proposals", json=body)
+    assert absent.status_code == 428, absent.text
+
+    # With the tag, the ceiling is what refuses — so the reorder moved the ordering
+    # and not the behaviour.
+    capped = client.post(
+        f"/api/experiments/{experiment.id}/proposals",
+        json=body,
+        headers={"If-Match": _etag(client, experiment.id)},
+    )
+    assert capped.status_code == 422, capped.text
+    assert capped.json()["error"] == "too_many_proposals"
+
+
+def test_the_create_declares_exactly_one_success_code_and_the_body_says_which(client):
+    """Two outcomes, ONE success code, and the body distinguishes them.
+
+    `POST .../proposals` is the only creating POST in this API that does not answer
+    `201`, and the reason is that it may create nothing: an operation-level `201`
+    would be an operation-wide claim that it creates. The repo-wide contract test
+    refuses two success codes for exactly that ambiguity; this pins the resolution
+    from the other side, so a later slice cannot restore the second code here without
+    tripping both.
+    """
+    spec = client.get("/api/openapi").json()
+    create = spec["paths"]["/api/experiments/{experiment_id}/proposals"]["post"]
+    assert sorted(c for c in create["responses"] if c.startswith("2")) == ["200"]
+    assert "deduplicated" in create["responses"]["200"]["description"]
+
+
+# --- I3: `reason` is refused on accept, never dropped --------------------------
+
+
+def test_a_reason_on_an_accept_is_refused_and_never_silently_discarded(
+    armed_client, experiment
+):
+    """`reason` was in `_PROPOSAL_REVIEW_KEYS` and `accept_proposal` takes none, so an
+    accept carrying one answered **200** and stored nothing.
+
+    A sentence a scientist wrote disappearing into a success response is the defect
+    the create route's own allowlist exists to prevent — *"refused rather than
+    accepted and ignored"* — and this is that rule applied to the act it was missing
+    from.
+
+    MUTATION: neutralised the accept branch of the asymmetry check (`if False:` in
+    place of `if "reason" in body:`). Measured over THIS FILE: **1 failed, 164
+    passed** — this test, which met `200` with the scientist's sentence stored
+    nowhere.
+    """
+    proposal = _created(armed_client, experiment)
+    before = _stored(experiment.id).rev
+
+    refused = _review(
+        armed_client,
+        experiment.id,
+        proposal["proposal_id"],
+        action="accept",
+        accepted_from="candidate",
+        reason="because it looked right",
+    )
+    assert refused.status_code == 422, refused.text
+    body = refused.json()
+    assert body["error"] == "unrecognized_field"
+    assert body["key"] == "reason"
+    assert "Nothing was written" in body["message"]
+
+    after = _stored(experiment.id)
+    assert after.rev == before
+    assert after.get_proposal(proposal["proposal_id"]).state == proposals.STATE_OPEN
+
+    # And the three acts that DO take one still do — the refusal is per-act, not a
+    # removal of the field.
+    kept = _review(
+        armed_client,
+        experiment.id,
+        proposal["proposal_id"],
+        action="reject",
+        reason="the source sentence was about a different sample",
+    )
+    assert kept.status_code == 200, kept.text
+    history = kept.json()["proposal"]["history"]
+    assert history[-1]["reason"] == "the source sentence was about a different sample"
+
+
+# --- I6: the per-record byte ceiling -------------------------------------------
+
+
+def test_the_per_record_byte_ceiling_refuses_rather_than_trims(
+    client, experiment, monkeypatch
+):
+    """`_MAX_PROPOSAL_BYTES` bounds ONE proposal and `_MAX_PROPOSALS_PER_RECORD`
+    bounds the ROW COUNT, and their product was a **262 MB** experiment document that
+    every individual refusal admitted.
+
+    That matters because `load_experiment` parses the whole document on every read and
+    `_authoritative_signature` sha256s the whole of it on every save. The bound is
+    lowered here so this is a test rather than a load run.
+
+    TWO MUTATIONS, BOTH RUN, because "there is no ceiling" and "the ceiling trims"
+    are different defects and only one of them is caught by a status code. Measured
+    over THIS FILE both times: **1 failed, 164 passed**, this test.
+
+    MUTATION: neutralised the `len(projected) > _MAX_PROPOSAL_STATE_BYTES` branch.
+    MUTATION: kept the branch and made it `exp.proposals.pop(0)` — trim the oldest to
+    make room — instead of refusing. The second is the one worth having: a trimming
+    build would answer `200` and still hold exactly one proposal, so a count assertion
+    alone would pass; it is caught because the stored value is asserted to be the
+    FIRST proposal's and not the second's.
+    """
+    assert routes._MAX_PROPOSAL_STATE_BYTES == routes._MAX_PROPOSAL_BYTES * 16, (
+        "the ceiling is written as a multiple of the per-proposal bound so it follows "
+        "`_MAX_NOTE_BYTES` rather than drifting from it"
+    )
+
+    assert _create(client, experiment, value="CuO").status_code == 200
+    # MEASURED WITH THE ROUTE'S OWN RENDERER, not with a plain `json.dumps`. The
+    # bound is over the compact separators `_render_exactly_as_a_response_would`
+    # emits; a differently-spaced measurement here would make the ceiling this test
+    # installs approximate, and "the refusal fired" would stop being a statement
+    # about the boundary.
+    stored_now = len(
+        routes._render_exactly_as_a_response_would(
+            [p.to_state() for p in _stored(experiment.id).proposals]
+        )
+    )
+    # A ceiling that ADMITS the row already on file and refuses the next one, so the
+    # refusal is about the addition rather than about the record being over already.
+    monkeypatch.setattr(routes, "_MAX_PROPOSAL_STATE_BYTES", stored_now + 10)
+
+    refused = _create(client, experiment, value="Cu2O")
+    assert refused.status_code == 422, refused.text
+    body = refused.json()
+    assert body["error"] == "proposals_too_large"
+    assert body["max_bytes"] == stored_now + 10
+    assert body["bytes"] > stored_now + 10
+    assert "REFUSED rather than trimmed" in body["message"]
+
+    after = _stored(experiment.id)
+    assert len(after.proposals) == 1, "the refusal must not have removed anything"
+    assert after.proposals[0].proposed_value == "CuO"
+
+
+# --- DEC-10, as corrected 2026-08-30 -------------------------------------------
+
+
+def test_a_non_accepting_proposal_act_moves_rev_but_records_no_revision(
+    submitting_client, experiment, submission_db
+):
+    """Contract §10 **DEC-10**, whose original wording said a proposal act *"DOES
+    create a revision at the next submit"*. **Measured false, and this is the
+    measurement.**
+
+    Both halves are asserted, because the corrected decision is that they come apart:
+    `rev` and the `ETag` DO move — proposals are in the authoritative signature, so a
+    stale second writer is refused — while the SUBMISSION does not, because
+    `submissions.content_signature` is computed over the export units and no export
+    unit contains a proposal. `state["proposals"]` sits outside `draft`, which is the
+    property §7 chose the location for.
+
+    The `accept` case is the exception and is covered by
+    `test_accepting_a_proposal_never_mutates_a_submitted_revision` above, which shows
+    revision 2 appearing — and there the revision comes from the VALUE WRITE, not from
+    the proposal act.
+    """
+    submitted = submitting_client.post(
+        f"/api/experiments/{experiment.id}/submit",
+        headers={"If-Match": _etag(submitting_client, experiment.id)},
+    )
+    assert submitted.status_code == 200, submitted.text
+    snapshot = copy.deepcopy(submission_db.revisions)
+    assert [row["revision_no"] for row in snapshot] == [1]
+    rev_before = _stored(experiment.id).rev
+
+    proposal = _created(submitting_client, experiment)
+    rejected = _review(
+        submitting_client,
+        experiment.id,
+        proposal["proposal_id"],
+        action="reject",
+        reason="the sentence was about a different sample",
+    )
+    assert rejected.status_code == 200, rejected.text
+
+    # HALF ONE — `rev` moved. Twice: once for the create, once for the reject.
+    assert _stored(experiment.id).rev > rev_before
+
+    # HALF TWO — the submission did not. The record's published content is unchanged,
+    # so there is nothing to record and the route says so rather than filing an empty
+    # revision.
+    resubmitted = submitting_client.post(
+        f"/api/experiments/{experiment.id}/submit",
+        headers={"If-Match": _etag(submitting_client, experiment.id)},
+    )
+    assert resubmitted.status_code == 409, resubmitted.text
+    assert resubmitted.json()["error"] == "already_submitted"
+    assert submission_db.revisions == snapshot
+
+
+def test_the_contract_no_longer_claims_a_proposal_act_creates_a_revision():
+    """The corrected DEC-10 is pinned as TEXT, because a decision table is what a
+    future slice reads before it builds.
+
+    Both directions: the false clause must survive only as a struck correction, and
+    the corrected claim must be present. A negative control alone would pass on a
+    document that had simply deleted the row.
+    """
+    contract = (
+        Path(routes.__file__).resolve().parents[3]
+        / "docs"
+        / "ingestion-proposal-contract.md"
+    ).read_text(encoding="utf-8")
+    assert "**DEC-10**" in contract
+    assert "MEASURED FALSE 2026-08-30" in contract
+    assert "~~**so a proposal act DOES create a revision at the next submit**~~" in contract
+    assert "409 already_submitted" in contract
+    # And the §7 enumeration now names the one place a proposal DOES travel durably.
+    assert "isaac_experiment_revisions.state" in contract
+    assert "submission_store.py:504" in contract
