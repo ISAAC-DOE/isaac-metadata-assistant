@@ -1716,7 +1716,16 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // writing nothing, any record that has ever been submitted, has exported, has an
     // exported run, has a published artifact on disk, or is a built-in worked
     // example. RE-MEASURED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(71);
+    // 71 -> 72: `GET /api/experiments/{experiment_id}/changes`, the record's change
+    // feed. Named in the description as a COALESCING STATE FEED and never as an event
+    // log, because there is no event table and §15's 2026-08-29 extension deliberately
+    // adds none — so the only thing derivable is a bounded ordered projection of where
+    // each entity stands now. Its description is long for the reason the two
+    // aggregates below moved so much: three limitations (coalescing, deletions, the
+    // gap guarantee's clock caveat) each cost a paragraph, and shortening any of them
+    // would not have made the description false, only silent about what the feed
+    // cannot do. RE-MEASURED from the served document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(72);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2017,7 +2026,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // reproduced inside the paragraph doing the removing. Written INTO the existing
     // paragraph again, so the `\n\n` count is UNCHANGED at 211 and the remainder
     // count below does not move — re-measured, not assumed.
-    expect(total).toBe(105187);
+    // 105,187 -> 108,435 (+3,248): ONE operation was ADDED — the change feed — and no
+    // existing description changed, which `test_contract_description_parity.py` proves
+    // rather than leaving it asserted here. RE-MEASURED over the transcribed array by
+    // the same rule, not incremented; the arithmetic reconciles as a check on the
+    // measurement rather than as its source (the served description is 3,262
+    // characters and carries 7 `\n\n` separators, which this total excludes: 3,262 -
+    // 14 = 3,248).
+    expect(total).toBe(108435);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -2059,7 +2075,18 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // would mean the bound had been appended instead, and one that left it at 210
     // while the character total moved would mean the two-cause prose had been woven
     // in. RE-DERIVED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(211);
+    // 211 -> 218 (+7): the change feed's description is EIGHT paragraphs — a lead plus
+    // seven — and every one of the seven is load-bearing rather than expository: what
+    // coalescing costs, why the storage forces it, the total order and why its
+    // tie-break is not decoration, that the kind set is served rather than fixed, then
+    // the three published properties (the gap guarantee, the deletion limitation, the
+    // expiry property) which are quoted verbatim from `change_feed.py` so the route and
+    // the tests cannot drift apart. It moves by exactly seven because all of it was
+    // appended as new paragraphs and NO existing description was touched; a change
+    // that moved the character total without moving this by seven would mean some of
+    // it had been woven into an existing lead instead. RE-DERIVED from the served
+    // document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(218);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

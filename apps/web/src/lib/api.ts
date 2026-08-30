@@ -29,6 +29,7 @@ import type {
   ApiAssetsResponse,
   ApiAssetWritten,
   ApiAuditResponse,
+  ApiChangeFeedPage,
   AssistantQueryResponse,
   ApiConflictResolved,
   ApiConflictsResponse,
@@ -1045,6 +1046,38 @@ export const api = {
     if (res.status === 304) return { changed: false };
     if (res.ok) return { changed: true, detail: await readJson<ApiExperimentDetail>(res, path) };
     throw httpError(res, path);
+  },
+
+  /*
+   * ONE PAGE OF THE RECORD'S CHANGE FEED — a coalescing STATE feed, not an event log.
+   *
+   * `cursor` is opaque and comes from a previous page's `next_cursor`; omit it to read
+   * from the start of the order, which is the resync path and is always available. A
+   * cursor this feed did not issue — including one issued by a DIFFERENT record's feed
+   * — is refused `422`, never answered from the wrong order.
+   *
+   * `limit` is CLAMPED server-side into `[1, 200]` rather than refused, and the page
+   * reports the value actually used. This client therefore does not validate it: a
+   * second bound here could only disagree with the server's, and the response says what
+   * happened.
+   */
+  async getChanges(
+    id: string,
+    opts: { cursor?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<ApiChangeFeedPage> {
+    const params = new URLSearchParams();
+    if (opts.cursor !== undefined) params.set('cursor', opts.cursor);
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    /* THE PATH LITERAL IS WRITTEN WHOLE and the query appended, for the reason
+       `getPendingPage` spells out: `backend-down-state.test.tsx` derives its per-record
+       sub-read inventory by regex over this file's template literals, and a nested
+       template parses as a new sub-read suffix with no product word behind it. */
+    const query = params.toString();
+    const path = `/experiments/${enc(id)}/changes`;
+    const res = await request(query ? `${path}?${query}` : path, { signal });
+    if (!res.ok) throw await httpErrorWithReason(res, path);
+    return readJson<ApiChangeFeedPage>(res, path);
   },
 
   async getDraftGroups(id: string) {

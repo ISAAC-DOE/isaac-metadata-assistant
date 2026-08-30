@@ -712,7 +712,16 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // nothing else used and therefore needed its own product word in
     // `SUB_RESOURCE_LABELS`. Read out of this test's own failure output
     // (`- 41 / + 42`), not derived by adding a delta.
-    expect(experimentPathLiterals.length).toBe(42);
+    // 42 -> 43: `getChanges`, the record's change feed. It writes one new
+    // `/experiments/${…}/changes` literal and appends its optional `?cursor=&limit=`
+    // query as a separate string — the same shape `getPendingPage` uses, and for the
+    // reason its call site records: a nested template would parse as a new sub-read
+    // suffix with no product word behind it. So this array gains one, `SUB_READ_SUFFIXES`
+    // gains `changes`, and `SUB_READ_SEGMENTS` gains it too, because `changes` is a
+    // first segment nothing else used and therefore needed its own product word in
+    // `SUB_RESOURCE_LABELS` ("recent changes"). Read out of this test's own failure
+    // output (`expected 43 to be 42`), not derived by adding a delta.
+    expect(experimentPathLiterals.length).toBe(43);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this
@@ -721,7 +730,9 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // guard exists to surface.
     // 33 -> 34: `provenance`, the read of where each value came from. Read out of
     // this test's own failure output (`have a length of 33 but got 34`), not derived.
-    expect(SUB_READ_SUFFIXES).toHaveLength(34);
+    // 34 -> 35: `changes`, the record's change feed. Read out of this test's own
+    // failure output (`have a length of 34 but got 35`), not derived.
+    expect(SUB_READ_SUFFIXES).toHaveLength(35);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -748,7 +759,12 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // it needed its own product word in `SUB_RESOURCE_LABELS` ("where the values came
     // from") — the guard below this line is what surfaced that. Read out of this
     // test's own failure output (`have a length of 20 but got 21`), not derived.
-    expect(SUB_READ_SEGMENTS).toHaveLength(21);
+    // 21 -> 22: `changes`. Like `provenance` it is a FIRST segment nothing else used,
+    // so it moves this counter as well as the suffix one and needed its own product
+    // word in `SUB_RESOURCE_LABELS` ("recent changes") — the guard below this line is
+    // what surfaced that, which is exactly the leak it was written to catch. Read out
+    // of this test's own failure output (`have a length of 21 but got 22`), not derived.
+    expect(SUB_READ_SEGMENTS).toHaveLength(22);
     // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
     // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
     // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`
