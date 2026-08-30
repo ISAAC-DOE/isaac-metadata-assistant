@@ -322,6 +322,7 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
     baseline_artifacts = _artifacts(eid)
     baseline_history = _history(db)
     note_id: dict[str, str] = {}
+    proposal_id: dict[str, str] = {}
 
     def capture_note():
         response = client.post(
@@ -331,6 +332,34 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
         )
         if response.status_code == 201:
             note_id["id"] = response.json()["note"]["id"]
+        return response
+
+    def propose():
+        """Create the proposal the review attempt below then accepts.
+
+        A NAMED FUNCTION AND NOT A LAMBDA, for `capture_note`'s reason: the review
+        attempt needs the id this response carries, and the sweep runs its attempts
+        in order, so the id has to be recorded as it goes. `POST .../proposals`
+        answers `200` and not `201` — it has two outcomes and only one creates, so
+        it declares no operation-level `201`; the sweep only requires `< 300`, and
+        this guard is written over the id rather than over the status.
+        """
+        response = client.post(
+            f"/api/experiments/{eid}/proposals",
+            json={
+                "note_id": note_id.get("id", "missing"),
+                "target_field_path": "timestamps.acquired_end_utc",
+                "run_id": run_a,
+                "proposed_value": "2026-04-04T00:00:00Z",
+                "rule": (
+                    "the ISO-8601 instant after `ended` in the captured note is the "
+                    "acquisition end time"
+                ),
+            },
+            headers={"If-Match": _etag(client, eid)},
+        )
+        if response.status_code < 300:
+            proposal_id["id"] = response.json()["proposal"]["proposal_id"]
         return response
 
     attempts: list[tuple[str, object, object]] = [
@@ -473,6 +502,45 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
             lambda: client.post(
                 f"/api/experiments/{eid}/notes/{note_id.get('id', 'missing')}/review",
                 json={"confirmed_by_user": True, "action": "keep"},
+                headers={"If-Match": _etag(client, eid)},
+            ),
+        ),
+        (
+            # PERSISTENT INGESTION PROPOSALS, BOTH WRITE ROUTES, SWEPT RATHER THAN
+            # EXCLUDED. They are addressed to one experiment and they rewrite that
+            # experiment's document, so the question this file exists to ask — does
+            # this route move a row of a submitted record's history — is exactly as
+            # live for them as for `POST /notes`. An exclusion entry with a reason
+            # would have been the easy way and the wrong one: "it only writes
+            # `state["proposals"]`" is a claim about the code, and this file's whole
+            # design is to establish such claims by issuing the request.
+            #
+            # The target is `timestamps.acquired_end_utc` on the same run the
+            # `PATCH /runs/{run}` attempt above already wrote, chosen so accepting
+            # cannot make the record un-exportable — `POST /submit (again)` further
+            # down is declared ACCEPTED and would fail if this proposal wrote a field
+            # that opened a required-sibling hole.
+            "POST /proposals",
+            ACCEPTED,
+            propose,
+        ),
+        (
+            # ACCEPTED, AND THE ACCEPTANCE REALLY WRITES. This app fixture sets the
+            # fixture verifier and an actor subject, so `require_human_actor` is
+            # satisfied and this reaches `_apply_run_field` — which is the branch
+            # worth sweeping. In a default-configured deployment the same request is
+            # `409 human_actor_required`; a sweep that met the refusal would be
+            # asserting that a route which wrote nothing moved nothing.
+            "POST /proposals/{id}/review",
+            ACCEPTED,
+            lambda: client.post(
+                f"/api/experiments/{eid}/proposals/"
+                f"{proposal_id.get('id', 'missing')}/review",
+                json={
+                    "confirmed_by_user": True,
+                    "action": "accept",
+                    "accepted_from": "candidate",
+                },
                 headers={"If-Match": _etag(client, eid)},
             ),
         ),
@@ -869,6 +937,11 @@ def test_the_sweep_covers_every_mutating_route_this_api_publishes(app):
         ),
         ("POST", "/api/experiments/{experiment_id}/conflicts/resolve"): "POST /conflicts/resolve",
         ("POST", "/api/experiments/{experiment_id}/notes"): "POST /notes",
+        ("POST", "/api/experiments/{experiment_id}/proposals"): "POST /proposals",
+        (
+            "POST",
+            "/api/experiments/{experiment_id}/proposals/{proposal_id}/review",
+        ): "POST /proposals/{id}/review",
         ("POST", "/api/experiments/{experiment_id}/notes/{note_id}/review"): (
             "POST /notes/{id}/review"
         ),

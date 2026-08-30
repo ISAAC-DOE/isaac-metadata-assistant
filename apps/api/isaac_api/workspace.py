@@ -78,7 +78,9 @@ from isaac_records.ids import is_record_id, new_record_id
 from isaac_records.models import derivation
 
 from . import notes as notes_module
+from . import proposals as proposals_module
 from .notes import Note
+from .proposals import IngestionProposal
 
 #: PATH-FREE BY RULE, like every other log line this application emits: a record
 #: id and an exception CLASS NAME, never a message, a filesystem path, a host or a
@@ -1536,6 +1538,92 @@ def _note_state_payload(exp: "Experiment") -> list:
     )
 
 
+# --- persistent ingestion proposals -------------------------------------------
+#
+# Proposals live inside the experiment's state document, BESIDE ``notes`` and
+# outside ``draft``, exactly as notes do and for the reason
+# ``proposals.STATE_KEY`` states: the draft is what export reads, so storing a
+# proposal outside it makes "a proposal is inert to export" structural rather than
+# asserted. NO DATABASE TABLE AND NO MIGRATION IS ADDED HERE — the state document is
+# already upserted whole into ``isaac_experiments.state``, so a new key inside it
+# needs no DDL, and ``db_write.OWNED_TABLES`` is unchanged.
+
+
+def _hydrate_proposals(raw: object) -> tuple[list[IngestionProposal], list]:
+    """``(proposals, unreadable raw entries)``. Never raises, AND NEVER DISCARDS.
+
+    THE PAIR SHAPE IS THE POINT, and it is :func:`_hydrate_notes`'s arrangement for
+    :func:`_hydrate_notes`'s reason, sharpened by a measured defect this repository
+    has already paid for once: a persisted non-iterable ``draft["pending"]`` made
+    ``GET /api/experiments`` answer **500**, so ONE malformed row took My Experiments
+    down for every record. A proposal is a recorded human judgement; a read path that
+    dropped one — or that 500ed on one — would be worse than the feature's absence.
+
+    So an entry :meth:`IngestionProposal.from_state` refuses is returned VERBATIM in
+    the second list. It is never coerced, parsed, walked or dropped:
+    :meth:`Experiment.to_state` writes those entries back out unchanged, so the next
+    save preserves them byte-for-byte, and the list route COUNTS them rather than
+    rendering them, because this server cannot say what a refused entry contains
+    without inventing it.
+
+    Two things are still normalised, and neither loses content: a top-level value
+    that is not a list yields no proposals at all (there is nothing to iterate), and
+    a DUPLICATE ``proposal_id`` keeps the first occurrence and files the rest as
+    unreadable — they are preserved, but they cannot both answer to one id.
+    """
+    if not isinstance(raw, list):
+        return [], []
+    hydrated: list[IngestionProposal] = []
+    unreadable: list = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            unreadable.append(entry)
+            continue
+        try:
+            proposal = IngestionProposal.from_state(entry)
+        except (
+            proposals_module.UnsupportedProposal,
+            TypeError,
+            ValueError,
+            AttributeError,
+        ):
+            unreadable.append(entry)
+            continue
+        if proposal.proposal_id in seen:
+            unreadable.append(entry)
+            continue
+        seen.add(proposal.proposal_id)
+        hydrated.append(proposal)
+    return hydrated, unreadable
+
+
+def _sorted_proposals(items: list[IngestionProposal]) -> list[IngestionProposal]:
+    """Canonical order: oldest proposal first, ties broken by id.
+
+    :func:`_sorted_notes`'s key and its reasoning: proposal time first because a
+    review queue reads chronologically, ``proposal_id`` second so the order is TOTAL
+    — which is what makes the signature below deterministic AND what makes the list
+    route's cursor well defined. The STATE is deliberately not in the key: accepting
+    or rejecting a proposal must not make it jump position under a reader's cursor.
+    """
+    return sorted(items, key=lambda p: (p.proposed_utc, p.proposal_id))
+
+
+def _proposal_state_payload(exp: "Experiment") -> list:
+    """Every proposal this experiment holds, in canonical order, plus the unreadable.
+
+    ONE function, used by both :meth:`Experiment.to_state` and
+    :func:`_authoritative_signature`, so what is persisted and what is hashed cannot
+    drift apart — :func:`_note_state_payload`'s arrangement. The unreadable raw
+    entries are in BOTH: they are part of the document and must survive a save, so
+    they must also be part of the state whose change is detected.
+    """
+    return [p.to_state() for p in _sorted_proposals(exp.proposals)] + list(
+        exp.unreadable_proposals
+    )
+
+
 def _authoritative_signature(exp: "Experiment") -> str:
     """Deterministic hash of the AUTHORITATIVE scientific state of an experiment.
 
@@ -1605,6 +1693,29 @@ def _authoritative_signature(exp: "Experiment") -> str:
         # state — the same property runs relied on, and pinned by the same kind of
         # test.
         "notes": _note_state_payload(exp),
+        # PROPOSALS ARE AUTHORITATIVE STATE TOO, and contract §10 DEC-10 says so in
+        # terms: adding this key MOVES ``rev`` and the ``ETag``, so a proposal act
+        # DOES create a revision at the next submit, and THAT IS INTENDED. The
+        # argument is the one made for notes one paragraph up rather than a new one:
+        # proposing a value, accepting it, or refusing it changes what this
+        # experiment holds, so a second client holding the pre-change validator must
+        # be refused instead of silently overwriting the act. Leaving proposals out
+        # would make "acceptance is an audited act" false in the one place it has to
+        # be true.
+        #
+        # The whole proposal is hashed, ``history`` included, because the history IS
+        # the audit trail. That is safe from churn because every act in
+        # ``proposals.py`` is refused from a non-``open`` state, so a repeated review
+        # cannot append a second identical row; and because ``save_versioned``
+        # already writes nothing when the authoritative state is byte-for-byte
+        # unchanged.
+        #
+        # An experiment written before proposals existed hashes with
+        # ``"proposals": []``, and so does the same experiment re-read from disk
+        # (``from_state`` yields none), so the added key does NOT cause a spurious
+        # rev bump on legacy state — the same property runs and notes both relied
+        # on, and pinned by the same kind of test.
+        "proposals": _proposal_state_payload(exp),
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -2711,6 +2822,22 @@ class Experiment:
     #: path that silently deletes captured content, in a feature whose entire
     #: purpose is that nothing captured is silently deleted.
     unreadable_notes: list = field(default_factory=list)
+    #: The experiment's PERSISTENT INGESTION PROPOSALS — a value, a target and the
+    #: rule that produced them, awaiting a person's judgement. Carried inside this
+    #: experiment's state document for the same reason runs and notes are, and with
+    #: the same disclosed cost.
+    #:
+    #: They are NOT part of the draft, and that is a boundary rather than a filing
+    #: decision: ``draft`` is what export reads, so a proposal is inert to
+    #: ``export.transform``, absent from ``submissions.content_signature`` and absent
+    #: from every run's ``resolved_run_draft`` — structurally, because nothing that
+    #: exports looks here. ``export.py``, ``transform`` and ``schema/`` are untouched.
+    proposals: list["IngestionProposal"] = field(default_factory=list)
+    #: RAW ``proposals`` entries the model could not read, kept VERBATIM so a save
+    #: cannot discard them. See :func:`_hydrate_proposals` — the alternative is a read
+    #: path that either deletes a recorded human judgement or 500s the whole list
+    #: screen over one malformed row.
+    unreadable_proposals: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -2815,6 +2942,11 @@ class Experiment:
             # parse: the entries survive untouched and a later build that
             # understands them reads them normally.
             "notes": _note_state_payload(self),
+            # The unreadable raw entries are written back out INSIDE this array by
+            # ``_proposal_state_payload``, exactly as they are for notes. That is
+            # what makes "no recorded judgement is silently discarded" hold across a
+            # save of a document this build could not fully parse.
+            proposals_module.STATE_KEY: _proposal_state_payload(self),
         }
 
     def save(self) -> None:
@@ -3200,6 +3332,61 @@ class Experiment:
                 self.notes[index] = note
                 return
         raise KeyError(note.id)
+
+    # -- persistent ingestion proposals -----------------------------------------
+
+    def sorted_proposals(self) -> list["IngestionProposal"]:
+        """This experiment's proposals in canonical order — INCLUDING closed ones.
+
+        There is no filtered variant and deliberately so, which is
+        :meth:`sorted_notes`'s rule for :meth:`sorted_notes`'s reason: a rejected or
+        withdrawn proposal is set aside, not deleted, and the only way that stays
+        true in practice is if the store has no way to serve a list with them already
+        removed. Filtering is the caller's, and the list route reports the per-state
+        counts so a client cannot show a subset without knowing it is one.
+        """
+        return _sorted_proposals(self.proposals)
+
+    def get_proposal(self, proposal_id: str) -> "IngestionProposal | None":
+        for proposal in self.proposals:
+            if proposal.proposal_id == proposal_id:
+                return proposal
+        return None
+
+    def add_proposal(self, proposal: "IngestionProposal") -> "IngestionProposal":
+        """Append one proposal to this experiment IN MEMORY. Does not save.
+
+        Saving is the caller's, exactly as it is for :meth:`capture_note` and
+        :meth:`add_run`, so a route records and persists once inside the same
+        ``record_lock`` critical section every other mutation uses.
+
+        THE PROPOSAL IS BUILT BY THE CALLER, not here, and that is the difference
+        from :meth:`capture_note`: minting one requires the target's current digest,
+        which only the route can compose (it is the route that knows which of the
+        three write classes a path belongs to). This method's whole job is the
+        id-collision refusal and the append.
+        """
+        if self.get_proposal(proposal.proposal_id) is not None:  # pragma: no cover
+            raise ValueError(
+                f"proposal id {proposal.proposal_id!r} already exists on this experiment"
+            )
+        self.proposals.append(proposal)
+        return proposal
+
+    def replace_proposal(self, proposal: "IngestionProposal") -> None:
+        """Swap in a revised proposal IN MEMORY, by id. Does not save.
+
+        The review acts in ``proposals.py`` are pure functions returning a NEW frozen
+        proposal, so this is how the result gets back into the experiment. It refuses
+        an id this experiment does not hold rather than appending —
+        :meth:`replace_note`'s rule: a "revision" of a proposal that is not here would
+        silently create one, and the caller has a bug.
+        """
+        for index, existing in enumerate(self.proposals):
+            if existing.proposal_id == proposal.proposal_id:
+                self.proposals[index] = proposal
+                return
+        raise KeyError(proposal.proposal_id)
 
     def resolve_run(self, run: "Run") -> dict[str, "Resolution"]:
         """Every inherited experiment-level address, resolved for ``run``. Read-only.
@@ -3679,6 +3866,15 @@ class Experiment:
         # migration is required for notes either, for the reason stated above the
         # ``runs`` line: an absent key hydrates to an empty pair.
         exp.notes, exp.unreadable_notes = _hydrate_notes(state.get("notes"))
+        # NO MIGRATION IS REQUIRED FOR PROPOSALS EITHER, for the reason stated above
+        # the ``runs`` line and restated for notes: every optional key is read with
+        # ``.get`` and a default, so a state document written before proposals
+        # existed hydrates to an empty PAIR rather than raising — and hashes with
+        # ``"proposals": []``, so the added signature key causes no spurious rev bump
+        # on legacy state.
+        exp.proposals, exp.unreadable_proposals = _hydrate_proposals(
+            state.get(proposals_module.STATE_KEY)
+        )
         return exp
 
     # -- derived views --
