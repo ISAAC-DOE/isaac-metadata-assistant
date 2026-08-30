@@ -16,8 +16,19 @@ therefore a binding that serves nothing and says why.
 
 WHAT A STANDARDS-COMPLIANT ANSWER TO D2 LOOKS LIKE
 ==================================================
-Verified against the MCP authorization specification (revision ``2025-06-18``,
-the revision this package's protocol surface targets):
+Verified against the MCP authorization specification (revision ``2025-06-18``
+when this section was written; **each bullet below re-checked against the live
+``2026-07-28`` text on 2026-08-30 and still holds**).
+
+The parenthetical used to read *"the revision this package's protocol surface
+targets"*, and is corrected rather than deleted: ``server.py`` is now
+**dual-era** and targets both, so the singular was true when written and is not
+now. **What is NOT claimed here is that the two revisions' authorization chapters
+are identical** — they are not (``2026-07-28`` adds, for instance, the
+``offline_access`` SHOULD NOT that ``oauth.py`` records as new), and no diff of
+the two was performed. The claim is the weaker and checkable one: every bullet
+below was re-read against the current text. ``oauth.py``'s docstring carries the
+requirement-by-requirement traceability, and it is scoped to ``2026-07-28``:
 
 * MCP authorization lives at the **transport** layer, not in the JSON-RPC body.
   A bearer token travels in ``Authorization``, never in a query string, and never

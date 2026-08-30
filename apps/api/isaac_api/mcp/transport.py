@@ -48,12 +48,17 @@ WHAT IS DELIBERATELY NOT IMPLEMENTED, AND WHY EACH IS A REFUSAL
   :func:`metadata_routes_or_none` registers those paths **only** for a binding
   that asks for them — which is none by default, so an unconfigured deployment
   still publishes nothing at all.
-* **``Access-Token`` in the query string** — ``400``, refused rather than
-  ignored. The MCP specification says access tokens *"**MUST NOT** be included
-  in the URI query string"*. Ignoring the parameter would be conformant and
-  useless: by the time the request arrives the token is already in whatever
-  access logs sit in front of this process, and a client doing it needs to be
-  told to stop rather than quietly served.
+* **A token in the query string** — ``400``, refused rather than ignored. The MCP
+  specification says access tokens *"**MUST NOT** be included in the URI query
+  string"* — **as an obligation on the CLIENT**, in its list of client
+  requirements, and OAuth 2.1 §5.1 defines no query-parameter method at all for a
+  resource server to have an opinion about. So this ``400`` is ISAAC's own choice
+  and not a conformance requirement, which is worth being exact about because
+  refusing is a divergence from the obvious alternative. Ignoring the parameter
+  would be defensible and useless: by the time the request arrives the token is
+  already in whatever access logs sit in front of this process, and a client doing
+  it needs to be told to stop rather than quietly served. See
+  :data:`QUERY_TOKEN_PARAMETERS`.
 
 RAW ASGI, WITH NO IMPORT OF STARLETTE OR FASTAPI
 ================================================
@@ -105,9 +110,13 @@ from urllib.parse import unquote_plus, urlsplit
 from .deployment import Credential, DeploymentBinding, resolve_binding
 from .server import (
     DEPLOYMENT_UNCONFIGURED,
+    ERA_MODERN,
+    HEADER_MISMATCH,
     INSUFFICIENT_SCOPE,
-    MCP_PROTOCOL_VERSION,
+    METHOD_NOT_FOUND,
+    UNSUPPORTED_PROTOCOL_VERSION,
     McpServer,
+    protocol_era,
 )
 
 __all__ = [
@@ -128,12 +137,21 @@ _log = logging.getLogger(__name__)
 #: ``ISAAC_BASE_PATH``.
 MCP_PATH = "/api/mcp"
 
-#: This layer's JSON-RPC error code. JSON-RPC reserves -32000..-32099 for
-#: implementation-defined errors; ``server.py`` holds -32001 (deployment
-#: unconfigured) and -32002 (insufficient scope), and this is the third and last.
-#: ``test_mcp_transport.py`` asserts the three are distinct, because a duplicated
-#: code is a client mis-branching on an authorization failure.
-TRANSPORT_REFUSED = -32003
+#: This layer's JSON-RPC error code, and the third of ISAAC's three.
+#:
+#: **MOVED OUT OF THE JSON-RPC RESERVED RANGE, 2026-08-30, with the other two.**
+#: ~~"JSON-RPC reserves -32000..-32099 for implementation-defined errors"~~ is
+#: true of JSON-RPC and no longer sufficient: ``2026-07-28`` partitions that block
+#: and leaves an implementation nowhere in it — ``-32000``..``-32019`` is a legacy
+#: sub-range *"new implementations **SHOULD NOT** use … at all"*, and
+#: ``-32020``..``-32099`` is reserved for the specification's own codes. See
+#: ``server.py``'s error-code block for the full quotation and for the one value
+#: (``-32002``) that was a MUST NOT rather than a SHOULD NOT.
+#:
+#: ``test_mcp_transport.py`` asserts the three are distinct AND outside the
+#: reserved range: a duplicated code is a client mis-branching on an authorization
+#: failure, and a reserved one is a client branching on somebody else's meaning.
+TRANSPORT_REFUSED = -31003
 
 #: Request body cap. The largest legitimate message is a ``tools/call`` whose
 #: arguments are a handful of scalars and one flat ``fields`` object; a megabyte
@@ -160,10 +178,33 @@ PROXY_HEADERS = (
 #: docstring. The VALUE is never read, never decoded and never logged; only the
 #: NAME is looked at, so nothing this refusal does can put a credential anywhere.
 #:
-#: ``access_token`` is RFC 6750 §2.3, which OAuth 2.1 removes and the MCP
-#: specification forbids in as many words. The other three are the names that
-#: appear in the wild and would otherwise sail past a check written for the
-#: standard one alone.
+#: **WHOSE OBLIGATION THIS IS — CORRECTED 2026-08-30, because the previous comment
+#: had it backwards and the correction changes what may be claimed, not what the
+#: code does.** ~~"which OAuth 2.1 removes and the MCP specification forbids in as
+#: many words"~~ is right about MCP and wrong about who is bound:
+#:
+#: * MCP's authorization chapter states it in a numbered list of **client**
+#:   requirements — *"2. Access tokens **MUST NOT** be included in the URI query
+#:   string"* — under *"MCP client **MUST** use the Authorization request header
+#:   field"*. It is an obligation on the sender.
+#: * OAuth 2.1 (draft-ietf-oauth-v2-1-13) **§5.1 has exactly two subsections** —
+#:   ``5.1.1`` Authorization Request Header Field and ``5.1.2`` Form-Encoded
+#:   Content Parameter. RFC 6750 §2.3's *"URI Query Parameter"* method is simply
+#:   **absent**; the draft was re-read on 2026-08-30 and **contains no sentence
+#:   saying a resource server MUST ignore, or MUST reject, a token in the query
+#:   string.** There is no server-side rule here to conform to or to diverge from.
+#:
+#: So refusing with ``400`` is **ISAAC's choice**, made freely rather than under a
+#: MUST, and the module docstring gives the reason: by the time the request
+#: arrives the credential is already in every access log in front of this process,
+#: and a client doing it needs to be told to stop rather than quietly served.
+#:
+#: ``access_token`` is RFC 6750 §2.3's own parameter name. **``bearer_token``,
+#: ``token`` and ``apikey`` are not OAuth parameters at all**, and are kept
+#: deliberately after re-examination: they are the names credential-bearing query
+#: parameters carry in the wild, this endpoint reads **no** query parameter for
+#: any purpose, and so refusing them costs a legitimate caller nothing. A
+#: parameter that is never read cannot be a parameter this refusal takes away.
 QUERY_TOKEN_PARAMETERS = ("access_token", "bearer_token", "token", "apikey")
 
 _JSON_CONTENT_TYPE = "application/json"
@@ -347,20 +388,24 @@ class McpHttpTransport:
             await self._refuse(send, 405, "method_not_allowed", reason, allow="POST")
             return
 
-        # A client that states a protocol version states one this server speaks,
-        # or is refused. The specification's negotiation happens in `initialize`;
-        # this header exists so a MISMATCH after negotiation is caught rather than
-        # silently reinterpreted.
-        declared = headers.get("mcp-protocol-version")
-        if declared is not None and declared != MCP_PROTOCOL_VERSION:
-            await self._refuse(
-                send,
-                400,
-                "unsupported_protocol_version",
-                f"This server implements MCP revision {MCP_PROTOCOL_VERSION}.",
-                data={"supported": [MCP_PROTOCOL_VERSION], "requested": declared},
-            )
-            return
+        # PROTOCOL-VERSION VALIDATION USED TO LIVE HERE AND HAS MOVED INTO
+        # `server.py`, WHICH IS A BEHAVIOUR CHANGE AND IS THE POINT OF THE DUAL-ERA
+        # WORK. Two reasons it could not stay:
+        #
+        # 1. **It could not see the body.** The modern revision carries the version
+        #    in `params._meta["io.modelcontextprotocol/protocolVersion"]` as well
+        #    as in the header, and requires the two to MATCH. A check that reads
+        #    only the header cannot enforce a rule about two values.
+        # 2. **It answered before authentication.** Every other pre-auth answer
+        #    this transport gives is about the HTTP envelope; this one was about
+        #    the MCP protocol, and an unauthenticated caller learned this server's
+        #    supported revisions from it.
+        #
+        # What replaces it is a real `UnsupportedProtocolVersionError` (JSON-RPC
+        # `-32022`), which `_status_for` maps to `400` — the status the revision
+        # names for it. The refusal body changed shape deliberately: the old one
+        # was this transport's own invention and a modern client could not
+        # recognise it.
 
         # Lowercased like `Accept` is: RFC 9110 §8.3.1 makes a media type's type
         # and subtype case-insensitive, so `APPLICATION/JSON` is `application/json`
@@ -425,17 +470,31 @@ class McpHttpTransport:
             return
 
         credential = _credential_from(headers)
-        envelope = await self._server.handle(message, credential=credential)
+        # The headers travel WITH the message, lowercased, because the modern
+        # revision makes the server validate one against the other: *"Servers that
+        # process the request body **MUST** reject requests where the values
+        # specified in the headers do not match the corresponding values in the
+        # request body."* A check split across two layers is a check that can be
+        # satisfied by neither.
+        header_map = headers.mapping()
+        envelope = await self._server.handle(
+            message, credential=credential, headers=header_map
+        )
 
         if envelope is None:
-            # A notification. The specification says 202 with no body — NOT 200
-            # with an empty object, which a client would try to parse as a result.
+            # A notification, from a caller who authenticated. The specification
+            # says 202 with no body — NOT 200 with an empty object, which a client
+            # would try to parse as a result. A notification whose CALLER did not
+            # authenticate never reaches here: `handle` returns a refusal envelope
+            # for it, and it is answered 401 with a challenge, because "no response
+            # to a notification" is a JSON-RPC rule about results and not a licence
+            # to serve an unauthenticated request.
             await _send(send, 202, b"", extra_headers=())
             return
 
         await _send(
             send,
-            self._status_for(envelope),
+            self._status_for(envelope, message, header_map),
             _encode(envelope),
             extra_headers=self._challenge_headers(envelope),
         )
@@ -489,7 +548,12 @@ class McpHttpTransport:
                 )
         return None
 
-    def _status_for(self, envelope: Mapping[str, Any]) -> int:
+    def _status_for(
+        self,
+        envelope: Mapping[str, Any],
+        message: Mapping[str, Any],
+        headers: Mapping[str, str],
+    ) -> int:
         """The HTTP status for a JSON-RPC envelope.
 
         Authorization outcomes get their HTTP status, because that is what an MCP
@@ -497,6 +561,32 @@ class McpHttpTransport:
         not. Every other JSON-RPC error stays ``200`` — the request was
         transported successfully and the *application* refused it, which is
         exactly the distinction JSON-RPC's error object exists to carry.
+
+        TWO PROTOCOL-DEFINED CODES AND ONE ERA-DEPENDENT ONE, added with the
+        dual-era work:
+
+        * ``-32022`` (``UnsupportedProtocolVersionError``) and ``-32020``
+          (``HeaderMismatch``) map to ``400`` **without consulting the era**,
+          because the specification names ``400`` for each unconditionally.
+
+          Which era can PRODUCE them is a separate question, and stating it
+          loosely is easy: ``-32020`` is only ever raised on a modern request
+          (``server.py`` runs the header rules in that branch alone), while
+          ``-32022`` **can** reach a legacy client and should. A ``2025-06-18``
+          client sends ``MCP-Protocol-Version: 2025-06-18``, which this server
+          serves, and declares its negotiated revision in ``initialize``'s
+          ``params``, which the version check never reads — so it never sees the
+          error. A client speaking an *older* revision that sends, say,
+          ``2024-11-05`` in the header does see it, and that is the correct
+          outcome: it is the message naming the revisions that do exist.
+        * ``-32601`` (``Method not found``) is ``404`` **for a modern request
+          only**: *"If the server does not implement the requested RPC method, it
+          **MUST** respond with ``404 Not Found`` and a JSON-RPC error with code
+          ``-32601``."* That is a rule of the ``2026-07-28`` transport binding, and
+          applying it to a legacy request would change a status this server has
+          returned since it shipped, for a client whose own revision does not ask
+          for it. The era is computed by ``server.protocol_era``, the same function
+          the server dispatched on, so the two cannot disagree.
         """
         error = envelope.get("error")
         if not isinstance(error, Mapping):
@@ -506,6 +596,15 @@ class McpHttpTransport:
             return 401
         if code == INSUFFICIENT_SCOPE:
             return 403
+        if code in (UNSUPPORTED_PROTOCOL_VERSION, HEADER_MISMATCH):
+            return 400
+        if code == METHOD_NOT_FOUND:
+            method = message.get("method")
+            params = message.get("params") or {}
+            if not isinstance(params, Mapping):
+                params = {}
+            if isinstance(method, str) and protocol_era(method, params, headers) == ERA_MODERN:
+                return 404
         return 200
 
     def _challenge_headers(self, envelope: Mapping[str, Any]) -> Iterable[tuple[bytes, bytes]]:
@@ -646,6 +745,24 @@ class _Headers:
             if name.lower() == wanted:
                 return value.decode("latin-1")
         return None
+
+    def mapping(self) -> dict[str, str]:
+        """Every header, lowercased name to value, FIRST occurrence wins.
+
+        First-wins rather than last-wins or comma-joined, so this agrees with
+        :meth:`get` exactly — two readers of the same header list that disagree
+        about a duplicate is how a header-versus-body check gets satisfied by a
+        value the dispatcher never saw. RFC 9110 permits joining repeated fields
+        into a list; none of the headers this server validates is a list header,
+        so a duplicate is a malformed request rather than a value to assemble, and
+        the first one is what the rest of this transport already acts on.
+        """
+        collected: dict[str, str] = {}
+        for name, value in self._raw:
+            key = name.lower().decode("latin-1")
+            if key not in collected:
+                collected[key] = value.decode("latin-1")
+        return collected
 
 
 def _accepts_json(accept: str) -> bool:

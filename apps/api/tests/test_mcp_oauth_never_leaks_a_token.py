@@ -141,6 +141,61 @@ def test_no_rejection_path_echoes_the_credential_in_the_body_or_the_headers(
             assert SENTINEL_SECRET not in value, (name, key)
 
 
+def test_a_credential_pasted_into_the_protocol_version_is_not_echoed_back(
+    served, signing_key
+):
+    """**A NEW ECHO PATH ARRIVED WITH THE DUAL-ERA WORK, AND IT IS BOUNDED.**
+
+    ``UnsupportedProtocolVersionError``'s ``data.requested`` is required by the
+    specification's error shape — a client declaring a version in two places needs
+    to know which one was rejected — so it is the first field in this surface that
+    carries caller-supplied text into a response body. Every other refusal here
+    states a rule instead of reflecting an input, and the historical defect this
+    file exists for was exactly a credential arriving in a field nobody expected
+    to be reflected.
+
+    Pasting a bearer token into ``MCP-Protocol-Version`` is not a contrived
+    attack; it is what a copy-paste into the wrong header line produces. The
+    server answers ``400`` with the version error and the field replaced by a
+    fixed string.
+
+    The value is swept through **both** carriers, because ``_meta`` and the header
+    are checked by the same loop and a fix applied to one would leave the other.
+
+    ``SENTINEL_SECRET`` is used **as the pasted value itself** rather than a
+    minted JWT: a compact JWS carries its claims base64-encoded, so a sentinel
+    inside one would not appear literally in the response even if the whole token
+    were echoed — the test would pass without establishing anything. The opaque
+    shape is also the realistic one for a paste.
+    """
+    pasted = SENTINEL_SECRET
+    carriers = (
+        ("header", {"MCP-Protocol-Version": pasted}, None),
+        (
+            "meta",
+            {},
+            {"_meta": {"io.modelcontextprotocol/protocolVersion": pasted}},
+        ),
+    )
+    for name, headers, params in carriers:
+        message = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+        if params is not None:
+            message["params"] = params
+        response = served.post(
+            MCP_PATH,
+            json=message,
+            headers={
+                "Authorization": f"Bearer {minted(signing_key)}",
+                **headers,
+            },
+        )
+        assert response.status_code == 400, (name, response.text)
+        assert response.json()["error"]["code"] == -32022, name
+        assert SENTINEL_SECRET not in response.text, name
+        for key, value in response.headers.items():
+            assert SENTINEL_SECRET not in value, (name, key)
+
+
 def test_the_refusal_still_says_something_useful_so_this_is_not_passing_by_silence(
     served, signing_key
 ):

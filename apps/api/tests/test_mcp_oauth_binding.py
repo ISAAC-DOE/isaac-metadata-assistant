@@ -256,14 +256,44 @@ def test_a_jwks_url_verifier_is_refused_because_no_fetcher_is_installed(jwks_fil
     assert "makes no outbound request" in resolved
 
 
-def test_a_missing_or_unreadable_key_file_refuses_every_token_rather_than_none(
+def test_a_key_file_that_is_missing_at_boot_refuses_to_resolve_at_all(tmp_path):
+    """**THIS TEST'S ASSERTION WAS INVERTED ON PURPOSE 2026-08-30.**
+
+    It used to say *"Resolution succeeds — the path is syntactically fine — and
+    every token is then refused"*, and treated that as the safe outcome. It is
+    safe in the sense that nothing is admitted; it is not safe in the sense that
+    matters, because `validate_oauth_selection_or_raise`'s own docstring said the
+    boot refusal existed to stop a deployment that *"looks identical to a working
+    one"* — and this was precisely that deployment. A wrong path on the day the
+    container starts is a typo, and a resource server that authenticates nobody
+    forever should be found by the operator watching the rollout, not by the first
+    scientist to try their token.
+
+    The per-request refusal is unchanged and is asserted by the next test, which
+    is the case this one used to stand in for.
+    """
+    resolved = oauth.resolve_oauth_binding(env(tmp_path / "not-there.json"), "")
+    assert isinstance(resolved, str)
+    assert "unusable at boot" in resolved
+    assert "no_usable_jwks_key" in resolved
+
+
+def test_a_key_file_that_disappears_after_boot_refuses_every_token_rather_than_none(
     tmp_path, signing_key
 ):
-    """Resolution succeeds — the path is syntactically fine — and every token is
-    then refused. The alternative, treating an unreadable key set as "no
-    verification required", is the shape this whole module exists to prevent."""
-    absent = tmp_path / "not-there.json"
-    resolved = binding(absent)
+    """The rotation case, which the boot probe deliberately does not touch.
+
+    A key set is rotated by replacing a file, and a request landing between the
+    unlink and the rename must fail closed with a 401 rather than take the process
+    down. So the source keeps raising per request — the alternative, treating an
+    unreadable key set as "no verification required", is the shape this whole
+    module exists to prevent — and the boot probe only removes the case where the
+    file was never there at all.
+    """
+    path = tmp_path / "jwks.json"
+    path.write_text(json.dumps(keys.jwks(signing_key)), encoding="utf-8")
+    resolved = binding(path)
+    path.unlink()
     with pytest.raises(DeploymentRefused) as caught:
         resolved.authenticate(bearer(signing_key))
     assert caught.value.code == "no_usable_jwks_key"
@@ -583,7 +613,22 @@ def test_a_challenge_value_that_could_split_the_header_is_dropped_not_escaped(
     jwks_file,
 ):
     """Escaping is a second parser to get right and truncating publishes a
-    fragment. A value that is not safe to emit is simply not emitted."""
+    fragment. A value that is not safe to emit is simply not emitted.
+
+    **READ THIS BESIDE
+    ``test_a_metadata_url_that_cannot_be_emitted_in_a_challenge_refuses_to_boot``,
+    because the two look like they contradict each other and do not.** Dropping is
+    the right behaviour of the RENDER path — an exception there would turn a
+    ``401`` into a ``500`` — and it is the wrong OUTCOME, because the parameter
+    dropped is the one the challenge exists to carry. Both are true, so the
+    disagreement is settled where a value is accepted rather than where it is
+    emitted: boot refuses the configuration, and the render path keeps its
+    fail-safe for a value that reached it another way.
+
+    Which is what this test does: ``dataclasses.replace`` builds a config
+    ``build_config`` would now refuse, so the branch stays exercised rather than
+    becoming unreachable code that asserts its own correctness.
+    """
     resolved = binding(jwks_file)
     from dataclasses import replace
 
@@ -600,10 +645,41 @@ def test_the_metadata_paths_are_deterministic_and_deduplicated(jwks_file):
     resolved = binding(
         jwks_file, **{oauth.METADATA_URL_ENV: "https://isaac.example.invalid/prm"}
     )
-    assert resolved.metadata_paths("") == (
-        oauth.WELL_KNOWN_PREFIX,
-        f"{oauth.WELL_KNOWN_PREFIX}/api/mcp",
+    assert resolved.metadata_paths("") == (f"{oauth.WELL_KNOWN_PREFIX}/api/mcp",)
+    assert oauth.metadata_paths(resolved.config, "/krish") == (
+        f"/krish{oauth.WELL_KNOWN_PREFIX}/api/mcp",
     )
+
+
+def test_the_bare_well_known_path_is_served_only_for_a_pathless_resource(jwks_file):
+    """RFC 9728 §3.3, applied as a routing decision rather than as a hope.
+
+    *"The ``resource`` value returned MUST be identical to the protected
+    resource's resource identifier value into which the well-known URI path suffix
+    was inserted to create the URL used to retrieve the metadata. If these values
+    are not identical, the data contained in the response MUST NOT be used."* A
+    client that
+    fetched ``/.well-known/oauth-protected-resource`` inserted the suffix into
+    ``https://host``; this server answers every such request with the CONFIGURED
+    resource, so while the resource carried a path that document was one a
+    conforming client had to discard. It is no longer offered.
+
+    Nothing in-process could have looked wrong about it: the body was a correct
+    document for a different URL.
+    """
+    with_path = binding(
+        jwks_file, **{oauth.METADATA_URL_ENV: "https://isaac.example.invalid/prm"}
+    )
+    assert oauth.WELL_KNOWN_PREFIX not in with_path.metadata_paths("")
+
+    pathless = binding(
+        jwks_file,
+        **{
+            oauth.RESOURCE_ENV: "https://isaac.example.invalid",
+            oauth.METADATA_URL_ENV: "https://isaac.example.invalid/prm",
+        },
+    )
+    assert pathless.metadata_paths("") == (oauth.WELL_KNOWN_PREFIX,)
 
 
 # ==========================================================================
@@ -743,16 +819,18 @@ def test_the_metadata_document_is_served_unauthenticated_at_both_paths(served):
     BEFORE it has a token, so requiring one would make the flow unstartable. It
     contains only configuration an operator chose to publish."""
     _, client = served
-    for path in (oauth.WELL_KNOWN_PREFIX, f"{oauth.WELL_KNOWN_PREFIX}/api/mcp"):
-        response = client.get(path)
-        assert response.status_code == 200, path
-        assert response.headers["content-type"].startswith("application/json")
-        assert response.json()["resource"] == RESOURCE
+    response = client.get(f"{oauth.WELL_KNOWN_PREFIX}/api/mcp")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["resource"] == RESOURCE
+    # And the bare suffix is NOT registered, because this resource has a path —
+    # see `test_the_bare_well_known_path_is_served_only_for_a_pathless_resource`.
+    assert client.get(oauth.WELL_KNOWN_PREFIX).status_code == 404
 
 
 def test_the_metadata_route_answers_405_for_a_write(served):
     _, client = served
-    response = client.post(oauth.WELL_KNOWN_PREFIX, json={})
+    response = client.post(f"{oauth.WELL_KNOWN_PREFIX}/api/mcp", json={})
     assert response.status_code == 405
     assert response.headers["allow"] == "GET, HEAD"
 
@@ -883,3 +961,353 @@ def test_every_service_basis_a_human_may_also_claim_is_still_claimable(jwks_file
     )
     with pytest.raises(ValueError):
         identity.ServicePrincipal(principal_id="agent", trust_basis="because-i-said-so")
+
+
+# ==========================================================================
+# 8. Configurations that used to boot clean and then work for nobody
+# ==========================================================================
+# Each of these produced a deployment INDISTINGUISHABLE, in every log and every
+# status surface, from a working one. That is why they are boot refusals rather
+# than request-time refusals: the only moment anybody is watching is the rollout.
+
+
+def test_an_issuer_outside_the_advertised_authorization_servers_refuses_to_boot(
+    jwks_file,
+):
+    """**A 100%-FAILING DEPLOYMENT THAT NOTHING IN-PROCESS COULD LOOK WRONG ABOUT.**
+
+    ``jwt.verify_access_token`` compares ``iss`` against the CONFIGURED issuer, by
+    exact string equality and nothing else. So a deployment whose RFC 9728
+    document advertises a different authorization server sends every conforming
+    client to authorize somewhere whose tokens it will then refuse — with
+    ``issuer_mismatch``, which reads as a broken authorization server rather than
+    as a typo in a manifest.
+
+    Refused at boot, and the assertion below is that resolution FAILS rather than
+    that the request path is careful: a resource server that publishes a
+    contradiction is misconfigured whether or not anyone has presented a token.
+    """
+    resolved = oauth.resolve_oauth_binding(
+        env(
+            jwks_file,
+            **{oauth.AUTHORIZATION_SERVERS_ENV: "https://other.example.invalid"},
+        ),
+        "",
+    )
+    assert isinstance(resolved, str)
+    assert oauth.ISSUER_ENV in resolved
+    assert oauth.AUTHORIZATION_SERVERS_ENV in resolved
+
+
+def test_an_issuer_among_several_advertised_servers_is_accepted(jwks_file):
+    """The acceptor for the refusal above. A deployment may legitimately advertise
+    several servers and accept from one of them; what is refused is advertising a
+    set the issuer is not IN."""
+    resolved = binding(
+        jwks_file,
+        **{
+            oauth.AUTHORIZATION_SERVERS_ENV: f"https://other.example.invalid, {ISSUER}"
+        },
+    )
+    assert resolved.config.authorization_servers == (
+        "https://other.example.invalid",
+        ISSUER,
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "metadata_url"),
+    [
+        # A backslash is legal in a URI path and `_canonical_uri` admits it, but
+        # it is outside `_SAFE_CHALLENGE_VALUE` — so the two checks genuinely
+        # disagreed, and the disagreement had a winner nobody chose.
+        ("backslash", "https://isaac.example.invalid/pr\\m"),
+        # Over 512 characters: also admitted by `_canonical_uri`, also dropped.
+        ("too_long", "https://isaac.example.invalid/" + "a" * 600),
+        # A double quote would terminate the quoted-string it is emitted inside.
+        ("quote", 'https://isaac.example.invalid/p"m'),
+    ],
+)
+def test_a_metadata_url_that_cannot_be_emitted_in_a_challenge_refuses_to_boot(
+    jwks_file, label, metadata_url
+):
+    """**A SILENT MUST VIOLATION, PROMOTED TO A BOOT FAILURE.**
+
+    ``_challenge_parameters`` DROPS a value that fails ``_SAFE_CHALLENGE_VALUE``
+    — correct, because escaping is a second parser to get right — and the dropped
+    parameter here is ``resource_metadata``, which is the one thing the ``401``
+    exists to carry. The result was a well-formed-looking challenge that gives a
+    conforming client no way to discover the authorization server, with nothing in
+    this process logging a word about it.
+
+    Decided at boot, not at render time, which is the whole finding: the render
+    path cannot refuse (an exception there turns a ``401`` into a ``500``), so the
+    only place the disagreement can be settled is where the value is accepted.
+    """
+    resolved = oauth.resolve_oauth_binding(
+        env(jwks_file, **{oauth.METADATA_URL_ENV: metadata_url}), ""
+    )
+    assert isinstance(resolved, str), label
+    assert "WWW-Authenticate challenge" in resolved
+
+
+def test_every_token_refusal_message_can_be_emitted_in_a_challenge(jwks_file):
+    """The other half of the same rule, over the values this build can actually
+    put in ``error_description``.
+
+    ``jwt._REJECTIONS`` is a closed set of fixed English strings, and each one
+    reaches a ``WWW-Authenticate`` header through ``_refuse``. A message carrying
+    a double quote would be dropped exactly as a bad URL is — so the set is
+    checked rather than trusted, and a future refusal reason that cannot be
+    emitted fails here rather than in a header nobody reads.
+    """
+    from isaac_api.mcp.jwt import _REJECTIONS
+
+    unemittable = [
+        code
+        for code, message in _REJECTIONS.items()
+        if not oauth._SAFE_CHALLENGE_VALUE.match(message)
+    ]
+    assert unemittable == []
+
+
+def test_a_jwks_file_that_is_not_json_refuses_to_boot(tmp_path):
+    """The unparseable-document branch, which the missing-file case does not
+    reach: a file that EXISTS and is garbage takes a different path from one that
+    is absent, and both end at a server that can verify nothing."""
+    path = tmp_path / "jwks.json"
+    path.write_text("{not json at all", encoding="utf-8")
+    resolved = oauth.resolve_oauth_binding(env(path), "")
+    assert isinstance(resolved, str)
+    assert "malformed_jwks" in resolved
+
+
+def test_a_jwks_file_carrying_no_usable_key_refuses_to_boot(tmp_path):
+    """Valid JSON, valid JWKS shape, and not one key this build can verify with —
+    the shape a rotation to an unsupported algorithm produces."""
+    path = tmp_path / "jwks.json"
+    path.write_text(
+        json.dumps({"keys": [{"kty": "EC", "kid": "ec", "crv": "P-256"}]}),
+        encoding="utf-8",
+    )
+    resolved = oauth.resolve_oauth_binding(env(path), "")
+    assert isinstance(resolved, str)
+    assert "no_usable_jwks_key" in resolved
+
+
+def test_the_boot_probe_does_not_make_this_container_depend_on_a_remote_issuer(
+    jwks_file,
+):
+    """The one key source that is NOT probed, and the reason.
+
+    Probing a fetched key set would make the container's ability to START depend
+    on the issuer being reachable at that instant, turning a five-minute issuer
+    outage into a deployment that will not roll. The per-request ``TokenRejected``
+    ``FetchedKeySource`` already raises is the right treatment for a fetch that
+    fails, at boot as at any other time.
+    """
+    assert oauth.FetchedKeySource(url="https://x.invalid", fetch=lambda _: {}).probe_at_boot is False
+    assert getattr(oauth.FileKeySource(path=jwks_file), "probe_at_boot", True) is True
+    assert getattr(oauth.FixtureKeySource(document={}), "probe_at_boot", True) is True
+
+
+# ==========================================================================
+# 9. The identity a request actually produces
+# ==========================================================================
+# Section 7 asserts what a service principal IS. This section asserts that a
+# request MAKES one — which is a different claim, and was the false one:
+# `service_identity` had zero production callers while `identity.py` said the
+# binding "can now build a SERVICE identity … at the MCP transport boundary".
+
+
+def test_an_authenticated_request_reports_the_service_tier_and_its_basis(
+    served, signing_key
+):
+    """Through the real path — HTTP, transport, server, binding — rather than by
+    calling ``service_identity`` directly, because calling it directly is what the
+    previous tests did and is exactly what did not prove it was reached."""
+    _, client = served
+    live = token(signing_key, exp=int(time.time()) + 600)
+    result = rpc(
+        client, "initialize", headers={"Authorization": f"Bearer {live}"}
+    ).json()["result"]
+    assert result["_isaac"]["trustTier"] == "service"
+    assert (
+        result["_isaac"]["trustBasis"]
+        == identity.TRUST_BASIS_VERIFIED_OAUTH_ACCESS_TOKEN
+    )
+    assert "trustRefusal" not in result["_isaac"]
+
+
+def test_the_loopback_binding_identifies_nobody_and_says_so(clean):
+    """``local-loopback`` authorizes by socket address, which identifies NOBODY.
+    Reporting ``untrusted`` with a reason is the honest answer; reporting a
+    principal because the request was authorized would be the confusion this whole
+    tier system exists to prevent."""
+    clean.setenv(DEPLOYMENT_ENV, LOCAL_LOOPBACK)
+    client = TestClient(build_app(), client=("127.0.0.1", 5555))
+    result = client.post(
+        MCP_PATH, json={"jsonrpc": "2.0", "id": 1, "method": "initialize"}
+    ).json()["result"]
+    assert result["_isaac"]["trustTier"] == "untrusted"
+    assert result["_isaac"]["trustRefusal"] == "no_verifier_configured"
+    assert "trustBasis" not in result["_isaac"]
+
+
+def test_the_identity_a_tool_call_carries_can_never_satisfy_require_human_actor(
+    jwks_file, signing_key
+):
+    """**THE GATE, ASSERTED OVER THE OBJECT A TOOL HANDLER ACTUALLY RECEIVES.**
+
+    ``McpServer.request_identity`` is what builds it and what ``ToolContext``
+    carries, so this is the identity any future handler would consult. It is
+    ``SERVICE``; ``require_human_actor`` reads ``.human``, which is ``None``; and
+    ``stamp_actor`` reads the same field. No tool can therefore accept a proposal,
+    submit, or attribute anything to a person — and none of that is arranged here,
+    it is inherited.
+    """
+    from isaac_api.mcp.server import McpServer
+
+    resolved = binding(jwks_file)
+    server = McpServer(None, binding=resolved)
+    request_identity = server.request_identity(resolved.authenticate(bearer(signing_key)))
+
+    assert request_identity.trust is identity.TrustTier.SERVICE
+    assert request_identity.human is None
+    assert identity.stamp_actor(request_identity, None) is None
+    raised = identity.HumanActorRequired(
+        operation="accept_proposal", identity=request_identity
+    )
+    assert raised.payload["reason"] == "service_principal_not_attributable"
+
+
+def test_no_mcp_authenticated_caller_has_a_tool_to_accept_or_submit_with(
+    served, signing_key
+):
+    """The gate above only matters if a tool could ever ask the question. None
+    can: the tool set is a closed, import-time-validated allowlist, and every
+    capability token that would name one of these operations makes the module fail
+    to import.
+
+    ``accept`` is in that token set as of 2026-08-30 — ``approve`` was there and
+    its synonym was not, and ISAAC's own conflict-resolution vocabulary is *accept
+    a proposal*, so ``isaac_accept_proposal`` is the exact name a future author
+    would reach for.
+    """
+    from isaac_api.mcp.policy import FORBIDDEN_TOOL_TOKENS, forbidden_tool_reason
+
+    _, client = served
+    live = token(signing_key, exp=int(time.time()) + 600)
+    listed = rpc(
+        client, "tools/list", headers={"Authorization": f"Bearer {live}"}
+    ).json()["result"]["tools"]
+    names = {tool["name"] for tool in listed}
+    assert names
+    for banned in ("accept", "approve", "submit", "export", "finalis", "delete"):
+        assert banned in FORBIDDEN_TOOL_TOKENS
+        assert not [n for n in names if banned in n.lower()]
+    for name in ("isaac_accept_proposal", "isaac_accept", "isaac_submit_record"):
+        assert forbidden_tool_reason(name) is not None, name
+
+
+def test_a_browser_origin_outside_the_cors_allowlist_cannot_preflight_this_endpoint(
+    served,
+):
+    """**THE MEASUREMENT BEHIND ``requires_loopback_origin=False``**, which is a
+    guard this binding turns OFF and which used to be turned off on a false
+    premise.
+
+    The old reason — *"this server refuses every request that does not carry a
+    token"* — was not true when it was written: three methods answered above the
+    first ``authenticate()`` call. It is true now, and it is a fact about
+    ``server.py``'s ordering rather than about this class, so the DNS-rebinding
+    argument is re-made here on evidence instead of on that sentence.
+
+    What this measures: a cross-origin POST carrying ``Authorization`` is not a
+    *simple request*, so a browser preflights it, and ISAAC's ``CORSMiddleware``
+    wraps this route like every other. An origin outside ``ISAAC_UI_CORS_ORIGINS``
+    — whose default is the Vite dev server on loopback — is refused **400
+    Disallowed CORS origin** with no ``access-control-allow-origin`` header, and
+    the real request is never sent.
+
+    **Stated with two limits, because they are what make it honest.** First, CORS
+    binds BROWSERS, not clients: a non-browser caller can send any ``Origin`` it
+    likes and be served — which is fine, because a non-browser caller is not the
+    thing DNS rebinding attacks, and because a remote MCP connector is
+    server-to-server and sends no ``Origin`` at all. Second,
+    ``ISAAC_UI_CORS_ORIGINS`` is an ISAAC-wide setting rather than this endpoint's,
+    so a deployment that widens it for the frontend widens it here too — the
+    second half of this test measures the *default*, which is the loopback Vite
+    origins and nothing else.
+
+    This is not a claim that the Transports chapter's ``Origin`` MUST is
+    satisfied; ``oauth.py`` names that divergence rather than claiming it.
+    """
+    _, client = served
+    preflight = {
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization,content-type",
+    }
+    refused = client.options(
+        MCP_PATH, headers={"Origin": "https://evil.example", **preflight}
+    )
+    assert refused.status_code == 400
+    assert "Disallowed CORS origin" in refused.text
+    assert "access-control-allow-origin" not in refused.headers
+
+    allowed = client.options(
+        MCP_PATH, headers={"Origin": "http://localhost:5173", **preflight}
+    )
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+# ==========================================================================
+# 10. What is NOT tested, and why saying so is better than a test
+# ==========================================================================
+
+
+def test_there_is_no_revocation_mechanism_to_test():
+    """**A DOCUMENTED ABSENCE, NOT A GAP LEFT QUIET.**
+
+    An audit asked for a "revoked token" negative control. There is nothing for it
+    to assert: this build validates a JWT by signature, issuer, audience and
+    expiry, and consults **no** revocation source — no introspection endpoint
+    (RFC 7662), no ``jti`` denylist, no session store. A token stays valid for the
+    whole of its ``exp`` window, and the only lever an operator has is the key
+    rotation ``FileKeySource`` picks up.
+
+    A test called ``test_a_revoked_token_is_refused`` could only revoke something
+    this code has no concept of, and would pass by construction — reading, in a
+    coverage report and in a security review, as evidence of a control that does
+    not exist. So the mechanism's absence is asserted instead, and the assertion
+    goes red the day somebody adds a revocation source without a real test beside
+    it.
+    """
+    import ast
+    import inspect
+
+    from isaac_api.mcp import jwt as jwtmod
+
+    # Over IDENTIFIERS, not raw text: both files discuss revocation in prose (a
+    # rotated key set is picked up so a *revoked key* is not served for a cache
+    # window), and a text scan would be satisfied by deleting a comment.
+    identifiers: set[str] = set()
+    for module in (jwtmod, oauth):
+        tree = ast.parse(inspect.getsource(module))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                identifiers.add(node.name)
+            elif isinstance(node, ast.Name):
+                identifiers.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                identifiers.add(node.attr)
+            elif isinstance(node, ast.keyword) and node.arg:
+                identifiers.add(node.arg)
+    lowered = " ".join(sorted(identifiers)).lower()
+    for absent in ("introspect", "revocation", "revoked", "denylist", "blocklist"):
+        assert absent not in lowered, absent
+
+    # And the bound on exposure, stated as the thing an operator can act on: the
+    # expiry the issuer set, and nothing else.
+    assert "exp" in inspect.getsource(jwtmod.verify_access_token)

@@ -488,3 +488,191 @@ def test_the_verifier_reads_a_real_clock_only_when_asked_to(primary, key_set):
     sleeping — and so the production caller's clock is an injectable seam."""
     token = keys.mint(primary, claims(exp=int(time.time()) + 300))
     assert verify(token, key_set, now=int(time.time()))
+
+
+# ==========================================================================
+# 6. The branches an audit found never executed
+# ==========================================================================
+# Every case below was measured — by line coverage over this file's own suite —
+# as a refusal path that no test reached. A refusal nothing exercises is a
+# refusal nobody has checked the polarity of, and this module has exactly one
+# job, so an unexercised branch here is not a coverage statistic.
+
+
+def test_a_token_carrying_no_audience_at_all_is_refused(primary, key_set):
+    """The MUST that makes this a resource server rather than a token reader.
+
+    *"MCP servers **MUST** validate that access tokens were issued specifically
+    for them as the intended audience."* A token with no ``aud`` claim names
+    nobody, so it was issued specifically for nobody. It is refused by the same
+    unconditional comparison that refuses a token minted for another resource —
+    ``resource not in ()`` — and that is worth pinning separately, because "the
+    claim is absent" is the case a verifier written with ``claims.get("aud", [])``
+    and a truthiness test lets through.
+    """
+    assert refusal(keys.mint(primary, claims(aud=_ABSENT)), key_set).code == (
+        "audience_mismatch"
+    )
+
+
+@pytest.mark.parametrize(
+    "audience",
+    [
+        [RESOURCE, 1],
+        [RESOURCE, None],
+        [RESOURCE, {"aud": RESOURCE}],
+        [1, RESOURCE],
+        {"aud": RESOURCE},
+        1,
+    ],
+)
+def test_an_audience_with_a_non_string_member_makes_the_whole_claim_unusable(
+    primary, key_set, audience
+):
+    """FILTERING WOULD BE THE BUG, WHICH IS WHY THE CASE IS HERE RATHER THAN THE
+    OBVIOUS ONE.
+
+    ``_audiences`` returns ``()`` for a list that is not entirely strings, so the
+    audience check refuses. The tempting implementation drops the bad members and
+    keeps the good ones — and ``[<this resource>, 1]`` would then read as a clean
+    single-audience token. This test's first parameter is exactly that shape: it
+    CONTAINS the correct resource, and is refused anyway.
+    """
+    assert refusal(keys.mint(primary, claims(aud=audience)), key_set).code == (
+        "audience_mismatch"
+    )
+
+
+def test_a_signature_whose_integer_is_not_less_than_the_modulus_is_refused(
+    primary, key_set
+):
+    """RFC 8017 §8.2.2 step 1's other half, and the half a lenient verifier skips.
+
+    A signature is an integer in ``[0, n)``. ``pow(s, e, n)`` happily computes an
+    answer for ``s >= n`` — it is just ``s mod n`` raised — so an implementation
+    that only checks the LENGTH accepts a whole family of equivalent signatures.
+    The signature used here is the modulus itself: exactly the right number of
+    bytes, and exactly the value the range check exists to exclude.
+    """
+    token = keys.mint(primary, claims())
+    header, payload, _ = token.split(".")
+    oversized = keys.b64url(primary.modulus.to_bytes(primary.size_bytes, "big"))
+    assert refusal(f"{header}.{payload}.{oversized}", key_set).code == "bad_signature"
+
+
+@pytest.mark.parametrize("not_before", ["soon", 1.5, True, [NOW], {"at": NOW}])
+def test_a_wrongly_typed_nbf_is_refused_rather_than_ignored(
+    primary, key_set, not_before
+):
+    """``nbf`` is optional, so the tempting reading of a bad one is "treat it as
+    absent". That inverts the claim's meaning: a token the issuer said was not yet
+    valid would become one with no such restriction. A present-but-unreadable
+    ``nbf`` is refused, which is the direction that cannot widen a grant.
+
+    ``True`` is in the list because ``isinstance(True, int)`` is ``True`` in
+    Python, so a bare ``isinstance`` check would read it as the epoch second 1.
+
+    ``None`` is deliberately NOT in the list — see the next test, which measures
+    it rather than assuming it.
+    """
+    token = keys.mint(primary, claims(nbf=not_before))
+    assert refusal(token, key_set).code == "not_yet_valid"
+
+
+def test_a_json_null_nbf_is_read_as_absent_and_that_is_not_the_same_as_exp(
+    primary, key_set
+):
+    """**MEASURED, AND IT IS THE ONE WRONG-TYPED ``nbf`` THAT IS ACCEPTED.**
+
+    ``nbf: null`` reaches ``claims.get("nbf") is None`` and takes the
+    claim-is-absent branch, so it verifies. Written down rather than folded into
+    the parametrize above, because it looks like a hole in that test's own rule
+    and is not one: a ``nbf`` the verifier refuses to read must fail closed
+    because refusing to read a RESTRICTION and then ignoring it widens the token.
+    An absent ``nbf`` carries no restriction to lose, and an attacker who wants
+    that outcome can simply omit the claim — so ``null`` and absent being the same
+    thing costs nothing.
+
+    ``exp`` is the opposite case and the contrast is the point: absent ``exp`` is
+    **refused** (``missing_expiry``), because there the absent state is the
+    dangerous one — a token that never expires. The two claims are optional in
+    opposite directions, so they get opposite treatment.
+    """
+    assert verify(keys.mint(primary, claims(nbf=None)), key_set)
+    assert refusal(keys.mint(primary, claims(exp=None)), key_set).code == (
+        "missing_expiry"
+    )
+
+
+@pytest.mark.parametrize("header_json", [b"[1, 2, 3]", b'"a string"', b"42", b"null"])
+def test_a_header_that_is_valid_json_but_not_an_object_is_refused(
+    primary, key_set, header_json
+):
+    """The mirror of the payload case, and the one that runs FIRST.
+
+    ``json.loads`` succeeds on all four, so the guard that matters is the type
+    check after it, not the parse. It is worth its own test because everything
+    downstream — ``crit``, ``typ``, ``alg``, ``kid`` — is a ``.get()`` on this
+    value, and a list answers ``.get`` with an ``AttributeError`` rather than a
+    refusal.
+    """
+    header = keys.b64url(header_json)
+    payload = keys.b64url(json.dumps(claims(), sort_keys=True).encode("utf-8"))
+    signature = keys.b64url(primary.sign(f"{header}.{payload}".encode("ascii")))
+    assert refusal(f"{header}.{payload}.{signature}", key_set).code == "malformed_token"
+
+
+def test_a_segment_over_the_per_segment_cap_is_refused_before_json_sees_it(
+    primary, key_set
+):
+    """The cap is DECODED bytes, and it bites below the whole-token cap.
+
+    A payload of 5 KiB is under ``MAX_COMPACT_TOKEN_BYTES`` once base64-encoded
+    with a header and a signature beside it, so this case is reachable only
+    because the per-segment bound exists — which is the point: deep or enormous
+    JSON is a parser problem, and the cheapest place not to have it is before
+    ``json.loads``.
+    """
+    big = json.dumps(claims(padding="x" * 5000), sort_keys=True).encode("utf-8")
+    assert len(big) > jwtmod.MAX_SEGMENT_BYTES
+    header = keys.b64url(json.dumps({"alg": "RS256", "kid": primary.kid}).encode())
+    payload = keys.b64url(big)
+    signature = keys.b64url(primary.sign(f"{header}.{payload}".encode("ascii")))
+    token = f"{header}.{payload}.{signature}"
+    assert len(token) < MAX_COMPACT_TOKEN_BYTES
+    assert refusal(token, key_set).code == "token_too_large"
+
+
+@pytest.mark.parametrize(
+    ("label", "exponent"),
+    [
+        # e = 1 makes RSA the identity function: `pow(s, 1, n) == s`, so ANY
+        # byte string that happens to equal the PKCS#1 block verifies, and an
+        # attacker can simply construct that block.
+        ("unity", 1),
+        # An even exponent cannot be coprime with (p-1)(q-1), so it is not an RSA
+        # public exponent at all. It is what a corrupted or hostile JWKS carries.
+        ("even", 4),
+        ("even_large", 65536),
+        # e >= n is outside the definition of the key pair.
+        ("not_below_modulus", None),
+    ],
+)
+def test_a_key_whose_exponent_is_not_a_public_exponent_is_skipped(
+    primary, label, exponent
+):
+    """A JWKS is fetched or projected from outside this process, so its numbers
+    are input. Each of these is a key that would "work" — produce a verdict — and
+    the verdict would be worthless.
+
+    Skipped rather than fatal, for the reason the mixed-key-type test gives; but
+    a document containing ONLY such a key yields no usable key at all, which is
+    what this asserts. Refusing loudly beats verifying against a key that cannot
+    refuse anything.
+    """
+    value = primary.modulus + 1 if exponent is None else exponent
+    entry = primary.jwk()
+    entry["e"] = keys.b64url(value.to_bytes((value.bit_length() + 7) // 8 or 1, "big"))
+    with pytest.raises(TokenRejected) as caught:
+        jwks_from_document({"keys": [entry]})
+    assert caught.value.code == "no_usable_jwks_key", label

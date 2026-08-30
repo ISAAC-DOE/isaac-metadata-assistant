@@ -55,6 +55,48 @@ WHAT IS DELIBERATELY NOT IMPLEMENTED
   arrive as a parsed :class:`JsonWebKeySet`; where they came from is
   ``oauth.py``'s problem and is a seam that is unset by default.
 
+THE ``typ`` DECISION: RFC 9068 IS NOT ENFORCED, AND THAT IS THE DECISION
+========================================================================
+RFC 9068 §4: *"The resource server MUST verify that the 'typ' header value is
+'at+jwt' or 'application/at+jwt' and reject tokens carrying any other value."*
+(§2.1 puts only a SHOULD on the issuer, which is why the burden lands on the
+resource server.) **This module does not enforce it**, and until 2026-08-30
+``oauth.py`` advertised *"RFC 9068-shaped JWT access tokens"*, which read as
+though it did. The claim is withdrawn there; the decision is recorded here,
+because this is where a future author will come looking for it.
+
+**Why the RFC is not the governing document.** MCP's authorization chapter says
+*"MCP servers, acting in their role as an OAuth 2.1 resource server, **MUST**
+validate access tokens as described in OAuth 2.1 Section 5.2"*, and RFC 9068 is
+absent from its Standards Compliance list entirely. So there is no MCP MUST to
+violate here — only an RFC this build chose not to adopt.
+
+**Why not adopt it anyway.** Because :data:`SUPPORTED_TYP_VALUES` would then be
+``{at+jwt, application/at+jwt}``, and a great many deployed authorization servers
+— Authentik, the one ISAAC would actually be configured against, among them —
+mint the generic ``JWT``. Every one of them would be refused, with a refusal
+naming a header field rather than anything an operator can act on. The strictly
+stronger rule is also the rule that makes the feature unusable against the
+issuer it exists for.
+
+**The residual risk, named rather than glossed.** Accepting ``JWT`` admits the
+*shape* of an OIDC **ID token**, and the only thing standing between an ID token
+and acceptance is the audience check: an ID token's ``aud`` is the ``client_id``,
+never the resource URI, so the unconditional ``resource in audiences`` comparison
+in :func:`verify_access_token` refuses it. **That defence has one failure mode
+and it is a configuration the operator controls: a ``client_id`` that is a URL
+equal to the resource identifier.** MCP's own client-registration chapter makes
+URL-shaped client IDs a live possibility (Client ID Metadata Documents use an
+HTTPS URL as the ``client_id``), so this is not hypothetical. The mitigation is
+an operator instruction — *do not register the MCP client with a ``client_id``
+equal to ``ISAAC_MCP_OAUTH_RESOURCE``* — recorded in
+``docs/mcp-oauth-operator-requirements-2026-08-27.md``, because no check inside
+this process can distinguish the two strings when they are the same string.
+
+What IS enforced: a ``typ`` that is present and is **outside**
+:data:`SUPPORTED_TYP_VALUES` is refused (``dpop+jwt``, ``id_token+jwt``, anything
+else), and an absent ``typ`` is permitted, which RFC 7515 §4.1.9 allows.
+
 NOTHING IN THIS MODULE EVER PUTS TOKEN MATERIAL IN AN EXCEPTION, A LOG, OR A
 RETURN VALUE
 ============================================================================
@@ -100,15 +142,14 @@ SUPPORTED_ALGORITHMS: Mapping[str, str] = {
 
 #: ``typ`` header values accepted. RFC 9068 mints ``at+jwt``; a great many
 #: deployed authorization servers (Authentik among them) mint the generic
-#: ``JWT``, and absent is permitted by RFC 7515.
+#: ``JWT``, and absent is permitted by RFC 7515 §4.1.9.
 #:
-#: ACCEPTING ``JWT`` ADMITS THE SHAPE OF AN OIDC **ID TOKEN**, AND THAT IS
-#: DELIBERATE AND DEFENDED ELSEWHERE. An ID token's ``aud`` is the client_id,
-#: never the resource URI, so :func:`verify_access_token`'s audience check —
-#: which is a MUST in the MCP specification and is unconditional here — refuses
-#: it. The narrower ``at+jwt``-only rule would be strictly stronger and would
-#: also refuse most real authorization servers, which is why the audience check
-#: rather than the ``typ`` check is where the weight is placed.
+#: **THIS SET IS THE ``typ`` DECISION, AND THE DECISION IS "RFC 9068 §4 IS NOT
+#: ENFORCED".** The module docstring's ``THE typ DECISION`` section carries the
+#: argument, the rejected alternative, and the one residual risk it leaves — a
+#: ``client_id`` that is a URL equal to the resource identifier, which is an
+#: operator instruction rather than a check this process can make. Read it before
+#: narrowing this set; narrowing it is defensible and would refuse Authentik.
 SUPPORTED_TYP_VALUES: frozenset[str] = frozenset(
     {"jwt", "at+jwt", "application/at+jwt"}
 )

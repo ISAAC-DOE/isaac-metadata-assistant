@@ -2,12 +2,37 @@
 
 WHAT THIS IS, AND WHAT IT IS NOT
 ================================
-This registers the name ``deployment.py`` has been holding open. It is a
-**complete, standards-conformant resource server** — RFC 9728 protected-resource
-metadata, RFC 8707 audience binding, RFC 6750 challenges, RFC 9068-shaped JWT
-access tokens — and it is **disabled by default and reachable in no shipped
-deployment**. Nothing here creates an account, a credential, an endpoint, a
-billing arrangement or an outbound connection, and nothing here may.
+This registers the name ``deployment.py`` has been holding open. It is an
+**OAuth 2.1 protected resource for the MCP authorization chapter** — RFC 9728
+protected-resource metadata, RFC 8707 audience binding, RFC 6750 challenges, and
+JWT access-token validation per OAuth 2.1 §5.2 — and it is **disabled by default
+and reachable in no shipped deployment**. Nothing here creates an account, a
+credential, an endpoint, a billing arrangement or an outbound connection, and
+nothing here may.
+
+~~"a **complete, standards-conformant** resource server … RFC 9068-shaped JWT
+access tokens"~~ — **BOTH HALVES CORRECTED 2026-08-30, and struck rather than
+reworded because an unqualified conformance claim in a security module is exactly
+the kind of sentence a reader stops checking.**
+
+*"Complete"* named no chapter, so it read as covering the whole specification
+while the module implements one of them. What is claimed, and the only thing
+claimed, is the **Authorization** chapter of revision ``2026-07-28`` in the
+resource-server role, enumerated requirement by requirement below. The
+**Transports** chapter is ``transport.py``'s and carries one documented
+divergence (the ``Origin`` MUST — see :attr:`requires_loopback_origin`); the
+client-side MUSTs are nobody's here and are listed under RESOURCE SERVER ONLY.
+
+*"RFC 9068-shaped"* was the more consequential half, because it implied a check
+this module does not make. **MCP mandates OAuth 2.1 §5.2, not RFC 9068** — *"MCP
+servers, acting in their role as an OAuth 2.1 resource server, **MUST** validate
+access tokens as described in OAuth 2.1 Section 5.2"* — and RFC 9068 appears
+nowhere in its Standards Compliance list. RFC 9068 §4 says *"The resource server
+MUST verify that the 'typ' header value is 'at+jwt' or 'application/at+jwt' and
+reject tokens carrying any other value"*;
+:data:`~.jwt.SUPPORTED_TYP_VALUES` deliberately also accepts ``JWT``, so
+the RFC 9068 claim was false as stated. See ``jwt.py``'s ``THE typ DECISION`` for
+the argument, the alternative that was rejected, and the residual risk it leaves.
 
 **D1 and D2 are still deferred and this does not answer them.** It makes them
 *answerable*: the application half now exists and can be reviewed, so what
@@ -36,10 +61,33 @@ anything either: it fails closed to ``UnconfiguredDeployment``, and
 :func:`validate_oauth_selection_or_raise` additionally makes the container
 refuse to boot, so a half-configured deployment is loud rather than quiet.
 
-VERIFIED AGAINST THE LIVE SPECIFICATION (fetched 2026-08-29, revision
-``2026-07-28``)
+WHICH REVISIONS ARE SERVED, AND WHICH CHAPTER EACH CLAIM COVERS
+===============================================================
+This binding serves **both** revisions ``server.py`` implements —
+``2026-07-28`` (modern) and ``2025-06-18`` (legacy) — because the binding decides
+*who may call*, not *what protocol is spoken*: era selection is
+``server.protocol_era``'s and applies identically under every binding.
+
+The claims below are **the Authorization chapter of ``2026-07-28``, in the
+resource-server role only.** Its Transports chapter is ``transport.py``'s, and
+one of its MUSTs is divergent here and named as such rather than claimed
+(:attr:`OAuthResourceServerDeployment.requires_loopback_origin`). Its Lifecycle,
+Versioning and Discovery chapters are ``server.py``'s.
+
+VERIFIED AGAINST THE LIVE SPECIFICATION (fetched 2026-08-29 and re-fetched
+2026-08-30, revision ``2026-07-28``)
 ====================================================================
 The requirements this module implements, each traceable:
+
+* *"Note that authorization **MUST** be included in every HTTP request from
+  client to server."* → every JSON-RPC method authenticates before it produces
+  anything, including ``ping``, ``notifications/initialized``,
+  ``server/discover`` and the unknown-method path. **This was not true when this
+  file first claimed conformance**: ``server.py`` answered three of those above
+  its first ``authenticate()`` call. It was invisible while the only serving
+  binding refused non-loopback peers on the socket, and this binding sets
+  ``requires_loopback_peer=False``, which is what turned a latent ordering bug
+  into an unauthenticated MCP endpoint. See ``server.py``'s module docstring.
 
 * *"MCP servers **MUST** implement OAuth 2.0 Protected Resource Metadata
   (RFC 9728)"* and *"The Protected Resource Metadata document returned by the MCP
@@ -128,8 +176,36 @@ honest status is that it is Dean's and outstanding. It is named here rather than
 only in a document because it is the requirement most likely to be discovered
 after the code is written.
 
-ONE PLACE THIS FILE DELIBERATELY DIVERGES FROM THE LETTER OF RFC 9728
-=====================================================================
+WHERE THIS BUILD DIVERGES FROM THE LETTER OF A SPECIFICATION — FOUR PLACES
+===========================================================================
+~~"ONE PLACE THIS FILE DELIBERATELY DIVERGES FROM THE LETTER OF RFC 9728"~~ —
+**corrected 2026-08-30. There were three when that heading was written and there
+are four now**, and a count in a heading is a claim like any other. The heading
+was doing real work — it invites a reader to check — which is precisely why it
+had to be right. Enumerated, so the next one is added to a list rather than
+appended somewhere else:
+
+1. **RFC 9728 §3.1 — the origin root.** The subject of this section, below.
+2. **RFC 9728 §1.2 — ``https`` only.** ``http://`` is admitted for a *literal*
+   loopback host so the flow can be exercised without a certificate. See
+   :data:`_HTTP`, which quotes §1.2 and states what bounds the carve-out.
+3. **``2026-07-28`` Transports — the ``Origin`` MUST.** This binding performs no
+   ``Origin`` validation at all. See
+   :attr:`OAuthResourceServerDeployment.requires_loopback_origin` for the three
+   arguments and for the explicit statement that they are a defence of the
+   position, not a claim that the MUST is met.
+4. **RFC 9068 §4 — the ``typ`` MUST.** Not enforced; ``jwt.py``'s ``THE typ
+   DECISION`` carries the argument and the residual risk. It is listed here for
+   completeness even though **MCP does not require RFC 9068 at all** — it
+   mandates OAuth 2.1 §5.2 — so this is a divergence from a specification ISAAC
+   never adopted rather than from one it must follow.
+
+A fifth thing changed here that is NOT a divergence and is the opposite:
+:func:`metadata_paths` used to serve the document at the bare
+``/.well-known/oauth-protected-resource`` even when the resource carried a path,
+which produced a document RFC 9728 §3.3 requires a client to **discard**. That is
+now emitted only for a resource with no path component.
+
 RFC 9728 §3.1 puts the metadata at the **origin root**:
 ``https://host/.well-known/oauth-protected-resource/krish/api/mcp``. ISAAC is
 path-mounted at ``ISAAC_BASE_PATH`` behind an edge that routes ``/krish/*`` to
@@ -258,6 +334,23 @@ _SAFE_CHALLENGE_VALUE = re.compile(r"\A[\x20-\x21\x23-\x5B\x5D-\x7E]{1,512}\Z")
 #: Schemes an issuer / resource / metadata URL may use. ``http`` is admitted ONLY
 #: for a loopback host, so a developer can run the whole flow locally without the
 #: production rule being "https unless somebody set a flag".
+#:
+#: **THIS IS A DELIBERATE DIVERGENCE, NOT AN IMPLEMENTATION OF A RULE, and the
+#: earlier comment implied otherwise by citing nothing.** RFC 9728 §1.2 defines
+#: the resource identifier as *"a URL that uses the ``https`` scheme and has no
+#: fragment component"*, with **no loopback exception of any kind** — unlike
+#: RFC 8252 §7.3, which grants one for native-app redirect URIs and is a different
+#: document about a different value.
+#: So a loopback ``http://`` resource identifier is outside the letter of RFC 9728
+#: and is admitted here anyway, for one reason: the alternative is that nobody can
+#: exercise this flow end to end without a TLS certificate, and an authorization
+#: path that is only ever run in production is one whose failure modes are
+#: discovered in production.
+#:
+#: What bounds it: the host must be a **literal** loopback name or address
+#: (:func:`_is_loopback_hostname` resolves nothing), so no DNS record can point a
+#: public name at this carve-out, and every non-loopback host is refused outright
+#: rather than warned about.
 _HTTPS = "https"
 _HTTP = "http"
 
@@ -379,6 +472,14 @@ class FetchedKeySource:
     clock: Callable[[], float] = time.time
     ttl_seconds: int = 300
     source_id: str = "jwks-url"
+    #: **NOT probed at boot**, and it is the only source that is not.
+    #: :func:`build_config`'s readability probe exists to catch a path that was
+    #: never right; probing a *remote* key set would instead make this container's
+    #: ability to start depend on the issuer being up at that moment, turning an
+    #: issuer's five-minute outage into a deployment that will not roll. The
+    #: per-request `TokenRejected` this class already raises is the correct
+    #: treatment for a fetch that fails, at boot as at any other time.
+    probe_at_boot: bool = False
     _cached: tuple[float, JsonWebKeySet] | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -476,7 +577,7 @@ OAUTH_ENV_VARS: tuple[str, ...] = (
 )
 
 
-def _canonical_uri(raw: str, *, variable: str, allow_path: bool) -> str:
+def _canonical_uri(raw: str, *, variable: str) -> str:
     """A canonical, absolute, fragment-free URI, or raise.
 
     The MCP specification's canonical-URI rules, applied as refusals rather than
@@ -484,6 +585,15 @@ def _canonical_uri(raw: str, *, variable: str, allow_path: bool) -> str:
     default port: a resource server that normalises is a resource server that
     accepts a token minted for a *different* string, and the ``aud`` comparison
     downstream is exact on purpose.
+
+    **A PATH IS ALWAYS PERMITTED, AND THE PATH-REFUSING PARAMETER IS GONE.** It
+    existed, and all five call sites passed the value that skipped it, so the
+    refusing branch was unreachable code asserting a rule this module does not
+    have — and not one it *should* have: the specification's own examples of valid
+    canonical URIs include ``https://mcp.example.com/mcp`` and
+    ``https://mcp.example.com/server/mcp``, RFC 8414 issuers routinely carry a
+    path, and a JWKS URL is nothing but a path. A dead branch in a validator reads
+    as a considered option; this one was never an option.
     """
     value = (raw or "").strip()
     if not value:
@@ -508,8 +618,6 @@ def _canonical_uri(raw: str, *, variable: str, allow_path: bool) -> str:
         raise OAuthConfigProblem(f"{variable} must not contain a query string.")
     if parts.username or parts.password:
         raise OAuthConfigProblem(f"{variable} must not contain userinfo.")
-    if not allow_path and parts.path not in ("", "/"):
-        raise OAuthConfigProblem(f"{variable} must not contain a path component.")
     return value
 
 
@@ -578,18 +686,19 @@ class OAuthResourceServerConfig:
         what the server enforces, and so ``offline_access`` — which this
         revision says a protected resource **SHOULD NOT** advertise — cannot
         appear unless somebody puts it in :class:`~.policy.Scope`.
+
+        **A ``scopes_expressible`` PROPERTY USED TO SIT BELOW THIS ONE AND IS
+        GONE.** It returned every member of :class:`~.policy.Scope` and existed,
+        by its own docstring, to keep *"what exists"* and *"what is advertised"*
+        as "a distinction in the code and not a comment somebody deletes". It had
+        no caller — not here, not in ``transport.py``, not in a test — so the
+        distinction it was making was a comment, in a property, that somebody
+        would eventually delete. The distinction itself is real and is the subject
+        of the three paragraphs above; it is kept where it is enforced. Every
+        scope this server can express is ``Scope`` itself, which is two lines
+        away and cannot go stale.
         """
         return (Scope.READ.value,)
-
-    @property
-    def scopes_expressible(self) -> tuple[str, ...]:
-        """Every scope this server can express. NOT what the metadata advertises.
-
-        Kept separate from :attr:`scopes_supported` so the difference between
-        "what exists" and "what is advertised as the minimal starting set" is a
-        distinction in the code and not a comment somebody deletes.
-        """
-        return tuple(sorted(scope.value for scope in Scope))
 
 
 # --------------------------------------------------------------------------
@@ -707,10 +816,39 @@ def metadata_paths(config: OAuthResourceServerConfig, base: str) -> tuple[str, .
     deployment, so the application serves the reachable neighbourhood of it and
     the operator supplies the advertised URL. Ordered and de-duplicated so the
     registered route list is deterministic.
+
+    **THE SUFFIX-ONLY PATH IS NOW EMITTED ONLY FOR A RESOURCE WITH NO PATH, and
+    the previous behaviour served a document every conforming client had to throw
+    away.** RFC 9728 §3.3: *"The ``resource`` value returned MUST be identical to
+    the protected resource's resource identifier value into which the well-known
+    URI path suffix was inserted to create the URL used to retrieve the metadata.
+    If these values are not identical, the data contained in the response MUST NOT
+    be used."* A client reaching ``…/.well-known/oauth-protected-resource`` has
+    inserted the suffix into ``https://host`` — so that document must say
+    ``resource: "https://host"``. This server always answers with the CONFIGURED
+    resource, so for ``https://host/api/mcp`` the bare path served a document
+    asserting a resource the URL does not describe: not a wrong value, but an
+    unusable one, and one that nothing in-process could look wrong about because
+    the body was correct for a different URL.
+
+    §3.3's SECOND validation rule is the reason the remaining paths are safe, and
+    is worth stating because it points the other way: *"If the protected resource
+    metadata was retrieved from a URL returned by the protected resource via the
+    ``WWW-Authenticate`` ``resource_metadata`` parameter, then the ``resource``
+    value returned MUST be identical to the URL that the client used to make the
+    request to the resource server."* That URL is the MCP endpoint, which is
+    exactly what :attr:`OAuthResourceServerConfig.resource` is — so a document
+    reached through the challenge validates however the operator has routed it.
+
+    What is emitted when the resource HAS a path is the suffix with that path
+    appended — which is the form §3.3 validates — plus the base-trimmed variant
+    for an edge that strips the mount prefix before forwarding.
     """
     resource_path = urlsplit(config.resource).path.rstrip("/")
-    candidates = [f"{base}{WELL_KNOWN_PREFIX}"]
-    if resource_path:
+    candidates: list[str] = []
+    if not resource_path:
+        candidates.append(f"{base}{WELL_KNOWN_PREFIX}")
+    else:
         candidates.append(f"{base}{WELL_KNOWN_PREFIX}{resource_path}")
         if base and resource_path.startswith(base):
             trimmed = resource_path[len(base) :]
@@ -811,12 +949,66 @@ class OAuthResourceServerDeployment:
       ``CLAUDE.md`` records that the Service is a plain ClusterIP with no
       NetworkPolicy, so a forwarded header is forgeable by any in-cluster
       caller, and this binding's answer to that is that it does not consult one.
-    * :attr:`requires_loopback_origin` — ``False``. The rebinding defence exists
-      because a *local* server is otherwise reachable by any web page. This
-      server refuses every request that does not carry a token this deployment's
-      issuer signed, and a page on another origin cannot obtain one: it is not
-      a cookie, the browser will not attach it, and no CORS policy here exposes
-      the response.
+    * :attr:`requires_loopback_origin` — ``False``, and **the reason given here
+      used to be false in a way that mattered.**
+
+      ~~"This server refuses every request that does not carry a token this
+      deployment's issuer signed"~~ — **struck 2026-08-30.** When that was
+      written, ``server.py`` answered ``ping``, ``notifications/initialized`` and
+      the unknown-method path **above** its first ``authenticate()`` call, so this
+      server did *not* refuse every request without a token; it refused every
+      request that reached a tool. The defence was taken off on the strength of a
+      property the code did not have, which is the worst way for a guard to be
+      removed — the sentence read as a measurement and was an assumption.
+
+      **It is true now**, and it is a fact about ``server.py``'s ordering rather
+      than about this class, which is why it is stated with a pointer instead of
+      as a property of the binding.
+
+      The decision is unchanged, and it is re-argued on the merits rather than
+      re-derived from the corrected sentence:
+
+      1. **DNS rebinding is an attack on AMBIENT authority.** It matters when
+         reaching an origin is itself sufficient — a local server that trusts its
+         peer. A bearer token is not ambient: the browser attaches no
+         ``Authorization`` header on its own, and a page on another origin has no
+         way to obtain one from this deployment's issuer.
+      2. **An origin allowlist already exists one layer out, and it is not this
+         flag.** A cross-origin POST carrying ``Authorization`` is not a *simple
+         request*, so a browser preflights it, and ISAAC's ``CORSMiddleware``
+         wraps this route like every other. An origin outside
+         ``ISAAC_UI_CORS_ORIGINS`` (default: the Vite dev server on loopback) has
+         its preflight refused **400 ``Disallowed CORS origin``** and the real
+         request is never sent. That is measured in
+         ``test_mcp_oauth_binding.py``, not assumed — and it is stated with **two**
+         limits rather than one, because the second is an operator's to know:
+
+         * **CORS binds browsers, not clients.** A non-browser caller can send any
+           ``Origin`` it likes and be served. That is fine — a non-browser caller
+           is not the thing DNS rebinding attacks.
+         * **``ISAAC_UI_CORS_ORIGINS`` is an ISAAC-wide setting, not this
+           endpoint's.** Its default is the two loopback Vite origins, and a
+           deployment that widens it for the frontend widens it here too. So this
+           is a bound that exists today rather than a guarantee this binding
+           enforces, and it is described as the former.
+      3. **The allowlist does not exist to enforce.** ``requires_loopback_origin``
+         answers exactly one question — *is this ``Origin`` loopback?* — and for a
+         binding whose entire purpose is a remote caller the honest answer for a
+         legitimate origin is "no". A remote MCP connector is server-to-server and
+         sends no ``Origin`` at all; a browser client would send one this
+         deployment has no configured way to recognise. Turning the flag on would
+         refuse the legitimate browser client and admit the connector, which is
+         the wrong way round.
+
+      **NAMED RATHER THAN CLAIMED, because it is a divergence and not a
+      satisfaction:** the Transports chapter says *"Servers **MUST** validate the
+      ``Origin`` header on all incoming connections to prevent DNS rebinding
+      attacks"*, and with this flag ``False`` **no ``Origin`` validation of any
+      kind happens on this binding.** The three arguments above are why that is a
+      defensible position for a token-authenticated remote resource; they are not
+      a claim that the MUST is met. An operator who wants it met needs a
+      configured origin allowlist, which this build does not have and which is not
+      built here because no deployment has an origin to put in it.
     """
 
     config: OAuthResourceServerConfig
@@ -1003,9 +1195,7 @@ def _authorization_servers(env: Mapping[str, str], issuer: str) -> tuple[str, ..
         if not candidate:
             continue
         servers.append(
-            _canonical_uri(
-                candidate, variable=AUTHORIZATION_SERVERS_ENV, allow_path=True
-            )
+            _canonical_uri(candidate, variable=AUTHORIZATION_SERVERS_ENV)
         )
     if not servers:
         raise OAuthConfigProblem(
@@ -1056,9 +1246,7 @@ def _key_source(env: Mapping[str, str]) -> tuple[KeySource, str]:
                 f"Project the key set into the pod and use "
                 f"'{FILE_TOKEN_VERIFIER}' instead."
             )
-        url = _canonical_uri(
-            env.get(JWKS_URL_ENV, ""), variable=JWKS_URL_ENV, allow_path=True
-        )
+        url = _canonical_uri(env.get(JWKS_URL_ENV, ""), variable=JWKS_URL_ENV)
         return (
             FetchedKeySource(url=url, fetch=fetcher),
             TRUST_BASIS_VERIFIED_OAUTH_ACCESS_TOKEN,
@@ -1090,19 +1278,39 @@ def build_config(env: Mapping[str, str], base: str) -> OAuthResourceServerConfig
     and the key set are each required, and a resource server missing any one of
     them is a resource server that cannot make the check the specification calls
     a MUST.
+
+    THREE CHECKS ADDED 2026-08-30, AND EACH CLOSES A CONFIGURATION THAT BOOTED
+    CLEAN AND THEN REFUSED EVERY TOKEN OR PUBLISHED SOMETHING UNUSABLE. They share
+    a shape worth naming: a deployment in any of these states looks *identical* in
+    every log and status surface to a working one, so the only place they can be
+    caught is the one moment an operator is watching — the boot.
     """
-    resource = _canonical_uri(
-        env.get(RESOURCE_ENV, ""), variable=RESOURCE_ENV, allow_path=True
-    )
-    issuer = _canonical_uri(env.get(ISSUER_ENV, ""), variable=ISSUER_ENV, allow_path=True)
+    resource = _canonical_uri(env.get(RESOURCE_ENV, ""), variable=RESOURCE_ENV)
+    issuer = _canonical_uri(env.get(ISSUER_ENV, ""), variable=ISSUER_ENV)
     servers = _authorization_servers(env, issuer)
     key_source, trust_basis = _key_source(env)
 
+    # (1) THE ISSUER MUST BE ONE OF THE SERVERS THIS RESOURCE ADVERTISES.
+    # `jwt.verify_access_token` compares `iss` to THIS issuer, by exact string
+    # equality and nothing else. A client obeys RFC 9728 to the letter: it reads
+    # `authorization_servers`, picks one, authorizes there, and presents the token
+    # it gets — which this server then refuses, 100% of the time, with
+    # `issuer_mismatch`. Nothing about that failure points at the configuration;
+    # it reads as a broken authorization server. The set is compared, not the
+    # first entry, because a deployment may legitimately advertise several and
+    # accept from one — what is refused is advertising a set the issuer is not IN.
+    if issuer not in servers:
+        raise OAuthConfigProblem(
+            f"{ISSUER_ENV} names an authorization server that is not among "
+            f"{AUTHORIZATION_SERVERS_ENV}. This resource would publish RFC 9728 "
+            "metadata directing clients to a server whose tokens it then rejects, "
+            "because the `iss` check compares against the configured issuer "
+            "alone. Add the issuer to the advertised list, or advertise only it."
+        )
+
     explicit_metadata = (env.get(METADATA_URL_ENV) or "").strip()
     if explicit_metadata:
-        metadata_url = _canonical_uri(
-            explicit_metadata, variable=METADATA_URL_ENV, allow_path=True
-        )
+        metadata_url = _canonical_uri(explicit_metadata, variable=METADATA_URL_ENV)
     else:
         if base:
             # THE TRAP THE OPERATOR REQUIREMENTS DOCUMENT NAMES, MADE A BOOT
@@ -1121,6 +1329,51 @@ def build_config(env: Mapping[str, str], base: str) -> OAuthResourceServerConfig
         metadata_url = (
             f"{parts.scheme}://{parts.netloc}{WELL_KNOWN_PREFIX}{parts.path.rstrip('/')}"
         )
+
+    # (2) THE ADVERTISED URL MUST BE EMITTABLE IN A CHALLENGE, DECIDED HERE AND
+    # NOT AT RENDER TIME. `_challenge_parameters` DROPS a value that fails
+    # `_SAFE_CHALLENGE_VALUE` — correct, because escaping is a second parser to get
+    # right — but a dropped `resource_metadata` is a straight MUST violation under
+    # the revision this binding declares, and it is SILENT: the 401 goes out
+    # looking well-formed, the client has no discovery URL, and nothing in this
+    # process logs a thing. `_canonical_uri` admits values this pattern rejects
+    # (a backslash is legal in a URI path; a long path exceeds the 512-character
+    # bound), so the two checks genuinely disagree and the disagreement had a
+    # winner nobody chose. It is settled at boot, in the direction that cannot
+    # produce a challenge missing the one parameter it exists to carry.
+    if not _SAFE_CHALLENGE_VALUE.match(metadata_url):
+        raise OAuthConfigProblem(
+            f"the protected-resource metadata URL cannot be emitted in a "
+            f"WWW-Authenticate challenge (set {METADATA_URL_ENV}, or derived from "
+            f"{RESOURCE_ENV}). It must be at most 512 characters of printable "
+            "ASCII and must contain no double quote and no backslash. A URL that "
+            "fails this is dropped from the challenge, which leaves a conforming "
+            "client with no way to discover the authorization server."
+        )
+
+    # (3) A KEY SET THAT CANNOT BE READ AT BOOT IS A DEPLOYMENT THAT REFUSES EVERY
+    # TOKEN FOREVER, AND IT USED TO BOOT CLEAN. `FileKeySource` raises
+    # `TokenRejected` per request — the right answer *at request time*, and the
+    # reason the rotation behaviour below is deliberately unchanged — but a path
+    # that is wrong on the day the container starts is a typo, not a rotation, and
+    # it produced a resource server that authenticated nobody while
+    # `validate_oauth_selection_or_raise`'s own docstring claimed the boot refusal
+    # existed to prevent exactly this.
+    #
+    # AFTER BOOT, A TRANSIENT UNLINK IS STILL TOLERATED, and that is the design
+    # rather than an omission: a key set is rotated by replacing a file, and a
+    # request that lands in the microsecond between unlink and rename must fail
+    # closed with a 401 rather than take the process down. Probing once, here, does
+    # not weaken that — it only removes the case where the file was never there.
+    if getattr(key_source, "probe_at_boot", True):
+        try:
+            key_source.keys()
+        except TokenRejected as rejected:
+            raise OAuthConfigProblem(
+                f"this deployment's verification key set is unusable at boot "
+                f"({rejected.code}), so it would accept no token at all. Check the "
+                f"path or document named by {JWKS_FILE_ENV} / {FIXTURE_JWKS_ENV}."
+            ) from rejected
 
     return OAuthResourceServerConfig(
         resource=resource,

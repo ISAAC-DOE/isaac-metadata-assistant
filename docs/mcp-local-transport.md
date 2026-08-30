@@ -91,7 +91,22 @@ proxy that strips its own forwarded headers. Bind loopback.
 
 ## 3. What the endpoint accepts
 
-One path, `POST` only, JSON-RPC 2.0, MCP revision **`2025-06-18`**.
+One path, `POST` only, JSON-RPC 2.0, and **two MCP revisions**: `2026-07-28`
+(*modern* — per-request `_meta`, no handshake) and `2025-06-18` (*legacy* — the
+`initialize` handshake). The revision's own terms; a server implementing both is
+what it calls **dual-era**.
+
+**How the era is chosen is the client's decision, not a setting:** an `initialize`
+request selects legacy semantics, and a request carrying
+`params._meta["io.modelcontextprotocol/protocolVersion"]` — or naming
+`server/discover`, which exists only in the modern revision — is served
+statelessly under `2026-07-28`. Nothing an operator configures moves it.
+
+**Nothing about the legacy path changed.** A `2025-06-18` client that sends
+`initialize`, then `tools/list`, then `tools/call` behaves exactly as it did
+before, sends none of the modern headers, and never sees a modern error. That is
+deliberate: the compatibility matrix records "Legacy client / Modern server" as
+*Fails*, because a legacy client has no fall-forward mechanism.
 
 | Condition | Answer |
 |---|---|
@@ -100,15 +115,67 @@ One path, `POST` only, JSON-RPC 2.0, MCP revision **`2025-06-18`**.
 | peer is not loopback, or ASGI reports no peer | `403 loopback_only` |
 | any of `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP` present | `403 proxied_request_refused` — the *presence* is the refusal; the value is never read |
 | `Origin` present and not a loopback host | `403 cross_origin_refused` (DNS-rebinding defence) |
-| `MCP-Protocol-Version` present and not `2025-06-18` | `400` |
+| **the caller presented no credential this binding accepts** | `401` — **for every method, including `ping`, `notifications/initialized`, `server/discover` and an unknown one.** Authentication happens before any method is dispatched |
+| a declared protocol version this server does not serve (header **or** `_meta`) | `400` with JSON-RPC `-32022` `UnsupportedProtocolVersionError`, listing `supported` |
+| a **modern** request missing or contradicting `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` | `400` with JSON-RPC `-32020` `HeaderMismatch` |
+| an unknown method, **modern** era | `404` with `-32601` |
+| an unknown method, **legacy** era | `200` with `-32601` |
 | `Content-Type` is not `application/json` | `415` |
 | `Accept` cannot take JSON | `406` |
 | body over 1 MiB | `413` |
 | a JSON-RPC **batch** (array) | `400` — removed in revision `2025-06-18` |
-| a notification (no `id`) | `202`, no body |
+| an **authenticated** notification (no `id`) | `202`, no body |
 | deployment refused the caller | `401`, and **no fabricated `WWW-Authenticate`** |
 | scope not granted | `403` |
 | any other JSON-RPC error | `200` with a JSON-RPC error object — the transport succeeded, the application refused |
+
+**Methods, per era.** Legacy: `initialize`, `notifications/initialized`, `ping`,
+`tools/list`, `tools/call`. Modern: `server/discover`, `ping`, `tools/list`,
+`tools/call`. An unknown-method refusal names its own era's list, so a legacy
+client is never told about `server/discover` and a modern one is never told about
+`initialize`.
+
+**A worked modern request**, since three headers are required and the third is
+conditional:
+
+```http
+POST /api/mcp HTTP/1.1
+Content-Type: application/json
+MCP-Protocol-Version: 2026-07-28
+Mcp-Method: tools/call
+Mcp-Name: isaac_list_experiments
+
+{"jsonrpc":"2.0","id":1,"method":"tools/call",
+ "params":{"name":"isaac_list_experiments","arguments":{},
+           "_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}
+```
+
+`Mcp-Name` is required for `tools/call` only, and may carry the revision's Base64
+sentinel (`=?base64?…?=`), which this server decodes before comparing it to
+`params.name`.
+
+**One thing an operator should not be surprised by:** `2025-06-18` was the only
+revision this server spoke until 2026-08-30, and the old refusal body for an
+unrecognised version was `{"code": "unsupported_protocol_version", ...}` under
+this transport's own error code. That body was not a recognized MCP error, so a
+dual-era client fell back to `initialize` and worked — **by accident**. It is now
+the real `-32022` envelope, which tells a modern client to retry with a supported
+version instead of falling back.
+
+**And ISAAC's own three error codes moved, in the same change.** They were
+`-32001` (deployment refused), `-32002` (insufficient scope) and `-32003`
+(transport refused); they are now **`-31001`, `-31002` and `-31003`**. The reason
+is `2026-07-28`'s partition of the block JSON-RPC set aside for implementations:
+`-32000`..`-32019` is a legacy sub-range new implementations *"**SHOULD NOT** use
+… at all"*, `-32020`..`-32099` is reserved for the specification's own codes, and
+`-32002` in particular is one implementations of this revision **MUST NOT** emit
+(it meant *resource not found* in earlier revisions, and clients are told to keep
+accepting it as such). A scope refusal arriving as `-32002` could therefore be
+read by a conforming client as a missing resource. The specification's own
+direction is to allocate *"outside the JSON-RPC reserved range (`-32768` to
+`-32000`)"*, which is where they now are. Nothing else about those three
+refusals — their HTTP status, their body shape, their `data.code` string —
+changed.
 
 No `Mcp-Session-Id` is ever issued. No RFC 9728 protected-resource-metadata document
 is published: a challenge naming an authorization server ISAAC does not run would
@@ -270,6 +337,12 @@ behaviour changes.
 
 `apps/api/tests/test_mcp_boundaries.py` — what must never be reachable.
 `apps/api/tests/test_mcp_server.py` — every registered tool, in process.
+`apps/api/tests/test_mcp_protocol_eras.py` — **added 2026-08-30**: that no method
+answers a caller who presented no credential (swept over every method in either
+era, plus two the server does not implement), and the dual-era contract — era
+selection, `server/discover`, the `-32022` and `-32020` error shapes, the modern
+header rules, and the assertion that the legacy handshake never produces a modern
+error, which is what a dual-era client's fallback depends on.
 
 **None of them reads real data, touches a database, or sends anything off this
 machine.** *This line previously said "None of them opens a socket", which was

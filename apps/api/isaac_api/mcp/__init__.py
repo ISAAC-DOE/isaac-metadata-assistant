@@ -19,12 +19,22 @@ WHAT IS AND IS NOT WIRED
   deployment that exists**. Two bindings can now serve a transport, and neither
   is reachable: ``local-loopback`` refuses every request whose socket peer is not
   a loopback address, refuses one that came through a proxy, and refuses a
-  credential it cannot verify; ``oauth-resource-server`` (``oauth.py``) is a
-  complete OAuth 2.1 protected resource and **resolves to the unconfigured
+  credential it cannot verify; ``oauth-resource-server`` (``oauth.py``) is
+  ~~a complete OAuth 2.1 protected resource~~ **an OAuth 2.1 protected resource
+  for the MCP authorization chapter** and **resolves to the unconfigured
   binding unless an operator supplies an issuer, a canonical resource URI and a
   verification key set** — none of which exists here, in any manifest, or in this
   repository at all. The DEFAULT binding mounts no route whatsoever, and
   ``ISAAC_MCP_DEPLOYMENT`` is unset in every deployment.
+
+  *"Complete" is struck 2026-08-30, and this was the FOURTH site carrying it — the
+  other three being ``oauth.py``'s module docstring, ``docs/mcp-capability-audit.md``
+  §"Read the boundary precisely", and by implication ``jwt.py``'s ``typ`` note. The
+  word named no chapter, so it read as covering a specification of which the module
+  implements one part; and it was written while three JSON-RPC methods still
+  answered before authentication. Both are corrected, and* ``oauth.py`` *now
+  enumerates four deliberate divergences rather than implying none. The
+  unreachability claim in this paragraph was true throughout and is unchanged.*
 
   Reachability (**D1**) and the authentication model (**D2**) are still
   outstanding infrastructure decisions and **``oauth.py`` did not answer either**.

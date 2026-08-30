@@ -216,17 +216,107 @@ Two facts worth knowing before scoping this as "an org-admin project":
 > That was the "live mismatch risk" §3.3 warned about; it is now a container that does not boot
 > instead of a connector that fails inside a browser.
 
+> **CORRECTED IN PLACE, 2026-08-30 — the status block above overclaimed on two of its five items,
+> and this is the document an operator reads before committing infrastructure work.** The
+> corrections are marked rather than folded in, because "items 1–5 are now BUILT" is precisely the
+> kind of sentence that gets acted on.
+>
+> - **Item 1 said "map validated claims to a `HumanActor`". It does not, and it must not.** The
+>   code maps a verified token to a **`ServicePrincipal`** at trust tier `SERVICE`. That is the
+>   correct behaviour and the difference is not cosmetic: a token proves that a *client* holds a
+>   credential the issuer minted, it does not establish that a person is present, and ISAAC has no
+>   trusted boundary that could. A `ServicePrincipal` can *authorize* an operation and can **never**
+>   be an author — `require_human_actor` refuses it, `stamp_actor` reads only the human field, and
+>   the class has no `subject` attribute to stamp with. An operator reading "maps to a `HumanActor`"
+>   would reasonably conclude that a connector's calls will be attributed to whoever authorized
+>   them. They will not be attributed to anyone.
+> - **Item 4 listed a "revoked" test. It cannot exist, and one has not been written.** This build
+>   validates a JWT by signature, issuer, audience and expiry and consults **no revocation source**
+>   — no RFC 7662 introspection, no `jti` denylist, no session store. **A token stays valid for the
+>   whole of its `exp` window and there is no way to end it early except rotating the signing key**,
+>   which invalidates every token at once. That is an operational fact worth having before the
+>   issuer's access-token lifetime is chosen. A test named for revocation would have passed by
+>   construction and read, in a security review, as evidence of a control that does not exist; what
+>   exists instead is `test_there_is_no_revocation_mechanism_to_test`, which asserts the absence and
+>   goes red if a revocation source is ever added without a real test beside it.
+> - **The other three items stand as written**, and items 1's remaining clauses (validate a bearer,
+>   bind the audience, enforce the two scopes) are built and tested.
+>
+> Two further things built since, both of which reduce what can go wrong at rollout: the deployment
+> now **refuses to start** if the configured issuer is not among the authorization servers it
+> advertises (that configuration boots clean and then rejects 100% of tokens), if the
+> protected-resource-metadata URL cannot be emitted in a `WWW-Authenticate` header, or if the JWKS
+> file is missing or unreadable **at boot** — while a file that disappears *after* boot is still
+> tolerated, because that is what a key rotation looks like.
+
 Named so the operator can see this is not an open-ended ask. All of it is application-side,
 disabled by default, and none of it requires an external answer to *write*:
 
 1. Register the reserved `oauth-resource-server` binding: validate a bearer, bind the token's
-   audience to the MCP URL, map validated claims to a `HumanActor`, enforce the two scopes.
+   audience to the MCP URL, map validated claims to a ~~`HumanActor`~~ **`ServicePrincipal`**
+   (see the correction above — a token authorizes, it never attributes), enforce the two scopes.
 2. Serve protected-resource metadata and the `401` + `WWW-Authenticate` handshake.
 3. Fail closed: with no verifier configured, the binding resolves unconfigured and **no route is
    registered** — the behaviour that ships today, preserved.
-4. Tests: forged-token, wrong-audience, expired, revoked, wrong-scope, scope-escalation, and a
-   proof that no token reaches Submit.
+4. Tests: forged-token, wrong-audience, expired, ~~revoked~~ (no such mechanism exists — see the
+   correction above), wrong-scope, scope-escalation, and a proof that no token reaches Submit.
 5. No change to the truth path, no migration, no new table.
+
+---
+
+## 6A. Configuration this deployment reads, and three ways to get it wrong
+
+Every variable below is read only when `ISAAC_MCP_DEPLOYMENT=oauth-resource-server`. With that
+unset — which is every shipped deployment — none of them is read and no route exists.
+
+| Variable | Required | What it is |
+|---|---|---|
+| `ISAAC_MCP_OAUTH_RESOURCE` | yes | The canonical resource URI. This is the exact string a token's `aud` must contain, and the string a scientist types into their client. Compared by exact string equality; nothing is normalised. |
+| `ISAAC_MCP_OAUTH_ISSUER` | yes | The authorization server that issues the tokens, compared to `iss`. |
+| `ISAAC_MCP_OAUTH_AUTHORIZATION_SERVERS` | no | Comma-separated servers published in the RFC 9728 document. Defaults to the issuer. **The issuer must be among them or the deployment refuses to start** — see below. |
+| `ISAAC_MCP_OAUTH_TOKEN_VERIFIER` | yes | `jwks-file` in any real deployment. `jwks-url` is refused (this build makes no outbound request); `test_fixture` is refused at boot. |
+| `ISAAC_MCP_OAUTH_JWKS_FILE` | with `jwks-file` | Path to a JWKS document projected into the pod. Re-read when its `(mtime, size)` changes, so a rotation is picked up without a restart. |
+| `ISAAC_MCP_OAUTH_METADATA_URL` | when `ISAAC_BASE_PATH` is set | The absolute URL the `WWW-Authenticate` challenge points at. Required for a path-mounted deployment, which cannot serve the RFC 9728 origin-root path. |
+| `ISAAC_MCP_OAUTH_RESOURCE_NAME` | no | **Previously undocumented.** A human-readable display name, published verbatim as RFC 9728's optional `resource_name` field. Cosmetic: it names the resource in a consent screen. It changes no check and grants nothing; omit it and the field is absent rather than empty. |
+
+Three configurations that are **valid on their face and produce a deployment that works for
+nobody**, each now refused at boot rather than at the first scientist's first request:
+
+1. **An issuer outside the advertised set.** ISAAC compares `iss` against
+   `ISAAC_MCP_OAUTH_ISSUER` alone. If the published `authorization_servers` names a different
+   server, every conforming client authorizes there and every resulting token is rejected — with a
+   message that reads as a broken authorization server rather than as a manifest typo.
+2. **An authorization server that MAPS AUDIENCES.** RFC 8707 §2.2 explicitly permits this:
+   *"The authorization server may use the exact `resource` value as the audience or it may map from
+   that value to a more general URI or abstract identifier for the given resource."* It adds that
+   *"the resource value(s) that is acceptable to an authorization server in fulfilling an access
+   token request is at its sole discretion based on local policy or configuration."* ISAAC's
+   audience check is exact and unconditional, because the MCP specification makes it a MUST — it
+   compares by simple string comparison and folds nothing. **So an AS configured to map, rewrite or
+   normalise the audience produces a 100%-failing deployment that looks correct from both ends.**
+   Before rollout, mint one token by hand and confirm its `aud` claim contains
+   `ISAAC_MCP_OAUTH_RESOURCE` **character for character** — no trailing slash added or removed, no
+   case folded, no default port elided. If the AS cannot be configured to preserve the exact value,
+   set `ISAAC_MCP_OAUTH_RESOURCE` to whatever the AS actually mints — but note that RFC 9728 §3.3
+   also requires the published `resource` to be identical to the URL the client called, so the two
+   constraints must be satisfied together or the connector will not complete discovery.
+3. **A `client_id` equal to the resource URI.** ISAAC accepts `typ: JWT` as well as `at+jwt`,
+   because Authentik and most deployed authorization servers mint the generic value and refusing it
+   would refuse the issuer this feature exists for. The consequence is that an OIDC **ID token** has
+   the right *shape*, and the only thing refusing it is the audience check — an ID token's `aud` is
+   the `client_id`, never the resource. That defence has exactly one failure mode, and it is a
+   registration choice: **do not register the MCP client with a `client_id` that is a URL equal to
+   `ISAAC_MCP_OAUTH_RESOURCE`.** MCP's Client ID Metadata Documents make URL-shaped client IDs a
+   live possibility, so this is worth checking rather than assuming.
+
+Two smaller notes an operator may need:
+
+- **`http://` is accepted for a loopback host only**, which is a deliberate divergence from RFC 9728
+  §1.2 (that section says the resource identifier is *"a URL using the `https` scheme"* and grants no
+  loopback exception). It exists so the flow can be exercised end to end without a certificate; the
+  host must be a *literal* loopback name or address, so no DNS record can point a public name at it.
+- **There is no revocation.** See the correction in §6. Choose the access-token lifetime with that
+  in mind: it is the only bound on how long a leaked token remains usable.
 
 ---
 

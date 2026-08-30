@@ -486,7 +486,19 @@ class ServicePrincipal:
     **CORRECTED 2026-08-29, and struck rather than reworded because it read as a
     statement about what this build can reach.** One producer now exists:
     ``mcp/oauth.py``'s ``OAuthResourceServerDeployment.service_identity`` builds
-    one from a verified OAuth 2.1 access token. What has NOT changed, and is the
+    one from a verified OAuth 2.1 access token.
+
+    **AND ON 2026-08-29 IT HAD NO CALLER, WHICH MADE THE PARAGRAPH ABOVE TRUE
+    ABOUT A FUNCTION AND FALSE ABOUT THE PROGRAM — recorded 2026-08-30 rather
+    than quietly fixed, because "there is a producer" and "a request produces
+    one" are the two claims this class's whole safety story rests on.** The
+    sentence below said the binding *"does so at the MCP transport boundary"*
+    while ``service_identity`` had zero production callers: nothing in
+    ``transport.py`` or ``server.py`` imported this module at all. The call site
+    now exists — ``mcp/server.py``'s ``McpServer.request_identity``, reached on
+    every authenticated request and threaded into every tool call's
+    ``ToolContext`` — so the description and the program agree. What has NOT
+    changed, and is the
     reason the class was written before it had a producer, is everything below
     it: the tier still refuses to be an author, ``stamp_actor`` still reads only
     :attr:`RequestIdentity.human`, and there is still no ``subject`` field here
@@ -568,7 +580,17 @@ class RequestIdentity:
 
     @classmethod
     def for_service(cls, principal: ServicePrincipal) -> RequestIdentity:
-        """A service, vouched for. No producer in this build; see the class."""
+        """A service, vouched for.
+
+        ~~"No producer in this build; see the class."~~ **Corrected 2026-08-30.**
+        One producer exists and is reached on every authenticated MCP request:
+        ``mcp/oauth.py``'s ``OAuthResourceServerDeployment.service_identity``,
+        called from ``mcp/server.py``'s ``McpServer.request_identity``. It remains
+        unreachable in every SHIPPED deployment, because the MCP route is
+        registered only when ``ISAAC_MCP_DEPLOYMENT`` names a serving binding and
+        nothing sets it — but "no code can build one" and "no deployment builds
+        one" are different claims, and only the second is still true.
+        """
         return cls(trust=TrustTier.SERVICE, service=principal)
 
 

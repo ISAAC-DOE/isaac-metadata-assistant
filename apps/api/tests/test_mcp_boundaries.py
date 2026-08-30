@@ -192,6 +192,69 @@ def test_every_destructive_verb_is_refused_at_BOTH_layers_not_only_one():
     assert {"delete", "discard", "remove"} <= DESTRUCTIVE_TOKENS
 
 
+def test_the_approval_verbs_include_their_synonym_because_one_of_them_was_missing():
+    """**A GAP OF EXACTLY ONE WORD, AND IT WAS THE WORD ISAAC ACTUALLY USES.**
+
+    ``approve`` was in :data:`FORBIDDEN_TOOL_TOKENS`; ``accept`` was not. That
+    matters because this repository's own vocabulary for the capability is *accept
+    a proposal* — ``conflict_resolution.py``'s operations are about accepting a
+    competing value, not approving one — so the name a future author would reach
+    for is ``isaac_accept_proposal``, and it would have passed the gate that
+    exists to stop exactly that.
+
+    ``accept`` was added 2026-08-30. It is a TOOL-only token, like ``approve``
+    beside it: no permitted operation path carries the substring, checked below
+    rather than asserted, so adding it costs nothing today and refuses a whole
+    capability tomorrow. It is deliberately NOT in ``DESTRUCTIVE_TOKENS`` —
+    accepting a proposal destroys nothing; it decides something, which is a
+    different reason to be forbidden.
+    """
+    for verb in ("accept", "approve"):
+        assert verb in FORBIDDEN_TOOL_TOKENS
+        assert verb not in DESTRUCTIVE_TOKENS
+        # Tool-only: no allowlisted route path carries it, which is why adding it
+        # refuses nothing that exists.
+        assert not [
+            operation.id
+            for operation in OPERATIONS.values()
+            if verb in operation.path_template.lower()
+        ], verb
+    # And the name it exists to refuse is refused, with a reason.
+    for name in ("isaac_accept_proposal", "isaac_accept_value", "accept_conflict"):
+        assert forbidden_tool_reason(name) is not None, name
+    assert "accept" in forbidden_tool_reason("isaac_accept_proposal")
+
+
+def test_no_mcp_scope_can_reach_an_accepting_finalising_or_exporting_operation():
+    """LEAST PRIVILEGE, STATED OVER THE OPERATION TABLE RATHER THAN OVER INTENT.
+
+    There are two scopes. Neither unlocks acceptance, submission, finalisation,
+    export or any destructive act — not because the handlers check, but because no
+    such operation is in the allowlist a tool resolves against, and no tool name
+    that would describe one can be registered. Asserted over BOTH scopes so a
+    future widening of ``DRAFT_WRITE`` cannot quietly acquire one.
+    """
+    for scope in Scope:
+        reachable = [op for op in OPERATIONS.values() if op.scope is scope]
+        assert reachable, scope
+        for operation in reachable:
+            lowered = f"{operation.id} {operation.path_template}".lower()
+            for banned in (
+                "accept",
+                "approve",
+                "submit",
+                "export",
+                "finalis",
+                "finaliz",
+                "publish",
+                "delete",
+                "remove",
+                "discard",
+                "purge",
+            ):
+                assert banned not in lowered, f"{operation.id} via {scope}: {banned}"
+
+
 def test_the_discard_operation_is_not_reachable_through_MCP_by_TWO_mechanisms():
     """``POST /api/experiments/{id}/discard`` cannot be called by an agent.
 
