@@ -196,7 +196,18 @@ class McpServer:
                 data={
                     "code": refusal.code,
                     **refusal.data,
-                    "challenge": self._binding.challenge(),
+                    # The refusal's OWN challenge when it has one, else the
+                    # binding's generic one. Written after the spread so a
+                    # `challenge` key inside `refusal.data` cannot displace it,
+                    # and `or` rather than a conditional because an empty dict is
+                    # not a usable challenge either.
+                    #
+                    # Both shipped bindings pass `challenge=None` and so are
+                    # unaffected. It matters for a binding that must distinguish
+                    # "no credential was presented" from "this credential is bad"
+                    # — RFC 6750 §3 says the first carries no `error` and the
+                    # second does, and one challenge per binding cannot say both.
+                    "challenge": refusal.challenge or self._binding.challenge(),
                 },
             )
         except _ScopeDenied as denied:

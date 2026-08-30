@@ -10264,7 +10264,7 @@
       },
       {
         "path": "apps/api/isaac_api/app.py",
-        "sha256": "b08376690eb367759f49602c118d1291f8c2263698c3834864cf81125522e66d"
+        "sha256": "b1f207632ae5dd6f7a547c0ce985ddd837d267bf5ba206826357d396931433e5"
       },
       {
         "path": "apps/api/isaac_api/auth.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "3593e05372f81404f9d798f8ace8cdf3c64c2a543e4e1f818ec5bd38808cd704"
+    "served_manifest_fingerprint": "839be76b5d58330e3fdd8984cd48fc5764b7567fbb7119471a951ce7de4c0897"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -168,9 +168,12 @@ __all__ = [
     "ISAAC_DEPLOYMENT_GROUPS",
     "PERMANENTLY_UNTRUSTED_HEADERS",
     "RECOGNISED_TRUST_BASES",
+    "SERVICE_ONLY_TRUST_BASES",
+    "SERVICE_TRUST_BASES",
     "SUBJECT_KIND_AUTHENTIK_USERNAME",
     "TRUST_BASIS_TEST_FIXTURE",
     "TRUST_BASIS_VERIFIED_EDGE_ASSERTION",
+    "TRUST_BASIS_VERIFIED_OAUTH_ACCESS_TOKEN",
     "UNCONFIGURED_VERIFIER",
     "EdgeAssertion",
     "EdgeTrustVerifier",
@@ -266,9 +269,50 @@ TRUST_BASIS_VERIFIED_EDGE_ASSERTION = "verified_edge_assertion"
 
 #: Every basis a claim may cite. Validated on construction, so an actor cannot
 #: exist without saying, in data, what vouched for it.
+#:
+#: **DELIBERATELY UNCHANGED BY THE OAUTH SLICE, AND THAT IS THE POINT.** This set
+#: is in a pinned parity relationship with a CHECK constraint in `0003_revisions`
+#: and `0004_submissions` — `test_submission_store.py::test_the_trust_bases_the_
+#: schema_admits_are_exactly_the_three_python_names` asserts it in both
+#: directions — and those migration bytes are owner-approved and frozen. Widening
+#: this set in application code would create a basis a `HumanActor` can construct
+#: and the database will reject, converting a construction-time refusal into a
+#: runtime integrity error on a durable, append-only, attributable table.
 RECOGNISED_TRUST_BASES: frozenset[str] = frozenset(
     {TRUST_BASIS_TEST_FIXTURE, TRUST_BASIS_VERIFIED_EDGE_ASSERTION}
 )
+
+#: A caller that presented an OAuth 2.1 access token this deployment verified
+#: against its configured issuer, signing keys and audience.
+#:
+#: IT IS NOT AN EDGE ASSERTION AND MUST NEVER BE CONFLATED WITH ONE. A verified
+#: token proves a *client* holds a credential the issuer minted. It does not
+#: establish that a person is present, and this build has no trusted boundary
+#: that could. `record_attribution` gates server-side stamping on
+#: :data:`TRUST_BASIS_VERIFIED_EDGE_ASSERTION` specifically; reusing that name
+#: here would have armed attribution for a non-human caller, which is the exact
+#: defect :class:`ServicePrincipal` exists to make unbuildable.
+TRUST_BASIS_VERIFIED_OAUTH_ACCESS_TOKEN = "verified_oauth_access_token"
+
+#: Bases a :class:`ServicePrincipal` may cite that a :class:`HumanActor` and an
+#: :class:`EdgeAssertion` may NOT.
+#:
+#: THE ASYMMETRY IS THE DESIGN, AND IT IS THE MIRROR OF AN EXISTING ONE.
+#: ``submissions.TRUST_BASIS_UNATTRIBUTED`` is admitted by the database and
+#: refused to a `HumanActor`; this is the opposite case — claimable by a service
+#: and refused both to a human and to the database, because no durable row in
+#: this application is ever written by a service. Keeping it out of
+#: :data:`RECOGNISED_TRUST_BASES` is therefore not an accommodation of a test: it
+#: is what stops a name nothing vouched for as a *person* from becoming
+#: constructible as one.
+SERVICE_ONLY_TRUST_BASES: frozenset[str] = frozenset(
+    {TRUST_BASIS_VERIFIED_OAUTH_ACCESS_TOKEN}
+)
+
+#: What :class:`ServicePrincipal` validates against. A superset of
+#: :data:`RECOGNISED_TRUST_BASES`, so every basis a human may cite a service may
+#: cite too — a fixture-verified service is a real state and must be expressible.
+SERVICE_TRUST_BASES: frozenset[str] = RECOGNISED_TRUST_BASES | SERVICE_ONLY_TRUST_BASES
 
 #: The two coarse **deployment-access** groups the edge admits
 #: (``docs/identity-trust-contract.md`` §5.3, upstream ``portal/api.py:66-67``).
@@ -290,8 +334,12 @@ class TrustTier(str, Enum):
     Three tiers, and the gap between them is the point:
 
       * :attr:`UNTRUSTED` — no identity was established. Carries a
-        :class:`IdentityRefusal` saying why. **This is every request in this
-        build**, including one arriving with all five edge headers populated.
+        :class:`IdentityRefusal` saying why. **This is every request that
+        reaches an ISAAC HTTP route in this build**, including one arriving with
+        all five edge headers populated. (Narrowed 2026-08-29: the MCP OAuth
+        binding can now build a SERVICE identity, but it does so at the MCP
+        transport boundary and never through
+        :func:`resolve_identity_for_request`, so no ISAAC route sees one.)
       * :attr:`SERVICE` — a non-human caller proved itself (a Bearer credential,
         in the pattern the infrastructure owner named: trusted-edge for browser
         traffic, independent Bearer validation for API traffic). It may
@@ -434,8 +482,26 @@ class ServicePrincipal:
     which is ``None`` on this tier. Attributability is designed out, not
     documented away.
 
-    Nothing in this build produces one; no service verifier exists. It is defined
-    so that when one is built, the tier already refuses to be an author.
+    ~~"Nothing in this build produces one; no service verifier exists."~~
+    **CORRECTED 2026-08-29, and struck rather than reworded because it read as a
+    statement about what this build can reach.** One producer now exists:
+    ``mcp/oauth.py``'s ``OAuthResourceServerDeployment.service_identity`` builds
+    one from a verified OAuth 2.1 access token. What has NOT changed, and is the
+    reason the class was written before it had a producer, is everything below
+    it: the tier still refuses to be an author, ``stamp_actor`` still reads only
+    :attr:`RequestIdentity.human`, and there is still no ``subject`` field here
+    for a stamping call site to reach for.
+
+    The producer is also unreachable in every shipped deployment — the MCP route
+    is registered only when ``ISAAC_MCP_DEPLOYMENT`` names a serving binding, and
+    nothing sets it. So "no service principal exists in the hosted application"
+    is still true; "no code can build one" no longer is, and the difference
+    matters to whoever reads this next.
+
+    Its basis is :data:`TRUST_BASIS_VERIFIED_OAUTH_ACCESS_TOKEN`, which is in
+    :data:`SERVICE_TRUST_BASES` and deliberately **not** in
+    :data:`RECOGNISED_TRUST_BASES` — see that constant for why widening the
+    smaller set would have been a durable-write hazard rather than a convenience.
     """
 
     #: An opaque name for the calling service. Not a person and not a username.
@@ -446,10 +512,10 @@ class ServicePrincipal:
     def __post_init__(self) -> None:
         if not self.principal_id or not self.principal_id.strip():
             raise ValueError("ServicePrincipal.principal_id must be non-empty")
-        if self.trust_basis not in RECOGNISED_TRUST_BASES:
+        if self.trust_basis not in SERVICE_TRUST_BASES:
             raise ValueError(
                 f"ServicePrincipal.trust_basis {self.trust_basis!r} is not one of "
-                f"{sorted(RECOGNISED_TRUST_BASES)}"
+                f"{sorted(SERVICE_TRUST_BASES)}"
             )
 
 

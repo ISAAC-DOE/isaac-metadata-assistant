@@ -1,0 +1,494 @@
+"""No credential reaches a log, a response body, a header, or another service.
+
+THIS FILE EXISTS BECAUSE THE DEFECT IT GUARDS AGAINST ALREADY HAPPENED HERE ONCE.
+``transport._credential_from`` used to split ``Authorization`` on the first space,
+so a header carrying a BARE token — no ``Bearer``, no space, a shape real clients
+send — put the entire credential into ``scheme``, and the loopback binding then
+reported that "scheme" in the body of its ``401``. A 48-character stand-in JWT
+came back to the caller verbatim. The existing test could not see it: it sent
+``"Bearer s3cret-value"``, the well-formed shape, and its assertion was true of
+that shape and of no other.
+
+So the assertions here are **swept over every rejection path**, not written one
+per known-bad case, and they are made against **four surfaces**: the response
+body, the response headers, everything the logging system was handed (including
+un-interpolated ``args``), and — the structural one — whether any object in the
+system has a field a token could be stored in at all.
+
+The last of those is what makes the no-passthrough rule hold by construction
+rather than by discipline. *"MCP servers MUST NOT accept or transit any other
+tokens"*: there is nowhere for a token to be kept, so there is nothing to
+forward.
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+import logging
+import time
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from isaac_api.mcp import jwt as jwtmod
+from isaac_api.mcp import oauth
+from isaac_api.mcp.deployment import DEPLOYMENT_ENV, OAUTH_RESOURCE_SERVER, Credential
+from isaac_api.mcp.jwt import VerifiedToken
+from isaac_api.mcp.transport import MCP_PATH
+import mcp_oauth_keys as keys
+
+MCP_PACKAGE = Path(oauth.__file__).parent
+
+ISSUER = "https://auth.example.invalid/application/o/isaac"
+RESOURCE = "https://isaac.example.invalid/api/mcp"
+
+#: Long enough that a fragment of it is unmistakable in any output, and shaped
+#: like the thing an attacker would try to make leak.
+SENTINEL_SECRET = "s3cret-" + "A" * 64
+
+
+@pytest.fixture(scope="session")
+def signing_key():
+    return keys.generate("isaac-signing-1", seed=keys.SEED)
+
+
+@pytest.fixture()
+def served(tmp_path, monkeypatch, signing_key):
+    jwks_path = tmp_path / "jwks.json"
+    jwks_path.write_text(json.dumps(keys.jwks(signing_key)), encoding="utf-8")
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    monkeypatch.delenv("ISAAC_BASE_PATH", raising=False)
+    for name in oauth.OAUTH_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(DEPLOYMENT_ENV, OAUTH_RESOURCE_SERVER)
+    monkeypatch.setenv(oauth.RESOURCE_ENV, RESOURCE)
+    monkeypatch.setenv(oauth.ISSUER_ENV, ISSUER)
+    monkeypatch.setenv(oauth.TOKEN_VERIFIER_ENV, oauth.FILE_TOKEN_VERIFIER)
+    monkeypatch.setenv(oauth.JWKS_FILE_ENV, str(jwks_path))
+
+    from isaac_api.app import create_app
+
+    app = create_app()
+    return TestClient(app, client=("203.0.113.7", 44321))
+
+
+def minted(signing_key, **overrides) -> str:
+    body = {
+        "iss": ISSUER,
+        "aud": RESOURCE,
+        "sub": SENTINEL_SECRET,
+        "exp": int(time.time()) + 600,
+        "scope": "isaac:read",
+    }
+    body.update(overrides)
+    return keys.mint(signing_key, body)
+
+
+def every_bad_credential(signing_key) -> dict[str, str]:
+    """One credential per refusal path this module can reach over HTTP.
+
+    Each value contains :data:`SENTINEL_SECRET`, so a leak anywhere shows up as
+    the same searchable string regardless of which branch produced it.
+    """
+    now = int(time.time())
+    other = keys.generate("attacker", seed=keys.SEED + 1)
+    return {
+        "bare_token_no_scheme": SENTINEL_SECRET,
+        "opaque": f"Bearer {SENTINEL_SECRET}",
+        "wrong_scheme": f"{SENTINEL_SECRET} abcdef",
+        "basic": f"Basic {SENTINEL_SECRET}",
+        "malformed_jws": f"Bearer {SENTINEL_SECRET}.{SENTINEL_SECRET}.{SENTINEL_SECRET}",
+        "alg_none": "Bearer " + keys.mint_unsecured({"sub": SENTINEL_SECRET}),
+        "hmac_confusion": "Bearer "
+        + keys.mint_hmac_confusion(signing_key, {"sub": SENTINEL_SECRET}),
+        "expired": "Bearer " + minted(signing_key, exp=now - 10_000),
+        "not_yet_valid": "Bearer " + minted(signing_key, nbf=now + 10_000),
+        "wrong_issuer": "Bearer " + minted(signing_key, iss="https://evil.invalid"),
+        "wrong_audience": "Bearer " + minted(signing_key, aud="https://other.invalid"),
+        "forged_signature": "Bearer "
+        + keys.mint(signing_key, {"sub": SENTINEL_SECRET, "exp": now + 60},
+                    signing_key=other),
+        "tampered": "Bearer "
+        + keys.mint(signing_key, {"sub": SENTINEL_SECRET, "exp": now + 60},
+                    tamper_signature=True),
+        "unknown_kid": "Bearer "
+        + keys.mint(signing_key, {"sub": SENTINEL_SECRET, "exp": now + 60},
+                    header_overrides={"kid": "rotated-away"}),
+        "oversized": "Bearer " + "z" * (jwtmod.MAX_COMPACT_TOKEN_BYTES + 10),
+    }
+
+
+# --- 1. nothing reaches the caller -------------------------------------------
+
+
+def test_no_rejection_path_echoes_the_credential_in_the_body_or_the_headers(
+    served, signing_key
+):
+    """Swept over every branch, because the historical defect was reachable on
+    exactly one shape and the test of the day covered a different one."""
+    for name, header in every_bad_credential(signing_key).items():
+        response = served.post(
+            MCP_PATH,
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Authorization": header},
+        )
+        assert response.status_code == 401, (name, response.status_code)
+        assert SENTINEL_SECRET not in response.text, name
+        for key, value in response.headers.items():
+            assert SENTINEL_SECRET not in value, (name, key)
+
+
+def test_the_refusal_still_says_something_useful_so_this_is_not_passing_by_silence(
+    served, signing_key
+):
+    """The negative control for the test above. A server that returned an empty
+    body would satisfy every leak assertion in this file and be useless."""
+    response = served.post(
+        MCP_PATH,
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        headers={"Authorization": "Bearer " + minted(signing_key, exp=1)},
+    )
+    body = response.json()
+    assert body["error"]["data"]["code"] == "expired"
+    assert "expired" in body["error"]["message"].lower()
+    assert 'error="invalid_token"' in response.headers["www-authenticate"]
+
+
+def test_a_successful_request_does_not_echo_the_credential_either(served, signing_key):
+    """The path nobody thinks to check, because it is the one that worked."""
+    good = minted(signing_key)
+    response = served.post(
+        MCP_PATH,
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        headers={"Authorization": f"Bearer {good}"},
+    )
+    assert response.status_code == 200
+    assert good not in response.text
+
+
+# --- 2. nothing reaches the logs ---------------------------------------------
+
+
+def test_no_rejection_path_hands_the_credential_to_the_logging_system(
+    served, signing_key, caplog
+):
+    """Asserted over ``record.args`` and ``record.getMessage()`` BOTH.
+
+    A ``_log.info("refused %s", token)`` produces a record whose formatted
+    message contains the token and whose ``args`` contains it too; a handler that
+    never formats would still ship ``args`` to a structured sink. Checking only
+    the formatted message would miss half of it.
+    """
+    with caplog.at_level(logging.DEBUG, logger="isaac_api"):
+        for header in every_bad_credential(signing_key).values():
+            served.post(
+                MCP_PATH,
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"Authorization": header},
+            )
+        credential_refusals = list(caplog.records)
+        # THE VACUITY GUARD, and it is a separate request on purpose. The sweep
+        # above logs NOTHING — see the next test, which asserts that as its own
+        # claim — so an empty `caplog` here would be indistinguishable from a
+        # logging pipeline this fixture never armed. The query-string refusal
+        # DOES log, at INFO, with a fixed string; driving one proves the capture
+        # is live before anything is concluded from its emptiness.
+        served.post(
+            f"{MCP_PATH}?access_token={SENTINEL_SECRET}",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        )
+
+    assert caplog.records, "the logging capture was never armed; the sweep is vacuous"
+    for record in caplog.records:
+        assert SENTINEL_SECRET not in record.getMessage()
+        assert SENTINEL_SECRET not in repr(record.args)
+    assert credential_refusals == [], (
+        "an authentication refusal wrote a log record; every one of them is "
+        "reached with a credential in hand, so this is the one code path where a "
+        f"log line is most likely to carry one: {credential_refusals}"
+    )
+
+
+def test_a_token_in_the_query_string_is_refused_without_being_logged(
+    served, signing_key, caplog
+):
+    """The refusal for a credential in the URL must not itself be what writes the
+    credential down. Only the parameter NAME is read; the value is never sliced
+    out of the query string at all."""
+    leaked = minted(signing_key)
+    with caplog.at_level(logging.DEBUG, logger="isaac_api"):
+        response = served.post(
+            f"{MCP_PATH}?access_token={leaked}",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        )
+    assert response.status_code == 400
+    assert leaked not in response.text
+    for record in caplog.records:
+        assert leaked not in record.getMessage()
+        assert leaked not in repr(record.args)
+
+
+# --- 3. no branch can build a message out of token material ------------------
+
+
+def test_every_rejection_message_is_a_constant_from_the_rejection_table():
+    """The property that makes the sweeps above hold for branches they miss.
+
+    Every ``TokenRejected`` this module raises carries a message looked up from
+    ``_REJECTIONS``. If a future branch interpolated a claim value — the
+    "helpful" *"expected audience X, got Y"* — the sweep might not reach it, but
+    this will: the message would not be in the table.
+    """
+    for code, message in jwtmod._REJECTIONS.items():
+        assert isinstance(message, str) and message
+        assert "{" not in message and "%s" not in message
+
+
+def test_no_raise_in_the_token_verifier_interpolates_anything():
+    """An AST scan, so it holds for branches no test drives.
+
+    Every ``raise TokenRejected(...)`` in ``jwt.py`` passes a constant or a
+    lookup; none passes an f-string, a ``.format`` call, or a ``%``. The one
+    place a message is constructed is ``FileKeySource``, which names no token.
+    """
+    tree = ast.parse((MCP_PACKAGE / "jwt.py").read_text(encoding="utf-8"))
+    offences = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Raise) or node.exc is None:
+            continue
+        for inner in ast.walk(node.exc):
+            if isinstance(inner, ast.JoinedStr):
+                offences.append(f"f-string at line {node.lineno}")
+            if isinstance(inner, ast.BinOp) and isinstance(inner.op, ast.Mod):
+                offences.append(f"%-format at line {node.lineno}")
+            if (
+                isinstance(inner, ast.Attribute)
+                and inner.attr == "format"
+            ):
+                offences.append(f".format at line {node.lineno}")
+    assert offences == [], offences
+
+
+def test_the_reportable_scheme_allowlist_replaces_rather_than_truncates():
+    """A 32-character prefix of a secret is not a redaction. Asserted against the
+    one field a refusal is allowed to publish."""
+    from isaac_api.mcp.deployment import _reportable_scheme
+
+    assert _reportable_scheme(SENTINEL_SECRET) == ""
+    assert _reportable_scheme("Bearer") == "Bearer"
+    assert SENTINEL_SECRET[:8] not in _reportable_scheme(SENTINEL_SECRET)
+
+
+# --- 4. no passthrough, held structurally ------------------------------------
+
+
+def test_no_object_downstream_of_verification_has_a_field_holding_the_token():
+    """*"MCP servers MUST NOT accept or transit any other tokens."*
+
+    Held by construction rather than by discipline: there is nowhere to keep a
+    token, so there is nothing to forward. A future field named ``token`` or
+    ``credential`` on either of these turns this red before it can be read by
+    anything.
+    """
+    from isaac_api.mcp.deployment import Principal
+
+    for cls in (VerifiedToken, Principal):
+        fields = set(getattr(cls, "__dataclass_fields__", {}))
+        assert not {"token", "credential", "access_token", "bearer", "raw"} & fields, cls
+
+
+def test_a_verified_token_object_does_not_contain_the_credential_anywhere(signing_key):
+    """Including in ``claims``, which is a copy of the payload and never of the
+    compact serialization it came from."""
+    from isaac_api.mcp.jwt import jwks_from_document, verify_access_token
+
+    compact = minted(signing_key)
+    verified = verify_access_token(
+        compact,
+        keys=jwks_from_document(keys.jwks(signing_key)),
+        issuer=ISSUER,
+        resource=RESOURCE,
+        now=int(time.time()),
+    )
+    assert compact not in repr(verified)
+    assert compact not in json.dumps(verified.claims, default=str)
+
+
+def test_the_binding_hands_the_client_a_principal_and_never_a_credential(
+    tmp_path, signing_key
+):
+    """``client.py`` builds its outbound headers from the principal. The
+    credential does not reach the object it is given, so an upstream request
+    cannot carry it even by accident."""
+    jwks_path = tmp_path / "jwks.json"
+    jwks_path.write_text(json.dumps(keys.jwks(signing_key)), encoding="utf-8")
+    resolved = oauth.resolve_oauth_binding(
+        {
+            oauth.RESOURCE_ENV: RESOURCE,
+            oauth.ISSUER_ENV: ISSUER,
+            oauth.TOKEN_VERIFIER_ENV: oauth.FILE_TOKEN_VERIFIER,
+            oauth.JWKS_FILE_ENV: str(jwks_path),
+        },
+        "",
+    )
+    compact = minted(signing_key)
+    principal = resolved.authenticate(Credential(scheme="Bearer", token=compact))
+    assert compact not in repr(principal)
+
+
+# --- 5. no outbound call, and the seam that would enable one is unset --------
+
+
+def test_the_jwks_fetch_seam_is_unset_and_nothing_in_the_repository_assigns_it():
+    """The seam is REAL — ``jwks-url`` is a recognised selection with a written
+    branch — and it is UNARMED. Asserted against the source rather than only
+    against the value, so an assignment executed at import time somewhere else
+    could not satisfy it."""
+    assert oauth.JWKS_FETCHER is None
+    for path in sorted(MCP_PACKAGE.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            targets = []
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id == "JWKS_FETCHER":
+                    value = getattr(node, "value", None)
+                    assert isinstance(value, ast.Constant) and value.value is None, (
+                        f"{path.name} assigns JWKS_FETCHER a non-None value"
+                    )
+
+
+@pytest.mark.parametrize("module", ["jwt.py", "oauth.py"])
+def test_the_token_verification_modules_import_no_networking_at_all(module):
+    """Not "make no call" — import nothing that could make one. ``httpx`` is
+    permitted elsewhere in this package (``client.py`` reaches ISAAC's own routes
+    in-process over an ASGI transport); it has no business here."""
+    forbidden = {
+        "socket",
+        "ssl",
+        "http",
+        "http.client",
+        "httpx",
+        "urllib.request",
+        "urllib.error",
+        "asyncio",
+        "requests",
+        "ftplib",
+        "smtplib",
+        "telnetlib",
+        "xmlrpc",
+    }
+    # `urllib.parse` is deliberately NOT forbidden and is deliberately not
+    # matched by a prefix rule: it is a string parser with no I/O, `oauth.py`
+    # uses `urlsplit` to validate a canonical URI, and forbidding the package
+    # root would either ban that or force a hand-rolled URL parser — which is a
+    # worse trade in a module whose whole job is refusing malformed input.
+    tree = ast.parse((MCP_PACKAGE / module).read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imported.add(alias.name)
+                imported.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module)
+            imported.add(node.module.split(".")[0])
+    assert not (imported & forbidden), sorted(imported & forbidden)
+    # …and the exemption is narrow, not a hole: `urllib.parse` is the ONLY
+    # `urllib` submodule either module may name.
+    assert not [
+        name
+        for name in imported
+        if name.startswith("urllib") and name not in ("urllib", "urllib.parse")
+    ]
+
+
+def test_the_seam_is_real_and_is_only_reachable_by_installing_a_fetcher(
+    monkeypatch, signing_key
+):
+    """A seam nothing can drive is not a seam — it is unreviewable dead code.
+
+    Installing a callable makes the whole path work, so the shape a future
+    authorized slice fills in is proven rather than asserted. The callable here
+    is a Python function returning a dict: **no socket is opened by this test**,
+    and none is opened by ``FetchedKeySource``, which calls whatever it was given
+    and makes no I/O decision of its own.
+    """
+    calls: list[str] = []
+
+    def fake_fetch(url: str):
+        calls.append(url)
+        return keys.jwks(signing_key)
+
+    monkeypatch.setattr(oauth, "JWKS_FETCHER", fake_fetch)
+    resolved = oauth.resolve_oauth_binding(
+        {
+            oauth.RESOURCE_ENV: RESOURCE,
+            oauth.ISSUER_ENV: ISSUER,
+            oauth.TOKEN_VERIFIER_ENV: oauth.URL_TOKEN_VERIFIER,
+            oauth.JWKS_URL_ENV: "https://auth.example.invalid/jwks",
+        },
+        "",
+    )
+    assert not isinstance(resolved, str), resolved
+    principal = resolved.authenticate(
+        Credential(scheme="Bearer", token=minted(signing_key))
+    )
+    assert principal.subject == SENTINEL_SECRET
+    # …and the key set is cached, so a second request does not re-fetch.
+    resolved.authenticate(Credential(scheme="Bearer", token=minted(signing_key)))
+    assert calls == ["https://auth.example.invalid/jwks"]
+
+
+def test_a_fetcher_that_fails_refuses_every_token_and_names_nothing(
+    monkeypatch, signing_key
+):
+    """A stale cache is deliberately NOT served on a failed refresh: a key set
+    that cannot be re-fetched may be one that was revoked. And the exception is
+    never interpolated — it could carry a URL, a hostname or a response body, and
+    this message reaches a 401."""
+
+    def angry_fetch(url: str):
+        raise RuntimeError(f"connect to {url} failed: {SENTINEL_SECRET}")
+
+    monkeypatch.setattr(oauth, "JWKS_FETCHER", angry_fetch)
+    resolved = oauth.resolve_oauth_binding(
+        {
+            oauth.RESOURCE_ENV: RESOURCE,
+            oauth.ISSUER_ENV: ISSUER,
+            oauth.TOKEN_VERIFIER_ENV: oauth.URL_TOKEN_VERIFIER,
+            oauth.JWKS_URL_ENV: "https://auth.example.invalid/jwks",
+        },
+        "",
+    )
+    from isaac_api.mcp.deployment import DeploymentRefused
+
+    with pytest.raises(DeploymentRefused) as caught:
+        resolved.authenticate(Credential(scheme="Bearer", token=minted(signing_key)))
+    assert caught.value.code == "no_usable_jwks_key"
+    assert SENTINEL_SECRET not in json.dumps(caught.value.data)
+    assert SENTINEL_SECRET not in caught.value.message
+
+
+def test_selecting_the_url_key_source_refuses_rather_than_reaching_for_one(tmp_path):
+    """The end-to-end consequence: an operator who configures ``jwks-url`` gets a
+    container that will not boot, naming the local alternative — not a process
+    that quietly makes an outbound request at first token."""
+    with pytest.raises(RuntimeError) as caught:
+        oauth.validate_oauth_selection_or_raise(
+            {
+                oauth.RESOURCE_ENV: RESOURCE,
+                oauth.ISSUER_ENV: ISSUER,
+                oauth.TOKEN_VERIFIER_ENV: oauth.URL_TOKEN_VERIFIER,
+                oauth.JWKS_URL_ENV: "https://auth.example.invalid/jwks",
+            },
+            "",
+        )
+    assert "makes no outbound request" in str(caught.value)
+    assert oauth.FILE_TOKEN_VERIFIER in str(caught.value)

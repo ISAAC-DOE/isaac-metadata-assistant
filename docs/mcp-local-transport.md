@@ -23,13 +23,26 @@ the code: `apps/api/isaac_api/mcp/transport.py`, `deployment.py`, `policy.py`.
 | *unset* (**the default**) | `unconfigured` | **No** | nobody — the path 404s |
 | `""` / whitespace | `unconfigured` | **No** | nobody |
 | anything unrecognised (`true`, `hosted`, `LOCAL_LOOPBACK`, …) | `unconfigured` | **No** | nobody |
-| `oauth-resource-server` / `edge-issued-bearer` | `unconfigured` (reserved, unimplemented) | **No** | nobody |
+| `edge-issued-bearer` | `unconfigured` (reserved, unimplemented) | **No** | nobody |
+| `oauth-resource-server`, **not fully configured** | `unconfigured` (misconfigured) | **No** | nobody — **and the container refuses to boot** |
 | `local-loopback` **with a bad scope string** | `unconfigured` (misconfigured) | **No** | nobody |
 | `local-loopback` | `local-loopback` | **Yes**, at `{ISAAC_BASE_PATH}/api/mcp` | a **loopback** peer, with **no** credential, **no** proxy header, and **no** off-loopback `Origin` |
+| `oauth-resource-server`, **fully configured** | `oauth-resource-server` | **Yes**, plus RFC 9728 metadata paths | a caller presenting a **valid OAuth 2.1 access token** for this resource. **No deployment is in this state** |
+
+**Row 5 is new (2026-08-29) and the previous version of this table said the two reserved names
+were both unimplemented. That is now true of `edge-issued-bearer` only.** The last row describes a
+configuration that exists in code and in tests and **in no deployment**: it requires an issuer, a
+canonical resource URI and a verification key set, none of which is written down anywhere in this
+repository. `ISAAC_MCP_DEPLOYMENT` is unset everywhere, so rows 1–5 are the only states any
+deployment has ever been in.
 
 Every fail-closed row lands on the same binding for the same reason: an operator's
-typo, an unimplemented placeholder and a scope list naming `isaac:submit` must all
-produce *nothing*, never a working read-only server somebody then trusts.
+typo, an unimplemented placeholder, an incomplete OAuth configuration and a scope
+list naming `isaac:submit` must all produce *nothing*, never a working read-only
+server somebody then trusts. The OAuth row additionally **fails to boot** rather
+than merely serving nothing — an operator who named that binding believes tokens
+are being verified, and a deployment that silently serves no MCP route looks
+identical to a working one.
 
 ---
 
@@ -164,13 +177,33 @@ and confirmation that the edge forwards `POST` to it with the request body and t
 **D2 — authentication.** One of two shapes, and ISAAC needs the parameters of
 whichever is chosen:
 
-* **ISAAC-hosted OAuth 2.1 resource server** (`oauth-resource-server`, reserved and
-  unimplemented). ISAAC would need: the authorization-server issuer URL; the token
-  endpoint; the expected `aud`/resource indicator value for this server (RFC 8707);
-  the signing keys or JWKS URL; the claim that carries scope, and the exact scope
-  strings the issuer will mint — ISAAC's are `isaac:read` and `isaac:draft.write`;
-  and confirmation that the edge passes OAuth traffic through rather than
-  intercepting it.
+* **ISAAC as an OAuth 2.1 resource server** (`oauth-resource-server`). ~~"reserved and
+  unimplemented"~~ — **IMPLEMENTED 2026-08-29** (`apps/api/isaac_api/mcp/oauth.py`,
+  `mcp/jwt.py`), disabled by default, reachable in no deployment. **The list below did not
+  shrink and is not satisfied by the implementation** — every item is a value only Dean can
+  supply, and the code refuses to boot without them, which is the point of listing them here:
+
+  the authorization-server issuer URL (`ISAAC_MCP_OAUTH_ISSUER`); the **exact** canonical
+  resource URI this server answers as, which must match what a scientist types into their
+  client including the path (`ISAAC_MCP_OAUTH_RESOURCE`, compared to a token's `aud` by exact
+  string equality, RFC 8707); the signing keys, **projected into the pod as a file**
+  (`ISAAC_MCP_OAUTH_JWKS_FILE` — a JWKS *URL* is refused, because this build makes no outbound
+  request); the URL at which the RFC 9728 metadata document is published, which **must** be
+  given explicitly when `ISAAC_BASE_PATH` is in use because a path-mounted ISAAC cannot serve
+  the RFC's origin-root path (`ISAAC_MCP_OAUTH_METADATA_URL`); the exact scope strings the
+  issuer will mint — ISAAC's are `isaac:read` and `isaac:draft.write`, they **do not nest**,
+  and there is no third; and confirmation that the edge passes OAuth traffic through rather
+  than intercepting it.
+
+  Two items the earlier list did not name and that are not application work: the token
+  endpoint must accept `application/x-www-form-urlencoded`, and **Anthropic's egress range
+  must reach both this endpoint and the issuer host** — see
+  [`mcp-oauth-operator-requirements-2026-08-27.md`](mcp-oauth-operator-requirements-2026-08-27.md)
+  §2, which is the item most likely to fail silently.
+
+  The claim that carries scope is **not** a parameter: `scope` (RFC 6749, space-delimited) and
+  `scp` (array or string) are both read, and a scope string ISAAC does not recognise is dropped
+  rather than refused, so a token carrying `openid profile` alongside `isaac:read` works.
 * **Edge-issued static bearer** (`edge-issued-bearer`, reserved and unimplemented).
   ISAAC would need: how the token is issued and rotated; how ISAAC verifies it
   (a shared secret it can compare, or a signature it can check — **not** "the edge

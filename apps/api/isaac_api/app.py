@@ -313,15 +313,72 @@ def create_app() -> FastAPI:
     if _mcp_is_requested():
         from starlette.routing import Route
 
-        from .mcp.transport import MCP_PATH, mcp_transport_or_none
+        from .mcp import transport as mcp_transport_module
+        from .mcp.deployment import OAUTH_RESOURCE_SERVER
+        from .mcp.transport import (
+            MCP_PATH,
+            mcp_transport_or_none,
+            metadata_routes_or_none,
+        )
 
-        mcp_transport = mcp_transport_or_none(app)
+        # BOOT REFUSAL, BEFORE ANYTHING IS MOUNTED, and only for an operator who
+        # named the OAuth binding. Same shape as `validate_provider_config_or_raise`
+        # and `validate_edge_trust_verifier_or_raise` above: resolution alone fails
+        # closed to a binding that serves nothing, and the DEGRADED RUN is the
+        # dangerous one — the operator set the variable, believes tokens are being
+        # verified, and gets a deployment that looks identical to a working one
+        # while serving no MCP route at all. Failing to boot is louder than any log
+        # line. It also refuses the fixture key source outright, so no running
+        # application can be configured onto a test double.
+        if (os.environ.get(_MCP_DEPLOYMENT_ENV) or "").strip() == OAUTH_RESOURCE_SERVER:
+            from .mcp.oauth import validate_oauth_selection_or_raise
+
+            validate_oauth_selection_or_raise(os.environ, base)
+
+        # Resolved ONCE and threaded into both calls. Resolving twice would open a
+        # window in which the transport and the metadata document disagreed about
+        # the configuration — a resource server advertising an audience its token
+        # check does not use is precisely the confused-deputy shape RFC 8707
+        # exists to close.
+        #
+        # Reached through the TRANSPORT MODULE's own name rather than imported
+        # directly, and that is deliberate rather than roundabout:
+        # `mcp_transport_or_none` has always resolved through
+        # `transport.resolve_binding`, and three negative controls in
+        # `test_mcp_transport.py` (`..._is_load_bearing`) monkeypatch exactly that
+        # attribute to force a binding that would otherwise be unmountable.
+        # Importing `resolve_binding` from `deployment` here would leave those
+        # patches pointing at a name nothing reads, and each control would go
+        # green while proving nothing — which is the failure mode the controls
+        # exist to catch, arriving through the controls themselves.
+        binding = mcp_transport_module.resolve_binding()
+
+        mcp_transport = mcp_transport_or_none(app, binding=binding)
         if mcp_transport is not None:
             app.router.routes.append(
                 Route(
                     f"{base}{MCP_PATH}",
                     mcp_transport,
                     name="mcp",
+                    methods=None,
+                    include_in_schema=False,
+                )
+            )
+        # RFC 9728 protected-resource metadata, mounted on exactly the same terms
+        # as the transport: `metadata_routes_or_none` answers `()` for every
+        # binding that has no authorization server to name, which is both shipped
+        # ones, so an unconfigured deployment publishes NOTHING — not an empty
+        # document, not a 404-from-a-registered-path. `include_in_schema=False`
+        # keeps a non-ISAAC discovery document out of the OpenAPI operation count,
+        # which is asserted exactly.
+        for index, (path, metadata_app) in enumerate(
+            metadata_routes_or_none(binding=binding, base=base)
+        ):
+            app.router.routes.append(
+                Route(
+                    path,
+                    metadata_app,
+                    name=f"oauth-protected-resource-{index}",
                     methods=None,
                     include_in_schema=False,
                 )

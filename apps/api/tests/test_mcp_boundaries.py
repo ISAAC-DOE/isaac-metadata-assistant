@@ -33,6 +33,7 @@ from isaac_api.mcp.deployment import (
     DEPLOYMENT_ENV,
     LOCAL_LOOPBACK,
     LOCAL_SCOPES_ENV,
+    OAUTH_RESOURCE_SERVER,
     RESERVED_BINDING_NAMES,
 )
 from isaac_api.mcp.policy import (
@@ -370,7 +371,20 @@ def test_the_session_header_is_written_from_the_principal_and_from_nowhere_else(
 @pytest.mark.parametrize(
     "value",
     [None, "", "   ", "enabled", "true", "public", "hosted", "authentik"]
-    + list(RESERVED_BINDING_NAMES),
+    + list(RESERVED_BINDING_NAMES)
+    # `oauth-resource-server` IS a registered binding now, and it belongs in this
+    # sweep anyway — with no configuration it must still resolve to
+    # `unconfigured`, for a different reason (`misconfigured:`) than a reserved
+    # name's (`reserved_pending_decision`).
+    #
+    # NAMED EXPLICITLY, and that is the point of this comment. It used to arrive
+    # here for free through `RESERVED_BINDING_NAMES`; when it was implemented it
+    # left that table and **silently vanished from this parametrization and from
+    # the matching one in `test_mcp_transport.py`** — two cases quietly stopped
+    # existing while both files stayed green. A list derived from a set that a
+    # feature can remove itself from is a list that shrinks when the feature
+    # lands, which is exactly when the coverage is most wanted.
+    + [OAUTH_RESOURCE_SERVER],
 )
 def test_every_value_that_is_not_a_registered_binding_resolves_to_unconfigured(value):
     env = {} if value is None else {DEPLOYMENT_ENV: value}

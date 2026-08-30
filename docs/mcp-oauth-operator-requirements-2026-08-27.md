@@ -195,6 +195,27 @@ Two facts worth knowing before scoping this as "an org-admin project":
 
 ## 6. What ISAAC would build, so the cost is visible
 
+> **STATUS UPDATE, 2026-08-29 — items 1–5 below are now BUILT, and nothing about the ask has
+> changed.** The application half exists at `apps/api/isaac_api/mcp/oauth.py` and
+> `mcp/jwt.py`: RFC 9728 protected-resource metadata, RFC 8707 audience binding, RFC 6750
+> `401`/`403` challenges, JWT signature/issuer/expiry/scope validation, and a fail-closed boot
+> refusal. It is **disabled by default and reachable in no deployment** — `ISAAC_MCP_DEPLOYMENT`
+> is unset everywhere, so no MCP route and no metadata route is registered, and §1 above is still
+> true as written.
+>
+> **This changes the ask in exactly one way: it is now smaller.** Every item in §2, §3.4–§3.7 and
+> §4 remains outstanding and none of it is application work — the firewall allowlist for
+> `160.79.104.0/21` to *both* hosts, the Authentik issuer, `code_challenge_methods_supported`,
+> client registration, the redirect URIs, and the connector administration. **D1 and D2 are still
+> deferred and this does not narrow them.** What it removes is the "and then ISAAC has to write
+> an OAuth implementation" line from any estimate.
+>
+> One requirement §3.3 flagged is now enforced rather than documented: if `ISAAC_BASE_PATH` is in
+> use, the deployment **refuses to start** unless the protected-resource-metadata URL is named
+> explicitly, because the RFC 9728 origin-root path is one a path-mounted ISAAC cannot serve.
+> That was the "live mismatch risk" §3.3 warned about; it is now a container that does not boot
+> instead of a connector that fails inside a browser.
+
 Named so the operator can see this is not an open-ended ask. All of it is application-side,
 disabled by default, and none of it requires an external answer to *write*:
 
