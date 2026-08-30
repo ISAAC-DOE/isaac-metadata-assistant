@@ -36,10 +36,29 @@ WHAT IS DELIBERATELY NOT IMPLEMENTED, AND WHY EACH IS A REFUSAL
 * **JSON-RPC batching** — ``400``. Revision ``2025-06-18`` removed it. Accepting a
   batch would mean deciding what a partially-authorized batch returns, which is a
   security question nobody has been asked.
-* **A protected-resource-metadata document** — not published, and no
-  ``WWW-Authenticate`` is fabricated. A challenge pointing at an authorization
-  server that does not exist is worse than no challenge; see
-  :meth:`~.deployment.UnconfiguredDeployment.challenge`.
+* ~~**A protected-resource-metadata document** — not published, and no
+  ``WWW-Authenticate`` is fabricated.~~ **NARROWED, NOT REVERSED.** The rule that
+  motivated it is unchanged and is now enforced in a stronger place: *a challenge
+  pointing at an authorization server that does not exist is worse than no
+  challenge*, so the two shipped bindings still return an empty challenge and
+  **no header is emitted** (:meth:`~.deployment.UnconfiguredDeployment.challenge`,
+  :meth:`~.deployment.LocalLoopbackDeployment.challenge`). What changed is that a
+  binding which *does* have an authorization server can now publish one:
+  ``oauth.py`` serves RFC 9728 metadata and emits the challenge, and
+  :func:`metadata_routes_or_none` registers those paths **only** for a binding
+  that asks for them — which is none by default, so an unconfigured deployment
+  still publishes nothing at all.
+* **A token in the query string** — ``400``, refused rather than ignored. The MCP
+  specification says access tokens *"**MUST NOT** be included in the URI query
+  string"* — **as an obligation on the CLIENT**, in its list of client
+  requirements, and OAuth 2.1 §5.1 defines no query-parameter method at all for a
+  resource server to have an opinion about. So this ``400`` is ISAAC's own choice
+  and not a conformance requirement, which is worth being exact about because
+  refusing is a divergence from the obvious alternative. Ignoring the parameter
+  would be defensible and useless: by the time the request arrives the token is
+  already in whatever access logs sit in front of this process, and a client doing
+  it needs to be told to stop rather than quietly served. See
+  :data:`QUERY_TOKEN_PARAMETERS`.
 
 RAW ASGI, WITH NO IMPORT OF STARLETTE OR FASTAPI
 ================================================
@@ -86,23 +105,29 @@ import ipaddress
 import json
 import logging
 from typing import Any, Awaitable, Callable, Iterable, Mapping
-from urllib.parse import urlsplit
+from urllib.parse import unquote_plus, urlsplit
 
 from .deployment import Credential, DeploymentBinding, resolve_binding
 from .server import (
     DEPLOYMENT_UNCONFIGURED,
+    ERA_MODERN,
+    HEADER_MISMATCH,
     INSUFFICIENT_SCOPE,
-    MCP_PROTOCOL_VERSION,
+    METHOD_NOT_FOUND,
+    UNSUPPORTED_PROTOCOL_VERSION,
     McpServer,
+    protocol_era,
 )
 
 __all__ = [
     "MAX_REQUEST_BYTES",
     "MCP_PATH",
+    "QUERY_TOKEN_PARAMETERS",
     "McpHttpTransport",
     "TRANSPORT_REFUSED",
     "is_loopback_host",
     "mcp_transport_or_none",
+    "metadata_routes_or_none",
 ]
 
 _log = logging.getLogger(__name__)
@@ -112,12 +137,21 @@ _log = logging.getLogger(__name__)
 #: ``ISAAC_BASE_PATH``.
 MCP_PATH = "/api/mcp"
 
-#: This layer's JSON-RPC error code. JSON-RPC reserves -32000..-32099 for
-#: implementation-defined errors; ``server.py`` holds -32001 (deployment
-#: unconfigured) and -32002 (insufficient scope), and this is the third and last.
-#: ``test_mcp_transport.py`` asserts the three are distinct, because a duplicated
-#: code is a client mis-branching on an authorization failure.
-TRANSPORT_REFUSED = -32003
+#: This layer's JSON-RPC error code, and the third of ISAAC's three.
+#:
+#: **MOVED OUT OF THE JSON-RPC RESERVED RANGE, 2026-08-30, with the other two.**
+#: ~~"JSON-RPC reserves -32000..-32099 for implementation-defined errors"~~ is
+#: true of JSON-RPC and no longer sufficient: ``2026-07-28`` partitions that block
+#: and leaves an implementation nowhere in it — ``-32000``..``-32019`` is a legacy
+#: sub-range *"new implementations **SHOULD NOT** use … at all"*, and
+#: ``-32020``..``-32099`` is reserved for the specification's own codes. See
+#: ``server.py``'s error-code block for the full quotation and for the one value
+#: (``-32002``) that was a MUST NOT rather than a SHOULD NOT.
+#:
+#: ``test_mcp_transport.py`` asserts the three are distinct AND outside the
+#: reserved range: a duplicated code is a client mis-branching on an authorization
+#: failure, and a reserved one is a client branching on somebody else's meaning.
+TRANSPORT_REFUSED = -31003
 
 #: Request body cap. The largest legitimate message is a ``tools/call`` whose
 #: arguments are a handful of scalars and one flat ``fields`` object; a megabyte
@@ -138,6 +172,40 @@ PROXY_HEADERS = (
     b"x-forwarded-proto",
     b"x-real-ip",
 )
+
+#: Query-parameter names that carry, or have historically carried, a bearer
+#: token. Their presence is a refusal on every binding — see the module
+#: docstring. The VALUE is never read, never decoded and never logged; only the
+#: NAME is looked at, so nothing this refusal does can put a credential anywhere.
+#:
+#: **WHOSE OBLIGATION THIS IS — CORRECTED 2026-08-30, because the previous comment
+#: had it backwards and the correction changes what may be claimed, not what the
+#: code does.** ~~"which OAuth 2.1 removes and the MCP specification forbids in as
+#: many words"~~ is right about MCP and wrong about who is bound:
+#:
+#: * MCP's authorization chapter states it in a numbered list of **client**
+#:   requirements — *"2. Access tokens **MUST NOT** be included in the URI query
+#:   string"* — under *"MCP client **MUST** use the Authorization request header
+#:   field"*. It is an obligation on the sender.
+#: * OAuth 2.1 (draft-ietf-oauth-v2-1-13) **§5.1 has exactly two subsections** —
+#:   ``5.1.1`` Authorization Request Header Field and ``5.1.2`` Form-Encoded
+#:   Content Parameter. RFC 6750 §2.3's *"URI Query Parameter"* method is simply
+#:   **absent**; the draft was re-read on 2026-08-30 and **contains no sentence
+#:   saying a resource server MUST ignore, or MUST reject, a token in the query
+#:   string.** There is no server-side rule here to conform to or to diverge from.
+#:
+#: So refusing with ``400`` is **ISAAC's choice**, made freely rather than under a
+#: MUST, and the module docstring gives the reason: by the time the request
+#: arrives the credential is already in every access log in front of this process,
+#: and a client doing it needs to be told to stop rather than quietly served.
+#:
+#: ``access_token`` is RFC 6750 §2.3's own parameter name. **``bearer_token``,
+#: ``token`` and ``apikey`` are not OAuth parameters at all**, and are kept
+#: deliberately after re-examination: they are the names credential-bearing query
+#: parameters carry in the wild, this endpoint reads **no** query parameter for
+#: any purpose, and so refusing them costs a legitimate caller nothing. A
+#: parameter that is never read cannot be a parameter this refusal takes away.
+QUERY_TOKEN_PARAMETERS = ("access_token", "bearer_token", "token", "apikey")
 
 _JSON_CONTENT_TYPE = "application/json"
 
@@ -217,6 +285,13 @@ class McpHttpTransport:
         # that matters and why splitting them is a follow-up rather than this
         # slice.
         self._loopback_only = bool(getattr(binding, "requires_loopback_peer", True))
+        # THE OTHER TWO THIRDS OF WHAT THAT FLAG USED TO MEAN. Each read with the
+        # SAFE default, so a binding that declares neither gets both — which is
+        # what every binding written before the split already had.
+        self._refuse_proxied = bool(getattr(binding, "refuses_proxy_headers", True))
+        self._loopback_origin_only = bool(
+            getattr(binding, "requires_loopback_origin", True)
+        )
 
     # -- ASGI -----------------------------------------------------------------
 
@@ -252,32 +327,49 @@ class McpHttpTransport:
         # 403, before the body is read") and `deployment.py` both state this order;
         # `test_mcp_transport.py` pins a non-loopback GET at 403.
         #
-        # ONE FLAG, THREE GUARDS — read this before flipping it. `_loopback_only`
-        # is `requires_loopback_peer`, whose name and whose documentation in
-        # `deployment.py` describe ONLY the first of the three refusals inside
-        # `_loopback_refusal`:
-        #   1. the socket-peer check          (the one the flag is named for);
-        #   2. the proxy-header refusal       (`PROXY_HEADERS`, ~line 371 below);
-        #   3. the cross-origin/DNS-rebinding refusal (`Origin`, ~line 380 below).
-        # So setting `requires_loopback_peer=False` — which is exactly what an
-        # implementer of an `edge-issued-bearer` binding would do when D2 is
-        # answered, because traffic then legitimately arrives through the edge —
-        # ALSO silently disables 2 and 3, on the one binding that will be
-        # internet-adjacent. That is the opposite of what that author will intend.
-        # Splitting the flag into three (peer / proxy / origin) is a FOLLOW-UP,
-        # deliberately not done in this slice; until it is, a new binding author
-        # must treat this flag as "all three local-server defences", not as its
-        # name.
-        if self._loopback_only:
-            refusal = self._loopback_refusal(scope, headers)
-            if refusal is not None:
-                code, message = refusal
-                # Logged at INFO with no peer address and no header value: the
-                # operator needs to know the guard fired, and a log line naming a
-                # remote address is a record this application has no reason to keep.
-                _log.info("MCP transport refused a request: %s", code)
-                await self._refuse(send, 403, code, message)
-                return
+        # ONE FLAG USED TO GATE THREE GUARDS. IT NOW GATES ONE, AND THE OTHER TWO
+        # HAVE THEIR OWN. The old comment here warned that whoever wrote the first
+        # internet-adjacent binding would set `requires_loopback_peer=False` for
+        # the peer check and silently lose the proxy-header and DNS-rebinding
+        # defences with it. `oauth.py` is that binding, so the split was made
+        # rather than the warning re-read: `deployment.DeploymentBinding` declares
+        # three attributes, each defaulting to the SAFE value, and a new binding
+        # answers all three questions with its own reason.
+        #
+        # Nothing about the two shipped bindings moves. `local-loopback` declares
+        # all three True — which is exactly what one flag set to True already gave
+        # it — and the unconfigured binding serves no route at all.
+        refusal = self._entry_refusal(scope, headers)
+        if refusal is not None:
+            code, message = refusal
+            # Logged at INFO with no peer address and no header value: the
+            # operator needs to know the guard fired, and a log line naming a
+            # remote address is a record this application has no reason to keep.
+            _log.info("MCP transport refused a request: %s", code)
+            await self._refuse(send, 403, code, message)
+            return
+
+        # AFTER the entry guards, so a caller this binding will not serve learns
+        # nothing extra from it, and BEFORE everything else, because a request
+        # that put a credential in its URL must not be processed as though it had
+        # not. 400, per the specification's own status table: this is a malformed
+        # authorization request, not a failed one. The parameter's VALUE is never
+        # read, so this refusal cannot itself become the thing that logs a token.
+        offending = _query_token_parameter(scope)
+        if offending is not None:
+            _log.info("MCP transport refused a request: token_in_query_string")
+            await self._refuse(
+                send,
+                400,
+                "token_in_query_string",
+                "An access token may never be sent in the URI query string. Put "
+                "it in the Authorization header. This request was refused rather "
+                "than served without it, because the credential has already "
+                "reached every access log in front of this process and the "
+                "client needs to stop doing it.",
+                data={"parameter": offending},
+            )
+            return
 
         method = (scope.get("method") or "").upper()
         if method != "POST":
@@ -296,20 +388,24 @@ class McpHttpTransport:
             await self._refuse(send, 405, "method_not_allowed", reason, allow="POST")
             return
 
-        # A client that states a protocol version states one this server speaks,
-        # or is refused. The specification's negotiation happens in `initialize`;
-        # this header exists so a MISMATCH after negotiation is caught rather than
-        # silently reinterpreted.
-        declared = headers.get("mcp-protocol-version")
-        if declared is not None and declared != MCP_PROTOCOL_VERSION:
-            await self._refuse(
-                send,
-                400,
-                "unsupported_protocol_version",
-                f"This server implements MCP revision {MCP_PROTOCOL_VERSION}.",
-                data={"supported": [MCP_PROTOCOL_VERSION], "requested": declared},
-            )
-            return
+        # PROTOCOL-VERSION VALIDATION USED TO LIVE HERE AND HAS MOVED INTO
+        # `server.py`, WHICH IS A BEHAVIOUR CHANGE AND IS THE POINT OF THE DUAL-ERA
+        # WORK. Two reasons it could not stay:
+        #
+        # 1. **It could not see the body.** The modern revision carries the version
+        #    in `params._meta["io.modelcontextprotocol/protocolVersion"]` as well
+        #    as in the header, and requires the two to MATCH. A check that reads
+        #    only the header cannot enforce a rule about two values.
+        # 2. **It answered before authentication.** Every other pre-auth answer
+        #    this transport gives is about the HTTP envelope; this one was about
+        #    the MCP protocol, and an unauthenticated caller learned this server's
+        #    supported revisions from it.
+        #
+        # What replaces it is a real `UnsupportedProtocolVersionError` (JSON-RPC
+        # `-32022`), which `_status_for` maps to `400` — the status the revision
+        # names for it. The refusal body changed shape deliberately: the old one
+        # was this transport's own invention and a modern client could not
+        # recognise it.
 
         # Lowercased like `Accept` is: RFC 9110 §8.3.1 makes a media type's type
         # and subtype case-insensitive, so `APPLICATION/JSON` is `application/json`
@@ -374,59 +470,90 @@ class McpHttpTransport:
             return
 
         credential = _credential_from(headers)
-        envelope = await self._server.handle(message, credential=credential)
+        # The headers travel WITH the message, lowercased, because the modern
+        # revision makes the server validate one against the other: *"Servers that
+        # process the request body **MUST** reject requests where the values
+        # specified in the headers do not match the corresponding values in the
+        # request body."* A check split across two layers is a check that can be
+        # satisfied by neither.
+        header_map = headers.mapping()
+        envelope = await self._server.handle(
+            message, credential=credential, headers=header_map
+        )
 
         if envelope is None:
-            # A notification. The specification says 202 with no body — NOT 200
-            # with an empty object, which a client would try to parse as a result.
+            # A notification, from a caller who authenticated. The specification
+            # says 202 with no body — NOT 200 with an empty object, which a client
+            # would try to parse as a result. A notification whose CALLER did not
+            # authenticate never reaches here: `handle` returns a refusal envelope
+            # for it, and it is answered 401 with a challenge, because "no response
+            # to a notification" is a JSON-RPC rule about results and not a licence
+            # to serve an unauthenticated request.
             await _send(send, 202, b"", extra_headers=())
             return
 
         await _send(
             send,
-            self._status_for(envelope),
+            self._status_for(envelope, message, header_map),
             _encode(envelope),
             extra_headers=self._challenge_headers(envelope),
         )
 
     # -- response shaping -----------------------------------------------------
 
-    def _loopback_refusal(
+    def _entry_refusal(
         self, scope: Mapping[str, Any], headers: _Headers
     ) -> tuple[str, str] | None:
-        """``(code, message)`` when this request must be refused, else ``None``."""
-        client = scope.get("client")
-        peer = client[0] if isinstance(client, (tuple, list)) and client else None
-        if not is_loopback_host(peer):
-            # The peer is NOT named in the message. An error body that echoes the
-            # address it saw is a reflection primitive and tells a scanner what
-            # the server believes about it; the operator gets the fact from the
-            # status code and the log line.
-            return (
-                "loopback_only",
-                "This MCP deployment binding serves loopback callers only, and "
-                "this request did not arrive from one. The check is made against "
-                "the connection's own peer address, never against a header.",
-            )
-        for name in PROXY_HEADERS:
-            if headers.has(name):
+        """``(code, message)`` when this request must be refused, else ``None``.
+
+        THREE INDEPENDENT GUARDS, EACH ASKING ITS OWN BINDING ATTRIBUTE. It was
+        one ``if`` over one flag; ``deployment.py``'s module docstring records
+        why that had to change before the first non-loopback binding shipped.
+        The order is unchanged, and so is the behaviour of every binding that
+        answers ``True`` to all three.
+        """
+        if self._loopback_only:
+            client = scope.get("client")
+            peer = client[0] if isinstance(client, (tuple, list)) and client else None
+            if not is_loopback_host(peer):
+                # The peer is NOT named in the message. An error body that echoes
+                # the address it saw is a reflection primitive and tells a scanner
+                # what the server believes about it; the operator gets the fact
+                # from the status code and the log line.
                 return (
-                    "proxied_request_refused",
-                    "This request carries a proxy header, so the loopback peer is "
-                    "a relay rather than the caller. The header's value is not "
-                    "read and is not trusted; its presence alone is the refusal.",
+                    "loopback_only",
+                    "This MCP deployment binding serves loopback callers only, "
+                    "and this request did not arrive from one. The check is made "
+                    "against the connection's own peer address, never against a "
+                    "header.",
                 )
-        origin = headers.get("origin")
-        if origin is not None and not _origin_is_loopback(origin):
-            return (
-                "cross_origin_refused",
-                "A browser origin outside loopback may not call this endpoint. "
-                "A page on any site can post to 127.0.0.1, so the peer check "
-                "alone is not a defence against DNS rebinding.",
-            )
+        if self._refuse_proxied:
+            for name in PROXY_HEADERS:
+                if headers.has(name):
+                    return (
+                        "proxied_request_refused",
+                        "This request carries a proxy header, so the loopback "
+                        "peer is a relay rather than the caller. The header's "
+                        "value is not read and is not trusted; its presence alone "
+                        "is the refusal.",
+                    )
+        if self._loopback_origin_only:
+            origin = headers.get("origin")
+            if origin is not None and not _origin_is_loopback(origin):
+                return (
+                    "cross_origin_refused",
+                    "A browser origin outside loopback may not call this "
+                    "endpoint. A page on any site can post to 127.0.0.1, so the "
+                    "peer check alone is not a defence against DNS rebinding.",
+                )
         return None
 
-    def _status_for(self, envelope: Mapping[str, Any]) -> int:
+    def _status_for(
+        self,
+        envelope: Mapping[str, Any],
+        message: Mapping[str, Any],
+        headers: Mapping[str, str],
+    ) -> int:
         """The HTTP status for a JSON-RPC envelope.
 
         Authorization outcomes get their HTTP status, because that is what an MCP
@@ -434,6 +561,32 @@ class McpHttpTransport:
         not. Every other JSON-RPC error stays ``200`` — the request was
         transported successfully and the *application* refused it, which is
         exactly the distinction JSON-RPC's error object exists to carry.
+
+        TWO PROTOCOL-DEFINED CODES AND ONE ERA-DEPENDENT ONE, added with the
+        dual-era work:
+
+        * ``-32022`` (``UnsupportedProtocolVersionError``) and ``-32020``
+          (``HeaderMismatch``) map to ``400`` **without consulting the era**,
+          because the specification names ``400`` for each unconditionally.
+
+          Which era can PRODUCE them is a separate question, and stating it
+          loosely is easy: ``-32020`` is only ever raised on a modern request
+          (``server.py`` runs the header rules in that branch alone), while
+          ``-32022`` **can** reach a legacy client and should. A ``2025-06-18``
+          client sends ``MCP-Protocol-Version: 2025-06-18``, which this server
+          serves, and declares its negotiated revision in ``initialize``'s
+          ``params``, which the version check never reads — so it never sees the
+          error. A client speaking an *older* revision that sends, say,
+          ``2024-11-05`` in the header does see it, and that is the correct
+          outcome: it is the message naming the revisions that do exist.
+        * ``-32601`` (``Method not found``) is ``404`` **for a modern request
+          only**: *"If the server does not implement the requested RPC method, it
+          **MUST** respond with ``404 Not Found`` and a JSON-RPC error with code
+          ``-32601``."* That is a rule of the ``2026-07-28`` transport binding, and
+          applying it to a legacy request would change a status this server has
+          returned since it shipped, for a client whose own revision does not ask
+          for it. The era is computed by ``server.protocol_era``, the same function
+          the server dispatched on, so the two cannot disagree.
         """
         error = envelope.get("error")
         if not isinstance(error, Mapping):
@@ -443,24 +596,66 @@ class McpHttpTransport:
             return 401
         if code == INSUFFICIENT_SCOPE:
             return 403
+        if code in (UNSUPPORTED_PROTOCOL_VERSION, HEADER_MISMATCH):
+            return 400
+        if code == METHOD_NOT_FOUND:
+            method = message.get("method")
+            params = message.get("params") or {}
+            if not isinstance(params, Mapping):
+                params = {}
+            if isinstance(method, str) and protocol_era(method, params, headers) == ERA_MODERN:
+                return 404
         return 200
 
     def _challenge_headers(self, envelope: Mapping[str, Any]) -> Iterable[tuple[bytes, bytes]]:
         """``WWW-Authenticate``, but only if the binding actually has one.
 
         RFC 9728 says a protected resource answers an unauthenticated request with
-        a challenge naming its ``resource_metadata``. ISAAC has no authorization
-        server and publishes no such document, so the shipped bindings return
-        ``None`` here and NO HEADER IS SENT. Emitting ``Bearer`` alone would tell a
-        client to go and get a token from somewhere that does not exist.
+        a challenge naming its ``resource_metadata``. A binding with no
+        authorization server returns nothing here and **no header is sent** —
+        emitting ``Bearer`` alone would tell a client to go and get a token from
+        somewhere that does not exist, which is the rule the two shipped bindings
+        still hold to.
 
-        The seam is real, though: a future binding that answers D2 returns a
-        populated challenge and this line starts emitting it, with no change here.
+        TWO STATUSES CARRY A CHALLENGE, NOT ONE, and the specification is explicit
+        that they say different things:
+
+        * ``401`` — no credential, or one that did not verify. The challenge comes
+          from the refusal itself when it has one (``DeploymentRefused.challenge``,
+          threaded through ``server.py`` into ``data.challenge``), because only the
+          refusal knows whether to carry ``error="invalid_token"``: RFC 6750 §3
+          says a request that presented nothing must NOT be answered with an error
+          code. Falls back to the binding's generic challenge.
+        * ``403`` — the token verified and does not carry the scope needed. The
+          specification asks for ``error="insufficient_scope"`` plus ``scope=``
+          naming **every** missing scope in one challenge, and ``_ScopeDenied``
+          has already computed exactly that set. Read through ``getattr`` so a
+          binding without ``scope_challenge`` simply emits no header.
         """
         error = envelope.get("error")
-        if not isinstance(error, Mapping) or error.get("code") != DEPLOYMENT_UNCONFIGURED:
+        if not isinstance(error, Mapping):
             return ()
-        challenge = self._binding.challenge() or {}
+        code = error.get("code")
+        data = error.get("data")
+        data = data if isinstance(data, Mapping) else {}
+
+        if code == DEPLOYMENT_UNCONFIGURED:
+            challenge = data.get("challenge")
+            if not isinstance(challenge, Mapping):
+                challenge = self._binding.challenge() or {}
+        elif code == INSUFFICIENT_SCOPE:
+            builder = getattr(self._binding, "scope_challenge", None)
+            if builder is None:
+                return ()
+            missing = data.get("missingScopes")
+            required = data.get("requiredScopes")
+            wanted = missing if isinstance(missing, (list, tuple)) else None
+            if not wanted:
+                wanted = required if isinstance(required, (list, tuple)) else ()
+            challenge = builder(tuple(wanted)) or {}
+        else:
+            return ()
+
         value = challenge.get("www_authenticate")
         if not isinstance(value, str) or not value.strip():
             return ()
@@ -551,6 +746,24 @@ class _Headers:
                 return value.decode("latin-1")
         return None
 
+    def mapping(self) -> dict[str, str]:
+        """Every header, lowercased name to value, FIRST occurrence wins.
+
+        First-wins rather than last-wins or comma-joined, so this agrees with
+        :meth:`get` exactly — two readers of the same header list that disagree
+        about a duplicate is how a header-versus-body check gets satisfied by a
+        value the dispatcher never saw. RFC 9110 permits joining repeated fields
+        into a list; none of the headers this server validates is a list header,
+        so a duplicate is a malformed request rather than a value to assemble, and
+        the first one is what the rest of this transport already acts on.
+        """
+        collected: dict[str, str] = {}
+        for name, value in self._raw:
+            key = name.lower().decode("latin-1")
+            if key not in collected:
+                collected[key] = value.decode("latin-1")
+        return collected
+
 
 def _accepts_json(accept: str) -> bool:
     """Whether an ``Accept`` header admits ``application/json``.
@@ -605,6 +818,69 @@ def _credential_from(headers: _Headers) -> Credential | None:
     if not delimiter:
         return Credential(scheme="", token=raw)
     return Credential(scheme=scheme.strip(), token=token.strip())
+
+
+def _query_token_parameter(scope: Mapping[str, Any]) -> str | None:
+    """The name of a credential-bearing query parameter, or ``None``.
+
+    **Only NAMES are examined.** The value is never sliced out, never decoded and
+    never returned, so this check cannot itself become the thing that puts a token
+    in a log line — which would be a comic way to fail at enforcing *"Access
+    tokens MUST NOT be included in the URI query string"*.
+
+    Parsed by hand rather than with ``parse_qsl`` for the same reason:
+    ``parse_qsl`` materialises every value, and there is no need for any of them
+    to exist as a Python object at all. The returned name is one of
+    :data:`QUERY_TOKEN_PARAMETERS` — a constant of this module, never
+    caller-controlled text — so it is safe to put in the refusal body.
+    """
+    raw = scope.get("query_string") or b""
+    if not raw:
+        return None
+    if isinstance(raw, str):  # pragma: no cover - ASGI gives bytes
+        raw = raw.encode("latin-1", "replace")
+    for pair in raw.split(b"&"):
+        if not pair:
+            continue
+        name_bytes = pair.split(b"=", 1)[0]
+        try:
+            name = unquote_plus(name_bytes.decode("ascii")).strip().lower()
+        except (UnicodeDecodeError, ValueError):  # pragma: no cover - defensive
+            continue
+        if name in QUERY_TOKEN_PARAMETERS:
+            return name
+    return None
+
+
+def metadata_routes_or_none(
+    *,
+    env: Mapping[str, str] | None = None,
+    binding: DeploymentBinding | None = None,
+    base: str = "",
+) -> tuple[tuple[str, Any], ...]:
+    """``((path, asgi_app), …)`` for the binding's discovery documents, or ``()``.
+
+    ``()`` IS THE DEFAULT AND IS WHAT EVERY SHIPPED DEPLOYMENT GETS. The two
+    bindings that exist without an OAuth configuration expose no
+    ``protected_resource_metadata`` attribute at all, so this returns nothing and
+    ``app.py`` registers no route — matching the MCP endpoint's own rule that an
+    unconfigured deployment has an *absent* path rather than one that refuses.
+    Publishing an RFC 9728 document naming an authorization server that does not
+    exist would be worse than publishing none.
+
+    Read through ``getattr`` rather than ``isinstance`` for the reason
+    ``deployment.DeploymentBinding`` is not ``runtime_checkable``: a structural
+    check is the one somebody reaches for and the one that must not be trusted.
+    """
+    resolved = binding if binding is not None else resolve_binding(env)
+    document = getattr(resolved, "protected_resource_metadata", None)
+    paths = getattr(resolved, "metadata_paths", None)
+    if document is None or paths is None:
+        return ()
+    from .oauth import ProtectedResourceMetadataApp
+
+    app = ProtectedResourceMetadataApp(document())
+    return tuple((path, app) for path in paths(base))
 
 
 async def _read_body(receive: Callable[[], Awaitable[Mapping[str, Any]]], cap: int):
