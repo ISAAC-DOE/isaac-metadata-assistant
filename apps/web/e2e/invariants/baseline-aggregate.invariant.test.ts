@@ -311,6 +311,22 @@ describe('the darwin column says how much of itself is measured', () => {
    *   ── THIRD MOVE, 2026-08-29, AND THE ONLY ONE WHERE HALF THE SET IS *NOT*
    *      MEASURED ON BOTH FACES ────────────────────────────────────────────────
    *
+   *   *** SUPERSEDED BY THE MERGE `c7b9db6`, 2026-08-30. EVERY ROW OF THE TABLE BELOW
+   *   AND BOTH CONCLUSIONS DRAWN FROM IT ARE FALSE AT HEAD. The block is kept because
+   *   it was true of the branch it was written on, and because a future session that
+   *   reads only its conclusions would build a `LINUX_CARRIED_FORWARD` register for
+   *   cells that no longer need one — or, worse, distrust five splits that WERE
+   *   measured on both faces. What actually happened: the merge adopted the linux
+   *   halves CI measured at `6958459` (run 33275970428), so the five "known-stale
+   *   linux halves" became SCALARS (desktop 57, width-320 76, mobile 73, zoom-200 70,
+   *   width-390 74) and the two "collapses" became the only two `settings-explorer`
+   *   SPLITS at HEAD — laptop `{57,58}` and tablet `{72,74}`, both CI-measured. The
+   *   two sets are DISJOINT, which is why the old text reads plausibly and is wrong in
+   *   every row. `DARWIN_CARRIED_FORWARD` is correctly `[]` and
+   *   `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` correctly `0`; no
+   *   `LINUX_CARRIED_FORWARD` is needed for these seven. Read what follows as history,
+   *   not as a description of this file. ***
+   *
    *   The base commit `542d757` edited `routes.py`'s `GET /api/about` description AND
    *   `settingsContent.ts` and did NOT re-baseline — the third time in four days that an
    *   OpenAPI description moved these seven cells, and the second time it was committed
@@ -378,8 +394,14 @@ describe('the darwin column says how much of itself is measured', () => {
    * side and wrote FIVE `settings-explorer` splits with a MEASURED darwin half beside
    * a KNOWN-STALE linux one, saying so at the cell. That branch was right about its
    * own file and its entries are NOT carried into this merge, because the linux halves
-   * it lacked have since been measured by CI run 33275970428 at `6958459`. Four of its
-   * five are scalars here, for the strongest possible reason: the two faces agree.
+   * it lacked have since been measured by CI run 33275970428 at `6958459`. ~~Four of its
+   * five are scalars here~~ — **FIVE of its five, re-counted 2026-08-30**, for the
+   * strongest possible reason: the two faces agree. Measured at HEAD, every
+   * `settings-explorer` cell that branch split is a scalar here — desktop 57,
+   * mobile 73, zoom-200 70, width-320 76, width-390 74 — and the only two
+   * `settings-explorer` SPLITS at HEAD are laptop `{57,58}` and tablet `{72,74}`,
+   * which that branch had written as scalars. The two lists are disjoint, which is
+   * why "four" read plausibly and was wrong.
    */
   it('the set of per-platform SPLIT cells is exactly the five measured on both faces', () => {
     const splits: string[] = [];

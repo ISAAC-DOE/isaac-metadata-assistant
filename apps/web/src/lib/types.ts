@@ -2421,7 +2421,14 @@ export interface ApiNotesResponse {
    * when that copy was written and stopped being true when the record-level enum
    * write shipped, and a client cannot tell WHICH from the wider subset alone.
    */
-  record_writable_field_paths: string[];
+  /*
+   * OPTIONAL ON PURPOSE, corrected 2026-08-30. This was declared required while
+   * `UnmappedNotesPanel.tsx` reads it `?? []` "because this key is newer than the
+   * others: a server that predates it must degrade". Under a required type that
+   * branch is unreachable and the type and the guard disagreed about the contract.
+   * The guard is the one that is right — the key IS newer — so the type follows it.
+   */
+  record_writable_field_paths?: string[];
   sources: string[];
   /** The EXPERIMENT's version token — the `If-Match` every note write must carry. */
   experiment_version: string;

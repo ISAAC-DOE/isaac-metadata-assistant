@@ -193,9 +193,15 @@ SOURCE_TYPE_ORIGIN: dict[str, str] = {
 #: so audio CAN be captured in the browser — it simply reaches no transcriber.
 #: (``test_provenance.py`` has carried that correction since 2026-08-24; this file had
 #: not, which is how one sweep's finding stays local to the file it was found in.)
-#: **So no surface may present voice capture as a feature that exists**, which is what
-#: this note was for and is unchanged; what it may no longer say is that nothing in
-#: the application creates a ``transcript`` note.
+#: **So no surface may present TRANSCRIPTION as a feature that exists** — narrowed
+#: 2026-08-30, because the previous wording said "voice capture" and the two sentences
+#: above had just established that voice capture DOES exist and is mounted ungated at
+#: ``RecordWorkbench``. ``transcriptCaptureContent.ts`` supplies "Start recording",
+#: "Stop recording" and "Request a transcript", and the panel's own copy is honest
+#: ("Audio stays in this tab's memory… never uploaded"). What no surface may claim is
+#: that speech becomes TEXT here: every transcription provider answers ``501``. What
+#: this note may no longer say at all is that nothing in the application creates a
+#: ``transcript`` note.
 #:
 #: The unqualified form DOES still hold for ``csv_column``, ``file_listing_line`` and
 #: ``extraction_residue``: accepted by the route, produced by nothing.

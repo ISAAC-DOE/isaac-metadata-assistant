@@ -147,9 +147,12 @@ open. Re-measured over HTTP on a freshly created record, both halves fail:
   route.
 
 **THE CURRENT MEASUREMENT, over all 25 paths and all SIX write operations** (the sixth,
-``POST /api/experiments/{id}/runs/{run_id}/edit``, was missing from every earlier
-enumeration in this repository and accepts none of the 25, so it changes no total —
-which is exactly why its absence went unnoticed):
+``POST /api/experiments/{id}/runs/{run_id}/edit``, accepts none of the 25, so it changes
+no total — which is exactly why its absence went unnoticed. ~~"was missing from every
+earlier enumeration in this repository"~~ — **FALSE, and refuted by this same change:**
+``routes.py``'s ``_record_enum_fields`` docstring table has listed all six all along,
+including on ``main`` before this branch existed. It was missing from the enumerations
+in THIS module, which is a much smaller claim and is the true one):
 
 * **5** run-level paths at ``PATCH /api/experiments/{id}/runs/{run_id}``;
 * **13** record-level ones at ``POST /api/experiments/{id}/runs/{run_id}/overrides``;

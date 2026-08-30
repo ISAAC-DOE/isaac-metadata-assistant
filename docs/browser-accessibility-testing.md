@@ -415,7 +415,7 @@ a shade wider would see the truncated label:
 
 #### How it is encoded — exact on both platforms, no tolerance
 
-A count is written either as a bare number (identical on both platforms — ~~93 of 103~~ **153 of 161, re-counted 2026-08-29; derive it rather than quoting it**) or as
+A count is written either as a bare number (identical on both platforms — ~~93 of 103~~ ~~153 of 161, re-counted 2026-08-29~~ **156 of 161, re-counted 2026-08-30 after the merge `c7b9db6` collapsed five splits to scalars; derive it rather than quoting it**) or as
 `{ darwin: n, linux: m }`. A layout instance list is written either as a bare array or as
 `{ darwin: [...], linux: [...] }`. `process.platform` selects the column, once, per run.
 

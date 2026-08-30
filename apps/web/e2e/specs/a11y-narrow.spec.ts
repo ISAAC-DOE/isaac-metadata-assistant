@@ -61,9 +61,13 @@
  * file means "identical on both platforms", and this app ships no webfont: SF Pro
  * and the `ubuntu-latest` DejaVu/Liberation face wrap at different words, which is
  * why some cells hold two numbers. ~~10 of the existing 103 triples already hold two
- * numbers. Ten of ten differ by exactly ±1~~ — **RE-COUNTED 2026-08-29: 8 of 161, and
- * they do NOT all differ by ±1** (`settings-about@width-320` differs by 2 and
- * `settings-explorer@width-320` by 3). The point the sentence was making survives its
+ * numbers. Ten of ten differ by exactly ±1~~ — ~~**RE-COUNTED 2026-08-29: 8 of 161**~~
+ * **RE-COUNTED AGAIN 2026-08-30: 5 of 161, and they do NOT all differ by ±1**
+ * (`settings-about@width-320` differs by 2 and `settings-explorer@tablet-768x1024`
+ * by 2). The 8 was this branch's count; the merge `c7b9db6` adopted CI's linux halves
+ * from `6958459` and five splits collapsed to scalars. The second example named here
+ * used to be `settings-explorer@width-320` "by 3" — that cell is a **scalar `76`** at
+ * HEAD and no cell in the file has a gap of 3. The point the sentence was making survives its
  * numbers and is the reason to keep it: the difference is small enough to look like
  * noise and large enough to turn CI red on a number nobody measured.
  * **CI (Linux) is the authority.**

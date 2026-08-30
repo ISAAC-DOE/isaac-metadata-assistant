@@ -1997,7 +1997,27 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // RE-TRANSCRIBED from `create_app().openapi()` by script, never hand-edited,
     // and RE-MEASURED over the served document rather than adjusted by a delta;
     // `test_contract_description_parity.py` proves the copy still matches.
-    expect(total).toBe(104871);
+    // 104,871 -> 105,187 (+316), 2026-08-30: the SAME description changed again, and
+    // no other. NOTE THE UNITS, because the first attempt at this line got them
+    // wrong and the test caught it: this total is NOT the raw sum of description
+    // characters. It is `lead.length + rest.join('').length`, which DROPS the
+    // `\n\n` separators — so it runs exactly 2 x 211 = 422 below the raw served
+    // total, which is 105,609. Comparing a raw measurement against this assertion
+    // reads as a 738-character change that did not happen. That is the same
+    // "arithmetic left behind by the edit that changed its inputs" failure this
+    // test's own header lectures about, reproduced while correcting it.
+    // Independent review measured that the sentence naming
+    // `record_writable_field_paths`' gate said "for the paths the official schema
+    // closes with an enum" — ONE of three gates. `context.environment` satisfies it,
+    // is mappable and is value-writable, and the record pair REFUSES it, because it
+    // is run-level: measured by derivation, `_record_enum_fields()` is
+    // {system.domain, system.technique} while mappable-and-enum-closed is
+    // {context.environment, system.technique}. That is the same "true on average,
+    // read about one field" failure the rest of the paragraph exists to remove,
+    // reproduced inside the paragraph doing the removing. Written INTO the existing
+    // paragraph again, so the `\n\n` count is UNCHANGED at 211 and the remainder
+    // count below does not move — re-measured, not assumed.
+    expect(total).toBe(105187);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and

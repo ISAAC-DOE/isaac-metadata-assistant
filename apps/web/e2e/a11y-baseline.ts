@@ -46,12 +46,20 @@
  * platforms, not ten of 103.~~ — **BOTH FIGURES RE-COUNTED 2026-08-29 AND BOTH WERE
  * WRONG, in a sentence whose entire purpose was to replace two stale numbers with
  * measured ones.** On the day it was written the file held **168** cells of which
- * **8** differed, not 6; at HEAD it holds **161** (the seven `landmark-unique` cells
- * were deleted when A11Y-06's residue closed) of which **8** differ. Re-derive rather
+ * **8** differed, not 6; ~~at HEAD it holds **161** … of which **8** differ~~ —
+ * **CORRECTED 2026-08-30, AND THE CORRECTION IS THE POINT OF THE INSTRUCTION IN THE
+ * NEXT SENTENCE.** The cell count was right; the split count was the branch's, and the
+ * MERGE moved it. `c7b9db6` adopted the linux halves CI measured at `6958459` and
+ * five of the eight splits COLLAPSED to scalars. At HEAD the file holds **161** cells
+ * of which **5** differ, and **156** are scalars. Re-derive rather
  * than quoting — strip comments, match `'<surface>@<project>': <count-or-pair>`, and
- * count the pairs whose halves are unequal. And they do NOT all differ by ±1:
+ * count the pairs whose halves are unequal. That instruction was in this paragraph
+ * already, and following it is what found this. And they do NOT all differ by ±1:
  * `settings-about@width-320` is `{ darwin: 9, linux: 7 }`, a gap of 2, and
- * `settings-explorer@width-320` is now `{ darwin: 76, linux: 73 }`, a gap of 3. More to the point, the day this file recorded
+ * `settings-explorer@tablet-768x1024` is `{ darwin: 72, linux: 74 }`, a gap of 2.
+ * ~~`settings-explorer@width-320` is now `{ darwin: 76, linux: 73 }`, a gap of 3~~ —
+ * **that cell is a SCALAR `76` at HEAD and no cell in this file has a gap of 3.**
+ * More to the point, the day this file recorded
  * TWENTY splits, **15 of them were not platform differences at all** — they were a
  * darwin column nothing had measured since a CI transcription moved their linux twin.
  * "Every one by exactly ±1" was doing real work in the argument above (it is what made
@@ -3728,10 +3736,18 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   //         a TEXT-LENGTH change (a backend OpenAPI description and a Settings `sub=`
   //         sentence, both from the base commit `542d757`), which is exactly the
   //         wrap-dependent case where this file forbids deriving the other platform.
-  //         Five of those seven cells now carry a stale linux half beside a fresh
+  //         ~~Five of those seven cells now carry a stale linux half beside a fresh
   //         darwin one and CI will name its own figures; two could not be written that
-  //         way at all and had to collapse to scalars — see the block above
-  //         `settings-explorer@desktop-1280x800`.
+  //         way at all and had to collapse to scalars~~ — **SUPERSEDED BY THE MERGE,
+  //         2026-08-30, and struck rather than edited because "five cells carry a stale
+  //         linux half" is a claim a future session acts on.** The merge `c7b9db6` took
+  //         the linux halves CI measured at `6958459` (run 33275970428), so NO
+  //         `settings-explorer` cell carries a stale linux half at HEAD: five are
+  //         SCALARS (desktop 57, mobile 73, zoom-200 70, width-320 76, width-390 74)
+  //         and the two that this note called collapses are the only SPLITS —
+  //         laptop `{57,58}`, tablet `{72,74}`, both CI-measured. The note below on
+  //         the total was corrected at the time; this per-cell sentence was not, and
+  //         that asymmetry is the defect worth remembering.
   //
   //   2430 - 7 - 154 = 2269
   //
