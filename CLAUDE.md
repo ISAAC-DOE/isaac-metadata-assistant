@@ -1409,6 +1409,76 @@ Out of scope unless explicitly approved:
   `PostgresOrdinaryStore.refuse_if_not_persistable` raises on one, and it raises on a canonical
   example id in any scope.
 
+***APPLICATION-SIDE SCOPE EXTENSION — PROJECT OWNER, 2026-08-29.*** **This is a NEW authorization
+granted on that date. Nothing below was authorized before it, and no earlier slice may cite it.**
+`docs/ingestion-proposal-contract.md` §8.1 said *"No committed sentence authorizes building it. A
+slice that implements it must establish and cite its own authorization basis."* **That sentence was
+TRUE when it was written and is SUPERSEDED as of 2026-08-29 — not retroactively false.** It is
+struck in place in that document rather than deleted, for the reason this section has struck rather
+than deleted four previous scope corrections: a reader must be able to see a recorded change of
+scope and not mistake it for a drift.
+
+  **What is authorized, APPLICATION-SIDE ONLY:** persistent ingestion proposals and the durable
+  contract they need; the scientist-facing Experiment Data Workspace, and website proposal review,
+  edit, acceptance, rejection, deferral and conflict handling; complete campaign-sheet write
+  coverage within the limits below; the remote MCP and bounded change-feed application architecture;
+  the disabled-by-default OAuth resource-server implementation; the verified-principal and
+  server-stamped attribution work buildable inside ISAAC; the least-disruptive accessible
+  palette/token decision needed to close **A11Y-01**, plus **A11Y-06**, **LAYOUT-01** and
+  **LAYOUT-02**; and the associated tests, documentation, migration artifacts, PRs and safe
+  integration.
+
+
+  ***PROVENANCE OF THIS GRANT, STATED BECAUSE A REPOSITORY CANNOT WITNESS A
+  CONVERSATION.*** This authorization reaches the repository as an **owner instruction
+  relayed in-session** — the same evidentiary class as the Dean answers this section
+  records as *"OPERATOR TESTIMONY ABOUT INFRASTRUCTURE CONFIGURATION … not an
+  observation by this repository and no artifact backing it is committed here."* **No
+  evidence file, packet or transcript backs it, and authorship witnesses nothing**:
+  every commit in this repository is authored by the project owner with Claude
+  co-authored, so a commit author cannot distinguish a granted scope from an assumed
+  one. An independent audit of the implementing branch raised exactly this and was
+  **right to**: a branch's own prose is not proof of its own authorization, and the
+  sentence being cited was written one commit earlier by the same work that cites it.
+  What a reader CAN check mechanically is the BOUNDARY — this entry is dated, names
+  what is and is not covered, forbids any earlier slice from citing it, and adds no
+  table. What a reader CANNOT check from inside the repository is that the instruction
+  was given. **Only Krish can confirm that.** The honest entry is that the repository
+  records the DECISION, not its DELIVERY — and no slice may cite this entry as though
+  the repository had verified it.
+
+  **What is NOT authorized, restated here so the boundary is committed rather than conversational:**
+  applying any hosted migration; modifying `isaac-k8` or any SLAC infrastructure; bypassing
+  Authentik; hunting for or repurposing secrets; creating provider accounts, enabling billing, or
+  incurring any charge; sending real scientific data, transcripts or audio to an unapproved
+  provider; exposing production-derived records or the five withheld aggregates (**G3**); deploying
+  a replacement personal Vercel/Railway environment; acting as Krish, Dean, Angel or a database
+  operator; making Angel's scientific classification decisions; claiming the human 200%-zoom gate
+  was automated; mass-deleting remote branches; or adding an apply route for
+  `POST /ingestion/csv/preview` — whose reconciliation-only authority boundary remains a **committed
+  human decision, not residual work**. Dean's **D1–D9** deferral is UNCHANGED by this: implementation
+  against deterministic fakes is authorized, a production provider is not.
+
+  ***NO NEW TABLE IS ADDED, AND THAT IS A DELIBERATE CONSEQUENCE OF THIS ENTRY, NOT AN OVERSIGHT.***
+  Proposals are stored at `state["proposals"]`, beside `state["notes"]`, inside the experiment state
+  document. **`db_write.OWNED_TABLES` is UNCHANGED.** This is the **first** scope extension in this
+  section that adds no table, and it is deliberate: this section records **four** separate occasions
+  on which a table reached `OWNED_TABLES` before any committed sentence named it — `isaac_runs`, the
+  five submission-lifecycle tables, `isaac_run_projection`, and the incomplete correction sweep that
+  followed — and a fifth is avoidable by not needing one. Two consequences, stated rather than left
+  to be discovered: a proposal is durable **exactly where the experiment document is durable and no
+  more**, and a feature that needed `0006` would be a feature that does not work until an operator
+  acts, which is a hard stop this authorization does not lift. **The persistence LOCATION was already
+  covered** by the 2026-08-07 lift's *"app-owned tables for experiments and their normal application
+  state"*; it is the FEATURE that needed authorizing, and a slice should cite that sentence for the
+  location rather than re-argue it.
+
+  **One consequence a future session must not read as a defect:** the acceptance route answers
+  **`409 human_actor_required`** in every default-configured deployment, because no trusted
+  authentication boundary exists in this build (Dean reconfirmed the ClusterIP bypass, 2026-08-12).
+  That is a CONFIGURATION fact, not a build defect, and no application change can close it. It is
+  exercised in CI through the deterministic fixture verifier.
+
 **Pre-Phase-37 readiness sequence (authorized 2026-07-30; Slice 2A authorized 2026-07-31).** An
 explicitly authorized, sequential readiness sequence runs *before* — and does not start — Phase 37.
 Phase 37 as a broad feature phase remains **unstarted and unauthorized**.
