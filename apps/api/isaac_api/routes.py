@@ -603,6 +603,43 @@ async def request_validation_error_handler(request, exc) -> JSONResponse:
     convert a genuine defect in this application into a client-blaming ``422``, which
     is the trade ``_PROBE_STRUCTURAL_ERRORS`` refuses one file over, for the same
     reason.
+
+    THE SECOND DEFECT, FOUND BY AN ATTACK PASS ON 2026-08-30 AND FIXED HERE. Depth was
+    one way the echo could destroy the response; **representability is another, and it
+    was open on 25 of this application's 71 operations.** A body carrying ``NaN``,
+    ``Infinity``, a lone surrogate in a value, a lone surrogate in a KEY, or a
+    top-level scalar of either produced an unhandled ``500`` — measured over HTTP as
+    **79 of 210 probes** (``test_attack_unrepresentable_request_values.py``). Two
+    distinct crashes, both in the render rather than in any route::
+
+        ValueError: Out of range float values are not JSON compliant: nan
+        UnicodeEncodeError: 'utf-8' codec can't encode character '\\ud800'
+
+    because Starlette renders with ``allow_nan=False`` and ``ensure_ascii=False``.
+
+    **The application's existing value guards could not have caught it.**
+    ``_is_storable_value`` and friends refuse exactly these values, and every one of
+    them runs INSIDE a route function; this crash happens before any route function is
+    entered.
+
+    THE CHECK IS THE RENDER, WHICH IS WHY IT CANNOT MOVE A WORKING RESPONSE.
+    :func:`_render_exactly_as_a_response_would` is the call
+    ``JSONResponse.render`` makes, transcribed rather than approximated (its own
+    docstring records that an earlier approximation was wrong in precisely this way).
+    So the fallback is reachable **only** on content whose render raises — exactly the
+    set that used to produce a ``500`` — and every ``422`` that renders today is
+    untouched, which is what keeps
+    ``test_deeply_nested_body_is_refused_not_crashed.py``'s byte-identity assertion
+    against FastAPI's own handler true.
+
+    IT SCREENS THE WHOLE CONTENT, NOT EACH ``input``, and that is deliberate rather
+    than lazy: a lone surrogate used as an object KEY lands in ``loc``, not in
+    ``input``, so a per-``input`` screen would have fixed four of the five measured
+    shapes and left the fifth answering ``500``.
+
+    THE FALLBACK QUOTES NOTHING FROM THE REQUEST. Echoing the offending value in the
+    message would re-open the same crash the moment somebody changed how it was
+    escaped, so the body names the CLASS of problem and no key, value or offset.
     """
     bounded = []
     for error in exc.errors():
@@ -632,6 +669,31 @@ async def request_validation_error_handler(request, exc) -> JSONResponse:
                     "msg": (
                         "The request body is nested too deeply to validate or to "
                         "describe. Nothing was read and nothing was written."
+                    ),
+                }
+            ]
+        }
+    try:
+        # NOT a serialization step — the result is discarded. This is the RENDER,
+        # run here so that a body Starlette cannot encode becomes a typed refusal
+        # instead of an unhandled 500 one frame later, inside `JSONResponse`.
+        _render_exactly_as_a_response_would(content)
+    except (ValueError, TypeError, RecursionError):
+        # ValueError covers UnicodeEncodeError (NaN/Infinity and lone surrogates
+        # respectively); TypeError covers an `input` the encoder left unrenderable.
+        # Narrow on purpose, for the reason the RecursionError arm above gives: a
+        # bare `except Exception` would convert a genuine defect in this application
+        # into a client-blaming 422.
+        content = {
+            "detail": [
+                {
+                    "type": "not_representable_in_json",
+                    "loc": ["body"],
+                    "msg": (
+                        "The request body carries a value JSON cannot represent "
+                        "(`NaN`, `Infinity`, or a lone surrogate), so this refusal "
+                        "cannot quote it back. Nothing was read and nothing was "
+                        "written."
                     ),
                 }
             ]
@@ -7181,6 +7243,46 @@ def _render_exactly_as_a_response_would(value) -> bytes:
     ).encode("utf-8")
 
 
+#: What stands in for a body key this application cannot put in a response. It quotes
+#: nothing from the request — no character, no offset, no length — because the whole
+#: reason it exists is that the key could not be rendered.
+UNRENDERABLE_KEY_PLACEHOLDER = "<a key this response cannot quote>"
+
+
+def _echoable_key(raw: object) -> str:
+    """A caller-supplied body KEY, made safe to name in a refusal body.
+
+    THE DEFECT THIS CLOSES, MEASURED OVER HTTP ON ``c2a93a7``. Three helpers —
+    :func:`_unknown_note_keys`, :func:`_unknown_conflict_keys` and the
+    ``unrecognized_field`` branch of ``POST /api/assistant/ask`` — refuse a body key
+    they do not accept and NAME IT in the ``422``. A body of ``{"\\ud800": 1}``
+    therefore built a ``JSONResponse`` carrying a lone surrogate, and Starlette's
+    render (``ensure_ascii=False`` … ``.encode("utf-8")``) raised
+    ``UnicodeEncodeError`` — an unhandled **500** on five operations, from inside the
+    refusal that was doing exactly the right thing.
+
+    It is a SECOND crash site, not the one
+    :func:`request_validation_error_handler` covers, and finding it required looking:
+    the handler's fix makes every route whose body is validated by a model safe, and
+    these three build their own bodies from an untyped ``dict`` and never reach it.
+
+    THE PREDICATE IS THE RENDER, not an approximation of it — the same call, and the
+    same reasoning, as the handler's check. So a key that renders is returned
+    unchanged and every refusal that works today is byte-identical; only a key that
+    would have crashed the response is replaced.
+
+    It is deliberately NOT applied to the ``key not in allowed`` test at any call
+    site: membership is decided on the REAL key, so an unrenderable key is still
+    correctly identified as unaccepted. Only what is *published* changes.
+    """
+    key = str(raw)
+    try:
+        _render_exactly_as_a_response_would(key)
+    except (ValueError, TypeError):
+        return UNRENDERABLE_KEY_PLACEHOLDER
+    return key
+
+
 #: The deepest nesting a stored run-level value may carry.
 #:
 #: MEASURED, not picked. All five members of :data:`RUN_WRITABLE_FIELD_PATHS` are
@@ -9863,7 +9965,9 @@ def _note_refusal(error: str, message: str, **extra) -> JSONResponse:
 
 def _unknown_note_keys(body: dict, allowed: frozenset[str]) -> JSONResponse | None:
     """Refuse a body key this operation does not accept. See :data:`_NOTE_CAPTURE_KEYS`."""
-    refused = sorted(str(key) for key in body if key not in allowed)
+    # `_echoable_key` bounds only what is PUBLISHED; membership is still decided on
+    # the real key. See its docstring for the 500 this closes.
+    refused = sorted(_echoable_key(key) for key in body if key not in allowed)
     if not refused:
         return None
     return _note_refusal(
@@ -10763,7 +10867,9 @@ def post_assistant_ask(
         return _transcript_refusal(
             "invalid_body", "The request body must be a JSON object."
         )
-    unknown = sorted(set(body) - _ASSISTANT_KEYS)
+    # `_echoable_key` bounds only what is PUBLISHED; membership is still decided on
+    # the real key. See its docstring for the 500 this closes.
+    unknown = sorted(_echoable_key(key) for key in set(body) - _ASSISTANT_KEYS)
     if unknown:
         # REFUSED, NOT IGNORED. A caller sending `record_id` is asking this
         # operation to fetch something, and answering 200 while dropping the key
@@ -15834,7 +15940,9 @@ def _conflict_refusal(error: str, message: str, **extra) -> JSONResponse:
 
 def _unknown_conflict_keys(body: dict) -> JSONResponse | None:
     """Refuse a body key the resolve operation does not accept."""
-    refused = sorted(str(key) for key in body if key not in _CONFLICT_RESOLVE_KEYS)
+    # `_echoable_key` bounds only what is PUBLISHED; membership is still decided on
+    # the real key. See its docstring for the 500 this closes.
+    refused = sorted(_echoable_key(key) for key in body if key not in _CONFLICT_RESOLVE_KEYS)
     if not refused:
         return None
     return _conflict_refusal(
