@@ -42,9 +42,24 @@
  *
  * **RE-MEASURED 2026-08-27, and both halves of that sentence are now wrong — kept
  * struck because the SECOND half is the one that mattered and it is the one that
- * failed.** The file holds **168 cells**, of which **6** differ between the platforms,
- * not ten of 103. And they do NOT all differ by ±1: `settings-about@width-320` is
- * `{ darwin: 9, linux: 7 }`, a gap of 2. More to the point, the day this file recorded
+ * failed.** ~~The file holds **168 cells**, of which **6** differ between the
+ * platforms, not ten of 103.~~ — **BOTH FIGURES RE-COUNTED 2026-08-29 AND BOTH WERE
+ * WRONG, in a sentence whose entire purpose was to replace two stale numbers with
+ * measured ones.** On the day it was written the file held **168** cells of which
+ * **8** differed, not 6; ~~at HEAD it holds **161** … of which **8** differ~~ —
+ * **CORRECTED 2026-08-30, AND THE CORRECTION IS THE POINT OF THE INSTRUCTION IN THE
+ * NEXT SENTENCE.** The cell count was right; the split count was the branch's, and the
+ * MERGE moved it. `c7b9db6` adopted the linux halves CI measured at `6958459` and
+ * five of the eight splits COLLAPSED to scalars. At HEAD the file holds **161** cells
+ * of which **5** differ, and **156** are scalars. Re-derive rather
+ * than quoting — strip comments, match `'<surface>@<project>': <count-or-pair>`, and
+ * count the pairs whose halves are unequal. That instruction was in this paragraph
+ * already, and following it is what found this. And they do NOT all differ by ±1:
+ * `settings-about@width-320` is `{ darwin: 9, linux: 7 }`, a gap of 2, and
+ * `settings-explorer@tablet-768x1024` is `{ darwin: 72, linux: 74 }`, a gap of 2.
+ * ~~`settings-explorer@width-320` is now `{ darwin: 76, linux: 73 }`, a gap of 3~~ —
+ * **that cell is a SCALAR `76` at HEAD and no cell in this file has a gap of 3.**
+ * More to the point, the day this file recorded
  * TWENTY splits, **15 of them were not platform differences at all** — they were a
  * darwin column nothing had measured since a CI transcription moved their linux twin.
  * "Every one by exactly ±1" was doing real work in the argument above (it is what made
@@ -532,8 +547,39 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * file is forced to write a one-platform reading, because its guard rejects a pair
        * whose halves are equal, and the header already records the compromise.
        */
-      'evidence@desktop-1280x800': 101,
-      'evidence@laptop-1024x768': 101,
+      /*
+       * ── `--text-disabled` MISUSE FIXED, 2026-08-29: -22 on all seven `evidence`
+       *    cells, BOTH columns ──────────────────────────────────────────────────
+       *
+       * `src/components/evidence.css`'s `.preview-line .ln` — the line-number gutter
+       * of the read-only source preview — painted TEXT at 11.5px with
+       * `--text-disabled` #c0c8d0, a token `styles/tokens.css:34` declares for
+       * "disabled chevrons/icons". Measured 1.69:1 on white, 1.56:1 on `--screen-base`
+       * and 1.49:1 on the `--cited-line-bg` highlight (the line a reader has been
+       * pointed AT — worse than the figure this entry's note records, and nothing had
+       * measured it). It is now `--text-slate` #5b6b7d: 5.46 / 5.05 / 4.81:1. The
+       * TOKEN'S VALUE IS UNCHANGED — `tokens.css:3-5` forbids editing values there, so
+       * only the token this one rule ASKS FOR moved, exactly as the `.section-tab` and
+       * `.onramp-tagline` fixes did. A11Y-01 IS NOT CLOSED BY THIS.
+       *
+       * DARWIN MEASURED: local macOS run at this branch's HEAD reported
+       * `IMPROVED evidence @ <pair> … color-contrast fell … (-22)` on all seven cells
+       * and moved nothing else on that surface — 101 -> 79 at desktop/laptop/tablet,
+       * 99 -> 77 at mobile/zoom-200/width-390/width-320.
+       *
+       * LINUX IS ARITHMETIC, AND THE ARGUMENT IS STATED SO A REVIEWER CAN REJECT IT
+       * RATHER THAN TAKE IT ON TRUST. This file's R1b note forbids assuming both
+       * platforms move together when a DOM NODE is removed, because that moves a wrap
+       * boundary. Nothing is removed here: the same 22 `.ln` elements render, and only
+       * their `color` changes. Their count is `preview.lines.length` — data, not
+       * layout — so it is 22 under any font, and every one of the 22 went from 1.49-1.69:1
+       * (failing by a factor of three) to >= 4.81:1, so there is no borderline case whose
+       * verdict a font could flip. Hence -22 on linux as well: 101 -> 79 and 99 -> 77.
+       * If CI disagrees, transcribe ITS numbers and correct the total; never loosen the
+       * assertion.
+       */
+      'evidence@desktop-1280x800': 79,
+      'evidence@laptop-1024x768': 79,
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
       // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
       // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
@@ -544,9 +590,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
       // `.record-file`. The element was always painted; only measurement
       // changed. Linux is the authority and may differ.
-      'evidence@tablet-768x1024': 101,
-      'evidence@mobile-375x812': 99,
-      'evidence@zoom-200': 99,
+      'evidence@tablet-768x1024': 79,
+      'evidence@mobile-375x812': 77,
+      'evidence@zoom-200': 77,
       /*
        * ── `evidence-graph`, MEASURED: 24 nodes at desktop, 2026-08-16 ────────────
        *
@@ -1383,6 +1429,56 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          split, in the same edit and from the same cause. Do not "tidy" either: the
          well-formedness guard rejects a pair whose halves are equal, and a scalar here
          is two independent measurements agreeing rather than one asserted twice. */
+      /*
+       * ── INHERITED DRIFT, DARWIN TRANSCRIBED 2026-08-29 — NOT CAUSED BY THIS SLICE ──
+       *
+       * All seven `settings-explorer` cells were ALREADY failing on darwin when this
+       * branch was cut, and that is measurable rather than asserted: the FIRST local
+       * run on this branch — taken before a single line of CSS was touched, with only
+       * `ApiDocs.tsx`'s landmark change applied — reported the identical `GREW … 55 to
+       * 57` on this cell. The cause is the one commit `f4523c2` already warned about
+       * in this file: the base commit `542d757` edited `apps/api/isaac_api/routes.py`
+       * (the `GET /api/about` OpenAPI `description=`) and
+       * `apps/web/src/lib/settingsContent.ts`, and the Endpoint Explorer renders
+       * operation descriptions verbatim. A BACKEND DOCSTRING IS RENDERED PRODUCT TEXT
+       * AND MOVES THE A11Y RATCHET — for the second time, and the second time it was
+       * committed without the baseline.
+       *
+       * DARWIN MEASURED, local macOS run at this branch's HEAD, twice with identical
+       * figures (the full four-spec sweep and an isolated
+       * `-g "Endpoint Explorer"` re-run):
+       *
+       *   desktop-1280x800   55 -> 57   laptop-1024x768   55 -> 57
+       *   tablet-768x1024    71 -> 72   mobile-375x812    71 -> 73
+       *   zoom-200           67 -> 70   width-320         73 -> 76
+       *   width-390          73 -> 74
+       *
+       * ~~THE LINUX COLUMN IS NOT TOUCHED, and it is now KNOWN TO BE STALE ... CI
+       * will report five GREW messages naming its own figures — transcribe those.~~
+       *
+       * ~~TWO OF THE SEVEN COULD NOT BE WRITTEN THAT WAY ... those two cells now
+       * ASSERT a linux value that no run has produced since `542d757`.~~
+       *
+       * ── BOTH PARAGRAPHS RESOLVED BY THE MERGE, 2026-08-29. They were TRUE of this
+       * slice's own branch and are struck rather than deleted, because "a cell asserts
+       * an unmeasured linux value" is exactly the kind of claim a future session acts
+       * on, and it is no longer true here. ────────────────────────────────────────
+       *
+       * CI DID report those GREW messages — run 33275970428, on the sibling branch at
+       * `6958459`, which took a deliberate red check for this purpose. The linux
+       * column is transcribed from it, so every one of the seven now carries a
+       * measured half on BOTH platforms, and no cell in this group asserts an
+       * unmeasured value. The two cells this note flagged as unwritable-as-splits
+       * (laptop, tablet) turned out to be genuine splits after all — linux measured 58
+       * and 74, not the 57 and 72 the stale column held — so the type system's
+       * limitation never had to be worked around.
+       *
+       * FOUR OTHERS COLLAPSED TO SCALARS for the strongest available reason: the two
+       * faces were measured independently and agree. The darwin figures below are this
+       * slice's own run and are UNCHANGED by the merge; two independent darwin runs on
+       * two different bases produced them, which is why the +14 and the A11Y-06 -7 can
+       * be summed without double-counting.
+       */
       'settings-explorer@desktop-1280x800': 57,
       'settings-explorer@laptop-1024x768': { darwin: 57, linux: 58 },
       /*
@@ -1813,8 +1909,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Every number MEASURED on BOTH platforms on the same commit and merged by
          `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
          run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': 99,
-      'evidence@width-390': 99,
+      'evidence@width-320': 77,
+      'evidence@width-390': 77,
       'experiments-example@width-320': 9,
       'experiments-example@width-390': 9,
       'experiments@width-320': 2,
@@ -2097,15 +2193,22 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
    *     `color-contrast` rule does not evaluate it and no `load@*` contrast
    *     count moves. `surfaces.ts` drops `expectH1: false` in the same change,
    *     which is what `specs/structure.spec.ts` instructs.
-   *   * `landmark-unique` (FINDING A11Y-06) — **HALF closed, and the entry is
-   *     RESTORED at 1 below rather than deleted.** The A11Y-06 fix is real and
-   *     stands: the name now sits ON each landmark rather than on the button
-   *     inside one of them (`aria-label="Site search"` on the TopBar region in
-   *     `src/components/SearchDialog.tsx`, `aria-label="Endpoint search"` on
+   *   * ~~`landmark-unique` (FINDING A11Y-06) — **HALF closed, and the entry is
+   *     RESTORED at 1 below rather than deleted.**~~ **FULLY closed 2026-08-29;
+   *     the entry is now DELETED and this half-closed text is struck rather than
+   *     rewritten, because "7 nodes remain" is the kind of claim a future session
+   *     acts on.** The first half of the A11Y-06 fix is unchanged and still
+   *     stands: the name sits ON each `role="search"` landmark rather than on the
+   *     button inside one of them (`aria-label="Site search"` on the TopBar region
+   *     in `src/components/SearchDialog.tsx`, `aria-label="Endpoint search"` on
    *     the endpoint filter in `src/screens/settings/ApiDocs.tsx`). That closed
    *     the `.topbar-search-region` node. The OTHER node per pair was never a
-   *     `role="search"` landmark at all — see the restored entry for what it
-   *     actually is — so 7 of the 14 nodes remain.
+   *     `role="search"` landmark at all: it was the `.card` blamed for TWO
+   *     `region` landmarks sharing the accessible name "Endpoint Explorer". The
+   *     inner one, `<section class="api-explorer">`, has had its
+   *     `aria-labelledby` removed (`src/screens/settings/ApiDocs.tsx`), so it is
+   *     no longer a landmark and its `<h3>` is untouched — see the deletion note
+   *     below for the measurement.
    *
    * 20 nodes of recorded debt come off both totals below (27 deleted, 7
    * restored): darwin 2559 -> 2539, linux 2829 -> 2809 — before the
@@ -2115,54 +2218,46 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
    * estimated because every one of the 20 deleted keys was a SCALAR, i.e.
    * asserted the identical number on both platforms.
    */
-  {
-    rule: 'landmark-unique',
-    impact: 'moderate',
-    note:
-      'FINDING A11Y-06, RESIDUE. The two `role="search"` landmarks are fixed and are NOT ' +
-      'what this entry counts any more — read the count as 1, not 2. TRANSCRIBED from CI run ' +
-      '33025558592 (job "browser accessibility and responsive baseline", head 2da0c71), which ' +
-      'reported `new:landmark-unique ... fired on 1 node(s)` on all seven `settings-explorer` ' +
-      'pairs after the search landmarks were named. ROOT CAUSE, identified in source rather ' +
-      'than inferred: `/settings?tab=explorer` renders TWO `region` landmarks with the SAME ' +
-      'accessible name, "Endpoint Explorer". The outer one is `SettingsCard` ' +
-      '(`src/screens/SettingsPage.tsx:326`, `<section class="card placeholder-card ' +
-      'settings-card" aria-labelledby="settings-apidocs-heading">`, whose `<h2>` reads ' +
-      '"Endpoint Explorer"); the inner one is `<section class="api-explorer" ' +
-      'aria-labelledby="settings-api-explorer-heading">` (`src/screens/settings/ApiDocs.tsx:357`), ' +
-      'whose `<h3>` reads "Endpoint Explorer" as well. axe blames the outer `.card`. This is ' +
-      'PRE-EXISTING, not introduced here: the pre-fix entry\'s own `targetPattern` was ' +
-      '`^(\\.card|\\.topbar-search-region)$`, so a `.card` node was already failing on `main` ' +
-      'and the pre-fix `note` — which claimed both nodes were the two search regions — was ' +
-      'wrong about the second one. THE FIX IS ONE LINE and is deliberately not taken here, ' +
-      'because it changes product DOM and this environment cannot run Playwright to confirm ' +
-      'the resulting count: give one of the two regions a distinct name, or stop the inner ' +
-      '`<section>` being a landmark (drop its `aria-labelledby`, keeping the `<h3>`).',
-    targetPattern: '^\\.card$',
-    // 7 nodes across 7 (surface, project) pairs — 1 each. MEASURED on linux;
-    // ~~the darwin column is REASONED (see `A11Y_BASELINE_TOTAL_NODES`)~~: a
-    // duplicated landmark NAME is a DOM/ARIA fact with no text measurement in
-    // it, so no font metric can change this count between platforms. Written as
-    // scalars for that reason, exactly as the pre-fix entry's 2s were.
-    //
-    // **CORRECTED 2026-08-27: THE DARWIN COLUMN IS NOW MEASURED TOO, AND THE
-    // REASONING WAS RIGHT — all seven cells reproduced unchanged.** The local darwin
-    // run (see `A11Y_BASELINE_TOTAL_NODES`) failed 19 cells and every one of them was
-    // `color-contrast`; `landmark-unique` produced ZERO mismatches. So this is the
-    // one place in this file where a reasoned darwin column has been checked against
-    // a reading and survived it, and the argument it rested on — a DOM/ARIA fact
-    // carries no text measurement — is now evidence rather than inference. The
-    // scalars are unchanged, and they are unchanged because a run says so.
-    counts: {
-      'settings-explorer@desktop-1280x800': 1,
-      'settings-explorer@laptop-1024x768': 1,
-      'settings-explorer@tablet-768x1024': 1,
-      'settings-explorer@mobile-375x812': 1,
-      'settings-explorer@zoom-200': 1,
-      'settings-explorer@width-320': 1,
-      'settings-explorer@width-390': 1,
-    },
-  },
+  /*
+   * ── `landmark-unique` (FINDING A11Y-06, RESIDUE) — ENTRY DELETED 2026-08-29 ──
+   *
+   * DELETING AN ENTRY IS THIS FILE'S WAY OF SAYING THE DEFECT IS GONE, so the
+   * evidence is recorded here rather than in a commit message.
+   *
+   * WHAT IT RECORDED. Seven cells, 1 node each, all `settings-explorer`,
+   * `targetPattern: '^\.card$'`. The blamed element was the shared `SettingsCard`
+   * wrapper, but the DEFECT was a pair: `/settings?tab=explorer` rendered TWO
+   * `region` landmarks with the identical accessible name "Endpoint Explorer" —
+   * that `.card` (named by its `<h2>`) and, inside it, `<section
+   * class="api-explorer" aria-labelledby="settings-api-explorer-heading">` (named
+   * by its `<h3>`). The entry's own note said the fix was one line and named it.
+   *
+   * THE FIX. `src/screens/settings/ApiDocs.tsx` drops the inner `<section>`'s
+   * `aria-labelledby`. A `<section>` with no accessible name is not a landmark, so
+   * one of the two disappears from the landmark list; the `<h3>` is untouched, so
+   * the heading outline and the visible title are unchanged. The `.card` side was
+   * deliberately NOT touched — it is shared chrome for all seven Settings tabs.
+   *
+   * MEASURED, darwin, local macOS run on 2026-08-29 at this branch's HEAD
+   * (`npx playwright test e2e/specs/a11y-axe.spec.ts e2e/specs/a11y-narrow.spec.ts
+   * e2e/specs/layout-responsive.spec.ts e2e/specs/layout-widths.spec.ts`): 7 failed
+   * / 339 passed / 424 skipped, and every one of the seven failures was
+   * `improved:landmark-unique` on a `settings-explorer` cell —
+   * "rule \"landmark-unique\" is baselined at 1 node(s) here on darwin but did not
+   * fire at all". No other rule moved anywhere in that run.
+   *
+   * THE LINUX COLUMN IS ASSERTED, NOT MEASURED, AND THE ARGUMENT IS THE ENTRY'S
+   * OWN. Two landmarks sharing an accessible NAME is a DOM/ARIA fact with no text
+   * measurement in it, so no font metric can change the count between platforms;
+   * the deleted entry made exactly that argument for its scalars, and a darwin run
+   * on 2026-08-27 checked it and found it right. Removing one of the two landmarks
+   * removes it on every platform. If CI disagrees it will report `landmark-unique`
+   * as NEW with its exact count — restore the entry from that output rather than
+   * loosening anything.
+   *
+   * −7 nodes on both columns: darwin 2426 -> 2419, linux 2430 -> 2423. See
+   * `A11Y_BASELINE_TOTAL_NODES`.
+   */
 ];
 
 /**
@@ -2170,9 +2265,17 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
  * a reviewer can watch: it is the size of the app's recorded automated-a11y
  * debt, and it can only go down without an explicit edit here.
  *
- * The six-node gap is entirely the ten font-metric triples above (eight +1,
+ * ~~The six-node gap is entirely the ten font-metric triples above (eight +1,
  * two −1). It is not extra debt on Linux; it is the same debt counted under a
- * wider font.
+ * wider font.~~
+ *
+ * **STRUCK 2026-08-29, and the reason matters more than the number.** The gap is now
+ * **10, in DARWIN's favour** (2279 vs 2269), and it is no longer "the same debt counted
+ * under a wider font". Five `settings-explorer` cells carry a darwin reading taken on
+ * 2026-08-29 beside a linux reading taken on 2026-08-28, from a source state that has
+ * since changed. **A gap in this constant no longer means only "font metrics"; it can
+ * also mean "one column is stale."** Which of the two it is, for each of the eight
+ * differing cells, is stated at the cell. Do not reconcile the columns by arithmetic.
  *
  * It went down by 346 when the two CRITICAL findings A11Y-02 (`button-name`,
  * 36) and A11Y-03 (`aria-allowed-attr` + `aria-allowed-role`, 310) were fixed
@@ -3273,7 +3376,71 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // branch measured darwin on its own base and reported the identical seven darwin
   // numbers. Its landmark change moves `landmark-unique` only, so the two runs
   // agreeing on `color-contrast` is a real confirmation rather than a coincidence.
-  darwin: 2440,
+  //
+  // ── AND THEN THE SAME COMMIT'S OTHER TWO SLICES, MERGED HERE 2026-08-29 ────────
+  //
+  // The block below is the A11Y-06 + `--text-disabled` work, integrated on top of
+  // the drift above. THE ARITHMETIC COMPOSES; the two slices touch DISJOINT cells:
+  //
+  //   2426  baseline before either slice
+  //   +14   the seven `settings-explorer` color-contrast cells (drift, block above)
+  //    -7   `landmark-unique` deleted: A11Y-06 closed, 7 cells x 1 -> 0
+  //  -154   `evidence` color-contrast, 7 cells x -22 (`--text-disabled` misuse)
+  //  ────
+  //   2279
+  //
+  // THE DISJOINTNESS IS MEASURED, NOT ASSUMED, and it is what makes the sum legal:
+  // this branch's darwin run at `6958459` (no A11Y-06 change present) and the
+  // A11Y-06 branch's darwin run at `491d567` (change present) produced the SAME
+  // seven `settings-explorer` color-contrast numbers. So removing the landmark
+  // moves `landmark-unique` and nothing else, and the +14 and the -7 cannot be
+  // double-counting the same nodes.
+  // ── A11Y-06 RESIDUE + `--text-disabled` MISUSE + INHERITED DRIFT, 2026-08-29: ──
+  // ── darwin 2426 -> 2279. ──────────────────────────────────────────────────
+  //
+  // FIRST, THE ARITHMETIC THE PREVIOUS ENTRY DID NOT LEAVE. The trail above ends at
+  // "2312 + 88 = 2400", and the literal read 2426. The missing +26 is commit
+  // `b86ca83`, which re-measured the seven `settings-explorer` cells on BOTH faces
+  // (CI job 99018666402 for linux, this host for darwin) and moved the literal without
+  // appending a note: 53->55, 53->55, 68->71, 66->71, 64->67, 68->73, 67->73 = +26,
+  // and 2400 + 26 = 2426. Recorded here so the trail reconciles with the literal
+  // rather than reading as a typo. (linux's half of the same commit was +28; see the
+  // linux column.)
+  //
+  // NOW THIS CHANGE. Three independent movements, and only two of them are work done
+  // here:
+  //
+  //   -7    `landmark-unique` ENTRY DELETED. A11Y-06's residue is closed —
+  //         `<section class="api-explorer">` is no longer a second `region` named
+  //         "Endpoint Explorer". Seven scalar cells of 1 node each. See the deletion
+  //         note where the entry used to be, immediately above this constant.
+  //
+  //  -154   `evidence@*` color-contrast, -22 on each of seven cells. The
+  //         `--text-disabled` #c0c8d0 line numbers of the source preview became
+  //         `--text-slate` #5b6b7d (1.49-1.69:1 -> 4.81-5.46:1). MEASURED on darwin,
+  //         and derived on linux from a DOM-count argument stated in full at those
+  //         cells. ONE USAGE OF A11Y-01; A11Y-01 IS NOT CLOSED.
+  //
+  //   +14   `settings-explorer@*`, +2/+2/+1/+2/+3/+3/+1. NOT WORK DONE HERE, and the
+  //         evidence that it is not is a run: the FIRST sweep on this branch, before
+  //         any CSS was touched, already reported these. The base commit `542d757`
+  //         edited `routes.py`'s `GET /api/about` description and
+  //         `settingsContent.ts`, and the Endpoint Explorer renders operation
+  //         descriptions verbatim — the same mechanism `f4523c2` recorded four days
+  //         earlier. Transcribed rather than left red.
+  //
+  //   2426 - 7 - 154 + 14 = 2279
+  //
+  // 2279 is DERIVED, not typed: it is what `sumA11yNodes(A11Y_BASELINE).darwin`
+  // reports, read out of the failure message of
+  // `e2e/invariants/baseline-aggregate.invariant.test.ts` before this literal was
+  // changed.
+  //
+  // THE COLUMNS NOW DIVERGE BY 10 IN DARWIN'S FAVOUR, and that is a KNOWN STALENESS
+  // rather than a measured platform difference: the `settings-explorer` +14 is a
+  // text-length change, so its linux half cannot be derived and was not written. CI
+  // will report five GREW messages there; transcribe ITS numbers.
+  darwin: 2279,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -3519,7 +3686,79 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // move by DIFFERENT amounts (+14 darwin, +13 linux) because the two faces started
   // from different places on four of the seven cells; both totals are the sum of
   // their own column's measured cells, neither derived from the other.
-  linux: 2443,
+  //
+  // ── MERGED 2026-08-29, and the linux column composes DIFFERENTLY — read this ──
+  //
+  //   2430  baseline before either slice
+  //   +13   the seven `settings-explorer` cells (linux moved by 13, darwin by 14)
+  //    -7   `landmark-unique` deleted
+  //  -154   `evidence` color-contrast, 7 x -22
+  //  ────
+  //   2282
+  //
+  // NOT 2269. The A11Y-06 branch's own linux figure was 2269 because it had left
+  // the seven `settings-explorer` LINUX halves stale at their pre-drift values — it
+  // said so, at the cell and at the total. This merge takes the linux halves that
+  // CI measured at `6958459` (run 33275970428) instead, so the +13 is present here
+  // and absent there. Do not reconcile the two numbers by preferring the smaller.
+  //
+  // ONE HALF OF THIS TOTAL IS STILL ARITHMETIC RATHER THAN A LINUX RUN, and it is
+  // named rather than buried: the `evidence` -154 was DERIVED on the argument that
+  // nothing leaves the DOM (`.ln` count is `preview.lines.length`, which is data,
+  // not layout) and every node moved from ~1.5:1 to >=4.81:1, so no borderline case
+  // exists that a font stack could flip. The argument is stated so it can be
+  // rejected; CI is the arbiter and this commit expects to be corrected by it.
+  // ── A11Y-06 RESIDUE + `--text-disabled` MISUSE, 2026-08-29: linux 2430 -> 2269. ──
+  //
+  // FIRST, THE MISSING ARITHMETIC, matching the darwin column's: the trail above ends
+  // at "2311 + 91 = 2402" and the literal read 2430. The +28 is commit `b86ca83`,
+  // which transcribed the seven `settings-explorer` cells from CI job 99018666402
+  // without appending a note: 54->55, 54->57, 69->72, 66->72, 64->68, 67->73, 67->72
+  // = +28, and 2402 + 28 = 2430.
+  //
+  // NOW THIS CHANGE. TWO movements, not three — the third one darwin took is
+  // deliberately absent:
+  //
+  //   -7    `landmark-unique` entry deleted. ASSERTED for linux, not measured, and
+  //         the argument is the deleted entry's own: two landmarks sharing an
+  //         accessible NAME is a DOM/ARIA fact with no text measurement in it, so no
+  //         font metric can move it. Removing one of the two removes it everywhere.
+  //
+  //  -154   `evidence@*`, -22 on each of seven cells. ARITHMETIC, and the reasoning is
+  //         written out at those cells rather than assumed: nothing is removed from
+  //         the DOM, the 22 `.ln` elements are `preview.lines.length` (data, not
+  //         layout) and every one of them moved from failing by a factor of three to
+  //         passing with headroom, so there is no borderline case a font could flip.
+  //         This file's R1b rule forbids arithmetic when a DOM NODE moves; no node
+  //         moves here.
+  //
+  //   +14   `settings-explorer@*` — DARWIN ONLY. Not applied here, deliberately. It is
+  //         a TEXT-LENGTH change (a backend OpenAPI description and a Settings `sub=`
+  //         sentence, both from the base commit `542d757`), which is exactly the
+  //         wrap-dependent case where this file forbids deriving the other platform.
+  //         ~~Five of those seven cells now carry a stale linux half beside a fresh
+  //         darwin one and CI will name its own figures; two could not be written that
+  //         way at all and had to collapse to scalars~~ — **SUPERSEDED BY THE MERGE,
+  //         2026-08-30, and struck rather than edited because "five cells carry a stale
+  //         linux half" is a claim a future session acts on.** The merge `c7b9db6` took
+  //         the linux halves CI measured at `6958459` (run 33275970428), so NO
+  //         `settings-explorer` cell carries a stale linux half at HEAD: five are
+  //         SCALARS (desktop 57, mobile 73, zoom-200 70, width-320 76, width-390 74)
+  //         and the two that this note called collapses are the only SPLITS —
+  //         laptop `{57,58}`, tablet `{72,74}`, both CI-measured. The note below on
+  //         the total was corrected at the time; this per-cell sentence was not, and
+  //         that asymmetry is the defect worth remembering.
+  //
+  //   2430 - 7 - 154 = 2269
+  //
+  // ~~Both totals were recomputed by summing `platformCount` over every entry~~ —
+  // TRUE ON THIS BRANCH, and superseded by the merge: 2269 summed a file whose seven
+  // `settings-explorer` LINUX halves were still pre-drift. The merged file carries
+  // the halves CI measured at `6958459` (run 33275970428), so the linux total is
+  // 2430 + 13 - 7 - 154 = 2282. The recomputation instruction stands and is how the
+  // number below was re-derived after the merge. If CI disagrees, correct THE NUMBER
+  // from the CI output; never loosen the assertion.
+  linux: 2282,
 };
 
 /**
@@ -3557,6 +3796,36 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
  * Note what the 2026-08-28 run did NOT do: it was scoped to `-g "Settings"` (8 failed /
  * 34 passed / 48 SKIPPED), so it is not a whole-file sweep and must not be read as
  * re-verifying any cell outside those eight.
+ *
+ * AMENDED AGAIN 2026-08-29, and the CELL TOTAL in the arithmetic above has changed as
+ * well as the split, so re-derive rather than quoting: the file now holds 161 cells, not
+ * 168 — the seven `landmark-unique` cells were DELETED when A11Y-06's residue closed
+ * (see the deletion note above `A11Y_BASELINE_TOTAL_NODES`), and all seven were
+ * `settings-explorer` scalars. FOURTEEN cells carry a 2026-08-29 reading: the seven
+ * `evidence@*` (the `--text-disabled` misuse fix, -22 each) and the seven
+ * `settings-explorer@*` (INHERITED drift from the base commit `542d757`, not caused by
+ * that day's work — see the block above `settings-explorer@desktop-1280x800`). Both sets
+ * come from the same whole-file sweep, `npx playwright test e2e/specs/a11y-axe.spec.ts
+ * e2e/specs/a11y-narrow.spec.ts e2e/specs/layout-responsive.spec.ts
+ * e2e/specs/layout-widths.spec.ts --reporter=list`, and the `settings-explorer` figures
+ * additionally reproduced in an isolated `-g "Endpoint Explorer"` re-run.
+ *
+ * THE SPLIT, DERIVED RATHER THAN QUOTED, because the 2026-08-28 version of this
+ * paragraph did not add up (it wrote "147 + 13 + 8 = 168" while also saying 6 of the 13
+ * had been superseded by the 8, which cannot both be true):
+ *
+ *   161  cells in the file
+ *   -14  re-measured 2026-08-29 (evidence x7, settings-explorer x7)
+ *    -1  still carrying the 2026-08-28 `-g "Settings"` run (`settings@width-320`;
+ *        its other 7 cells were settings-explorer and are superseded above)
+ *    -8  still carrying the 2026-08-27 discard/evidence-graph runs (evidence-graph x7
+ *        + `guided-completion@desktop-1280x800`; the 5 settings-explorer cells among
+ *        that day's 13 are superseded above)
+ *   ---
+ *   138  carry the sweep recorded in the fields below
+ *
+ * `commit` below is AGAIN deliberately not moved, for the reason it was not moved twice
+ * before: it would then be wrong for the 138, which is the larger and older claim.
  */
 export const DARWIN_MEASUREMENT = {
   /** Local date of the run whose readings the `darwin` column carries. */
