@@ -113,8 +113,16 @@ ALLOWED_METHODS = frozenset({"GET", "POST", "PATCH"})
 #: an official ISAAC record and its evidence sidecar — it is the finalisation this
 #: slice is forbidden to expose, whatever it is called on a given screen — so the
 #: token that would name it is banned rather than left to be recognised.
+#: ``accept`` is here for the reason ``approve`` is, and it was MISSING while
+#: ``approve`` was present — which is a gap of exactly one synonym. ISAAC's own
+#: conflict-resolution vocabulary is *accept a proposal*, not *approve* one
+#: (``conflict_resolution.py``), so the name a future author would reach for to
+#: expose that capability is ``isaac_accept_proposal`` — and it would have sailed
+#: past this set. Added so that it is an ``ImportError`` rather than a review miss.
+#: Nothing registered today contains the substring, checked before adding it.
 FORBIDDEN_TOOL_TOKENS = frozenset(
     {
+        "accept",
         "approve",
         "delete",
         "destroy",
