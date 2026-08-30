@@ -545,8 +545,13 @@ def test_the_assistant_origin_never_appears_over_the_committed_example_records(c
             assert "voice" not in entry["origins"], entry
 
 
-def test_the_voice_arm_has_no_producer_but_is_not_unreachable_over_the_api(client):
-    """PRECISION, because the two easy summaries are both wrong.
+def test_the_voice_arm_is_reachable_and_still_transcribes_nothing(client):
+    """PRECISION, because the easy summaries have now been wrong three times.
+
+    RENAMED FROM ``test_the_voice_arm_has_no_producer_but_is_not_unreachable_over_the_api``
+    on 2026-08-29, because a test name that asserts a fact which has changed is how
+    the next reader comes to believe it — the same reason
+    ``test_capture_surfaces_promise_only_what_they_accept`` renamed one of its own.
 
     Nothing in this build TRANSCRIBES anything — ~~there is no recorder~~, no
     transcription provider, and the notes panel hard-codes `typed_note`.
@@ -558,9 +563,17 @@ def test_the_voice_arm_has_no_producer_but_is_not_unreachable_over_the_api(clien
     recorder half was false and the assertions below never depended on it.) But
     `POST .../notes` validates `source` against the whole note vocabulary, so a
     direct API caller CAN store a transcript note today, and this module reports
-    `voice` for it. "No producer exists" is true of the application; "the arm is
-    unreachable" is false at the API boundary, and a test that asserted the
-    stronger claim would be asserting something the route disproves.
+    `voice` for it.
+
+    ~~'"No producer exists" is true of the application; "the arm is unreachable" is
+    false at the API boundary'~~ — **CORRECTED 2026-08-29: THE FIRST HALF IS NOW
+    FALSE TOO.** `POST /api/experiments/{id}/transcript` writes one
+    `source="transcript"` note per segment of a finalized transcript, which is an
+    APPLICATION producer, not an API-boundary one. The second negative control below
+    proves it rather than asserting it in prose. What survives — and is the whole
+    point of this test — is that reaching the `voice` arm still involves NO
+    transcription: that route reads text a person already finalized, and no audio
+    reaches any provider.
     """
     assert "transcript" in notes_module.NOTE_SOURCES
 
@@ -578,6 +591,31 @@ def test_the_voice_arm_has_no_producer_but_is_not_unreachable_over_the_api(clien
     assert len(voice) == 1
     assert voice[0]["primary_origin"] == "voice"
     assert voice[0]["review_state"] == "unmapped"
+
+    # THE APPLICATION PRODUCER, proved rather than described. `POST .../transcript`
+    # is not a direct-API-caller trick: it is a shipped operation with a mounted
+    # frontend surface, and it stores `source="transcript"` notes itself. The
+    # sentence this replaces said no such producer existed.
+    #
+    # MUTATION: dropping `source=_TRANSCRIPT_NOTE_SOURCE` from `post_transcript`'s
+    # `capture_note` call turns this RED — the note is stored under the model's own
+    # default and no second `voice` entry appears.
+    version = client.get(f"/api/experiments/{experiment_id}").json()["version"]
+    stored = client.post(
+        f"/api/experiments/{experiment_id}/transcript",
+        headers={"If-Match": f'"{version}"'},
+        json={"text": "the shutter stuck between scans.", "finalized": True},
+    )
+    assert stored.status_code == 200, stored.text
+
+    listed = client.get(f"/api/experiments/{experiment_id}/notes").json()["notes"]
+    from_route = [n for n in listed if n["source"] == "transcript"]
+    # Two now: the direct-API one above, and the one the ROUTE wrote. Both polarities
+    # in one assertion, so neither can pass while the other is absent.
+    assert len(from_route) == 2, listed
+    # And nothing was transcribed to get here — the route reads finalized TEXT, and
+    # the provider seam it does not touch still refuses.
+    assert client.post("/api/transcription", json={}).status_code == 501
 
 
 # =============================================================================

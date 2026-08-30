@@ -1965,7 +1965,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // paragraph as its own `<p class="api-docs-description">`, so a new paragraph
     // re-baselines seven `settings-explorer` accessibility cells on two platforms.)
     // RE-DERIVED from the served document, never incremented: raw sum over the 71
-    // operations = 104,467, minus 2 per `\n\n` separator (211 x 2 = 422) = 104,045.
+    // operations = 105,293, minus 2 per `\n\n` separator (211 x 2 = 422) = 104,871.
     // 103,838 -> 104,045 (+207): the two `unavailable`-cause descriptions
     // (`GET /api/about`, `POST /api/assistant/memory/query`) each gained the
     // sentence refusing the read-back remedy. Written INTO the existing paragraph,
@@ -1973,7 +1973,25 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // commit after the assertion moved to 104,045 — the arithmetic was left behind
     // by the edit that changed its inputs, which is the exact failure this test's
     // own header lectures about. Re-measured over `create_app().openapi()`.)
-    expect(total).toBe(104045);
+    // 104,045 -> 104,871 (+826): ONE existing description changed —
+    // `GET /api/experiments/{experiment_id}/notes` — and no other. It used to END
+    // "Both routes are a run's, so a record with no runs can write none of them
+    // yet", which stopped being true when `system.technique` gained a record-level
+    // write path: measured over HTTP, `{"system.technique": "XAS"}` at
+    // `POST /api/experiments/{id}/answers` returns 200 on a record with ZERO runs.
+    // The replacement strikes that sentence in place and describes the new
+    // `record_writable_field_paths` key, which is the per-path answer to WHERE.
+    // It also stops the paragraph's OPENING list of accepting routes reading as
+    // exhaustive — it named the two run routes and nothing else, which is the same
+    // "true on average" failure one sentence further down.
+    // Every word of it was written INTO the existing `value_writable_field_paths`
+    // paragraph, so the remainder count below MUST NOT move — a change that moved
+    // it would have appended instead, and would re-baseline the seven
+    // `settings-explorer` accessibility cells this test's header warns about.
+    // RE-TRANSCRIBED from `create_app().openapi()` by script, never hand-edited,
+    // and RE-MEASURED over the served document rather than adjusted by a delta;
+    // `test_contract_description_parity.py` proves the copy still matches.
+    expect(total).toBe(104871);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
