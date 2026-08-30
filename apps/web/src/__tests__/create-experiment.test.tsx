@@ -333,27 +333,102 @@ describe('My Experiments · where a new experiment is stored', () => {
     expect(line!.textContent).not.toMatch(/database/i);
   });
 
-  it('a configured database that is NOT ANSWERING says so, and promises nothing', async () => {
+  it('a configured database that records are NOT REACHING says so, and promises nothing', async () => {
     /*
      * THE REGRESSION THIS SECTION EXISTS FOR. Before the backend named this state,
      * it reported `durable: true` while every read and write against the database
      * failed — so this line promised durability on the exact deployment where
      * creating an experiment could not work at all.
+     *
+     * THE `/not answering/i` ASSERTION THIS REPLACES PINNED A DEFECT, and is
+     * inverted rather than deleted. `unavailable` has TWO causes —
+     * `experiment_repository.storage_status`'s own comment says so — and "not
+     * answering" is only one of them. In the other, the `PGDATABASE` gate refuses
+     * the configured name, `_postgres_available()` returns false, the FILESYSTEM
+     * repository is selected, and `POST /api/experiments` answers **201** into a
+     * working directory that is not durable (measured; see
+     * `apps/api/tests/test_about_and_openapi.py`'s two-cause pair). So the old
+     * assertion required this line to name a cause it cannot know and to deny
+     * what half of this state actually does. Note the shape of the trap: the
+     * DEGRADED_LEGACY case two tests above describes that very cause correctly,
+     * one screen's worth of code away, and the two never had to agree.
+     *
+     * PINNED ON THE RENDERED TEXT, not on the label constant, for the reason the
+     * ephemeral case states: a matcher reading the constant passes whatever the
+     * constant says. Both directions are asserted — what it must say, and the
+     * false promises it must not make, which now include the retired one.
      */
     await openEmptyState(UNAVAILABLE);
     const line = panel().querySelector<HTMLElement>('.queue-empty-storage');
     expect(line).not.toBeNull();
     expect(line!.dataset.durability).toBe('unavailable');
     expect(line!.textContent).toBe(LABELS.storageUnavailable);
-    /*
-     * PINNED ON THE RENDERED TEXT, not on the label constant, for the reason the
-     * ephemeral case states: a matcher reading the constant passes whatever the
-     * constant says. Both directions are asserted — what it must say, and the two
-     * false promises it must not make.
-     */
-    expect(line!.textContent).toMatch(/not answering/i);
+    // It must still deliver the bad news: a database is meant to hold these and
+    // is not getting them. That is the whole reason the line is not silence.
+    expect(line!.textContent).toMatch(/database/i);
+    expect(line!.textContent).toMatch(/not reaching it/i);
+    // ...and it delivers it as a RECORDED OBSERVATION, not as a live fact. The
+    // present tense is false under the third outcome — a stale recorded failure
+    // over a database that is answering, where the write lands in PostgreSQL and
+    // IS durable. Added 2026-08-29; this file's own sibling guard passed the
+    // present-tense form for one commit because `/not reaching it/i` matches both.
+    expect(line!.textContent).toMatch(/has recorded that they were not reaching it/i);
+    expect(line!.textContent).not.toMatch(/records? (?:are|is) not reaching it|and they are not reaching it/i);
+    // And it must not promise durability...
     expect(line!.textContent).not.toMatch(/stay here across restarts|saved in this/i);
-    expect(line!.textContent).not.toMatch(/cleared when the server restarts/i);
+    // ...nor assert an outcome that is false under the gate-refused cause.
+    expect(line!.textContent).not.toMatch(/not answering/i);
+    expect(line!.textContent).not.toMatch(/will not work until/i);
+  });
+
+  it('names no storage location and no restart outcome for a state that determines neither', async () => {
+    /*
+     * A RESTORED GUARD, NOT A NEW ONE — and it is restored because deleting the
+     * one that stood here was the mistake.
+     *
+     * `expect(line!.textContent).not.toMatch(/cleared when the server restarts/i)`
+     * used to sit in the ephemeral-vs-unavailable pair. It was removed in the
+     * change that rewrote `LABELS.storageUnavailable`, on a rationale that
+     * addressed a DIFFERENT over-narrowing ("not answering"), and the replacement
+     * copy then made exactly the claim the deleted guard had forbidden: "the
+     * record is kept only in this server's workspace and is lost when the server
+     * restarts."
+     *
+     * THAT CLAIM IS FALSE ON A REACHABLE PATH, and false in the unsafe direction.
+     * `experiment_repository.repository()` selects the backend from
+     * `_postgres_available(env)` ALONE and never consults `storage_failure()`,
+     * while `storage_status()` reports `unavailable` whenever a failure has been
+     * recorded and not cleared. So with `backend: "postgres"` the PostgreSQL
+     * repository is still the one that runs, and the recorded failure may be
+     * stale — a read-path failure, a `_not_provisioned` relation while writes
+     * work, or a database that has recovered. The create then lands in
+     * PostgreSQL and IS durable. Telling that scientist their record is in a
+     * workspace and dies at the next restart UNDERSTATES persistence, which is
+     * the exact defect this whole change exists to remove.
+     *
+     * SO THE GUARD PINS THE INVARIANT RATHER THAN THE SENTENCE. `unavailable`
+     * determines neither where a record goes nor whether it survives a restart —
+     * this screen is handed `state`, and not even `backend` would settle it — so
+     * the copy may not name a location and may not name a restart outcome,
+     * whatever it is reworded to next. NEGATIVE CONTROL: run against the string
+     * this replaces and both assertions fail (verified 2026-08-28 by reverting
+     * the label, running this file, and observing red on `/restart/i` and on the
+     * location matcher; then restored).
+     */
+    await openEmptyState(UNAVAILABLE);
+    const text = panel().querySelector<HTMLElement>('.queue-empty-storage')!.textContent!;
+    // No restart outcome, in either direction — not "is lost when the server
+    // restarts" and not "survives a restart".
+    expect(text).not.toMatch(/restart/i);
+    // No storage location. The workspace, the working directory and the server's
+    // disk are all claims this state does not license.
+    expect(text).not.toMatch(/workspace|working directory|on (this|the) server|on disk|\bfiles?\b/i);
+    // And it still delivers the bad news, so the guard cannot be satisfied by
+    // deleting the line — silence would pass both matchers above.
+    expect(text).toMatch(/database/i);
+    expect(text).toMatch(/not reaching it/i);
+    // As above: a recorded observation, never a present-tense live fact.
+    expect(text).not.toMatch(/records? (?:are|is) not reaching it|and they are not reaching it/i);
   });
 
   it('reads the NAMED state even when it disagrees with the boolean fallback', async () => {

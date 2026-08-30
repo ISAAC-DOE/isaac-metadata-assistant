@@ -235,8 +235,101 @@ describe('the darwin column says how much of itself is measured', () => {
    * file's existing encoding for a one-platform reading (see the note at those cells),
    * and minting a split for them would be the exact anti-pattern this guard forbids —
    * a linux half nothing measured.
+   *
+   * The persistence-truthfulness branch (2026-08-28) moved five more, taking the set
+   * from four to seven. Both halves of every cell below were MEASURED at the same
+   * commit `dad8715` — linux from CI run 33134705411 / job 98731972499, darwin from a
+   * local macOS run on this host (Playwright 1.62.1 + bundled Chromium, backend started
+   * as CI starts it) — so nothing here is carried forward and
+   * `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0.
+   *
+   *   REMOVED  settings-explorer@mobile-375x812    {darwin 51, linux 50} -> scalar 66
+   *
+   *     COLLAPSES for the same reason the three above did in 2026-08-27: the two faces
+   *     landed on the same number (66/66). Note this cell has now been a split and a
+   *     scalar twice; that it oscillates is not instability in the app, it is a cell
+   *     sitting one node from a wrap boundary on one face.
+   *
+   *   ADDED    settings-explorer@desktop-1280x800  scalar 44 -> {darwin 53, linux 54}
+   *   ADDED    settings-explorer@laptop-1024x768   scalar 44 -> {darwin 53, linux 54}
+   *   ADDED    settings-explorer@tablet-768x1024   scalar 58 -> {darwin 68, linux 69}
+   *   ADDED    settings-explorer@width-320         scalar 51 -> {darwin 68, linux 67}
+   *
+   *     All four are real, measured, one-node platform differences. `width-320` is the
+   *     one where DARWIN IS THE HIGHER HALF — the opposite direction from the other
+   *     three — which is the concrete reason this branch did not transcribe the linux
+   *     column across. Had it done so, four of these eight cells would have been wrong,
+   *     and this one wrong in a direction no rule of thumb would have caught.
+   *
+   *   ── SECOND MOVE, SAME BRANCH, 2026-08-28 ─────────────────────────────────────
+   *
+   *   The review fix for #192 widened the `/api/about` description's paragraph 3 from
+   *   2,054 to 2,550 characters WITHOUT changing its paragraph count (5 before, 5
+   *   after, computed both times). All seven cells moved anyway. The coupling is
+   *   therefore to description LENGTH, not to paragraph structure — the constraint
+   *   written to prevent this churn was necessary but not sufficient, and that is the
+   *   durable lesson: editing ANY OpenAPI description in this app re-baselines seven
+   *   cells on two platforms, at roughly one CI round-trip each.
+   *
+   *   Both faces re-measured at `c75c42f`: darwin locally on this host, linux from CI
+   *   job 99018666402. The split set churns again, in BOTH directions:
+   *
+   *     desktop-1280x800  {55, 55} -> SCALAR 55   split collapses
+   *     width-320         {73, 73} -> SCALAR 73   split collapses
+   *     mobile-375x812    scalar   -> {71, 72}    scalar becomes split
+   *     width-390         scalar   -> {73, 72}    scalar becomes split, DARWIN HIGHER
+   *     zoom-200          scalar   -> {67, 68}    scalar becomes split
+   *     laptop-1024x768   {55, 57}                a gap of TWO
+   *     tablet-768x1024   {71, 72}
+   *
+   *   Two of these refute rules of thumb this file has entertained before.
+   *   `laptop-1024x768` differs by TWO, so "every one by exactly +/-1, the signature of
+   *   a single wrap boundary" fails again. And `width-390` has darwin as the HIGHER
+   *   half, so the direction is not consistent either. Nothing here was predicted from
+   *   the other column; every number was read off a run.
+   *
+   *     The whole family moved for ONE cause, established by controlled experiment and
+   *     not inferred: the `GET /api/about` OpenAPI `description=` grew from 2 paragraphs
+   *     to ~~6~~ **5** — corrected 2026-08-28, having been asserted rather than counted;
+   *     `len([p for p in description.split('\n\n') if p.strip()])` reads 2 on
+   *     `origin/main` and 5 here — and the Endpoint Explorer renders operation
+   *     descriptions as
+   *     `<p class="api-docs-description">`. Reverting `routes.py` alone to `origin/main`,
+   *     with every frontend change still applied, put the surface back to its old
+   *     numbers. A BACKEND DOCSTRING IS RENDERED PRODUCT TEXT.
+   *
+   *     THE CONTROL WAS RUN FOR ALL SEVEN CELLS, not one. An earlier revision of this
+   *     paragraph reported the experiment on `desktop-1280x800` and asserted the other
+   *     six shared its cause; an independent review flagged that as inference wearing
+   *     the word "measured", by the same standard this file applies to a darwin half.
+   *     The control was therefore re-run across the whole family on 2026-08-28, and
+   *     every one of the seven returned to its exact pre-change value — tablet 68 -> 58,
+   *     mobile 66 -> 51, zoom-200 64 -> 53, and so on for the rest. Each of those is the
+   *     number this file held before the change, so the attribution is now a
+   *     measurement on all seven and not an extrapolation from one.
    */
-  it('the set of per-platform SPLIT cells is exactly the four measured on both faces', () => {
+  /*
+   * 2026-08-29 — THE SPLIT SET CHURNS IN BOTH DIRECTIONS FOR THE THIRD TIME, and the
+   * churn is now larger than the set that survives it. Rounds 3-4 of the
+   * persistence-truthfulness branch moved all seven `settings-explorer` cells (see
+   * `A11Y_BASELINE_TOTAL_NODES`' 2026-08-29 block for the two runs). FOUR splits
+   * collapsed to scalars because the two faces landed on the same number:
+   *
+   *     mobile-375x812   {71, 72} -> SCALAR 73
+   *     zoom-200         {67, 68} -> SCALAR 70
+   *     width-390        {73, 72} -> SCALAR 74   (darwin had been HIGHER)
+   *     width-320        scalar 73 -> SCALAR 76  (stays scalar, moves)
+   *
+   * and TWO stayed split (`laptop-1024x768` {57, 58}, `tablet-768x1024` {72, 74}).
+   * Eight -> five. The lesson this guard already taught is reinforced rather than
+   * revised: a split is not a stable property of a cell, it is the accident of two
+   * font stacks landing on different wrap points for the text that happens to be
+   * there today. Change the text and the set changes.
+   *
+   * Both faces of all seven were measured at the SAME commit (`6958459`), so none of
+   * the five below is a carried-forward half and `DARWIN_CARRIED_FORWARD` stays empty.
+   */
+  it('the set of per-platform SPLIT cells is exactly the five measured on both faces', () => {
     const splits: string[] = [];
     for (const entry of A11Y_BASELINE) {
       for (const [key, count] of Object.entries(entry.counts)) {
@@ -254,7 +347,8 @@ describe('the darwin column says how much of itself is measured', () => {
       [
         'color-contrast @ memory-graph@zoom-200',
         'color-contrast @ settings-about@width-320',
-        'color-contrast @ settings-explorer@mobile-375x812',
+        'color-contrast @ settings-explorer@laptop-1024x768',
+        'color-contrast @ settings-explorer@tablet-768x1024',
         'color-contrast @ validator@zoom-200',
       ].sort()
     );

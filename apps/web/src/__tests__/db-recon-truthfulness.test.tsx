@@ -903,6 +903,31 @@ describe('Settings → Data & Privacy — no two cards contradict each other', (
     expect(resets.detail).toMatch(/nothing from it is written here/i);
     expect(resets.summary).not.toMatch(/there is no database|^no database/i);
   });
+
+  /*
+   * THE SAME GUARANTEE ON THE ARM WHERE IT IS HARDEST TO KEEP. `conceptById`
+   * above reads the `ephemeral` fixture. On a `durable` deployment there are now
+   * TWO databases a reader could be thinking of — the one their experiment
+   * records go into, and the isolated SLAC test database the read-only
+   * diagnostic may read — and the card has to separate them by name rather than
+   * rely on there being only one. A card that said "your records are in a
+   * database" while leaving that clause implicit would be the diagnostic defect
+   * re-created by the persistence fix, which is precisely the direction this
+   * whole file exists to watch.
+   */
+  it.each(['durable', 'unavailable'])(
+    'keeps that clause when persistence is %s and a second database is in play',
+    (persistence) => {
+      const resets = settingsConcepts({ ...SETTINGS_FACTS, persistence }).find(
+        (c) => c.id === 'what-resets',
+      )!;
+      expect(resets.detail).toMatch(/the workspace is not stored in a database/i);
+      expect(resets.detail).toMatch(/is not the workspace's storage/i);
+      expect(resets.detail).toMatch(/nothing from it is written here/i);
+      expect(resets.detail).toMatch(/only sanitized aggregate results are returned/i);
+      expect(resets.summary).not.toMatch(/there is no database|^no database/i);
+    },
+  );
 });
 
 // --- 13: THE SWEEP GUARD ------------------------------------------------------
@@ -1021,11 +1046,30 @@ interface CopyUnit {
   text: string;
 }
 
+/*
+ * EVERY REACHABLE PERSISTENCE STATE, not just the one the fixture happens to
+ * carry. `SETTINGS_FACTS.persistence` is `'ephemeral'`, and until 2026-08-27
+ * that was the ONLY value `GET /api/about` could return — it was a hardcoded
+ * literal — so scanning one state scanned the whole copy surface.
+ *
+ * It is derived now, from `experiment_storage.state`, and the hosted deployment
+ * reports `durable`. So the cards that branch on it have arms this sweep had
+ * never seen, and an arm nobody sweeps is exactly where the next unqualified
+ * whole-application claim would land. `unavailable` and an unrecognised value are
+ * included for the same reason: every arm that can render is scanned.
+ */
+const PERSISTENCE_STATES = ['ephemeral', 'durable', 'unavailable', 'not-a-known-state'];
+
 function settingsCopyUnits(): CopyUnit[] {
-  const units: CopyUnit[] = settingsConcepts(SETTINGS_FACTS).map((c) => ({
-    where: `concept "${c.id}"`,
-    text: [c.heading, c.summary, c.detail, c.more?.label ?? '', c.more?.text ?? ''].join(' '),
-  }));
+  const units: CopyUnit[] = [];
+  for (const persistence of PERSISTENCE_STATES) {
+    for (const c of settingsConcepts({ ...SETTINGS_FACTS, persistence })) {
+      units.push({
+        where: `concept "${c.id}" [persistence=${persistence}]`,
+        text: [c.heading, c.summary, c.detail, c.more?.label ?? '', c.more?.text ?? ''].join(' '),
+      });
+    }
+  }
   for (const [key, value] of Object.entries(API_ACCESS_COPY)) {
     if (typeof value === 'string') units.push({ where: `API_ACCESS_COPY.${key}`, text: value });
   }
@@ -1036,9 +1080,13 @@ describe('sweep guard — every settingsContent copy unit, one at a time', () =>
   const units = settingsCopyUnits();
 
   it('scans every concept and every API-access string, not a hand-picked subset', () => {
-    expect(units.length).toBeGreaterThanOrEqual(9 + 5);
+    // 9 concepts per state (the module has more), plus the API-access strings,
+    // which are state-independent and so are collected once rather than N times.
+    expect(units.length).toBeGreaterThanOrEqual(9 * PERSISTENCE_STATES.length + 5);
     for (const id of ['synthetic-data-only', 'no-real-experiment-data', 'what-resets']) {
-      expect(units.map((u) => u.where)).toContain(`concept "${id}"`);
+      for (const persistence of PERSISTENCE_STATES) {
+        expect(units.map((u) => u.where)).toContain(`concept "${id}" [persistence=${persistence}]`);
+      }
     }
     expect(units.map((u) => u.where)).toContain('API_ACCESS_COPY.statusHeading');
   });

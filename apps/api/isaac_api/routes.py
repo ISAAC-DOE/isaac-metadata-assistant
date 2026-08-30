@@ -17485,10 +17485,45 @@ def post_assistant_memory_query(
         "Non-sensitive identity and provenance for this deployment: the app "
         "version, the build commit when the deployment supplies one (otherwise "
         "`null` — it is never guessed), the official ISAAC record-schema version "
-        "this build validates against, the runtime data mode, the persistence "
-        "model, the data regime, and the name of the deterministic core package.\n\n"
-        "Every value is reused from the same authoritative source "
-        "`GET /api/health` reads, so the two can never disagree. Read-only."
+        "this build validates against, the runtime data mode, where experiments "
+        "are stored, the data regime, and the name of the deterministic core "
+        "package.\n\n"
+        "`persistence` is `GET /api/health`'s own `experiment_storage.state` — "
+        "`durable`, `ephemeral` or `unavailable` — resolved from the same "
+        "authoritative source on every call, so the two operations cannot "
+        "disagree about it WITHIN ONE SERVER PROCESS. Part of what that source "
+        "reports is an observation held in the answering process's own memory, so "
+        "across replicas two calls can legitimately differ; the bound is stated "
+        "rather than left implied. `app_version`, `build_commit` and "
+        "`runtime_mode` are likewise the same reads `GET /api/health` performs.\n\n"
+        "`unavailable` has two causes and they behave differently, which matters "
+        "to anything that renders a consequence: either this deployment is not "
+        "reaching its database — it may be unreachable, or answering while missing "
+        "a table a migration has not created, or the failure may have been recorded "
+        "earlier and not yet cleared — in which case `POST /api/experiments` "
+        "returns `503` having written nothing for as long as that condition still "
+        "holds on the write path; or its configured database name was refused, in "
+        "which case the server degrades to its working directory and "
+        "`POST /api/experiments` succeeds into storage that is not durable. "
+        "`persistence` does not distinguish them; `GET /api/health`'s "
+        "`experiment_storage.backend` does. What holds in both is narrower than it "
+        "looks and is stated as such: this state establishes nothing about the "
+        "durability of a record created in it. READING THE RECORD BACK DOES NOT "
+        "SETTLE IT and must not be offered as the check: every route reads through "
+        "the working directory, so a record created under the degraded-to-filesystem "
+        "cause is served `200` while not being durable. `GET /api/health`'s "
+        "`experiment_storage` is what distinguishes the causes — a database "
+        "that has recovered since the failure was recorded still reports "
+        "`unavailable` and still writes durably.\n\n"
+        "`persistence` is a claim about EXPERIMENT RECORDS and nothing else. "
+        "Exported record files and their evidence sidecars are written to this "
+        "deployment's working directory and are not held in a database, whatever "
+        "`persistence` reports; a deployment that restores a `durable` "
+        "experiment after a restart reports that experiment's exported artifact "
+        "as stale rather than serving it.\n\n"
+        "`record_schema_version` is the vendored official schema's own version. "
+        "`data_regime` and `core` are fixed literals describing this prototype's "
+        "scope, not live readings. Read-only."
     ),
     response_description="The app version, build commit, schema version, runtime mode, and data regime.",
     responses={**_R_UNAUTHORIZED},
@@ -17501,8 +17536,74 @@ def about() -> dict:
     `EXPECTED_VERSION` from `isaac_records.official` (the vendored official
     schema's version, read-only import — that module is never modified here),
     and `runtime_mode.runtime_mode()` (the SAME fail-closed resolver `/health`
-    uses). `persistence` and `data_regime` are fixed, non-configurable literals
+    uses). `data_regime` and `core` are fixed, non-configurable literals
     describing this prototype's current scope.
+
+    `persistence` WAS A LITERAL, AND THE LITERAL WAS FALSE IN PRODUCTION. It read
+    `"ephemeral"` unconditionally while `/health`'s `experiment_storage.state`
+    read `"durable"` on the same process — measured on the hosted deployment on
+    2026-08-27, where two experiments created on 2026-08-09 and 2026-08-10 were
+    still present across dozens of rollouts
+    (`docs/evidence/hosted-qa-2026-08-27.md` §3). The published description
+    claimed the two operations "can never disagree"; they did, and the claim
+    understated persistence on the surface a scientist reads to find out what
+    happens to their data.
+
+    No local test could have caught it and none was at fault: with `PGHOST`
+    unset the repository resolves to the filesystem and `"ephemeral"` is the
+    true answer, which is every developer machine and CI. It is now DERIVED from
+    the same `experiment_repository.storage_status()` call `/health` serves, so
+    the "cannot disagree" sentence is true by construction rather than by
+    intention. That function opens no connection, issues no query and cannot
+    raise on a database problem — the discipline `/health` needs as the readiness
+    probe, and which this operation inherits for free by reusing it.
+
+    AND THE "CANNOT DISAGREE" SENTENCE IS NOW BOUNDED, because unbounded it was
+    the same shape of over-claim as the literal it replaced. Part of what
+    `storage_status()` reports is `storage_failure()`, which
+    `experiment_repository`'s module docstring documents as PROCESS-LOCAL: "each
+    replica observes its own failures", and the first read after a process start
+    is optimistic because nothing has been attempted. Two calls answered by
+    different replicas can therefore differ — which is not a defect, it is what
+    per-process observation means — so the published sentence says "within one
+    server process" rather than leaving the reader to discover the bound.
+
+    THE PUBLISHED DESCRIPTION ALSO NAMES `unavailable`'s TWO CAUSES, because
+    three user-facing surfaces independently wrote copy asserting the wrong one.
+    `state` collapses them (the value's own comment in `storage_status` says so),
+    and only `experiment_storage.backend` separates them: `filesystem` means
+    `_postgres_available()` refused the configured database NAME and the create
+    SUCCEEDS into a non-durable working directory; `postgres` means the database
+    is selected and the records are not reaching it.
+
+    ~~"`postgres` means the database is selected and not answering, and the
+    create returns `503` having written nothing"~~ CORRECTED 2026-08-28, one
+    commit after it was written, and kept struck because the narrowing it makes
+    is the one an independent review found in the PUBLISHED text as well.
+
+    "Not answering" is one fact out of at least three that reach
+    `backend: "postgres"` + `state: "unavailable"`. `_unavailable()` also records
+    `_not_provisioned` — the server ANSWERING but missing a relation because a
+    migration has not been applied — and a recorded failure is not re-tested, so
+    a third reachable case is a database that has since recovered. The `503` then
+    does not follow from the state at all: `repository()` selects the backend from
+    `_postgres_available(env)` ALONE and never consults `storage_failure()`, so
+    with `backend: "postgres"` the Postgres repository is still the one that runs;
+    a write against a recovered (or read-path-only-broken) database SUCCEEDS,
+    DURABLY, and `_note_storage_success()` clears the flag. The `503` holds while
+    the condition is current and on the write path, and the published clause now
+    says so with that condition attached rather than as an unqualified
+    consequence. Publishing the causes on the operation that serves `persistence`
+    is still what stops the next consumer re-deriving them wrongly from the state
+    alone — it just may not publish a consequence the state does not determine.
+
+    WHAT IT DOES NOT COVER, stated here because the copy downstream depends on
+    it: exported artifact FILES are not in the database. This module's docstring
+    in `experiment_repository` states that limit directly — a restart restores a
+    `durable` experiment's state including its `record_id` while the artifact
+    files are gone, and the readers report `stale`. `persistence: "durable"` is
+    therefore a claim about experiment records, never about the working
+    directory.
 
     The published `description=` states what the endpoint RETURNS; it deliberately
     does not enumerate what is withheld (hostnames, infrastructure internals,
@@ -17515,7 +17616,7 @@ def about() -> dict:
         "build_commit": _build_commit(),
         "record_schema_version": EXPECTED_VERSION,
         "runtime_mode": runtime_mode.runtime_mode(),
-        "persistence": "ephemeral",
+        "persistence": experiment_repository.storage_status()["state"],
         "data_regime": "synthetic-only",
         "core": "isaac_records",
     }

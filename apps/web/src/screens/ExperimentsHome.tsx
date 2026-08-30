@@ -49,11 +49,28 @@ type Durability = 'durable' | 'ephemeral' | 'unavailable' | 'unknown';
  * to read `configured && !durable` as EPHEMERAL, on the reasoning that the only
  * way to reach it was a `PGDATABASE` mismatch, after which the app really does
  * fall back to the workspace directory. That reasoning no longer covers the state
- * space: a deployment whose database is configured and NOT ANSWERING also reports
+ * space: a deployment whose database is configured and not reaching it also
+ * reports `durable: false`, and there the reader's work is not simply ephemeral.
+ * Telling them "cleared when the server restarts" would be a different false
+ * promise, not a safer one, so the backend now names the state and this reads
+ * the name.
+ *
+ * ~~"a deployment whose database is configured and NOT ANSWERING also reports
  * `durable: false`, and there the reader's work is not ephemeral — creating fails
- * outright with a 503. Telling them "cleared when the server restarts" would be a
- * different false promise, not a safer one, so the backend now names the state
- * and this reads the name.
+ * outright with a 503"~~ CORRECTED 2026-08-28, kept struck because it was the
+ * same over-narrowing the label one file over was corrected for on the same day.
+ * Two things were wrong with it. "NOT ANSWERING" names one fact out of at least
+ * three that produce `backend: "postgres"` + `state: "unavailable"`: the server
+ * being unreachable, the server ANSWERING but missing a relation because a
+ * migration was not applied (`_not_provisioned`), and a failure recorded earlier
+ * that has since resolved. And "creating fails outright with a 503" holds only
+ * while that condition is still current AND on the write path —
+ * `experiment_repository.repository()` branches on `_postgres_available()` alone
+ * and never consults `storage_failure()`, so with `backend: "postgres"` the
+ * Postgres repository still runs and a write against a recovered database
+ * SUCCEEDS, durably, clearing the flag. The state name is what this function
+ * reads and the state name is all it may assert; the consequence is not this
+ * file's to state, which is why the copy it selects no longer states one.
  *
  * THE BOOLEAN IS STILL THE FALLBACK, for a deployment serving the first version
  * of this block (`state` absent). There, `configured && !durable` can only be the
@@ -87,9 +104,21 @@ function storageSentence(durability: Durability): string | null {
   if (durability === 'durable') return LABELS.storageDurable;
   if (durability === 'ephemeral') return LABELS.storageEphemeral;
   // NOT SILENCE. `unavailable` is the one bad state, and the reader is about to
-  // press a button that will fail — saying so before they press it is the whole
-  // value of the line. It is deliberately not softened into "storage is being
-  // set up": that would be an invented cause.
+  // press a button whose result is not durable — saying so before they press it
+  // is the whole value of the line. It is deliberately not softened into "storage
+  // is being set up": that would be an invented cause.
+  //
+  // ~~"a button that will fail"~~ — corrected with the label itself (pre-existing,
+  // not introduced by the `/api/about` `persistence` slice). `unavailable` has two
+  // causes and ~~only one of them fails the create~~ NEITHER OF THEM FAILS IT
+  // RELIABLY (second correction, 2026-08-28, swept with the label): when the
+  // `PGDATABASE` gate refuses the configured name the app degrades to the
+  // filesystem repository and `POST /api/experiments` answers 201; and even with
+  // `backend: "postgres"` the create can answer 201 DURABLY, because
+  // `repository()` never consults `storage_failure()` and the recorded failure
+  // may be stale. `state` alone does not separate the causes — only
+  // `experiment_storage.backend` does, and this function is given `state` — and
+  // no value of either predicts the outcome. See `LABELS.storageUnavailable`.
   if (durability === 'unavailable') return LABELS.storageUnavailable;
   // UNKNOWN SAYS NOTHING. Not "checking…", not a hedge — the only honest thing to
   // say about durability that has not been established is nothing, and a hedge

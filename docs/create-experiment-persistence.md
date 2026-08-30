@@ -128,9 +128,20 @@ It **degrades, and discloses**, rather than failing. Verified by
 | `POST /api/experiments` | **503**, typed, and nothing is written anywhere |
 | `GET /api/health` → `experiment_storage` | `durable: false`, `state: "unavailable"` |
 
-The UI reads that state and stops promising durability; it says the database is not
-answering and that creating will not work until it does. It does **not** silently
+The UI reads that state and stops promising durability. It does **not** silently
 write an ephemeral record, because the reader was told their work is kept.
+
+~~"it says the database is not answering and that creating will not work until it does"~~ —
+corrected 2026-08-27. That described the copy accurately, and the copy was wrong: `unavailable`
+has **two** causes and the sentence named only this one. The table above is the
+`backend: "postgres"` row. The other cause is the `PGDATABASE` gate refusing the configured
+name, where `_postgres_available()` is false, the filesystem repository is selected, and
+`POST /api/experiments` answers **201** into a working directory that is not durable — its own
+docstring documents that as the intended degradation. `state` does not separate the two;
+`experiment_storage.backend` does, and the UI is given the state. So the copy
+(`LABELS.storageUnavailable`, and the three Data & Privacy cards) now states the invariant that
+holds under both — nothing created in this state is durable — and says outright that it cannot
+tell which outcome applies. See `docs/deployment.md` for the measured pair.
 
 ---
 

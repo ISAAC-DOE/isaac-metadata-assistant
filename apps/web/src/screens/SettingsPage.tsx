@@ -348,6 +348,41 @@ type GraphStatusState = ReturnType<typeof useFetch<ApiGraphStatus>>;
  * the definition. It renders no `detail` string at all — that is what stops the
  * old two-and-three-times duplication from creeping back.
  *
+ * THE FRAMING SENTENCE USED TO OVER-CLAIM, and the fix is to scope it rather
+ * than to make every row live. It read "the runtime values below are read from
+ * the app itself", over SEVEN rows of which THREE were hardcoded literals — not
+ * one. (~~TWO~~ — corrected in review: `about()` returns seven fields and
+ * `persistence`, `data_regime` and `core` were all fixed literals. Miscounting
+ * the set a scoping sentence is scoping is the same class of defect as the
+ * sentence itself.) `persistence` was `"ephemeral"` unconditionally, which was
+ * false on the hosted deployment (`docs/evidence/hosted-qa-2026-08-27.md` §3)
+ * and is now DERIVED from `experiment_storage.state`, so that row has become
+ * what the sentence always claimed it was.
+ *
+ * `data_regime` HAS NOT AND DELIBERATELY MUST NOT. It stays the literal
+ * `"synthetic-only"`, which is defensible as a SCOPED claim: `runtime_mode`
+ * independently refuses to boot in `real` mode, and the mode has never meant "no
+ * real data exists anywhere in the process" — production-derived records transit
+ * pod memory during the read-only diagnostic. Changing that value is a different
+ * decision with its own guard tests, and making it live "for consistency" would
+ * be a claim nobody has established.
+ *
+ * So the sentence now says which rows are live and which are fixed, instead of
+ * asserting liveness over a block that contains both. `App Version`, `Record
+ * Schema`, `Data Regime` and `Core` are all fixed for a given build; `Runtime
+ * Mode`, `Persistence` and `Build Commit` are resolved per request.
+ *
+ * ~~"`Build Commit` ... fixed for a given build"~~ — corrected in review, in the
+ * same change that wrote it. `routes._build_commit()` is read from the
+ * environment on EVERY request (`ISAAC_BUILD_COMMIT`, else
+ * `RAILWAY_GIT_COMMIT_SHA`, else `null`), and its own docstring says "read live
+ * (not cached) so it reflects the running env" — it is a property of the
+ * DEPLOYMENT, not of the build, and the same image redeployed with a different
+ * value reports the different value. The `/api/about` description written in this
+ * same change already grouped it with the live reads, so two surfaces authored
+ * together partitioned the same field differently; the frontend half was the
+ * wrong one.
+ *
  * Authentication deliberately has no status row: `ApiKeyAuthMiddleware` is only
  * active when the backend was started with a shared key configured, and the
  * browser cannot read that. So the boundary appears as a summary that states
@@ -365,7 +400,7 @@ function OverviewTab({
       icon={<Settings size={18} strokeWidth={2} aria-hidden="true" className="settings-card-icon" />}
       headingId="settings-overview-heading"
       title="Overview"
-      sub="What this running build is right now — the runtime values below are read from the app itself. This build has no user-adjustable settings."
+      sub="What this running build is right now. Runtime Mode, Persistence and Build Commit are read live from this deployment; the other rows are fixed properties of this build. This build has no user-adjustable settings."
     >
       {state.status === 'loading' && <LoadingPanel label="Loading app info…" />}
       {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}

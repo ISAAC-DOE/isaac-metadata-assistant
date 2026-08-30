@@ -61,10 +61,261 @@ def test_about_returns_expected_non_sensitive_fields(client):
     assert body["record_schema_version"] == "1.05"
     assert body["record_schema_version"] == EXPECTED_VERSION
     assert body["runtime_mode"] == "synthetic-only"
+    # WITH NO `PGHOST` THIS IS STILL `ephemeral`, AND THAT IS THE POINT OF THE
+    # THREE TESTS BELOW. It is no longer a literal — it is the repository's own
+    # answer — but on a developer machine and in CI the repository resolves to
+    # the filesystem, so the derived value and the retired literal agree. This
+    # assertion therefore CANNOT distinguish the fix from the defect, and a
+    # regression to a hardcoded `"ephemeral"` would leave it green. The
+    # `durable` / `unavailable` branches are covered separately, and one of
+    # them is written specifically to fail against the retired literal.
     assert body["persistence"] == "ephemeral"
     assert body["data_regime"] == "synthetic-only"
     assert body["core"] == "isaac_records"
     assert isinstance(body["app_version"], str) and body["app_version"]
+
+
+# --- `persistence` is DERIVED, and the local value cannot prove it -------------
+#
+# THE DEFECT THESE TESTS EXIST FOR. `GET /api/about` served
+# `"persistence": "ephemeral"` as a hardcoded literal. On the hosted deployment
+# that was FALSE and the SAME PROCESS contradicted it: `GET /api/health` reported
+# `experiment_storage.state: "durable"`, and two experiments created 17 and 18
+# days earlier were still being served (`docs/evidence/hosted-qa-2026-08-27.md`
+# §3). The operation's published description asserted the two "can never
+# disagree" while they disagreed in production.
+#
+# WHY THE SUITE ABOVE COULD NOT SEE IT, AND WHY THAT IS NOT A TESTING FAILURE.
+# Every test in this file runs with `PGHOST` unset, so
+# `experiment_repository._postgres_available` is false, the repository resolves
+# to the filesystem, and `"ephemeral"` is the TRUE answer. The literal and the
+# derivation agree on every developer machine and in CI. Only a
+# Postgres-configured deployment can falsify the literal — which is exactly the
+# environment no test in this repository is permitted to create, because
+# connecting to a database is out of scope by project rule.
+#
+# SO THE STATE IS INJECTED, NOT CONFIGURED. These tests monkeypatch
+# `experiment_repository.storage_status`, which is the one function `/health`
+# already serves verbatim and the one `/about` now reads. NOTHING here sets
+# `PGHOST`, opens a connection, or reaches a database: the whole point of
+# `storage_status` is that it opens nothing, and substituting it keeps that
+# property absolutely rather than by inspection.
+#
+# `test_about_reports_durable_when_the_repository_does` is the NEGATIVE CONTROL.
+# It is the one test in this file that FAILS against the retired literal, and it
+# is why the `== "ephemeral"` assertion above is allowed to stay.
+
+
+def _pin_storage_state(monkeypatch, state: str) -> None:
+    """Make `storage_status` report one state, opening nothing.
+
+    The whole block is substituted rather than only `state`, because `/health`
+    serves this dict verbatim and a half-real dict would let a test assert
+    agreement between two halves of one fabricated value. Every key is spelled
+    out so the shape stays the shape the route contract publishes.
+    """
+    from isaac_api import experiment_repository
+
+    monkeypatch.setattr(
+        experiment_repository,
+        "storage_status",
+        lambda env=None: {
+            "configured": state != "ephemeral",
+            "backend": "postgres" if state == "durable" else "filesystem",
+            "durable": state == "durable",
+            "state": state,
+            "run_projection": {"authoritative": False, "last_pass": None},
+        },
+    )
+
+
+def test_about_reports_durable_when_the_repository_does(client, monkeypatch):
+    """THE NEGATIVE CONTROL. Fails against the hardcoded `"ephemeral"` literal.
+
+    Against the defect this reads::
+
+        AssertionError: assert 'ephemeral' == 'durable'
+
+    which is the hosted defect reproduced in a unit test, with no database
+    anywhere near it.
+    """
+    _pin_storage_state(monkeypatch, "durable")
+    assert client.get("/api/about").json()["persistence"] == "durable"
+
+
+def test_about_reports_unavailable_when_the_repository_does(client, monkeypatch):
+    """The third state, which is neither reassuring nor ephemeral.
+
+    `unavailable` means a database IS configured and experiment records are NOT
+    reaching it. Reporting `ephemeral` there would be the mirror image of the
+    original defect — it would tell a reader their work is going somewhere
+    temporary while saying nothing about the database that is failing them.
+
+    ~~"in fact it is not being accepted at all"~~ — corrected in review, before
+    this file was a day old, because it is the same over-reading of `state` that
+    the copy defect downstream came from. `unavailable` has TWO causes and only
+    one of them refuses the write; see
+    `test_the_pgdatabase_gate_degrades_to_a_working_create_that_is_not_durable`
+    below, which measures the other.
+    """
+    _pin_storage_state(monkeypatch, "unavailable")
+    assert client.get("/api/about").json()["persistence"] == "unavailable"
+
+
+@pytest.mark.parametrize("state", ["ephemeral", "durable", "unavailable"])
+def test_about_and_health_cannot_disagree_about_persistence(client, monkeypatch, state):
+    """The property the published description now claims, asserted directly.
+
+    The description says the two operations "cannot disagree about it". That was
+    an intention while `/about` held a literal; it is a consequence now that both
+    read the same function. This asserts the consequence in all three states
+    rather than trusting the sentence.
+
+    AND IT IS EXACTLY AS BOUNDED AS THE SENTENCE NOW IS. Both requests are served
+    by ONE process here, which is the only scope in which the claim holds:
+    `storage_status` reads `storage_failure()`, which `experiment_repository`'s
+    module docstring documents as process-local ("each replica observes its own
+    failures"). Nothing in this repository can test across replicas, so the
+    published sentence says "within one server process" rather than resting on a
+    test whose single-process scope is invisible in its name.
+    """
+    _pin_storage_state(monkeypatch, state)
+    about = client.get("/api/about").json()
+    health = client.get("/api/health").json()
+    assert about["persistence"] == health["experiment_storage"]["state"] == state
+
+
+# --- `unavailable` has TWO causes, and copy that assumes one of them is false --
+#
+# THE DEFECT THIS PINS. The change that derived `persistence` also rewrote the
+# five governance surfaces that render it, and the `unavailable` copy asserted
+# "Creating an experiment fails outright rather than storing one temporarily, so
+# nothing is put somewhere for a while and then lost." `lib/labels.ts` carried
+# the same belief already ("Creating an experiment will not work until it does").
+#
+# That is true when the database is SELECTED and not answering. It is false when
+# the `PGDATABASE` gate refuses the configured NAME: `_postgres_available()`
+# returns False, `repository()` hands back `FilesystemExperimentRepository`, and
+# the create SUCCEEDS into the working directory — which its own docstring
+# documents as the intended degradation. A scientist whose operator mistyped
+# `PGDATABASE` is told the create fails, gets a record, and concludes it is
+# durable.
+#
+# NO DATABASE IS CONTACTED, and that is enforced rather than reasoned about:
+# `db_write.connect_psycopg2` is replaced by a raiser, so if the gate ever stops
+# refusing this configuration the test fails loudly instead of opening a socket.
+# The one function under test opens nothing by design.
+
+
+@pytest.fixture()
+def _clean_storage_observation():
+    """`_storage_failure` is a MODULE GLOBAL, so it must not leak either way.
+
+    One of these tests deliberately induces a durable-write failure. Without this
+    the observation would survive into every later test in the process and make
+    `storage_status()` report `unavailable` for reasons that test knows nothing
+    about — the same shape of cross-test leak the schema-cache fixture in
+    `test_system_enum_fields.py` exists to prevent.
+    """
+    from isaac_api import experiment_repository
+
+    experiment_repository.forget_storage_failure()
+    yield
+    experiment_repository.forget_storage_failure()
+
+
+def test_the_pgdatabase_gate_degrades_to_a_working_create_that_is_not_durable(
+    tmp_path, monkeypatch, _clean_storage_observation
+):
+    """`state: unavailable`, `backend: filesystem`, and `POST /api/experiments` -> 201.
+
+    The two facts a surface must not collapse: the state says records are not
+    reaching a configured database, and the create nevertheless succeeds — into
+    storage the same block reports as `durable: false`.
+    """
+    from fastapi.testclient import TestClient
+
+    from isaac_api import db_write, experiment_repository
+    from isaac_api.app import create_app
+
+    def _never(*args, **kwargs):
+        raise AssertionError("this test must not open a database connection")
+
+    monkeypatch.setattr(db_write, "connect_psycopg2", _never)
+    monkeypatch.setenv("PGHOST", "db.example.invalid")
+    monkeypatch.setenv("PGDATABASE", "not_the_expected_name")
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+
+    status = experiment_repository.storage_status()
+    assert status["state"] == "unavailable"
+    assert status["backend"] == "filesystem"
+    assert status["configured"] is True
+    assert status["durable"] is False
+    assert isinstance(
+        experiment_repository.repository(),
+        experiment_repository.FilesystemExperimentRepository,
+    )
+
+    local = TestClient(create_app(), raise_server_exceptions=False)
+    assert local.get("/api/about").json()["persistence"] == "unavailable"
+    created = local.post("/api/experiments", json={"title": "degraded create"})
+    # THE ASSERTION THE RETIRED COPY WOULD HAVE FAILED.
+    assert created.status_code == 201, created.text
+    listed = local.get("/api/experiments").json()["experiments"]
+    assert [row["id"] for row in listed] == [created.json()["id"]]
+
+
+def test_the_selected_database_not_answering_refuses_the_create(
+    tmp_path, monkeypatch, _clean_storage_observation
+):
+    """The OTHER cause of the same state, so the pair is measured and not assumed.
+
+    Same `state`, opposite outcome: `backend: postgres` and a typed `503` having
+    written nothing. Still no connection — the connector itself is what raises.
+    """
+    from fastapi.testclient import TestClient
+
+    from isaac_api import db_recon, db_write, experiment_repository
+    from isaac_api.app import create_app
+
+    class _Down(Exception):
+        pass
+
+    def _down(*args, **kwargs):
+        raise _Down("no connection is attempted in this test")
+
+    monkeypatch.setattr(db_write, "connect_psycopg2", _down)
+    monkeypatch.setenv("PGHOST", "db.example.invalid")
+    monkeypatch.setenv("PGDATABASE", db_recon.EXPECTED_DATABASE)
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+
+    local = TestClient(create_app(), raise_server_exceptions=False)
+    created = local.post("/api/experiments", json={"title": "refused create"})
+    assert created.status_code == 503, created.text
+    assert created.json()["error"] == "experiment_storage_unavailable"
+
+    status = experiment_repository.storage_status()
+    assert status["state"] == "unavailable"
+    assert status["backend"] == "postgres"
+    assert local.get("/api/experiments").json()["experiments"] == []
+
+
+def test_about_persistence_is_always_one_of_the_three_named_states(client):
+    """No fourth value, and the names are the repository's own constants — not a
+    second copy of three strings that could drift from the ones `/health` uses."""
+    from isaac_api.experiment_repository import (
+        STORAGE_STATE_DURABLE,
+        STORAGE_STATE_EPHEMERAL,
+        STORAGE_STATE_UNAVAILABLE,
+    )
+
+    assert client.get("/api/about").json()["persistence"] in {
+        STORAGE_STATE_DURABLE,
+        STORAGE_STATE_EPHEMERAL,
+        STORAGE_STATE_UNAVAILABLE,
+    }
 
 
 def test_about_build_commit_matches_build_commit_helper_when_unset(client):

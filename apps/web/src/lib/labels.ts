@@ -599,19 +599,95 @@ export const LABELS = {
    * worse than saying it: the reader is about to press a button that will fail,
    * and the honest thing is to tell them before they press it rather than after.
    *
-   * IT DESCRIBES THE CONSEQUENCE ACCURATELY, which took some care. Creating does
-   * not silently produce a temporary record — `POST /api/experiments` returns 503
-   * and writes nothing at all — so "may be lost" would be wrong in the direction
-   * that matters. "Will not work until it does" is what actually happens.
+   * ~~IT DESCRIBES THE CONSEQUENCE ACCURATELY, which took some care. Creating
+   * does not silently produce a temporary record — `POST /api/experiments`
+   * returns 503 and writes nothing at all — so "may be lost" would be wrong in
+   * the direction that matters. "Will not work until it does" is what actually
+   * happens.~~
+   *
+   * THAT WAS FALSE FOR HALF OF THIS STATE, AND IT IS PRE-EXISTING — this comment
+   * and the sentence it justified were both on `origin/main` and were not
+   * introduced by the `/api/about` `persistence` slice; they are corrected here
+   * because they are the same sentence one screen away from that slice's own,
+   * and this one renders on My Experiments.
+   *
+   * `unavailable` HAS TWO CAUSES — `experiment_repository.storage_status` says so
+   * itself: "because the PGDATABASE gate refused it, or because it stopped
+   * answering." They behave OPPOSITELY, measured over HTTP with no database
+   * contacted (outbound connections stubbed to raise):
+   *
+   *  · `PGDATABASE` not the expected name -> `_postgres_available()` is false ->
+   *    `repository()` is the FILESYSTEM repository -> `state: "unavailable"`,
+   *    `backend: "filesystem"`, and `POST /api/experiments` answers **201**. The
+   *    record is created and listed, in a working directory that is not durable.
+   *    `_postgres_available`'s docstring documents this as intended degradation.
+   *  · the database stops answering -> `state: "unavailable"`,
+   *    `backend: "postgres"`, and the create answers **503
+   *    experiment_storage_unavailable** having written nothing.
+   *
+   * So "that database is not answering" described only the second cause, and
+   * "will not work until it does" denied exactly what the first one does. A
+   * scientist whose operator mistyped `PGDATABASE` would be told creating will
+   * not work, get a record, and reasonably conclude it was stored durably.
+   *
+   * THE SENTENCE NOW STATES WHAT HOLDS UNDER BOTH, and does not pretend to know
+   * which applies: this screen branches on `experiment_storage.state`, and only
+   * `experiment_storage.backend` separates the two. It still tells the reader the
+   * bad news before they press the button, which is the whole reason it exists.
+   *
+   * ~~"Creating one may fail outright; if it succeeds, the record is kept only in
+   * this server's workspace and is lost when the server restarts."~~ CORRECTED
+   * 2026-08-28, one commit after it shipped, and struck rather than replaced
+   * because it is the SAME defect class this change exists to fix — it told the
+   * reader their work was ephemeral in a state where it can be durable.
+   *
+   * THE THIRD OUTCOME THE PAIR ABOVE OMITS. The two-cause split is measured and
+   * correct as far as it goes, but it is a split of CAUSES, not of OUTCOMES, and
+   * the success branch of the first cause has two of them. `repository()`
+   * (`experiment_repository.py`) selects the backend from `_postgres_available()`
+   * ALONE — it never consults `storage_failure()` — while `storage_status()`
+   * reports `unavailable` whenever a failure has been RECORDED and not yet
+   * cleared. So with `backend: "postgres"` the Postgres repository is still the
+   * one that runs, and the recorded failure may be stale: it may have come from a
+   * READ path, or from `_not_provisioned` (a migration not applied) while writes
+   * work, or the database may simply have recovered. If that write then succeeds,
+   * the record is IN PostgreSQL and IS durable, and `_note_storage_success()`
+   * clears the flag.
+   *
+   * SO THIS LINE NO LONGER NAMES A STORAGE LOCATION OR A RESTART. What is true
+   * under every one of the three outcomes is narrower than the old sentence and
+   * still worth saying before the button is pressed: a database is meant to hold
+   * these and is not getting them, the attempt may fail outright, and nothing
+   * this screen has read establishes that a record created now is stored
+   * durably. Note that it stops one step short of `settingsContent.ts`'s
+   * "nothing you create in this state is durable" for the same reason — that
+   * absolute is false on the recovered-write path, and understating persistence
+   * is precisely the failure being corrected here.
    *
    * The two sentences above deliberately never mention this state, and the note
    * on `unknown` above still holds for `unknown` — that one renders nothing,
    * because there the app has established NOTHING. Here it has established
    * something bad, which is a different thing from knowing nothing.
    */
+  /*
+   * THE ANTECEDENT WAS CORRECTED 2026-08-29, one commit after this string was
+   * written, by independent review. ~~"and they are not reaching it"~~ is a
+   * PRESENT-TENSE assertion, and it is FALSE under the third outcome the same
+   * PR discovered: `storage_status()` reads a RECORDED failure and opens no
+   * connection, while `repository()` never consults that record at all, so a
+   * stale or recovered failure leaves the Postgres repository running and a
+   * succeeding write IS durable. The consequence clause was hedged and the
+   * antecedent was not — which is the same defect one clause to the left.
+   *
+   * This site was ALSO missed by the sweep that found the four in
+   * `settingsContent.ts`, because the phrase is split across a `+`
+   * concatenation and no single-line grep reaches it. That is the second time
+   * in this PR a text sweep has missed a site for a mechanical reason.
+   */
   storageUnavailable:
-    'This deployment saves experiments in its own database, and that database is not ' +
-    'answering. Creating an experiment will not work until it does.',
+    'A database is configured to hold experiments for this deployment, and the backend has ' +
+    'recorded that they were not reaching it. Creating one may fail outright, and nothing on ' +
+    'this screen establishes that a record created now is stored durably.',
 
   actionLaunchGuidedDemo: 'Launch Guided Demo',
   launchGuidedDemoBody:

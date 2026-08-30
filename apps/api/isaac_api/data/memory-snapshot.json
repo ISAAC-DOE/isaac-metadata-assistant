@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "cb022a4e11a9862fe8a82274f6001c97dc877aeb227c23fea9d281abd8d58426"
+        "sha256": "ebf3bb791aafe782019c3d2d2cf0b0a7c52cf3d19da1621ebcd54d006d63d367"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "6f5beaa494e3116767559bc682a13c9a4f257c4384b5667c680d236deb154e32"
+        "sha256": "04624cabba4ab27c8a58672c4fba543ceffa0531b2d4fd1b39f8ece54a98510c"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10540,7 +10540,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "a448ec5af175f98772f72c3f35717c2fd6d4cd47e1bf3d812eec27e626ec4b06"
+        "sha256": "04d9b1d3f320bc79786dbc5411482dfb76f1b4995025188abae148b1691e83a2"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10568,11 +10568,11 @@
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "9be710e081f4a37b03ab67bff4fb1ff3476bf75582be16797b32336ee7cb3ca4"
+        "sha256": "755f3365a05fa7efac9312e299502aa9a8044b0ac8744bee716af366488cc2bf"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "c0d771559838f6de5dc39b201f00bcccc046cd866bca96bccf44bfbb8d653a4a"
+        "sha256": "77dff34da4c7bfe449afaf5026a5b7ab7a67365a532ad0f17d5f54c7592e6768"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10624,7 +10624,7 @@
       },
       {
         "path": "docs/deployment.md",
-        "sha256": "3ead1f5982bf4004cd0d3cd8cdd1d78143945af8b6420c6281a2007e0317eb72"
+        "sha256": "9a72d0f309a863df14c0da5f18e19fdc84f68da32615cd8167fa207decaf05b8"
       },
       {
         "path": "docs/extraction.md",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "641312ecef7e12bdc73fc2041ecebe8db11a59b7eb8c71b6d521a0b7f9a4ab96"
+    "served_manifest_fingerprint": "3593e05372f81404f9d798f8ace8cdf3c64c2a543e4e1f818ec5bd38808cd704"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
