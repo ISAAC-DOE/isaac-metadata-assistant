@@ -5,20 +5,44 @@ THE TWO INVARIANTS THIS MODULE EXISTS TO ENFORCE
 
 **(1) Nothing captured is ever silently discarded.** A scientist writes things
 down that the extractor cannot place: a sentence about why a scan was re-run, a
-column heading nothing recognises, a remark in a transcript. Every pipeline in
+column heading nothing recognises, a remark in a transcript. ~~Every pipeline in
 this repository drops such content on the floor — quietly, with no surface saying
-so — and **it still does: no pipeline was rewired when this module was added.**
-A :class:`Note` is the destination that now EXISTS and is where such content WILL
-land once a producer is wired to it; today the only producer is a person typing
-into the Unmapped Notes panel, whose captures all carry
-``source="typed_note"``. The intended first automatic producer is the
-``unrecognised_labels`` list that ``providers/extraction.py`` already computes
-and then discards — wiring that seam is a later slice, and until it lands nothing
-in this application creates a ``csv_column``, ``transcript``,
-``file_listing_line`` or ``extraction_residue`` note, sets a ``run_id``, or
-supplies a ``candidate_field_path``. The vocabulary exists ahead of its
-producers deliberately; **reading it as evidence that the producers exist is the
-misreading this paragraph is worded to prevent.**
+so — and **it still does: no pipeline was rewired when this module was added.**~~
+— **NARROWED 2026-08-29, in the same sweep as the paragraph below and for the same
+reason.** "No pipeline was rewired when this module was added" is a historical claim
+and stays true; "it still does", stated of EVERY pipeline, does not. The transcript
+reader (``routes.post_transcript``) stores every segment as a note — its own
+description says so outright — so it is a reading path that no longer drops. The
+EXTRACTION pipeline still does, and that is the case this invariant is still waiting
+on. A :class:`Note` is the destination that EXISTS, and is where such content WILL
+land once the remaining producers are wired to it.
+
+~~"today the only producer is a person typing into the Unmapped Notes panel, whose
+captures all carry ``source="typed_note"``. The intended first automatic producer is
+the ``unrecognised_labels`` list that ``providers/extraction.py`` already computes and
+then discards — wiring that seam is a later slice, and until it lands nothing in this
+application creates a ``csv_column``, ``transcript``, ``file_listing_line`` or
+``extraction_residue`` note, sets a ``run_id``, or supplies a
+``candidate_field_path``."~~ — **CORRECTED 2026-08-29: A SECOND PRODUCER SHIPPED AND
+THIS PARAGRAPH DID NOT MOVE, so the file kept asserting the absence of three things it
+was already doing.** ``routes.post_transcript`` (``POST
+/api/experiments/{id}/transcript``) creates a note per transcript segment and does ALL
+THREE at once. Measured over HTTP against a record with one run, finalizing a
+three-sentence transcript with ``run_id`` set: three notes, every one
+``source="transcript"``, every one carrying that ``run_id``, and the segment *"The
+temperature was 300 K."* carrying ``candidate_field_path="context.temperature_K"`` with
+its ``candidate_rule``. It is kept struck rather than rewritten because a reader who
+knows the paragraph once said "nothing creates a ``transcript`` note" will otherwise
+re-derive it from the vocabulary and reach the same wrong conclusion.
+
+**WHAT IS STILL TRUE, and it is the half the paragraph existed for.** ``csv_column``,
+``file_listing_line`` and ``extraction_residue`` still have **no producer** — the
+``unrecognised_labels`` list that ``providers/extraction.py`` computes and then
+discards is still the intended first one for ``extraction_residue``, and wiring that
+seam is still a later slice. So the vocabulary is still wider than its producers, just
+by three members rather than four; **reading it as evidence that every producer exists
+is the misreading this paragraph is worded to prevent.** The two that DO produce are
+``typed_note`` (a person typing into the Unmapped Notes panel) and ``transcript``.
 
 What invariant (1) governs is therefore what happens to content that DOES reach
 here. Dismissal is a STATE (:data:`NOTE_DISMISSED`), reached by an explicit act,
@@ -124,11 +148,14 @@ remaining **7** — the six ``system.configuration.*`` paths and
 that is unchanged: they are ``field_level``-unclassified, and the record-level write
 surface is derived by filtering on ``LEVEL_EXPERIMENT``, so they are excluded without a
 special case rather than by a list somebody has to remember to keep.
-
 The per-path answer is derived and served rather than described in prose, at
 ``routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT`` and on the wire as
 ``value_writable_field_paths``, so a surface can be true about the path in front of
-the reader instead of true on average.
+the reader instead of true on average. **The WHERE is served the same way**, at
+``routes.NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD`` / ``record_writable_field_paths``
+— added precisely because this paragraph is one of several prose enumerations of the
+same fact, they went stale at different times and in different directions, and a
+served derivation cannot.
 """
 
 from __future__ import annotations
@@ -628,9 +655,13 @@ def map_note(note: Note, *, field_path: str, at: str) -> Note:
     copied. **For 7 of the 25 mappable paths NO SUCH PATH EXISTS.** Measured over HTTP
     against every write route this application has, on a created record with one run:
     the six ``system.configuration.*`` paths and ``timestamps.created_utc`` are refused
-    by all five — ``422 unrecognized_field`` from the record/run answer and edit routes
-    and from ``PATCH .../runs/{run_id}``, ``422 not_overridable`` from ``POST
-    .../runs/{run_id}/overrides``. A sentence that is true of 18 paths out of 25 is not
+    by all ~~five~~ **six** — ``422 unrecognized_field`` from the record/run answer and
+    edit routes and from ``PATCH .../runs/{run_id}``, ``422 not_overridable`` from
+    ``POST .../runs/{run_id}/overrides``. (CORRECTED 2026-08-29: the count said five
+    while the enumeration beside it already named six — record ``answers``, record
+    ``edit``, run ``answers``, run ``edit``, ``PATCH`` and ``overrides``. Nothing about
+    the seven moved; re-measured over all six, they are still refused by every one.)
+    A sentence that is true of 18 paths out of 25 is not
     "true on average" in the one place a scientist reads before choosing a target; it
     is false for the path they chose. Which paths do have a route is served per path as
     ``value_writable_field_paths`` — see

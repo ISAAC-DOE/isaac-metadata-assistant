@@ -57,17 +57,24 @@ from isaac_api.mcp.deployment import (
     LOCAL_LOOPBACK,
     LOCAL_SCOPES_ENV,
     LOCAL_SESSION_ENV,
+    OAUTH_RESOURCE_SERVER,
     RESERVED_BINDING_NAMES,
     LocalLoopbackDeployment,
     Principal,
     UnconfiguredDeployment,
+    resolve_binding,
 )
 from isaac_api.mcp.policy import FORBIDDEN_PATH_TOKENS, OPERATIONS, PERMITTED_TOOL_NAMES, Scope
 from isaac_api.mcp.server import (
     DEPLOYMENT_UNCONFIGURED,
+    HEADER_MISMATCH,
     INSUFFICIENT_SCOPE,
     INVALID_PARAMS,
+    LEGACY_PROTOCOL_VERSION,
     MCP_PROTOCOL_VERSION,
+    MODERN_PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    UNSUPPORTED_PROTOCOL_VERSION,
 )
 from isaac_api.mcp.transport import (
     MAX_REQUEST_BYTES,
@@ -228,9 +235,44 @@ def test_no_value_but_the_registered_binding_name_mounts_anything(workspace, val
     ``LOCAL_LOOPBACK`` and ``local_loopback`` are in the list on purpose: an
     operator's near miss must fail closed, not fall through to a case-insensitive
     or punctuation-insensitive match somebody added for convenience.
+
+    ``oauth-resource-server`` is **deliberately not in this list**, and the test
+    below is why — it does something stronger than mounting nothing.
     """
     workspace.setenv(DEPLOYMENT_ENV, value)
     assert _mcp_route_paths(build_app()) == []
+
+
+def test_an_unconfigured_oauth_selection_refuses_to_BOOT_not_merely_to_serve(workspace):
+    """The one binding name that does something stronger than mounting nothing.
+
+    IT WAS NEARLY LOST SILENTLY, AND THAT IS WORTH RECORDING. Until
+    ``oauth-resource-server`` was implemented it reached the sweep above for free
+    through ``RESERVED_BINDING_NAMES``; implementing it removed it from that table
+    and **removed the case from the parametrization at the same time**, with this
+    file staying green. A list derived from a set a feature can remove itself from
+    shrinks exactly when the new coverage is most wanted.
+
+    Written as its own test rather than added back to the sweep because the
+    correct assertion is a different, stronger one. Both halves matter and are
+    asserted separately:
+
+    * ``resolve_binding`` still fails closed — an incomplete configuration is the
+      unconfigured binding, so nothing serves even if the boot check were removed;
+    * ``create_app`` **raises**, so a container configured this way does not start.
+      The degraded run is the dangerous one: an operator who set the variable
+      believes tokens are being verified, and a process that quietly serves no MCP
+      route is indistinguishable from a working one.
+    """
+    workspace.setenv(DEPLOYMENT_ENV, OAUTH_RESOURCE_SERVER)
+
+    resolved = resolve_binding()
+    assert isinstance(resolved, UnconfiguredDeployment)
+    assert resolved.serves_transport is False
+
+    with pytest.raises(RuntimeError) as caught:
+        build_app()
+    assert OAUTH_RESOURCE_SERVER in str(caught.value)
 
 
 def test_a_misconfigured_scope_list_mounts_nothing_rather_than_mounting_a_reader(
@@ -807,20 +849,85 @@ def test_a_client_that_cannot_accept_json_is_refused(workspace):
 
 
 def test_a_client_declaring_another_protocol_revision_is_refused(workspace):
+    """**THE REFUSAL BODY CHANGED SHAPE HERE, AND THAT IS THE POINT OF THE CHANGE.**
+
+    It used to be this transport's own invention — ``TRANSPORT_REFUSED`` with
+    ``data.code == "unsupported_protocol_version"`` — and a modern client cannot
+    recognise that. ``2026-07-28`` allocates a code for exactly this
+    (``-32022``, ``UnsupportedProtocolVersionError``) and keys the whole
+    dual-era fallback on whether the ``400`` body carries *"a recognized modern
+    JSON-RPC error"*: recognised means *retry with a supported version*,
+    unrecognised means *fall back to ``initialize``*. Emitting the old body told
+    every modern client to give up on a server that would have served it.
+    """
     _, client = configured(workspace)
     response = rpc(client, "ping", headers={"mcp-protocol-version": "2024-11-05"})
     assert response.status_code == 400
-    assert response.json()["error"]["data"]["supported"] == [MCP_PROTOCOL_VERSION]
+    error = response.json()["error"]
+    assert error["code"] == UNSUPPORTED_PROTOCOL_VERSION
+    assert error["message"] == "Unsupported protocol version"
+    assert error["data"] == {
+        "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
+        "requested": "2024-11-05",
+    }
+    # Both served revisions are served, which is what "dual-era" means — and the
+    # modern one is served on the modern TERMS, which is why it carries the two
+    # headers `2026-07-28` marks REQUIRED. A modern request that omits them is a
+    # `HeaderMismatch`, not a served request; that is asserted separately.
     assert rpc(
-        client, "ping", headers={"mcp-protocol-version": MCP_PROTOCOL_VERSION}
+        client, "ping", headers={"mcp-protocol-version": LEGACY_PROTOCOL_VERSION}
+    ).status_code == 200
+    assert rpc(
+        client,
+        "ping",
+        headers={
+            "mcp-protocol-version": MODERN_PROTOCOL_VERSION,
+            "mcp-method": "ping",
+        },
     ).status_code == 200
 
 
-def test_the_three_implementation_defined_error_codes_are_distinct(workspace):
-    """A duplicated code is a client mis-branching on an authorization failure."""
+def test_the_three_isaac_error_codes_are_distinct_and_outside_the_reserved_range(
+    workspace,
+):
+    """**THE SECOND ASSERTION IS INVERTED FROM WHAT IT USED TO BE, AND ONE OF THE
+    THREE CODES WAS A MUST NOT.**
+
+    It read ``assert all(-32099 <= code <= -32000 for code in codes)`` — the codes
+    were IN the JSON-RPC implementation-defined block, which is where JSON-RPC
+    2.0 says implementation-defined codes belong. ``2026-07-28`` partitions that
+    block and leaves an implementation nowhere inside it:
+
+    * *"``-32000`` to ``-32019`` — legacy. … New codes **MUST NOT** be allocated
+      in this sub-range, and new implementations **SHOULD NOT** use codes from
+      this sub-range at all."*
+    * *"``-32020`` to ``-32099`` — reserved for the MCP specification. …
+      Implementations **MUST NOT** emit any code from this sub-range that is not
+      defined by this specification."*
+
+    And ``-32002``, which this server emitted for **insufficient scope**, is named
+    individually: *"Implementations of this protocol version **MUST NOT** emit
+    these codes: ``-32002`` — resource not found."* The harm is real rather than
+    formal — the same section tells clients they *"**SHOULD** still accept
+    ``-32002``"* from older servers as *resource not found*, so a conforming
+    client could read a scope refusal as a missing resource.
+
+    Declaring ``2026-07-28`` is what turned a collision into a MUST NOT, so it is
+    fixed in the same change. The destination is the specification's own:
+    *"New error codes for purposes not defined by this specification **SHOULD** be
+    allocated outside the JSON-RPC reserved range (``-32768`` to ``-32000``)."*
+    """
     codes = {DEPLOYMENT_UNCONFIGURED, INSUFFICIENT_SCOPE, TRANSPORT_REFUSED}
     assert len(codes) == 3
-    assert all(-32099 <= code <= -32000 for code in codes)
+    for code in codes:
+        assert not (-32768 <= code <= -32000), code
+    # And specifically not the three the specification allocates, nor the two it
+    # retires — a name-based check would pass while the numbers collided.
+    assert codes.isdisjoint({-32020, -32021, -32022, -32002, -32042})
+    # The MCP-allocated codes this server DOES emit are emitted with the
+    # specification's meanings and are not reused for anything of ISAAC's.
+    assert {HEADER_MISMATCH, UNSUPPORTED_PROTOCOL_VERSION} == {-32020, -32022}
+    assert codes.isdisjoint({HEADER_MISMATCH, UNSUPPORTED_PROTOCOL_VERSION})
 
 
 # ==========================================================================
@@ -1275,17 +1382,20 @@ def test_the_env_precheck_is_the_outer_gate_and_is_load_bearing(workspace, monke
 def test_the_loopback_guard_is_load_bearing(workspace, monkeypatch):
     """Disable it and a remote peer is served — so the 403 is this check, not luck.
 
-    **This control is also a warning, and must not be read as an endorsement.**
-    The flip it performs — ``requires_loopback_peer=False`` — switches off THREE
-    guards, not one: the peer check, the proxy-header refusal and the
-    cross-origin/DNS-rebinding refusal all sit behind that single flag in
-    ``transport.py``. Serving a remote peer 200 is the correct assertion *here*,
-    because this is a control on an unmountable binding in a test process. It
-    would be the wrong thing to reproduce in a real binding: an
-    ``edge-issued-bearer`` author who copies this flip to admit edge traffic
-    silently disables the other two on the one binding that is internet-adjacent.
-    See the comments at ``transport.py``'s ``if self._loopback_only`` and in
-    ``deployment.py``; splitting the flag is a follow-up.
+    ~~"**This control is also a warning …** The flip it performs —
+    ``requires_loopback_peer=False`` — switches off THREE guards, not one …
+    splitting the flag is a follow-up."~~ **THE FOLLOW-UP HAPPENED, and the
+    warning is kept struck rather than deleted because it is the reason it
+    happened.** ``deployment.DeploymentBinding`` now declares three independent
+    attributes — ``requires_loopback_peer``, ``refuses_proxy_headers``,
+    ``requires_loopback_origin`` — each read in ``transport.py`` through
+    ``getattr`` with the SAFE value as its default. The first binding the warning
+    predicted is ``mcp/oauth.py``, and it answers all three with its own reason.
+
+    So this control now flips ONE guard and the other two still hold, which is
+    what ``test_the_proxy_and_origin_guards_survive_the_peer_flip`` below asserts.
+    ``local-loopback`` is unchanged in every respect: it declares all three
+    ``True``, which is exactly what the single flag already gave it.
     """
     import isaac_api.mcp.transport as transport_module
 
@@ -1300,6 +1410,33 @@ def test_the_loopback_guard_is_load_bearing(workspace, monkeypatch):
     )
     reopened = build_app()
     assert rpc(TestClient(reopened, client=("203.0.113.9", 5000)), "ping").status_code == 200
+
+
+def test_the_proxy_and_origin_guards_survive_the_peer_flip(workspace, monkeypatch):
+    """The half of the split that would otherwise be invisible.
+
+    Before the split, flipping ``requires_loopback_peer`` disabled the
+    proxy-header and DNS-rebinding refusals as a side effect, and no test could
+    see it because the only binding that set the flag set it ``True``. With the
+    same flip applied here, a remote peer is served — and a remote peer carrying a
+    proxy header, or a foreign ``Origin``, is still refused.
+
+    Reading this test going green after a future edit that re-merges the flags
+    would be reading it wrong: it would go RED, which is the point.
+    """
+    import isaac_api.mcp.transport as transport_module
+
+    monkeypatch.setattr(
+        transport_module,
+        "resolve_binding",
+        lambda env=None: _forced(LocalLoopbackDeployment(), requires_loopback_peer=False),
+    )
+    workspace.setenv(DEPLOYMENT_ENV, LOCAL_LOOPBACK)
+    client = TestClient(build_app(), client=("203.0.113.9", 5000))
+
+    assert rpc(client, "ping").status_code == 200
+    assert rpc(client, "ping", headers={"X-Forwarded-For": "1.2.3.4"}).status_code == 403
+    assert rpc(client, "ping", headers={"Origin": "https://evil.invalid"}).status_code == 403
 
 
 def test_the_scope_check_is_load_bearing(workspace, monkeypatch):

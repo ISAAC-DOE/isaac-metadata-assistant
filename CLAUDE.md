@@ -723,7 +723,13 @@ Current state:
   reach a RECORD (which has no field to qualify it). Do not collapse those two.
 
   **Still not done, and named rather than implied:** the campaign-sheet fields (technique, facility,
-  sample, contributors) have no capture surface, so a record can be finished but not richly
+  sample, contributors) ~~have no capture surface~~ — **CORRECTED 2026-08-30 and the file
+  contradicted itself here: §11 already measured "5 writable via `PATCH .../runs/{id}`, 13 via
+  `/overrides`, 7 refused by all five". Probed over HTTP: `field:system.facility.site`,
+  `field:sample.material.name`, `field:system.technique` and `block:attribution` all return
+  **200**. The TRUE residue is the 7 paths no route accepts — the six `system.configuration.*`
+  and `timestamps.created_utc` — and, until 2026-08-30, the absence of a RECORD-level surface
+  reaching any of them**, so a record could be finished but not richly
   described; `POST /ingestion/csv/preview` has no route that APPLIES a preview; ~~the native
   assistant and voice remain provider seams with no route invoking them~~ — **CORRECTED 2026-08-24,
   and this clause was FALSE WHEN IT WAS COMMITTED, which is why it is struck rather than edited.**
@@ -732,7 +738,8 @@ Current state:
   51435e7 32fe7a3` confirms that commit was already in history when this paragraph was written.
   `POST /api/transcription` shipped earlier still, in `72e2206` (2026-08-17). Both answer **`501`
   `no_provider_configured`** in every deployment, `POST /api/experiments/{id}/transcript` answers
-  **`200`** with no provider involved at all, and `/api/assistant/ask` is one of the **69** operations
+  **`200`** with no provider involved at all, and `/api/assistant/ask` is one of the ~~69~~ **71** operations (re-measured 2026-08-30; the test's
+  own comments record 68→69 assistant/ask, 69→70 rename, 70→71 discard)
   `test_about_and_openapi.py` pins. So the sentence was not describing a gap; it was describing
   absent *routes* that existed. **The true residue, which is what the clause was reaching for and
   what still holds: no product screen advertises the assistant seam** — deliberately, per
@@ -907,8 +914,12 @@ Current state:
   conflation recurred four times. `official_validator_ran` is now published, derived at the route
   from `official_report is not None`. Two payloads that differ only in that field were shown to be
   **identical on every other key**, asserted as a property. **The sixth consumer was invisible to
-  every prior sweep**: `lib/experimentGraph.ts` contains **2 NUL bytes**, so `rg`/`grep` dropped it
-  and exited 0. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
+  every prior sweep**: ~~`lib/experimentGraph.ts` contains **2 NUL bytes**, so `rg`/`grep` dropped it
+  and exited 0.~~ — **FALSE AT THIS HEAD, measured twice independently on 2026-08-30: 369 files
+  under `apps/web/src`, ZERO containing a NUL byte; that file's NUL count is 0; `rg -l` and
+  `rg -al` return the identical 63 files.** The file was rewritten since. The finding was real
+  when written and the `-a` habit costs nothing — but **a future session must not skip an `rg`
+  sweep of `apps/web/src` on the strength of this**, and must not cite it as a live trap. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
   through an adapter that returns a *different type*, was rendering **"FAIL — Invalid against
   official ISAAC schema v1.05"** about a record `validate_official` never opened.
 
@@ -972,12 +983,40 @@ Current state:
   needs its own argument.
 
   **A SCIENTIST CAN NOW RENAME A RECORD** (#184, `PATCH /api/experiments/{id}`, operations 69 →
-  70). **Discard was NOT built, and the reason is the finding:** §15 enumerates, per table, only
+  70). ~~**Discard was NOT built, and the reason is the finding:** §15 enumerates, per table, only
   `INSERT`s and `UPSERT`s — **no committed sentence permits a `DELETE`** — while
   `db_write.WriteStatementPolicy` **does not refuse one** (measured: `DELETE` against all eight
   app-owned tables is accepted; only `records` is refused). **Mechanical permission is not
   authorization.** A hard delete would also need **eight statements in dependency order across
-  seven referencing tables, six of them append-only history**, none carrying `ON DELETE`.
+  seven referencing tables, six of them append-only history**, none carrying `ON DELETE`.~~
+
+  ***EVERY SENTENCE OF THAT PARAGRAPH IS NOW FALSE, AND ONE OF THEM WAS FALSE WHEN IT WAS
+  WRITTEN. It is struck rather than deleted because "discard was not built" is exactly the kind
+  of claim a future session acts on — by building it a second time.*** Re-measured 2026-08-30:
+
+  - **Discard EXISTS.** `POST /api/experiments/{experiment_id}/discard` is registered at
+    `routes.py:3179`, shipped in `d93b896` and merged in `6d5bda6` — **an ancestor of the very
+    commit that wrote "was NOT built"**. So this was false on the day it was committed, not
+    merely overtaken.
+  - **The policy DOES refuse a `DELETE`, on five of nine tables**, and there are **nine** owned
+    tables, not eight. Measured by importing `WriteStatementPolicy` and checking each:
+    `isaac_experiments`, `isaac_runs`, `isaac_run_projection` and `isaac_schema_migrations`
+    **accept**; the five append-only history tables are **refused** by a `_APPEND_ONLY_TABLES`
+    guard that did not exist when the paragraph was written; `records` is refused as a table this
+    application does not own.
+  - **Four `DELETE` statements now execute** (`experiment_repository.py:1059`, `:1659`, `:1670`,
+    `:1677`), not the "eight in dependency order" the paragraph forecast — because the five
+    history tables are never reached.
+
+  ***AND THE HALF THAT SURVIVES IS THE HALF THAT MATTERS: "MECHANICAL PERMISSION IS NOT
+  AUTHORIZATION" IS STILL TRUE, AND THIS IS A FIFTH INSTANCE OF THE PATTERN §15 DOCUMENTS FOUR
+  TIMES.*** No sentence in §15 permits a `DELETE` against any table. The four that execute rest
+  on an authorization `experiment_repository.py:1606` itself calls *"the project owner's narrow
+  one"* — i.e. conversational, exactly as `isaac_runs`, the five submission-lifecycle tables and
+  `isaac_run_projection` each were before being named. **§15 is corrected below to name it**, so
+  the basis is committed rather than conversational. The durable lesson is unchanged and is now
+  five-for-five: a slice that cannot cite a committed sentence permitting what it does has not
+  established its authorization basis, and saying so is part of the slice.
 
   **Named rather than implied, and still not done:** ~~the `.section-tab` contrast fix is written
   but its **~40 Linux baseline cells need a CI round-trip** to transcribe (PR #186)~~ —
@@ -999,7 +1038,10 @@ Current state:
   carried-forward darwin half distinguishable from a measured one; `isaac_runs`
   Stage 2b; an apply route for `POST /ingestion/csv/preview` — **which is NOT residual work but a
   committed human decision** (*"Option 1 — reconciliation-only … a deliberate authority boundary,
-  NOT a defect"*); the Evidence Graph / Compare Runs cross-feature work; the human responsive /
+  NOT a defect"*); ~~the Evidence Graph / Compare Runs cross-feature work~~ — **DONE, corrected
+  2026-08-30: `apps/web/src/components/RunCompare.tsx` and `run-compare.css` exist, and
+  `7a66127 feat(evidence graph)` and `5b99807 feat(compare runs)` are both ancestors of HEAD**;
+  the human responsive /
   200%-zoom sign-off, which **no CDP method, flag or API can drive** and is therefore not
   automatable at all; personal-deploy retirement; and **every hosted QA** — `/krish` sits behind an
   Authentik edge this environment cannot authenticate to.
@@ -1260,8 +1302,13 @@ Out of scope unless explicitly approved:
 
   **What listing it covers, precisely:** creating it by an owner-applied migration, and writing it
   through the ONE statement `experiment_repository.Q_UPSERT_RUN_PROJECTION`, inside the same
-  transaction and the same accepted branch as the run rows it describes. It covers **no read** —
-  exactly one statement in the application names the table and nothing reads it, pinned by test —
+  transaction and the same accepted branch as the run rows it describes. ~~It covers **no read** —
+  exactly one statement in the application names the table and nothing reads it, pinned by test~~
+  — **FALSE NOW, re-measured 2026-08-30: THREE statements name it** — the write path's stamp, the
+  Stage-2b reader (`FROM isaac_run_projection WHERE experiment_id = ANY(...)`), and the discard's
+  delete. Stage 2b IS this build, and `/api/health` says so on the wire
+  (`run_projection.authoritative: true`). The two halves of the old gating claim that DO survive:
+  `0005` is still **not owner-approved**, and the backfill has still **never been run anywhere** —
   and **no** hosted application of `0005`. **Making `isaac_runs` a read source (Stage 2b) is still a
   separate decision and is gated on the backfill having RUN with every one of its
   `UNREADABLE`/`refused`/`failed` counts at 0, AND on the operator's two completeness
@@ -1384,6 +1431,20 @@ Out of scope unless explicitly approved:
   not justified by any measurement in this repository, and the brief that motivates it ("contract
   §8 D7") is cited by several files and committed to none of them.
 
+  ***DELETE IS NAMED HERE, 2026-08-30 — THE FIFTH TIME A STATEMENT CLASS REACHED THE WRITE PATH
+  BEFORE ANY COMMITTED SENTENCE NAMED IT, AND THE FIRST TIME IT IS A STATEMENT CLASS RATHER THAN A
+  TABLE.*** `isaac_runs`, the five submission-lifecycle tables, `isaac_run_projection`, and the
+  incomplete correction sweep that followed are the first four; this is the fifth, found by an
+  independent truthfulness sweep rather than by the implementing slice. **What is covered:** the
+  four `DELETE` statements the discard path executes — `Q_DELETE_EXPERIMENT`,
+  `Q_DELETE_RUNS_FOR_EXPERIMENT`, the run-pruning delete at `experiment_repository.py:1059`, and
+  `Q_DELETE_RUN_PROJECTION_FOR_EXPERIMENT` — against `isaac_experiments`, `isaac_runs` and
+  `isaac_run_projection` only, inside the discard transaction. **What is NOT covered, and is
+  refused mechanically as well as textually:** any `DELETE` against the five append-only history
+  tables (`db_write._APPEND_ONLY_TABLES` raises), any `DELETE` against `records`, and any
+  `TRUNCATE` or `DROP` of anything. The mechanical guard and this sentence must agree; if a future
+  slice widens one, it widens both in the same change.
+
   **What it does NOT cover, and each of these is still out of scope:** modifying the
   production-derived 30-record `records` table (the write path's statement policy refuses any
   statement naming it); the verification truth plane; official validator/export behaviour;
@@ -1408,6 +1469,76 @@ Out of scope unless explicitly approved:
   Enforced three times — the save hook skips any non-`None` `session_id`,
   `PostgresOrdinaryStore.refuse_if_not_persistable` raises on one, and it raises on a canonical
   example id in any scope.
+
+***APPLICATION-SIDE SCOPE EXTENSION — PROJECT OWNER, 2026-08-29.*** **This is a NEW authorization
+granted on that date. Nothing below was authorized before it, and no earlier slice may cite it.**
+`docs/ingestion-proposal-contract.md` §8.1 said *"No committed sentence authorizes building it. A
+slice that implements it must establish and cite its own authorization basis."* **That sentence was
+TRUE when it was written and is SUPERSEDED as of 2026-08-29 — not retroactively false.** It is
+struck in place in that document rather than deleted, for the reason this section has struck rather
+than deleted four previous scope corrections: a reader must be able to see a recorded change of
+scope and not mistake it for a drift.
+
+  **What is authorized, APPLICATION-SIDE ONLY:** persistent ingestion proposals and the durable
+  contract they need; the scientist-facing Experiment Data Workspace, and website proposal review,
+  edit, acceptance, rejection, deferral and conflict handling; complete campaign-sheet write
+  coverage within the limits below; the remote MCP and bounded change-feed application architecture;
+  the disabled-by-default OAuth resource-server implementation; the verified-principal and
+  server-stamped attribution work buildable inside ISAAC; the least-disruptive accessible
+  palette/token decision needed to close **A11Y-01**, plus **A11Y-06**, **LAYOUT-01** and
+  **LAYOUT-02**; and the associated tests, documentation, migration artifacts, PRs and safe
+  integration.
+
+
+  ***PROVENANCE OF THIS GRANT, STATED BECAUSE A REPOSITORY CANNOT WITNESS A
+  CONVERSATION.*** This authorization reaches the repository as an **owner instruction
+  relayed in-session** — the same evidentiary class as the Dean answers this section
+  records as *"OPERATOR TESTIMONY ABOUT INFRASTRUCTURE CONFIGURATION … not an
+  observation by this repository and no artifact backing it is committed here."* **No
+  evidence file, packet or transcript backs it, and authorship witnesses nothing**:
+  every commit in this repository is authored by the project owner with Claude
+  co-authored, so a commit author cannot distinguish a granted scope from an assumed
+  one. An independent audit of the implementing branch raised exactly this and was
+  **right to**: a branch's own prose is not proof of its own authorization, and the
+  sentence being cited was written one commit earlier by the same work that cites it.
+  What a reader CAN check mechanically is the BOUNDARY — this entry is dated, names
+  what is and is not covered, forbids any earlier slice from citing it, and adds no
+  table. What a reader CANNOT check from inside the repository is that the instruction
+  was given. **Only Krish can confirm that.** The honest entry is that the repository
+  records the DECISION, not its DELIVERY — and no slice may cite this entry as though
+  the repository had verified it.
+
+  **What is NOT authorized, restated here so the boundary is committed rather than conversational:**
+  applying any hosted migration; modifying `isaac-k8` or any SLAC infrastructure; bypassing
+  Authentik; hunting for or repurposing secrets; creating provider accounts, enabling billing, or
+  incurring any charge; sending real scientific data, transcripts or audio to an unapproved
+  provider; exposing production-derived records or the five withheld aggregates (**G3**); deploying
+  a replacement personal Vercel/Railway environment; acting as Krish, Dean, Angel or a database
+  operator; making Angel's scientific classification decisions; claiming the human 200%-zoom gate
+  was automated; mass-deleting remote branches; or adding an apply route for
+  `POST /ingestion/csv/preview` — whose reconciliation-only authority boundary remains a **committed
+  human decision, not residual work**. Dean's **D1–D9** deferral is UNCHANGED by this: implementation
+  against deterministic fakes is authorized, a production provider is not.
+
+  ***NO NEW TABLE IS ADDED, AND THAT IS A DELIBERATE CONSEQUENCE OF THIS ENTRY, NOT AN OVERSIGHT.***
+  Proposals are stored at `state["proposals"]`, beside `state["notes"]`, inside the experiment state
+  document. **`db_write.OWNED_TABLES` is UNCHANGED.** This is the **first** scope extension in this
+  section that adds no table, and it is deliberate: this section records **four** separate occasions
+  on which a table reached `OWNED_TABLES` before any committed sentence named it — `isaac_runs`, the
+  five submission-lifecycle tables, `isaac_run_projection`, and the incomplete correction sweep that
+  followed — and a fifth is avoidable by not needing one. Two consequences, stated rather than left
+  to be discovered: a proposal is durable **exactly where the experiment document is durable and no
+  more**, and a feature that needed `0006` would be a feature that does not work until an operator
+  acts, which is a hard stop this authorization does not lift. **The persistence LOCATION was already
+  covered** by the 2026-08-07 lift's *"app-owned tables for experiments and their normal application
+  state"*; it is the FEATURE that needed authorizing, and a slice should cite that sentence for the
+  location rather than re-argue it.
+
+  **One consequence a future session must not read as a defect:** the acceptance route answers
+  **`409 human_actor_required`** in every default-configured deployment, because no trusted
+  authentication boundary exists in this build (Dean reconfirmed the ClusterIP bypass, 2026-08-12).
+  That is a CONFIGURATION fact, not a build defect, and no application change can close it. It is
+  exercised in CI through the deterministic fixture verifier.
 
 **Pre-Phase-37 readiness sequence (authorized 2026-07-30; Slice 2A authorized 2026-07-31).** An
 explicitly authorized, sequential readiness sequence runs *before* — and does not start — Phase 37.

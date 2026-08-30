@@ -803,6 +803,11 @@
      title, and truncates instead of overflowing. --text-secondary on --surface
      is 8.07:1. */
   .record-surface {
+    /* LAYOUT-02: stated rather than left to the initial value. This is the item
+       that yields when the crumb row is tight — it already truncates with an
+       ellipsis and keeps a readable fragment, which the state chip beside it
+       cannot do without destroying the word that IS the state. */
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -810,6 +815,87 @@
     font-weight: 500;
     color: var(--text-secondary);
   }
+
+  /* ---- LAYOUT-01 · the trust readout reflows instead of spilling -------
+   *
+   * THE DEFECT, as `e2e/layout-baseline.ts` LAYOUT-01 measured it: `.statusbar`
+   * is `display: flex` with the default `nowrap` and a HARD `height: 52px`, so
+   * at 375px it laid out 575px of content in a 353px box. It has
+   * `overflow-x: visible`, so it did not clip itself — it SPILLED, sideways and
+   * downwards, and `div.screen-card { overflow: hidden }` then cut whatever
+   * crossed the card edge. The segments painted over one another and read as
+   * garbled ("dry-run · 1" over "not exported yet"). Eight measured
+   * `surface@project` pairs; 20 clipped offenders on darwin, 21 on linux.
+   *
+   * WHY WRAPPING AND NOT HIDING. Every segment of this footer is a trust
+   * signal — Validation, Coverage, Advisory, the phase, and the runtime
+   * honesty statement. Hiding one at a narrow width, or truncating its text,
+   * would make the readout say less on the screens where a reader can see
+   * least; `display: none` on a blocker is the exact failure this footer
+   * exists to prevent. So the row is allowed to become two or three rows and
+   * every segment stays whole and reachable at 320px.
+   *
+   * `height` -> `min-height` is what makes a second row EXIST. A fixed 52px box
+   * cannot hold one: the extra line would simply overflow again, one layer in.
+   * The 52px floor is kept, so a footer whose content still fits one row is
+   * exactly the height it was — measured at 1024 and 768 on the record
+   * surfaces, where LAYOUT-01 records no offender at 1024 and the note says
+   * the defect starts below it.
+   *
+   * THE BAND IS <=1024px, matching `.topbar` above and for the same reason: the
+   * declaration only does anything when the content does not fit, and confining
+   * it here keeps the desktop layout byte-identical, which is this block's
+   * stated contract. `align-content: center` keeps a single-row footer centred
+   * in its 52px floor exactly as `align-items: center` did.
+   *
+   * The vertical padding is what stops a wrapped footer from painting its rows
+   * against the border, and it is inert while the content fits: 8 + ~20 + 8 is
+   * 36px, below the 52px floor.
+   */
+  .statusbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 2px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  /* The three signal segments each carry 16px of side padding, 96px of a 353px
+     row across the three of them. 10px keeps them visibly separated — the
+     `.statusbar-sep` hairline is still there — and gives 36px back to the text.
+     Nothing is hidden and nothing truncates; this only reduces the chance that
+     a segment has to take a row of its own. */
+  .statusbar-seg,
+  .statusbar-note { padding: 0 10px; }
+  /* `margin-left: auto` would strand the runtime badge alone at the right
+     end of whatever row it lands on, with the preceding segment's row half
+     empty. Once the footer wraps, reading order is top-to-bottom and the tail
+     is simply the last item. It keeps its own 14px internal gap. */
+  .statusbar-tail { margin-left: 0; }
+
+  /* ---- LAYOUT-02 · the state chip cannot leave the crumb ---------------
+   *
+   * The chip carries a whole word that IS the record's state ("Draft",
+   * "Exported"), so it must neither shrink nor ellipsize; the leaf crumb beside
+   * it already truncates and keeps a readable fragment, which makes it the
+   * right item to yield. `flex: none` on the chip and `flex: 0 1 auto` on the
+   * crumb say which is which instead of leaving it to the initial values, and
+   * `max-width: 100%` means that even a chip wider than the whole row starts at
+   * the row's left edge rather than past its right one.
+   *
+   * WHAT THIS DOES AND DOES NOT CLAIM. LAYOUT-02's remaining instance is
+   * LINUX-ONLY (`export-readiness-done@mobile-375x812`, `darwin: []` — a
+   * measurement). Its stated cause, "record-context does not shrink at phone
+   * widths", was already addressed by the C1/I4 change on 2026-08-01, which is
+   * why the darwin instance was deleted then; these declarations make the
+   * containment structural rather than a consequence of how wide the system
+   * face happens to be. This environment cannot measure Linux, so the linux
+   * instance is KEPT until a CI run annotates it as not-fired.
+   *
+   * (`.record-surface`'s half of this is declared on its own rule above, beside
+   * the truncation it depends on, rather than repeated here.) */
+  .record-context > .chip { flex: none; max-width: 100%; }
 }
 
 @media (max-width: 640px) {

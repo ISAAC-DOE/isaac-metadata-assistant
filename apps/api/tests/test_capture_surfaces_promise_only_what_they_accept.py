@@ -11,11 +11,35 @@ D1 — *"a value still has to be entered and confirmed on the field itself"*
 docstring all said it, of all 25 mappable paths. Measured over HTTP against every write
 route this application has, seven of them are refused by every one. Worse, the notes
 module docstring named ``POST .../answers`` and ``POST .../edit`` as "the path that
-turns a value into a confirmed field", and those two accept **none of the 25**.
+turns a value into a confirmed field", and those two accept ~~**none of the 25**~~ —
+**one of the 25 as of 2026-08-29; see D2 below.** The sentence is left standing with
+its correction attached because it is the FINDING this file records, and rewriting a
+finding to match today's behaviour is how a file stops saying what it was for.
 
 :func:`test_the_served_writable_set_is_what_the_write_routes_actually_do` is the load-
-bearing one: it does not compare two constants, it SENDS a write at all 25 paths to all
-five routes and compares 125 observed statuses to the served set.
+bearing one: it does not compare two constants, it SENDS a write at all 25 paths to
+every write route and compares the observed statuses to the served set.
+
+~~"to all five routes … 125 observed statuses"~~ — **CORRECTED 2026-08-29: THE PROBE
+CLAIMED TO COVER EVERY WRITE ROUTE AND ENUMERATED FIVE OF SIX.** ``POST
+/api/experiments/{id}/runs/{run_id}/edit`` was missing. Its addition changes NO member
+of the served set — measured, it answers ``422 unrecognized_field`` at all 25 paths —
+so the file's conclusions were right. **That is exactly why it was worth fixing rather
+than shrugging at: a set derived from an incomplete route enumeration is only
+accidentally right**, the next accepting route added would have been omitted the same
+way, and ``routes._record_enum_fields``' own docstring has listed six all along, so two
+places in one module disagreed about how many write routes exist. The probe now sends
+**150** requests over **six** routes.
+
+D2 — the surfaces' description of WHERE the value is entered
+------------------------------------------------------------
+A second stale claim in the same family, corrected in the same change: every accepting
+route used to be a run's, so five surfaces said the value is entered "on a run of this
+record". ``system.technique`` is now also answered at ``POST .../answers`` and corrected
+at ``POST .../edit``, which are the RECORD's, and a record with no runs can hold it.
+:func:`test_the_record_level_arm_needs_no_run_at_all` measures that, and
+``record_writable_field_paths`` serves the per-path answer so no surface has to
+transcribe it.
 
 D3 — a contributor set through the only available write path could never export
 -------------------------------------------------------------------------------
@@ -113,7 +137,7 @@ def _envelope(value):
 
 
 def test_the_served_writable_set_is_what_the_write_routes_actually_do(client):
-    """125 real requests, not a comparison of two constants.
+    """150 real requests, not a comparison of two constants.
 
     THIS IS THE TEST THE COPY CLAIM NEEDED AND DID NOT HAVE. A test asserting that
     ``value_writable_field_paths`` equals ``NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT``
@@ -122,6 +146,13 @@ def test_the_served_writable_set_is_what_the_write_routes_actually_do(client):
     also was. So every mappable path is sent to every write operation this application
     has, and the served set is required to be precisely the paths that at least one of
     them accepted.
+
+    ~~125 requests, five routes~~ — **SIX since 2026-08-29.** ``POST
+    .../runs/{run_id}/edit`` was absent from a probe whose whole warrant is that it is
+    exhaustive. It accepts none of the 25, so no assertion below moved; the enumeration
+    is nonetheless the thing this test rests on, and
+    :func:`test_the_probe_covers_every_write_route_the_application_publishes` now derives
+    it from the served OpenAPI document rather than leaving it to a reader to notice.
 
     MUTATION: serving ``sorted(NOTE_MAPPABLE_FIELD_PATHS)`` (the old, false claim, made
     machine-readable) turns this RED on 7 paths; serving ``[]`` turns it RED on 18.
@@ -160,6 +191,14 @@ def test_the_served_writable_set_is_what_the_write_routes_actually_do(client):
                 json={"confirmed_by_user": True, "fields": {path: value}},
                 headers={"If-Match": _etag(client, run)},
             ),
+            # THE SIXTH, missing until 2026-08-29. It accepts none of the 25 — which is
+            # why nobody noticed, and why an enumeration must be derived rather than
+            # remembered.
+            "run_edit": client.post(
+                f"{run}/edit",
+                json={"confirmed_by_user": True, "answers": {path: value}},
+                headers={"If-Match": _etag(client, run)},
+            ),
             "run_override": client.post(
                 f"{run}/overrides",
                 json={
@@ -180,6 +219,13 @@ def test_the_served_writable_set_is_what_the_write_routes_actually_do(client):
             json={"confirmed_by_user": True, "address": ws.field_address(path)},
             headers={"If-Match": _etag(client, run)},
         )
+
+    # THE PROBE'S OWN SHAPE, asserted rather than described: 25 paths x 6 routes. The
+    # prose above used to say "five" while claiming to be exhaustive, so the count is
+    # now a measurement of what actually ran.
+    assert len(observed) == 25
+    assert {len(row) for row in observed.values()} == {6}
+    assert sum(len(row) for row in observed.values()) == 150
 
     assert sorted(served["value_writable_field_paths"]) == sorted(accepted), observed
 
@@ -387,6 +433,320 @@ def test_the_record_level_routes_accept_exactly_the_record_level_paths(client):
         assert edit_outcomes[path] == (422, "not_an_allowed_value"), path
     for path in refused_unknown:
         assert edit_outcomes[path] == (422, "unrecognized_field"), path
+
+
+#: Every experiment-scoped mutation the OpenAPI document publishes that is NOT one of the
+#: six field-path write routes, with the reason it is not. **It exists because the probe
+#: above spent months claiming to cover "every write route this application has" while
+#: enumerating five of six**, and a hand-written list cannot notice a seventh arriving.
+#: A new experiment-scoped mutation therefore fails
+#: :func:`test_the_probe_covers_every_write_route_the_application_publishes` until someone
+#: decides which side of the line it is on — which is the whole mechanism, not overhead.
+_NOT_A_FIELD_PATH_WRITE: dict[str, str] = {
+    "PATCH /api/experiments/{experiment_id}": "renames the record; takes `title`, no field path",
+    "POST /api/experiments/{experiment_id}/assets": "an asset row, addressed by asset id",
+    "PATCH /api/experiments/{experiment_id}/assets/{asset_id}": "an asset row",
+    "POST /api/experiments/{experiment_id}/assets/{asset_id}/remove": "an asset row",
+    "POST /api/experiments/{experiment_id}/assistant/query": "read-only Q&A",
+    "POST /api/experiments/{experiment_id}/audit": "read-only; POST because it takes a body",
+    "POST /api/experiments/{experiment_id}/conflicts/resolve": "records a decision, never a value",
+    "POST /api/experiments/{experiment_id}/discard": "removes the record",
+    "POST /api/experiments/{experiment_id}/export": "reads the draft; writes no field",
+    "POST /api/experiments/{experiment_id}/ingestion/csv/preview": "reconciliation-only; applies nothing",
+    "POST /api/experiments/{experiment_id}/notes": "captures a note; a note is not a value",
+    # THE TWO PROPOSAL ROUTES, AND THE SECOND ONE IS CLASSIFIED HONESTLY RATHER THAN
+    # CONVENIENTLY. `create` genuinely writes no value — contract invariant I1 is that
+    # creating a proposal leaves `export_draft` and every run's `resolved_run_draft`
+    # byte-identical. `review` is the awkward one: on `accept` it DOES write a field
+    # value. It is out of the PROBE not because it writes nothing, but because it is
+    # not addressed BY a field path — it takes a `proposal_id`, and the value it
+    # writes goes through the very writers this probe already covers
+    # (`_apply_run_field`, `set_run_override`, `_apply_record_enum_fields`), so
+    # probing it would re-measure them through a second door. Saying "records a
+    # decision, never a value" here would be the comfortable falsehood this file
+    # exists to catch.
+    "POST /api/experiments/{experiment_id}/proposals": "creates a proposal; invariant I1 is that it writes no value",
+    "POST /api/experiments/{experiment_id}/proposals/{proposal_id}/review": "accept DOES write a value, but through the probed writers and addressed by proposal id, not by field path",
+    "POST /api/experiments/{experiment_id}/notes/{note_id}/review": "records a target, not a value",
+    "POST /api/experiments/{experiment_id}/runs": "creates a run",
+    "POST /api/experiments/{experiment_id}/runs/{run_id}/check": "read-only validation",
+    "POST /api/experiments/{experiment_id}/runs/{run_id}/overrides/clear": "removes an override",
+    "POST /api/experiments/{experiment_id}/runs/{run_id}/remove": "removes a run",
+    "POST /api/experiments/{experiment_id}/submit": "submits what the record already holds",
+    "POST /api/experiments/{experiment_id}/transcript": "stores text and proposes; writes no field",
+    "POST /api/experiments/{experiment_id}/validate": "read-only validation",
+    "POST /api/experiments/{experiment_id}/warnings": "read-only advisory tier",
+}
+
+#: The six the probe sends, as they appear in the OpenAPI document.
+_PROBED_WRITE_ROUTES: dict[str, str] = {
+    "record_answers": "POST /api/experiments/{experiment_id}/answers",
+    "record_edit": "POST /api/experiments/{experiment_id}/edit",
+    "run_answers": "POST /api/experiments/{experiment_id}/runs/{run_id}/answers",
+    "run_patch": "PATCH /api/experiments/{experiment_id}/runs/{run_id}",
+    "run_edit": "POST /api/experiments/{experiment_id}/runs/{run_id}/edit",
+    "run_override": "POST /api/experiments/{experiment_id}/runs/{run_id}/overrides",
+}
+
+
+def test_the_probe_covers_every_write_route_the_application_publishes(client):
+    """The guard the missing sixth route needed, DERIVED from the served document.
+
+    THE DEFECT: ``test_the_served_writable_set_is_what_the_write_routes_actually_do``
+    rests entirely on being exhaustive — it is the only thing that makes its 18/7 split
+    a fact about the API rather than about one author's memory. It enumerated FIVE
+    routes and said "every write route this application has"; ``POST
+    .../runs/{run_id}/edit`` was missing, and ``routes._record_enum_fields``' own
+    docstring in the same module has listed six all along. Nothing failed, because the
+    sixth accepts none of the 25 — the enumeration was wrong and the answer was right.
+
+    So this reads the OpenAPI document, takes every mutating operation under
+    ``/api/experiments/{experiment_id}``, and requires each one to be either probed or
+    explicitly classified with a reason. **A seventh route cannot arrive silently**: it
+    lands in neither set and this goes RED naming it.
+
+    MUTATION: dropping ``run_edit`` from ``_PROBED_WRITE_ROUTES`` — the exact shape of
+    the original defect — turns this RED with that operation unclassified.
+    """
+    spec = client.app.openapi()
+    published = {
+        f"{method.upper()} {path}"
+        for path, item in spec["paths"].items()
+        if path.startswith("/api/experiments/{experiment_id}")
+        for method in item
+        if method in ("post", "put", "patch", "delete")
+    }
+    probed = set(_PROBED_WRITE_ROUTES.values())
+
+    # Every probed route is real — a typo here would silently shrink the probe.
+    assert probed <= published, sorted(probed - published)
+    # And every published mutation is on exactly one side of the line.
+    unclassified = published - probed - set(_NOT_A_FIELD_PATH_WRITE)
+    assert not unclassified, sorted(unclassified)
+    stale = set(_NOT_A_FIELD_PATH_WRITE) - published
+    assert not stale, sorted(stale)
+    # Both sides non-empty and disjoint, so neither list can pass by being everything.
+    assert probed and _NOT_A_FIELD_PATH_WRITE
+    assert not probed & set(_NOT_A_FIELD_PATH_WRITE)
+    assert len(probed) == 6
+
+
+def test_the_record_level_arm_needs_no_run_at_all(client):
+    """~~"Both routes are a run's, so a record with no runs can write none of them
+    yet"~~ — the served sentence that was false, measured from the outside.
+
+    THE DEFECT: that sentence ended the ``GET .../notes`` description, and the same
+    claim stood in ``UnmappedNotesPanel``'s hint ("a value for this field is entered and
+    confirmed **on a run of this record**", for every writable path), in
+    ``notes.py``'s module docstring, and in
+    ``NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT``'s own comment — which NAMED the
+    served sentence as still false and deferred it. It is the mild direction of the
+    locked-door defect: a reader told to go and create a run they do not need.
+
+    Nothing here uses a run. The record is created and never given one, and it still has
+    none afterwards — which is the assertion that makes this about the RECORD rather
+    than about the value happening to land somewhere.
+
+    MUTATION: removing the ``_apply_record_enum_fields`` call from ``post_answers``
+    turns the first write RED with ``422 unrecognized_field``.
+    """
+    experiment_id = _experiment(client, "Record-level, no runs")
+    exp = f"/api/experiments/{experiment_id}"
+    assert client.get(f"{exp}/runs").json()["total"] == 0
+
+    # A REAL MEMBER OF THE SCHEMA'S OWN ENUM. The earlier probe sends "PROBE-VALUE",
+    # which measures the enum rather than the route — the distinction that made the old
+    # notes.py paragraph read as "accepts none of them" when it accepts this one.
+    answered = client.post(
+        f"{exp}/answers",
+        json={"confirmed_by_user": True, "answers": {"system.technique": "XAS"}},
+        headers={"If-Match": _etag(client, exp)},
+    )
+    assert answered.status_code == 200, answered.text
+
+    stored = ws.load_experiment(experiment_id, session_id=None)
+    assert stored.draft["fields"]["system.technique"]["value"] == "XAS"
+    assert stored.runs == []
+
+    corrected = client.post(
+        f"{exp}/edit",
+        json={"confirmed_by_user": True, "answers": {"system.technique": "XRD"}},
+        headers={"If-Match": _etag(client, exp)},
+    )
+    assert corrected.status_code == 200, corrected.text
+    assert ws.load_experiment(experiment_id, session_id=None).draft["fields"][
+        "system.technique"
+    ]["value"] == "XRD"
+    assert client.get(f"{exp}/runs").json()["total"] == 0
+
+    # NEGATIVE CONTROL, so this cannot be read as "the record routes take field paths".
+    # They take exactly the schema-enum ones; everything else is still refused.
+    other = client.post(
+        f"{exp}/answers",
+        json={"confirmed_by_user": True, "answers": {"sample.material.name": "CuO"}},
+        headers={"If-Match": _etag(client, exp)},
+    )
+    assert other.status_code == 422, other.text
+    assert other.json()["error"] == "unrecognized_field"
+
+
+def test_the_served_record_writable_set_is_what_the_record_routes_actually_do(client):
+    """The new key is MEASURED against the routes, exactly as its wider sibling is.
+
+    A test comparing ``record_writable_field_paths`` to
+    ``NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD`` would prove only self-consistency —
+    the same nothing the false sentence also proved. So every mappable path is sent to
+    the record's two operations with a value each will accept if the path is known, and
+    the served set must be exactly what came back ``200``.
+
+    THE ENUM MAKES THE PROBE VALUE MATTER, which is the trap the older probe fell into:
+    an arbitrary string is refused ``not_an_allowed_value`` by a route that DOES know
+    the path, so a probe using one measures the enum and reports "refused".
+
+    MUTATION: serving ``value_writable_field_paths`` for this key (18 paths) turns this
+    RED on 17; serving ``[]`` turns it RED on 1.
+    """
+    experiment_id = _experiment(client, "Record-writable measurement")
+    exp = f"/api/experiments/{experiment_id}"
+    enums = routes._record_enum_fields()
+
+    accepted, observed = set(), {}
+    for path in sorted(routes.NOTE_MAPPABLE_FIELD_PATHS):
+        # A value the route would accept IF it knows the path: the schema's own first
+        # enum member where there is one, and otherwise the ordinary probe value.
+        value = enums[path][0] if path in enums else _NUMERIC.get(path, "PROBE-VALUE")
+        responses = {
+            "answers": client.post(
+                f"{exp}/answers",
+                json={"confirmed_by_user": True, "answers": {path: value}},
+                headers={"If-Match": _etag(client, exp)},
+            ),
+            "edit": client.post(
+                f"{exp}/edit",
+                json={"confirmed_by_user": True, "answers": {path: value}},
+                headers={"If-Match": _etag(client, exp)},
+            ),
+        }
+        observed[path] = {k: r.status_code for k, r in responses.items()}
+        if any(r.status_code < 300 for r in responses.values()):
+            accepted.add(path)
+
+    served = client.get(f"{exp}/notes").json()
+    assert sorted(served["record_writable_field_paths"]) == sorted(accepted), observed
+    # BOTH POLARITIES, so the equality cannot pass vacuously in either direction.
+    assert accepted == {"system.technique"}, observed
+    assert set(routes.NOTE_MAPPABLE_FIELD_PATHS) - accepted, observed
+    # AND IT IS A SUBSET OF THE WIDER KEY, which is what stops a client rendering two
+    # contradictory sentences about one field.
+    assert accepted <= set(served["value_writable_field_paths"])
+
+
+def test_no_surface_still_says_every_accepting_route_is_a_runs(client):
+    """The four copies of the "on a run" claim, pinned so none of them comes back.
+
+    Each is asserted absent as a LIVE claim and present as a struck correction —
+    checking only for absence would pass on a file that deleted the paragraph and said
+    nothing, which is how a disclosure quietly disappears.
+
+    MUTATION: restoring the sentence in any of the four turns this RED.
+    """
+    import inspect
+    import re
+    from pathlib import Path
+
+    import isaac_api.notes as notes
+
+    dead = "so a record with no runs can write none of them yet"
+
+    spec = client.app.openapi()
+    listing = spec["paths"]["/api/experiments/{experiment_id}/notes"]["get"]["description"]
+    # It survives ONLY inside the sentence that retracts it, and the ORDER is the
+    # load-bearing part: a quotation with no retraction beside it reads as the claim.
+    assert listing.count(dead) == 1
+    assert "AND NOT EVERY ACCEPTING ROUTE IS A RUN'S" in listing
+    assert listing.index("used to end") < listing.index(dead)
+    assert "`record_writable_field_paths`" in listing
+    assert not listing.rstrip().endswith(dead + ".")
+
+    module_text = notes.__doc__ or ""
+    stale = "those two routes accept **none of them**"
+    # ONCE, AND INSIDE THE STRIKETHROUGH. Asserting mere absence would pass on a file
+    # that deleted the paragraph; asserting mere presence would pass on one that
+    # restored the claim beside its own retraction, which is the exact accident
+    # `test_no_surface_still_promises_...` was extended to catch.
+    assert module_text.count(stale) == 1
+    struck = re.findall(r"~~(.*?)~~", module_text, re.DOTALL)
+    assert sum(stale in block for block in struck) == 1, struck
+    assert "CORRECTED 2026-08-29" in module_text
+    assert "not_an_allowed_value" in module_text
+    assert "NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD" in module_text
+
+    constant_doc = Path(inspect.getsourcefile(routes)).read_text()
+    assert "THE SERVED SENTENCE STILL SAYS THE OLD THING" in constant_doc
+    assert "~~**THE SERVED SENTENCE STILL SAYS THE OLD THING" in constant_doc
+
+    repo_root = Path(__file__).resolve().parents[3]
+    panel = repo_root / "apps" / "web" / "src" / "components" / "UnmappedNotesPanel.tsx"
+    panel_text = panel.read_text()
+    assert panel_text.count("Both write routes are a run's") == 1
+    assert "~~\"AND IT SAYS 'ON A RUN'" in panel_text
+    assert "recordWritablePaths" in panel_text
+
+
+def test_the_transcript_route_is_a_second_note_producer(client):
+    """~~"nothing in this application creates a `transcript` note, sets a `run_id`, or
+    supplies a `candidate_field_path`"~~ — measured false, in FIVE files at once.
+
+    THE DEFECT: `notes.py`'s module docstring, `routes.py`'s section header,
+    `provenance.py`'s reachability note, `UnmappedNotesPanel.tsx`'s header and
+    `test_provenance.py`'s own docstring all said the note vocabulary had exactly one
+    producer. `POST /api/experiments/{id}/transcript` had shipped and does all three of
+    the enumerated things. Nothing failed, because no test asserted the absence — the
+    claim lived only in prose, which is exactly why it survived five sweeps.
+
+    MUTATION: dropping `run_id=run_id` from `post_transcript`'s `capture_note` call
+    turns the run assertion RED; dropping `candidate_field_path=` turns the candidate
+    assertion RED.
+    """
+    experiment_id = _experiment(client, "Transcript producer")
+    exp = f"/api/experiments/{experiment_id}"
+    run_id = _run(client, experiment_id)
+
+    stored = client.post(
+        f"{exp}/transcript",
+        json={
+            "text": (
+                "The beamline was 7-3. The temperature was 300 K. "
+                "We re-ran scan three because the beam dropped."
+            ),
+            "finalized": True,
+            "run_id": run_id,
+        },
+        headers={"If-Match": _etag(client, exp)},
+    )
+    assert stored.status_code == 200, stored.text
+
+    captured = client.get(f"{exp}/notes").json()["notes"]
+    assert len(captured) == 3, captured
+    assert {n["source"] for n in captured} == {"transcript"}
+    assert {n["run_id"] for n in captured} == {run_id}
+    with_candidate = [n for n in captured if n["candidate_field_path"]]
+    assert [n["candidate_field_path"] for n in with_candidate] == ["context.temperature_K"]
+    # A candidate with no rule is a guess wearing a field name — `notes.py` refuses one,
+    # and this proves the route supplies the rule rather than relying on that refusal.
+    assert with_candidate[0]["candidate_rule"]
+    # BOTH POLARITIES: two of the three proposed nothing, so "supplies a candidate" is
+    # not being read as "supplies one for everything".
+    assert len(with_candidate) == 1, captured
+
+    # THE THREE SOURCES THAT STILL HAVE NO PRODUCER, which is the half of the old claim
+    # that survives and is what the corrected paragraphs now say.
+    import isaac_api.notes as notes
+
+    assert {"csv_column", "file_listing_line", "extraction_residue"} < notes.NOTE_SOURCES
+    routes_src = __import__("pathlib").Path(routes.__file__).read_text()
+    assert "capture_note" in routes_src
+    assert routes_src.count("exp.capture_note(") == 2, "a third producer needs the prose updated"
 
 
 def test_no_surface_still_promises_a_value_can_be_entered_at_every_mapped_path(client):

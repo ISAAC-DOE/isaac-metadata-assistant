@@ -2425,6 +2425,22 @@ export interface ApiNotesResponse {
    * that tells a person to do the second must know whether it is possible.
    */
   value_writable_field_paths: string[];
+  /**
+   * The sub-subset of THOSE that a RECORD-level operation accepts — 1 of the 18 at
+   * time of writing (`system.technique`). A path in it can be given a value on a
+   * record with no runs; a path outside it needs a run first. It exists because
+   * "the value is entered on a run of this record" was true of every writable path
+   * when that copy was written and stopped being true when the record-level enum
+   * write shipped, and a client cannot tell WHICH from the wider subset alone.
+   */
+  /*
+   * OPTIONAL ON PURPOSE, corrected 2026-08-30. This was declared required while
+   * `UnmappedNotesPanel.tsx` reads it `?? []` "because this key is newer than the
+   * others: a server that predates it must degrade". Under a required type that
+   * branch is unreachable and the type and the guard disagreed about the contract.
+   * The guard is the one that is right — the key IS newer — so the type follows it.
+   */
+  record_writable_field_paths?: string[];
   sources: string[];
   /** The EXPERIMENT's version token — the `If-Match` every note write must carry. */
   experiment_version: string;
