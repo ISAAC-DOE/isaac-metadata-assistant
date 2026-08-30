@@ -82,16 +82,38 @@
   font-weight: 500;
   color: var(--text-primary);
 }
+/*
+ * `--text-tertiary` -> `--text-muted` ON THESE TWO, and the reason is this slice's
+ * own doing rather than a drive-by cleanup.
+ *
+ * Recomputed here, not quoted: `--text-tertiary` #78838f is 3.86:1 on #ffffff — below
+ * WCAG 1.4.3 — and `--text-muted` #5b6570 is 5.93:1. Same figures the `.section-tab`
+ * fix was made on, and the same in-repo precedent.
+ *
+ * WHY NOW. Both rules are pre-existing, and both were effectively unscanned: axe had
+ * never seen a `.field-row` at any viewport, because `FieldGroup` does not render its
+ * body while collapsed and `e2e/helpers/disclosures.ts` opened only the two Statistics
+ * disclosures. This slice opens the draft blocks so the new controls are actually
+ * scanned — AND it turns "honestly missing" from a rare state into the normal one, 26
+ * rows deep on a freshly created record. Leaving the token would have shipped a wall of
+ * newly-visible, newly-scanned 1.4.3 failures under a change whose whole point is that
+ * the rows are worth reading.
+ *
+ * SCOPED TO THE TWO RULES THIS SLICE MADE PROMINENT. `.fg-summary` and `.field-path`
+ * still use the lighter tokens: they render on the collapsed HEADER, which was always
+ * visible and always scanned, so their debt is the app-wide `--text-tertiary` palette
+ * question (CLAUDE.md §11's A3) and not this change's to settle.
+ */
 .field-value.awaiting {
   font-family: var(--font-ui);
   font-style: italic;
   font-weight: 400;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 .field-helper {
   margin-top: 6px;
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   line-height: 1.5;
 }
 .field-evidence {
