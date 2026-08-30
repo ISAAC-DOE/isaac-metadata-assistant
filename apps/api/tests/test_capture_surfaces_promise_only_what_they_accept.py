@@ -338,6 +338,19 @@ _NOT_A_FIELD_PATH_WRITE: dict[str, str] = {
     "POST /api/experiments/{experiment_id}/export": "reads the draft; writes no field",
     "POST /api/experiments/{experiment_id}/ingestion/csv/preview": "reconciliation-only; applies nothing",
     "POST /api/experiments/{experiment_id}/notes": "captures a note; a note is not a value",
+    # THE TWO PROPOSAL ROUTES, AND THE SECOND ONE IS CLASSIFIED HONESTLY RATHER THAN
+    # CONVENIENTLY. `create` genuinely writes no value — contract invariant I1 is that
+    # creating a proposal leaves `export_draft` and every run's `resolved_run_draft`
+    # byte-identical. `review` is the awkward one: on `accept` it DOES write a field
+    # value. It is out of the PROBE not because it writes nothing, but because it is
+    # not addressed BY a field path — it takes a `proposal_id`, and the value it
+    # writes goes through the very writers this probe already covers
+    # (`_apply_run_field`, `set_run_override`, `_apply_record_enum_fields`), so
+    # probing it would re-measure them through a second door. Saying "records a
+    # decision, never a value" here would be the comfortable falsehood this file
+    # exists to catch.
+    "POST /api/experiments/{experiment_id}/proposals": "creates a proposal; invariant I1 is that it writes no value",
+    "POST /api/experiments/{experiment_id}/proposals/{proposal_id}/review": "accept DOES write a value, but through the probed writers and addressed by proposal id, not by field path",
     "POST /api/experiments/{experiment_id}/notes/{note_id}/review": "records a target, not a value",
     "POST /api/experiments/{experiment_id}/runs": "creates a run",
     "POST /api/experiments/{experiment_id}/runs/{run_id}/check": "read-only validation",
