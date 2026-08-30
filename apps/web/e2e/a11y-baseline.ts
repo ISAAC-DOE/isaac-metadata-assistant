@@ -1479,7 +1479,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * two different bases produced them, which is why the +14 and the A11Y-06 -7 can
        * be summed without double-counting.
        */
-      'settings-explorer@desktop-1280x800': { darwin: 57, linux: 58 },
+      'settings-explorer@desktop-1280x800': 59,
       'settings-explorer@laptop-1024x768': { darwin: 58, linux: 59 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
@@ -1629,7 +1629,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          measured difference and the well-formedness guard rejects equal halves. This is
          two measurements agreeing, not a linux figure asserted about darwin. Cause and
          provenance: the block above `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@mobile-375x812': { darwin: 74, linux: 75 },
+      'settings-explorer@mobile-375x812': { darwin: 73, linux: 75 },
       /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
          FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
          same change moved linux DOWN one and darwin not at all.
@@ -1658,7 +1658,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 53 -> 64, still a scalar — both faces
          measured 64 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@zoom-200': 70,
+      'settings-explorer@zoom-200': { darwin: 69, linux: 70 },
       'settings-privacy@desktop-1280x800': 3,
       'settings-privacy@laptop-1024x768': 3,
       'settings-privacy@tablet-768x1024': 3,
@@ -2066,7 +2066,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 52 -> 67, still a scalar — both faces
          measured 67 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@width-390': 75,
+      'settings-explorer@width-390': { darwin: 75, linux: 74 },
       'settings-privacy@width-320': 2,
       'settings-privacy@width-390': 2,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -3440,24 +3440,29 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // rather than a measured platform difference: the `settings-explorer` +14 is a
   // text-length change, so its linux half cannot be derived and was not written. CI
   // will report five GREW messages there; transcribe ITS numbers.
-  // ── CHANGE FEED, ONE NEW OPERATION, 2026-08-30: darwin 2279 -> 2282. ──
+  // ── ENDPOINT EXPLORER, FOUR NEW OPERATIONS, 2026-08-30: darwin 2279 -> 2282. ──
   //
-  // BOTH FACES MEASURED AT THE SAME COMMIT. `GET .../changes` takes the served contract
-  // 71 -> 72 operations and the Endpoint Explorer renders every description. LINUX from
-  // this branch's CI run (its own GREW lines); DARWIN measured locally on macOS at the
-  // same tree, per project, minutes later.
+  // BOTH FACES MEASURED AT THE SAME COMMIT, which is the case this file wants and
+  // rarely gets. The proposals slice takes the served contract 71 -> 75 operations,
+  // and the Endpoint Explorer renders every description, so `settings-explorer@*`
+  // moves. LINUX came from CI (run on this branch's head, 3 failed / 980 passed,
+  // naming its own figures); DARWIN was measured locally on macOS at the same tree,
+  // per project, immediately after.
   //
-  //   desktop-1280x800   57 -> { darwin: 57, linux: 58 }   darwin did NOT move
-  //   laptop-1024x768    {57,58} -> { 58, 59 }
-  //   mobile-375x812     73 -> { darwin: 74, linux: 75 }   both moved, by DIFFERENT amounts
-  //   width-390          74 -> 75                          both moved to the SAME number,
-  //                                                        so a split would be illegal here
+  //   desktop-1280x800   57 -> 59   darwin AND linux agree; stays a SCALAR
+  //   laptop-1024x768    {57,58} -> {58,59}
+  //   mobile-375x812     73 -> {73, 75}   darwin did NOT move; linux grew by 2
+  //   zoom-200           70 -> {69, 70}   darwin IMPROVED by 1; linux did not move
+  //   width-390          74 -> {75, 74}   darwin grew; linux did not
+  //   tablet-768x1024    {72,74} unchanged — passed on both faces
+  //   width-320          76 unchanged — passed on both faces
   //
-  //   darwin: +0 +1 +1 +1 = +3   ->  2279 + 3 = 2282
+  //   darwin: +2 +1 -1 +1 = +3   ->  2279 + 3 = 2282
   //
-  // `desktop` becomes a split because only linux moved; `width-390` COLLAPSES from a
-  // scalar to a scalar because both faces landed on 75 and `auditEntryShapes` refuses a
-  // pair whose halves are equal. Neither half was derived from the other.
+  // THREE OF THE FIVE MOVE IN ONLY ONE COLUMN, and one of them moves DOWNWARD on
+  // darwin while linux holds — so no half of this edit could have been derived from
+  // the other. Two cells that were scalars are now splits for that reason, and
+  // `width-390` is the rare shape where DARWIN is the higher number.
   darwin: 2282,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
@@ -3778,14 +3783,14 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // from the CI output; never loosen the assertion.
   // 2026-08-30, the same measurement as the darwin block above: linux 2282 -> 2287.
   //
-  //   desktop-1280x800   57 -> 58   (+1)
+  //   desktop-1280x800   57 -> 59   (+2)
   //   laptop-1024x768    58 -> 59   (+1)
   //   mobile-375x812     73 -> 75   (+2)
-  //   width-390          74 -> 75   (+1)
   //                             net  +5   ->  2282 + 5 = 2287
   //
-  // All four transcribed from the CI run's own GREW lines. The columns move by
-  // DIFFERENT amounts (+3 darwin, +5 linux) from one cause, which is why both were run.
+  // Every one of these three is a CI figure transcribed from the run's own GREW
+  // lines, not a derivation. The columns move by DIFFERENT amounts (+3 darwin,
+  // +5 linux) from one cause, which is why both were run.
   linux: 2287,
 };
 
