@@ -308,7 +308,28 @@ describe('the darwin column says how much of itself is measured', () => {
    *     number this file held before the change, so the attribution is now a
    *     measurement on all seven and not an extrapolation from one.
    */
-  it('the set of per-platform SPLIT cells is exactly the eight measured on both faces', () => {
+  /*
+   * 2026-08-29 — THE SPLIT SET CHURNS IN BOTH DIRECTIONS FOR THE THIRD TIME, and the
+   * churn is now larger than the set that survives it. Rounds 3-4 of the
+   * persistence-truthfulness branch moved all seven `settings-explorer` cells (see
+   * `A11Y_BASELINE_TOTAL_NODES`' 2026-08-29 block for the two runs). FOUR splits
+   * collapsed to scalars because the two faces landed on the same number:
+   *
+   *     mobile-375x812   {71, 72} -> SCALAR 73
+   *     zoom-200         {67, 68} -> SCALAR 70
+   *     width-390        {73, 72} -> SCALAR 74   (darwin had been HIGHER)
+   *     width-320        scalar 73 -> SCALAR 76  (stays scalar, moves)
+   *
+   * and TWO stayed split (`laptop-1024x768` {57, 58}, `tablet-768x1024` {72, 74}).
+   * Eight -> five. The lesson this guard already taught is reinforced rather than
+   * revised: a split is not a stable property of a cell, it is the accident of two
+   * font stacks landing on different wrap points for the text that happens to be
+   * there today. Change the text and the set changes.
+   *
+   * Both faces of all seven were measured at the SAME commit (`6958459`), so none of
+   * the five below is a carried-forward half and `DARWIN_CARRIED_FORWARD` stays empty.
+   */
+  it('the set of per-platform SPLIT cells is exactly the five measured on both faces', () => {
     const splits: string[] = [];
     for (const entry of A11Y_BASELINE) {
       for (const [key, count] of Object.entries(entry.counts)) {
@@ -327,10 +348,7 @@ describe('the darwin column says how much of itself is measured', () => {
         'color-contrast @ memory-graph@zoom-200',
         'color-contrast @ settings-about@width-320',
         'color-contrast @ settings-explorer@laptop-1024x768',
-        'color-contrast @ settings-explorer@mobile-375x812',
         'color-contrast @ settings-explorer@tablet-768x1024',
-        'color-contrast @ settings-explorer@width-390',
-        'color-contrast @ settings-explorer@zoom-200',
         'color-contrast @ validator@zoom-200',
       ].sort()
     );

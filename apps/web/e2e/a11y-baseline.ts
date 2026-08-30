@@ -1383,8 +1383,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          split, in the same edit and from the same cause. Do not "tidy" either: the
          well-formedness guard rejects a pair whose halves are equal, and a scalar here
          is two independent measurements agreeing rather than one asserted twice. */
-      'settings-explorer@desktop-1280x800': 55,
-      'settings-explorer@laptop-1024x768': { darwin: 55, linux: 57 },
+      'settings-explorer@desktop-1280x800': 57,
+      'settings-explorer@laptop-1024x768': { darwin: 57, linux: 58 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -1456,7 +1456,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          BECOMING a split because the two faces measured one node apart. Cause,
          provenance and the controlled experiment that established it are in the block
          above `settings-explorer@desktop-1280x800`. Both halves measured at `dad8715`. */
-      'settings-explorer@tablet-768x1024': { darwin: 71, linux: 72 },
+      'settings-explorer@tablet-768x1024': { darwin: 72, linux: 74 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1533,7 +1533,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          measured difference and the well-formedness guard rejects equal halves. This is
          two measurements agreeing, not a linux figure asserted about darwin. Cause and
          provenance: the block above `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@mobile-375x812': { darwin: 71, linux: 72 },
+      'settings-explorer@mobile-375x812': 73,
       /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
          FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
          same change moved linux DOWN one and darwin not at all.
@@ -1562,7 +1562,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 53 -> 64, still a scalar — both faces
          measured 64 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@zoom-200': { darwin: 67, linux: 68 },
+      'settings-explorer@zoom-200': 70,
       'settings-privacy@desktop-1280x800': 3,
       'settings-privacy@laptop-1024x768': 3,
       'settings-privacy@tablet-768x1024': 3,
@@ -1960,7 +1960,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          The asymmetry the note above records — that `@width-320` and `@width-390` "did
          not behave alike" — is unchanged: they move by different amounts (+17 vs +15 on
          darwin) and only this one splits. */
-      'settings-explorer@width-320': 73,
+      'settings-explorer@width-320': 76,
       /* DISCARD OPERATION, 2026-08-27: linux 51 -> 52, COLLAPSING to a scalar.
          darwin was already 52 and a darwin run the same day still reads 52, so the
          pair no longer marks a measured difference and the guard rejects equal
@@ -1970,7 +1970,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 52 -> 67, still a scalar — both faces
          measured 67 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@width-390': { darwin: 73, linux: 72 },
+      'settings-explorer@width-390': 74,
       'settings-privacy@width-320': 2,
       'settings-privacy@width-390': 2,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -3237,7 +3237,43 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // fire on any of the eight. This is more of an existing shortfall becoming visible,
   // which is exactly why the number is corrected upward rather than the assertion
   // loosened. If CI disagrees with this literal, correct THE NUMBER from CI output.
-  darwin: 2426,
+  // ── PERSISTENCE-TRUTHFULNESS ROUNDS 3-4, 2026-08-29. ALL SEVEN `settings-explorer`
+  //    `color-contrast` CELLS MOVED. darwin 2426 -> 2440 (+14). ───────────────────
+  //
+  // CAUSE, and it is the branch's own: `GET /api/about`'s served description gained
+  // 207 characters (the sentence refusing the read-back remedy), and the Endpoint
+  // Explorer RENDERS every served description. More text at the same
+  // `--text-tertiary` #78838f is more nodes axe counts. No token changed, no new
+  // foreground appeared, and the `foregrounds` guard did not fire on any of the
+  // seven — this is the documented A11Y-01 debt becoming more visible, not a new
+  // defect. Round 4 changed `settingsContent.ts` and `labels.ts`, which the
+  // `settings-privacy` surface renders, not this one; the movement is round 3's.
+  //
+  //   cell                   darwin (local macOS, this host)   linux (CI 33275970428)
+  //   desktop-1280x800              55 -> 57                        55 -> 57   SCALAR 57
+  //   laptop-1024x768               55 -> 57                        57 -> 58   { 57, 58 }
+  //   tablet-768x1024               71 -> 72                        72 -> 74   { 72, 74 }
+  //   mobile-375x812                71 -> 73                        72 -> 73   SCALAR 73
+  //   zoom-200                      67 -> 70                        68 -> 70   SCALAR 70
+  //   width-320                     73 -> 76                        73 -> 76   SCALAR 76
+  //   width-390                     73 -> 74                        72 -> 74   SCALAR 74
+  //
+  // BOTH FACES WERE MEASURED AT THE SAME COMMIT (`6958459`), neither reasoned and
+  // neither copied across. darwin is this host's `npx playwright test
+  // e2e/specs/a11y-axe.spec.ts e2e/specs/a11y-narrow.spec.ts`; linux is transcribed
+  // from the GREW lines of CI run 33275970428, which took a deliberate red check for
+  // exactly this purpose — the practice `b86ca83` records.
+  //
+  // THE SPLIT SET CHURNS AGAIN, IN BOTH DIRECTIONS, which is now the third commit to
+  // observe it: FOUR cells collapse to scalars (mobile, zoom-200, width-320,
+  // width-390 — the last two had been a scalar and a split respectively) and TWO stay
+  // split (laptop, tablet). Do not read a split as a stable property of a cell.
+  //
+  // INDEPENDENT CROSS-CHECK, worth recording because it was free: the `A11Y-06`
+  // branch measured darwin on its own base and reported the identical seven darwin
+  // numbers. Its landmark change moves `landmark-unique` only, so the two runs
+  // agreeing on `color-contrast` is a real confirmation rather than a coincidence.
+  darwin: 2440,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -3479,7 +3515,11 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // exactly at the other four. Unlike the 2026-08-27 entry above, no cell in this edit
   // is a one-platform measurement asserted about the other: both faces were run at the
   // same commit. Do not reconcile the columns by copying a half across.
-  linux: 2430,
+  // 2026-08-29 (see the darwin block above): linux 2430 -> 2443 (+13). The columns
+  // move by DIFFERENT amounts (+14 darwin, +13 linux) because the two faces started
+  // from different places on four of the seven cells; both totals are the sum of
+  // their own column's measured cells, neither derived from the other.
+  linux: 2443,
 };
 
 /**
