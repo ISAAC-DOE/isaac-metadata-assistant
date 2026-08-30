@@ -1969,7 +1969,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // paragraph as its own `<p class="api-docs-description">`, so a new paragraph
     // re-baselines seven `settings-explorer` accessibility cells on two platforms.)
     // RE-DERIVED from the served document, never incremented: raw sum over the 71
-    // operations = 104,467, minus 2 per `\n\n` separator (211 x 2 = 422) = 104,045.
+    // operations = 105,293, minus 2 per `\n\n` separator (211 x 2 = 422) = 104,871.
     // 103,838 -> 104,045 (+207): ~~the two `unavailable`-cause descriptions
     // (`GET /api/about`, `POST /api/assistant/memory/query`) each gained~~ —
     // CORRECTED 2026-08-29 by independent review. **ONE** description changed,
@@ -1983,6 +1983,44 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // commit after the assertion moved to 104,045 — the arithmetic was left behind
     // by the edit that changed its inputs, which is the exact failure this test's
     // own header lectures about. Re-measured over `create_app().openapi()`.)
+    // 104,045 -> 104,871 (+826): ONE existing description changed —
+    // `GET /api/experiments/{experiment_id}/notes` — and no other. It used to END
+    // "Both routes are a run's, so a record with no runs can write none of them
+    // yet", which stopped being true when `system.technique` gained a record-level
+    // write path: measured over HTTP, `{"system.technique": "XAS"}` at
+    // `POST /api/experiments/{id}/answers` returns 200 on a record with ZERO runs.
+    // The replacement strikes that sentence in place and describes the new
+    // `record_writable_field_paths` key, which is the per-path answer to WHERE.
+    // It also stops the paragraph's OPENING list of accepting routes reading as
+    // exhaustive — it named the two run routes and nothing else, which is the same
+    // "true on average" failure one sentence further down.
+    // Every word of it was written INTO the existing `value_writable_field_paths`
+    // paragraph, so the remainder count below MUST NOT move — a change that moved
+    // it would have appended instead, and would re-baseline the seven
+    // `settings-explorer` accessibility cells this test's header warns about.
+    // RE-TRANSCRIBED from `create_app().openapi()` by script, never hand-edited,
+    // and RE-MEASURED over the served document rather than adjusted by a delta;
+    // `test_contract_description_parity.py` proves the copy still matches.
+    // 104,871 -> 105,187 (+316), 2026-08-30: the SAME description changed again, and
+    // no other. NOTE THE UNITS, because the first attempt at this line got them
+    // wrong and the test caught it: this total is NOT the raw sum of description
+    // characters. It is `lead.length + rest.join('').length`, which DROPS the
+    // `\n\n` separators — so it runs exactly 2 x 211 = 422 below the raw served
+    // total, which is 105,609. Comparing a raw measurement against this assertion
+    // reads as a 738-character change that did not happen. That is the same
+    // "arithmetic left behind by the edit that changed its inputs" failure this
+    // test's own header lectures about, reproduced while correcting it.
+    // Independent review measured that the sentence naming
+    // `record_writable_field_paths`' gate said "for the paths the official schema
+    // closes with an enum" — ONE of three gates. `context.environment` satisfies it,
+    // is mappable and is value-writable, and the record pair REFUSES it, because it
+    // is run-level: measured by derivation, `_record_enum_fields()` is
+    // {system.domain, system.technique} while mappable-and-enum-closed is
+    // {context.environment, system.technique}. That is the same "true on average,
+    // read about one field" failure the rest of the paragraph exists to remove,
+    // reproduced inside the paragraph doing the removing. Written INTO the existing
+    // paragraph again, so the `\n\n` count is UNCHANGED at 211 and the remainder
+    // count below does not move — re-measured, not assumed.
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2014,7 +2052,22 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //     per `\n\n` separator (235 x 2 = 470) = 117,038.
     // The array's own copy was re-transcribed FROM `create_app().openapi()` and
     // `test_contract_description_parity.py` proves it matches, in both directions.
-    expect(total).toBe(117038);
+    //
+    // MERGE, 2026-08-30. BOTH LINEAGES ABOVE ARE REAL AND NEITHER SUBSUMES THE OTHER,
+    // which is why both are kept rather than one being chosen. `main` corrected ONE
+    // existing description twice (104,045 -> 104,871 -> 105,187); this branch ADDED
+    // FOUR operations and corrected THREE descriptions from the same 104,045 base.
+    // The merged tree therefore carries both sets of bytes, and the total below is
+    // RE-MEASURED over the merged served document rather than composed by adding the
+    // two deltas — composing them would assume the two edits touch disjoint text,
+    // which is exactly the kind of arithmetic this test's header lectures about.
+    // Measured on the merged tree: 75 operations, raw sum 118,650, 235 `\n\n`
+    // separators, so 118,650 - 470 = 118,180. The two lineages DO reconcile, which
+    // is a check rather than the derivation: main's raw grew 104,467 -> 105,609
+    // (+1,142) and the branch's raw was 117,508, and 117,508 + 1,142 = 118,650.
+    // Separators go 211 + 24 = 235 — the 24 are the four new operations', and
+    // neither lineage's prose corrections added one.
+    expect(total).toBe(118180);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and

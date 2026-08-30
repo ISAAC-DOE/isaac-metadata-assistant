@@ -14,11 +14,22 @@
  * ever exempted — see `../a11y-baseline.ts` for why the first version of this
  * file effectively did exempt one, and what replaced it.
  *
- * Ten of the 103 recorded triples hold a separate exact number for macOS and
- * for Linux, because there is no webfont and the system face changes where text
- * wraps. The scan enforces the CURRENT platform's number, exactly; the
- * well-formedness test below checks BOTH columns. **CI (Linux) is the
- * authority** — a green macOS run does not predict a green CI run.
+ * ~~Ten of the 103 recorded triples hold a separate exact number for macOS and
+ * for Linux~~ — ~~**RE-COUNTED 2026-08-29: EIGHT of 161.**~~ **RE-COUNTED AGAIN
+ * 2026-08-30: FIVE of 161.** Eight was this branch's figure and the MERGE moved it:
+ * `c7b9db6` took the linux halves CI measured at `6958459` and five splits collapsed
+ * to scalars. Both earlier figures were right when written and neither is now.
+ * Neither of the first two figures was right
+ * when it was written and the sentence has been stale for weeks in both halves, so it
+ * is struck rather than silently renumbered. Derive it rather than trusting this
+ * comment: `e2e/a11y-baseline.ts` is the only source, and the count moves whenever a
+ * cell is added, deleted or transcribed. What the sentence was FOR is unchanged and is
+ * the part to keep: some cells hold a separate exact number per platform, because
+ * there is no webfont and the system face changes where text wraps — and, since
+ * 2026-08-29, because one column can also simply be older than the other. The scan
+ * enforces the CURRENT platform's number, exactly; the well-formedness test below
+ * checks BOTH columns. **CI (Linux) is the authority** — a green macOS run does not
+ * predict a green CI run.
  */
 
 import {

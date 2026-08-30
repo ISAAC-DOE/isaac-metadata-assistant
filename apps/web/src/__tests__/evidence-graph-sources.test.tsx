@@ -302,6 +302,9 @@ const notesFixture = (over: Partial<ApiNotesResponse> = {}): ApiNotesResponse =>
   unreadable_entries: 0,
   mappable_field_paths: ['sample.material.formula', 'context.environment'],
   value_writable_field_paths: ['sample.material.formula'],
+  // Empty, which is what the real server answers for these two paths: neither is one
+  // of the schema-enum fields the record's own operations accept.
+  record_writable_field_paths: [],
   sources: ['typed_note'],
   experiment_version: '1.0',
   ...over,
