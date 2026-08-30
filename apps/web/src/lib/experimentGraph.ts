@@ -734,8 +734,28 @@ export function buildExperimentGraph(
   };
 
   for (const group of groups) {
+    /*
+     * SKELETON ROWS ARE SKIPPED, AND THAT IS WHAT KEEPS THIS GRAPH TRUTHFUL.
+     *
+     * `GET /draft` now returns a row for every field path this build can extract into
+     * or write at, whether or not the record holds one (`present: false`, `value:
+     * null`, `status: "missing"`). This graph models what a record IS — its fields,
+     * their evidence, the issues attached to them — so a node per unfilled path would
+     * be 26 assertions of structure the record never made, on a created record where
+     * today there are none. `fromDraft: true` says the field came from the draft, and
+     * for a skeleton row that would simply be false.
+     *
+     * The section is created BEFORE the filter, so a section whose rows are all
+     * skeleton still appears — the record does have a `Sample` section in the shape
+     * `_GROUP_TITLES` gives it — and `ensureSection(title, true)` is unchanged.
+     *
+     * Measured consequence: on every seeded record every row is `present`, so this
+     * graph is byte-identical to what it was; on a created record it stays at zero
+     * field nodes, which is also what it was.
+     */
     ensureSection(group.title, true);
     for (const f of group.fields) {
+      if (f.present === false) continue;
       ensureField(f.path, {
         label: f.label,
         value: f.value,

@@ -44,6 +44,35 @@
  * would look like nothing had happened, which is what makes it worth a helper
  * rather than a comment.
  *
+ * ── AND THE RECORD SCREEN'S FOUR DRAFT BLOCKS, ADDED 2026-08-30 ─────────────
+ *
+ * A measured coverage hole of the same shape, and a larger one. `FieldGroup` collapses
+ * every draft block on arrival — the four sections that hold every field row on the
+ * record screen — and it is a `button[aria-expanded]` over conditionally rendered
+ * children, so the body is not merely hidden, it is NOT IN THE DOM. axe has therefore
+ * never seen a single `.field-row`, at any viewport, on any surface, since those
+ * sections were written. Everything the group-skeleton slice put inside them (the
+ * per-path capture sentence, and the value control on the two paths a record-level route
+ * accepts) would have landed in exactly that blind spot.
+ *
+ * THE SELECTOR IS `section[data-draft-block]`, NOT `.fg-header`, and the distinction is
+ * the whole reason that attribute exists. `RenameExperimentPanel`, `RecordInfoPanel` and
+ * `RecordLinksPanel` deliberately reuse `FieldGroup`'s shell down to the class names
+ * (each says so in its own header), so a `.fg-header` sweep would also open three
+ * sections this addition is not about and move their counts for an unrelated reason.
+ * Same argument as `details.stats-disclosure` carrying its own class rather than
+ * borrowing `details.stats-technical`.
+ *
+ * THE COUNT IS ASSERTED AS "AT LEAST ONE", NOT AS AN EXACT NUMBER, and that is a
+ * deliberate departure from `PROSE_DISCLOSURES` above. The number of draft blocks is a
+ * property of the RECORD under test — `serialize.draft_to_groups` emits a section only
+ * for a group that has rows — so pinning it here would make an unrelated change to a
+ * record's field set fail inside a helper whose job is coverage. What the assertion has
+ * to catch is the failure mode that matters: the blocks becoming unreachable, or
+ * silently ceasing to exist, while the baselines quietly drop. `FIELD_GROUP_SURFACES`
+ * names the surfaces that must mount at least one, so a surface losing them entirely
+ * names itself.
+ *
  * ── What it deliberately does NOT open ──────────────────────────────────────
  *
  * Each chart's own data-table `<details class="stats-chart-table-wrap">` stays
@@ -51,6 +80,10 @@
  * for every reader, and opening four tables at seven widths would move counts
  * for a reason unrelated to this gap. They remain unscanned, which is a real and
  * still-open limitation and is stated here rather than left to be discovered.
+ *
+ * The record screen's OTHER collapsed `.field-group` cards (Experiment Name, Record
+ * Information, Record Links) also stay closed, for the same reason and with the same
+ * status: a real, still-open coverage gap, named here rather than left to be found.
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -71,6 +104,20 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
   statistics: 4,
   'statistics-example': 4,
 });
+
+/**
+ * Surfaces that MUST mount at least one collapsed draft block.
+ *
+ * `record-detail` is the record workbench, which renders one `FieldGroup` per draft
+ * section. Declared rather than measured-and-accepted, for the reason
+ * `PROSE_DISCLOSURES` is: a surface that quietly stopped mounting them would otherwise
+ * take every field row out of every scan while the baselines merely drifted down, which
+ * this helper's own history shows reads as an accessibility win.
+ *
+ * The COUNT is deliberately not declared — see the header. A surface absent from this set
+ * may mount zero, and any it does mount are still opened.
+ */
+export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail']);
 
 export async function openUnreachableDisclosures(page: Page, surfaceId: string): Promise<void> {
   const technical = page.locator('details.stats-technical');
@@ -120,4 +167,49 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
     await one.locator('> summary').click();
     await expect(one).toHaveAttribute('open', '');
   }
+
+  await openDraftBlocks(page, surfaceId);
+}
+
+/**
+ * Open every collapsed draft block on the record screen.
+ *
+ * A separate function from the one above — though called from it, so no spec has to
+ * remember a second step — because the two open different things by different mechanisms:
+ * a `<details>` toggled through its `<summary>`, and a `button[aria-expanded]` whose
+ * panel does not exist in the DOM until it is pressed. Keeping them apart means a failure
+ * names which kind failed.
+ *
+ * IDEMPOTENT AND ORDER-INSENSITIVE: it re-reads the collapsed set on each pass rather
+ * than iterating a snapshot, because pressing one header re-renders the list. It presses
+ * only headers reporting `aria-expanded="false"`, so a block an earlier step already
+ * opened is never toggled shut again.
+ */
+export async function openDraftBlocks(page: Page, surfaceId: string): Promise<void> {
+  const blocks = page.locator('section[data-draft-block]');
+  const mounted = await blocks.count();
+  if (FIELD_GROUP_SURFACES.has(surfaceId)) {
+    expect(
+      mounted,
+      `surface "${surfaceId}" is declared in FIELD_GROUP_SURFACES (e2e/helpers/disclosures.ts) ` +
+        'but mounts no section[data-draft-block]. A draft block that is not opened here is not ' +
+        'scanned by axe at any viewport, and its disappearance would read as a baseline ' +
+        'improvement rather than as the coverage loss it is.'
+    ).toBeGreaterThan(0);
+  }
+
+  /* Bounded rather than `while (true)`: each pass can only shrink the collapsed set, and
+     the bound turns "a header that will not stay open" into a named failure instead of a
+     hung scan at every viewport. One press each is `mounted` passes. */
+  for (let pass = 0; pass < mounted; pass++) {
+    const collapsed = page.locator(
+      'section[data-draft-block] > .fg-header[aria-expanded="false"]'
+    );
+    if ((await collapsed.count()) === 0) break;
+    await collapsed.first().click();
+  }
+
+  await expect(
+    page.locator('section[data-draft-block] > .fg-header[aria-expanded="false"]')
+  ).toHaveCount(0);
 }

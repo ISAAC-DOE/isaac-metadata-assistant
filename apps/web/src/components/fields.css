@@ -107,6 +107,89 @@
   overflow-wrap: anywhere;
 }
 
+/* ---- capture: the sentence, and (for two paths) the control ---------------
+ *
+ * A skeleton row — a field path the record holds no value at — is not an error state
+ * and is not styled as one. It reads exactly as an honestly missing value always has;
+ * `data-present="false"` exists so a test and a stylesheet can tell the two apart
+ * without parsing copy, not so the row can be tinted.
+ *
+ * EVERY COLOUR HERE IS `--text-muted` (5.93:1 on white) OR DARKER. `--text-tertiary`
+ * (#78838f, 3.86:1) is used by the older rules above and is deliberately not extended to
+ * this new copy: it is the token the `.section-tab` fix retired for exactly this reason,
+ * and a sentence a reader must act on is the last place to reintroduce it.
+ */
+.field-capture-hint,
+.field-capture-note {
+  margin: 8px 0 0;
+  max-width: 66ch;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.field-capture {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.field-capture-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.field-capture-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Sized so the control clears the 24px minimum target height at every viewport. */
+.field-capture-select {
+  min-height: 32px;
+  max-width: 320px;
+  padding: 6px 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+}
+
+.field-capture-select:focus-visible {
+  outline: none;
+  border-color: var(--action);
+  box-shadow: var(--ring-active);
+}
+
+.field-capture-select[aria-invalid='true'] {
+  border-color: var(--fail-solid);
+}
+
+.field-capture-status:empty {
+  display: none;
+}
+
+.field-capture-status {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+/* Never colour alone: the sentence carries the state, the hue reinforces it. */
+.field-capture-error {
+  margin: 0;
+  max-width: 66ch;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fail-text);
+}
+
 /* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
 @media (max-width: 640px) {
   /* Stack the fixed 190px label column above the value so neither is squeezed. */

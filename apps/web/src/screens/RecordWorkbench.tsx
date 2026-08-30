@@ -705,11 +705,35 @@ function LoadedWorkbench({
       */}
       <AssetReferencesPanel experimentId={id} />
 
+      {/*
+        THE DRAFT BLOCKS ARE THE CAPTURE SURFACE, AND UNTIL NOW A CREATED RECORD HAD
+        NONE. Measured over HTTP: `GET /draft` on a record created through
+        `POST /api/experiments` returned `{"groups": []}` — zero rows, zero groups — so
+        these four sections rendered nothing at all and a scientist had no way to learn
+        that a record holds a sample, a facility or a technique. The server now returns
+        the group skeleton, so the same call returns 26 rows in the same 4 groups a
+        seeded record has.
+
+        `capture` IS WHAT MAKES ONE OF THOSE ROWS WRITABLE HERE, and it is granted only
+        on this screen because only this screen holds the record's current version token.
+        `FieldCaptureControl` decides per row whether a control may be offered at all —
+        two of the 26 paths have a record-level route, and the rest say where their value
+        is entered rather than offering a box that would be refused.
+
+        `onAgentRefresh` AND NOT `bundle.reload`, for the reason `RenameExperimentPanel`
+        two sections below records: the loading variant unmounts this entire body, which
+        would destroy the control mid-announcement and drop focus to `<body>`.
+      */}
       {groups.map((group) => (
         <FieldGroup
           key={group.block}
           group={group}
           expanded={isExpanded(group.block)}
+          capture={{
+            experimentId: id,
+            version: detail.version,
+            onSaved: onAgentRefresh,
+          }}
           onToggle={() =>
             setToggles((prev) => ({
               ...prev,

@@ -56,6 +56,10 @@ export interface DraftField {
   source_types: SourceType[];
   evidence?: FieldEvidence[]; // compact citation for the field row
   helper?: string; // inferred/needs-you helper copy (sentence case)
+  /** See `ApiDraftField.present` — passed through, never computed from `status`. */
+  present?: boolean;
+  /** See `ApiDraftField.capture` — passed through, never re-derived. */
+  capture?: DraftFieldCapture;
 }
 
 export interface FieldGroupData {
@@ -762,6 +766,50 @@ export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields
   artifact: ApiArtifactState;
 }
 
+/**
+ * WHERE — IF ANYWHERE — A VALUE MAY BE ENTERED AT ONE FIELD PATH.
+ *
+ * Served per row by `GET /api/experiments/{id}/draft`, derived in `routes.capture_facts`
+ * from the same three sets the write routes gate on. **Never re-derived in this client**,
+ * for the reason `UnmappedNotesPanel`'s `valueWriteHint` already documents: a client-side
+ * list of "which paths take a value" is free to drift the moment the server's derivation
+ * changes, and nothing would fail.
+ *
+ * THE THREE BOOLEANS ARE THREE DIFFERENT OPERATIONS AND MUST NOT BE COLLAPSED. Measured
+ * over HTTP across all 26 skeleton paths and all six write routes: 2 are
+ * `record_writable`, 5 are `run_field_writable`, 13 are `run_overridable`, and 7 are none
+ * of them. A row where all three are false must render no control at all — that is the
+ * defect `CLAUDE.md` §11 records ("a panel told the scientist to enter a value on 25
+ * fields, and 7 accept none"), and this shape exists so it cannot recur.
+ *
+ * `run_overridable` IS NOT "the record's value can be entered here". An override records
+ * ONE RUN's divergence from a record-level value; it is not a way to say what the record
+ * is. Copy built on it must say "on a run".
+ */
+export interface DraftFieldCapture {
+  /** This build's experiment/run classification, or `null` if it did not say. */
+  level: 'experiment' | 'run' | 'unclassified' | null;
+  /** `POST /api/experiments/{id}/answers`, corrected at `.../edit`. */
+  record_writable: boolean;
+  /** `PATCH /api/experiments/{id}/runs/{run_id}` — a run's own field. */
+  run_field_writable: boolean;
+  /** `POST .../runs/{run_id}/overrides` — one run's divergence, not the record's value. */
+  run_overridable: boolean;
+  /** The official schema's own closed set, where it declares one. Never invented here. */
+  choices: string[] | null;
+  /**
+   * The vendored schema namespace this path sits in that declares NO members, or `null`.
+   *
+   * It exists so one sentence is not said about two different things. Seven skeleton
+   * paths accept a value from no route: the six `system.configuration.*`, whose scope is
+   * an OPEN SCIENTIFIC QUESTION because the schema enumerates no members for that
+   * namespace, and `timestamps.created_utc`, which is a declared property the exporter
+   * stamps and whose scope is not an open question at all. `workspace.field_level`'s own
+   * docstring warns against pooling them; this is how the copy avoids it.
+   */
+  open_namespace?: string | null;
+}
+
 export interface ApiDraftField {
   path: string;
   label: string;
@@ -769,6 +817,19 @@ export interface ApiDraftField {
   status: FieldStatus;
   evidence_count: number;
   source_types: SourceType[];
+  /**
+   * Whether the draft actually CARRIES an envelope at this path.
+   *
+   * `false` is the group skeleton: the shape of a value this record does not have,
+   * served so a created record renders its fields instead of nothing. A `false` row is
+   * not a field the record gained, and no consumer may report it as one.
+   *
+   * Optional so a fixture written before the server served it still type-checks;
+   * `undefined` is read as "the server did not say", and every consumer that must know
+   * treats that the same way it treats a `missing` status.
+   */
+  present?: boolean;
+  capture?: DraftFieldCapture;
 }
 
 export interface ApiDraftGroup {

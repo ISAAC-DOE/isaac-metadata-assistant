@@ -2017,7 +2017,39 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // reproduced inside the paragraph doing the removing. Written INTO the existing
     // paragraph again, so the `\n\n` count is UNCHANGED at 211 and the remainder
     // count below does not move — re-measured, not assumed.
-    expect(total).toBe(105187);
+    // 105,187 -> 106,511 (+1,324) and 211 -> 214 post-lead paragraphs, 2026-08-30:
+    // ONE existing description changed — `GET /api/experiments/{experiment_id}/draft`
+    // — and no other, which `test_contract_description_parity.py` proves rather than
+    // leaving it asserted here. That route now returns the group SKELETON: a row for
+    // every field path this build can extract into or write at, whether or not the
+    // draft holds one. Measured before: a record created through `POST /api/experiments`
+    // served `{"groups": []}` — zero rows, zero groups — so the record screen's four
+    // field sections rendered nothing at all. The three APPENDED paragraphs describe
+    // `present`, the `capture` block that says WHERE a value may be entered, and the
+    // scope limit that none of it describes the official schema's full field set.
+    //
+    // THE PARAGRAPH COUNT MOVES BY EXACTLY THREE, AND THAT IS THE TELL. Each is an
+    // APPENDED paragraph rather than prose woven into the lead; a change that moved the
+    // character total while leaving this at 211 would mean the opposite. It is stated
+    // here rather than inferred because a new paragraph re-baselines the
+    // `settings-explorer` accessibility cells on two platforms — the Endpoint Explorer
+    // renders each paragraph as its own `<p class="api-docs-description">` — so three
+    // new ones is a deliberate cost, not a side effect nobody counted.
+    //
+    // RE-MEASURED the same two independent ways every corrected total above was, and
+    // NOT by adding a delta:
+    //
+    //   · from the SERVED document: the `splitPurpose` paragraph rule transcribed into
+    //     Python over `create_app().openapi()`, restricted to the 71 operations this
+    //     array names, gives total 106,511 and 214 post-lead paragraphs.
+    //   · internal consistency: raw sum of the 71 served descriptions = 106,939; this
+    //     figure drops the 214 `\n\n` separators, and 106,939 - 428 = 106,511.
+    //
+    // The collapsed-operation count is UNCHANGED at zero, which is not luck: the new
+    // remainder runs well past `PURPOSE_DISCLOSURE_MIN_CHARS` and stays inline because
+    // it carries `refusal` — a `BOUNDARY_CAVEAT_MARKERS` entry — in the sentence saying
+    // a surface can decline to offer a control whose only outcome would be one.
+    expect(total).toBe(106511);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -2059,7 +2091,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // would mean the bound had been appended instead, and one that left it at 210
     // while the character total moved would mean the two-cause prose had been woven
     // in. RE-DERIVED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(211);
+    // 211 -> 214 (+3): `GET .../draft` APPENDED three paragraphs. See the note above
+    // the character total for the measurement and for why three appended paragraphs
+    // rather than woven prose was the deliberate choice. RE-MEASURED from the served
+    // document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(214);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather
