@@ -1479,8 +1479,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * two different bases produced them, which is why the +14 and the A11Y-06 -7 can
        * be summed without double-counting.
        */
-      'settings-explorer@desktop-1280x800': { darwin: 60, linux: 59 },
-      'settings-explorer@laptop-1024x768': 59,
+      'settings-explorer@desktop-1280x800': 60,
+      'settings-explorer@laptop-1024x768': { darwin: 59, linux: 60 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -1658,7 +1658,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 53 -> 64, still a scalar — both faces
          measured 64 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@zoom-200': { darwin: 71, linux: 70 },
+      'settings-explorer@zoom-200': 71,
       'settings-privacy@desktop-1280x800': 3,
       'settings-privacy@laptop-1024x768': 3,
       'settings-privacy@tablet-768x1024': 3,
@@ -2066,7 +2066,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 52 -> 67, still a scalar — both faces
          measured 67 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@width-390': { darwin: 76, linux: 74 },
+      'settings-explorer@width-390': { darwin: 76, linux: 75 },
       'settings-privacy@width-320': 2,
       'settings-privacy@width-390': 2,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -3814,7 +3814,23 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Every one of these three is a CI figure transcribed from the run's own GREW
   // lines, not a derivation. The columns move by DIFFERENT amounts (+3 darwin,
   // +5 linux) from one cause, which is why both were run.
-  linux: 2287,
+  // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
+  //
+  //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)
+  //   width-390          74 -> 75   (+1)      zoom-200          70 -> 71   (+1)
+  //   mobile-375x812 and tablet-768x1024 did NOT appear in the run's GREW lines,
+  //   so their linux halves are unmoved and their splits stand as written.
+  //                                    net  +4   ->  2287 + 4 = 2291
+  //
+  // TWO CELLS COLLAPSED TO SCALARS IN THIS TRANSCRIPTION AND ONE BECAME A SPLIT, in
+  // the same edit and in opposite directions — which is the churn this file's header
+  // describes rather than a mistake. `desktop-1280x800` and `zoom-200` collapsed
+  // because linux caught up to darwin exactly (60 and 71), and a scalar is the only
+  // legal way to say the faces agree. `laptop-1024x768`, which had to be written as a
+  // scalar 59 one commit ago because both halves then read 59, SPLITS again now that
+  // linux measured 60. Every number here is a CI figure or a local macOS reading at
+  // the merged tree; none is derived from the other column.
+  linux: 2291,
 };
 
 /**
