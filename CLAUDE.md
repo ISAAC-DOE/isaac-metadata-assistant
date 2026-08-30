@@ -1428,6 +1428,25 @@ scope and not mistake it for a drift.
   **LAYOUT-02**; and the associated tests, documentation, migration artifacts, PRs and safe
   integration.
 
+
+  ***PROVENANCE OF THIS GRANT, STATED BECAUSE A REPOSITORY CANNOT WITNESS A
+  CONVERSATION.*** This authorization reaches the repository as an **owner instruction
+  relayed in-session** — the same evidentiary class as the Dean answers this section
+  records as *"OPERATOR TESTIMONY ABOUT INFRASTRUCTURE CONFIGURATION … not an
+  observation by this repository and no artifact backing it is committed here."* **No
+  evidence file, packet or transcript backs it, and authorship witnesses nothing**:
+  every commit in this repository is authored by the project owner with Claude
+  co-authored, so a commit author cannot distinguish a granted scope from an assumed
+  one. An independent audit of the implementing branch raised exactly this and was
+  **right to**: a branch's own prose is not proof of its own authorization, and the
+  sentence being cited was written one commit earlier by the same work that cites it.
+  What a reader CAN check mechanically is the BOUNDARY — this entry is dated, names
+  what is and is not covered, forbids any earlier slice from citing it, and adds no
+  table. What a reader CANNOT check from inside the repository is that the instruction
+  was given. **Only Krish can confirm that.** The honest entry is that the repository
+  records the DECISION, not its DELIVERY — and no slice may cite this entry as though
+  the repository had verified it.
+
   **What is NOT authorized, restated here so the boundary is committed rather than conversational:**
   applying any hosted migration; modifying `isaac-k8` or any SLAC infrastructure; bypassing
   Authentik; hunting for or repurposing secrets; creating provider accounts, enabling billing, or

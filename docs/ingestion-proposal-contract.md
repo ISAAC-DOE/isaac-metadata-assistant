@@ -297,11 +297,47 @@ operation-level `201` would be an operation-wide claim that it creates; the repo
 test refuses two success codes for exactly that ambiguity. The status says the request succeeded and
 the body's `deduplicated` says which of the two happened.
 
-**MCP: no new tool.** `PERMITTED_TOOL_NAMES` is closed at 10 (`mcp/policy.py:683-699`) and
+~~**MCP: no new tool.**~~ — **AMENDED 2026-08-30, AND ONLY ONE OF THIS PARAGRAPH'S TWO HALVES IS
+SUPERSEDED. It is struck in place rather than rewritten, because "no new tool" is a claim a future
+session acts on.** `PERMITTED_TOOL_NAMES` is closed at 10 (`mcp/policy.py:683-699`) and
 `forbidden_tool_reason` turns "we decided not to" into an `ImportError` (`mcp/policy.py:31-37`).
-Adding `isaac_accept_proposal` would give an external agent a path to scientific content;
-`ai-integration-decision-packet.md` §6's "external agents cannot submit" points the same way.
-A read-only `isaac_list_proposals` under `Scope.READ` is arguable and is **not** recommended here.
+
+**THE HALF THAT SURVIVES, AND IS STRENGTHENED:** adding `isaac_accept_proposal` would give an
+external agent a path to scientific content; `ai-integration-decision-packet.md` §6's "external
+agents cannot submit" points the same way. **No accept, review, supersede, withdraw, finalize,
+export or Submit tool may exist at any scope**, and `POST .../proposals/{id}/review` must never
+appear in an MCP `OPERATIONS` entry. Measured while amending this: `FORBIDDEN_TOOL_TOKENS`
+(`mcp/policy.py:116`) contains `approve` but **NOT `accept`**, so `isaac_accept_proposal` would
+pass the token guard today and be caught only by the closed name set — one reviewer's attention
+away from shipping. `accept` is added to that set, so the refusal is an `ImportError`.
+
+**THE HALF THAT IS SUPERSEDED:** the decline of a *creation* tool, and the "not recommended"
+verdict on a read-only `isaac_list_proposals`. The 2026-08-29 authorization covers the remote MCP
+architecture, and the Claude voice-to-proposal workflow it authorizes is **unbuildable** if MCP
+cannot create a proposal — that is the whole point of minting a proposal type rather than letting
+an agent write a field. **The safety argument runs the other way from how §4 first read it:** §5
+**I1** and **I2** make a proposal inert to the draft, to `export.transform` and to
+`submissions.content_signature`, so CREATING one mutates no authoritative metadata. That inertness
+is precisely what makes it the safe channel for model-derived output.
+
+**The amended surface — three tools, least privilege:**
+
+| Tool | Scope | Why this scope |
+|---|---|---|
+| `isaac_propose_field_value` | **new** `isaac:proposals.write` | Creating a proposal is NOT a draft write and must not require `DRAFT_WRITE`, which can change draft content directly. The model-derived channel gets the weakest scope that works. |
+| `isaac_list_proposals`, `isaac_get_proposal` | `Scope.READ` | Reading proposal status is a read. §4 called it "arguable"; the workflow requires it. |
+| `isaac_get_changes` | `Scope.READ` | The bounded cursor feed. |
+
+Scopes still do not nest (`policy.py`, "WHY THE SCOPES DO NOT NEST"), so a deployment granting only
+`isaac:proposals.write` can create a proposal and read nothing else.
+
+**Three consequences to state rather than discover.** §5 **I4** still binds unchanged: acceptance
+requires a trusted human identity and answers `409 human_actor_required` in every
+default-configured deployment, and MCP creating a proposal does not move that one inch. The
+`trust_basis` of an MCP-created proposal is the OAuth **service principal's**, never a human's, and
+the accepting scientist's identity is a separate field on a separate transition — the two must
+never collapse. And `client_request_key` (§2, DEC-13) becomes load-bearing rather than optional,
+because a retrying MCP client is exactly the case its reversal was argued for.
 
 ---
 
@@ -555,8 +591,10 @@ proposal does not reach, in a section arguing that the storage location has no l
    (reconciliation-only, "a deliberate authority boundary, NOT a defect"), not residual work.
 7. **Any LLM or external model provider.** A proposal's `rule` is a deterministic sentence from a
    committed table. No production provider is authorized; every seam answers `501`.
-8. **MCP surface, frontend design, and copy.** §4 declines a new tool; the UI is unspecified beyond
-   the two negative constraints in §5 and §6 (no Accept control that can only be refused).
+8. **MCP surface, frontend design, and copy.** ~~§4 declines a new tool~~ — **AMENDED 2026-08-30:
+   §4 now permits exactly three, all read-or-create, none able to accept, review or Submit.** The
+   UI remains unspecified beyond the two negative constraints in §5 and §6 (no Accept control that
+   can only be refused).
 9. **Expiry, scheduling, background sweeps, change feeds, cursors, event logs, and Undo.** ~~None
    exists in this repository and none is designed here.~~ **The FIRST HALF was independently
    re-measured on 2026-08-29 and is TRUE — ~~`rg` for `get_changes_since|change_feed|changes_since|
@@ -619,6 +657,17 @@ when written**; it is struck in place, not deleted, so this reads as a recorded 
 rather than a drift — the discipline `CLAUDE.md` §15 applies to its own four table-naming
 corrections. The committed basis is the §15 entry of the same date. **Nothing here authorizes
 applying a hosted migration, and §10 DEC-12 makes that moot by needing none.**
+
+**PROVENANCE, and it is a limitation rather than a caveat.** This grant reaches the repository as an
+**owner instruction relayed in-session**, in the same evidentiary class as the operator testimony
+`CLAUDE.md` §15 records for Dean. No evidence file backs it and none can: every commit here is
+authored by the owner with Claude co-authored, so authorship distinguishes nothing. An independent
+forensic audit of the implementing branch raised precisely this — the sentence being cited was
+written one commit earlier, by the same work that cites it — and **that objection is correct and is
+not answered by this document.** What is checkable is the BOUNDARY (dated, scoped, no table, no
+earlier slice may cite it); what is not checkable from inside the repository is that the instruction
+was given. Only Krish can confirm it. An implementing slice must cite this as a recorded owner
+decision, never as something the repository verified.
 
 ### 10.1 What a second independent review found
 

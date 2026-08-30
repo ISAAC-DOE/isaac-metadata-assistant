@@ -16,8 +16,19 @@ therefore a binding that serves nothing and says why.
 
 WHAT A STANDARDS-COMPLIANT ANSWER TO D2 LOOKS LIKE
 ==================================================
-Verified against the MCP authorization specification (revision ``2025-06-18``,
-the revision this package's protocol surface targets):
+Verified against the MCP authorization specification (revision ``2025-06-18``
+when this section was written; **each bullet below re-checked against the live
+``2026-07-28`` text on 2026-08-30 and still holds**).
+
+The parenthetical used to read *"the revision this package's protocol surface
+targets"*, and is corrected rather than deleted: ``server.py`` is now
+**dual-era** and targets both, so the singular was true when written and is not
+now. **What is NOT claimed here is that the two revisions' authorization chapters
+are identical** — they are not (``2026-07-28`` adds, for instance, the
+``offline_access`` SHOULD NOT that ``oauth.py`` records as new), and no diff of
+the two was performed. The claim is the weaker and checkable one: every bullet
+below was re-read against the current text. ``oauth.py``'s docstring carries the
+requirement-by-requirement traceability, and it is scoped to ``2026-07-28``:
 
 * MCP authorization lives at the **transport** layer, not in the JSON-RPC body.
   A bearer token travels in ``Authorization``, never in a query string, and never
@@ -77,26 +88,30 @@ Both are read through ``getattr`` with the **safe** value as the default
 (``False`` and ``True`` respectively), so a binding that forgets to declare them
 serves nothing and, if it somehow serves, serves only itself.
 
-``requires_loopback_peer`` CONTROLS MORE THAN ITS NAME SAYS
-===========================================================
-Read this before writing the binding that answers D2. In ``transport.py`` this
-single flag gates **three** distinct refusals, not one:
+THE ONE FLAG THAT CONTROLLED THREE GUARDS IS NOW THREE FLAGS
+============================================================
+This section used to warn that ``requires_loopback_peer`` gated **three**
+distinct refusals in ``transport.py`` — the socket-peer check it is named for,
+the proxy-header refusal, and the cross-origin/DNS-rebinding refusal — and that
+the author of the first internet-adjacent binding would set it ``False`` for the
+first reason and silently lose the other two. **That is exactly what would have
+happened**: ``oauth.py`` is that binding, and it needs a non-loopback peer.
 
-1. the **socket-peer check** — the one the name describes;
-2. the **proxy-header refusal** — any of :data:`~.transport.PROXY_HEADERS`
-   present means the loopback peer is a relay, not the caller;
-3. the **cross-origin refusal** — an ``Origin`` outside loopback, which is the
-   DNS-rebinding defence the MCP specification requires of a local server.
+So the flag was split, and the warning is recorded here as history rather than
+deleted, because the shape of the mistake is the useful part. Three independent
+attributes now exist — :attr:`DeploymentBinding.requires_loopback_peer`,
+:attr:`~DeploymentBinding.refuses_proxy_headers`,
+:attr:`~DeploymentBinding.requires_loopback_origin` — each read through
+``getattr`` with the **safe** value (``True``) as its default, so a binding that
+declares none of them gets every defence. Both shipped bindings are unchanged in
+behaviour: :class:`LocalLoopbackDeployment` declares all three ``True``, which is
+what the single flag already gave it, and :class:`UnconfiguredDeployment` serves
+nothing at all.
 
-The consequence is the reason this note exists. An ``edge-issued-bearer`` binding
-legitimately receives traffic *through the Authentik edge*, so its author will
-set ``requires_loopback_peer=False`` — and will thereby switch off the proxy and
-origin defences too, on the one binding in this design that is
-internet-adjacent. **That is not the intent of setting this flag and must not be
-allowed to happen silently.** Until the flag is split into three (a deliberate
-FOLLOW-UP, not this slice), treat it as "all three local-server defences", and
-whoever splits it should give the new binding explicit answers for 2 and 3
-rather than inheriting ``False`` for them.
+The rule the old note was reaching for still stands, and is now enforceable:
+**a new binding answers all three questions explicitly.** ``oauth.py``'s class
+docstring gives its own reason for each, which is what "explicit" has to mean if
+it is to be worth anything.
 """
 
 from __future__ import annotations
@@ -106,6 +121,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Mapping, Protocol
 
+from ..config import base_path
 from .policy import Scope, parse_scope
 
 __all__ = [
@@ -113,6 +129,7 @@ __all__ = [
     "DeploymentBinding",
     "DeploymentRefused",
     "LOCAL_LOOPBACK",
+    "OAUTH_RESOURCE_SERVER",
     "LocalLoopbackDeployment",
     "Principal",
     "RESERVED_BINDING_NAMES",
@@ -144,15 +161,32 @@ UNCONFIGURED = "unconfigured"
 #: ``test_mcp_transport.py``.
 LOCAL_LOOPBACK = "local-loopback"
 
-#: Names held for the two answers D2 could take. NOT REGISTERED: selecting one
-#: resolves to :class:`UnconfiguredDeployment`, which is the correct answer while
-#: the decision is outstanding.
+#: The OAuth 2.1 protected-resource binding, implemented in ``oauth.py``.
+#:
+#: **Naming it here is not turning it on.** Selecting it still resolves to
+#: :class:`UnconfiguredDeployment` unless a complete, valid configuration is
+#: present — an issuer, a canonical resource URI, a verification key set — and
+#: none of those exists in any shipped deployment or anywhere in this repository.
+#: The constant lives in this module rather than in ``oauth.py`` so that
+#: :func:`resolve_binding` can branch on it without importing OAuth code on the
+#: default path.
+OAUTH_RESOURCE_SERVER = "oauth-resource-server"
+
+#: Names held for an answer D2 could take. NOT REGISTERED: selecting one resolves
+#: to :class:`UnconfiguredDeployment`, which is the correct answer while the
+#: decision is outstanding.
+#:
+#: **``oauth-resource-server`` WAS IN THIS TABLE AND HAS MOVED.** It is now an
+#: implemented binding (``oauth.py``) and is registered by :func:`resolve_binding`.
+#: Read that as the narrow claim it is: the APPLICATION half exists, is disabled
+#: by default, and still resolves to :class:`UnconfiguredDeployment` unless an
+#: operator supplies a complete configuration. **D1 and D2 remain DEFERRED and
+#: this did not answer them** — an issuer, a registered client, a reachable host
+#: and a routing decision are all external and none of them exists. What changed
+#: is that they are now answerable against reviewable code instead of a plan.
+#: ``test_mcp_oauth_binding.py`` pins that the name appears in exactly one of the
+#: two tables, so it can never read as both reserved and served.
 RESERVED_BINDING_NAMES: Mapping[str, str] = {
-    "oauth-resource-server": (
-        "ISAAC runs its own OAuth 2.1 authorization server, publishes RFC 9728 "
-        "protected-resource metadata, and the edge passes OAuth traffic through. "
-        "Blocked on D1 and D2."
-    ),
     "edge-issued-bearer": (
         "The Authentik edge is configured to accept a pre-issued static bearer on "
         "the MCP path specifically. Blocked on D2, and on the edge configuration "
@@ -269,11 +303,31 @@ class DeploymentRefused(Exception):
     be a secret.
     """
 
-    def __init__(self, code: str, message: str, *, data: dict | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        data: dict | None = None,
+        challenge: dict | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.data = dict(data or {})
+        #: The challenge THIS refusal should carry, when it differs from the
+        #: binding's generic one. ``None`` — the default, and what every existing
+        #: construction passes — means ``server.py`` falls back to
+        #: :meth:`DeploymentBinding.challenge`, so neither shipped binding changes
+        #: in any respect.
+        #:
+        #: It exists because RFC 6750 §3 distinguishes two cases a single generic
+        #: challenge cannot. A request that carried NO credential must not be
+        #: answered ``error="invalid_token"`` — that is the normal first step of
+        #: an authorization flow, not a failure, and reporting an error for it
+        #: sends conforming clients down an error path. An expired or forged one
+        #: must be.
+        self.challenge = dict(challenge) if challenge is not None else None
 
 
 class DeploymentBinding(Protocol):
@@ -295,11 +349,33 @@ class DeploymentBinding(Protocol):
     #: default of ``True`` wherever it is consulted, so forgetting it narrows
     #: rather than widens.
     #:
-    #: **It also gates two guards the name does not mention** — the proxy-header
-    #: refusal and the cross-origin/DNS-rebinding refusal. See the module
-    #: docstring section "``requires_loopback_peer`` controls more than its name
-    #: says" before setting this ``False`` on a new binding.
+    #: ~~"**It also gates two guards the name does not mention**"~~ — **NO LONGER
+    #: TRUE, and struck rather than deleted because the warning it carried is why
+    #: the split happened.** It gated the proxy-header refusal and the
+    #: cross-origin/DNS-rebinding refusal too, and the module docstring predicted
+    #: that the author of an internet-adjacent binding would set this ``False``
+    #: and silently switch both off. Rather than let the first such binding
+    #: (``oauth.py``) do exactly that, the flag is now three flags. This one means
+    #: what its name says and nothing more.
     requires_loopback_peer: bool
+    #: Must a request carrying any of :data:`~.transport.PROXY_HEADERS` be
+    #: refused? Read with a default of ``True``, so a binding that does not
+    #: declare it narrows rather than widens. Refusing is right for a local
+    #: server (a loopback peer behind a proxy says nothing about the originator)
+    #: and wrong for a binding that is *meant* to be reached through an edge —
+    #: which is why it is now a separate answer rather than a side effect.
+    #:
+    #: Setting it ``False`` does not start TRUSTING a forwarded header. No code
+    #: in this package reads one's value, and none may: ``CLAUDE.md`` records
+    #: that the Service is a plain ClusterIP with no NetworkPolicy, so any
+    #: in-cluster caller can forge one.
+    refuses_proxy_headers: bool
+    #: Must an ``Origin`` header, when present, name a loopback host? The
+    #: DNS-rebinding defence the specification requires **of a local server**.
+    #: Default ``True``. A token-authenticated remote binding answers ``False``,
+    #: because a page on another origin cannot obtain a bearer the issuer signed
+    #: and the browser will not attach one for it.
+    requires_loopback_origin: bool
 
     def authenticate(self, credential: Credential | None) -> Principal:
         """The caller's principal, or raise :class:`DeploymentRefused`."""
@@ -342,6 +418,9 @@ class UnconfiguredDeployment:
     #: anyway so that a future edit which mounts this binding by mistake still
     #: refuses every non-loopback peer.
     requires_loopback_peer: bool = True
+    #: Same reasoning, for the two guards that used to ride on the flag above.
+    refuses_proxy_headers: bool = True
+    requires_loopback_origin: bool = True
 
     def authenticate(self, credential: Credential | None) -> Principal:
         raise DeploymentRefused(
@@ -372,10 +451,18 @@ class UnconfiguredDeployment:
                 {
                     "id": "D2",
                     "question": (
-                        "What authenticates that caller — an ISAAC-hosted OAuth 2.1 "
-                        "authorization server advertised via RFC 9728, or a "
-                        "pre-issued bearer the Authentik edge accepts on the MCP "
-                        "path?"
+                        # CORRECTED 2026-08-29. This read "an ISAAC-hosted OAuth "
+                        # 2.1 authorization server", which was never what the
+                        # option meant and is now contradicted by working code:
+                        # `oauth.py` makes ISAAC an OAuth 2.1 RESOURCE server. It
+                        # issues no token, registers no client and hosts no
+                        # authorization server — it validates tokens an EXTERNAL
+                        # issuer minted, and naming that issuer is the decision.
+                        "What authenticates that caller — an OAuth 2.1 access "
+                        "token from an institutional authorization server, which "
+                        "ISAAC validates as a protected resource and advertises "
+                        "via RFC 9728, or a pre-issued bearer the Authentik edge "
+                        "accepts on the MCP path?"
                     ),
                     "owner": "Dean / SLAC infrastructure",
                     "status": "DEFERRED 2026-08-12",
@@ -440,6 +527,11 @@ class LocalLoopbackDeployment:
     serves_transport: bool = True
     #: The name is the contract, and this is where the name is kept.
     requires_loopback_peer: bool = True
+    #: Both were previously implied by the flag above and are now declared. A
+    #: loopback peer that arrived through a relay is not the caller, and a page
+    #: on any origin can post to ``127.0.0.1``; a local server needs both.
+    refuses_proxy_headers: bool = True
+    requires_loopback_origin: bool = True
 
     def authenticate(self, credential: Credential | None) -> Principal:
         if credential is not None:
@@ -515,6 +607,24 @@ def resolve_binding(env: Mapping[str, str] | None = None) -> DeploymentBinding:
             supplied=raw,
             reason="reserved_pending_decision",
         )
+    if raw == OAUTH_RESOURCE_SERVER:
+        # Imported here rather than at module scope, and the reason is the same
+        # one `app.py` gives for importing this package lazily: `oauth.py`
+        # imports `..identity`, which imports Starlette, and this module is
+        # otherwise reachable from a context that has neither. It also keeps the
+        # default path — the only one any shipped deployment takes — from
+        # executing a line of OAuth code.
+        from .oauth import resolve_oauth_binding
+
+        resolved = resolve_oauth_binding(environ, base_path())
+        if isinstance(resolved, str):
+            # A configuration this build will not serve fails closed to the same
+            # binding as a typo, carrying the specific reason. `app.py`
+            # additionally refuses to BOOT on it, so this branch is what a
+            # direct `resolve_binding` call sees rather than what an operator
+            # experiences.
+            return UnconfiguredDeployment(supplied=raw, reason=resolved)
+        return resolved
     if raw != LOCAL_LOOPBACK:
         return UnconfiguredDeployment(supplied=raw, reason="unrecognised")
 
