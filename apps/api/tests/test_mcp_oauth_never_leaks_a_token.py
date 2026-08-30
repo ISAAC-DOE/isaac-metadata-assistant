@@ -547,3 +547,242 @@ def test_selecting_the_url_key_source_refuses_rather_than_reaching_for_one(tmp_p
         )
     assert "makes no outbound request" in str(caught.value)
     assert oauth.FILE_TOKEN_VERIFIER in str(caught.value)
+
+
+# =============================================================================
+# 6. THE SAME QUESTION, ASKED OF THE WHOLE APPLICATION (added 2026-08-30)
+# =============================================================================
+#
+# Section 5 above proves `jwt.py` and `oauth.py` import nothing that could open a
+# socket. That is the right claim for the two modules that handle a credential —
+# and it is silent about the other 50-odd modules in this package, any one of which
+# could make an outbound call from a route. This section extends the same
+# STRUCTURAL method to the whole of `apps/api/isaac_api/`, rather than adding a
+# second file with a second definition of "outbound".
+#
+# Measured 2026-08-30 over every `.py` under the package: FOUR modules name an
+# outbound-capable client, and all four are accounted for below. Nothing is
+# mocked; the assertions are over the source.
+
+API_PACKAGE = MCP_PACKAGE.parent
+
+#: Modules that may open a socket, and the ONLY reason each may.
+#:
+#: * The three ``db_*`` modules use ``psycopg2`` — the deployment-mediated
+#:   PostgreSQL path ``CLAUDE.md`` §15 authorizes, reachable only where the libpq
+#:   environment is set, which no default deployment sets.
+#: * ``mcp/client.py`` uses ``httpx`` against an **in-process ASGI transport** — it
+#:   reaches ISAAC's own routes without a socket at all, which
+#:   :func:`test_the_one_httpx_client_is_bound_to_the_app_and_never_to_a_host`
+#:   asserts rather than assumes.
+#:
+#: The map is exact in BOTH directions: a module listed here that stops importing
+#: its client is as much a failure as a module that starts, because a stale
+#: exemption is how the next one gets waved through.
+OUTBOUND_EXEMPTIONS = {
+    "db_provider.py": {"psycopg2"},
+    "db_recon.py": {"psycopg2"},
+    "db_write.py": {"psycopg2"},
+    "mcp/client.py": {"httpx"},
+}
+
+#: Every module that could carry a request off this machine. ``urllib.parse`` is
+#: deliberately absent for the reason section 5 gives: it is a string parser with
+#: no I/O, and banning the package root would force a hand-rolled URL parser.
+OUTBOUND_CAPABLE = {
+    "aiohttp",
+    "boto3",
+    "ftplib",
+    "http",
+    "http.client",
+    "httpx",
+    "paramiko",
+    "psycopg",
+    "psycopg2",
+    "requests",
+    "smtplib",
+    "socket",
+    "ssl",
+    "telnetlib",
+    "urllib.error",
+    "urllib.request",
+    "urllib3",
+    "websockets",
+    "xmlrpc",
+}
+
+
+def _imported_names(path: Path) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name)
+                names.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module)
+            names.add(node.module.split(".")[0])
+    return names
+
+
+def test_no_module_in_the_api_package_imports_an_outbound_client_unexpectedly():
+    """Package-wide, and exact in both directions.
+
+    Every ``.py`` under ``apps/api/isaac_api/`` is parsed and its imports compared
+    against :data:`OUTBOUND_CAPABLE`. A module that names one must appear in
+    :data:`OUTBOUND_EXEMPTIONS` with exactly the clients it names — and a module in
+    that map that no longer names its client fails too, because a stale exemption is
+    how the next outbound import gets waved through.
+
+    Measured 2026-08-30: four modules, three ``psycopg2`` and one ``httpx``, and
+    nothing else in the package.
+
+    MUTATION, both directions, both run:
+
+    * adding ``import http.client`` to ``isaac_api/workflow.py``::
+
+          AssertionError: unexpected outbound-capable import(s):
+          {'workflow.py': ['http', 'http.client']}
+
+    * adding a ``"workflow.py": {"requests"}`` entry to
+      :data:`OUTBOUND_EXEMPTIONS` that no module earns::
+
+          AssertionError: stale exemption(s) — the module no longer imports it:
+          {'workflow.py': ['requests']}
+
+    *``requests`` was the first choice for the first mutation and is not installed
+    in this environment, so importing it failed at collection (exit 4) rather than
+    at the assertion — a mutation that breaks the test run proves nothing. The
+    stdlib ``http.client`` is the equivalent weakening that actually runs.*
+    """
+    unexpected = {}
+    stale = {}
+    scanned = 0
+    for path in sorted(API_PACKAGE.rglob("*.py")):
+        scanned += 1
+        rel = str(path.relative_to(API_PACKAGE))
+        found = _imported_names(path) & OUTBOUND_CAPABLE
+        allowed = OUTBOUND_EXEMPTIONS.get(rel, set())
+        if found - allowed:
+            unexpected[rel] = sorted(found - allowed)
+        if allowed - found:
+            stale[rel] = sorted(allowed - found)
+    assert not unexpected, f"unexpected outbound-capable import(s): {unexpected}"
+    assert not stale, f"stale exemption(s) — the module no longer imports it: {stale}"
+    assert scanned >= 40, scanned
+
+
+def test_the_one_httpx_client_is_bound_to_the_app_and_never_to_a_host():
+    """``httpx`` is in this package, and it cannot reach the network.
+
+    ``mcp/client.py`` is the only module that imports it, and every client it
+    constructs is handed an ``ASGITransport`` — which dispatches into the in-process
+    FastAPI application object and opens no socket. Asserted over the AST, so a
+    future ``httpx.AsyncClient(base_url="https://…")`` with no transport fails here
+    rather than at the first request.
+
+    Measured 2026-08-30: one ``ASGITransport(app=…)`` and one
+    ``AsyncClient(base_url=…, timeout=…, transport=…)`` — the only two such calls in
+    the module.
+
+    MUTATION: deleting ``transport=transport`` from the ``AsyncClient(...)`` call
+    turns this RED::
+
+        AssertionError: httpx client at line 213 has no transport= — it would open
+        a socket
+        assert 'transport' in {'base_url', 'timeout'}
+    """
+    source = (API_PACKAGE / "mcp" / "client.py").read_text(encoding="utf-8")
+    constructions = 0
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "attr", getattr(node.func, "id", None))
+        if name not in ("AsyncClient", "Client"):
+            continue
+        constructions += 1
+        keywords = {kw.arg for kw in node.keywords if kw.arg}
+        assert "transport" in keywords, (
+            f"httpx client at line {node.lineno} has no transport= — "
+            "it would open a socket"
+        )
+    assert constructions == 1, f"expected exactly one httpx client, found {constructions}"
+    assert "ASGITransport" in source
+
+
+def test_every_provider_seam_is_unconfigured_so_no_route_can_call_out(monkeypatch):
+    """The seams that WOULD make an outbound call, reported by the application
+    itself.
+
+    ``test_providers.py`` covers the resolution rules in depth. What is asserted
+    here — in the file about egress — is the one consequence that matters for this
+    section: on the default environment every seam reports ``configured: false``
+    with a reason, so no route has a provider to call.
+
+    MUTATION: making every seam report itself configured (``"configured": True or
+    …`` in ``providers/config.py``) turns this RED at the top-level roll-up, before
+    any per-seam assertion::
+
+        AssertionError: {'any_provider_configured': True, 'decision_reference':
+        'docs/ai-integration-decision-packet.md', 'seams': [{'seam': 'assistant',
+        'implementation': 'unconfigured', 'configured': True, …}]}
+        assert True is False
+
+    Note which assertion catches it: the roll-up, not the per-seam loop. A caller
+    reading only ``any_provider_configured`` is the one most likely to act on it, so
+    it is the one that must be right.
+    """
+    from isaac_api import providers
+
+    report = providers.capabilities()
+    assert report["any_provider_configured"] is False, report
+    seams = {entry["seam"]: entry for entry in report["seams"]}
+    assert set(seams) == set(providers.SEAMS), sorted(seams)
+    for seam, entry in seams.items():
+        assert entry["configured"] is False, (seam, entry)
+        assert entry["is_test_double"] is False, (seam, entry)
+        assert entry["reason"], (seam, entry)
+
+
+def test_no_openapi_description_quotes_an_environment_value(tmp_path, monkeypatch):
+    """A secret set in the environment must not surface in the published contract.
+
+    The OpenAPI document is the largest single body this application serves and is
+    entirely author-written, which makes it the easiest place for a configuration
+    value to be interpolated "for clarity". Every credential-shaped variable this
+    build reads is set to a sentinel, the document is generated, and the sentinel
+    must appear nowhere in it.
+
+    MUTATION: passing ``terms_of_service=os.environ.get("ISAAC_UI_API_KEY")`` to
+    ``FastAPI(...)`` in ``create_app`` turns this RED::
+
+        AssertionError: an environment value reached the OpenAPI document
+        assert 's3cret-AAAA…' not in '{"openapi":…"terms_of_service":
+        "s3cret-AAAA…", "version": "0.1.0"}, "paths": …'
+
+    *The obvious mutation — interpolating the value into a ROUTE description —
+    does NOT work, and the reason is worth knowing: route decorators run at IMPORT
+    time, before this test's ``monkeypatch`` sets anything, so the sentinel is
+    never in the environment when the string is built. Only a value read inside
+    ``create_app`` can carry it. That also bounds what this test can catch: an
+    import-time leak of a variable set in the real deployment's environment would
+    be invisible here.*
+    """
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("PGHOST", raising=False)
+    for name in (
+        "ISAAC_UI_API_KEY",
+        "PGPASSWORD",
+        oauth.JWKS_FILE_ENV,
+        oauth.JWKS_URL_ENV,
+    ):
+        monkeypatch.setenv(name, SENTINEL_SECRET)
+
+    from isaac_api.app import create_app
+
+    document = json.dumps(create_app().openapi())
+    assert SENTINEL_SECRET not in document, (
+        "an environment value reached the OpenAPI document"
+    )
+    # The document must actually have been built, or this passes on an empty string.
+    assert len(document) > 100_000, len(document)
