@@ -421,7 +421,6 @@ describe('the darwin column says how much of itself is measured', () => {
       [
         'color-contrast @ memory-graph@zoom-200',
         'color-contrast @ settings-about@width-320',
-        'color-contrast @ settings-explorer@laptop-1024x768',
         'color-contrast @ settings-explorer@tablet-768x1024',
         'color-contrast @ validator@zoom-200',
         // ── ADDED 2026-08-30, AND EVERY DARWIN HALF HERE IS A LOCAL macOS READING ──
@@ -447,6 +446,13 @@ describe('the darwin column says how much of itself is measured', () => {
         // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0 — correctly, because nothing
         // here is carried forward.
         'color-contrast @ settings-explorer@mobile-375x812',
+        // ── MERGED 2026-08-30 · proposals + change feed compound on the same cells ──
+        // `desktop-1280x800` JOINS as a split (darwin 60 measured on the merged tree,
+        // linux half pending CI). `laptop-1024x768` LEAVES in the same edit: both
+        // halves read 59, and `auditEntryShapes` refuses an equal-halves pair, so a
+        // scalar is the only legal expression — a limitation of the type, not a claim
+        // that linux was re-measured.
+        'color-contrast @ settings-explorer@desktop-1280x800',
         'color-contrast @ settings-explorer@zoom-200',
         'color-contrast @ settings-explorer@width-390',
       ].sort()
