@@ -1024,15 +1024,17 @@ describe('the value hint is per path, not on average', () => {
     expect(hint.textContent).not.toContain('nowhere to enter one');
   });
 
-  it('for a path a write route accepts, names WHERE the value is entered', async () => {
+  it('for a run-level path, names the RUN as where the value is entered', async () => {
     const select = await openMap();
     fireEvent.change(select, { target: { value: 'sample.material.name' } });
 
     const hint = screen.getByText(/It does not write a value/);
     // "on a run of this record" — not "on the field itself", which named no screen.
-    // Both accepting routes are a run's.
+    // This path's only accepting route IS a run's (`POST .../runs/{id}/overrides`),
+    // which is why the run sentence is the correct one HERE and not everywhere.
     expect(hint.textContent).toContain('entered and confirmed on a run of this record');
     expect(hint.textContent).not.toContain('nowhere to enter one');
+    expect(hint.textContent).not.toContain('No run is needed');
   });
 
   it('for a path NO write route accepts, says so instead of sending them nowhere', async () => {
@@ -1055,6 +1057,76 @@ describe('the value hint is per path, not on average', () => {
     // The honest sentence is a DISCLOSURE, not a new gate: refusing the mapping would
     // discard a scientist's own judgement about where their prose belongs.
     expect(map.disabled).toBe(false);
+  });
+
+  /*
+   * D2 (2026-08-29). The run sentence above was true of ALL 18 writable paths when it
+   * was written, and stopped being true for one of them. `system.technique` is answered
+   * at `POST /api/experiments/{id}/answers` and corrected at `.../edit`, which are the
+   * RECORD's — measured over HTTP, `{"system.technique": "XAS"}` returns 200 on a record
+   * with ZERO runs. So a scientist mapping a note there was told to go and use a run
+   * they do not need and may not have. The server now answers per path in
+   * `record_writable_field_paths`, and the three outcomes are asserted separately.
+   */
+  const WITH_RECORD_LEVEL = {
+    mappable_field_paths: [
+      'system.technique',
+      'sample.material.name',
+      'system.configuration.detector_model',
+    ],
+    value_writable_field_paths: ['system.technique', 'sample.material.name'],
+    record_writable_field_paths: ['system.technique'],
+  };
+
+  async function openMapWith(over: Record<string, string[]>) {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()], over) } });
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    return (await screen.findByLabelText('Field this note belongs to')) as HTMLSelectElement;
+  }
+
+  it('for a RECORD-level path, does not send the reader to a run they do not need', async () => {
+    const select = await openMapWith(WITH_RECORD_LEVEL);
+    fireEvent.change(select, { target: { value: 'system.technique' } });
+
+    const hint = screen.getByText(/It does not write a value/);
+    expect(hint.textContent).toContain('entered and confirmed on this record');
+    expect(hint.textContent).toContain('No run is needed');
+    // THE ASSERTION THAT CARRIES THE FIX. The false sentence must not survive for this
+    // path in any form — "on this record" alone would still pass if the run sentence
+    // sat beside it, which is how a correction gets rendered next to the claim it
+    // retracts.
+    expect(hint.textContent).not.toContain('on a run of this record');
+    expect(hint.textContent).not.toContain('nowhere to enter one');
+  });
+
+  it('and the run-level paths in the SAME payload still say a run', async () => {
+    // BOTH POLARITIES FROM ONE SERVER ANSWER, so the record sentence cannot have been
+    // achieved by making every hint say it.
+    const select = await openMapWith(WITH_RECORD_LEVEL);
+    fireEvent.change(select, { target: { value: 'sample.material.name' } });
+
+    const hint = screen.getByText(/It does not write a value/);
+    expect(hint.textContent).toContain('entered and confirmed on a run of this record');
+    expect(hint.textContent).not.toContain('No run is needed');
+  });
+
+  it('a path the server calls record-writable but NOT value-writable still says nowhere', async () => {
+    // FAIL-CLOSED ON AN INCONSISTENT SERVER. The real server derives
+    // `record_writable_field_paths` as a subset, so this payload cannot occur — but the
+    // ORDER the client reads the two keys in decides what happens if it ever does, and
+    // the safe answer is the honest one, never "enter it on this record" for a path
+    // nothing accepts. That is the locked-door failure this whole hint exists to end.
+    const select = await openMapWith({
+      mappable_field_paths: ['system.configuration.detector_model'],
+      value_writable_field_paths: [],
+      record_writable_field_paths: ['system.configuration.detector_model'],
+    });
+    fireEvent.change(select, { target: { value: 'system.configuration.detector_model' } });
+
+    const hint = screen.getByText(/It does not write a value/);
+    expect(hint.textContent).toContain('this version has nowhere to enter one for this field');
+    expect(hint.textContent).not.toContain('No run is needed');
   });
 
   it('the hint the client renders comes from the SERVER, never from a client-side list', async () => {

@@ -294,8 +294,52 @@
   color: var(--text-secondary);
   white-space: nowrap;
 }
+/*
+ * A11Y-01, ONE USAGE — AND ONLY ONE USAGE. This does NOT close A11Y-01.
+ *
+ * WHAT WAS WRONG. These are the line numbers of the read-only source preview,
+ * rendered as TEXT at 11.5px. They were painted with `--text-disabled`
+ * (#c0c8d0), and `styles/tokens.css:34` declares that token for "disabled
+ * chevrons/icons". So this was a documented MISUSE of a token, not a judgement
+ * about the palette — which is exactly why it can be fixed here while A11Y-01
+ * itself stays the owner's decision. `e2e/a11y-baseline.ts`'s A11Y-01 note has
+ * named this site as the worst ratio in the application since the finding was
+ * written.
+ *
+ * MEASURED, on every ground this gutter is drawn on (WCAG 2.x relative
+ * luminance; recomputed here rather than quoted):
+ *
+ *              --text-disabled #c0c8d0   ->   --text-slate #5b6b7d
+ *   --surface        #ffffff      1.69:1            5.46:1
+ *   --surface-subtle #fbfcfd      1.65:1            5.32:1
+ *   --screen-base    #f4f6f9      1.56:1            5.05:1
+ *   --cited-line-bg  #eaf1fb      1.49:1            4.81:1   <- worst case
+ *
+ * The worst ground is `--cited-line-bg`, the highlight behind a CITED line —
+ * i.e. the line a reader has been pointed at. At 11.5px WCAG 1.4.3 requires
+ * 4.5:1 (the 3:1 large-text threshold does not apply anywhere near this size),
+ * so every ground now passes and the worst one did not before by a factor of
+ * three. The 1.56:1 the baseline records is the `--screen-base` figure and is
+ * reproduced exactly; 1.49:1 on the cited row is worse still and is recorded
+ * here because nothing had measured it.
+ *
+ * WHY `--text-slate` AND NOT `--text-muted`. Both clear 4.5:1 on all four
+ * grounds (`--text-muted` reaches 5.22:1 on the worst). `--text-slate` is the
+ * repository's declared token for MONO labels — `tokens.css:29` calls it
+ * "coverage + mono eyebrows/labels", and `chrome.css`'s own contrast note pairs
+ * `--text-muted` with UI prose and `--text-slate` with mono, "matching
+ * `.statusbar-eyebrow`". This gutter is `var(--font-mono)`. It also keeps the
+ * visual hierarchy the design intends: the numbers stay quieter than the line
+ * text beside them (`--text-secondary`, 8.07:1) instead of matching it.
+ *
+ * NO TOKEN VALUE CHANGED. `styles/tokens.css:3-5` forbids editing values there
+ * and this change does not touch that file — the same shape as the `.section-tab`
+ * fix (`--text-tertiary` -> `--text-muted` in `screens.css`) and the
+ * `.onramp-tagline` fix before it. `--text-disabled` remains #c0c8d0 and remains
+ * correct for the disabled chevrons it was declared for.
+ */
 .preview-line .ln {
-  color: var(--text-disabled);
+  color: var(--text-slate);
   width: 22px;
   text-align: right;
   flex: none;

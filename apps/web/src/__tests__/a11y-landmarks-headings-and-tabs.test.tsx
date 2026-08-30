@@ -256,6 +256,84 @@ describe('A11Y-06 · every role="search" landmark carries its own name', () => {
   });
 });
 
+/* ── A11Y-06 RESIDUE · one region named "Endpoint Explorer", not two ─────── */
+
+/*
+ * THE OTHER HALF OF A11Y-06, AND IT WAS NEVER THE SEARCH LANDMARKS.
+ *
+ * The `landmark-unique` baseline entry counted 14 nodes and its `note` said all
+ * fourteen were the two unnamed `role="search"` regions above. Naming those
+ * closed SEVEN of them. The remaining seven were a different defect wearing the
+ * same rule id: `/settings?tab=explorer` rendered TWO `region` landmarks with
+ * the IDENTICAL accessible name "Endpoint Explorer" — the shared `SettingsCard`
+ * wrapper (`<section class="card placeholder-card settings-card"
+ * aria-labelledby="settings-apidocs-heading">`, `<h2>Endpoint Explorer</h2>`)
+ * and, inside it, `<section class="api-explorer"
+ * aria-labelledby="settings-api-explorer-heading">` whose `<h3>` reads the same
+ * words. axe blamed the OUTER `.card`, which is why the baseline's
+ * `targetPattern` names an element that is not the one that had to change.
+ *
+ * AFTER: the inner `<section>` carries no `aria-labelledby`, so it is not a
+ * landmark at all, and exactly one region on the tab is named "Endpoint
+ * Explorer". The `<h3>` is untouched, so the heading outline is unchanged.
+ *
+ * VERIFIED TO FAIL PRE-FIX: with `aria-labelledby="settings-api-explorer-heading"`
+ * restored on `ApiDocs.tsx`'s `<section className="api-explorer">`, the first
+ * test below fails `expected 2 to be 1` and the second fails
+ * `expected 'Endpoint Explorer' to be null`.
+ */
+
+describe('A11Y-06 residue · the Endpoint Explorer tab names one region, once', () => {
+  /** Every element the accessibility tree exposes with the `region` role. */
+  function regions(container: HTMLElement): Element[] {
+    return Array.from(container.querySelectorAll('section, [role="region"]')).filter((el) => {
+      if (el.getAttribute('role') === 'region') return true;
+      // A bare <section> is a `region` ONLY when it has an accessible name.
+      return el.tagName === 'SECTION' && landmarkName(el) !== '';
+    });
+  }
+
+  it('renders exactly one region named "Endpoint Explorer"', async () => {
+    const { container } = renderSettings('/settings?tab=explorer');
+    await waitFor(() => {
+      expect(container.querySelector('.api-explorer')).not.toBeNull();
+    });
+    const named = regions(container).filter((el) => landmarkName(el) === 'Endpoint Explorer');
+    expect(
+      named.length,
+      `two landmarks named "Endpoint Explorer" are indistinguishable in a landmark list; ` +
+        `found ${named.length}: ${named.map((el) => el.className).join(' | ')}`,
+    ).toBe(1);
+    // And it is the shared card, not the inner panel — the card is the one that
+    // carries the tab's title, so it is the one that should keep the name.
+    expect(named[0].className).toContain('settings-card');
+  });
+
+  /*
+   * NEGATIVE CONTROL. The test above would also pass if the inner `<section>`
+   * were renamed to something else, or deleted, or turned into a `<div>`. This
+   * pins the SHAPE the fix actually took: the panel element still exists, is
+   * still a `<section>`, still carries its `<h3>` — and is nameless, which is
+   * the single property that stops it being a second landmark.
+   */
+  it('the inner panel still exists and still has its heading, but is not a landmark', async () => {
+    const { container } = renderSettings('/settings?tab=explorer');
+    await waitFor(() => {
+      expect(container.querySelector('.api-explorer')).not.toBeNull();
+    });
+    const panel = container.querySelector('.api-explorer')!;
+    expect(panel.tagName).toBe('SECTION');
+    expect(panel.getAttribute('aria-labelledby')).toBeNull();
+    expect(panel.getAttribute('aria-label')).toBeNull();
+    expect(panel.getAttribute('role')).toBeNull();
+    expect(landmarkName(panel)).toBe('');
+    // The heading is kept: this fix must not cost the outline a level.
+    const h3 = panel.querySelector('h3#settings-api-explorer-heading');
+    expect(h3, 'the <h3> must survive — only the landmark name was removed').not.toBeNull();
+    expect(h3!.textContent).toBe('Endpoint Explorer');
+  });
+});
+
 /* ── A16 · the inactive section tab clears WCAG 1.4.3 ────────────────────── */
 
 /*

@@ -20,13 +20,19 @@
  * sixth Playwright project multiplies EVERY `@responsive` spec — structure,
  * states, long-strings, layout-responsive, charts, tabs, the axe sweep — not
  * just the scan that wanted the width, and it perturbs the count ratchet in
- * `e2e/a11y-baseline.ts` for all 22 surfaces in one go. This file adds 22 surfaces
- * × 2 widths of axe scanning and nothing else, inside one project, by moving the
- * viewport itself with `page.setViewportSize`. (22 = `SURFACES.length`; the count
- * was 21 until `evidence-graph` was added, and the shape assertion at the foot of
- * this file reads the array rather than a literal, so the two cannot drift.
- * `npx playwright test e2e/specs/a11y-narrow.spec.ts --list` reports
- * `SURFACES.length * 2 + 1` tests — the scans plus that browserless shape test.)
+ * `e2e/a11y-baseline.ts` for every surface in one go. This file adds `SURFACES.length`
+ * surfaces × 2 widths of axe scanning and nothing else, inside one project, by moving
+ * the viewport itself with `page.setViewportSize`.
+ *
+ * (~~22 = `SURFACES.length`; the count was 21 until `evidence-graph` was added~~ —
+ * **RE-COUNTED 2026-08-29: `SURFACES.length` is 23**, and it was already 23 when the
+ * "22" was written. The literal is deliberately NOT replaced with "23": that is how
+ * this sentence went stale twice, and the number is one `git` commit away from being
+ * wrong again. MEASURED rather than asserted: `npx playwright test
+ * e2e/specs/a11y-narrow.spec.ts --list` reports `Total: 235 tests in 1 file`, which is
+ * 5 projects × (23 × 2 + 1) — the scans plus one browserless shape test per project.
+ * The shape assertion at the foot of this file reads the array rather than a literal,
+ * so the CODE cannot drift; only this comment could, and did.)
  *
  * The cost of that choice, stated rather than buried: DPR stays at the host
  * project's 1. That is the right call here — `color-contrast`, `button-name`,
@@ -54,9 +60,17 @@
  * DO NOT transcribe a macOS reading into a bare number. A bare number in that
  * file means "identical on both platforms", and this app ships no webfont: SF Pro
  * and the `ubuntu-latest` DejaVu/Liberation face wrap at different words, which is
- * why 10 of the existing 103 triples already hold two numbers. Ten of ten differ
- * by exactly ±1 — small enough to look like noise and large enough to turn CI
- * red on a number nobody measured. **CI (Linux) is the authority.**
+ * why some cells hold two numbers. ~~10 of the existing 103 triples already hold two
+ * numbers. Ten of ten differ by exactly ±1~~ — ~~**RE-COUNTED 2026-08-29: 8 of 161**~~
+ * **RE-COUNTED AGAIN 2026-08-30: 5 of 161, and they do NOT all differ by ±1**
+ * (`settings-about@width-320` differs by 2 and `settings-explorer@tablet-768x1024`
+ * by 2). The 8 was this branch's count; the merge `c7b9db6` adopted CI's linux halves
+ * from `6958459` and five splits collapsed to scalars. The second example named here
+ * used to be `settings-explorer@width-320` "by 3" — that cell is a **scalar `76`** at
+ * HEAD and no cell in the file has a gap of 3. The point the sentence was making survives its
+ * numbers and is the reason to keep it: the difference is small enough to look like
+ * noise and large enough to turn CI red on a number nobody measured.
+ * **CI (Linux) is the authority.**
  */
 
 import {
