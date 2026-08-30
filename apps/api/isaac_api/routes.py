@@ -18,7 +18,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import Annotated, Any, Literal, Mapping, Sequence
+from typing import Annotated, Any, Literal, Mapping, NamedTuple, Sequence
 
 import logging
 
@@ -3412,9 +3412,20 @@ def post_experiment_discard(
         "review screen renders. Each field carries its label, official path, "
         "current value, the status derived from its evidence, and the kinds of "
         "source that evidence came from. Read-only; the response carries the "
-        "record's current `ETag`."
+        "record's current `ETag`.\n\n"
+        "`record_blocks` carries the record-level BLOCKS beside the fields — "
+        "`block:attribution` and `block:tags`, keyed by the same namespaced address "
+        "the write operations take. They are not `fields`, so they can appear in no "
+        "group; a client that could read a facility name but not the contributors "
+        "beside it would have to overwrite a block it had never seen in order to add "
+        "to it. `null` means the record carries nothing there. The address set is "
+        "DERIVED from the same classification the write operations use, so a block "
+        "that becomes record-level appears here in the same change."
     ),
-    response_description="The draft's fields, grouped, with the current `ETag`.",
+    response_description=(
+        "The draft's fields, grouped, the record-level block payloads, and the "
+        "current `ETag`."
+    ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
@@ -3422,7 +3433,18 @@ def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Re
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
-    return serialize.draft_to_groups(exp.draft)
+    return {
+        **serialize.draft_to_groups(exp.draft),
+        # READ, NOT REFUSED, and no shape is asserted. A persisted block of any shape is
+        # handed back as it is stored: `CLAUDE.md` §11's read-path doctrine says a
+        # malformed value already on disk cannot be refused to a reader who did nothing
+        # wrong, and a client that is about to REPLACE a block needs to see what it is
+        # replacing — including when what it is replacing is wrong.
+        "record_blocks": {
+            address: (exp.draft or {}).get(ws.parse_address(address)[1])
+            for address in sorted(RECORD_WRITABLE_BLOCK_ADDRESSES)
+        },
+    }
 
 
 # --- 6. pending ---------------------------------------------------------------
@@ -3984,19 +4006,152 @@ def _record_enum_fields() -> Mapping[str, tuple]:
     return MappingProxyType(found)
 
 
-def _record_enum_field_answers(answers_by_id: dict) -> dict:
-    """The non-blank entries of an answers body that name one of those paths.
+class _RecordFieldSpec(NamedTuple):
+    """What the vendored official schema says about ONE record-level field path.
+
+    Both members may be ``None``, and the two ``None``s mean different things:
+
+    * ``declared_type is None`` — the schema declares NO type at this path, because the
+      path lives under one of its DESIGNATED OPEN namespaces. Measured on v1.05:
+      ``sample.composition`` declares no ``properties`` at all (*"Open by design"*, its
+      own description), and ``sample.geometry`` declares ``properties`` that do not
+      include ``pellet_diameter_mm``. Three of the thirteen record-level paths resolve
+      to nothing for that reason. **No type is then enforced, and none is invented** —
+      ``CLAUDE.md`` §5 forbids this application deciding what the schema declined to
+      say. Storability is still enforced, which is a statement about this process
+      rather than about the science.
+    * ``enum is None`` — the schema closes this path with no fixed value list, so any
+      correctly-typed value is admissible here and the official validator remains the
+      authority on whether it is the RIGHT one.
+    """
+
+    declared_type: str | None
+    enum: tuple | None
+
+
+@functools.lru_cache(maxsize=1)
+def _record_writable_fields() -> Mapping[str, _RecordFieldSpec]:
+    """Every record-level FIELD path a record-level write accepts -> what the schema says.
+
+    ONE MAPPING, TWO SOURCES, AND NEITHER IS TRANSCRIBED:
+
+    * :data:`RECORD_WRITABLE_FIELD_PATHS` — the experiment-level half of the
+      extractor/level split, which is also exactly what
+      :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` is built from, so the record-level write
+      surface and the run-level override surface cannot disagree about which paths are
+      the record's;
+    * :func:`_record_enum_fields` — the paths the schema itself CLOSES with an enum and
+      declares REQUIRED. It contributes ``system.domain``, which is absent from
+      ``EXTRACTOR_FIELD_MAP`` and therefore from the set above, and it is why that
+      function is called rather than folded in: its three gates are the argument that
+      made those two fields writable in the first place and they are not re-litigated
+      here.
+
+    THE PER-PATH FACTS ARE READ FROM THE VENDORED DOCUMENT AT RUNTIME, never restated.
+    ``CLAUDE.md`` §1 makes the schema the authority on structure and vocabulary, so a
+    refusal that names a type or an allowed list must quote the document rather than a
+    copy of it — and reading it means every gate FOLLOWS a schema refresh instead of
+    silently disagreeing with one.
+
+    FAIL-CLOSED, AND MORE BROADLY THAN ITS SIBLING. An unreadable or unparseable schema
+    yields an EMPTY mapping, so NO record-level field path is recognised, every such
+    write is refused as ``unrecognized_field``, and nothing is stored. That is wider
+    than :func:`_record_enum_fields`' own fail-closed answer — which only had two paths
+    to withhold — and it is deliberate: this application must not accept a value at a
+    path whose declared type it could not read, because it would then have applied no
+    check the schema was entitled to make. ``lru_cache`` holds that empty answer for the
+    life of the process rather than for one request, exactly as
+    :func:`_official_block_type` records for itself; the direction is refusing writes
+    that would have been accepted, never accepting writes that should have been refused.
+
+    IT IS THE SECOND CACHE OVER THE SAME DOCUMENT, and that is stated rather than left
+    to be discovered by whoever writes the next test. Nothing in production invalidates
+    either cache, so the two can only disagree in a process that clears one — and a test
+    that clears :func:`_record_enum_fields` alone leaves THIS one serving its warm
+    answer, which is the mapping the write routes actually consult. That is not a
+    hypothetical: it is the failure mode
+    ``test_an_unreadable_schema_fails_closed_and_writes_nothing`` was extended to cover
+    after it passed while the route accepted a write it should have refused.
+
+    THE RESULT IS READ-ONLY BECAUSE IT IS SHARED — same reason, same mechanism, as
+    :func:`_record_enum_fields`: every call returns the SAME object, so a caller that
+    added a path to it would widen this application's write surface for the life of the
+    process. The mapping is wrapped and its values are immutable tuples.
+    """
+    try:
+        schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # unreadable or unparseable vendored schema
+        return MappingProxyType({})
+
+    def declared(path: str) -> _RecordFieldSpec:
+        node: object = schema
+        for segment in path.split("."):
+            properties = node.get("properties") if isinstance(node, dict) else None
+            if not isinstance(properties, dict) or segment not in properties:
+                return _RecordFieldSpec(None, None)  # an OPEN namespace; see the class
+            node = properties[segment]
+        if not isinstance(node, dict):
+            return _RecordFieldSpec(None, None)
+        node_type = node.get("type")
+        values = node.get("enum")
+        return _RecordFieldSpec(
+            node_type if isinstance(node_type, str) else None,
+            tuple(values) if isinstance(values, list) else None,
+        )
+
+    enum_fields = _record_enum_fields()
+    return MappingProxyType(
+        {
+            path: declared(path)
+            for path in sorted({*RECORD_WRITABLE_FIELD_PATHS, *enum_fields})
+        }
+    )
+
+
+def _record_field_answers(answers_by_id: dict) -> dict:
+    """The non-blank entries of an answers body that name a record-level FIELD path.
+
+    RENAMED FROM ``_record_enum_field_answers`` AND WIDENED, because the key set it
+    selects is no longer only the schema-enum pair: the twelve facility/sample paths
+    join it through :data:`RECORD_WRITABLE_FIELD_PATHS`. The name is the set's, not one
+    member's — a helper named after its first key set is how the next widening happens
+    without anyone noticing the name stopped covering the contents.
 
     Blank (``None``/``""``) is excluded here for the same reason every other reader of
     an answers body excludes it: a blank answer is not an answer, and this operation
-    does not CLEAR a field. Clearing a confirmed record-level enum value is deliberately
-    not built by this slice — see :func:`_apply_record_enum_fields`.
+    does not CLEAR a field. Clearing a confirmed record-level value is deliberately not
+    built by this slice — see :func:`_apply_record_fields`.
     """
-    known = _record_enum_fields()
+    known = _record_writable_fields()
     return {
         key: value
         for key, value in (answers_by_id or {}).items()
         if isinstance(key, str) and key in known and value not in (None, "")
+    }
+
+
+def _record_block_answers(answers_by_id: dict) -> dict:
+    """The non-blank entries of an answers body that name a record-level BLOCK address.
+
+    KEYED BY THE NAMESPACED ADDRESS (``block:attribution``, ``block:tags``) and NOT by a
+    bare ``attribution``/``tags``, which is ``workspace.parse_address``' own argument
+    reused rather than re-decided: ``tags`` is both a top-level draft block and a legal
+    official schema path, so a bare token would be ambiguous the moment anything put
+    ``tags`` in the field map. It is also the spelling a client already reads off a
+    run's ``inherited`` map and sends to the override operation, so one address has one
+    spelling everywhere on this API.
+
+    ``None``/``""`` is dropped for the reason every other reader drops it. An empty
+    LIST or OBJECT is NOT dropped: ``{"block:tags": []}`` is a scientist saying this
+    record carries no tags, which is a statement, and the block type gate below accepts
+    it because the schema declares ``tags`` an array.
+    """
+    return {
+        key: value
+        for key, value in (answers_by_id or {}).items()
+        if isinstance(key, str)
+        and key in RECORD_WRITABLE_BLOCK_ADDRESSES
+        and value not in (None, "")
     }
 
 
@@ -4012,34 +4167,96 @@ def _record_field_question(path: str) -> str:
     return f"Value for {path} on this record?"
 
 
-def _enum_field_is_confirmed(draft: dict, path: str) -> bool:
-    """Whether the record already holds a confirmed value at one enum field path.
+#: Returned by :func:`_record_answer_stored_value` for a key the record holds nothing
+#: at. A sentinel rather than ``None``, because ``None`` is a value a persisted envelope
+#: can literally carry and "absent" and "present but null" must not compare equal.
+_NO_STORED_VALUE = object()
 
-    THIS IS THE ``/answers`` vs ``/edit`` SPLIT FOR THESE FIELDS, and it is deliberately
+
+def _record_answer_is_confirmed(draft: dict, key: str) -> bool:
+    """Whether the record already holds a confirmed value at one record-level key.
+
+    THIS IS THE ``/answers`` vs ``/edit`` SPLIT FOR THESE KEYS, and it is deliberately
     the same split the rest of this module already draws rather than a second rule.
     ``/answers`` answers what is OPEN; ``/edit`` corrects what is ANSWERED. For a
     ``series``/``qc``/``descriptor`` the state is read off ``draft["pending"]``; these
-    paths raise no blocker (nothing in ``extract.draft_builder`` emits one for them), so
-    the same question is asked of the field map instead: a field the record holds a
-    non-null, non-``missing`` value for is answered, and one it does not is open.
+    keys raise no blocker (nothing in ``extract.draft_builder`` emits one for them), so
+    the same question is asked of the stored document instead.
 
-    ``draft.get("fields")`` IS TYPE-GUARDED, not read with ``or {}``. A persisted
-    non-dict there is a document a reader did nothing to deserve — ``CLAUDE.md`` §11's
-    read-path doctrine — and the honest answer for it is "no confirmed value", which
-    routes the caller to ``/answers`` and refuses ``/edit``. Neither branch reads or
-    coerces the malformed value.
+    ONE FUNCTION FOR BOTH NAMESPACES, because it is one rule. A ``field:`` key is
+    confirmed when ``draft["fields"][path]`` is an envelope holding a non-null,
+    non-``missing`` value; a ``block:`` key is confirmed when the draft carries that
+    block at all with a non-``None`` payload. Two functions would be two chances for
+    ``/answers`` and ``/edit`` to disagree about which one owns a key.
+
+    EVERY CONTAINER READ IS TYPE-GUARDED, never ``or {}``. A persisted non-dict is a
+    document a reader did nothing to deserve — ``CLAUDE.md`` §11's read-path doctrine —
+    and the honest answer for it is "no confirmed value", which routes the caller to
+    ``/answers`` and refuses ``/edit``. Nothing here reads or coerces a malformed value.
     """
-    fields = draft.get("fields")
-    env = fields.get(path) if isinstance(fields, dict) else None
-    return (
+    return _record_answer_stored_value(draft, key) is not _NO_STORED_VALUE
+
+
+def _block_payload_carries_nothing(payload: object) -> bool:
+    """Is this stored block payload a SCAFFOLD rather than something a person authored?
+
+    **THIS EXISTS BECAUSE A CREATED RECORD SHIPS WITH ONE.** ``POST /api/experiments``
+    seeds ``attribution: {"contributors": []}`` — the block key is present and its
+    payload is a truthy dict, but nobody has said anything with it. Treating key presence
+    as "already answered" made the FIRST contributor unaddable through the answering
+    operation on every record this application creates: ``/answers`` refused with
+    ``already_answered`` and pointed at ``/edit``, which is the operation documented to
+    CORRECT a value the record holds. Measured, not reasoned about.
+
+    IT IS A STRUCTURAL DEFINITION AND NOTHING MORE. It decides WHICH OPERATION owns a
+    write; it never decides whether a value is valid, never writes anything, and is not
+    consulted by the exporter, the draft validator or the official validator. Empty means
+    ``None``, an empty container, or a mapping every value of which is itself empty by
+    this same rule — so ``{"contributors": []}`` and ``{}`` are empty while
+    ``{"contributors": [{}]}`` is not, because a contributor entry someone actually sent
+    is content even when the deterministic checks will later refuse its shape.
+
+    GENERIC RATHER THAN PER-BLOCK, deliberately. A rule spelled ``attribution ->
+    contributors``, ``tags -> the list`` would be a second, hand-written copy of what the
+    two blocks contain, free to drift the moment a third becomes record-level.
+    """
+    if payload is None:
+        return True
+    if isinstance(payload, (str, bytes, list, tuple, set)):
+        return len(payload) == 0
+    if isinstance(payload, dict):
+        return all(_block_payload_carries_nothing(value) for value in payload.values())
+    return False
+
+
+def _record_answer_stored_value(draft: dict, key: str):
+    """The value the record currently holds at one record-level key, or the sentinel.
+
+    THE COMPARISON HALF of :func:`_record_answer_is_confirmed`, split out so the two
+    refusals that ask *"does the submitted value DIFFER from the stored one?"* read the
+    stored value through the same accessor that decided it was stored. Reading it twice,
+    once per namespace, at each of two call sites is four chances to disagree.
+    """
+    if key in RECORD_WRITABLE_BLOCK_ADDRESSES:
+        _kind, name = ws.parse_address(key)
+        stored = draft.get(name) if isinstance(draft, dict) else None
+        # A SEEDED, EMPTY BLOCK IS NOT A STORED VALUE — see
+        # `_block_payload_carries_nothing`, which exists because every record this
+        # application creates ships with one.
+        return _NO_STORED_VALUE if _block_payload_carries_nothing(stored) else stored
+    fields = draft.get("fields") if isinstance(draft, dict) else None
+    env = fields.get(key) if isinstance(fields, dict) else None
+    if (
         isinstance(env, dict)
         and env.get("value") is not None
         and env.get("status") != "missing"
-    )
+    ):
+        return env["value"]
+    return _NO_STORED_VALUE
 
 
 def _refuse_a_value_the_schema_does_not_allow(
-    enum_answers: dict, identifiers: dict
+    field_answers: dict, identifiers: dict
 ) -> JSONResponse | None:
     """``422 not_an_allowed_value`` for a value outside the schema's own enum, else ``None``.
 
@@ -4070,10 +4287,25 @@ def _refuse_a_value_the_schema_does_not_allow(
     reflection surface.
 
     NOTHING IS WRITTEN, and this runs before any mutation on both operations.
+
+    **WIDENED WITHOUT BEING LOOSENED, 2026-08-30.** Its input is now every record-level
+    FIELD path a write accepts, not only the two the schema closes with an enum — and it
+    refuses ONLY at a path whose ``_RecordFieldSpec.enum`` is non-``None``. So the
+    twelve facility/sample paths pass through it untouched (the schema publishes no
+    fixed list for any of them and inventing one here would be exactly the vocabulary
+    authorship ``CLAUDE.md`` §1 reserves to the document), and if a schema refresh ever
+    closes one of them, this gate covers it on the same day without an edit. The old
+    ``value not in known.get(path, ())`` would have refused EVERY value at every
+    non-enum path once the input widened, which is why the membership test is now
+    guarded by the enum's presence rather than by a default of ``()``.
     """
-    known = _record_enum_fields()
+    known = _record_writable_fields()
     offending = sorted(
-        path for path, value in enum_answers.items() if value not in known.get(path, ())
+        path
+        for path, value in field_answers.items()
+        if (spec := known.get(path)) is not None
+        and spec.enum is not None
+        and value not in spec.enum
     )
     if not offending:
         return None
@@ -4084,7 +4316,9 @@ def _refuse_a_value_the_schema_does_not_allow(
             **identifiers,
             "key": offending[0],
             "keys": offending,
-            "allowed": {path: list(known.get(path, ())) for path in offending},
+            "allowed": {
+                path: list(known[path].enum or ()) for path in offending
+            },
             "message": (
                 "The official ISAAC schema closes each of these fields with a fixed "
                 "list of values, and what was sent is not one of them. Nothing was "
@@ -4095,10 +4329,149 @@ def _refuse_a_value_the_schema_does_not_allow(
     )
 
 
-def _refuse_answering_an_already_confirmed_enum_field(
-    draft: dict, enum_answers: dict, *, edit_at: str, identifiers: dict
+def _refuse_a_record_value_the_record_cannot_hold(
+    field_answers: dict, identifiers: dict
 ) -> JSONResponse | None:
-    """The ``already_answered`` refusal, for a field whose state lives in the field map.
+    """``422 invalid_field_value`` for a record-level field value, or ``None``.
+
+    TWO CONDITIONS UNDER ONE CODE, AND THE BODY — NOT THE MESSAGE — SAYS WHICH:
+
+    1. **Storable at all** — the shared :func:`_is_storable_value`, so ``NaN``,
+       ``Infinity``, a lone surrogate, an absurdly nested value and an oversized one are
+       refused here for exactly the reasons they are refused on the run edit route and
+       on the override route. A value written here lands in the same document, is walked
+       by the same signature hash and is rendered by the same response serializer, and
+       this module has already paid twice for a value that committed and then made every
+       later read of the record a permanent 500.
+    2. **The JSON type the official schema declares for that path**, read from the
+       vendored document at runtime by :func:`_record_writable_fields` and never
+       transcribed. ``bool`` is excluded from ``integer``/``number`` unless the schema
+       actually declared ``boolean``, because ``bool`` is a subclass of ``int`` and
+       satisfies a check it has no business satisfying — the same exclusion
+       :func:`_refuse_override_payload` makes for a block's type, for the same reason.
+
+    THE CODE IS ``invalid_field_value`` AND THAT IS DELIBERATE RATHER THAN CONVENIENT.
+    :func:`_refuse_unstorable_answer` already argues it at length for condition 1 on
+    these same two operations — *"a client that already branches on
+    ``invalid_field_value`` should not need a second code to learn that a value it sent
+    is too big"* — and a wrong-TYPED value is the same statement about the same field
+    set: this value cannot be held here. A third code would split one client branch in
+    three.
+
+    **THE CAUSE IS NAMED STRUCTURALLY, WHICH IS THE ONLY WAY IT CAN BE NAMED HONESTLY
+    HERE.** ``_refuse_unstorable_answer``'s message *"deliberately states no cause"*, and
+    the reason is recorded: a cause-naming sentence was measured being served verbatim
+    about a key it did not describe. That hazard is real and it is a hazard about a
+    SENTENCE, which is fixed at write time for a body that may name several keys refused
+    for different reasons. So no sentence claims a per-key cause; ``expected_types``
+    does, and it is the same device ``not_an_allowed_value`` already uses for
+    ``allowed``: a key IN it was refused because the schema declares that type and this
+    value is not of it, and a key ABSENT from it was refused because the value cannot be
+    stored at any path at all. The message says exactly that and asserts nothing else.
+
+    ~~A path the schema declares no type for is refused fail-closed~~ — **NOT DONE, and
+    named rather than left to be discovered.** Three of the thirteen record-level paths
+    (``sample.composition.CuO2_mass_fraction``, ``sample.composition.sucrose_mass_fraction``
+    and ``sample.geometry.pellet_diameter_mm``) resolve to nothing, because the schema
+    declares ``sample.composition`` and ``sample.geometry`` OPEN BY DESIGN in their own
+    descriptions. Refusing them would make three of the twelve paths this slice exists to
+    open unwritable; inventing a type for them would be this application deciding what
+    the schema declined to say, which ``CLAUDE.md`` §5 forbids and §1 reserves to the
+    document. They are therefore accepted subject to condition 1 only, which is a claim
+    about what this process can store and not a claim about the science. Condition 1
+    still applies to every path, so the open namespaces are not an unbounded ingress.
+
+    NOTHING IS WRITTEN, and this runs before any mutation on both operations.
+    """
+    known = _record_writable_fields()
+    unstorable: list[str] = []
+    wrong_typed: dict[str, str] = {}
+    for path in sorted(field_answers):
+        value = field_answers[path]
+        if not _is_storable_value(value):
+            unstorable.append(path)
+            continue
+        declared = (known.get(path) or _RecordFieldSpec(None, None)).declared_type
+        expected = _JSON_TYPE_TO_PYTHON.get(declared or "")
+        if declared is None or expected is None:
+            continue  # an OPEN namespace — see the docstring; nothing is invented
+        if not isinstance(value, expected) or (
+            declared != "boolean" and isinstance(value, bool)
+        ):
+            wrong_typed[path] = declared
+    offending = sorted([*unstorable, *wrong_typed])
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "invalid_field_value",
+            **identifiers,
+            "key": offending[0],
+            "keys": offending,
+            "expected_types": {path: wrong_typed[path] for path in sorted(wrong_typed)},
+            "message": (
+                "Nothing was written: any value the record already held for these "
+                "fields is unchanged, and any question this would have answered is "
+                "still open. A field named in `expected_types` was refused because "
+                "the official ISAAC schema declares that JSON type for it and what "
+                "was sent is not of it. A field NOT named there was refused because "
+                "the value cannot be stored at any field — too large, nested too "
+                "deeply, or not renderable as JSON (`NaN`, `Infinity`, a lone "
+                "surrogate)."
+            ),
+        },
+    )
+
+
+def _refuse_a_record_block_the_record_cannot_hold(
+    block_answers: dict, identifiers: dict
+) -> JSONResponse | None:
+    """The override route's OWN block-payload gate, applied to a record-level write.
+
+    :func:`_refuse_override_payload` IS CALLED, NOT REIMPLEMENTED, and the reuse is the
+    whole point. It already applies, in order: storability; the JSON type the official
+    schema declares for the block (``object`` for ``attribution``, ``array`` for
+    ``tags``), fail-closed when the schema declares none; and the deterministic draft
+    validator's own refusal of ``attribution.uploaded_by`` — a field no client may
+    author, because the schema declares it stamped from an authenticated identity and
+    this application has none to stamp it with (``CLAUDE.md`` §11: the stamp requires
+    ``trust_basis == verified_edge_assertion`` and no verifier in this build mints
+    that). A second copy of any of those three here would be a second definition of
+    what a block payload may be, free to drift from the one the override route enforces.
+
+    IT INHERITS THE LIMIT AS WELL AS THE GATE, and that is stated rather than implied:
+    that function applies NO ``attribution.contributors[...]`` finding, shape or
+    evidence, and its own docstring records the measurement. So a contributor missing a
+    ``name``/``role``, or carrying a list-valued ``name``, is STORED here exactly as it
+    is stored through an override, refused later by the run check and by the export
+    gate, and correctable by a further write. That posture is fail-closed at the
+    boundary that mints an official record, which is the boundary that matters.
+
+    ONE REFUSAL PER REQUEST, taking the addresses in sorted order, so a body naming both
+    blocks with two different faults reports a stable one rather than a dict-order one.
+    """
+    for address in sorted(block_answers):
+        _kind, name = ws.parse_address(address)
+        refusal = _refuse_override_payload(
+            ws.ADDRESS_BLOCK,
+            name,
+            block_answers[address],
+            identifiers=identifiers,
+            # NOT "override". A record-level write is a different act, and a refusal
+            # that names the wrong one describes something the caller did not do on the
+            # one screen they read to work out what to fix.
+            subject="value",
+        )
+        if refusal is not None:
+            return refusal
+    return None
+
+
+def _refuse_answering_an_already_confirmed_record_key(
+    draft: dict, record_answers: dict, *, edit_at: str, identifiers: dict
+) -> JSONResponse | None:
+    """The ``already_answered`` refusal, for a key whose state lives in the draft itself.
 
     THE SAME RULE AND THE SAME ERROR CODE as
     :func:`_refuse_answering_an_already_answered_key`, deliberately: this operation
@@ -4108,25 +4481,33 @@ def _refuse_answering_an_already_confirmed_enum_field(
 
     IT IS A SEPARATE FUNCTION BECAUSE THE STATE IS READ SOMEWHERE ELSE, not because the
     rule differs. That one probes with ``apply_corrections`` over ``draft["pending"]``
-    and the blocks each blocker's value lives in; these paths have no blocker and their
-    value lives in ``draft["fields"]``, so the probe would answer about nothing.
+    and the blocks each blocker's value lives in; these keys have no blocker, and their
+    value lives in ``draft["fields"]`` (a field path) or in the top-level block itself
+    (a ``block:`` address), so the probe would answer about nothing.
+
+    RENAMED FROM ``..._an_already_confirmed_enum_field`` AND WIDENED: it now covers every
+    record-level field path and both record-level block addresses. Both namespaces are
+    read through :func:`_record_answer_stored_value`, so "is it confirmed?" and "does the
+    submitted value differ?" are answered by one accessor rather than by two readings
+    that could disagree.
 
     ``answer_at`` IS UNCONDITIONALLY THE RECORD'S CORRECTION OPERATION, and that differs
     from the sibling for a reason worth stating rather than leaving to be noticed. Every
     key the sibling can name is RUN-owned, so on a record with runs it must withhold the
-    pointer; these two are EXPERIMENT-level (``workspace.EXPERIMENT_LEVEL_FIELD_PATHS``),
-    the record's own ``/edit`` accepts them whether or not runs exist, and the pointer is
-    therefore provably actionable in every state this refusal is reachable in.
+    pointer; every key this one can name is EXPERIMENT-level (by construction — the two
+    sets it reads are filtered on ``LEVEL_EXPERIMENT``), the record's own ``/edit``
+    accepts them whether or not runs exist, and the pointer is therefore provably
+    actionable in every state this refusal is reachable in.
 
     RESUBMITTING THE IDENTICAL VALUE IS STILL A SUCCESS, exactly as on every other key:
     the refusal fires only where the two values differ, which is the only case in which
     something the caller sent would have been lost.
     """
     offending = sorted(
-        path
-        for path, value in enum_answers.items()
-        if _enum_field_is_confirmed(draft, path)
-        and ((draft.get("fields") or {}).get(path) or {}).get("value") != value
+        key
+        for key, value in record_answers.items()
+        if (stored := _record_answer_stored_value(draft, key)) is not _NO_STORED_VALUE
+        and stored != value
     )
     if not offending:
         return None
@@ -4150,23 +4531,23 @@ def _refuse_answering_an_already_confirmed_enum_field(
     )
 
 
-def _refuse_correcting_an_unconfirmed_enum_field(
-    draft: dict, enum_answers: dict, *, answer_at: str, identifiers: dict
+def _refuse_correcting_an_unconfirmed_record_key(
+    draft: dict, record_answers: dict, *, answer_at: str, identifiers: dict
 ) -> JSONResponse | None:
-    """The ``not_yet_answered`` refusal, for a field whose state lives in the field map.
+    """The ``not_yet_answered`` refusal, for a key whose state lives in the draft itself.
 
     The exact mirror of the function above, and the same-code/different-storage argument
-    applies unchanged. A correction of a field the record holds no value for would store
-    a first value through an operation whose whole contract is that it CORRECTS one —
-    and would do so past the ``already_answered`` redirect that sends a caller here, so
-    the two operations would each accept what the other is documented to own.
+    applies unchanged. A correction of a key the record holds no value for would store a
+    first value through an operation whose whole contract is that it CORRECTS one — and
+    would do so past the ``already_answered`` redirect that sends a caller here, so the
+    two operations would each accept what the other is documented to own.
 
     ``answer_at`` is the record's own answers operation, unconditionally, for the reason
-    the sibling gives: these paths are experiment-level, so that operation accepts them
-    on a record with runs and on one without.
+    the sibling gives: every key it can name is experiment-level, so that operation
+    accepts them on a record with runs and on one without.
     """
     offending = sorted(
-        path for path in enum_answers if not _enum_field_is_confirmed(draft, path)
+        key for key in record_answers if not _record_answer_is_confirmed(draft, key)
     )
     if not offending:
         return None
@@ -4187,8 +4568,8 @@ def _refuse_correcting_an_unconfirmed_enum_field(
     )
 
 
-def _apply_record_enum_fields(draft: dict, enum_answers: dict, timestamp: str) -> list[str]:
-    """Write each confirmed enum value into the RECORD's own field map. What changed.
+def _apply_record_fields(draft: dict, field_answers: dict, timestamp: str) -> list[str]:
+    """Write each confirmed value into the RECORD's own field map. What changed.
 
     THE WRITER IS :func:`_apply_run_field`, REUSED RATHER THAN REIMPLEMENTED, and that
     is the whole point: it already mints the four-key ``models.user_confirmation``
@@ -4210,24 +4591,91 @@ def _apply_record_enum_fields(draft: dict, enum_answers: dict, timestamp: str) -
 
     CLEARING IS NOT BUILT, and is named rather than implied. :func:`_apply_run_field`
     removes a field when handed ``None``, and this function can never hand it one:
-    :func:`_record_enum_field_answers` drops blanks before they arrive. Un-saying a
-    confirmed record-level classification is a real operation with its own questions —
-    what it means for a run that inherited it, and what the workflow should then say —
-    and inheriting it as a side effect of a blank-tolerant filter would be deciding
-    those questions by accident.
+    :func:`_record_field_answers` drops blanks before they arrive. Un-saying a confirmed
+    record-level value is a real operation with its own questions — what it means for a
+    run that inherited it, and what the workflow should then say — and inheriting it as
+    a side effect of a blank-tolerant filter would be deciding those questions by
+    accident.
+
+    WIDENED FROM THE TWO SCHEMA-ENUM PATHS TO EVERY RECORD-LEVEL FIELD PATH, and NOTHING
+    about the write changed with it: the same writer, the same envelope, the same
+    four-key confirmation, the same idempotence, the same question text. A facility name
+    a scientist types is a user confirmation over their own input in exactly the sense a
+    technique chosen from the schema's enum is, and it is exactly what the five
+    run-level paths already record through ``PATCH .../runs/{run_id}``. Nothing is
+    derived, defaulted, or inferred from another field.
     """
-    if not enum_answers:
+    if not field_answers:
         return []
     existing = draft.get("fields")
     fields = existing if isinstance(existing, dict) else {}
     written: list[str] = []
-    for path, value in enum_answers.items():
+    for path, value in field_answers.items():
         if _apply_run_field(
             fields, path, value, timestamp, question=_record_field_question(path)
         ):
             written.append(path)
     if written and not isinstance(existing, dict):
         draft["fields"] = fields
+    return written
+
+
+def _apply_record_blocks(draft: dict, block_answers: dict, timestamp: str) -> list[str]:
+    """Write each confirmed block payload onto the RECORD's draft. What changed.
+
+    THE PAYLOAD IS THE BLOCK ITSELF, which is the shape the override route already
+    stores at these two addresses and the shape ``resolved_run_draft`` already resolves
+    them from — so a value written here is read by exactly the machinery that reads an
+    inherited one, and no run needs to know where it came from.
+
+    ``attribution`` EARNS ITS ``block_evidence`` HERE, through the same two helpers the
+    override route uses (:func:`_attribution_confirmations` and
+    :func:`_rewrite_attribution_evidence`). The defect that pair exists to close is
+    exactly reachable at this level: ``draft_validator`` requires an
+    ``attribution:<name>|<role>`` entry for every contributor, so a write that stored the
+    block and no evidence would accept a contributor **that could never be exported, by
+    any subsequent request**. The entitlement is unchanged and is narrow: the recorded
+    claim is *"a request carrying ``confirmed_by_user: true`` supplied this contributor
+    at this operation"*, minted only for a contributor whose ``name`` and ``role`` are
+    both non-empty strings — because a key built from a list-valued name would let a
+    shape the official schema cannot hold pass the coverage gate. **No evidence rule is
+    weakened**: ``draft_validator`` is truth-path (``CLAUDE.md`` §13) and is untouched.
+
+    ``tags`` MINTS NO EVIDENCE, and that is the validator's own rule rather than an
+    omission here: ``tags`` is exempt from block-evidence coverage BY DESIGN
+    (``block_level``/``draft_validator`` — authorship IS the confirmation). Writing one
+    anyway would put a provenance entry into ``export.build_sidecar``'s output that
+    nothing asked for.
+
+    IDEMPOTENT, and it has to be for the same reason the field writer does: an evidence
+    entry carries a timestamp, so an unconditional rewrite would move ``rev`` on a
+    re-submission that changed nothing and destroy ``_save_versioned``'s byte-stable
+    no-op. A payload equal to the stored one is left alone; the evidence rewrite keeps a
+    matching entry with its ORIGINAL timestamp and stamps only a genuinely new one, and
+    it is consulted even when the payload is unchanged so that a block stored before
+    this write path existed can still earn the evidence it needs to export.
+    """
+    if not block_answers:
+        return []
+    written: list[str] = []
+    for address in sorted(block_answers):
+        _kind, name = ws.parse_address(address)
+        payload = block_answers[address]
+        changed = draft.get(name) != payload
+        if changed:
+            draft[name] = payload
+        if name == "attribution":
+            if _rewrite_attribution_evidence(
+                draft,
+                _attribution_confirmations(
+                    payload,
+                    timestamp,
+                    question=_RECORD_ATTRIBUTION_CONFIRMATION_QUESTION,
+                ),
+            ):
+                changed = True
+        if changed:
+            written.append(address)
     return written
 
 
@@ -4974,10 +5422,63 @@ _ANSWER_REFUSED_HEAD_TAIL: str = "`already_answered`.\n\n"
 #: pointing at a locked door: the caller sends a correctly spelled key and is told it
 #: misspelled one.
 _NOT_AN_ALLOWED_VALUE_IN_ANSWER_HEAD: str = "`not_an_allowed_value`, or "
+
+#: THE RECORD-LEVEL WRITE SURFACE, described once and composed into both record blocks.
+#:
+#: IT IS ON THE RECORD BLOCKS ONLY, for the reason the ``not_an_allowed_value`` prose
+#: gives at length: a run's answers/edit operation refuses every one of these keys with
+#: ``unrecognized_field`` and always has, so a run contract naming them would send a
+#: caller with a correctly spelled key to hunt for a misspelling.
+_RECORD_LEVEL_WRITE_PARAGRAPH: str = (
+    "**RECORD-LEVEL FIELDS AND BLOCKS ARE ANSWER KEYS HERE**, beside the record's "
+    "own blocking questions. Send an official dotted path (`sample.material.name`, "
+    "`system.facility.beamline`, `system.technique`, …) as the key and the value as "
+    "the value; send `block:attribution` or `block:tags` to set the whole block. The "
+    "admissible set is DERIVED at runtime — the deterministic extractor's official "
+    "paths that this build classifies as belonging to the record rather than to a "
+    "run, plus the two record-level blocks — so it follows a field-map or schema "
+    "change instead of being restated here. A path the build classifies as neither "
+    "level (`system.configuration.*`, `timestamps.created_utc`) is NOT writable and "
+    "is not guessed into a level; a RUN's own field (`context.*`, "
+    "`timestamps.acquired_*`) is written on the run. Each accepted value is recorded "
+    "as a `user_confirmation` on the record and every run INHERITS it by reference — "
+    "nothing is copied down, so a run that has recorded its own override at that "
+    "address keeps it. Nothing is derived from anything else, defaulted, or "
+    "inferred.\n\n"
+    "`invalid_field_value` ALSO COVERS THESE KEYS, with an extra `expected_types` "
+    "key: a field named there was refused because the official ISAAC schema declares "
+    "that JSON type for it and the value is not of it; a field absent from it was "
+    "refused because the value cannot be stored at all. Three paths sit under "
+    "namespaces the schema declares OPEN BY DESIGN (`sample.composition.*`, "
+    "`sample.geometry.*`) and so have no declared type — none is invented for them, "
+    "and the official validator remains the authority on whether a well-formed value "
+    "is the right one.\n\n"
+    "`invalid_block_payload` — a `block:` key carried a payload that is not the "
+    "block itself, of the type the official schema declares for it (an object for "
+    "`attribution`, an array for `tags`), or whose contents the deterministic checks "
+    "could not read. `attribution.uploaded_by` is refused inside an attribution "
+    "payload: the schema declares it stamped from an authenticated identity and this "
+    "application has none to stamp it with. The body is "
+    "`{error, experiment_id, address, expected_type, message}`, plus `findings` — the "
+    "draft validator's own words — when it has any.\n\n"
+    "`unrepresentable_value` — a `block:` key carried a payload that cannot be stored "
+    "at all: it nests more deeply, or is larger, than a stored value may, or it is not "
+    "representable in JSON (`NaN`, `Infinity`, a lone surrogate). It is NAMED HERE "
+    "because these operations can now raise it and the published contract did not "
+    "describe it; it is the same code, with the same body "
+    "(`{error, experiment_id, address, message}`), that the run override operation "
+    "already serves for the same condition, because it is the same gate.\n\n"
+    "A confirmed `attribution` payload "
+    "records the `user_confirmation` its contributors earn, which is what makes them "
+    "exportable; WHO confirmed it is deliberately not recorded, because this "
+    "application receives no verified user identity.\n\n"
+)
+
 _NOT_AN_ALLOWED_VALUE_ANSWER_PARAGRAPH: str = (
     "`not_an_allowed_value` — the body named a record-level field the official "
-    "ISAAC schema closes with a fixed list of values (`system.domain` and "
-    "`system.technique`), and the value sent is not one of them. Nothing was "
+    "ISAAC schema closes with a fixed list of values (today `system.domain` and "
+    "`system.technique`; the set is read from the schema, not listed here), and the "
+    "value sent is not one of them. Nothing was "
     "written and any value the record already held is unchanged. The body is "
     "`{error, experiment_id, key, keys, allowed, message}`, where `keys` names "
     "EVERY offending field and `allowed` maps each one to the complete list the "
@@ -5130,6 +5631,7 @@ _R_ANSWER_REFUSED_RECORD: dict = {
             _ANSWER_REFUSED_HEAD_LEAD
             + _NOT_AN_ALLOWED_VALUE_IN_ANSWER_HEAD
             + _ANSWER_REFUSED_HEAD_TAIL
+            + _RECORD_LEVEL_WRITE_PARAGRAPH
             + _NOT_AN_ALLOWED_VALUE_ANSWER_PARAGRAPH
             + _ANSWER_REFUSED_SHARED_BODY
         ),
@@ -5259,15 +5761,28 @@ def post_answers(
             "with `422 invalid_field_value`; and a recognised key whose question is "
             "already closed, submitted with a DIFFERENT value, is refused with `422 "
             "already_answered`.\n\n"
-            "TWO RECORD-LEVEL FIELD PATHS ARE ALSO ANSWER KEYS HERE: `system.domain` "
-            "and `system.technique`, the two the official ISAAC schema declares "
-            "required on `system` and closes with a fixed list of values. Send the "
-            "dotted path as the key and one of the schema's own values as the value; "
-            "anything else is refused with `422 not_an_allowed_value`, which carries "
-            "the permitted list. The value is recorded as a user confirmation on the "
-            "record and every run inherits it. Neither is derived from the other, "
-            "defaulted, or inferred: give only one and the other stays missing. They "
-            "are the RECORD's, so a run's answers operation does not accept them."
+            "~~TWO RECORD-LEVEL FIELD PATHS ARE ALSO ANSWER KEYS HERE~~ — **THE WHOLE "
+            "RECORD-LEVEL SET IS.** Every official dotted path this build classifies "
+            "as the RECORD's rather than a run's is an answer key here — the sample, "
+            "the facility, `system.domain` and `system.technique` — and so are the two "
+            "record-level BLOCK addresses, `block:attribution` and `block:tags`. Send "
+            "the dotted path (or the `block:` address) as the key and the value as the "
+            "value.\n\n"
+            "A path the schema closes with a fixed list of values takes one of the "
+            "schema's own; anything else is refused with `422 not_an_allowed_value`, "
+            "which carries the permitted list. A value of the wrong JSON type is "
+            "refused with `422 invalid_field_value`, whose `expected_types` names what "
+            "the schema declares per field. A block payload of the wrong shape is "
+            "refused with `422 invalid_block_payload`; `attribution.uploaded_by` is "
+            "refused inside an attribution payload, because the schema declares it "
+            "stamped from an authenticated identity this application does not have.\n\n"
+            "Each accepted value is recorded as a user confirmation on the record and "
+            "every run INHERITS it by reference — nothing is copied down, so a run "
+            "holding its own override at that address keeps it. Nothing is derived "
+            "from anything else, defaulted, or inferred: give only one and the rest "
+            "stay missing. They are the RECORD's, so a run's answers operation does "
+            "not accept them, and a field this build classifies as belonging to "
+            "neither level is not writable at all."
         ),
     ),
     if_match: str | None = Header(
@@ -5309,6 +5824,40 @@ def post_answers(
         )
         if refusal is not None:
             return refusal
+        # THE RECORD-LEVEL KEYS ARE RESOLVED AND VALUE-SCREENED BEFORE THE PRECONDITION,
+        # and only the value screens are here. The split is the whole of the ordering
+        # argument and is worth stating rather than leaving to be inferred:
+        #
+        #   * a VALUE screen reads the BODY and the vendored schema and nothing else, so
+        #     its answer is the same whether or not the caller's `If-Match` is current.
+        #     Answering `412` first would send a compliant client to refresh and rebuild
+        #     a request that is still unreadable — the loop that cannot terminate that
+        #     `_refuse_answers_that_are_not_an_object` sits above the precondition to
+        #     avoid. This is the same rule `post_note` states for itself ("every input is
+        #     resolved before the precondition is even checked").
+        #   * a STATE screen (`already_answered` below) reads what the RECORD currently
+        #     holds, and answering about that state to a caller whose token does not
+        #     match it would describe a record they have not seen. Those stay AFTER the
+        #     precondition, where they always were.
+        #
+        # This MOVES `not_an_allowed_value` earlier than it used to run, which is a
+        # deliberate behaviour change in the direction the module already argues for: an
+        # off-enum value with a stale token was a `412` and is now a `422`.
+        record_fields = _record_field_answers(body.get("answers") or {})
+        record_blocks = _record_block_answers(body.get("answers") or {})
+        refusal = _refuse_a_value_the_schema_does_not_allow(
+            record_fields, {"experiment_id": exp.id}
+        )
+        if refusal is None:
+            refusal = _refuse_a_record_value_the_record_cannot_hold(
+                record_fields, {"experiment_id": exp.id}
+            )
+        if refusal is None:
+            refusal = _refuse_a_record_block_the_record_cannot_hold(
+                record_blocks, {"experiment_id": exp.id}
+            )
+        if refusal is not None:
+            return refusal
         err = _check_if_match(if_match, exp)
         if err is not None:
             return err
@@ -5325,35 +5874,29 @@ def post_answers(
         # honestly about a key it can no longer see. It walks keys only, never values, so
         # it does not front-run the depth guard below (the one refusal that must precede
         # anything that walks a submitted value).
+        # THE RECORD-LEVEL KEYS ARE DECLARED KNOWN, so a body naming only one of them is
+        # not refused as unrecognised by the route that is about to write it. Both key
+        # sets are passed: the field paths (`_record_writable_fields`) and the two block
+        # addresses. `_record_enum_fields()` alone would have left the twelve
+        # facility/sample paths and both blocks reported as dropped.
         dropped = _dropped_answer_keys(
             body.get("answers") or {},
             exp.draft,
             edit_only=False,
-            extra_known=_record_enum_fields(),
+            extra_known={*_record_writable_fields(), *RECORD_WRITABLE_BLOCK_ADDRESSES},
         )
         refusal = _refuse_a_body_that_names_nothing_answerable(
             body.get("answers") or {}, dropped, {"experiment_id": exp.id}
         )
         if refusal is not None:
             return refusal
-        # THE RECORD-LEVEL SCHEMA-ENUM FIELDS, handled beside the shaped answers rather
+        # THE RECORD-LEVEL FIELDS AND BLOCKS, handled beside the shaped answers rather
         # than through them. `complete.apply_answers` has no branch for a dotted field
         # path — it writes the blocks its blockers name — and it is truth-path code
         # (`CLAUDE.md` §13) that this slice deliberately does not touch. So the two
         # paths run side by side inside the same lock, the same precondition and the
-        # same `_save_versioned` compare-and-swap.
-        enum_answers = _record_enum_field_answers(body.get("answers") or {})
-        # FIRST OF THE ENUM REFUSALS, AND ORDERED BY THE ARGUMENT `_refuse_unstorable_answer`
-        # ALREADY MAKES FOR ITS SIZE HALF: a value outside the schema's own enum can be
-        # stored at NO level, so answering "send it to the run" first would spend the
-        # caller's retry on a round trip ending in a refusal. It is also cheap and walks
-        # nothing — membership in a tuple of short strings — so it costs the common path
-        # nothing and cannot front-run the depth guard below.
-        refusal = _refuse_a_value_the_schema_does_not_allow(
-            enum_answers, {"experiment_id": exp.id}
-        )
-        if refusal is not None:
-            return refusal
+        # same `_save_versioned` compare-and-swap. They were resolved and value-screened
+        # ABOVE the precondition; only the STATE screen is left, and it is below.
         apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
         # FIRST OF THE REFUSALS, AND ONLY ITS SIZE HALF — the SHAPE half runs after the
         # `409` below, because it preempted it. See `_refuse_unstorable_answer`.
@@ -5412,12 +5955,14 @@ def post_answers(
         )
         if refusal is not None:
             return refusal
-        # THE SAME RULE FOR THE ENUM FIELDS, whose state lives in `draft["fields"]`
-        # rather than in `draft["pending"]`, so the probe above cannot see it. Placed
-        # beside its sibling deliberately: they are one contract with one error code.
-        refusal = _refuse_answering_an_already_confirmed_enum_field(
+        # THE SAME RULE FOR THE RECORD-LEVEL KEYS, whose state lives in `draft["fields"]`
+        # or in the top-level block itself rather than in `draft["pending"]`, so the
+        # probe above cannot see it. Placed beside its sibling deliberately: they are one
+        # contract with one error code. This is a STATE screen, which is why it is here
+        # and not above the precondition with the value screens.
+        refusal = _refuse_answering_an_already_confirmed_record_key(
             exp.draft,
-            enum_answers,
+            {**record_fields, **record_blocks},
             edit_at=_EDIT_OPERATION_RECORD,
             identifiers={"experiment_id": exp.id},
         )
@@ -5426,23 +5971,29 @@ def post_answers(
         draft_before = exp.draft
         # `apply_answers` deep-copies its input and returns a NEW draft, so
         # `draft_before` is the pre-write document and stays that way — including for
-        # the enum write below, which mutates only the fresh copy.
+        # the record-level writes below, which mutate only the fresh copy.
         exp.draft = apply_answers(exp.draft, apply_shape)
-        enum_written = _apply_record_enum_fields(exp.draft, enum_answers, timestamp)
+        enum_written = [
+            *_apply_record_fields(exp.draft, record_fields, timestamp),
+            *_apply_record_blocks(exp.draft, record_blocks, timestamp),
+        ]
         # answer_log is EXCLUDED from the rev signature: log the submission only when it
         # actually changes the authoritative draft, so an identical re-entry is neither
         # logged nor rewritten (byte-stable) and never bumps rev. save_versioned decides
         # by comparing the on-disk authoritative signature.
         #
-        # `fields` IS ADDED ONLY WHEN AN ENUM FIELD ACTUALLY LANDED. `answer_log` is the
-        # audit trail `workspace._at_risk_summary` counts before a destructive reset, and
-        # an entry recording an empty `apply_shape` and nothing else would under-describe
-        # confirmed work exactly as the missing run-level entry once did. The key is
-        # additive and the log is already shape-varying (the run path adds `run_id`);
-        # nothing reads it but `len()`.
+        # `fields` IS ADDED ONLY WHEN A RECORD-LEVEL KEY ACTUALLY LANDED. `answer_log` is
+        # the audit trail `workspace._at_risk_summary` counts before a destructive reset,
+        # and an entry recording an empty `apply_shape` and nothing else would
+        # under-describe confirmed work exactly as the missing run-level entry once did.
+        # The key is additive and the log is already shape-varying (the run path adds
+        # `run_id`); nothing reads it but `len()`.
+        submitted_record_values = {**record_fields, **record_blocks}
         log_entry: dict = {"applied": apply_shape, "at": timestamp}
         if enum_written:
-            log_entry["fields"] = {path: enum_answers[path] for path in enum_written}
+            log_entry["fields"] = {
+                key: submitted_record_values[key] for key in enum_written
+            }
         exp.answer_log.append(log_entry)
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
@@ -5464,12 +6015,12 @@ def post_answers(
             if changed
             else []
         )
-        # THE ENUM FIELDS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
+        # THE RECORD-LEVEL KEYS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
         # `_fields_the_shape_carries` removes every key `apply_shape` does not carry, and
         # `apply_shape` deliberately never carries these. Without this, a write that
         # landed would be reported as `Updated 0 field(s)` — the same understatement the
         # function above exists to prevent in the other direction, arriving from the one
-        # key set it cannot see. `enum_written` is what the writer actually changed, not
+        # key set it cannot see. `enum_written` is what the writers actually changed, not
         # what was submitted, so an idempotent re-submission still reports nothing.
         if changed and enum_written:
             landed = set(changed_fields) | set(enum_written)
@@ -5622,11 +6173,12 @@ _NOT_AN_ALLOWED_VALUE_IN_CORRECTION_HEAD: str = (
     "vendored schema document rather than restated here), "
 )
 _NOT_YET_ANSWERED_COVERS_THE_ENUM_FIELDS: str = (
-    "`not_yet_answered` ALSO COVERS THOSE TWO FIELDS. This operation corrects a "
-    "value the record already holds; a record that has never been given a domain "
-    "or a technique is answered at the answers operation instead, which "
-    "`answer_at` names. Neither field is ever derived from the other, defaulted, "
-    "or inferred, so a record given only one keeps the other missing.\n\n"
+    "`not_yet_answered` ALSO COVERS EVERY RECORD-LEVEL FIELD PATH AND BLOCK ADDRESS "
+    "described above. This operation corrects a value the record already holds; a "
+    "record that has never been given one is answered at the answers operation "
+    "instead, which `answer_at` names. No record-level value is ever derived from "
+    "another, defaulted, or inferred, so a record given only one keeps the rest "
+    "missing.\n\n"
 )
 
 #: The COMPLETE ``422`` that BOTH correction operations serve, built by merging the
@@ -5669,6 +6221,7 @@ _R_CORRECTION_REFUSED_RECORD: dict = {
             _CORRECTION_REFUSED_HEAD_LEAD
             + _NOT_AN_ALLOWED_VALUE_IN_CORRECTION_HEAD
             + _CORRECTION_REFUSED_HEAD_TAIL
+            + _RECORD_LEVEL_WRITE_PARAGRAPH
             + _NOT_YET_ANSWERED_COVERS_THE_ENUM_FIELDS
             + _R_NOT_YET_ANSWERED[422]["description"]
         ),
@@ -6188,13 +6741,17 @@ def post_edit(
             "each key names a field already present in the draft. Omitting "
             "`confirmed_by_user: true`, or naming no recognised editable field, is "
             "rejected with `422`.\n\n"
-            "`system.domain` and `system.technique` are correctable here once the "
-            "record holds a value for them — the two record-level fields the official "
-            "ISAAC schema declares required on `system` and closes with a fixed list of "
-            "values. A value outside that list is refused with `422 "
-            "not_an_allowed_value`, which carries the permitted list; a field the "
-            "record has never been given is refused with `422 not_yet_answered` and "
-            "answered at the answers operation instead."
+            "EVERY RECORD-LEVEL FIELD PATH AND BLOCK ADDRESS is correctable here once "
+            "the record holds a value for it — the sample, the facility, "
+            "`system.domain`, `system.technique`, `block:attribution` and `block:tags`. "
+            "The set is derived at runtime from the same classification the answers "
+            "operation uses, so the two cannot disagree. A value outside a schema-closed "
+            "list is refused with `422 not_an_allowed_value`, which carries the "
+            "permitted list; a value of the wrong declared JSON type with `422 "
+            "invalid_field_value` and its `expected_types`; a malformed block payload "
+            "with `422 invalid_block_payload`. A field the record has never been given "
+            "is refused with `422 not_yet_answered` and answered at the answers "
+            "operation instead."
         ),
     ),
     if_match: str | None = Header(
@@ -6233,6 +6790,26 @@ def post_edit(
         )
         if refusal is not None:
             return refusal
+        # RESOLVED AND VALUE-SCREENED BEFORE THE PRECONDITION, the same split
+        # `post_answers` states at length: a screen that reads only the body and the
+        # vendored schema answers the same thing whether or not the caller's token is
+        # current, and answering `412` first would send a compliant client to rebuild a
+        # request that is still unreadable. The STATE screens stay below.
+        record_fields = _record_field_answers(body.get("answers") or {})
+        record_blocks = _record_block_answers(body.get("answers") or {})
+        refusal = _refuse_a_value_the_schema_does_not_allow(
+            record_fields, {"experiment_id": exp.id}
+        )
+        if refusal is None:
+            refusal = _refuse_a_record_value_the_record_cannot_hold(
+                record_fields, {"experiment_id": exp.id}
+            )
+        if refusal is None:
+            refusal = _refuse_a_record_block_the_record_cannot_hold(
+                record_blocks, {"experiment_id": exp.id}
+            )
+        if refusal is not None:
+            return refusal
         err = _check_if_match(if_match, exp)
         if err is not None:
             return err
@@ -6260,18 +6837,8 @@ def post_edit(
             body.get("answers") or {},
             exp.draft,
             edit_only=True,
-            extra_known=_record_enum_fields(),
+            extra_known={*_record_writable_fields(), *RECORD_WRITABLE_BLOCK_ADDRESSES},
         )
-        # THE RECORD-LEVEL SCHEMA-ENUM FIELDS — see `post_answers` for why they are
-        # handled beside the shaped answers and not through them. The value screen runs
-        # first here for the same reason it does there: a value outside the schema's own
-        # enum can be stored nowhere, so no other refusal has a more useful answer.
-        enum_answers = _record_enum_field_answers(body.get("answers") or {})
-        refusal = _refuse_a_value_the_schema_does_not_allow(
-            enum_answers, {"experiment_id": exp.id}
-        )
-        if refusal is not None:
-            return refusal
         refusal = _refuse_run_level_on_the_record(exp, apply_shape)
         if refusal is not None:
             return refusal
@@ -6296,26 +6863,27 @@ def post_edit(
         )
         if refusal is not None:
             return refusal
-        # THE SAME RULE FOR THE ENUM FIELDS, whose state lives in `draft["fields"]` and
-        # is therefore invisible to the pending-list probe above. It runs BEFORE the
-        # "nothing to correct" refusal for the reason that refusal's sibling gives:
-        # "still open" is more specific than "not recognised", and sending a scientist
-        # to look for a misspelling in a correctly spelled field name is the mistake
-        # this module has already made once.
-        refusal = _refuse_correcting_an_unconfirmed_enum_field(
+        # THE SAME RULE FOR THE RECORD-LEVEL KEYS, whose state lives in `draft["fields"]`
+        # or in the top-level block itself and is therefore invisible to the pending-list
+        # probe above. It runs BEFORE the "nothing to correct" refusal for the reason
+        # that refusal's sibling gives: "still open" is more specific than "not
+        # recognised", and sending a scientist to look for a misspelling in a correctly
+        # spelled field name is the mistake this module has already made once.
+        record_answers = {**record_fields, **record_blocks}
+        refusal = _refuse_correcting_an_unconfirmed_record_key(
             exp.draft,
-            enum_answers,
+            record_answers,
             answer_at=_ANSWERS_OPERATION_RECORD,
             identifiers={"experiment_id": exp.id},
         )
         if refusal is not None:
             return refusal
-        if not _has_correction_target(apply_shape) and not enum_answers:
-            # No recognized field to correct — never invent one. `enum_answers` is
-            # consulted beside the apply-shape because this operation now writes a key
-            # set the shape does not carry: without it, a body naming ONLY a confirmed
-            # `system.domain` would be refused as unrecognised by the route that is
-            # about to write it.
+        if not _has_correction_target(apply_shape) and not record_answers:
+            # No recognized field to correct — never invent one. `record_answers` is
+            # consulted beside the apply-shape because this operation writes a key set
+            # the shape does not carry: without it, a body naming ONLY a confirmed
+            # `system.domain` or `block:tags` would be refused as unrecognised by the
+            # route that is about to write it.
             return JSONResponse(
                 status_code=422,
                 content={
@@ -6392,13 +6960,17 @@ def post_edit(
         # invents a value (a malformed sha256 / off-enum qc leaves the value as-is).
         draft_before = exp.draft  # `apply_corrections` deep-copies; this stays pre-write
         exp.draft = apply_corrections(exp.draft, apply_shape)
-        enum_written = _apply_record_enum_fields(exp.draft, enum_answers, timestamp)
-        # `fields` is added only when an enum field actually landed — see `post_answers`
-        # for the audit-trail argument. A correction that re-submits the stored value is
-        # idempotent in the writer, so it lands nothing and logs nothing extra.
+        enum_written = [
+            *_apply_record_fields(exp.draft, record_fields, timestamp),
+            *_apply_record_blocks(exp.draft, record_blocks, timestamp),
+        ]
+        # `fields` is added only when a record-level key actually landed — see
+        # `post_answers` for the audit-trail argument. A correction that re-submits the
+        # stored value is idempotent in the writers, so it lands nothing and logs nothing
+        # extra.
         log_entry: dict = {"edited": apply_shape, "at": timestamp}
         if enum_written:
-            log_entry["fields"] = {path: enum_answers[path] for path in enum_written}
+            log_entry["fields"] = {key: record_answers[key] for key in enum_written}
         exp.answer_log.append(log_entry)
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
@@ -6418,12 +6990,12 @@ def post_edit(
             if changed
             else []
         )
-        # THE ENUM FIELDS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
+        # THE RECORD-LEVEL KEYS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
         # `_fields_the_shape_carries` removes every key `apply_shape` does not carry, and
         # `apply_shape` deliberately never carries these. Without this, a write that
         # landed would be reported as `Updated 0 field(s)` — the same understatement the
         # function above exists to prevent in the other direction, arriving from the one
-        # key set it cannot see. `enum_written` is what the writer actually changed, not
+        # key set it cannot see. `enum_written` is what the writers actually changed, not
         # what was submitted, so an idempotent re-submission still reports nothing.
         if changed and enum_written:
             landed = set(changed_fields) | set(enum_written)
@@ -7144,18 +7716,76 @@ def _select_runs(
     return selected
 
 
-EXPERIMENT_OVERRIDABLE_ADDRESSES: frozenset[str] = frozenset(
-    [
-        ws.field_address(path)
-        for path, _coercer in EXTRACTOR_FIELD_MAP.values()
-        if ws.field_level(path) == ws.LEVEL_EXPERIMENT
-    ]
-    + [
-        ws.block_address(key)
-        for key in (*ws.EXPERIMENT_LEVEL_BLOCKS, *ws.RUN_LEVEL_BLOCKS)
-        if ws.block_level(key) == ws.LEVEL_EXPERIMENT
-    ]
+#: THE RECORD-LEVEL FIELD PATHS THE RECORD ITSELF MAY BE GIVEN A VALUE AT.
+#:
+#: **THE DEFECT THIS SET EXISTS TO CLOSE**, measured over HTTP against a record created
+#: through this application's own ``POST /api/experiments`` path, at 121 field/block
+#: addresses × the 5 write routes: a scientist could not enter a facility, a sample or a
+#: contributor ON THE RECORD by any request. The twelve paths below other than
+#: ``system.technique`` were accepted at exactly ONE route — ``POST
+#: .../runs/{run_id}/overrides`` — and an override is a RUN's recorded DIVERGENCE from a
+#: value the record holds. :func:`_record_enum_fields` already says why that is not a
+#: substitute: *"It is not a way to say what the record is."* The consequence was
+#: visible on the run view, which reported ``inherited == ['block:attribution']`` and
+#: nothing else, because an address appears there only once the record CARRIES a value
+#: at it — which no route could put there.
+#:
+#: DERIVED FROM THE SAME ONE EXPRESSION :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` USED TO
+#: HOLD INLINE, and that is the whole point of hoisting it. The two questions — "may a
+#: run record a divergence here?" and "may the record be given a value here?" — are
+#: answered by the same classification, and writing the comprehension twice would put a
+#: second copy of it in this file, free to drift the moment ``EXTRACTOR_FIELD_MAP`` or
+#: ``workspace.field_level`` moves. The override set is now built FROM these two
+#: constants rather than beside them, so a path cannot leave one and stay in the other.
+#: ``test_the_record_writable_set_is_derived_not_transcribed`` re-derives it from
+#: ``EXTRACTOR_FIELD_MAP`` rather than asserting its members.
+#:
+#: TWO GATES ON THE FIELD HALF, unchanged and load-bearing — see
+#: :data:`RUN_WRITABLE_FIELD_PATHS` for the measurement that put them there.
+#: ``field_level`` is a segment-aware PREFIX test, so on its own it answers
+#: ``LEVEL_EXPERIMENT`` for ``sample.material.typo``; membership in
+#: ``EXTRACTOR_FIELD_MAP`` is what makes the path a REAL official field path.
+#:
+#: FAIL-CLOSED, AND THE SIX ``system.configuration.*`` PATHS ARE WHY IT MATTERS. They
+#: are ``LEVEL_UNCLASSIFIED`` — whether two runs of one experiment may legitimately
+#: differ in detector model is a scientific question this repository has no answer to
+#: (``CLAUDE.md`` §15 records all six as *"unclassified, verified"* pending an external
+#: answer) — so the filter excludes them WITHOUT a special case, and
+#: ``timestamps.created_utc`` with them. Nothing here guesses an unclassified path into
+#: a level, and ``test_the_unclassified_paths_are_excluded_by_the_derivation`` asserts
+#: that the exclusion comes from the filter rather than from a list.
+RECORD_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
+    path
+    for path, _coercer in EXTRACTOR_FIELD_MAP.values()
+    if ws.field_level(path) == ws.LEVEL_EXPERIMENT
 )
+
+
+#: THE RECORD-LEVEL BLOCK ADDRESSES the record itself may be given a payload at.
+#:
+#: FILTERED, NOT COPIED, exactly as :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` filtered it
+#: inline before: iterating ``EXPERIMENT_LEVEL_BLOCKS`` alone would be tautological, so
+#: the comprehension runs over BOTH block tuples and lets ``block_level`` decide. Moving
+#: ``tags`` between those tuples therefore updates this set from the one place the
+#: classification lives.
+RECORD_WRITABLE_BLOCK_ADDRESSES: frozenset[str] = frozenset(
+    ws.block_address(key)
+    for key in (*ws.EXPERIMENT_LEVEL_BLOCKS, *ws.RUN_LEVEL_BLOCKS)
+    if ws.block_level(key) == ws.LEVEL_EXPERIMENT
+)
+
+
+#: THE COMPLETE SET OF NAMESPACED ADDRESSES A RUN MAY RECORD AN OVERRIDE AT.
+#:
+#: Now COMPOSED from the two constants above rather than re-deriving them, so the
+#: address set this route enforces and the path set the RECORD-level write routes
+#: enforce cannot disagree about what "experiment-level" means. The value is unchanged —
+#: ``test_run_api.py::test_the_overridable_set_is_derived_from_the_field_map`` recomputes
+#: it from ``EXTRACTOR_FIELD_MAP`` and still passes — and the long argument for each gate
+#: now lives on the constants that apply it.
+EXPERIMENT_OVERRIDABLE_ADDRESSES: frozenset[str] = frozenset(
+    ws.field_address(path) for path in RECORD_WRITABLE_FIELD_PATHS
+) | RECORD_WRITABLE_BLOCK_ADDRESSES
 
 
 #: The exact call Starlette's ``JSONResponse.render`` makes, transcribed rather than
@@ -7317,7 +7947,7 @@ def _apply_run_field(
 
     ``question`` OVERRIDES THE TEXT THE CONFIRMATION RECORDS, and defaults to this
     function's original run-level wording so every existing caller is byte-identical.
-    It exists so :func:`_apply_record_enum_fields` can reuse this writer for a
+    It exists so :func:`_apply_record_fields` can reuse this writer for a
     RECORD-level field instead of building a second envelope: the two levels record
     different true sentences ("on this run" / "on this record"), and everything else
     about a confirmed field — the envelope shape, the four-key evidence entry, the
@@ -8207,8 +8837,33 @@ def _not_overridable(address: object) -> JSONResponse:
     )
 
 
-def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONResponse | None:
+def _refuse_override_payload(
+    kind: str,
+    name: str,
+    payload: object,
+    *,
+    identifiers: dict | None = None,
+    subject: str = "override",
+) -> JSONResponse | None:
     """A 422 if this payload cannot be stored at this address, else ``None``.
+
+    TWO KEYWORDS EXIST SO THE RECORD-LEVEL BLOCK WRITE CAN REUSE THIS GATE RATHER THAN
+    COPY IT, and neither changes a single verdict:
+
+    * ``identifiers`` — merged into every refusal body, because the record-level
+      operations name ``experiment_id`` in every refusal they serve and a body arriving
+      without it would be the one exception a client has to special-case. The override
+      route passes nothing and its bodies are byte-identical to what they always were.
+    * ``subject`` — the NOUN the prose uses for what was refused. It is a parameter and
+      not a hardcoded "override" because a record-level write is not an override, and a
+      refusal that calls it one describes the wrong act on the one screen a scientist
+      reads to work out what to fix. The RULES are identical, which is why this function
+      is shared; only the name of the thing being refused differs, so only that is
+      passed. The ``field:`` branch is deliberately NOT parameterised: the record-level
+      FIELD write does not use this function at all (a record answer carries a bare
+      value, not a draft envelope — see
+      :func:`_refuse_a_record_value_the_record_cannot_hold`), so that branch has one
+      caller and its wording stays exactly true for it.
 
     THREE GATES, and each one closes something measured rather than imagined.
 
@@ -8280,18 +8935,20 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
     clear operation below. That is the same posture as any other unfinished draft
     content, and it is fail-closed at the boundary that mints an official record.
     """
+    identifiers = identifiers or {}
     if not _is_storable_value(payload):
         return JSONResponse(
             status_code=422,
             content={
                 "error": "unrepresentable_value",
+                **identifiers,
                 "address": (
                     ws.field_address(name)
                     if kind == ws.ADDRESS_FIELD
                     else ws.block_address(name)
                 ),
                 "message": (
-                    "This override cannot be stored. Either it cannot be represented "
+                    f"This {subject} cannot be stored. Either it cannot be represented "
                     "in JSON — `NaN`, `Infinity` and `-Infinity` are accepted by some "
                     "parsers but are not JSON, and a record containing one could not "
                     "be read back or exported — or it nests more deeply, or is larger, "
@@ -8321,6 +8978,7 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
                 status_code=422,
                 content={
                     "error": "invalid_envelope",
+                    **identifiers,
                     "address": ws.field_address(name),
                     "findings": findings,
                     "message": (
@@ -8347,10 +9005,11 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
             status_code=422,
             content={
                 "error": "invalid_block_payload",
+                **identifiers,
                 "address": ws.block_address(name),
                 "expected_type": declared,
                 "message": (
-                    "A record-level block override must be the block itself, of the "
+                    f"A record-level block {subject} must be the block itself, of the "
                     "type the official schema declares for it — an object for "
                     "`attribution`, an array of labels for `tags`. A payload of "
                     "another type is refused rather than stored: it has no valid "
@@ -8380,10 +9039,11 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
             status_code=422,
             content={
                 "error": "invalid_block_payload",
+                **identifiers,
                 "address": ws.block_address(name),
                 "expected_type": declared,
                 "message": (
-                    "This block override is the type the official schema declares, but "
+                    f"This block {subject} is the type the official schema declares, but "
                     "its CONTENTS are not a shape the deterministic checks can read — "
                     "`attribution.contributors` must be a list of contributor objects, "
                     "each an object. It is refused rather than stored: the checks that "
@@ -8397,11 +9057,12 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
             status_code=422,
             content={
                 "error": "invalid_block_payload",
+                **identifiers,
                 "address": ws.block_address(name),
                 "expected_type": declared,
                 "findings": identity_findings,
                 "message": (
-                    "This block override names a field no client may author. The "
+                    f"This block {subject} names a field no client may author. The "
                     "finding is the deterministic draft validator's own words. "
                     "Nothing was written."
                 ),
@@ -8443,6 +9104,31 @@ _ATTRIBUTION_CONFIRMATION_QUESTION = (
     "identity, so WHO confirmed it is deliberately not recorded."
 )
 
+#: The same question, for a contributor confirmed on the RECORD rather than on one run.
+#:
+#: A SEPARATE CONSTANT BECAUSE THE ONE ABOVE WOULD BE FALSE HERE, in both halves that
+#: matter: it says *"this run"* and it names the override operation. Stored evidence is
+#: read by a person deciding whether a claim is trustworthy, so an entry describing an
+#: act nobody performed is exactly the fabricated provenance ``CLAUDE.md`` §5 forbids —
+#: and the entry is what ``export.build_sidecar`` publishes.
+#:
+#: IT KEEPS THE ONE RESTRAINT THE ORIGINAL EXISTS FOR: it names the OPERATION and refuses
+#: to name the PERSON. What this application can honestly assert is that a request
+#: arrived at one named operation carrying ``confirmed_by_user: true`` with this
+#: contributor in its payload. WHO sent it is not recorded, because no trusted
+#: authentication boundary exists to read an identity from.
+#:
+#: THE TWO QUESTIONS DIFFER, WHICH IS ALSO WHY THE IDEMPOTENCE STAYS HONEST: an entry
+#: minted by a run override does not silently satisfy a record-level confirmation, and
+#: vice versa, because ``_rewrite_attribution_evidence``'s ``_same`` compares the
+#: question text. Each level's evidence says what actually happened at that level.
+_RECORD_ATTRIBUTION_CONFIRMATION_QUESTION = (
+    "Who contributed to this record, and in what role? Confirmed by whoever sent POST "
+    "/api/experiments/{experiment_id}/answers (or .../edit) for block:attribution with "
+    "confirmed_by_user: true. This application receives no verified user identity, so "
+    "WHO confirmed it is deliberately not recorded."
+)
+
 
 def _attribution_evidence_key(name: str, role: str) -> str:
     """The ``block_evidence`` key ``draft_validator`` looks a contributor up under.
@@ -8454,8 +9140,19 @@ def _attribution_evidence_key(name: str, role: str) -> str:
     return f"attribution:{name}|{role}"
 
 
-def _attribution_confirmations(payload: object, timestamp: str) -> dict[str, list[dict]]:
+def _attribution_confirmations(
+    payload: object,
+    timestamp: str,
+    *,
+    question: str = _ATTRIBUTION_CONFIRMATION_QUESTION,
+) -> dict[str, list[dict]]:
     """The ``block_evidence`` entries a confirmed ``block:attribution`` payload earns.
+
+    ``question`` NAMES THE ACT BEING RECORDED and defaults to the run override's own
+    wording, so every existing caller is byte-identical. The record-level block write
+    passes :data:`_RECORD_ATTRIBUTION_CONFIRMATION_QUESTION` instead, because the default
+    would state two things that did not happen — see that constant. Everything else about
+    the entry is shared and must stay that way.
 
     **THE DEFECT THIS CLOSES, measured over HTTP.** An override at ``block:attribution``
     carrying one contributor was accepted with ``200``, and the export then refused at
@@ -8505,15 +9202,19 @@ def _attribution_confirmations(payload: object, timestamp: str) -> dict[str, lis
         if not (isinstance(name, str) and name and isinstance(role, str) and role):
             continue
         entries[_attribution_evidence_key(name, role)] = [
-            user_confirmation(
-                _ATTRIBUTION_CONFIRMATION_QUESTION, f"{name} | {role}", timestamp
-            )
+            user_confirmation(question, f"{name} | {role}", timestamp)
         ]
     return entries
 
 
-def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dict]]) -> None:
+def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dict]]) -> bool:
     """Make the RUN's own ``attribution:`` block evidence exactly ``entries``.
+
+    A THIN NORMALISER OVER :func:`_rewrite_attribution_evidence`, which does the work and
+    carries the argument. It exists because the RUN's draft may be a non-dict and has to
+    be replaced on the ``Run`` before anything writes into it, while the record's draft
+    is always a dict by the time a write reaches it. Splitting the two means the RECORD
+    -level write reuses this rule instead of holding a second copy of it.
 
     **REPLACE, NOT MERGE, and the direction matters twice.** An override REPLACES the
     run's whole ``attribution`` block, so a contributor dropped from the payload is gone
@@ -8538,6 +9239,24 @@ def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dic
     """
     draft = run.draft if isinstance(run.draft, dict) else {}
     run.draft = draft
+    return _rewrite_attribution_evidence(draft, entries)
+
+
+def _rewrite_attribution_evidence(draft: dict, entries: dict[str, list[dict]]) -> bool:
+    """Make ONE draft's ``attribution:`` block evidence exactly ``entries``. Changed?
+
+    THE RULE, SHARED BY THE RUN OVERRIDE AND THE RECORD-LEVEL BLOCK WRITE — see
+    :func:`_rewrite_run_attribution_evidence` for the argument, which applies at both
+    levels because both REPLACE the whole ``attribution`` block rather than merging into
+    it. Whose ``block_evidence`` is written is decided by the CALLER handing in its own
+    draft, which is the one thing that must not be shared: writing a run's confirmation
+    onto the experiment would attach it to every sibling that never received it, and
+    writing the experiment's onto one run would hide it from the others.
+
+    IT NOW REPORTS WHETHER ANYTHING CHANGED, because the record-level writer needs that
+    to decide whether the request wrote anything at all. The override route ignores the
+    answer and relies on ``_save_versioned``'s signature comparison exactly as before.
+    """
     existing = draft.get("block_evidence")
     existing = existing if isinstance(existing, dict) else {}
 
@@ -8560,9 +9279,12 @@ def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dic
         prior = existing.get(key)
         rebuilt[key] = prior if _same(prior, fresh) else fresh
     if rebuilt:
+        changed = draft.get("block_evidence") != rebuilt
         draft["block_evidence"] = rebuilt
     else:
+        changed = "block_evidence" in draft
         draft.pop("block_evidence", None)
+    return changed
 
 
 @router.post(
@@ -9650,33 +10372,39 @@ NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
 #: to every one of the five routes and comparing the observed statuses to this set.
 #:
 #: TWO THINGS IT DOES NOT PROMISE, and both matter to the copy built on it. It does
-#: not promise the value will be ACCEPTED — a closed enum, a required sibling
-#: property or the no-guessing rules may still refuse the particular value. And
+#: not promise the value will be ACCEPTED — a closed enum, a declared JSON type, a
+#: required sibling property or the no-guessing rules may still refuse the particular
+#: value. And
 #: ~~every one of these routes is a RUN's, so a record with no runs yet can write none
-#: of them~~ — **CORRECTED: TRUE OF 18 OF THE 19, AND FALSE OF ONE.**
-#: ``system.technique`` is now also accepted by ``POST /api/experiments/{id}/answers``
-#: and its correction operation (see :func:`_record_enum_fields`), which are the
-#: RECORD's, so that one path IS writable on a record with no runs. Membership still
-#: means "a route exists", not "you can do it right now".
+#: of them~~ — ~~**CORRECTED: TRUE OF 18 OF THE 19, AND FALSE OF ONE**~~ —
+#: **CORRECTED AGAIN 2026-08-30: TRUE OF 5 OF THE 19, AND FALSE OF THE OTHER 14.**
+#: Every EXPERIMENT-level path in this set is now accepted by ``POST
+#: /api/experiments/{id}/answers`` and its correction operation, which are the
+#: RECORD's — so 13 of the 18 mappable-and-writable paths are writable on a record
+#: with no runs, and only the 5 RUN-level ones (``context.*``,
+#: ``timestamps.acquired_*``) need a run to exist. Both earlier readings are kept
+#: struck rather than replaced, because each was true of the build it described and
+#: the sequence is what stops the next reader trusting a number nobody re-measured.
+#: Membership still means "a route exists", not "you can do it right now".
 #:
-#: **THE SERVED SENTENCE STILL SAYS THE OLD THING, AND THAT IS NAMED RATHER THAN LEFT
-#: TO BE FOUND.** The notes-listing operation's description ends *"Both routes are a
-#: run's, so a record with no runs can write none of them yet"*, which is now false for
-#: ``system.technique``. It is not corrected in this change because
-#: ``apps/web/src/test/apiFixtures.ts`` transcribes that description verbatim and
-#: ``test_contract_description_parity`` compares the two — so the sentence and its
-#: transcription have to move together, and this slice is scoped to the backend. The
-#: defect it leaves is the MILD direction (a reader is told they need a run when they
-#: no longer do), not the direction this repository's disclosure rules exist to
-#: prevent (a sentence pointing at a locked door).
+#: ~~**THE SERVED SENTENCE STILL SAYS THE OLD THING**~~ — **CLOSED 2026-08-30.** The
+#: notes-listing operation's description used to end *"Both routes are a run's, so a
+#: record with no runs can write none of them yet"*, and the previous session left it
+#: standing because ``apps/web/src/test/apiFixtures.ts`` transcribes that description
+#: verbatim and ``test_contract_description_parity`` compares the two. The sentence and
+#: its transcription have now been moved together, in one change, and the served
+#: paragraph names all three write routes rather than two.
 #:
-#: THE THIRD ROUTE IS IN THE DERIVATION EVEN THOUGH IT CHANGES NO MEMBER TODAY.
-#: ``system.technique`` is already admitted by the override clause and
-#: ``system.domain`` is not in :data:`NOTE_MAPPABLE_FIELD_PATHS` at all, so the set is
-#: byte-identical either way — which is exactly why the clause is written now rather
-#: than when it first matters: this constant's whole discipline is that it is derived
-#: from the routes that enforce it, and a route that accepts a value belongs in the
-#: derivation whether or not it happens to be load-bearing this week.
+#: THE RECORD ROUTE IS IN THE DERIVATION AND NOW CHANGES NO MEMBER — WHICH IS A
+#: DIFFERENT FACT FROM THE ONE THIS COMMENT USED TO STATE, and worth being exact
+#: about. When the clause was written, ``system.technique`` was already admitted by
+#: the override clause and ``system.domain`` is not in
+#: :data:`NOTE_MAPPABLE_FIELD_PATHS` at all, so the set was byte-identical either way.
+#: That is still so, and for a stronger reason: the record-level write surface is now
+#: derived from the SAME expression :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` is
+#: (:data:`RECORD_WRITABLE_FIELD_PATHS`), so the two clauses cannot select different
+#: paths. The clause stays because this constant's whole discipline is that it is
+#: derived from the routes that enforce it.
 #:
 #: IT MOVES THE SCHEMA READ TO IMPORT TIME, which is a real consequence and is stated
 #: rather than discovered. :func:`_record_enum_fields` is otherwise called lazily, on
@@ -9912,16 +10640,21 @@ _NOTE_LIST_DESC = (
         "`value_writable_field_paths` is the SUBSET of those paths that some "
         "write operation in this build accepts a value at — `PATCH "
         "/api/experiments/{experiment_id}/runs/{run_id}` for a run's own field, "
-        "`POST /api/experiments/{experiment_id}/runs/{run_id}/overrides` for a "
-        "record-level one. MAPPING A NOTE AND ENTERING ITS VALUE ARE DIFFERENT "
-        "ACTS, and for 7 of the 25 mappable paths the second one has no route at "
-        "all: every write operation refuses them. Mapping to such a path is still "
-        "correct and still keeps the content on the record in full — this key "
-        "says only that no request can then put a value there, so a client must "
-        "not tell a person to go and do it. It promises nothing about a value "
-        "being ACCEPTED: a closed enum, a required sibling property or the "
-        "no-guessing rules may still refuse the particular value. Both routes are "
-        "a run's, so a record with no runs can write none of them yet.\n\n"
+        "`POST /api/experiments/{experiment_id}/answers` (corrected at "
+        "`.../edit`) for a record-level one, and `POST "
+        "/api/experiments/{experiment_id}/runs/{run_id}/overrides` to record ONE "
+        "run's divergence from a record-level value. MAPPING A NOTE AND ENTERING "
+        "ITS VALUE ARE DIFFERENT ACTS, and for 7 of the 25 mappable paths the "
+        "second one has no route at all: every write operation refuses them. "
+        "Mapping to such a path is still correct and still keeps the content on "
+        "the record in full — this key says only that no request can then put a "
+        "value there, so a client must not tell a person to go and do it. It "
+        "promises nothing about a value being ACCEPTED: a closed enum, a declared "
+        "JSON type, a required sibling property or the no-guessing rules may still "
+        "refuse the particular value. ~~Both routes are a run's, so a record with "
+        "no runs can write none of them yet.~~ CORRECTED: the record-level paths "
+        "are writable on a record with no runs at all, through the record's own "
+        "answers operation; only the 5 run-level paths need a run to exist.\n\n"
         "`unreadable_entries` counts stored entries this build cannot present as "
         "notes. There are two kinds and the count does not separate them: an "
         "entry the note model refused, and an entry whose id another note already "

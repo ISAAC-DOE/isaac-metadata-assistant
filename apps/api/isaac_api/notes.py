@@ -102,13 +102,28 @@ that turns a value into a confirmed field already exists and is unchanged — ``
 ``confirmed_by_user: true`` and a matching ``If-Match``, recorded as
 ``user_confirmation`` evidence."* Measured over HTTP against a record created through
 ``POST /api/experiments``, at every one of the 25 mappable paths, those two routes
-accept **none of them** — both answer ``422 unrecognized_field`` for all 25, because
+accept ~~**none of them** — both answer ``422 unrecognized_field`` for all 25, because
 they are keyed to a record's open blocking questions and to fields the draft already
-holds, not to official field paths. The two routes that DO accept these paths are a
-RUN's: ``PATCH /api/experiments/{id}/runs/{run_id}`` for the 5 run-level paths, and
-``POST /api/experiments/{id}/runs/{run_id}/overrides`` for 13 record-level ones. The
+holds, not to official field paths~~ — **CORRECTED 2026-08-30: they now accept 13 of
+the 25, and this paragraph is struck in place rather than rewritten because it is the
+sentence the surfaces copied.** ``POST /experiments/{id}/answers`` and ``POST
+/experiments/{id}/edit`` accept every EXPERIMENT-level official path — the sample, the
+facility, ``system.technique`` — and the two record-level block addresses
+``block:attribution`` and ``block:tags``, recording each as a ``user_confirmation`` on
+the record that every run then inherits. They were keyed only to blocking questions and
+to fields the draft already held when this was written; they no longer are.
+
+~~The two routes that DO accept these paths are a RUN's~~ — **THREE routes accept them
+now.** ``PATCH /api/experiments/{id}/runs/{run_id}`` for the 5 run-level paths; ``POST
+/api/experiments/{id}/answers`` (corrected at ``.../edit``) for the 13 record-level
+ones, which is the route a record with no runs at all can use; and ``POST
+/api/experiments/{id}/runs/{run_id}/overrides`` to record ONE run's divergence from a
+record-level value. The
 remaining **7** — the six ``system.configuration.*`` paths and
-``timestamps.created_utc`` — are accepted by no write route in this build at all.
+``timestamps.created_utc`` — are accepted by no write route in this build at all, and
+that is unchanged: they are ``field_level``-unclassified, and the record-level write
+surface is derived by filtering on ``LEVEL_EXPERIMENT``, so they are excluded without a
+special case rather than by a list somebody has to remember to keep.
 
 The per-path answer is derived and served rather than described in prose, at
 ``routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT`` and on the wire as

@@ -1979,7 +1979,20 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // commit after the assertion moved to 104,045 — the arithmetic was left behind
     // by the edit that changed its inputs, which is the exact failure this test's
     // own header lectures about. Re-measured over `create_app().openapi()`.)
-    expect(total).toBe(104045);
+    // 104,045 -> 104,951 (+906): TWO descriptions moved, and the arithmetic is spelled
+    // out because the raw character delta and this number DIFFER BY TWO and that gap is
+    // the whole reason the two aggregates are asserted separately.
+    //   * `GET .../draft` 302 -> 876 (+574), APPENDING one paragraph — the
+    //     `record_blocks` key, the record-level block payloads a client must be able to
+    //     READ before it replaces one;
+    //   * `GET .../notes` 2,898 -> 3,232 (+334), written INTO the existing
+    //     `value_writable_field_paths` paragraph — its closing sentence ("Both routes
+    //     are a run's, so a record with no runs can write none of them yet") had become
+    //     false and is struck in place, with the record-level write route named.
+    // Raw sum +908; the appended `\n\n` adds one separator, so the remainder count below
+    // moves 211 -> 212 and this total loses 2: 104,045 + 908 - 2 = 104,951. RE-DERIVED
+    // over the transcribed array by the same rule the header states, not incremented.
+    expect(total).toBe(104951);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -2021,7 +2034,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // would mean the bound had been appended instead, and one that left it at 210
     // while the character total moved would mean the two-cause prose had been woven
     // in. RE-DERIVED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(211);
+    // 211 -> 212 (+1): ONLY `GET .../draft` appended a paragraph (the `record_blocks`
+    // key). It moves by exactly one because the `GET .../notes` correction in the same
+    // change was written INTO an existing paragraph — a change that moved this by two
+    // would mean that correction had been appended instead, and one that left it at 211
+    // while the character total moved would mean the `record_blocks` prose had been
+    // woven in. RE-DERIVED from the transcribed array, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(212);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather
