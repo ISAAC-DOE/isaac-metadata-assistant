@@ -119,13 +119,51 @@ Read the boundary precisely, because "the transport exists" is easy to over-read
 
 * **The default deployment registers no MCP route at all** — an absent path, not a path that
   answers 403. A route that refuses still advertises the capability.
-* The one binding that serves a transport refuses every request whose **socket peer** is not a
-  loopback address, refuses one carrying a proxy header, refuses an off-loopback browser `Origin`,
-  and refuses a credential it cannot verify. No header is ever read as evidence of identity.
+* ~~"The one binding that serves a transport"~~ — **CORRECTED 2026-08-29: there are now two, and
+  neither is reachable.** `local-loopback` is unchanged in every respect: it refuses every request
+  whose **socket peer** is not a loopback address, refuses one carrying a proxy header, refuses an
+  off-loopback browser `Origin`, and refuses a credential it cannot verify. `oauth-resource-server`
+  (`apps/api/isaac_api/mcp/oauth.py`) is ~~a complete OAuth 2.1 protected resource~~ **an OAuth 2.1
+  protected resource for the MCP *authorization* chapter** — RFC 9728 metadata, RFC 8707 audience
+  binding, RFC 6750 challenges, JWT validation per OAuth 2.1 §5.2 — and it **resolves to
+  the unconfigured binding unless an operator supplies an issuer, a canonical resource URI and a
+  verification key set.** None of those exists in this repository, in any manifest, or in any
+  deployment. In both bindings, **no header is ever read as evidence of identity.**
+
+  > **"Complete" is struck 2026-08-30, in the same change that struck it in `oauth.py`, because a
+  > correction that lands in the code and not in the document an outsider reads is not a
+  > correction.** Two things the word covered up:
+  >
+  > 1. **It named no chapter.** What is implemented is the Authorization chapter in the
+  >    resource-server role. Four divergences are now enumerated in `oauth.py`'s module docstring
+  >    rather than implied away — including one from the *Transports* chapter: unlike
+  >    `local-loopback`, this binding performs **no `Origin` validation at all**, deliberately,
+  >    because a token is not ambient authority and no allowlist exists to enforce.
+  > 2. **Three JSON-RPC methods answered before authentication.** On the day the bullet above was
+  >    written, `ping`, `notifications/initialized` and the unknown-method path returned `200` to a
+  >    caller carrying no token — harmless under `local-loopback`, whose socket-peer guard refuses a
+  >    stranger first, and live under this binding, which has no such guard by design. Fixed
+  >    2026-08-30: every method authenticates before it produces anything. The bullet's own claim
+  >    that this binding is disabled and unreachable was true throughout and is unchanged; what was
+  >    not true is that the code behind the switch was complete.
+  >
+  > The server also now speaks **two protocol revisions** — `2026-07-28` (modern, per-request
+  > `_meta`, `server/discover`) and `2025-06-18` (legacy, `initialize` handshake). §2's reading of
+  > the transport is unaffected: the era is chosen by how a client opens, not by configuration, and
+  > no route exists in any deployment either way.
 * **Nothing about D1 or D2 is answered, narrowed, or implied.** No internet-reachable path, no
-  credential, no outbound call, no billing, and no hosted connection exists or is authorized. The
-  two reserved binding names remain unimplemented, and selecting one still resolves to the
-  unconfigured binding.
+  credential, no outbound call, no billing, and no hosted connection exists or is authorized.
+  ~~"The two reserved binding names remain unimplemented, and selecting one still resolves to the
+  unconfigured binding."~~ — **CORRECTED 2026-08-29, and the correction is narrow.** One of the two
+  (`oauth-resource-server`) is now IMPLEMENTED; `edge-issued-bearer` is still reserved and
+  unimplemented. Selecting either **still resolves to the unconfigured binding** in every state
+  this repository can reach, for different reasons: the reserved one because it is not registered,
+  the implemented one because it has no configuration. **Implementing the application half is not
+  answering D2.** D2 asks which authentication model SLAC will operate, and answering it requires
+  an issuer, a registered client, a redirect-URI policy and a firewall decision — every one of them
+  Dean's, none of them written down anywhere here. What changed is that the question can now be
+  costed against reviewable code instead of a plan. See
+  [`docs/mcp-oauth-operator-requirements-2026-08-27.md`](mcp-oauth-operator-requirements-2026-08-27.md) §6.
 * ~~"No product screen mentions MCP (verified: `apps/web/src` contains no reference)"~~ —
   **CORRECTED 2026-08-25, AND IT WAS FALSE ON THE DAY IT WAS COMMITTED.** Re-running the check the
   sentence itself offers:

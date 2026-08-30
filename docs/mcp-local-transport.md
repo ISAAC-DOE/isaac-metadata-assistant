@@ -23,13 +23,26 @@ the code: `apps/api/isaac_api/mcp/transport.py`, `deployment.py`, `policy.py`.
 | *unset* (**the default**) | `unconfigured` | **No** | nobody — the path 404s |
 | `""` / whitespace | `unconfigured` | **No** | nobody |
 | anything unrecognised (`true`, `hosted`, `LOCAL_LOOPBACK`, …) | `unconfigured` | **No** | nobody |
-| `oauth-resource-server` / `edge-issued-bearer` | `unconfigured` (reserved, unimplemented) | **No** | nobody |
+| `edge-issued-bearer` | `unconfigured` (reserved, unimplemented) | **No** | nobody |
+| `oauth-resource-server`, **not fully configured** | `unconfigured` (misconfigured) | **No** | nobody — **and the container refuses to boot** |
 | `local-loopback` **with a bad scope string** | `unconfigured` (misconfigured) | **No** | nobody |
 | `local-loopback` | `local-loopback` | **Yes**, at `{ISAAC_BASE_PATH}/api/mcp` | a **loopback** peer, with **no** credential, **no** proxy header, and **no** off-loopback `Origin` |
+| `oauth-resource-server`, **fully configured** | `oauth-resource-server` | **Yes**, plus RFC 9728 metadata paths | a caller presenting a **valid OAuth 2.1 access token** for this resource. **No deployment is in this state** |
+
+**Row 5 is new (2026-08-29) and the previous version of this table said the two reserved names
+were both unimplemented. That is now true of `edge-issued-bearer` only.** The last row describes a
+configuration that exists in code and in tests and **in no deployment**: it requires an issuer, a
+canonical resource URI and a verification key set, none of which is written down anywhere in this
+repository. `ISAAC_MCP_DEPLOYMENT` is unset everywhere, so rows 1–5 are the only states any
+deployment has ever been in.
 
 Every fail-closed row lands on the same binding for the same reason: an operator's
-typo, an unimplemented placeholder and a scope list naming `isaac:submit` must all
-produce *nothing*, never a working read-only server somebody then trusts.
+typo, an unimplemented placeholder, an incomplete OAuth configuration and a scope
+list naming `isaac:submit` must all produce *nothing*, never a working read-only
+server somebody then trusts. The OAuth row additionally **fails to boot** rather
+than merely serving nothing — an operator who named that binding believes tokens
+are being verified, and a deployment that silently serves no MCP route looks
+identical to a working one.
 
 ---
 
@@ -78,7 +91,22 @@ proxy that strips its own forwarded headers. Bind loopback.
 
 ## 3. What the endpoint accepts
 
-One path, `POST` only, JSON-RPC 2.0, MCP revision **`2025-06-18`**.
+One path, `POST` only, JSON-RPC 2.0, and **two MCP revisions**: `2026-07-28`
+(*modern* — per-request `_meta`, no handshake) and `2025-06-18` (*legacy* — the
+`initialize` handshake). The revision's own terms; a server implementing both is
+what it calls **dual-era**.
+
+**How the era is chosen is the client's decision, not a setting:** an `initialize`
+request selects legacy semantics, and a request carrying
+`params._meta["io.modelcontextprotocol/protocolVersion"]` — or naming
+`server/discover`, which exists only in the modern revision — is served
+statelessly under `2026-07-28`. Nothing an operator configures moves it.
+
+**Nothing about the legacy path changed.** A `2025-06-18` client that sends
+`initialize`, then `tools/list`, then `tools/call` behaves exactly as it did
+before, sends none of the modern headers, and never sees a modern error. That is
+deliberate: the compatibility matrix records "Legacy client / Modern server" as
+*Fails*, because a legacy client has no fall-forward mechanism.
 
 | Condition | Answer |
 |---|---|
@@ -87,15 +115,67 @@ One path, `POST` only, JSON-RPC 2.0, MCP revision **`2025-06-18`**.
 | peer is not loopback, or ASGI reports no peer | `403 loopback_only` |
 | any of `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP` present | `403 proxied_request_refused` — the *presence* is the refusal; the value is never read |
 | `Origin` present and not a loopback host | `403 cross_origin_refused` (DNS-rebinding defence) |
-| `MCP-Protocol-Version` present and not `2025-06-18` | `400` |
+| **the caller presented no credential this binding accepts** | `401` — **for every method, including `ping`, `notifications/initialized`, `server/discover` and an unknown one.** Authentication happens before any method is dispatched |
+| a declared protocol version this server does not serve (header **or** `_meta`) | `400` with JSON-RPC `-32022` `UnsupportedProtocolVersionError`, listing `supported` |
+| a **modern** request missing or contradicting `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` | `400` with JSON-RPC `-32020` `HeaderMismatch` |
+| an unknown method, **modern** era | `404` with `-32601` |
+| an unknown method, **legacy** era | `200` with `-32601` |
 | `Content-Type` is not `application/json` | `415` |
 | `Accept` cannot take JSON | `406` |
 | body over 1 MiB | `413` |
 | a JSON-RPC **batch** (array) | `400` — removed in revision `2025-06-18` |
-| a notification (no `id`) | `202`, no body |
+| an **authenticated** notification (no `id`) | `202`, no body |
 | deployment refused the caller | `401`, and **no fabricated `WWW-Authenticate`** |
 | scope not granted | `403` |
 | any other JSON-RPC error | `200` with a JSON-RPC error object — the transport succeeded, the application refused |
+
+**Methods, per era.** Legacy: `initialize`, `notifications/initialized`, `ping`,
+`tools/list`, `tools/call`. Modern: `server/discover`, `ping`, `tools/list`,
+`tools/call`. An unknown-method refusal names its own era's list, so a legacy
+client is never told about `server/discover` and a modern one is never told about
+`initialize`.
+
+**A worked modern request**, since three headers are required and the third is
+conditional:
+
+```http
+POST /api/mcp HTTP/1.1
+Content-Type: application/json
+MCP-Protocol-Version: 2026-07-28
+Mcp-Method: tools/call
+Mcp-Name: isaac_list_experiments
+
+{"jsonrpc":"2.0","id":1,"method":"tools/call",
+ "params":{"name":"isaac_list_experiments","arguments":{},
+           "_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}
+```
+
+`Mcp-Name` is required for `tools/call` only, and may carry the revision's Base64
+sentinel (`=?base64?…?=`), which this server decodes before comparing it to
+`params.name`.
+
+**One thing an operator should not be surprised by:** `2025-06-18` was the only
+revision this server spoke until 2026-08-30, and the old refusal body for an
+unrecognised version was `{"code": "unsupported_protocol_version", ...}` under
+this transport's own error code. That body was not a recognized MCP error, so a
+dual-era client fell back to `initialize` and worked — **by accident**. It is now
+the real `-32022` envelope, which tells a modern client to retry with a supported
+version instead of falling back.
+
+**And ISAAC's own three error codes moved, in the same change.** They were
+`-32001` (deployment refused), `-32002` (insufficient scope) and `-32003`
+(transport refused); they are now **`-31001`, `-31002` and `-31003`**. The reason
+is `2026-07-28`'s partition of the block JSON-RPC set aside for implementations:
+`-32000`..`-32019` is a legacy sub-range new implementations *"**SHOULD NOT** use
+… at all"*, `-32020`..`-32099` is reserved for the specification's own codes, and
+`-32002` in particular is one implementations of this revision **MUST NOT** emit
+(it meant *resource not found* in earlier revisions, and clients are told to keep
+accepting it as such). A scope refusal arriving as `-32002` could therefore be
+read by a conforming client as a missing resource. The specification's own
+direction is to allocate *"outside the JSON-RPC reserved range (`-32768` to
+`-32000`)"*, which is where they now are. Nothing else about those three
+refusals — their HTTP status, their body shape, their `data.code` string —
+changed.
 
 No `Mcp-Session-Id` is ever issued. No RFC 9728 protected-resource-metadata document
 is published: a challenge naming an authorization server ISAAC does not run would
@@ -164,13 +244,33 @@ and confirmation that the edge forwards `POST` to it with the request body and t
 **D2 — authentication.** One of two shapes, and ISAAC needs the parameters of
 whichever is chosen:
 
-* **ISAAC-hosted OAuth 2.1 resource server** (`oauth-resource-server`, reserved and
-  unimplemented). ISAAC would need: the authorization-server issuer URL; the token
-  endpoint; the expected `aud`/resource indicator value for this server (RFC 8707);
-  the signing keys or JWKS URL; the claim that carries scope, and the exact scope
-  strings the issuer will mint — ISAAC's are `isaac:read` and `isaac:draft.write`;
-  and confirmation that the edge passes OAuth traffic through rather than
-  intercepting it.
+* **ISAAC as an OAuth 2.1 resource server** (`oauth-resource-server`). ~~"reserved and
+  unimplemented"~~ — **IMPLEMENTED 2026-08-29** (`apps/api/isaac_api/mcp/oauth.py`,
+  `mcp/jwt.py`), disabled by default, reachable in no deployment. **The list below did not
+  shrink and is not satisfied by the implementation** — every item is a value only Dean can
+  supply, and the code refuses to boot without them, which is the point of listing them here:
+
+  the authorization-server issuer URL (`ISAAC_MCP_OAUTH_ISSUER`); the **exact** canonical
+  resource URI this server answers as, which must match what a scientist types into their
+  client including the path (`ISAAC_MCP_OAUTH_RESOURCE`, compared to a token's `aud` by exact
+  string equality, RFC 8707); the signing keys, **projected into the pod as a file**
+  (`ISAAC_MCP_OAUTH_JWKS_FILE` — a JWKS *URL* is refused, because this build makes no outbound
+  request); the URL at which the RFC 9728 metadata document is published, which **must** be
+  given explicitly when `ISAAC_BASE_PATH` is in use because a path-mounted ISAAC cannot serve
+  the RFC's origin-root path (`ISAAC_MCP_OAUTH_METADATA_URL`); the exact scope strings the
+  issuer will mint — ISAAC's are `isaac:read` and `isaac:draft.write`, they **do not nest**,
+  and there is no third; and confirmation that the edge passes OAuth traffic through rather
+  than intercepting it.
+
+  Two items the earlier list did not name and that are not application work: the token
+  endpoint must accept `application/x-www-form-urlencoded`, and **Anthropic's egress range
+  must reach both this endpoint and the issuer host** — see
+  [`mcp-oauth-operator-requirements-2026-08-27.md`](mcp-oauth-operator-requirements-2026-08-27.md)
+  §2, which is the item most likely to fail silently.
+
+  The claim that carries scope is **not** a parameter: `scope` (RFC 6749, space-delimited) and
+  `scp` (array or string) are both read, and a scope string ISAAC does not recognise is dropped
+  rather than refused, so a token carrying `openid profile` alongside `isaac:read` works.
 * **Edge-issued static bearer** (`edge-issued-bearer`, reserved and unimplemented).
   ISAAC would need: how the token is issued and rotated; how ISAAC verifies it
   (a shared secret it can compare, or a signature it can check — **not** "the edge
@@ -237,6 +337,12 @@ behaviour changes.
 
 `apps/api/tests/test_mcp_boundaries.py` — what must never be reachable.
 `apps/api/tests/test_mcp_server.py` — every registered tool, in process.
+`apps/api/tests/test_mcp_protocol_eras.py` — **added 2026-08-30**: that no method
+answers a caller who presented no credential (swept over every method in either
+era, plus two the server does not implement), and the dual-era contract — era
+selection, `server/discover`, the `-32022` and `-32020` error shapes, the modern
+header rules, and the assertion that the legacy handshake never produces a modern
+error, which is what a dual-era client's fallback depends on.
 
 **None of them reads real data, touches a database, or sends anything off this
 machine.** *This line previously said "None of them opens a socket", which was
