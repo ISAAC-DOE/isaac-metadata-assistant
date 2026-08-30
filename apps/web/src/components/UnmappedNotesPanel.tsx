@@ -3,12 +3,24 @@
  *
  * WHAT THIS PANEL IS FOR. A scientist writes things down that no rule can place: why
  * a scan was repeated, a column heading nothing recognised, an aside in a transcript.
- * Every pipeline in this application drops such content silently, and STILL DOES —
- * nothing was rewired to feed this panel. This is the destination that now exists,
- * and where a person decides what each note is. Its only producer today is the
- * capture box below, which always sends `typed_note`; the extractor's discarded
- * `unrecognised_labels` is the intended first automatic producer and is not wired,
- * so no note here yet carries a run, a candidate path, or any source but that one.
+ * This is the destination that now exists, and where a person decides what each note is.
+ *
+ * ~~"Every pipeline in this application drops such content silently, and STILL DOES —
+ * nothing was rewired to feed this panel. Its only producer today is the capture box
+ * below, which always sends `typed_note`; … so no note here yet carries a run, a
+ * candidate path, or any source but that one."~~ — CORRECTED 2026-08-29. `POST
+ * /api/experiments/{id}/transcript` writes one `source: "transcript"` note per segment
+ * of a finalized transcript, carrying that capture's `run_id` and, when the reader
+ * proposed exactly one, a `candidate_field_path` with its rule. So notes rendered here
+ * DO already arrive with a run, a candidate path and a second source — which is why
+ * this panel renders the candidate-with-its-rule at all (see rule 1 below). Struck
+ * rather than rewritten: the same sentence stood in four backend files and this one,
+ * and a reader who remembers any copy will otherwise re-derive the wrong conclusion.
+ *
+ * WHAT SURVIVES: the capture box below is still the only thing in the frontend that
+ * calls `POST .../notes`, and it still always sends `typed_note`; `csv_column`,
+ * `file_listing_line` and `extraction_residue` still have no producer anywhere, the
+ * extractor's discarded `unrecognised_labels` being the intended first one.
  *
  * THE FOUR ACTIONS ARE PEERS. Map, Edit, Keep as Note and Dismiss are rendered as one
  * row of equally-weighted buttons, deliberately. "Keep as Note" is a first-class
@@ -438,6 +450,11 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
                   note={note}
                   mappablePaths={list.loaded.mappable_field_paths}
                   valueWritablePaths={list.loaded.value_writable_field_paths}
+                  // `?? []` because this key is newer than the others: a server that
+                  // predates it must degrade to the run-level sentence, which is the
+                  // MILD direction (a reader is told they need a run when they may
+                  // not), never to a claim that no run is needed when one is.
+                  recordWritablePaths={list.loaded.record_writable_field_paths ?? []}
                   busy={busyNoteId === note.id || version === null}
                   onReview={review}
                 />
@@ -589,19 +606,38 @@ function CaptureNote({
  * not write a value — a value still has to be entered and confirmed on the field
  * itself."* The first half is true everywhere. The second half describes an ACTION, and
  * for the six `system.configuration.*` paths and `timestamps.created_utc` no request in
- * this build can perform it — measured over HTTP against all five write routes, every
- * one of which answers 422. So the screen whose whole purpose is to stop captured
- * content being thrown away was sending the scientist to a locked door, and the one
- * thing they could reasonably conclude on finding it locked is that the note has no home.
+ * this build can perform it — measured over HTTP against all ~~five~~ six write routes,
+ * every one of which answers 422. (The count read five until 2026-08-29;
+ * `POST .../runs/{run_id}/edit` was missing from the enumeration and accepts none of the
+ * 25, so re-measuring over six moved no path in either direction.) So the screen whose
+ * whole purpose is to stop captured content being thrown away was sending the scientist
+ * to a locked door, and the one thing they could reasonably conclude on finding it
+ * locked is that the note has no home.
  *
  * IT IS PER PATH, NOT ON AVERAGE, because a hint is read about the field in front of you.
  * `value_writable_field_paths` is the server's own subset — derived in `routes.py` from
- * the two admissible-address sets the write routes actually enforce, so the sentence and
+ * the admissible-address sets the write routes actually enforce, so the sentence and
  * the refusal cannot drift. Nothing is transcribed here.
  *
- * AND IT SAYS "ON A RUN", which the old copy did not. Both write routes are a run's:
- * `PATCH .../runs/{run_id}` for a run's own field and `POST .../runs/{run_id}/overrides`
- * for a record-level one. "On the field itself" pointed at no screen a person could find.
+ * AND IT SAYS WHERE, which the old copy did not. "On the field itself" pointed at no
+ * screen a person could find.
+ *
+ * ~~"AND IT SAYS 'ON A RUN' … Both write routes are a run's: `PATCH .../runs/{run_id}`
+ * for a run's own field and `POST .../runs/{run_id}/overrides` for a record-level
+ * one."~~ — CORRECTED 2026-08-29. That was true of all 18 writable paths when it was
+ * written and is now false for one of them. `system.technique` is also answered at
+ * `POST /api/experiments/{id}/answers` and corrected at `POST /api/experiments/{id}/edit`,
+ * which are the RECORD's — measured over HTTP, `{"system.technique": "XAS"}` returns 200
+ * on a record with ZERO runs. So a reader mapping a note to `system.technique` was being
+ * sent to a run they do not need and may not have. It is the MILD direction of the same
+ * defect the paragraph above describes, and it is the same defect: a sentence true on
+ * average, read about one field.
+ *
+ * SO THERE ARE THREE OUTCOMES, NOT TWO, and the third is served rather than transcribed:
+ * `record_writable_field_paths` is the server's sub-subset a record-level operation
+ * accepts. A client-side list of "which one is the record's" would be free to drift the
+ * moment the server's derivation changed, and nothing would fail — which is precisely
+ * how the two-outcome version of this function came to be wrong.
  *
  * WHY THE UNWRITABLE SEVEN ARE NOT SIMPLY GIVEN A ROUTE, which would be the better fix:
  * `system.configuration` is a designated OPEN namespace the vendored schema declares no
@@ -609,24 +645,41 @@ function CaptureNote({
  * question — classifying them here would be deciding it rather than reporting it. That is
  * a product decision, and this is the honest sentence until it is made.
  */
-export function valueWriteHint(fieldPath: string, valueWritablePaths: string[]): string {
+export function valueWriteHint(
+  fieldPath: string,
+  valueWritablePaths: string[],
+  recordWritablePaths: string[] = [],
+): string {
   if (fieldPath === '') {
     // NOTHING CHOSEN YET, so nothing may be said about a specific field. The half that
     // is true of every path is said, and no more.
     return 'This records where the content belongs. It does not write a value.';
   }
-  return valueWritablePaths.includes(fieldPath)
+  if (!valueWritablePaths.includes(fieldPath)) {
+    return (
+      'This records where the content belongs. It does not write a value, and this ' +
+      'version has nowhere to enter one for this field — mapping files the note and ' +
+      'keeps its text on the record in full, which is all it can do here.'
+    );
+  }
+  // THE RECORD-LEVEL ARM IS CHECKED AGAINST THE WRITABLE SET FIRST, deliberately. The
+  // server derives `record_writable_field_paths` as a SUBSET of the writable set, so
+  // the two can never disagree — but reading them in the other order would let a
+  // hypothetical inconsistency render as "enter it on this record" for a path nothing
+  // accepts, which is the locked-door failure this whole function exists to end.
+  // Ordering it this way makes the worst case the mild direction instead.
+  return recordWritablePaths.includes(fieldPath)
     ? 'This records where the content belongs. It does not write a value — a value for ' +
-        'this field is entered and confirmed on a run of this record.'
-    : 'This records where the content belongs. It does not write a value, and this ' +
-        'version has nowhere to enter one for this field — mapping files the note and ' +
-        'keeps its text on the record in full, which is all it can do here.';
+        'this field is entered and confirmed on this record. No run is needed.'
+    : 'This records where the content belongs. It does not write a value — a value for ' +
+        'this field is entered and confirmed on a run of this record.';
 }
 
 function NoteCard({
   note,
   mappablePaths,
   valueWritablePaths,
+  recordWritablePaths,
   busy,
   onReview,
 }: {
@@ -638,6 +691,11 @@ function NoteCard({
    * false sentence this exists to replace.
    */
   valueWritablePaths: string[];
+  /**
+   * And the server's per-path answer to "WHERE — on a run, or on the record?". A
+   * subset of `valueWritablePaths`, also served rather than derived here.
+   */
+  recordWritablePaths: string[];
   busy: boolean;
   onReview: (
     note: ApiNote,
@@ -903,7 +961,9 @@ function NoteCard({
             they are looking, and the alternative it names is a real one: keeping
             the note is a first-class outcome, not a consolation.
           */}
-          <p className="note-form-hint">{valueWriteHint(fieldPath, valueWritablePaths)}</p>
+          <p className="note-form-hint">
+            {valueWriteHint(fieldPath, valueWritablePaths, recordWritablePaths)}
+          </p>
           <p className="note-form-hint">
             This list is not every field in the ISAAC schema — it is the set this
             version can map a note to. If the field you want is missing, that does
@@ -923,6 +983,7 @@ function NoteCard({
                   `Mapped to ${fieldPath}. No value was written. ${valueWriteHint(
                     fieldPath,
                     valueWritablePaths,
+                    recordWritablePaths,
                   )}`,
                 )
               }

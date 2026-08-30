@@ -143,27 +143,66 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       'the pending segment over as well — nothing at 1024 or 1280. It affects every record surface because ' +
       'StatusBar is shared chrome, but WHICH segments clip depends on the record\'s ' +
       'own status text, so the lists below differ per surface. Fix belongs in ' +
-      '`src/components/chrome.css` (.statusbar), not here.',
+      '`src/components/chrome.css` (.statusbar), not here. ' +
+      'FIXED 2026-08-29 in `src/components/chrome.css` — exactly where this note said the fix ' +
+      'belonged. Inside the existing `@media (max-width: 1024px)` block the footer becomes ' +
+      '`min-height: 52px` + `flex-wrap: wrap` instead of a hard `height: 52px` single-line row, ' +
+      'so the segments REFLOW onto further rows rather than spilling sideways out of the card. ' +
+      'Nothing is hidden and nothing truncates: every segment of this footer is a trust signal ' +
+      '(phase / Validation / Coverage / Advisory / the runtime honesty statement), so hiding or ' +
+      'ellipsising one at a narrow width would make the readout say LESS on the screens where a ' +
+      'reader can see least. All 20 recorded darwin offenders stopped firing in one run; see the ' +
+      'per-instance note below for why the linux lists are kept.',
+    /*
+     * ── FIXED ON DARWIN, 2026-08-29 — ALL TWENTY OFFENDERS ──────────────────
+     *
+     * MEASURED, local macOS run at this branch's HEAD:
+     * `npx playwright test e2e/specs/layout-responsive.spec.ts --reporter=json`,
+     * reading the `layout-baseline-not-fired` annotations. Every one of the 20
+     * darwin offenders across all eight keys was reported as not fired, and NO new
+     * clipped or occluded finding appeared anywhere in that run. That is what a
+     * shared-cause fix looks like: one declaration block, eight keys, twenty
+     * offenders, one run.
+     *
+     * IT ALSO CLOSED FOUR LAYOUT-04 KEYS, which is the corroboration rather than a
+     * coincidence: LAYOUT-04's cause (a) is stated as "`div.screen-card` inherits
+     * the non-reflowing StatusBar's width", and `div.screen-card` stopped
+     * overflowing at 320, 375 and 390 on every record surface in the same run.
+     *
+     * WHY THE LINUX LISTS SURVIVE, and this is a real reservation rather than the
+     * usual conservatism. `flex-wrap: wrap` absorbs any amount of extra WIDTH by
+     * adding rows, so the shared cause is closed structurally — but a wrap boundary
+     * falls BETWEEN flex items, and a single `.statusbar-seg` is itself a nowrap
+     * flex row. A segment whose own content exceeded the whole 353px line under a
+     * wider system face would still overflow, and this environment cannot measure
+     * the Linux face. `darwin: []` tolerates nothing, so a macOS regression now
+     * FAILS where it used to be pre-authorised; when CI annotates a linux instance
+     * as not-fired, delete the whole entry then.
+     */
     instances: {
-      'record-detail@mobile-375x812': [SB_PHASE, SB_PENDING, SB_ADVISORY, SB_EYEBROW, SB_RIGHT],
-      // PLATFORM-DIFFERING. On Linux the wider system face makes the pending
-      // segment ("— dry-run · 1 error") overflow the 768px footer as well, so
-      // the same non-reflowing footer clips a second segment there. Evidenced
-      // by GitHub Actions run 30668917975, whose log excerpt named
-      // `span.statusbar-pending` / `span.statusbar-seg` / `footer.statusbar`
-      // and that text. The excerpt was TRUNCATED: SB_ADVISORY is carried over
-      // from the macOS measurement (the footer geometry that clips it there is
-      // if anything tighter under a wider font) and it is possible CI reports
-      // further segments at this pair. If it does, the failure names them
-      // exactly — add them here rather than widening the match. Nothing beyond
-      // SB_PENDING is claimed as Linux-measured.
-      'record-detail@tablet-768x1024': { darwin: [SB_ADVISORY], linux: [SB_ADVISORY, SB_PENDING] },
-      'record-detail@zoom-200': [SB_PHASE, SB_PENDING, SB_ADVISORY],
-      'guided-completion@mobile-375x812': [SB_PHASE, SB_NOTE],
-      'evidence@mobile-375x812': [SB_NOTE],
-      'export-readiness@mobile-375x812': [SB_PENDING, SB_ADVISORY, SB_EYEBROW, SB_RIGHT],
-      'export-readiness-done@mobile-375x812': [SB_ADVISORY, SB_EYEBROW, SB_RIGHT],
-      'export-readiness-done@zoom-200': [SB_ADVISORY],
+      'record-detail@mobile-375x812': fixedOnDarwin(SB_PHASE, SB_PENDING, SB_ADVISORY, SB_EYEBROW, SB_RIGHT),
+      // ~~PLATFORM-DIFFERING.~~ Now `fixedOnDarwin`, like every other key here —
+      // but the linux list is UNCHANGED and the reason it holds two selectors
+      // rather than one is kept, because it is what CI will be judged against.
+      // On Linux the wider system face makes the pending segment ("— dry-run · 1
+      // error") overflow the 768px footer as well, so the same non-reflowing
+      // footer clipped a second segment there. Evidenced by GitHub Actions run
+      // 30668917975, whose log excerpt named `span.statusbar-pending` /
+      // `span.statusbar-seg` / `footer.statusbar` and that text. The excerpt was
+      // TRUNCATED: SB_ADVISORY is carried over from the macOS measurement (the
+      // footer geometry that clipped it there was if anything tighter under a
+      // wider font) and it is possible CI reports further segments at this pair.
+      // If it does, the failure names them exactly — add them here rather than
+      // widening the match. Nothing beyond SB_PENDING is claimed as
+      // Linux-measured, and nothing here is claimed as still firing on Linux;
+      // the list is what the fix has yet to be measured AGAINST.
+      'record-detail@tablet-768x1024': fixedOnDarwin(SB_ADVISORY, SB_PENDING),
+      'record-detail@zoom-200': fixedOnDarwin(SB_PHASE, SB_PENDING, SB_ADVISORY),
+      'guided-completion@mobile-375x812': fixedOnDarwin(SB_PHASE, SB_NOTE),
+      'evidence@mobile-375x812': fixedOnDarwin(SB_NOTE),
+      'export-readiness@mobile-375x812': fixedOnDarwin(SB_PENDING, SB_ADVISORY, SB_EYEBROW, SB_RIGHT),
+      'export-readiness-done@mobile-375x812': fixedOnDarwin(SB_ADVISORY, SB_EYEBROW, SB_RIGHT),
+      'export-readiness-done@zoom-200': fixedOnDarwin(SB_ADVISORY),
     },
   },
   {
@@ -181,7 +220,19 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       'and the wider Linux system face does not. It would be visible to any user whose system ' +
       'font is a shade wider, and it is genuinely broken on CI. The underlying cause ' +
       '(record-context does not shrink at phone widths) is shared by both. ' +
-      'Fix belongs in `src/components/chrome.css` (.record-context / .topbar) and fixes both.',
+      'Fix belongs in `src/components/chrome.css` (.record-context / .topbar) and fixes both. ' +
+      'THE ONE REMAINING INSTANCE IS LINUX-ONLY AND THIS ENTRY HOLDS EXACTLY ONE KEY — ' +
+      'do not read the "On Evidence it is `span.chip.chip-draft`" sentence above as a live ' +
+      'instance; that macOS instance was DELETED on 2026-08-01 and the sentence survives only ' +
+      'because it is what the Linux one is being compared to. ' +
+      '2026-08-29: `src/components/chrome.css` now states the crumb\'s shrink contract instead ' +
+      'of leaving it to the flexbox initial values — the state chip is `flex: none; ' +
+      'max-width: 100%` (the word IS the state, so it must neither shrink nor ellipsise) and ' +
+      '`.record-surface` is `flex: 0 1 auto` (it already truncates and keeps a readable ' +
+      'fragment, so it is the item that yields). That makes the containment structural rather ' +
+      'than a consequence of how wide the system face happens to be. IT IS NOT CLAIMED AS A ' +
+      'MEASURED FIX: darwin already read `[]` here before the change, so no local run can ' +
+      'distinguish it from the 2026-08-01 fix, and only CI can retire the linux instance.',
     instances: {
       // The macOS instance (`span < span.chip.chip-draft < div.record-context`
       // at `evidence@mobile-375x812`, label reading "Draf") is DELETED as of
@@ -312,31 +363,69 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       'list. Measured on darwin at the width sweep\'s own widths. **Linux is the authority and is ' +
       'NOT yet measured** — the system font is wider there, so CI may report further instances; ' +
       'when it does, add them exactly as named rather than widening the match.',
+    /*
+     * ── CAUSE (a) FIXED ON DARWIN, 2026-08-29 — TEN OFFENDERS ACROSS NINE KEYS ──
+     *
+     * This entry's own note names cause (a) as "`div.screen-card` inherits the
+     * non-reflowing StatusBar's width (LAYOUT-01: 575px of content in a 353px
+     * box)". LAYOUT-01 is now fixed at the source, and cause (a) went with it:
+     * `div.screen-card < div.app < div#root` stopped overflowing at 320, 375 and
+     * 390 on all four record surfaces in the same run, and
+     * `section.field-group < main#main.screen-main.pad < …` at
+     * `record-detail@width-320` went with them — the card is a column flex
+     * container, so the footer's 575px min-content had been widening `main` and
+     * everything inside it.
+     *
+     * MEASURED: `npx playwright test e2e/specs/layout-widths.spec.ts
+     * --reporter=json`, local macOS, this branch's HEAD, reading the
+     * `layout-baseline-not-fired` annotations at widths 320, 375 and 390. Known
+     * overflow at those widths fell 320: 7 -> 3, 375: 5 -> 2, 390: 4 -> 1.
+     *
+     * CAUSE (b) IS UNTOUCHED AND STILL FIRES on darwin — `section.preview`
+     * (evidence), `main#main.screen-main.pad` (export-readiness-done) and
+     * `main#main.screen-main.centered` (guided-completion) are content whose
+     * min-content width exceeds a phone viewport, which the footer never caused
+     * and this change does not address.
+     *
+     * The linux lists are kept for the reason `fixedOnDarwin` documents and the
+     * one LAYOUT-01 states in full: wrapping absorbs width between flex ITEMS,
+     * and a single `.statusbar-seg` is itself a nowrap row that a wider face
+     * could still overrun.
+     */
     instances: {
-      'evidence@width-320': [
-        'div.screen-card < div.app < div#root',
-        'section.preview < main#main.screen-main < div.screen-body.evidence',
-      ],
+      'evidence@width-320': {
+        darwin: ['section.preview < main#main.screen-main < div.screen-body.evidence'],
+        linux: [
+          'div.screen-card < div.app < div#root',
+          'section.preview < main#main.screen-main < div.screen-body.evidence',
+        ],
+      },
       'evidence@width-375': ['section.preview < main#main.screen-main < div.screen-body.evidence'],
       'evidence@width-390': ['section.preview < main#main.screen-main < div.screen-body.evidence'],
-      'record-detail@width-320': [
+      'record-detail@width-320': fixedOnDarwin(
         'div.screen-card < div.app < div#root',
-        'section.field-group < main#main.screen-main.pad < div.screen-body.record',
-      ],
-      'record-detail@width-375': ['div.screen-card < div.app < div#root'],
-      'record-detail@width-390': ['div.screen-card < div.app < div#root'],
-      'export-readiness@width-320': ['div.screen-card < div.app < div#root'],
-      'export-readiness@width-375': ['div.screen-card < div.app < div#root'],
-      'export-readiness@width-390': ['div.screen-card < div.app < div#root'],
-      'export-readiness-done@width-320': [
-        'div.screen-card < div.app < div#root',
-        'main#main.screen-main.pad < div.screen-body.record < div.screen-card',
-      ],
-      'export-readiness-done@width-375': [
-        'div.screen-card < div.app < div#root',
-        'main#main.screen-main.pad < div.screen-body.record < div.screen-card',
-      ],
-      'export-readiness-done@width-390': ['div.screen-card < div.app < div#root'],
+        'section.field-group < main#main.screen-main.pad < div.screen-body.record'
+      ),
+      'record-detail@width-375': fixedOnDarwin('div.screen-card < div.app < div#root'),
+      'record-detail@width-390': fixedOnDarwin('div.screen-card < div.app < div#root'),
+      'export-readiness@width-320': fixedOnDarwin('div.screen-card < div.app < div#root'),
+      'export-readiness@width-375': fixedOnDarwin('div.screen-card < div.app < div#root'),
+      'export-readiness@width-390': fixedOnDarwin('div.screen-card < div.app < div#root'),
+      'export-readiness-done@width-320': {
+        darwin: ['main#main.screen-main.pad < div.screen-body.record < div.screen-card'],
+        linux: [
+          'div.screen-card < div.app < div#root',
+          'main#main.screen-main.pad < div.screen-body.record < div.screen-card',
+        ],
+      },
+      'export-readiness-done@width-375': {
+        darwin: ['main#main.screen-main.pad < div.screen-body.record < div.screen-card'],
+        linux: [
+          'div.screen-card < div.app < div#root',
+          'main#main.screen-main.pad < div.screen-body.record < div.screen-card',
+        ],
+      },
+      'export-readiness-done@width-390': fixedOnDarwin('div.screen-card < div.app < div#root'),
       'guided-completion@width-320': [
         'main#main.screen-main.centered < div.screen-body.record < div.screen-card',
       ],

@@ -21,11 +21,21 @@ are named now, but the entry's OTHER node per pair was never a `role="search"` l
 measured **1** still firing on all seven `settings-explorer` pairs. The entry is restored at 1
 with its root cause named. See its row in §6.
 
-The remaining findings — **A11Y-01**, **A11Y-06 (residue)**, LAYOUT-01, LAYOUT-02 — are **still
-open and still baselined**, deliberately: see §6 and the Baseline Completion Matrix §3B. A11Y-01
-is a palette decision the owner has to make and is explicitly not a slice's to take
-(`styles/tokens.css:3-5`) — though one of its *usages* was corrected in the same slice, see its
-row.
+~~The remaining findings — **A11Y-01**, **A11Y-06 (residue)**, LAYOUT-01, LAYOUT-02 — are **still
+open and still baselined**, deliberately~~ — **CORRECTED 2026-08-29 and struck rather than
+rewritten, because "still open" is a claim a future session acts on.** A third closure slice
+(2026-08-29) **closed A11Y-06's residue** and **fixed LAYOUT-01 on darwin**. What is still open:
+
+* **A11Y-01** — open, and still a palette decision the owner has to make, explicitly not a
+  slice's to take (`styles/tokens.css:3-5`). **One further *usage* was corrected on 2026-08-29**
+  (the `--text-disabled` line-number misuse; see the palette decision record in §6.1a). That is
+  the second usage-level correction, after `.section-tab`. **Neither closes A11Y-01.**
+* **LAYOUT-02** — open, **Linux-only, one instance.** See its row for what was corrected in the
+  row itself.
+* **LAYOUT-01** — **fixed at source, darwin-measured, linux pending a CI round-trip.** All 20
+  recorded darwin offenders stopped firing in one run; the linux lists are retained until CI
+  annotates them not-fired, exactly as LAYOUT-03's were.
+* **A11Y-06** — **fully closed.** The baseline entry is deleted.
 
 ---
 
@@ -393,16 +403,19 @@ the card edge on macOS and a couple of pixels past it on Linux, and any user who
 a shade wider would see the truncated label:
 
 * `export-readiness-done@mobile-375x812` — `span.chip.chip-exported` in `div.record-context` runs
-  315→372 inside a container ending at 365 and the label "Exported" is cut. **This is the same
+  315→372 inside a container ending at 365 and the label "Exported" is cut. ~~**This is the same
   defect as LAYOUT-02** (`chip-draft` on Evidence), recorded as its second instance, and one CSS
-  fix in `.record-context` closes both.
+  fix in `.record-context` closes both.~~ **CORRECTED 2026-08-29: it is not "its second instance",
+  it is now its ONLY instance.** The `chip-draft` instance on Evidence was deleted on 2026-08-01
+  and darwin measures `[]` here, so LAYOUT-02 is a one-key, Linux-only entry. The shared cause it
+  named is addressed (see its row in §6); retiring the entry needs a CI run, not a local one.
 * `record-detail@tablet-768x1024` — a second StatusBar segment (`span.statusbar-pending`,
   "— dry-run · 1 error") clips, where macOS clips only `span.statusbar-advisory`. Recorded under
   **LAYOUT-01**.
 
 #### How it is encoded — exact on both platforms, no tolerance
 
-A count is written either as a bare number (identical on both platforms — 93 of 103) or as
+A count is written either as a bare number (identical on both platforms — ~~93 of 103~~ ~~153 of 161, re-counted 2026-08-29~~ **156 of 161, re-counted 2026-08-30 after the merge `c7b9db6` collapsed five splits to scalars; derive it rather than quoting it**) or as
 `{ darwin: n, linux: m }`. A layout instance list is written either as a bare array or as
 `{ darwin: [...], linux: [...] }`. `process.platform` selects the column, once, per run.
 
@@ -520,21 +533,97 @@ defect is gone *and* its baseline entry was deleted, so a regression fails the s
 
 | ID | Rule | Impact | Status | Where | What is wrong |
 |---|---|---|---|---|---|
-| **A11Y-01** | `color-contrast` | serious | **OPEN** | every surface, every viewport — **1,610 nodes** | **Not one palette decision — three distinct causes**, measured across 43 (foreground, background, size) combinations spanning **1.56:1 – 4.25:1** and **11** distinct rendered foregrounds. (1) `--text-disabled #c0c8d0`, which `tokens.css:34` intends for disabled chevrons, is rendered as *text* by `evidence.css:239` for preview line numbers at 11.5px → **1.56:1**, the worst in the app. (2) Genuinely low tokens: `#78838f`, `#9aa4af`, `#2f7d78` on the `#e6f1f0` chip tint. (3) **Five failures are `opacity` composites of tokens that pass at full strength** — e.g. `--text-muted #5b6570` is 5.93:1 but composites to `#777f89` under `queue.css:63 .exp-row.done { opacity: .82 }`; `--advisory-text #8a6420` was deliberately darkened for AA in P23C and still composites to `#9b793d`. **Darkening tokens will not fix group (3); the `opacity` has to go.** `#8e98a2`, named in an earlier draft of this table as a token, appears nowhere in `apps/web/src` — it is one of these composites. **`.section-tab` came off group (2) on 2026-08-26** — `--text-tertiary` #78838f (3.86:1) → `--text-muted` #5b6570 (5.93:1) in `screens.css`. **No token value changed**, so A11Y-01 itself is untouched and still the owner's palette decision; one *usage* of a low token moved. Measured effect, transcribed from CI run 33025558592: **119 cells across 17 surfaces × 7 scan projects, −378 nodes on the linux column.** Per surface, constant across all seven projects of each: −6 on the six `settings-*` surfaces, −3 on `memory`/`memory-graph`, −2 on `governance`/`schema-reference`/`validator`, −1 on `evidence`/`evidence-graph`/`record-detail`/the three `statistics` surfaces. **The 1,610 figure above is the original measurement and is now historical** — do not quote it as current; `A11Y_BASELINE_TOTAL_NODES` in `e2e/a11y-baseline.ts` is the live number and covers every rule, not just this one. |
+| **A11Y-01** | `color-contrast` | serious | **OPEN** | every surface, every viewport — **1,610 nodes** | **Not one palette decision — three distinct causes**, measured across 43 (foreground, background, size) combinations spanning **1.56:1 – 4.25:1** and **11** distinct rendered foregrounds. ~~(1) `--text-disabled #c0c8d0`, which `tokens.css:34` intends for disabled chevrons, is rendered as *text* by `evidence.css:239` for preview line numbers at 11.5px → **1.56:1**, the worst in the app.~~ **FIXED 2026-08-29 — see the palette decision record in §6.1a.** That rule (now `evidence.css:298`, `.preview-line .ln`) asks for `--text-slate #5b6b7d` instead: **1.49–1.69:1 → 4.81–5.46:1** across the four grounds the gutter is drawn on. **No token value changed**, so this is a *usage* correction like `.section-tab`, and **A11Y-01 is NOT closed by it** — causes (2) and (3) are untouched. (2) Genuinely low tokens: `#78838f`, `#9aa4af`, `#2f7d78` on the `#e6f1f0` chip tint. (3) **Five failures are `opacity` composites of tokens that pass at full strength** — e.g. `--text-muted #5b6570` is 5.93:1 but composites to `#777f89` under `queue.css:63 .exp-row.done { opacity: .82 }`; `--advisory-text #8a6420` was deliberately darkened for AA in P23C and still composites to `#9b793d`. **Darkening tokens will not fix group (3); the `opacity` has to go.** `#8e98a2`, named in an earlier draft of this table as a token, appears nowhere in `apps/web/src` — it is one of these composites. **`.section-tab` came off group (2) on 2026-08-26** — `--text-tertiary` #78838f (3.86:1) → `--text-muted` #5b6570 (5.93:1) in `screens.css`. **No token value changed**, so A11Y-01 itself is untouched and still the owner's palette decision; one *usage* of a low token moved. Measured effect, transcribed from CI run 33025558592: **119 cells across 17 surfaces × 7 scan projects, −378 nodes on the linux column.** Per surface, constant across all seven projects of each: −6 on the six `settings-*` surfaces, −3 on `memory`/`memory-graph`, −2 on `governance`/`schema-reference`/`validator`, −1 on `evidence`/`evidence-graph`/`record-detail`/the three `statistics` surfaces. **The 1,610 figure above is the original measurement and is now historical** — do not quote it as current; `A11Y_BASELINE_TOTAL_NODES` in `e2e/a11y-baseline.ts` is the live number and covers every rule, not just this one. |
 | **A11Y-02** | `button-name` | **critical** | **FIXED** | was: every surface, at `mobile-375x812` and `zoom-200` — **36 nodes** | Below the 640px breakpoint `chrome.css:503` sets `.topbar-search-label, .topbar-search-kbd { display: none }`. The only remaining content of `<button class="topbar-search">` was an `aria-hidden` SVG and there was no `aria-label`, so the global search trigger had **no accessible name at all** at phone widths and at 200% zoom. **Fix:** `aria-label="Search"` on the trigger in `apps/web/src/components/SearchDialog.tsx`. **No CSS changed** — the name no longer depends on `chrome.css` leaving the label visible, which is why the fix holds at every width rather than only at the two that failed. |
 | **A11Y-03** | `aria-allowed-attr` / `aria-allowed-role` | **critical** / minor | **FIXED** | was: `evidence`, all viewports — 31 nodes per rule per project, **310 nodes** | The 31 Evidence Trail entries rendered as `<button role="listitem" aria-pressed="…">`. `role="listitem"` overrode the implicit button role, and `aria-pressed` is not allowed on `listitem` — so the selected/unselected state was not exposed at all. **Fix:** in `apps/web/src/components/EvidenceTrailPanel.tsx` the `role="listitem"` moved onto a wrapper `<div class="trail-item">`, leaving a plain `<button>` with its implicit role and a now-valid `aria-pressed`. |
 | **A11Y-04** | `scrollable-region-focusable` | serious | **FIXED** (2026-08-26) | was: 6 pairs — `evidence` at desktop, mobile, 320 and 390; `settings-api` at mobile and 320 | `div.preview-lines.scroll-x` (source-file preview) and `pre.api-samples-code` (API Access) scrolled but took no focus, so a keyboard-only reader could see text running past the right edge with no way to move the box. **Fix:** `tabIndex={0}` + `role="group"` + `aria-label` on both, and on the three sibling scroll containers in the same two components that axe has never scanned because their tab or `<details>` is closed during the sweep. `role="group"` and not `region`: a region is a landmark, and an extra landmark would have re-created A11Y-06 while closing this. Follows `.rc-tablewrap` in `RunCompare.tsx`. |
 | **A11Y-05** | `page-has-heading-one` | moderate | **FIXED** (2026-08-26) | was: `load`, 7 pairs | `/load` rendered no heading of any level, so a screen-reader user got an empty heading list and the page announced no name of its own. **Fix:** `<h1 class="sr-only">Load Materials</h1>` in `screens/LoadMaterials.tsx`, the pattern four other screens already use — visually hidden so the on-ramp's design is unchanged, and not `isVisibleOnScreen`, so no `load@*` `color-contrast` count moves. `expectH1: false` is dropped from `e2e/surfaces.ts` in the same change, exactly as `specs/structure.spec.ts`'s failure message instructs. |
-| **A11Y-06** | `landmark-unique` | moderate | **HALF FIXED — the search half closed 2026-08-26; 7 nodes remain OPEN and baselined** ~~FIXED (2026-08-26)~~ | `settings-explorer`, 7 pairs — **was 2 nodes each (14), now 1 each (7)** | **The search half, which is genuinely fixed.** Two `role="search"` landmarks had no distinguishing accessible name: the TopBar trigger (`SearchDialog.tsx`) and the endpoint filter (`settings/ApiDocs.tsx`). The `aria-label="Search"` added for A11Y-02 sat on the `<button>` INSIDE the first, which names the control and not the landmark. **Fix:** `aria-label="Site search"` on the TopBar region and `aria-label="Endpoint search"` on the filter — both on the landmark element itself. Recorded because the first attempt looked tidier and was wrong: `aria-labelledby` pointing at the filter's own visible "Search endpoints" label made one string the name of both the region and the input, and three existing tests failed with `Found multiple elements with the text of: Search endpoints`. **The half that was never a search landmark, and is still open.** CI run 33025558592 reported `landmark-unique` still firing on **1** node per pair, at `<section class="card placeholder-card settings-card" aria-labelledby="settings-apidocs-heading">`. Cause, read out of source rather than inferred: `/settings?tab=explorer` renders **two `region` landmarks with the identical accessible name "Endpoint Explorer"** — the `SettingsCard` wrapper (`screens/SettingsPage.tsx:326`, `<h2>`) and `<section class="api-explorer">` (`screens/settings/ApiDocs.tsx:357`, `<h3>`). **This is PRE-EXISTING, not a regression:** the pre-fix entry's own `targetPattern` was `^(\.card\|\.topbar-search-region)$`, naming two different elements, so a `.card` node was already failing on `main` — the pre-fix `note`, which claimed both nodes were the search regions, was wrong about the second. **The fix is one line and is deliberately not taken yet:** give one region a distinct name, or drop the inner `<section>`'s `aria-labelledby` so it stops being a landmark (keeping the `<h3>`). It changes product DOM and needs a browser run to confirm the resulting count. |
+| **A11Y-06** | `landmark-unique` | moderate | **FIXED — search half 2026-08-26, region half 2026-08-29** ~~HALF FIXED — 7 nodes remain OPEN and baselined~~ ~~FIXED (2026-08-26)~~ | was: `settings-explorer`, 7 pairs — 2 nodes each (14), then 1 each (7), now **0**; baseline entry DELETED | **The search half, which is genuinely fixed.** Two `role="search"` landmarks had no distinguishing accessible name: the TopBar trigger (`SearchDialog.tsx`) and the endpoint filter (`settings/ApiDocs.tsx`). The `aria-label="Search"` added for A11Y-02 sat on the `<button>` INSIDE the first, which names the control and not the landmark. **Fix:** `aria-label="Site search"` on the TopBar region and `aria-label="Endpoint search"` on the filter — both on the landmark element itself. Recorded because the first attempt looked tidier and was wrong: `aria-labelledby` pointing at the filter's own visible "Search endpoints" label made one string the name of both the region and the input, and three existing tests failed with `Found multiple elements with the text of: Search endpoints`. **The half that was never a search landmark, and is still open.** CI run 33025558592 reported `landmark-unique` still firing on **1** node per pair, at `<section class="card placeholder-card settings-card" aria-labelledby="settings-apidocs-heading">`. Cause, read out of source rather than inferred: `/settings?tab=explorer` renders **two `region` landmarks with the identical accessible name "Endpoint Explorer"** — the `SettingsCard` wrapper (`screens/SettingsPage.tsx:326`, `<h2>`) and `<section class="api-explorer">` (`screens/settings/ApiDocs.tsx:357`, `<h3>`). **This is PRE-EXISTING, not a regression:** the pre-fix entry's own `targetPattern` was `^(\.card\|\.topbar-search-region)$`, naming two different elements, so a `.card` node was already failing on `main` — the pre-fix `note`, which claimed both nodes were the search regions, was wrong about the second. ~~**The fix is one line and is deliberately not taken yet:** give one region a distinct name, or drop the inner `<section>`'s `aria-labelledby` so it stops being a landmark (keeping the `<h3>`). It changes product DOM and needs a browser run to confirm the resulting count.~~ **TAKEN 2026-08-29, and it is the second option.** `screens/settings/ApiDocs.tsx`'s `<section className="api-explorer">` carries no `aria-labelledby`, so it is not a landmark at all; the `<h3>` is untouched, so the heading outline and the visible title are unchanged. The `SettingsCard` side was deliberately left alone — it is shared chrome for all seven Settings tabs. **MEASURED:** a local macOS run reported `improved:landmark-unique` on all seven pairs and moved no other rule; the baseline entry is deleted, **−7 nodes on both columns**. The linux half is asserted, not measured — two landmarks sharing an accessible *name* is a DOM/ARIA fact with no text measurement in it. Pinned in the fast job by `src/__tests__/a11y-landmarks-headings-and-tabs.test.tsx` ("exactly one region named Endpoint Explorer", plus a negative control). |
 
 ### Responsive layout
 
-Both are **OPEN**. Neither has been fixed and both entries remain in `e2e/layout-baseline.ts`.
+~~Both are **OPEN**. Neither has been fixed and both entries remain in `e2e/layout-baseline.ts`.~~ **CORRECTED 2026-08-29.** **LAYOUT-01 is FIXED at source** (`src/components/chrome.css`) and all 20 recorded darwin offenders stopped firing in one run; its entry remains only as a linux list awaiting a CI round-trip, exactly as LAYOUT-03's does. **LAYOUT-02 is still open, and is Linux-only with ONE instance** — see its row.
 
 | ID | Where | What is wrong |
 |---|---|---|
-| **LAYOUT-01** | 8 measured `surface@project` pairs (not all 15 of the five record surfaces × three narrow projects — only 8 ever fire) | The record StatusBar footer does not reflow. At 375px its content measures **575px in a 353px box** with `overflow-x: visible`, so the phase / pending / advisory / coverage segments spill sideways and downwards and are then cut by `div.screen-card { overflow: hidden }`. Visually the segments overlap and read as garbled. Severity scales with width: severe at 375, ~11px of vertical clipping at 640 (200% zoom), ~1px at 768. Shared chrome, so it affects every record surface. On Linux a **second** segment (`span.statusbar-pending`, "— dry-run · 1 error") also clips on `record-detail` at 768 — see §6.1. |
-| **LAYOUT-02** | `evidence` at `mobile-375x812`; **plus, on Linux only, `export-readiness-done` at `mobile-375x812`** | The TopBar record-context status chip in `div.record-context` runs past the right edge of `div.screen-card` and is cut by its `overflow: hidden`. On Evidence it is `span.chip.chip-draft`, 9px over, and the label reads "Draf". The second instance is `span.chip.chip-exported`, 315→372 against a container ending at 365, label "Exported" — **a real application defect that macOS font metrics happen to hide**, not a test artifact (see §6.1). One fix in `.record-context` closes both. |
+| **LAYOUT-01** | 8 measured `surface@project` pairs (not all 15 of the five record surfaces × three narrow projects — only 8 ever fire) | The record StatusBar footer does not reflow. At 375px its content measures **575px in a 353px box** with `overflow-x: visible`, so the phase / pending / advisory / coverage segments spill sideways and downwards and are then cut by `div.screen-card { overflow: hidden }`. Visually the segments overlap and read as garbled. Severity scales with width: severe at 375, ~11px of vertical clipping at 640 (200% zoom), ~1px at 768. Shared chrome, so it affects every record surface. On Linux a **second** segment (`span.statusbar-pending`, "— dry-run · 1 error") also clips on `record-detail` at 768 — see §6.1. **FIXED 2026-08-29** in `src/components/chrome.css`, inside the existing `@media (max-width: 1024px)` block: the footer becomes `min-height: 52px` + `flex-wrap: wrap` instead of a hard `height: 52px` nowrap row, so the segments **reflow** onto further rows instead of spilling out of the card. **Nothing is hidden and nothing truncates** — every segment is a trust signal, so hiding or ellipsising one would make the readout say *less* on the screens where a reader can see least. **MEASURED, darwin:** all 20 recorded offenders across all 8 keys reported not-fired in one run, with no new clipped or occluded finding anywhere. It also closed **four LAYOUT-04 keys** (`div.screen-card` overflow at 320/375/390 on the record surfaces), which is LAYOUT-04's own stated cause (a). The linux lists are kept: wrapping absorbs width *between* flex items, but a single `.statusbar-seg` is itself a nowrap row a wider face could still overrun. `HOSTED/CI ROUND-TRIP PENDING`. |
+| **LAYOUT-02** | ~~`evidence` at `mobile-375x812`; **plus, on Linux only, `export-readiness-done` at `mobile-375x812`**~~ — **CORRECTED 2026-08-29: LINUX ONLY, and ONE instance.** | **The Evidence instance has not existed since 2026-08-01** and this row asserted it for four weeks. `e2e/layout-baseline.ts`'s LAYOUT-02 `instances` map holds exactly one key, `export-readiness-done@mobile-375x812`, and its darwin list is `[]` — *a measurement, not an omission*: the C1/I4 change gave `.record-context` `overflow: hidden` at every width and moved the compact top-bar treatment into the ≤1024 band, and the suite's own staleness signal named `evidence @ mobile-375x812: LAYOUT-02` as not-fired. The struck text is kept because the `chip-draft` description is still what the surviving Linux instance is being compared to. **What remains:** `span.chip.chip-exported` in `div.record-context` runs 315→372 inside a container ending at 365, label "Exported" cut — **a real application defect that macOS font metrics happen to hide**, not a test artifact (see §6.1). **2026-08-29:** `chrome.css` now *states* the crumb's shrink contract (`flex: none; max-width: 100%` on the state chip, whose word IS the state; `flex: 0 1 auto` on `.record-surface`, which already truncates and keeps a readable fragment), making the containment structural rather than font-dependent. **This is NOT claimed as a measured fix:** darwin already read `[]` here, so no local run can distinguish it from the 2026-08-01 change, and only CI can retire the Linux instance. |
+
+### 6.1a Palette decision record — A11Y-01, and what 2026-08-29 did and did not do
+
+**A11Y-01 IS NOT CLOSED.** This section exists so nobody reads the `evidence@*` node counts
+falling by 154 as the finding being retired. It is one *usage* of one token, on one screen.
+
+#### What was fixed
+
+| | |
+|---|---|
+| Site | `apps/web/src/components/evidence.css`, `.preview-line .ln` — the line-number gutter of the read-only source preview on `/record/:id/evidence` |
+| Was | `color: var(--text-disabled)` — `#c0c8d0` |
+| Now | `color: var(--text-slate)` — `#5b6b7d` |
+| Type size / family | 11.5px, `var(--font-mono)`. WCAG 1.4.3 therefore requires **4.5:1**; the 3:1 large-text threshold does not apply anywhere near this size |
+| Token values changed | **none.** `styles/tokens.css:3-5` forbids editing values there, and this change does not touch that file |
+
+#### Measured contrast, before and after
+
+Recomputed here (WCAG 2.x relative luminance) over every ground the gutter is drawn on, rather
+than quoted from the baseline:
+
+| Ground | Before — `#c0c8d0` | After — `#5b6b7d` |
+|---|---:|---:|
+| `--surface` `#ffffff` | 1.69:1 | 5.46:1 |
+| `--surface-subtle` `#fbfcfd` | 1.65:1 | 5.32:1 |
+| `--screen-base` `#f4f6f9` | 1.56:1 | 5.05:1 |
+| `--cited-line-bg` `#eaf1fb` | **1.49:1** | **4.81:1** |
+
+**The worst ground is the cited-line highlight, at 1.49:1 — worse than the 1.56:1 this document
+and `e2e/a11y-baseline.ts` both record, and nothing had measured it.** That is the row a reader
+has been *pointed at*. The 1.56:1 figure is reproduced exactly and is the `--screen-base` case.
+
+#### Why this was a slice's to take, and the palette still is not
+
+`tokens.css:34` declares `--text-disabled` for **"disabled chevrons/icons"**. Rendering it as
+11.5px body text is a **documented misuse of the token**, not a judgement about whether the
+palette is dark enough — so correcting it needs no palette decision and touches no token value.
+That is the same shape as the two precedents: `.section-tab` (`--text-tertiary` → `--text-muted`,
+2026-08-26) and `.onramp-tagline` before it.
+
+`--text-slate` and not `--text-muted`: both clear 4.5:1 on all four grounds (`--text-muted`
+reaches 5.22:1 on the worst), but `tokens.css:29` declares `--text-slate` for *"coverage + mono
+eyebrows/labels"* and `chrome.css`'s own contrast note pairs `--text-muted` with UI prose and
+`--text-slate` with mono, "matching `.statusbar-eyebrow`". This gutter is `var(--font-mono)`. It
+also keeps the intended hierarchy — the numbers stay quieter than the line text beside them
+(`--text-secondary`, 8.07:1) rather than matching it.
+
+#### What remains, and whose decision it is
+
+**Unchanged.** A11Y-01's three causes are stated in its row above and none of them moved:
+
+1. **Neutral tokens that are simply too light** — `--text-tertiary #78838f` (3.86:1) and
+   `--text-quaternary #9aa4af` (2.53:1), across hundreds of declarations. `--text-disabled`
+   remains `#c0c8d0` and remains correct for the disabled chevrons it was declared for.
+2. **Two saturated status/category colours** just under AA at small sizes — `--verified-text
+   #2f7d78` on its `#e6f1f0` chip tint (4.2:1) and `--src-derivation #7a6bb0` (4.25:1).
+3. **Five `opacity` composites of tokens that already pass at full strength.** `--text-muted`
+   #5b6570 is 5.93:1 and composites to `#777f89`; `--advisory-text #8a6420` was *already*
+   darkened for AA in P23C and still composites to `#9b793d`. **Darkening tokens cannot fix
+   these — the `opacity` has to go**, which is a component change, not a palette one.
+
+**The remaining A11Y-01 debt is the project owner's palette decision and is explicitly not a
+slice's to take** (`apps/web/src/styles/tokens.css:3-5`, lifted verbatim from the design handoff:
+"Do not edit values here; refresh from the handoff if the design system changes"). Two usage-level
+corrections have now been made against it. **Neither is a down payment on the decision, and this
+one does not close A11Y-01.**
+
+#### Effect on the ratchet
+
+`evidence@*`, all seven scan projects, uniformly **−22 nodes**: 101 → 79 at
+desktop/laptop/tablet, 99 → 77 at mobile-375x812/zoom-200/width-390/width-320. Darwin measured;
+the linux column is **arithmetic**, and the argument is written out at the cells so it can be
+rejected rather than trusted — nothing leaves the DOM, the 22 `.ln` elements are
+`preview.lines.length` (data, not layout) and every one moved from failing by a factor of three
+to passing with headroom, so no borderline case exists that a font could flip. If CI disagrees,
+transcribe its numbers.
 
 ### Informational, not failing
 
