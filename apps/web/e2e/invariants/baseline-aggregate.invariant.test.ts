@@ -424,6 +424,18 @@ describe('the darwin column says how much of itself is measured', () => {
         'color-contrast @ settings-explorer@laptop-1024x768',
         'color-contrast @ settings-explorer@tablet-768x1024',
         'color-contrast @ validator@zoom-200',
+        // ── ADDED 2026-08-30 · change feed. BOTH HALVES MEASURED AT THIS COMMIT. ──
+        // `GET .../changes` takes the contract 71 -> 72 operations; the Endpoint
+        // Explorer renders every description. linux from this branch's CI GREW lines,
+        // darwin from a local macOS run per project minutes later.
+        //   desktop-1280x800  { darwin: 57, linux: 58 }  darwin did NOT move at all
+        //   mobile-375x812    { darwin: 74, linux: 75 }  both moved, by different amounts
+        // `settings-explorer@width-390` is deliberately NOT here: both faces landed on
+        // 75, and `auditEntryShapes` refuses a pair whose halves are equal, so a scalar
+        // is the only legal expression of "measured on both, and they agree".
+        // `DARWIN_CARRIED_FORWARD` stays empty; nothing here is carried forward.
+        'color-contrast @ settings-explorer@desktop-1280x800',
+        'color-contrast @ settings-explorer@mobile-375x812',
       ].sort()
     );
   });
