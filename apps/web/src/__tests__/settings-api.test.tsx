@@ -1087,7 +1087,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 71 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 75 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1716,7 +1716,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // writing nothing, any record that has ever been submitted, has exported, has an
     // exported run, has a published artifact on disk, or is a built-in worked
     // example. RE-MEASURED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(71);
+    // 71 -> 75: the four PERSISTENT INGESTION PROPOSAL operations — list, create,
+    // read one, review one. They are transcribed from the generated document by the
+    // same rule every other row here is, and `test_contract_description_parity.py`
+    // proves the transcription rather than leaving it asserted here.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(75);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -1979,7 +1983,12 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // commit after the assertion moved to 104,045 — the arithmetic was left behind
     // by the edit that changed its inputs, which is the exact failure this test's
     // own header lectures about. Re-measured over `create_app().openapi()`.)
-    expect(total).toBe(104045);
+    // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
+    // description changed — `test_contract_description_parity.py` proves that rather
+    // than leaving it asserted here. RE-DERIVED from the served document and never
+    // incremented: raw sum over the 75 operations = 115,429, minus 2 per `\n\n`
+    // separator (235 x 2 = 470) = 114,959.
+    expect(total).toBe(114959);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -2021,7 +2030,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // would mean the bound had been appended instead, and one that left it at 210
     // while the character total moved would mean the two-cause prose had been woven
     // in. RE-DERIVED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(211);
+    // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
+    // paragraphs between them. It is asserted separately from the character total
+    // for the reason every entry above gives: a change that moved one and not the
+    // other would mean prose had been woven into an existing paragraph rather than
+    // appended, and neither number may be inferred from the other. RE-DERIVED from
+    // the served document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(235);
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

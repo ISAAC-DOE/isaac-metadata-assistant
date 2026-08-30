@@ -633,8 +633,22 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # every client the resource is generically deletable, which is exactly what was
     # not authorized.
     #
+    #
+    # 71 -> 75: PERSISTENT INGESTION PROPOSALS — list, create, read one, and perform
+    # one review act on one. Four operations, the same shape as the four Unmapped
+    # Notes operations one section over, and for the same reason: this is the
+    # destination for the VALUED half of a proposal, which until now did not survive
+    # the request. `providers/extraction.py`'s `FieldCandidate` is a valued proposal
+    # deliberately never stored; a note carries the target and the rule and
+    # deliberately carries no value. These four close that gap and no other.
+    #
+    # NO TABLE AND NO MIGRATION WAS ADDED. A proposal lives at `state["proposals"]`
+    # inside the experiment's own state document, beside `notes`, so `db_write.
+    # OWNED_TABLES` is unchanged — the first scope extension in `CLAUDE.md` §15 that
+    # adds none, deliberately.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 71, f"expected 71 documented operations, found {checked}"
+    assert checked == 75, f"expected 75 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
