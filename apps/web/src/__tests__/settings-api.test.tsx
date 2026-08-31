@@ -2067,10 +2067,30 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // (+1,142) and the branch's raw was 117,508, and 117,508 + 1,142 = 118,650.
     // Separators go 211 + 24 = 235 — the 24 are the four new operations', and
     // neither lineage's prose corrections added one.
-    // 118,578 -> 118,276 (-302), 2026-08-30, STRIKE SWEEP. Six served strings wrapped a
+    // 117,944 -> 118,276 (+332), 2026-08-30. CORRECTED AFTER INDEPENDENT REVIEW, and
+    // the correction is the point: this entry first read "118,578 -> 118,276 (-302)",
+    // which stated a PREDECESSOR THAT NEVER EXISTED IN THIS FILE. `git log --all
+    // -S"118578" -- <this file>` returns no commit. 118,578 was an INTERMEDIATE,
+    // UNCOMMITTED state — the `record_writable_field_paths` prose applied, the strike
+    // sweep not yet — and quoting it as the committed baseline put a missing step and a
+    // wrong sign into the one comment block whose stated purpose is not to leave
+    // arithmetic behind. Committed predecessor: `git show 6f4aac4:...` line 2070 =
+    // 117,944.
+    //
+    // THE +332 IS TWO EFFECTS IN ONE COMMIT, and they pull opposite ways, which is why
+    // neither may be quoted alone. Per operation, re-derived from the served document:
+    //   * `GET .../notes`            +541  the `record_writable_field_paths` paragraph
+    //   * `POST .../answers`          -78  strike sweep
+    //   * `POST .../runs/{id}/answers` -131  strike sweep
+    // 541 - 78 - 131 = +332. The strike sweep's own contribution is -302 across the
+    // three operation descriptions it touched (-93 notes, -78, -131); the notes figure
+    // is a removal INSIDE the same paragraph the +541 added, so the two are not
+    // separable by subtraction and are stated as measured rather than apportioned.
+    //
+    // STRIKE SWEEP. Six served strings wrapped a
     // retracted sentence in `~~ ~~`. This screen renders every description as PLAIN
-    // TEXT — there is no markdown renderer in `apps/web`, and the tree's only
-    // `dangerouslySetInnerHTML` is a test asserting its own absence — so the markers
+    // TEXT — `apps/web` declares no markdown dependency and imports no renderer — so the
+    // markers
     // reached the reader as literal tildes around a sentence that is not true. The
     // retracted halves were removed from the SERVED copy and the history moved to
     // `notes.__doc__`; `test_no_served_description_carries_editorial_strike_typography`
@@ -2092,7 +2112,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
     //
     // (The pre-existing comment lineage above states "raw sum 118,650, 235 separators,
     // so 118,180". That arithmetic never reproduced — the assertion it sits above was
-    // 118,578, and re-measuring the unmodified tree gives 236 separators. It is left in
+    // 117,944, and re-measuring the unmodified tree gives raw 118,416 / 236. It is left in
     // place as history rather than silently rewritten, but it is not the derivation.)
     expect(total).toBe(118276);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one

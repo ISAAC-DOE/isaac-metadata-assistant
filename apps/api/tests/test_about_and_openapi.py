@@ -1228,10 +1228,22 @@ def test_no_served_description_carries_editorial_strike_typography(client):
     code, and a struck sentence stops them reinstating a claim already measured false.
     THIS document is rendered to scientists in Settings -> API Docs by ``ApiDocs.tsx``,
     which prints every description as PLAIN TEXT — ``<p className="api-docs-description">
-    {purpose.lead}</p>`` for operations, ``api-browser-section-note`` for request bodies
-    and responses, ``api-docs-param-desc`` for parameters. There is NO markdown renderer
-    anywhere in ``apps/web``: the tree's only ``dangerouslySetInnerHTML`` occurrence is a
-    test asserting its own absence. So ``~~`` reached the reader as literal tildes around
+    {purpose.lead}</p>`` for operations, ``api-browser-section-note`` for responses,
+    ``api-docs-param-desc`` for parameters. The request-body case is the one exception
+    worth stating precisely: the struck string lived at
+    ``requestBody.content.application/json.schema.description``, and that operation has
+    NO top-level ``requestBody.description`` at all — so ``ApiDocs.tsx:882`` never read
+    it, and it reached the reader through ``ContentBlocks``' collapsed
+    ``<details>Technical Schema</details>`` ``<pre>{stringify(...)}</pre>`` instead.
+    Still plain text, still a defect, by a different route than an earlier revision of
+    this docstring stated. There is NO markdown renderer
+    anywhere in ``apps/web``: ``package.json`` declares no markdown dependency and ``src``
+    imports no renderer. (An earlier revision of this docstring said "the tree's only
+    ``dangerouslySetInnerHTML`` occurrence is a test asserting its own absence". That was
+    true when written and is no longer — this very change added a second occurrence, in a
+    prose comment. The substantive claim is unaffected because it never rested on that
+    count; it is corrected here because a claim that falsifies itself two commits later is
+    exactly what this file exists to catch.) So ``~~`` reached the reader as literal tildes around
     a false sentence, and the reader was left to work out which half to believe.
 
     THE INVARIANT, STATED AS A PROPERTY RATHER THAN AS SIX ABSENCES. Asserting that the

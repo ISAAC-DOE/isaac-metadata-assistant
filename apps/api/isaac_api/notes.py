@@ -155,13 +155,29 @@ descriptions no longer do. Six of them — the record and run ``/answers`` opera
 descriptions, the record ``/answers`` request body, both ``422`` response descriptions,
 and ``/notes``'s own operation description — carried ``~~ ~~`` around a retracted
 sentence. That surface is rendered to scientists in Settings → API Docs as PLAIN TEXT
-(``ApiDocs.tsx``; there is no markdown renderer anywhere in ``apps/web``, and the tree's
-only ``dangerouslySetInnerHTML`` is a test asserting its own absence), so the markers
+(``ApiDocs.tsx`` interpolates every description as a bare JSX child; ``apps/web`` declares
+no markdown dependency in ``package.json`` and imports no markdown renderer anywhere in
+``src`` — that, not a count of ``dangerouslySetInnerHTML``, is what establishes it), so the markers
 reached the reader as literal tildes wrapped around a false sentence, and the reader was
 left to decide which half to believe. The API reference now states only what is true; the
 history is here. ``test_no_served_description_carries_editorial_strike_typography``
-pins it as a property of the whole document rather than as six absences, because
-asserting the six would have passed on the seventh.
+pins it as a property of the whole OpenAPI document rather than as six absences,
+because asserting the six would have passed on a seventh in that document.
+
+**AND THERE IS A SEVENTH, IN A DIFFERENT CATALOG, LEFT DELIBERATELY IN PLACE — named
+here rather than left for the next sweep to rediscover.** ``isaac_api.mcp.tools``'s
+``isaac_answer_questions`` description carries the SAME retracted sentence
+(``~~**EVERY KEY YOU SEND IS EITHER ACTED ON OR REFUSED BY NAME…**~~``), it is served
+to external agents by ``tools/list``, and it is NOT in ``/api/openapi``, so the guard
+above never walks it. It is untouched for two reasons, neither of which is oversight:
+ISAAC does not render that string — an MCP client does, and this repository has not
+measured how — and
+``test_answers_that_cannot_land.py::test_the_mcp_tool_no_longer_states_the_two_false_sentences``
+records a considered decision to keep that particular absolute visible as a strike,
+with its own reasoning. **So the honest scope of the 2026-08-30 sweep is: ISAAC's own
+OpenAPI document, completely; the MCP tool catalog, not at all.** Whether the MCP
+catalog should follow is a separate question about a surface with a different reader,
+and it is open.
 
 ~~The two routes that DO accept these paths are a RUN's~~ — **THREE routes accept them
 now.** ``PATCH /api/experiments/{id}/runs/{run_id}`` for the 5 run-level paths; ``POST

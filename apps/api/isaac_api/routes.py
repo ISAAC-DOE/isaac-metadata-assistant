@@ -10484,7 +10484,10 @@ NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT: frozenset[str] = frozenset(
 #: closes with a REQUIRED enum — because those were the only two a record-level route
 #: accepted. The campaign-sheet slice widened the record routes to 14 field paths and 2
 #: block addresses, and on the merged tree the SERVED key went on saying
-#: ``['system.technique']`` while the ROUTES accepted fourteen more.
+#: ``['system.technique']`` while the ROUTES accepted THIRTEEN more — fourteen field
+#: paths in total, of which twelve are additional members of the mappable set this
+#: constant intersects. (An earlier revision said "fourteen more", conflating the
+#: total with the excess.)
 #: ``test_the_served_record_writable_set_is_what_the_record_routes_actually_do`` failed
 #: with the two lists side by side, which is exactly the defect it was written to catch:
 #: a surface describing a capability it no longer bounds.
@@ -11247,6 +11250,40 @@ def _proposal_writer_for(path: str) -> str | None:
     proposal at that path must therefore route through `_apply_record_fields`,
     which checks the enum, and not through the override, which does not. Reversing
     these two clauses would silently inherit a hole this feature must not widen.
+
+    THE FIRST CLAUSE IS ``_record_enum_fields()`` AND NOT ``_record_writable_fields()``,
+    WHICH LOOKS LIKE THE DEFECT THE SAME SESSION FIXED IN
+    ``NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD`` AND IS NOT. An independent review
+    raised exactly that, correctly observing that two served keys now answer "which
+    paths are the RECORD's" differently — ``record_writable_field_paths`` says 13 and
+    ``record_scoped_target_field_paths`` says 1. Widening this clause was MEASURED and
+    REJECTED, and the reason is recorded here so nobody re-derives it as an improvement:
+
+    this function maps a PATH to a writer, and :data:`_PROPOSAL_WRITER_SCOPE` then makes
+    that writer's scope the path's scope. Returning the record writer for the twelve
+    sample/facility paths would therefore make them ``record``-scoped, and the create
+    route refuses a proposal that names a run at a record-scoped target
+    (``target_is_record_scoped``). **A run override could then never be PROPOSED for a
+    sample or facility value** — which is precisely what an override is for, and what
+    ``7822b13``'s own message calls "a RUN's deliberate DIVERGENCE". The widening would
+    close a documentation gap by deleting a capability.
+
+    The honest fix is a writer chosen from ``(path, run_id)`` rather than from ``path``
+    alone, so one path can carry a record-scoped proposal AND a run-scoped one. That is
+    a real design change with its own tests and is deliberately NOT done here. Two
+    smaller things ARE done, because they are what actually misled a reader: the
+    ``target_requires_a_run`` refusal no longer claims "a value at this path is written
+    on a RUN" (false since the record answers operation accepted these paths), and it
+    now names the operation that does accept them.
+
+    A SECOND THING A WIDENING WOULD HAVE TO CARRY, recorded because it is not obvious:
+    :func:`_apply_accepted_proposal`'s record branch reads
+    ``_record_enum_fields().get(path) or ()`` and refuses when ``value not in allowed``.
+    For a path with no enum that set is empty, so EVERY value would be refused
+    ``not_an_allowed_value`` with an empty ``allowed`` list. The branch would need
+    ``if allowed and value not in allowed`` plus the storability/declared-type checks
+    :func:`_refuse_a_record_value_the_record_cannot_hold` performs, or a proposal would
+    be able to write a wrong-typed value that ``POST .../answers`` refuses.
     """
     if path in _record_enum_fields():
         return proposals.APPLIED_VIA_RECORD_ENUM
@@ -12135,13 +12172,28 @@ def post_proposal(
             # so a record-scoped proposal for it could never be applied — and a
             # proposal that can only ever be refused is exactly the shape the target
             # set's derivation exists to prevent.
+            # ── THE MESSAGE IS ABOUT PROPOSALS, NOT ABOUT THE RECORD'S WRITE
+            # SURFACE, AND IT USED TO CONFLATE THEM ────────────────────────────
+            # It said "A value at this path is written on a RUN", which became FALSE
+            # for the twelve sample/facility paths the moment the record-level
+            # answers operation accepted them: `POST .../answers` writes
+            # `sample.material.name` on a record with NO runs and returns 200. The
+            # true statement is narrower and is the one a client can act on — this
+            # PROPOSAL applies through a run's writer, so it needs a run — and it is
+            # said beside the operation that does not.
             return _proposal_refusal(
                 "target_requires_a_run",
                 (
-                    "A value at this path is written on a RUN, so a proposal for it "
-                    "must name the run it is about. It is not inferred, and a "
+                    "A PROPOSAL at this path is applied through a run's writer, so "
+                    "it must name the run it is about; it is not inferred, and a "
                     "record with no runs cannot yet hold a proposal for this path. "
-                    "Nothing was written."
+                    "That is a fact about the proposal mechanism, NOT about where "
+                    "the value may be entered: a path served in "
+                    "`record_writable_field_paths` by "
+                    "`GET /api/experiments/{experiment_id}/notes` can be given a "
+                    "value directly on the record, with no run, through "
+                    "`POST /api/experiments/{experiment_id}/answers`. Nothing was "
+                    "written."
                 ),
                 key=path,
                 run_id=None,

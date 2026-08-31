@@ -580,8 +580,14 @@ def test_the_record_level_arm_needs_no_run_at_all(client):
     assert client.get(f"{exp}/runs").json()["total"] == 0
 
     # ── NEGATIVE CONTROLS, so this cannot be read as "the record routes take every
-    # field path". TWO of them, because the two are refused for DIFFERENT REASONS and
-    # only one of those reasons is permanent ─────────────────────────────────────
+    # field path". TWO of them, because only ONE of the two is permanently refusable —
+    # and NOT, as this comment first claimed, because the route refuses them for two
+    # different reasons. CORRECTED AFTER INDEPENDENT REVIEW, and measured: both are
+    # `ws.field_level(...) == "unclassified"`, and BOTH are refused by the identical
+    # gate, `key not in _record_writable_fields()`. There is no server-owned exclusion
+    # anywhere in the write route. So the difference between the two is NOT in how the
+    # route behaves today; it is in what could make each of them writable tomorrow, and
+    # that is worth two assertions rather than one ────────────────────────────────
     #
     # The control here used to be `sample.material.name`, and the campaign-sheet slice
     # made that path record-writable — so the control silently became a POSITIVE case
@@ -595,11 +601,21 @@ def test_the_record_level_arm_needs_no_run_at_all(client):
     # schema itself, with any client value overwritten (tamper-proof attribution,
     # D. Sokaras 2026-06-15), and `export._enforce_server_owned_invariant` strips it from
     # the assembled record as a structural backstop after every writer. A client can
-    # therefore never be given this path, whatever any future classification decides, and
-    # this assertion is the one that proves the route invariant rather than a snapshot of
-    # today's registry. Note `block:attribution` IS record-writable — which is exactly why
-    # this control is worth having: accepting the BLOCK must not mean accepting an
-    # arbitrary FIELD inside it.
+    # therefore never be given this path — but the permanence rests on the SCHEMA
+    # DECLARATION, on the block guard, and on the export invariant, NOT on the write
+    # route, which knows nothing about server-owned fields. Stated precisely because the
+    # first version of this comment claimed the route proved it: if a future slice
+    # classified `attribution` as experiment-level and put it in the extractor map, this
+    # control would go red exactly as control (2) will. What makes it a better control is
+    # that doing so would ALSO have to defeat the schema's own sentence and
+    # `export._enforce_server_owned_invariant`, whereas control (2) needs only a human
+    # answer that is actively being sought.
+    #
+    # `block:attribution` IS record-writable, and that SHARPENS this control rather than
+    # undermining it: accepting the BLOCK must not mean accepting an arbitrary FIELD
+    # inside it. Measured rather than reasoned — posting `block:attribution` with an
+    # `uploaded_by` key inside returns `422 invalid_block_payload`, whose message says a
+    # draft may not author a field the schema declares server-stamped.
     server_owned = client.post(
         f"{exp}/answers",
         json={
@@ -753,8 +769,8 @@ def test_no_surface_still_says_every_accepting_route_is_a_runs(client):
     #   * THIS string is the OpenAPI operation description. It is served to clients and
     #     rendered to scientists in Settings -> API Docs by `ApiDocs.tsx`, which prints
     #     it as PLAIN TEXT (`<p className="api-docs-description">{...}</p>`). There is
-    #     no markdown renderer anywhere in `apps/web` — the only `dangerouslySetInnerHTML`
-    #     in the tree is a test asserting its own absence — so `~~` reached the reader as
+    #     no markdown renderer anywhere in `apps/web` — no markdown dependency in
+    #     `package.json`, no renderer imported in `src` — so `~~` reached the reader as
     #     literal tilde characters wrapped around a sentence that is not true.
     #
     # A reference manual that shows a reader a false sentence, marks it with punctuation
