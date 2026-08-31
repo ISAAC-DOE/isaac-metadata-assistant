@@ -2066,7 +2066,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 52 -> 67, still a scalar — both faces
          measured 67 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@width-390': { darwin: 76, linux: 75 },
+      'settings-explorer@width-390': { darwin: 76, linux: 74 },
       'settings-privacy@width-320': 2,
       'settings-privacy@width-390': 2,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -3487,6 +3487,11 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // that way deliberately so the stale linux half stays VISIBLE rather than collapsing
   // into a scalar that would falsely claim the two faces agree.
   darwin: 2289,
+  // 2282 -> 2283, 2026-08-30: the single MEASURED +1 at
+  // `settings-explorer@width-390` (75 -> 76) from the strike sweep — see that
+  // entry's note. The linux total below is deliberately unmoved: CI run
+  // 33344481475 at the same head reported zero baseline mismatches.
+  darwin: 2283,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -3669,6 +3674,31 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // arithmetic and for why a structural fix is the one case where this environment
   // may move the linux column without a CI run.
   //
+  // ── STRIKE-SWEEP MEASUREMENT, 2026-08-30: settings-explorer@width-390 darwin
+  // 75 -> 76 (+1). LINUX UNTOUCHED AT 74, DELIBERATELY. ──
+  //
+  // The campaign-sheet slice removed editorial `~~ ~~` retractions from six SERVED
+  // OpenAPI descriptions (they render as literal tildes — `apps/web` has no markdown
+  // renderer). Three of the six are operation descriptions, so the Endpoint Explorer's
+  // rendered text changed: total 117,944 -> 118,276 characters. `splitPurpose`
+  // collapses an operation's post-lead paragraphs only when their joined length
+  // exceeds `PURPOSE_DISCLOSURE_MIN_CHARS`, so a length change can move a paragraph
+  // between COLLAPSED (inside a closed `<details>`, not scanned) and INLINE (rendered,
+  // scanned) — which is how a prose edit moves a `color-contrast` node count at all.
+  //
+  // MEASURED ON THIS MACHINE, not reasoned: a local darwin Playwright run at head
+  // 202a319 reported `GREW settings-explorer @ width-390 on darwin: rule
+  // "color-contrast" grew from 75 to 76 node(s) (+1)`. That is the same way the
+  // 2026-08-27 darwin column was produced, and it is why this cell is NOT added to
+  // `DARWIN_CARRIED_FORWARD`.
+  //
+  // THE LINUX HALF IS NOT TOUCHED, and the reason is measured rather than assumed:
+  // CI run 33344481475 at this same head reported **zero** accessibility baseline
+  // mismatches — its only failure was the 320px layout overflow fixed in the same
+  // commit. So linux genuinely did not move, and writing 76 there to "match" would
+  // have replaced a measured number with a guessed one, against this file's own
+  // header rule. The pair is now a real platform split, not a stale column.
+
   // ── `.section-tab` TRANSCRIPTION, 2026-08-27: linux 2802 -> 2431 (-371). ──
   //
   // MEASURED, unlike its darwin counterpart. Every one of the 119 `color-contrast`

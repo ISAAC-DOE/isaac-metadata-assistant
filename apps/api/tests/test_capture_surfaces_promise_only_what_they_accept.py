@@ -249,9 +249,67 @@ def test_the_served_writable_set_is_what_the_write_routes_actually_do(client):
         assert set(observed[path].values()) == {422}, (path, observed[path])
 
 
-def test_the_record_level_routes_accept_exactly_the_schema_enum_paths(client):
-    """~~A record with NO runs can write none of the 25~~ — **NO LONGER TRUE OF ONE OF
-    THEM, AND THE TEST IS CORRECTED RATHER THAN DELETED.**
+def test_the_record_level_routes_accept_exactly_the_record_level_paths(client):
+    """~~A record with NO runs can write none of the 25~~ — ~~**NO LONGER TRUE OF ONE OF
+    THEM**~~ — **NO LONGER TRUE OF THIRTEEN OF THEM, 2026-08-30.**
+
+    RENAMED A SECOND TIME, from ``..._accept_exactly_the_schema_enum_paths``, for exactly
+    the reason it was renamed the first time: **a test name that outlives its claim is
+    how the next reader believes it.** The whole history is kept below rather than
+    replaced, because each revision was a correct reading of the build it was written
+    against and the SEQUENCE is the thing worth carrying forward.
+
+    **WHAT CHANGED THIS TIME, AND WHY THE OLD ASSERTION HAD TO GO RED.** The record-level
+    answers and correction operations now accept EVERY experiment-level field path this
+    build recognises — the twelve facility/sample paths beside ``system.technique`` — and
+    both experiment-level BLOCK addresses. Before, a scientist creating a record in
+    product could not enter a facility, a sample or a contributor ON THE RECORD by any
+    request: those twelve were accepted at exactly one route, ``POST
+    .../runs/{run_id}/overrides``, and an override is a RUN's recorded DIVERGENCE from a
+    value the record holds, not a way to say what the record is.
+
+    So the old body — which asserted ``422`` at every one of the 25 paths and split them
+    into ``not_an_allowed_value`` (one path) and ``unrecognized_field`` (the rest) — was
+    measuring a door that is now open. It is replaced by the three-way split the build
+    actually has, asserted per path and never uniformly, because a uniform assertion is
+    what let the FIRST version read as a statement about all 25 when it had become a
+    statement about 24.
+
+    **THE SPLIT, MEASURED not assumed, and every group is asserted non-empty so none can
+    pass vacuously.** Each path is probed on its OWN fresh record, because an accepted
+    write changes what the next probe would measure:
+
+    * **accepted (200)** — the twelve record-level paths other than
+      ``system.technique``. Nothing is guessed: the value is written as a
+      ``user_confirmation`` exactly as ``PATCH .../runs/{run_id}`` writes a run's own.
+      Three of them (``sample.composition.*``, ``sample.geometry.pellet_diameter_mm``)
+      sit under namespaces the schema declares OPEN BY DESIGN and therefore carry no
+      declared type to check — that is the schema's decision, not this build's.
+    * **refused for the VALUE (422 ``not_an_allowed_value``)** — ``system.technique``,
+      because ``"PROBE-VALUE"`` is not one of the schema's 37 techniques. The route
+      recognised the field and refused the value, which is the distinction this module's
+      doctrine insists on: a scientist must never be sent looking for a misspelling that
+      is not there.
+    * **refused as unrecognised (422 ``unrecognized_field``)** — the five RUN-level paths
+      (a run owns them; the record does not) and the seven ``LEVEL_UNCLASSIFIED`` ones:
+      the six ``system.configuration.*`` and ``timestamps.created_utc``. **The
+      unclassified seven are the group this whole change must not disturb**, they are
+      excluded by the derivation's ``LEVEL_EXPERIMENT`` filter rather than by a list, and
+      they are the same seven
+      ``test_the_served_writable_set_is_what_the_write_routes_actually_do`` measures as
+      refused by all five routes.
+
+    **``/edit`` IS ASSERTED SEPARATELY AND DIFFERS, which is the contract rather than an
+    inconsistency:** on a record that holds no value yet, a record-level path is
+    ``not_yet_answered`` there (answer it at ``/answers``), and an unrecognised one stays
+    ``unrecognized_field``. The value screen still runs first, so an off-enum
+    ``system.technique`` is ``not_an_allowed_value`` at both.
+
+    MUTATION: making an unclassified path record-writable turns this RED.
+
+    ---- the earlier revisions, kept ----
+
+    RENAMED FROM ``test_the_two_write_routes_that_do_accept_these_paths_are_both_a_runs``,
 
     RENAMED FROM ``test_the_two_write_routes_that_do_accept_these_paths_are_both_a_runs``,
     because the old name asserted the very fact that changed and a name that outlives its
@@ -282,41 +340,99 @@ def test_the_record_level_routes_accept_exactly_the_schema_enum_paths(client):
     MUTATION: adding a record-level route for any OTHER official field path turns this
     RED, exactly as before.
     """
-    experiment_id = _experiment(client)
-    exp = f"/api/experiments/{experiment_id}"
-    record_writable = set(routes._record_enum_fields())
-    reached_record_route, refused_by_both = [], []
-    for path in sorted(routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT):
+    # ALL 25 MAPPABLE PATHS, not the 18 some route accepts. The narrower set is derived
+    # partly FROM the record-level routes, so walking it would ask the routes to confirm
+    # a set they define — and it would silently drop the seven unclassified paths, which
+    # are the group this change must leave refused.
+    accepted, refused_value, refused_unknown, edit_outcomes = [], [], [], {}
+    for path in sorted(routes.NOTE_MAPPABLE_FIELD_PATHS):
         value = _NUMERIC.get(path, "PROBE-VALUE")
-        for response in (
-            client.post(
-                f"{exp}/answers",
-                json={"confirmed_by_user": True, "answers": {path: value}},
-                headers={"If-Match": _etag(client, exp)},
-            ),
-            client.post(
-                f"{exp}/edit",
-                json={"confirmed_by_user": True, "answers": {path: value}},
-                headers={"If-Match": _etag(client, exp)},
-            ),
-        ):
-            assert response.status_code == 422, (path, response.text)
-            if path in record_writable:
-                # The route recognised the field and refused the VALUE, which is the
-                # distinction this module's own doctrine insists on: a scientist must
-                # never be sent looking for a misspelling that is not there.
-                assert response.json()["error"] == "not_an_allowed_value", path
-                reached_record_route.append(path)
-            else:
-                assert response.json()["error"] == "unrecognized_field", path
-                refused_by_both.append(path)
+        # A FRESH RECORD PER PATH. Probing all 25 against one record would let an
+        # accepted write decide what the next probe measures — the twelve that now land
+        # would leave the record holding values, and `already_answered` would start
+        # answering for a path the previous iteration wrote.
+        exp = f"/api/experiments/{_experiment(client, title=f'probe {path}')}"
+        # `/edit` IS PROBED FIRST, ON THE UNANSWERED RECORD, and the order is the
+        # measurement rather than a preference: probing `/answers` first STORES the value
+        # for the twelve that now land, and `/edit` would then be correcting an answered
+        # field and returning `200` — a true fact about a different record state, read as
+        # though `/edit` accepted a first value.
+        edited = client.post(
+            f"{exp}/edit",
+            json={"confirmed_by_user": True, "answers": {path: value}},
+            headers={"If-Match": _etag(client, exp)},
+        )
+        edit_outcomes[path] = (edited.status_code, edited.json().get("error"))
+        answered = client.post(
+            f"{exp}/answers",
+            json={"confirmed_by_user": True, "answers": {path: value}},
+            headers={"If-Match": _etag(client, exp)},
+        )
+        if answered.status_code == 200:
+            accepted.append(path)
+            continue
+        assert answered.status_code == 422, (path, answered.text)
+        error = answered.json()["error"]
+        if error == "unrecognized_field":
+            refused_unknown.append(path)
+        else:
+            assert error == "not_an_allowed_value", (path, answered.text)
+            refused_value.append(path)
 
-    assert sorted(set(reached_record_route)) == ["system.technique"]
-    assert refused_by_both, "both polarities must be present or the split is vacuous"
-    # AND NOTHING WAS WRITTEN BY ANY OF IT, which is what makes the corrected claim as
-    # safe as the one it replaces.
-    stored = ws.load_experiment(experiment_id, session_id=None)
-    assert (stored.draft or {}).get("fields") in (None, {})
+    # THE THREE GROUPS, NAMED RATHER THAN COUNTED. A count would pass against the wrong
+    # membership; the whole point of the change is WHICH paths moved.
+    assert sorted(accepted) == [
+        "sample.composition.CuO2_mass_fraction",
+        "sample.composition.sucrose_mass_fraction",
+        "sample.geometry.pellet_diameter_mm",
+        "sample.material.formula",
+        "sample.material.name",
+        "sample.material.provenance",
+        "sample.sample_form",
+        "system.facility.beamline",
+        "system.facility.endstation",
+        "system.facility.facility_name",
+        "system.facility.organization",
+        "system.facility.site",
+    ]
+    assert refused_value == ["system.technique"]
+    assert sorted(refused_unknown) == [
+        "context.environment",
+        "context.temperature_K",
+        "context.thermodynamics.atmosphere",
+        "system.configuration.detector_model",
+        "system.configuration.monochromator_crystal",
+        "system.configuration.n_scans",
+        "system.configuration.proposal_id",
+        "system.configuration.session_id",
+        "system.configuration.spectrometer_geometry",
+        "timestamps.acquired_end_utc",
+        "timestamps.acquired_start_utc",
+        "timestamps.created_utc",
+    ]
+    # THE UNCLASSIFIED SEVEN, ASSERTED AS A DERIVED FACT rather than by re-listing them:
+    # they are absent from the record-writable set because `field_level` classifies them
+    # as neither level, and that is the exclusion the derivation makes without a special
+    # case.
+    unclassified = {
+        path
+        for path in routes.NOTE_MAPPABLE_FIELD_PATHS
+        if ws.field_level(path) == ws.LEVEL_UNCLASSIFIED
+    }
+    assert len(unclassified) == 7
+    assert unclassified <= set(refused_unknown)
+    assert unclassified.isdisjoint(routes.RECORD_WRITABLE_FIELD_PATHS)
+
+    # `/edit` ON A RECORD HOLDING NOTHING: the record-level paths are redirected to the
+    # answers operation rather than accepted, and the unrecognised ones stay
+    # unrecognised. Asserted per path, so a route that started accepting a first value
+    # at `/edit` would turn this RED.
+    for path in accepted:
+        assert edit_outcomes[path] == (422, "not_yet_answered"), (path, edit_outcomes[path])
+    for path in refused_value:
+        assert edit_outcomes[path] == (422, "not_an_allowed_value"), path
+    for path in refused_unknown:
+        assert edit_outcomes[path] == (422, "unrecognized_field"), path
 
 
 #: Every experiment-scoped mutation the OpenAPI document publishes that is NOT one of the
@@ -345,7 +461,7 @@ _NOT_A_FIELD_PATH_WRITE: dict[str, str] = {
     # value. It is out of the PROBE not because it writes nothing, but because it is
     # not addressed BY a field path — it takes a `proposal_id`, and the value it
     # writes goes through the very writers this probe already covers
-    # (`_apply_run_field`, `set_run_override`, `_apply_record_enum_fields`), so
+    # (`_apply_run_field`, `set_run_override`, `_apply_record_fields`), so
     # probing it would re-measure them through a second door. Saying "records a
     # decision, never a value" here would be the comfortable falsehood this file
     # exists to catch.
@@ -431,7 +547,7 @@ def test_the_record_level_arm_needs_no_run_at_all(client):
     none afterwards — which is the assertion that makes this about the RECORD rather
     than about the value happening to land somewhere.
 
-    MUTATION: removing the ``_apply_record_enum_fields`` call from ``post_answers``
+    MUTATION: removing the ``_apply_record_fields`` call from ``post_answers``
     turns the first write RED with ``422 unrecognized_field``.
     """
     experiment_id = _experiment(client, "Record-level, no runs")
@@ -463,15 +579,81 @@ def test_the_record_level_arm_needs_no_run_at_all(client):
     ]["value"] == "XRD"
     assert client.get(f"{exp}/runs").json()["total"] == 0
 
-    # NEGATIVE CONTROL, so this cannot be read as "the record routes take field paths".
-    # They take exactly the schema-enum ones; everything else is still refused.
-    other = client.post(
+    # ── NEGATIVE CONTROLS, so this cannot be read as "the record routes take every
+    # field path". TWO of them, because only ONE of the two is permanently refusable —
+    # and NOT, as this comment first claimed, because the route refuses them for two
+    # different reasons. CORRECTED AFTER INDEPENDENT REVIEW, and measured: both are
+    # `ws.field_level(...) == "unclassified"`, and BOTH are refused by the identical
+    # gate, `key not in _record_writable_fields()`. There is no server-owned exclusion
+    # anywhere in the write route. So the difference between the two is NOT in how the
+    # route behaves today; it is in what could make each of them writable tomorrow, and
+    # that is worth two assertions rather than one ────────────────────────────────
+    #
+    # The control here used to be `sample.material.name`, and the campaign-sheet slice
+    # made that path record-writable — so the control silently became a POSITIVE case
+    # and the test failed asserting 422 against its own feature working. Replacing it
+    # with another path that merely happens to be refused today repeats the mistake one
+    # step further out. So the PRIMARY control is a path that can never become
+    # client-writable, and the unclassified path is kept as a SECOND, separately-labelled
+    # assertion that is EXPECTED to change.
+
+    # (1) PERMANENT. `attribution.uploaded_by` is declared SERVER-STAMPED by the official
+    # schema itself, with any client value overwritten (tamper-proof attribution,
+    # D. Sokaras 2026-06-15), and `export._enforce_server_owned_invariant` strips it from
+    # the assembled record as a structural backstop after every writer. A client can
+    # therefore never be given this path — but the permanence rests on the SCHEMA
+    # DECLARATION, on the block guard, and on the export invariant, NOT on the write
+    # route, which knows nothing about server-owned fields. Stated precisely because the
+    # first version of this comment claimed the route proved it: if a future slice
+    # classified `attribution` as experiment-level and put it in the extractor map, this
+    # control would go red exactly as control (2) will. What makes it a better control is
+    # that doing so would ALSO have to defeat the schema's own sentence and
+    # `export._enforce_server_owned_invariant`, whereas control (2) needs only a human
+    # answer that is actively being sought.
+    #
+    # `block:attribution` IS record-writable, and that SHARPENS this control rather than
+    # undermining it: accepting the BLOCK must not mean accepting an arbitrary FIELD
+    # inside it. Measured rather than reasoned — posting `block:attribution` with an
+    # `uploaded_by` key inside returns `422 invalid_block_payload`, whose message says a
+    # draft may not author a field the schema declares server-stamped.
+    server_owned = client.post(
         f"{exp}/answers",
-        json={"confirmed_by_user": True, "answers": {"sample.material.name": "CuO"}},
+        json={
+            "confirmed_by_user": True,
+            "answers": {"attribution.uploaded_by": "someone@example.invalid"},
+        },
         headers={"If-Match": _etag(client, exp)},
     )
-    assert other.status_code == 422, other.text
-    assert other.json()["error"] == "unrecognized_field"
+    assert server_owned.status_code == 422, server_owned.text
+    assert server_owned.json()["error"] == "unrecognized_field"
+
+    # (2) CURRENT-REGISTRY, AND DELIBERATELY NOT PERMANENT.
+    # `system.configuration.detector_model` is one of the seven paths all five write
+    # routes refuse today, and it is refused because `workspace.field_level` leaves its
+    # Experiment-vs-Run classification `unclassified` pending a human scientific answer
+    # (`docs/run-scope-decision-packet.md`; CLAUDE.md §15 records the six
+    # `system.configuration.*` fields as "unclassified, verified").
+    #
+    # THIS ASSERTION IS EXPECTED TO GO RED when that answer arrives, and going red is
+    # the CORRECT outcome, not a regression: it is how a future authorized slice learns
+    # that this file records the field as unwritable. Whoever closes the classification
+    # should CHANGE this assertion to match the new authority — the field becoming
+    # writable is the feature, not a defect — and must leave control (1) alone, because
+    # (1) is what actually pins the invariant. Nothing here argues the field should stay
+    # refused, and nothing here may be cited as a reason not to implement it.
+    unclassified = client.post(
+        f"{exp}/answers",
+        json={
+            "confirmed_by_user": True,
+            "answers": {"system.configuration.detector_model": "Vortex ME4"},
+        },
+        headers={"If-Match": _etag(client, exp)},
+    )
+    assert unclassified.status_code == 422, unclassified.text
+    assert unclassified.json()["error"] == "unrecognized_field"
+    # The REASON, asserted rather than described, so the comment above cannot drift from
+    # the registry it claims to be quoting.
+    assert ws.field_level("system.configuration.detector_model") == "unclassified"
 
 
 def test_the_served_record_writable_set_is_what_the_record_routes_actually_do(client):
@@ -518,7 +700,34 @@ def test_the_served_record_writable_set_is_what_the_record_routes_actually_do(cl
     served = client.get(f"{exp}/notes").json()
     assert sorted(served["record_writable_field_paths"]) == sorted(accepted), observed
     # BOTH POLARITIES, so the equality cannot pass vacuously in either direction.
-    assert accepted == {"system.technique"}, observed
+    # ── RE-DERIVED 2026-08-30 ON THE MERGED TREE: 1 -> 13 ──────────────────────────
+    # This literal used to read `{"system.technique"}`, and it was right: that was the
+    # only mappable path a record-level route accepted. The campaign-sheet slice widened
+    # the record routes, and on the merged tree THIRTEEN of the 25 mappable paths are
+    # accepted on a record with no runs at all. The list is written out rather than
+    # counted, because the point of this assertion is to be a fact about WHICH paths,
+    # not how many — a count would pass over a set that swapped one member for another.
+    #
+    # 13, not the slice's 14: `system.domain` IS record-writable but is NOT in
+    # `NOTE_MAPPABLE_FIELD_PATHS` (the extractor's field map never emits it), and this
+    # probe walks the mappable set. Both facts are true and the difference between them
+    # is the reason this test and the served key intersect the two sets rather than
+    # taking either alone.
+    assert accepted == {
+        "sample.composition.CuO2_mass_fraction",
+        "sample.composition.sucrose_mass_fraction",
+        "sample.geometry.pellet_diameter_mm",
+        "sample.material.formula",
+        "sample.material.name",
+        "sample.material.provenance",
+        "sample.sample_form",
+        "system.facility.beamline",
+        "system.facility.endstation",
+        "system.facility.facility_name",
+        "system.facility.organization",
+        "system.facility.site",
+        "system.technique",
+    }, observed
     assert set(routes.NOTE_MAPPABLE_FIELD_PATHS) - accepted, observed
     # AND IT IS A SUBSET OF THE WIDER KEY, which is what stops a client rendering two
     # contradictory sentences about one field.
@@ -544,22 +753,65 @@ def test_no_surface_still_says_every_accepting_route_is_a_runs(client):
 
     spec = client.app.openapi()
     listing = spec["paths"]["/api/experiments/{experiment_id}/notes"]["get"]["description"]
-    # It survives ONLY inside the sentence that retracts it, and the ORDER is the
-    # load-bearing part: a quotation with no retraction beside it reads as the claim.
-    assert listing.count(dead) == 1
-    assert "AND NOT EVERY ACCEPTING ROUTE IS A RUN'S" in listing
-    assert listing.index("used to end") < listing.index(dead)
-    assert "`record_writable_field_paths`" in listing
-    assert not listing.rstrip().endswith(dead + ".")
 
-    module_text = notes.__doc__ or ""
+    # ── THE SERVED SURFACE IS NOT A DECISION RECORD, AND THIS BLOCK USED TO REQUIRE
+    # THAT IT BE ONE. CHANGED 2026-08-30 ──────────────────────────────────────────
+    #
+    # These lines used to assert that the dead sentence was PRESENT here, struck, and
+    # ordered before its correction — the same discipline this repository applies to
+    # module docstrings and `#:` comments. That was wrong for THIS string, and the
+    # difference is not stylistic:
+    #
+    #   * `notes.__doc__` and `routes.py`'s comments are read by whoever edits the
+    #     code. A retraction kept in place there stops a future author reinstating a
+    #     claim that was already measured false. That discipline is UNCHANGED and is
+    #     still asserted below.
+    #   * THIS string is the OpenAPI operation description. It is served to clients and
+    #     rendered to scientists in Settings -> API Docs by `ApiDocs.tsx`, which prints
+    #     it as PLAIN TEXT (`<p className="api-docs-description">{...}</p>`). There is
+    #     no markdown renderer anywhere in `apps/web` — no markdown dependency in
+    #     `package.json`, no renderer imported in `src` — so `~~` reached the reader as
+    #     literal tilde characters wrapped around a sentence that is not true.
+    #
+    # A reference manual that shows a reader a false sentence, marks it with punctuation
+    # the page cannot render, and trusts them to notice, is worse than one that simply
+    # says what is true. So the invariant asserted here is now the OPPOSITE one, and the
+    # history lives in the decision record where an editor will meet it.
+    assert dead not in listing
+    # NO EDITORIAL TYPOGRAPHY IN A SERVED STRING AT ALL. Asserting only the absence of
+    # this one sentence would pass on the next struck claim, which is how six of these
+    # accumulated before anyone measured them.
+    assert "~~" not in listing
+    # AND THE POSITIVE CLAIM IS STILL MADE, so this cannot be satisfied by deleting the
+    # paragraph and saying nothing — which is how a disclosure quietly disappears.
+    assert "The record-level paths are writable on a record with no runs at all" in listing
+    assert "only the 5 run-level paths need a run to exist" in listing
+    assert "`record_writable_field_paths`" in listing
+
+    # ── WHITESPACE- AND STRIKE-ROBUST, 2026-08-30, and the reason is a real near-miss ──
+    # This searched the raw docstring for a contiguous literal. The campaign-sheet slice
+    # re-wrapped the paragraph AND inserted the `~~` strike marker between "accept" and
+    # "**none of them**", so the phrase was still present, still struck, still exactly
+    # once — and the search reported it GONE. A test that fails when a sentence is
+    # correctly struck would push the next author to delete the retraction instead of
+    # keeping it, which is the opposite of what this file exists to enforce. Collapsing
+    # whitespace and dropping the strike markers makes the assertion about the CLAIM
+    # rather than about its typography.
+    raw_module_text = " ".join((notes.__doc__ or "").split())
+    module_text = raw_module_text.replace("~~", "")
     stale = "those two routes accept **none of them**"
     # ONCE, AND INSIDE THE STRIKETHROUGH. Asserting mere absence would pass on a file
     # that deleted the paragraph; asserting mere presence would pass on one that
     # restored the claim beside its own retraction, which is the exact accident
     # `test_no_surface_still_promises_...` was extended to catch.
     assert module_text.count(stale) == 1
-    struck = re.findall(r"~~(.*?)~~", module_text, re.DOTALL)
+    # NOTE the two texts: `module_text` has the strike markers REMOVED so the phrase is
+    # findable however it is wrapped or marked, while `raw_module_text` KEEPS them so
+    # this line can still prove the phrase sits inside a strike block. Searching one
+    # text for both facts is what made the first version of this fix break the second
+    # assertion while repairing the first.
+    struck = re.findall(r"~~(.*?)~~", raw_module_text, re.DOTALL)
+    struck = [b.replace("~~", "") for b in struck]
     assert sum(stale in block for block in struck) == 1, struck
     assert "CORRECTED 2026-08-29" in module_text
     assert "not_an_allowed_value" in module_text

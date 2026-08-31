@@ -2097,7 +2097,69 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // change that moved BOTH numbers would mean a paragraph had been added; one that
     // moved `rest` alone would mean prose had been moved between paragraphs.
     // RE-MEASURED over the served document, not incremented.
-    expect(total).toBe(122207);
+    // ── MERGE RE-MEASUREMENT, 2026-08-30. NEITHER SIDE'S NUMBER SURVIVED, and both
+    // lineages above are kept because both are real. `main` (campaign-sheet + strike
+    // sweep) took the served contract to 75 operations / 118,276 / 236 paragraphs;
+    // this branch took it to 76 / 122,207 / 242. The merged tree carries BOTH sets of
+    // bytes, so the figures below are RE-DERIVED from `create_app().openapi()` over the
+    // merged document rather than composed by adding the two deltas — composing them
+    // would assume the edits touch disjoint text, which is exactly the arithmetic this
+    // block exists to refuse. Measured: 76 operations, raw sum 122,849, 243 `\n\n`
+    // separators, 122,849 - 486 = 122,363; and 243 post-lead paragraphs.
+    //
+    // The paragraph count MOVES here (242 -> 243) because the merge brings in the
+    // change feed's own operation, which carries one. That is an ADDED operation, not
+    // prose woven into an existing one, so the `settings-explorer` a11y cells re-baseline
+    // and CI on the merged head is the authority for the linux figures.
+    expect(total).toBe(122363);
+    // 117,944 -> 118,276 (+332), 2026-08-30. CORRECTED AFTER INDEPENDENT REVIEW, and
+    // the correction is the point: this entry first read "118,578 -> 118,276 (-302)",
+    // which stated a PREDECESSOR THAT NEVER EXISTED IN THIS FILE. `git log --all
+    // -S"118578" -- <this file>` returns no commit. 118,578 was an INTERMEDIATE,
+    // UNCOMMITTED state — the `record_writable_field_paths` prose applied, the strike
+    // sweep not yet — and quoting it as the committed baseline put a missing step and a
+    // wrong sign into the one comment block whose stated purpose is not to leave
+    // arithmetic behind. Committed predecessor: `git show 6f4aac4:...` line 2070 =
+    // 117,944.
+    //
+    // THE +332 IS TWO EFFECTS IN ONE COMMIT, and they pull opposite ways, which is why
+    // neither may be quoted alone. Per operation, re-derived from the served document:
+    //   * `GET .../notes`            +541  the `record_writable_field_paths` paragraph
+    //   * `POST .../answers`          -78  strike sweep
+    //   * `POST .../runs/{id}/answers` -131  strike sweep
+    // 541 - 78 - 131 = +332. The strike sweep's own contribution is -302 across the
+    // three operation descriptions it touched (-93 notes, -78, -131); the notes figure
+    // is a removal INSIDE the same paragraph the +541 added, so the two are not
+    // separable by subtraction and are stated as measured rather than apportioned.
+    //
+    // STRIKE SWEEP. Six served strings wrapped a
+    // retracted sentence in `~~ ~~`. This screen renders every description as PLAIN
+    // TEXT — `apps/web` declares no markdown dependency and imports no renderer — so the
+    // markers
+    // reached the reader as literal tildes around a sentence that is not true. The
+    // retracted halves were removed from the SERVED copy and the history moved to
+    // `notes.__doc__`; `test_no_served_description_carries_editorial_strike_typography`
+    // now pins the absence as a property of the whole document.
+    //
+    // THREE of the six are operation descriptions and so move this number: `POST
+    // .../answers`, `POST .../runs/{run_id}/answers`, `GET .../notes`. The other three
+    // are a request-body and two `422` response descriptions, which this total does not
+    // read. RE-DERIVED from the served document, never subtracted: raw sum over the 75
+    // operations = 118,748, 236 `\n\n` separators, 118,748 - 472 = 118,276.
+    //
+    // THE PARAGRAPH COUNT BELOW DELIBERATELY DOES NOT MOVE and stays 236: every one of
+    // the three edits was woven INTO an existing paragraph rather than removing one, so
+    // the Endpoint Explorer emits the same number of `<p class="api-docs-description">`
+    // nodes and NO `settings-explorer` accessibility cell is re-baselined on either
+    // platform. A change that moved this total while leaving 236 alone is the expected
+    // signature of a prose correction; one that moved both would mean a paragraph had
+    // been added or dropped and the a11y baseline would need a CI round-trip.
+    //
+    // (The pre-existing comment lineage above states "raw sum 118,650, 235 separators,
+    // so 118,180". That arithmetic never reproduced — the assertion it sits above was
+    // 117,944, and re-measuring the unmodified tree gives raw 118,416 / 236. It is left in
+    // place as history rather than silently rewritten, but it is not the derivation.)
+
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -2145,7 +2207,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // other would mean prose had been woven into an existing paragraph rather than
     // appended, and neither number may be inferred from the other. RE-DERIVED from
     // the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(242);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(243);
+
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

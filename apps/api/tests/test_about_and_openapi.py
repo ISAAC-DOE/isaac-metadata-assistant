@@ -1242,3 +1242,107 @@ def test_the_removed_probe_route_table_is_clean(client):
     paths = {route.path for route in _walk_api_routes(client.app)}
     assert paths, "the route walk found nothing — this check would pass vacuously"
     assert _REMOVED_PROBE_PATH not in paths
+
+
+def test_no_served_description_carries_editorial_strike_typography(client):
+    """A REFERENCE MANUAL MAY NOT SHOW A SCIENTIST A SENTENCE THAT IS NOT TRUE.
+
+    THE DEFECT, measured 2026-08-30: SIX served strings in this document wrapped a
+    retracted claim in ``~~ ~~`` and left it beside its correction — the discipline
+    this repository correctly applies to module docstrings and ``#:`` comments, applied
+    to the wrong kind of surface. The six were the record and run ``/answers``
+    operation descriptions, the record ``/answers`` request body, both ``422`` response
+    descriptions, and the ``/notes`` operation description.
+
+    WHY IT IS A DEFECT HERE AND NOT THERE. A docstring is read by whoever edits the
+    code, and a struck sentence stops them reinstating a claim already measured false.
+    THIS document is rendered to scientists in Settings -> API Docs by ``ApiDocs.tsx``,
+    which prints every description as PLAIN TEXT — ``<p className="api-docs-description">
+    {purpose.lead}</p>`` for operations, ``api-browser-section-note`` for responses,
+    ``api-docs-param-desc`` for parameters. The request-body case is the one exception
+    worth stating precisely: the struck string lived at
+    ``requestBody.content.application/json.schema.description``, and that operation has
+    NO top-level ``requestBody.description`` at all — so ``ApiDocs.tsx:882`` never read
+    it, and it reached the reader through ``ContentBlocks``' collapsed
+    ``<details>Technical Schema</details>`` ``<pre>{stringify(...)}</pre>`` instead.
+    Still plain text, still a defect, by a different route than an earlier revision of
+    this docstring stated. There is NO markdown renderer
+    anywhere in ``apps/web``: ``package.json`` declares no markdown dependency and ``src``
+    imports no renderer. (An earlier revision of this docstring said "the tree's only
+    ``dangerouslySetInnerHTML`` occurrence is a test asserting its own absence". That was
+    true when written and is no longer — this very change added a second occurrence, in a
+    prose comment. The substantive claim is unaffected because it never rested on that
+    count; it is corrected here because a claim that falsifies itself two commits later is
+    exactly what this file exists to catch.) So ``~~`` reached the reader as literal tildes around
+    a false sentence, and the reader was left to work out which half to believe.
+
+    THE INVARIANT, STATED AS A PROPERTY RATHER THAN AS SIX ABSENCES. Asserting that the
+    six known sentences are gone would pass on the seventh. This walks every
+    ``description``/``summary``/``title`` string in the generated document instead, so a
+    struck claim cannot be introduced anywhere in the API reference again.
+
+    WHAT THIS DOES NOT SAY. It does not forbid recording that something changed —
+    ``/notes`` still explains that the record-level paths became writable, and the
+    ``422`` descriptions still explain what the old behaviour was. It forbids the
+    TYPOGRAPHY of retraction in a surface that cannot render it, which is a different and
+    narrower thing. The retraction history stays in ``notes.__doc__`` and in ``routes.py``'s
+    own comments, and ``test_no_surface_still_says_every_accepting_route_is_a_runs``
+    asserts it is still there.
+
+    THE BOUNDARY, NAMED SO THIS IS NEITHER OVER- NOR UNDER-APPLIED. This walks ISAAC's
+    OWN generated OpenAPI document and nothing else, because that is the surface ISAAC
+    renders itself, as plain text. Three neighbouring surfaces KEEP their strikes and a
+    future sweep must not "fix" them:
+
+    * ``docs/*.md`` — rendered as markdown by GitHub and every editor, so a strike
+      displays as a strike. ``test_ingestion_proposals.py`` pins one deliberately.
+    * Python docstrings and ``#:`` comments — read by whoever edits the code, never
+      served. ``notes.__doc__`` and ``routes.py``'s constants carry this change's own
+      history for exactly that reason.
+    * ``isaac_api.mcp.tools.TOOLS[...].description`` — consumed by an MCP client, not by
+      this application's UI. ISAAC does not control its rendering, and
+      ``test_answers_that_cannot_land.py::test_the_mcp_tool_no_longer_states_the_two_false_sentences``
+      records a considered decision to keep a withdrawn absolute visible there. That is a
+      different surface with a different reader; it is deliberately out of scope here.
+
+    MUTATION: restoring ``~~`` around any retracted sentence in any served description
+    turns this RED and names the exact JSON pointer.
+    """
+    schema = client.get("/api/openapi").json()
+
+    offenders: list[str] = []
+
+    def walk(node: object, pointer: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if (
+                    key in ("description", "summary", "title")
+                    and isinstance(value, str)
+                    and "~~" in value
+                ):
+                    offenders.append(f"{pointer}.{key}")
+                walk(value, f"{pointer}.{key}")
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, f"{pointer}[{index}]")
+
+    walk(schema, "")
+    assert not offenders, (
+        "served API-reference strings carry strike typography, which "
+        f"Settings -> API Docs renders as literal tildes: {offenders}"
+    )
+    # NOT VACUOUS: the walk must actually have visited a substantial document.
+    described = []
+
+    def count(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "description" and isinstance(value, str):
+                    described.append(value)
+                count(value)
+        elif isinstance(node, list):
+            for value in node:
+                count(value)
+
+    count(schema)
+    assert len(described) > 200, len(described)

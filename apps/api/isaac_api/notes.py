@@ -124,48 +124,72 @@ BOTH HALVES, AND IS CORRECTED RATHER THAN DELETED.** This paragraph read: *"The 
 that turns a value into a confirmed field already exists and is unchanged — ``POST
 /experiments/{id}/answers`` / ``POST /experiments/{id}/edit`` with
 ``confirmed_by_user: true`` and a matching ``If-Match``, recorded as
-``user_confirmation`` evidence."*
+``user_confirmation`` evidence."* Measured over HTTP against a record created through
+``POST /api/experiments``, at every one of the 25 mappable paths, ~~those two routes
+accept **none of them** — both answer ``422 unrecognized_field`` for all 25, because
+they are keyed to a record's open blocking questions and to fields the draft already
+holds, not to official field paths~~ — **CORRECTED 2026-08-30: they now accept 13 of
+the 25, and this paragraph is struck in place rather than rewritten because it is the
+sentence the surfaces copied.** ``POST /experiments/{id}/answers`` and ``POST
+/experiments/{id}/edit`` accept every EXPERIMENT-level official path — the sample, the
+facility, ``system.technique`` — and the two record-level block addresses
+``block:attribution`` and ``block:tags``, recording each as a ``user_confirmation`` on
+the record that every run then inherits. They were keyed only to blocking questions and
+to fields the draft already held when this was written; they no longer are.
 
-~~"Measured over HTTP against a record created through ``POST /api/experiments``, at
-every one of the 25 mappable paths, those two routes accept **none of them** — both
-answer ``422 unrecognized_field`` for all 25 … The two routes that DO accept these
-paths are a RUN's."~~ — **CORRECTED 2026-08-29: THE CORRECTION HAS ITSELF GONE STALE,
-AND IT IS NOW WRONG IN THE OPPOSITE DIRECTION FROM THE SENTENCE IT REPLACED.** The
-record-level enum write shipped, and this paragraph did not move, so a paragraph
-written to stop a surface pointing at a locked door ended up denying a door that is
-open. Re-measured over HTTP on a freshly created record, both halves fail:
+**ACCEPTING A PATH IS NOT ACCEPTING A VALUE, and the distinction is the one this module
+most needs a reader to keep.** Membership in the writable set says a ROUTE exists, never
+that a particular value will be stored. A closed enum still answers
+``not_an_allowed_value`` for a non-member, a declared JSON type still answers
+``invalid_field_value``, a malformed block payload still answers
+``invalid_block_payload``, and a value the store cannot represent still answers
+``unrepresentable_value``. A surface that reads "writable" as "will be accepted" tells a
+scientist to go and do something that then fails, which is the same class of defect as
+the struck sentence above and is why the two facts are named separately.
 
-* **"all 25 answer ``422 unrecognized_field``"** — 24 do. ``system.technique`` answers
-  ``422 not_an_allowed_value``, because the route RECOGNISES the field and is
-  refusing the *value*. That distinction is one this module's own doctrine insists
-  on: a scientist must never be sent hunting for a misspelling that is not there.
-* **"those two routes accept none of them"** — ``{"system.technique": "XAS"}`` at
-  ``POST /api/experiments/{id}/answers`` returns **200** and stores the value, on a
-  record with **zero runs**; ``POST /api/experiments/{id}/edit`` then corrects it.
-  ``"PROBE-VALUE"`` was refused only because it is not one of the schema's 37
-  techniques, so a probe that sends an arbitrary string measures the enum, not the
-  route.
+**WHERE THE RETRACTIONS LIVE, AND WHERE THEY DELIBERATELY NO LONGER DO (2026-08-30).**
+This docstring keeps its struck sentences, and so do ``routes.py``'s ``#:`` comments:
+they are read by whoever edits the code, and a retraction left in place is what stops a
+future author reinstating a claim already measured false. The SERVED OpenAPI
+descriptions no longer do. Six of them — the record and run ``/answers`` operation
+descriptions, the record ``/answers`` request body, both ``422`` response descriptions,
+and ``/notes``'s own operation description — carried ``~~ ~~`` around a retracted
+sentence. That surface is rendered to scientists in Settings → API Docs as PLAIN TEXT
+(``ApiDocs.tsx`` interpolates every description as a bare JSX child; ``apps/web`` declares
+no markdown dependency in ``package.json`` and imports no markdown renderer anywhere in
+``src`` — that, not a count of ``dangerouslySetInnerHTML``, is what establishes it), so the markers
+reached the reader as literal tildes wrapped around a false sentence, and the reader was
+left to decide which half to believe. The API reference now states only what is true; the
+history is here. ``test_no_served_description_carries_editorial_strike_typography``
+pins it as a property of the whole OpenAPI document rather than as six absences,
+because asserting the six would have passed on a seventh in that document.
 
-**THE CURRENT MEASUREMENT, over all 25 paths and all SIX write operations** (the sixth,
-``POST /api/experiments/{id}/runs/{run_id}/edit``, accepts none of the 25, so it changes
-no total — which is exactly why its absence went unnoticed. ~~"was missing from every
-earlier enumeration in this repository"~~ — **FALSE, and refuted by this same change:**
-``routes.py``'s ``_record_enum_fields`` docstring table has listed all six all along,
-including on ``main`` before this branch existed. It was missing from the enumerations
-in THIS module, which is a much smaller claim and is the true one):
+**AND THERE IS A SEVENTH, IN A DIFFERENT CATALOG, LEFT DELIBERATELY IN PLACE — named
+here rather than left for the next sweep to rediscover.** ``isaac_api.mcp.tools``'s
+``isaac_answer_questions`` description carries the SAME retracted sentence
+(``~~**EVERY KEY YOU SEND IS EITHER ACTED ON OR REFUSED BY NAME…**~~``), it is served
+to external agents by ``tools/list``, and it is NOT in ``/api/openapi``, so the guard
+above never walks it. It is untouched for two reasons, neither of which is oversight:
+ISAAC does not render that string — an MCP client does, and this repository has not
+measured how — and
+``test_answers_that_cannot_land.py::test_the_mcp_tool_no_longer_states_the_two_false_sentences``
+records a considered decision to keep that particular absolute visible as a strike,
+with its own reasoning. **So the honest scope of the 2026-08-30 sweep is: ISAAC's own
+OpenAPI document, completely; the MCP tool catalog, not at all.** Whether the MCP
+catalog should follow is a separate question about a surface with a different reader,
+and it is open.
 
-* **5** run-level paths at ``PATCH /api/experiments/{id}/runs/{run_id}``;
-* **13** record-level ones at ``POST /api/experiments/{id}/runs/{run_id}/overrides``;
-* **1** of those 13, ``system.technique``, ADDITIONALLY at the record's own
-  ``answers``/``edit`` pair — so it is the one mappable path a value can be entered
-  at on a record with no runs;
-* the remaining **7** — the six ``system.configuration.*`` paths and
-  ``timestamps.created_utc`` — are accepted by no write operation in this build at
-  all, ``422`` from all six.
-
-18 writable, 7 not, unchanged. What changed is WHERE, and "on a run" is no longer true
-of every one of the 18.
-
+~~The two routes that DO accept these paths are a RUN's~~ — **THREE routes accept them
+now.** ``PATCH /api/experiments/{id}/runs/{run_id}`` for the 5 run-level paths; ``POST
+/api/experiments/{id}/answers`` (corrected at ``.../edit``) for the 13 record-level
+ones, which is the route a record with no runs at all can use; and ``POST
+/api/experiments/{id}/runs/{run_id}/overrides`` to record ONE run's divergence from a
+record-level value. The
+remaining **7** — the six ``system.configuration.*`` paths and
+``timestamps.created_utc`` — are accepted by no write route in this build at all, and
+that is unchanged: they are ``field_level``-unclassified, and the record-level write
+surface is derived by filtering on ``LEVEL_EXPERIMENT``, so they are excluded without a
+special case rather than by a list somebody has to remember to keep.
 The per-path answer is derived and served rather than described in prose, at
 ``routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT`` and on the wire as
 ``value_writable_field_paths``, so a surface can be true about the path in front of

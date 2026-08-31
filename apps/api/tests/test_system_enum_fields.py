@@ -200,15 +200,32 @@ def test_an_unreadable_schema_fails_closed_and_writes_nothing(client, tmp_path, 
     hold the poisoned answer for every later test in this process — which is exactly the
     behaviour the implementation documents in production, and exactly why a test that
     induces it has to clean up after itself.
+
+    **BOTH CACHES ARE CLEARED, AND THE FIRST VERSION OF THIS TEST CLEARED ONE.** There
+    are now two ``lru_cache``d readers of the vendored document —
+    ``_record_enum_fields`` and ``_record_writable_fields``, which is what the record's
+    write routes actually consult — and clearing only the first left the second serving
+    its warm answer, so the write was ACCEPTED with ``200`` while the schema was
+    unreadable. That is exactly the open gate this test exists to refuse. In production
+    neither cache is ever invalidated, so the incoherence is reachable only from a test
+    that induces it; the remedy is to clear both here, not to remove a cache the routes
+    depend on.
     """
     experiment_id = _experiment(client)
     routes._record_enum_fields.cache_clear()
+    routes._record_writable_fields.cache_clear()
     monkeypatch.setattr(routes, "schema_path", lambda _root: tmp_path / "no-such-schema.json")
     try:
         assert dict(routes._record_enum_fields()) == {}
-        r = _answer(client, experiment_id, {"system.domain": "experimental"})
-        assert r.status_code == 422, r.text
-        assert r.json()["error"] == "unrecognized_field"
+        assert dict(routes._record_writable_fields()) == {}
+        # BOTH NAMESPACES, so the fail-closed claim covers the whole record-level write
+        # surface rather than the one path that motivated it. A facility field is
+        # refused for the same reason the enum pair is: the schema could not be read, so
+        # no gate the schema was entitled to apply was applied.
+        for key in ("system.domain", "sample.material.name"):
+            r = _answer(client, experiment_id, {key: "anything"})
+            assert r.status_code == 422, (key, r.text)
+            assert r.json()["error"] == "unrecognized_field", key
         assert _stored_fields(experiment_id) == {}
     finally:
         # ORDER IS LOAD-BEARING AND WAS GOT WRONG ONCE: undo the patch FIRST, then
@@ -218,7 +235,9 @@ def test_an_unreadable_schema_fails_closed_and_writes_nothing(client, tmp_path, 
         # this test exists to document.
         monkeypatch.undo()
         routes._record_enum_fields.cache_clear()
+        routes._record_writable_fields.cache_clear()
     assert set(routes._record_enum_fields()) == {"system.domain", "system.technique"}
+    assert "sample.material.name" in routes._record_writable_fields()
 
 
 def test_the_derived_mapping_cannot_be_widened_by_a_caller(client):

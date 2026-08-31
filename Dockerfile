@@ -17,6 +17,23 @@ WORKDIR /web
 COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci
 COPY apps/web/ ./
+# THE VENDORED SCHEMA, FOR TYPE-CHECKING ONLY, AND ONLY BECAUSE `npm run build` IS
+# `tsc -b && vite build`. `src/__tests__/record-description.test.tsx` imports
+# `../../../../schema/isaac_record_v1.json` — deliberately the real document rather
+# than a hand-built double, so the test cannot drift from the schema — and from
+# `/web/src/__tests__/` that path resolves to `/schema/isaac_record_v1.json`.
+# `tsc -b` type-checks `src`, tests included, so WITHOUT this line the image build
+# fails `TS2307: Cannot find module` and NO image can be produced. It is invisible to
+# every other check: `npm run build` passes in a full checkout, so both the local
+# command and CI's `frontend` job are green while the Docker build is impossible.
+#
+# It does NOT reach the bundle. `vite build` walks the entry graph, which no test file
+# is in, and stage 2 below takes only `/web/dist`. The file is the public official
+# schema that stage 2 already ships via `COPY schema/`, so this adds no content the
+# image did not have and widens no data-governance boundary — but the header's
+# "built from apps/web/ sources only" is now one file short of true, which is why this
+# says so here rather than leaving it to be discovered.
+COPY schema/isaac_record_v1.json /schema/isaac_record_v1.json
 # Bake the deploy prefix into asset URLs, the router basename, and the
 # same-origin API base. Runtime ISAAC_BASE_PATH below must match.
 RUN VITE_BASE_PATH="${BASE_PATH}/" VITE_API_BASE="${BASE_PATH}/api" npm run build

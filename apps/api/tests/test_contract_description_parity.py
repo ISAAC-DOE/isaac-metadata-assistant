@@ -53,7 +53,15 @@ def _unescape(raw: str) -> str:
 
 def _entries() -> list[tuple[str, str]]:
     src = FIXTURES_TS.read_text()
-    start = src.index("REAL_CONTRACT_DESCRIPTIONS")
+    # ANCHOR ON THE DECLARATION, NOT ON THE NAME. `src.index("REAL_CONTRACT_DESCRIPTIONS")`
+    # matched the FIRST occurrence anywhere in the file — including a prose COMMENT that
+    # merely mentions the array. That happened on 2026-08-30: a comment added ~2,350 lines
+    # above the array sent `start` into an unrelated object literal, `end` then found the
+    # wrong terminator, and all three tests in this module failed with "the array's shape
+    # probably changed". The shape had not changed; the search had. Anchoring on the
+    # `export const` declaration makes a mention in a comment harmless, which matters
+    # because this module's whole purpose is to fail LOUDLY for the right reason.
+    start = src.index("export const REAL_CONTRACT_DESCRIPTIONS")
     end = src.index("\n];", start)
     return [(op, _unescape(desc)) for op, desc in _ENTRY_RE.findall(src[start:end])]
 

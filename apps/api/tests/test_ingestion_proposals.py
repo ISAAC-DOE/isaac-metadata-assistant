@@ -415,7 +415,7 @@ def test_I2_a_proposal_is_absent_from_every_runs_resolved_draft(client, experime
         (
             RECORD_PATH,
             RECORD_VALUE,
-            "_apply_record_enum_fields",
+            "_apply_record_fields",
             proposals.APPLIED_VIA_RECORD_ENUM,
         ),
     ],
@@ -1901,7 +1901,7 @@ def test_the_record_scoped_enum_path_routes_through_the_enum_writer_not_the_over
 
     ``field:system.technique`` IS in ``EXPERIMENT_OVERRIDABLE_ADDRESSES`` and its run
     override returns 200 while accepting OFF-ENUM values. An accepted proposal at that
-    path must route through ``_apply_record_enum_fields``, which checks the enum.
+    path must route through ``_apply_record_fields``, which checks the enum.
 
     MUTATION: swapped the first two clauses of ``_proposal_writer_for`` so the
     override matched first. The off-enum refusal below went from 422 to 200.
