@@ -633,8 +633,22 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # every client the resource is generically deletable, which is exactly what was
     # not authorized.
     #
+    #
+    # 71 -> 75: PERSISTENT INGESTION PROPOSALS — list, create, read one, and perform
+    # one review act on one. Four operations, the same shape as the four Unmapped
+    # Notes operations one section over, and for the same reason: this is the
+    # destination for the VALUED half of a proposal, which until now did not survive
+    # the request. `providers/extraction.py`'s `FieldCandidate` is a valued proposal
+    # deliberately never stored; a note carries the target and the rule and
+    # deliberately carries no value. These four close that gap and no other.
+    #
+    # NO TABLE AND NO MIGRATION WAS ADDED. A proposal lives at `state["proposals"]`
+    # inside the experiment's own state document, beside `notes`, so `db_write.
+    # OWNED_TABLES` is unchanged — the first scope extension in `CLAUDE.md` §15 that
+    # adds none, deliberately.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 71, f"expected 71 documented operations, found {checked}"
+    assert checked == 75, f"expected 75 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -907,6 +921,38 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # nothing is written. There is NO DELETE: a decision is revised, which appends.
     ("/api/experiments/{experiment_id}/conflicts", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/conflicts/resolve", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    # PERSISTENT INGESTION PROPOSALS. The split is the Notes API's, for the Notes
+    # API's reason: a proposal is stored INSIDE the experiment's own document, so
+    # creating one and reviewing one both REWRITE THE RECORD and carry the record's
+    # `If-Match` with the whole 400/412/428 set. There is deliberately no per-proposal
+    # validator, and deliberately NO DELETE — rejecting, superseding and withdrawing
+    # are review acts on the review operation, so they appear here as a `200` on a
+    # POST and not as a `204` anywhere.
+    #
+    # THE CREATE IS THE ONE POST IN THIS TABLE THAT CREATES AND DOES NOT ANSWER `201`,
+    # and that is deliberate rather than an oversight — see the comment above the
+    # route. It has TWO outcomes: it mints a proposal, or it finds one already
+    # carrying the caller's `client_request_key` and mints nothing. An operation-level
+    # `201` would assert that this operation creates, which is false of the second, and
+    # `test_every_success_response_has_its_own_description` (rightly) refuses the two
+    # success codes that would let it say both. The status says the request succeeded;
+    # the body's `deduplicated` says which happened.
+    #
+    # The review POST's `409` carries four distinct refusals — `human_actor_required`,
+    # `proposal_stale`, `target_run_removed` and `target_scope_mismatch` — and every
+    # one of them writes nothing. The two reads take no `If-Match` because they write
+    # nothing; the list's `422` is its own `unknown_cursor` refusal as well as the
+    # framework's parameter validation, which is why the operation declares it.
+    ("/api/experiments/{experiment_id}/proposals", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/proposals", "post"): [
+        "200", "400", "401", "404", "412", "422", "428", "503",
+    ],
+    ("/api/experiments/{experiment_id}/proposals/{proposal_id}", "get"): [
+        "200", "401", "404", "422", "503",
+    ],
+    ("/api/experiments/{experiment_id}/proposals/{proposal_id}/review", "post"): [
+        "200", "400", "401", "404", "409", "412", "422", "428", "503",
+    ],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],
@@ -1166,3 +1212,107 @@ def test_the_removed_probe_route_table_is_clean(client):
     paths = {route.path for route in _walk_api_routes(client.app)}
     assert paths, "the route walk found nothing — this check would pass vacuously"
     assert _REMOVED_PROBE_PATH not in paths
+
+
+def test_no_served_description_carries_editorial_strike_typography(client):
+    """A REFERENCE MANUAL MAY NOT SHOW A SCIENTIST A SENTENCE THAT IS NOT TRUE.
+
+    THE DEFECT, measured 2026-08-30: SIX served strings in this document wrapped a
+    retracted claim in ``~~ ~~`` and left it beside its correction — the discipline
+    this repository correctly applies to module docstrings and ``#:`` comments, applied
+    to the wrong kind of surface. The six were the record and run ``/answers``
+    operation descriptions, the record ``/answers`` request body, both ``422`` response
+    descriptions, and the ``/notes`` operation description.
+
+    WHY IT IS A DEFECT HERE AND NOT THERE. A docstring is read by whoever edits the
+    code, and a struck sentence stops them reinstating a claim already measured false.
+    THIS document is rendered to scientists in Settings -> API Docs by ``ApiDocs.tsx``,
+    which prints every description as PLAIN TEXT — ``<p className="api-docs-description">
+    {purpose.lead}</p>`` for operations, ``api-browser-section-note`` for responses,
+    ``api-docs-param-desc`` for parameters. The request-body case is the one exception
+    worth stating precisely: the struck string lived at
+    ``requestBody.content.application/json.schema.description``, and that operation has
+    NO top-level ``requestBody.description`` at all — so ``ApiDocs.tsx:882`` never read
+    it, and it reached the reader through ``ContentBlocks``' collapsed
+    ``<details>Technical Schema</details>`` ``<pre>{stringify(...)}</pre>`` instead.
+    Still plain text, still a defect, by a different route than an earlier revision of
+    this docstring stated. There is NO markdown renderer
+    anywhere in ``apps/web``: ``package.json`` declares no markdown dependency and ``src``
+    imports no renderer. (An earlier revision of this docstring said "the tree's only
+    ``dangerouslySetInnerHTML`` occurrence is a test asserting its own absence". That was
+    true when written and is no longer — this very change added a second occurrence, in a
+    prose comment. The substantive claim is unaffected because it never rested on that
+    count; it is corrected here because a claim that falsifies itself two commits later is
+    exactly what this file exists to catch.) So ``~~`` reached the reader as literal tildes around
+    a false sentence, and the reader was left to work out which half to believe.
+
+    THE INVARIANT, STATED AS A PROPERTY RATHER THAN AS SIX ABSENCES. Asserting that the
+    six known sentences are gone would pass on the seventh. This walks every
+    ``description``/``summary``/``title`` string in the generated document instead, so a
+    struck claim cannot be introduced anywhere in the API reference again.
+
+    WHAT THIS DOES NOT SAY. It does not forbid recording that something changed —
+    ``/notes`` still explains that the record-level paths became writable, and the
+    ``422`` descriptions still explain what the old behaviour was. It forbids the
+    TYPOGRAPHY of retraction in a surface that cannot render it, which is a different and
+    narrower thing. The retraction history stays in ``notes.__doc__`` and in ``routes.py``'s
+    own comments, and ``test_no_surface_still_says_every_accepting_route_is_a_runs``
+    asserts it is still there.
+
+    THE BOUNDARY, NAMED SO THIS IS NEITHER OVER- NOR UNDER-APPLIED. This walks ISAAC's
+    OWN generated OpenAPI document and nothing else, because that is the surface ISAAC
+    renders itself, as plain text. Three neighbouring surfaces KEEP their strikes and a
+    future sweep must not "fix" them:
+
+    * ``docs/*.md`` — rendered as markdown by GitHub and every editor, so a strike
+      displays as a strike. ``test_ingestion_proposals.py`` pins one deliberately.
+    * Python docstrings and ``#:`` comments — read by whoever edits the code, never
+      served. ``notes.__doc__`` and ``routes.py``'s constants carry this change's own
+      history for exactly that reason.
+    * ``isaac_api.mcp.tools.TOOLS[...].description`` — consumed by an MCP client, not by
+      this application's UI. ISAAC does not control its rendering, and
+      ``test_answers_that_cannot_land.py::test_the_mcp_tool_no_longer_states_the_two_false_sentences``
+      records a considered decision to keep a withdrawn absolute visible there. That is a
+      different surface with a different reader; it is deliberately out of scope here.
+
+    MUTATION: restoring ``~~`` around any retracted sentence in any served description
+    turns this RED and names the exact JSON pointer.
+    """
+    schema = client.get("/api/openapi").json()
+
+    offenders: list[str] = []
+
+    def walk(node: object, pointer: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if (
+                    key in ("description", "summary", "title")
+                    and isinstance(value, str)
+                    and "~~" in value
+                ):
+                    offenders.append(f"{pointer}.{key}")
+                walk(value, f"{pointer}.{key}")
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, f"{pointer}[{index}]")
+
+    walk(schema, "")
+    assert not offenders, (
+        "served API-reference strings carry strike typography, which "
+        f"Settings -> API Docs renders as literal tildes: {offenders}"
+    )
+    # NOT VACUOUS: the walk must actually have visited a substantial document.
+    described = []
+
+    def count(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "description" and isinstance(value, str):
+                    described.append(value)
+                count(value)
+        elif isinstance(node, list):
+            for value in node:
+                count(value)
+
+    count(schema)
+    assert len(described) > 200, len(described)

@@ -15,18 +15,41 @@ WHAT IS AND IS NOT WIRED
   ``transport.py`` — a **Streamable HTTP endpoint that a real MCP client can
   actually speak to**, mounted only when ``ISAAC_MCP_DEPLOYMENT`` resolves to a
   binding that serves one. No network egress, no credential, no new dependency.
-* **Not wired, on purpose:** any *remotely reachable* connection. The one binding
-  that serves a transport, ``local-loopback``, refuses every request whose socket
-  peer is not a loopback address, refuses one that came through a proxy, and
-  refuses a credential it cannot verify. Reachability (D1) and the authentication
-  model (D2) are still outstanding infrastructure decisions;
-  :mod:`isaac_api.mcp.deployment` is the seam they drop into, and the DEFAULT
-  binding mounts no route at all rather than mounting one that refuses.
+* **Not wired, on purpose:** any *remotely reachable* connection **in any
+  deployment that exists**. Two bindings can now serve a transport, and neither
+  is reachable: ``local-loopback`` refuses every request whose socket peer is not
+  a loopback address, refuses one that came through a proxy, and refuses a
+  credential it cannot verify; ``oauth-resource-server`` (``oauth.py``) is
+  ~~a complete OAuth 2.1 protected resource~~ **an OAuth 2.1 protected resource
+  for the MCP authorization chapter** and **resolves to the unconfigured
+  binding unless an operator supplies an issuer, a canonical resource URI and a
+  verification key set** — none of which exists here, in any manifest, or in this
+  repository at all. The DEFAULT binding mounts no route whatsoever, and
+  ``ISAAC_MCP_DEPLOYMENT`` is unset in every deployment.
 
-  *This paragraph previously read "Not wired, on purpose: any transport, and
-  therefore any real connection." It is corrected rather than deleted, because
-  the thing it was protecting — that no scientist's Claude can reach hosted ISAAC
-  until Dean answers D1 and D2 — is unchanged. Only the mechanism moved.*
+  *"Complete" is struck 2026-08-30, and this was the FOURTH site carrying it — the
+  other three being ``oauth.py``'s module docstring, ``docs/mcp-capability-audit.md``
+  §"Read the boundary precisely", and by implication ``jwt.py``'s ``typ`` note. The
+  word named no chapter, so it read as covering a specification of which the module
+  implements one part; and it was written while three JSON-RPC methods still
+  answered before authentication. Both are corrected, and* ``oauth.py`` *now
+  enumerates four deliberate divergences rather than implying none. The
+  unreachability claim in this paragraph was true throughout and is unchanged.*
+
+  Reachability (**D1**) and the authentication model (**D2**) are still
+  outstanding infrastructure decisions and **``oauth.py`` did not answer either**.
+  It makes them answerable: the application half is now reviewable code rather
+  than a plan, and what remains — a firewall allowlist for Anthropic's egress
+  range to *two* hosts, an issuer, a registered client — is external and is
+  Dean's. See ``docs/mcp-oauth-operator-requirements-2026-08-27.md``.
+
+  *This paragraph has been corrected twice, and both corrections are kept because
+  each protected the same claim through a different mechanism. It first read "Not
+  wired, on purpose: any transport, and therefore any real connection", which
+  stopped being true when ``transport.py`` landed. It then named ``local-loopback``
+  as "the one binding that serves a transport", which stopped being true when
+  ``oauth.py`` landed. The thing being protected has never changed: **no
+  scientist's Claude can reach hosted ISAAC until D1 and D2 are answered.***
 
 The module map, in the order a reader should take them:
 
@@ -35,7 +58,9 @@ The module map, in the order a reader should take them:
 ``client``      the only path to ISAAC, hard-bound to the operation allowlist
 ``tools``       the tools and their schemas
 ``server``      JSON-RPC framing and the authorization checks around each call
-``transport``   the HTTP endpoint, the loopback guard, and the mount decision
+``transport``   the HTTP endpoint, the entry guards, and the mount decision
+``jwt``         JWS/JWT verification, standard library only, no network
+``oauth``       the OAuth 2.1 protected-resource binding — disabled by default
 """
 
 from __future__ import annotations

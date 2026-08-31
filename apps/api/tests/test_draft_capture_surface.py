@@ -286,7 +286,33 @@ def test_the_four_buckets_are_the_measured_ones(client):
         )
     }
 
-    assert record == {"system.domain", "system.technique"}
+    # ── RE-MEASURED ON THE MERGED TREE, 2026-08-30: 2 -> 14 ────────────────────────
+    # This read `{"system.domain", "system.technique"}` and was right: those were the
+    # only two paths a record-level route accepted. The campaign-sheet slice on `main`
+    # widened the record routes to FOURTEEN field paths, and this assertion is what
+    # caught the capture surface still deriving `record_writable` from
+    # `_record_enum_fields()` — i.e. still telling a scientist that twelve sample and
+    # facility values cannot be entered on the record, one screen away from an
+    # operation that accepts them.
+    #
+    # Written out rather than counted, because the point is WHICH paths: a count would
+    # pass over a set that swapped one member for another.
+    assert record == {
+        "sample.composition.CuO2_mass_fraction",
+        "sample.composition.sucrose_mass_fraction",
+        "sample.geometry.pellet_diameter_mm",
+        "sample.material.formula",
+        "sample.material.name",
+        "sample.material.provenance",
+        "sample.sample_form",
+        "system.domain",
+        "system.facility.beamline",
+        "system.facility.endstation",
+        "system.facility.facility_name",
+        "system.facility.organization",
+        "system.facility.site",
+        "system.technique",
+    }
     assert run_field == {
         "context.environment",
         "context.temperature_K",

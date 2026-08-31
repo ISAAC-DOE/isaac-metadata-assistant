@@ -698,10 +698,28 @@ def test_both_answers_operations_declare_the_two_refusals_they_perform(client):
         description = document["paths"][path]["post"]["responses"]["422"]["description"]
         assert "unrecognized_field" in description, path
         assert "invalid_field_value" in description, path
-        # The withdrawn sentence survives ONLY as a struck-through correction. Deleting
-        # it would hide that the contract used to say the opposite.
-        assert "~~A wrong-TYPED value is NOT this refusal" in description, path
-        assert "WITHDRAWN" in description, path
+        # ── RE-PINNED 2026-08-30: THE DECLARATION, NOT ITS TYPOGRAPHY ──────────────
+        # This used to require the literal `~~A wrong-TYPED value is NOT this refusal`
+        # and the word `WITHDRAWN` — i.e. it required a SERVED string to carry an
+        # editorial strikethrough. That was the right instinct applied to the wrong
+        # surface. This description is rendered to scientists in Settings -> API Docs
+        # as PLAIN TEXT (`ApiDocs.tsx`; there is no markdown renderer in `apps/web`),
+        # so `~~` reached the reader as literal tildes around a sentence the same
+        # paragraph then contradicts, and the test made removing them a test failure.
+        #
+        # WHAT THIS TEST IS ACTUALLY FOR IS UNCHANGED and is now asserted directly: a
+        # contract CHANGE — refusing a key that was documented as ignored — must be
+        # DECLARED rather than merely implemented. So the description must still say
+        # what the behaviour used to be and when it changed. Deleting the disclosure
+        # fails here exactly as before; only the markup is no longer required.
+        assert "Until 2026-08-25" in description, path
+        assert "was instead dropped by the core" in description, path
+        # AND THE CURRENT BEHAVIOUR IS STATED POSITIVELY, so this cannot be satisfied by
+        # a description that only reminisces about the old contract.
+        assert "IS this refusal" in description, path
+        # The struck typography must NOT come back to a served string; the history for
+        # this change lives in `routes.py`'s own comments, which are not served.
+        assert "~~" not in description, path
 
     prose = document["paths"]["/api/experiments/{experiment_id}/answers"]["post"]["description"]
     assert "unrecognized_field" in prose, prose

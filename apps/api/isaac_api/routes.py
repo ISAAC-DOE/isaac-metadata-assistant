@@ -18,7 +18,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import Annotated, Any, Literal, Mapping, Sequence
+from typing import Annotated, Any, Literal, Mapping, NamedTuple, Sequence
 
 import logging
 
@@ -61,6 +61,7 @@ from . import identity as identity_module
 from . import memory
 from . import memory_graph
 from . import notes
+from . import proposals
 from . import provenance
 from . import revision_history
 from . import runtime_mode
@@ -3432,8 +3433,19 @@ def post_experiment_discard(
         "open scientific question rather than an omission.\n\n"
         "None of this describes the official ISAAC schema's full field set, which is "
         "larger; it describes what this application can extract into and write at."
+        "\n\n"
+        "`record_blocks` carries the record-level BLOCKS beside the fields — "
+        "`block:attribution` and `block:tags`, keyed by the same namespaced address "
+        "the write operations take. They are not `fields`, so they can appear in no "
+        "group; a client that could read a facility name but not the contributors "
+        "beside it would have to overwrite a block it had never seen in order to add "
+        "to it. `null` means the record carries nothing there. The address set is "
+        "DERIVED from the same classification the write operations use, so a block "
+        "that becomes record-level appears here in the same change."
     ),
-    response_description="The draft's fields, grouped, with the current `ETag`.",
+    response_description=(
+        "The draft's fields, grouped, the record-level block payloads, and the "
+        "current `ETag`."    ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
@@ -3441,6 +3453,11 @@ def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Re
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
+    # BOTH SIDES OF THE MERGE ADDED TO THIS ONE RETURN, and both are kept: the capture
+    # model that says WHERE a value may be entered, and the record-level blocks that
+    # say what the record currently holds beside its fields. They answer different
+    # questions about the same read and neither subsumes the other.
+    #
     # The capture model covers the skeleton AND whatever the draft happens to hold, so
     # a path outside `CAPTURE_SURFACE_PATHS` — one a future extractor writes, say —
     # still renders with real facts rather than with the fail-closed unknown. It is
@@ -3449,7 +3466,18 @@ def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Re
     # requests would be a mutable object every response hands out.
     fields = exp.draft.get("fields") or {}
     known = CAPTURE_SURFACE_PATHS | {p for p in fields if isinstance(p, str)}
-    return serialize.draft_to_groups(exp.draft, capture=capture_facts(known))
+    return {
+        **serialize.draft_to_groups(exp.draft, capture=capture_facts(known)),
+        # READ, NOT REFUSED, and no shape is asserted. A persisted block of any shape is
+        # handed back as it is stored: `CLAUDE.md` §11's read-path doctrine says a
+        # malformed value already on disk cannot be refused to a reader who did nothing
+        # wrong, and a client that is about to REPLACE a block needs to see what it is
+        # replacing — including when what it is replacing is wrong.
+        "record_blocks": {
+            address: (exp.draft or {}).get(ws.parse_address(address)[1])
+            for address in sorted(RECORD_WRITABLE_BLOCK_ADDRESSES)
+        },
+    }
 
 
 # --- 6. pending ---------------------------------------------------------------
@@ -4011,19 +4039,152 @@ def _record_enum_fields() -> Mapping[str, tuple]:
     return MappingProxyType(found)
 
 
-def _record_enum_field_answers(answers_by_id: dict) -> dict:
-    """The non-blank entries of an answers body that name one of those paths.
+class _RecordFieldSpec(NamedTuple):
+    """What the vendored official schema says about ONE record-level field path.
+
+    Both members may be ``None``, and the two ``None``s mean different things:
+
+    * ``declared_type is None`` — the schema declares NO type at this path, because the
+      path lives under one of its DESIGNATED OPEN namespaces. Measured on v1.05:
+      ``sample.composition`` declares no ``properties`` at all (*"Open by design"*, its
+      own description), and ``sample.geometry`` declares ``properties`` that do not
+      include ``pellet_diameter_mm``. Three of the thirteen record-level paths resolve
+      to nothing for that reason. **No type is then enforced, and none is invented** —
+      ``CLAUDE.md`` §5 forbids this application deciding what the schema declined to
+      say. Storability is still enforced, which is a statement about this process
+      rather than about the science.
+    * ``enum is None`` — the schema closes this path with no fixed value list, so any
+      correctly-typed value is admissible here and the official validator remains the
+      authority on whether it is the RIGHT one.
+    """
+
+    declared_type: str | None
+    enum: tuple | None
+
+
+@functools.lru_cache(maxsize=1)
+def _record_writable_fields() -> Mapping[str, _RecordFieldSpec]:
+    """Every record-level FIELD path a record-level write accepts -> what the schema says.
+
+    ONE MAPPING, TWO SOURCES, AND NEITHER IS TRANSCRIBED:
+
+    * :data:`RECORD_WRITABLE_FIELD_PATHS` — the experiment-level half of the
+      extractor/level split, which is also exactly what
+      :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` is built from, so the record-level write
+      surface and the run-level override surface cannot disagree about which paths are
+      the record's;
+    * :func:`_record_enum_fields` — the paths the schema itself CLOSES with an enum and
+      declares REQUIRED. It contributes ``system.domain``, which is absent from
+      ``EXTRACTOR_FIELD_MAP`` and therefore from the set above, and it is why that
+      function is called rather than folded in: its three gates are the argument that
+      made those two fields writable in the first place and they are not re-litigated
+      here.
+
+    THE PER-PATH FACTS ARE READ FROM THE VENDORED DOCUMENT AT RUNTIME, never restated.
+    ``CLAUDE.md`` §1 makes the schema the authority on structure and vocabulary, so a
+    refusal that names a type or an allowed list must quote the document rather than a
+    copy of it — and reading it means every gate FOLLOWS a schema refresh instead of
+    silently disagreeing with one.
+
+    FAIL-CLOSED, AND MORE BROADLY THAN ITS SIBLING. An unreadable or unparseable schema
+    yields an EMPTY mapping, so NO record-level field path is recognised, every such
+    write is refused as ``unrecognized_field``, and nothing is stored. That is wider
+    than :func:`_record_enum_fields`' own fail-closed answer — which only had two paths
+    to withhold — and it is deliberate: this application must not accept a value at a
+    path whose declared type it could not read, because it would then have applied no
+    check the schema was entitled to make. ``lru_cache`` holds that empty answer for the
+    life of the process rather than for one request, exactly as
+    :func:`_official_block_type` records for itself; the direction is refusing writes
+    that would have been accepted, never accepting writes that should have been refused.
+
+    IT IS THE SECOND CACHE OVER THE SAME DOCUMENT, and that is stated rather than left
+    to be discovered by whoever writes the next test. Nothing in production invalidates
+    either cache, so the two can only disagree in a process that clears one — and a test
+    that clears :func:`_record_enum_fields` alone leaves THIS one serving its warm
+    answer, which is the mapping the write routes actually consult. That is not a
+    hypothetical: it is the failure mode
+    ``test_an_unreadable_schema_fails_closed_and_writes_nothing`` was extended to cover
+    after it passed while the route accepted a write it should have refused.
+
+    THE RESULT IS READ-ONLY BECAUSE IT IS SHARED — same reason, same mechanism, as
+    :func:`_record_enum_fields`: every call returns the SAME object, so a caller that
+    added a path to it would widen this application's write surface for the life of the
+    process. The mapping is wrapped and its values are immutable tuples.
+    """
+    try:
+        schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # unreadable or unparseable vendored schema
+        return MappingProxyType({})
+
+    def declared(path: str) -> _RecordFieldSpec:
+        node: object = schema
+        for segment in path.split("."):
+            properties = node.get("properties") if isinstance(node, dict) else None
+            if not isinstance(properties, dict) or segment not in properties:
+                return _RecordFieldSpec(None, None)  # an OPEN namespace; see the class
+            node = properties[segment]
+        if not isinstance(node, dict):
+            return _RecordFieldSpec(None, None)
+        node_type = node.get("type")
+        values = node.get("enum")
+        return _RecordFieldSpec(
+            node_type if isinstance(node_type, str) else None,
+            tuple(values) if isinstance(values, list) else None,
+        )
+
+    enum_fields = _record_enum_fields()
+    return MappingProxyType(
+        {
+            path: declared(path)
+            for path in sorted({*RECORD_WRITABLE_FIELD_PATHS, *enum_fields})
+        }
+    )
+
+
+def _record_field_answers(answers_by_id: dict) -> dict:
+    """The non-blank entries of an answers body that name a record-level FIELD path.
+
+    RENAMED FROM ``_record_enum_field_answers`` AND WIDENED, because the key set it
+    selects is no longer only the schema-enum pair: the twelve facility/sample paths
+    join it through :data:`RECORD_WRITABLE_FIELD_PATHS`. The name is the set's, not one
+    member's — a helper named after its first key set is how the next widening happens
+    without anyone noticing the name stopped covering the contents.
 
     Blank (``None``/``""``) is excluded here for the same reason every other reader of
     an answers body excludes it: a blank answer is not an answer, and this operation
-    does not CLEAR a field. Clearing a confirmed record-level enum value is deliberately
-    not built by this slice — see :func:`_apply_record_enum_fields`.
+    does not CLEAR a field. Clearing a confirmed record-level value is deliberately not
+    built by this slice — see :func:`_apply_record_fields`.
     """
-    known = _record_enum_fields()
+    known = _record_writable_fields()
     return {
         key: value
         for key, value in (answers_by_id or {}).items()
         if isinstance(key, str) and key in known and value not in (None, "")
+    }
+
+
+def _record_block_answers(answers_by_id: dict) -> dict:
+    """The non-blank entries of an answers body that name a record-level BLOCK address.
+
+    KEYED BY THE NAMESPACED ADDRESS (``block:attribution``, ``block:tags``) and NOT by a
+    bare ``attribution``/``tags``, which is ``workspace.parse_address``' own argument
+    reused rather than re-decided: ``tags`` is both a top-level draft block and a legal
+    official schema path, so a bare token would be ambiguous the moment anything put
+    ``tags`` in the field map. It is also the spelling a client already reads off a
+    run's ``inherited`` map and sends to the override operation, so one address has one
+    spelling everywhere on this API.
+
+    ``None``/``""`` is dropped for the reason every other reader drops it. An empty
+    LIST or OBJECT is NOT dropped: ``{"block:tags": []}`` is a scientist saying this
+    record carries no tags, which is a statement, and the block type gate below accepts
+    it because the schema declares ``tags`` an array.
+    """
+    return {
+        key: value
+        for key, value in (answers_by_id or {}).items()
+        if isinstance(key, str)
+        and key in RECORD_WRITABLE_BLOCK_ADDRESSES
+        and value not in (None, "")
     }
 
 
@@ -4039,34 +4200,96 @@ def _record_field_question(path: str) -> str:
     return f"Value for {path} on this record?"
 
 
-def _enum_field_is_confirmed(draft: dict, path: str) -> bool:
-    """Whether the record already holds a confirmed value at one enum field path.
+#: Returned by :func:`_record_answer_stored_value` for a key the record holds nothing
+#: at. A sentinel rather than ``None``, because ``None`` is a value a persisted envelope
+#: can literally carry and "absent" and "present but null" must not compare equal.
+_NO_STORED_VALUE = object()
 
-    THIS IS THE ``/answers`` vs ``/edit`` SPLIT FOR THESE FIELDS, and it is deliberately
+
+def _record_answer_is_confirmed(draft: dict, key: str) -> bool:
+    """Whether the record already holds a confirmed value at one record-level key.
+
+    THIS IS THE ``/answers`` vs ``/edit`` SPLIT FOR THESE KEYS, and it is deliberately
     the same split the rest of this module already draws rather than a second rule.
     ``/answers`` answers what is OPEN; ``/edit`` corrects what is ANSWERED. For a
     ``series``/``qc``/``descriptor`` the state is read off ``draft["pending"]``; these
-    paths raise no blocker (nothing in ``extract.draft_builder`` emits one for them), so
-    the same question is asked of the field map instead: a field the record holds a
-    non-null, non-``missing`` value for is answered, and one it does not is open.
+    keys raise no blocker (nothing in ``extract.draft_builder`` emits one for them), so
+    the same question is asked of the stored document instead.
 
-    ``draft.get("fields")`` IS TYPE-GUARDED, not read with ``or {}``. A persisted
-    non-dict there is a document a reader did nothing to deserve — ``CLAUDE.md`` §11's
-    read-path doctrine — and the honest answer for it is "no confirmed value", which
-    routes the caller to ``/answers`` and refuses ``/edit``. Neither branch reads or
-    coerces the malformed value.
+    ONE FUNCTION FOR BOTH NAMESPACES, because it is one rule. A ``field:`` key is
+    confirmed when ``draft["fields"][path]`` is an envelope holding a non-null,
+    non-``missing`` value; a ``block:`` key is confirmed when the draft carries that
+    block at all with a non-``None`` payload. Two functions would be two chances for
+    ``/answers`` and ``/edit`` to disagree about which one owns a key.
+
+    EVERY CONTAINER READ IS TYPE-GUARDED, never ``or {}``. A persisted non-dict is a
+    document a reader did nothing to deserve — ``CLAUDE.md`` §11's read-path doctrine —
+    and the honest answer for it is "no confirmed value", which routes the caller to
+    ``/answers`` and refuses ``/edit``. Nothing here reads or coerces a malformed value.
     """
-    fields = draft.get("fields")
-    env = fields.get(path) if isinstance(fields, dict) else None
-    return (
+    return _record_answer_stored_value(draft, key) is not _NO_STORED_VALUE
+
+
+def _block_payload_carries_nothing(payload: object) -> bool:
+    """Is this stored block payload a SCAFFOLD rather than something a person authored?
+
+    **THIS EXISTS BECAUSE A CREATED RECORD SHIPS WITH ONE.** ``POST /api/experiments``
+    seeds ``attribution: {"contributors": []}`` — the block key is present and its
+    payload is a truthy dict, but nobody has said anything with it. Treating key presence
+    as "already answered" made the FIRST contributor unaddable through the answering
+    operation on every record this application creates: ``/answers`` refused with
+    ``already_answered`` and pointed at ``/edit``, which is the operation documented to
+    CORRECT a value the record holds. Measured, not reasoned about.
+
+    IT IS A STRUCTURAL DEFINITION AND NOTHING MORE. It decides WHICH OPERATION owns a
+    write; it never decides whether a value is valid, never writes anything, and is not
+    consulted by the exporter, the draft validator or the official validator. Empty means
+    ``None``, an empty container, or a mapping every value of which is itself empty by
+    this same rule — so ``{"contributors": []}`` and ``{}`` are empty while
+    ``{"contributors": [{}]}`` is not, because a contributor entry someone actually sent
+    is content even when the deterministic checks will later refuse its shape.
+
+    GENERIC RATHER THAN PER-BLOCK, deliberately. A rule spelled ``attribution ->
+    contributors``, ``tags -> the list`` would be a second, hand-written copy of what the
+    two blocks contain, free to drift the moment a third becomes record-level.
+    """
+    if payload is None:
+        return True
+    if isinstance(payload, (str, bytes, list, tuple, set)):
+        return len(payload) == 0
+    if isinstance(payload, dict):
+        return all(_block_payload_carries_nothing(value) for value in payload.values())
+    return False
+
+
+def _record_answer_stored_value(draft: dict, key: str):
+    """The value the record currently holds at one record-level key, or the sentinel.
+
+    THE COMPARISON HALF of :func:`_record_answer_is_confirmed`, split out so the two
+    refusals that ask *"does the submitted value DIFFER from the stored one?"* read the
+    stored value through the same accessor that decided it was stored. Reading it twice,
+    once per namespace, at each of two call sites is four chances to disagree.
+    """
+    if key in RECORD_WRITABLE_BLOCK_ADDRESSES:
+        _kind, name = ws.parse_address(key)
+        stored = draft.get(name) if isinstance(draft, dict) else None
+        # A SEEDED, EMPTY BLOCK IS NOT A STORED VALUE — see
+        # `_block_payload_carries_nothing`, which exists because every record this
+        # application creates ships with one.
+        return _NO_STORED_VALUE if _block_payload_carries_nothing(stored) else stored
+    fields = draft.get("fields") if isinstance(draft, dict) else None
+    env = fields.get(key) if isinstance(fields, dict) else None
+    if (
         isinstance(env, dict)
         and env.get("value") is not None
         and env.get("status") != "missing"
-    )
+    ):
+        return env["value"]
+    return _NO_STORED_VALUE
 
 
 def _refuse_a_value_the_schema_does_not_allow(
-    enum_answers: dict, identifiers: dict
+    field_answers: dict, identifiers: dict
 ) -> JSONResponse | None:
     """``422 not_an_allowed_value`` for a value outside the schema's own enum, else ``None``.
 
@@ -4097,10 +4320,25 @@ def _refuse_a_value_the_schema_does_not_allow(
     reflection surface.
 
     NOTHING IS WRITTEN, and this runs before any mutation on both operations.
+
+    **WIDENED WITHOUT BEING LOOSENED, 2026-08-30.** Its input is now every record-level
+    FIELD path a write accepts, not only the two the schema closes with an enum — and it
+    refuses ONLY at a path whose ``_RecordFieldSpec.enum`` is non-``None``. So the
+    twelve facility/sample paths pass through it untouched (the schema publishes no
+    fixed list for any of them and inventing one here would be exactly the vocabulary
+    authorship ``CLAUDE.md`` §1 reserves to the document), and if a schema refresh ever
+    closes one of them, this gate covers it on the same day without an edit. The old
+    ``value not in known.get(path, ())`` would have refused EVERY value at every
+    non-enum path once the input widened, which is why the membership test is now
+    guarded by the enum's presence rather than by a default of ``()``.
     """
-    known = _record_enum_fields()
+    known = _record_writable_fields()
     offending = sorted(
-        path for path, value in enum_answers.items() if value not in known.get(path, ())
+        path
+        for path, value in field_answers.items()
+        if (spec := known.get(path)) is not None
+        and spec.enum is not None
+        and value not in spec.enum
     )
     if not offending:
         return None
@@ -4111,7 +4349,9 @@ def _refuse_a_value_the_schema_does_not_allow(
             **identifiers,
             "key": offending[0],
             "keys": offending,
-            "allowed": {path: list(known.get(path, ())) for path in offending},
+            "allowed": {
+                path: list(known[path].enum or ()) for path in offending
+            },
             "message": (
                 "The official ISAAC schema closes each of these fields with a fixed "
                 "list of values, and what was sent is not one of them. Nothing was "
@@ -4122,10 +4362,149 @@ def _refuse_a_value_the_schema_does_not_allow(
     )
 
 
-def _refuse_answering_an_already_confirmed_enum_field(
-    draft: dict, enum_answers: dict, *, edit_at: str, identifiers: dict
+def _refuse_a_record_value_the_record_cannot_hold(
+    field_answers: dict, identifiers: dict
 ) -> JSONResponse | None:
-    """The ``already_answered`` refusal, for a field whose state lives in the field map.
+    """``422 invalid_field_value`` for a record-level field value, or ``None``.
+
+    TWO CONDITIONS UNDER ONE CODE, AND THE BODY — NOT THE MESSAGE — SAYS WHICH:
+
+    1. **Storable at all** — the shared :func:`_is_storable_value`, so ``NaN``,
+       ``Infinity``, a lone surrogate, an absurdly nested value and an oversized one are
+       refused here for exactly the reasons they are refused on the run edit route and
+       on the override route. A value written here lands in the same document, is walked
+       by the same signature hash and is rendered by the same response serializer, and
+       this module has already paid twice for a value that committed and then made every
+       later read of the record a permanent 500.
+    2. **The JSON type the official schema declares for that path**, read from the
+       vendored document at runtime by :func:`_record_writable_fields` and never
+       transcribed. ``bool`` is excluded from ``integer``/``number`` unless the schema
+       actually declared ``boolean``, because ``bool`` is a subclass of ``int`` and
+       satisfies a check it has no business satisfying — the same exclusion
+       :func:`_refuse_override_payload` makes for a block's type, for the same reason.
+
+    THE CODE IS ``invalid_field_value`` AND THAT IS DELIBERATE RATHER THAN CONVENIENT.
+    :func:`_refuse_unstorable_answer` already argues it at length for condition 1 on
+    these same two operations — *"a client that already branches on
+    ``invalid_field_value`` should not need a second code to learn that a value it sent
+    is too big"* — and a wrong-TYPED value is the same statement about the same field
+    set: this value cannot be held here. A third code would split one client branch in
+    three.
+
+    **THE CAUSE IS NAMED STRUCTURALLY, WHICH IS THE ONLY WAY IT CAN BE NAMED HONESTLY
+    HERE.** ``_refuse_unstorable_answer``'s message *"deliberately states no cause"*, and
+    the reason is recorded: a cause-naming sentence was measured being served verbatim
+    about a key it did not describe. That hazard is real and it is a hazard about a
+    SENTENCE, which is fixed at write time for a body that may name several keys refused
+    for different reasons. So no sentence claims a per-key cause; ``expected_types``
+    does, and it is the same device ``not_an_allowed_value`` already uses for
+    ``allowed``: a key IN it was refused because the schema declares that type and this
+    value is not of it, and a key ABSENT from it was refused because the value cannot be
+    stored at any path at all. The message says exactly that and asserts nothing else.
+
+    ~~A path the schema declares no type for is refused fail-closed~~ — **NOT DONE, and
+    named rather than left to be discovered.** Three of the thirteen record-level paths
+    (``sample.composition.CuO2_mass_fraction``, ``sample.composition.sucrose_mass_fraction``
+    and ``sample.geometry.pellet_diameter_mm``) resolve to nothing, because the schema
+    declares ``sample.composition`` and ``sample.geometry`` OPEN BY DESIGN in their own
+    descriptions. Refusing them would make three of the twelve paths this slice exists to
+    open unwritable; inventing a type for them would be this application deciding what
+    the schema declined to say, which ``CLAUDE.md`` §5 forbids and §1 reserves to the
+    document. They are therefore accepted subject to condition 1 only, which is a claim
+    about what this process can store and not a claim about the science. Condition 1
+    still applies to every path, so the open namespaces are not an unbounded ingress.
+
+    NOTHING IS WRITTEN, and this runs before any mutation on both operations.
+    """
+    known = _record_writable_fields()
+    unstorable: list[str] = []
+    wrong_typed: dict[str, str] = {}
+    for path in sorted(field_answers):
+        value = field_answers[path]
+        if not _is_storable_value(value):
+            unstorable.append(path)
+            continue
+        declared = (known.get(path) or _RecordFieldSpec(None, None)).declared_type
+        expected = _JSON_TYPE_TO_PYTHON.get(declared or "")
+        if declared is None or expected is None:
+            continue  # an OPEN namespace — see the docstring; nothing is invented
+        if not isinstance(value, expected) or (
+            declared != "boolean" and isinstance(value, bool)
+        ):
+            wrong_typed[path] = declared
+    offending = sorted([*unstorable, *wrong_typed])
+    if not offending:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "invalid_field_value",
+            **identifiers,
+            "key": offending[0],
+            "keys": offending,
+            "expected_types": {path: wrong_typed[path] for path in sorted(wrong_typed)},
+            "message": (
+                "Nothing was written: any value the record already held for these "
+                "fields is unchanged, and any question this would have answered is "
+                "still open. A field named in `expected_types` was refused because "
+                "the official ISAAC schema declares that JSON type for it and what "
+                "was sent is not of it. A field NOT named there was refused because "
+                "the value cannot be stored at any field — too large, nested too "
+                "deeply, or not renderable as JSON (`NaN`, `Infinity`, a lone "
+                "surrogate)."
+            ),
+        },
+    )
+
+
+def _refuse_a_record_block_the_record_cannot_hold(
+    block_answers: dict, identifiers: dict
+) -> JSONResponse | None:
+    """The override route's OWN block-payload gate, applied to a record-level write.
+
+    :func:`_refuse_override_payload` IS CALLED, NOT REIMPLEMENTED, and the reuse is the
+    whole point. It already applies, in order: storability; the JSON type the official
+    schema declares for the block (``object`` for ``attribution``, ``array`` for
+    ``tags``), fail-closed when the schema declares none; and the deterministic draft
+    validator's own refusal of ``attribution.uploaded_by`` — a field no client may
+    author, because the schema declares it stamped from an authenticated identity and
+    this application has none to stamp it with (``CLAUDE.md`` §11: the stamp requires
+    ``trust_basis == verified_edge_assertion`` and no verifier in this build mints
+    that). A second copy of any of those three here would be a second definition of
+    what a block payload may be, free to drift from the one the override route enforces.
+
+    IT INHERITS THE LIMIT AS WELL AS THE GATE, and that is stated rather than implied:
+    that function applies NO ``attribution.contributors[...]`` finding, shape or
+    evidence, and its own docstring records the measurement. So a contributor missing a
+    ``name``/``role``, or carrying a list-valued ``name``, is STORED here exactly as it
+    is stored through an override, refused later by the run check and by the export
+    gate, and correctable by a further write. That posture is fail-closed at the
+    boundary that mints an official record, which is the boundary that matters.
+
+    ONE REFUSAL PER REQUEST, taking the addresses in sorted order, so a body naming both
+    blocks with two different faults reports a stable one rather than a dict-order one.
+    """
+    for address in sorted(block_answers):
+        _kind, name = ws.parse_address(address)
+        refusal = _refuse_override_payload(
+            ws.ADDRESS_BLOCK,
+            name,
+            block_answers[address],
+            identifiers=identifiers,
+            # NOT "override". A record-level write is a different act, and a refusal
+            # that names the wrong one describes something the caller did not do on the
+            # one screen they read to work out what to fix.
+            subject="value",
+        )
+        if refusal is not None:
+            return refusal
+    return None
+
+
+def _refuse_answering_an_already_confirmed_record_key(
+    draft: dict, record_answers: dict, *, edit_at: str, identifiers: dict
+) -> JSONResponse | None:
+    """The ``already_answered`` refusal, for a key whose state lives in the draft itself.
 
     THE SAME RULE AND THE SAME ERROR CODE as
     :func:`_refuse_answering_an_already_answered_key`, deliberately: this operation
@@ -4135,25 +4514,33 @@ def _refuse_answering_an_already_confirmed_enum_field(
 
     IT IS A SEPARATE FUNCTION BECAUSE THE STATE IS READ SOMEWHERE ELSE, not because the
     rule differs. That one probes with ``apply_corrections`` over ``draft["pending"]``
-    and the blocks each blocker's value lives in; these paths have no blocker and their
-    value lives in ``draft["fields"]``, so the probe would answer about nothing.
+    and the blocks each blocker's value lives in; these keys have no blocker, and their
+    value lives in ``draft["fields"]`` (a field path) or in the top-level block itself
+    (a ``block:`` address), so the probe would answer about nothing.
+
+    RENAMED FROM ``..._an_already_confirmed_enum_field`` AND WIDENED: it now covers every
+    record-level field path and both record-level block addresses. Both namespaces are
+    read through :func:`_record_answer_stored_value`, so "is it confirmed?" and "does the
+    submitted value differ?" are answered by one accessor rather than by two readings
+    that could disagree.
 
     ``answer_at`` IS UNCONDITIONALLY THE RECORD'S CORRECTION OPERATION, and that differs
     from the sibling for a reason worth stating rather than leaving to be noticed. Every
     key the sibling can name is RUN-owned, so on a record with runs it must withhold the
-    pointer; these two are EXPERIMENT-level (``workspace.EXPERIMENT_LEVEL_FIELD_PATHS``),
-    the record's own ``/edit`` accepts them whether or not runs exist, and the pointer is
-    therefore provably actionable in every state this refusal is reachable in.
+    pointer; every key this one can name is EXPERIMENT-level (by construction — the two
+    sets it reads are filtered on ``LEVEL_EXPERIMENT``), the record's own ``/edit``
+    accepts them whether or not runs exist, and the pointer is therefore provably
+    actionable in every state this refusal is reachable in.
 
     RESUBMITTING THE IDENTICAL VALUE IS STILL A SUCCESS, exactly as on every other key:
     the refusal fires only where the two values differ, which is the only case in which
     something the caller sent would have been lost.
     """
     offending = sorted(
-        path
-        for path, value in enum_answers.items()
-        if _enum_field_is_confirmed(draft, path)
-        and ((draft.get("fields") or {}).get(path) or {}).get("value") != value
+        key
+        for key, value in record_answers.items()
+        if (stored := _record_answer_stored_value(draft, key)) is not _NO_STORED_VALUE
+        and stored != value
     )
     if not offending:
         return None
@@ -4177,23 +4564,23 @@ def _refuse_answering_an_already_confirmed_enum_field(
     )
 
 
-def _refuse_correcting_an_unconfirmed_enum_field(
-    draft: dict, enum_answers: dict, *, answer_at: str, identifiers: dict
+def _refuse_correcting_an_unconfirmed_record_key(
+    draft: dict, record_answers: dict, *, answer_at: str, identifiers: dict
 ) -> JSONResponse | None:
-    """The ``not_yet_answered`` refusal, for a field whose state lives in the field map.
+    """The ``not_yet_answered`` refusal, for a key whose state lives in the draft itself.
 
     The exact mirror of the function above, and the same-code/different-storage argument
-    applies unchanged. A correction of a field the record holds no value for would store
-    a first value through an operation whose whole contract is that it CORRECTS one —
-    and would do so past the ``already_answered`` redirect that sends a caller here, so
-    the two operations would each accept what the other is documented to own.
+    applies unchanged. A correction of a key the record holds no value for would store a
+    first value through an operation whose whole contract is that it CORRECTS one — and
+    would do so past the ``already_answered`` redirect that sends a caller here, so the
+    two operations would each accept what the other is documented to own.
 
     ``answer_at`` is the record's own answers operation, unconditionally, for the reason
-    the sibling gives: these paths are experiment-level, so that operation accepts them
-    on a record with runs and on one without.
+    the sibling gives: every key it can name is experiment-level, so that operation
+    accepts them on a record with runs and on one without.
     """
     offending = sorted(
-        path for path in enum_answers if not _enum_field_is_confirmed(draft, path)
+        key for key in record_answers if not _record_answer_is_confirmed(draft, key)
     )
     if not offending:
         return None
@@ -4214,8 +4601,8 @@ def _refuse_correcting_an_unconfirmed_enum_field(
     )
 
 
-def _apply_record_enum_fields(draft: dict, enum_answers: dict, timestamp: str) -> list[str]:
-    """Write each confirmed enum value into the RECORD's own field map. What changed.
+def _apply_record_fields(draft: dict, field_answers: dict, timestamp: str) -> list[str]:
+    """Write each confirmed value into the RECORD's own field map. What changed.
 
     THE WRITER IS :func:`_apply_run_field`, REUSED RATHER THAN REIMPLEMENTED, and that
     is the whole point: it already mints the four-key ``models.user_confirmation``
@@ -4237,24 +4624,91 @@ def _apply_record_enum_fields(draft: dict, enum_answers: dict, timestamp: str) -
 
     CLEARING IS NOT BUILT, and is named rather than implied. :func:`_apply_run_field`
     removes a field when handed ``None``, and this function can never hand it one:
-    :func:`_record_enum_field_answers` drops blanks before they arrive. Un-saying a
-    confirmed record-level classification is a real operation with its own questions —
-    what it means for a run that inherited it, and what the workflow should then say —
-    and inheriting it as a side effect of a blank-tolerant filter would be deciding
-    those questions by accident.
+    :func:`_record_field_answers` drops blanks before they arrive. Un-saying a confirmed
+    record-level value is a real operation with its own questions — what it means for a
+    run that inherited it, and what the workflow should then say — and inheriting it as
+    a side effect of a blank-tolerant filter would be deciding those questions by
+    accident.
+
+    WIDENED FROM THE TWO SCHEMA-ENUM PATHS TO EVERY RECORD-LEVEL FIELD PATH, and NOTHING
+    about the write changed with it: the same writer, the same envelope, the same
+    four-key confirmation, the same idempotence, the same question text. A facility name
+    a scientist types is a user confirmation over their own input in exactly the sense a
+    technique chosen from the schema's enum is, and it is exactly what the five
+    run-level paths already record through ``PATCH .../runs/{run_id}``. Nothing is
+    derived, defaulted, or inferred from another field.
     """
-    if not enum_answers:
+    if not field_answers:
         return []
     existing = draft.get("fields")
     fields = existing if isinstance(existing, dict) else {}
     written: list[str] = []
-    for path, value in enum_answers.items():
+    for path, value in field_answers.items():
         if _apply_run_field(
             fields, path, value, timestamp, question=_record_field_question(path)
         ):
             written.append(path)
     if written and not isinstance(existing, dict):
         draft["fields"] = fields
+    return written
+
+
+def _apply_record_blocks(draft: dict, block_answers: dict, timestamp: str) -> list[str]:
+    """Write each confirmed block payload onto the RECORD's draft. What changed.
+
+    THE PAYLOAD IS THE BLOCK ITSELF, which is the shape the override route already
+    stores at these two addresses and the shape ``resolved_run_draft`` already resolves
+    them from — so a value written here is read by exactly the machinery that reads an
+    inherited one, and no run needs to know where it came from.
+
+    ``attribution`` EARNS ITS ``block_evidence`` HERE, through the same two helpers the
+    override route uses (:func:`_attribution_confirmations` and
+    :func:`_rewrite_attribution_evidence`). The defect that pair exists to close is
+    exactly reachable at this level: ``draft_validator`` requires an
+    ``attribution:<name>|<role>`` entry for every contributor, so a write that stored the
+    block and no evidence would accept a contributor **that could never be exported, by
+    any subsequent request**. The entitlement is unchanged and is narrow: the recorded
+    claim is *"a request carrying ``confirmed_by_user: true`` supplied this contributor
+    at this operation"*, minted only for a contributor whose ``name`` and ``role`` are
+    both non-empty strings — because a key built from a list-valued name would let a
+    shape the official schema cannot hold pass the coverage gate. **No evidence rule is
+    weakened**: ``draft_validator`` is truth-path (``CLAUDE.md`` §13) and is untouched.
+
+    ``tags`` MINTS NO EVIDENCE, and that is the validator's own rule rather than an
+    omission here: ``tags`` is exempt from block-evidence coverage BY DESIGN
+    (``block_level``/``draft_validator`` — authorship IS the confirmation). Writing one
+    anyway would put a provenance entry into ``export.build_sidecar``'s output that
+    nothing asked for.
+
+    IDEMPOTENT, and it has to be for the same reason the field writer does: an evidence
+    entry carries a timestamp, so an unconditional rewrite would move ``rev`` on a
+    re-submission that changed nothing and destroy ``_save_versioned``'s byte-stable
+    no-op. A payload equal to the stored one is left alone; the evidence rewrite keeps a
+    matching entry with its ORIGINAL timestamp and stamps only a genuinely new one, and
+    it is consulted even when the payload is unchanged so that a block stored before
+    this write path existed can still earn the evidence it needs to export.
+    """
+    if not block_answers:
+        return []
+    written: list[str] = []
+    for address in sorted(block_answers):
+        _kind, name = ws.parse_address(address)
+        payload = block_answers[address]
+        changed = draft.get(name) != payload
+        if changed:
+            draft[name] = payload
+        if name == "attribution":
+            if _rewrite_attribution_evidence(
+                draft,
+                _attribution_confirmations(
+                    payload,
+                    timestamp,
+                    question=_RECORD_ATTRIBUTION_CONFIRMATION_QUESTION,
+                ),
+            ):
+                changed = True
+        if changed:
+            written.append(address)
     return written
 
 
@@ -5001,10 +5455,63 @@ _ANSWER_REFUSED_HEAD_TAIL: str = "`already_answered`.\n\n"
 #: pointing at a locked door: the caller sends a correctly spelled key and is told it
 #: misspelled one.
 _NOT_AN_ALLOWED_VALUE_IN_ANSWER_HEAD: str = "`not_an_allowed_value`, or "
+
+#: THE RECORD-LEVEL WRITE SURFACE, described once and composed into both record blocks.
+#:
+#: IT IS ON THE RECORD BLOCKS ONLY, for the reason the ``not_an_allowed_value`` prose
+#: gives at length: a run's answers/edit operation refuses every one of these keys with
+#: ``unrecognized_field`` and always has, so a run contract naming them would send a
+#: caller with a correctly spelled key to hunt for a misspelling.
+_RECORD_LEVEL_WRITE_PARAGRAPH: str = (
+    "**RECORD-LEVEL FIELDS AND BLOCKS ARE ANSWER KEYS HERE**, beside the record's "
+    "own blocking questions. Send an official dotted path (`sample.material.name`, "
+    "`system.facility.beamline`, `system.technique`, …) as the key and the value as "
+    "the value; send `block:attribution` or `block:tags` to set the whole block. The "
+    "admissible set is DERIVED at runtime — the deterministic extractor's official "
+    "paths that this build classifies as belonging to the record rather than to a "
+    "run, plus the two record-level blocks — so it follows a field-map or schema "
+    "change instead of being restated here. A path the build classifies as neither "
+    "level (`system.configuration.*`, `timestamps.created_utc`) is NOT writable and "
+    "is not guessed into a level; a RUN's own field (`context.*`, "
+    "`timestamps.acquired_*`) is written on the run. Each accepted value is recorded "
+    "as a `user_confirmation` on the record and every run INHERITS it by reference — "
+    "nothing is copied down, so a run that has recorded its own override at that "
+    "address keeps it. Nothing is derived from anything else, defaulted, or "
+    "inferred.\n\n"
+    "`invalid_field_value` ALSO COVERS THESE KEYS, with an extra `expected_types` "
+    "key: a field named there was refused because the official ISAAC schema declares "
+    "that JSON type for it and the value is not of it; a field absent from it was "
+    "refused because the value cannot be stored at all. Three paths sit under "
+    "namespaces the schema declares OPEN BY DESIGN (`sample.composition.*`, "
+    "`sample.geometry.*`) and so have no declared type — none is invented for them, "
+    "and the official validator remains the authority on whether a well-formed value "
+    "is the right one.\n\n"
+    "`invalid_block_payload` — a `block:` key carried a payload that is not the "
+    "block itself, of the type the official schema declares for it (an object for "
+    "`attribution`, an array for `tags`), or whose contents the deterministic checks "
+    "could not read. `attribution.uploaded_by` is refused inside an attribution "
+    "payload: the schema declares it stamped from an authenticated identity and this "
+    "application has none to stamp it with. The body is "
+    "`{error, experiment_id, address, expected_type, message}`, plus `findings` — the "
+    "draft validator's own words — when it has any.\n\n"
+    "`unrepresentable_value` — a `block:` key carried a payload that cannot be stored "
+    "at all: it nests more deeply, or is larger, than a stored value may, or it is not "
+    "representable in JSON (`NaN`, `Infinity`, a lone surrogate). It is NAMED HERE "
+    "because these operations can now raise it and the published contract did not "
+    "describe it; it is the same code, with the same body "
+    "(`{error, experiment_id, address, message}`), that the run override operation "
+    "already serves for the same condition, because it is the same gate.\n\n"
+    "A confirmed `attribution` payload "
+    "records the `user_confirmation` its contributors earn, which is what makes them "
+    "exportable; WHO confirmed it is deliberately not recorded, because this "
+    "application receives no verified user identity.\n\n"
+)
+
 _NOT_AN_ALLOWED_VALUE_ANSWER_PARAGRAPH: str = (
     "`not_an_allowed_value` — the body named a record-level field the official "
-    "ISAAC schema closes with a fixed list of values (`system.domain` and "
-    "`system.technique`), and the value sent is not one of them. Nothing was "
+    "ISAAC schema closes with a fixed list of values (today `system.domain` and "
+    "`system.technique`; the set is read from the schema, not listed here), and the "
+    "value sent is not one of them. Nothing was "
     "written and any value the record already held is unchanged. The body is "
     "`{error, experiment_id, key, keys, allowed, message}`, where `keys` names "
     "EVERY offending field and `allowed` maps each one to the complete list the "
@@ -5031,10 +5538,8 @@ _ANSWER_REFUSED_SHARED_BODY: str = (
     "and they silently dropped it — which made a mistyped key indistinguishable "
     "from an accepted one, because the resulting `200` explained itself as "
     "*\"the submitted value was identical\"* about a key the record had never "
-    "held. ~~A key is now either acted on or refused by name.~~ "
-    "**OVERSTATED, AND SCOPED HERE RATHER THAN DELETED** \u2014 a key is acted "
-    "on, refused by name, or, WHEN AT LEAST ONE OTHER KEY IN THE SAME BODY WAS "
-    "RECOGNISED, dropped on a `200` that does not name it. Measured: `{\"qc\": "
+    "held. A key is acted on, refused by name, or, WHEN AT LEAST ONE OTHER KEY IN "
+    "THE SAME BODY WAS RECOGNISED, dropped on a `200` that does not name it. Measured: `{\"qc\": "
     "<valid>, \"sample.material.nmae\": \"Fe2O3\"}` answers `200` with "
     "`changed_fields: [\"qc\"]`, and the mistyped key appears nowhere in the "
     "response. What IS guaranteed for that key, and is the half this change "
@@ -5065,10 +5570,9 @@ _ANSWER_REFUSED_SHARED_BODY: str = (
     "code the correction operations serve for the same condition, deliberately: "
     "a client that already branches on `invalid_field_value` should not need a "
     "second code to learn that a value it sent is too big.\n\n"
-    "~~A wrong-TYPED value is NOT this refusal — it is dropped by the core and "
-    "its question is reported still open in the `200`, which is the behaviour "
-    "this operation has always had.~~ **WITHDRAWN 2026-08-25.** A wrong-typed "
-    "`series`, `qc` or `descriptor` IS this refusal now. The old behaviour "
+    "A wrong-typed `series`, `qc` or `descriptor` IS this refusal. Until "
+    "2026-08-25 such a value was instead dropped by the core, with its question "
+    "reported still open in the `200`. That earlier behaviour "
     "relied on the `200`'s question list to tell the caller nothing landed, "
     "while the `invalidation.reason` beside it said the submitted value was "
     "already stored — so the two halves of one response contradicted each "
@@ -5157,6 +5661,7 @@ _R_ANSWER_REFUSED_RECORD: dict = {
             _ANSWER_REFUSED_HEAD_LEAD
             + _NOT_AN_ALLOWED_VALUE_IN_ANSWER_HEAD
             + _ANSWER_REFUSED_HEAD_TAIL
+            + _RECORD_LEVEL_WRITE_PARAGRAPH
             + _NOT_AN_ALLOWED_VALUE_ANSWER_PARAGRAPH
             + _ANSWER_REFUSED_SHARED_BODY
         ),
@@ -5227,9 +5732,8 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
         "Requires `confirmed_by_user: true` and the record's current `ETag` in "
         "`If-Match`. A BLANK answer is dropped rather than invented, so a "
         "submission carrying only blanks is a no-op: it is not logged and does not "
-        "advance the revision. ~~Blank and unrecognised answers are dropped~~ — an "
-        "UNRECOGNISED KEY is now refused with `422 unrecognized_field` instead of "
-        "being dropped, and a `series`, `qc` or `descriptor` value the record "
+        "advance the revision. An UNRECOGNISED KEY is refused with `422 "
+        "unrecognized_field`, and a `series`, `qc` or `descriptor` value the record "
         "cannot hold is refused with `422 invalid_field_value`. Both used to be "
         "absorbed into a `200` whose `invalidation.reason` read *\"the submitted "
         "value was identical\"* about a value that had neither been stored nor been "
@@ -5279,22 +5783,35 @@ def post_answers(
             "`{\"confirmed_by_user\": true, \"answers\": {<key>: <value>}}`. The "
             "keys come from `GET /api/experiments/{experiment_id}/pending`. "
             "Omitting `confirmed_by_user: true` is rejected with `422`; an "
-            "UNRECOGNISED key is refused with `422 unrecognized_field` (~~is ignored "
-            "rather than invented~~, which was true and unhelpful — the drop was "
-            "silent and the resulting `200` claimed the value was identical); a "
+            "UNRECOGNISED key is refused with `422 unrecognized_field` (it used to be "
+            "dropped silently, and the resulting `200` then claimed the value was "
+            "identical); a "
             "`series`, `qc` or `descriptor` value the record cannot hold is refused "
             "with `422 invalid_field_value`; and a recognised key whose question is "
             "already closed, submitted with a DIFFERENT value, is refused with `422 "
             "already_answered`.\n\n"
-            "TWO RECORD-LEVEL FIELD PATHS ARE ALSO ANSWER KEYS HERE: `system.domain` "
-            "and `system.technique`, the two the official ISAAC schema declares "
-            "required on `system` and closes with a fixed list of values. Send the "
-            "dotted path as the key and one of the schema's own values as the value; "
-            "anything else is refused with `422 not_an_allowed_value`, which carries "
-            "the permitted list. The value is recorded as a user confirmation on the "
-            "record and every run inherits it. Neither is derived from the other, "
-            "defaulted, or inferred: give only one and the other stays missing. They "
-            "are the RECORD's, so a run's answers operation does not accept them."
+            "THE WHOLE RECORD-LEVEL SET IS AN ANSWER KEY HERE. Every official dotted path "
+            "this build classifies "
+            "as the RECORD's rather than a run's is an answer key here — the sample, "
+            "the facility, `system.domain` and `system.technique` — and so are the two "
+            "record-level BLOCK addresses, `block:attribution` and `block:tags`. Send "
+            "the dotted path (or the `block:` address) as the key and the value as the "
+            "value.\n\n"
+            "A path the schema closes with a fixed list of values takes one of the "
+            "schema's own; anything else is refused with `422 not_an_allowed_value`, "
+            "which carries the permitted list. A value of the wrong JSON type is "
+            "refused with `422 invalid_field_value`, whose `expected_types` names what "
+            "the schema declares per field. A block payload of the wrong shape is "
+            "refused with `422 invalid_block_payload`; `attribution.uploaded_by` is "
+            "refused inside an attribution payload, because the schema declares it "
+            "stamped from an authenticated identity this application does not have.\n\n"
+            "Each accepted value is recorded as a user confirmation on the record and "
+            "every run INHERITS it by reference — nothing is copied down, so a run "
+            "holding its own override at that address keeps it. Nothing is derived "
+            "from anything else, defaulted, or inferred: give only one and the rest "
+            "stay missing. They are the RECORD's, so a run's answers operation does "
+            "not accept them, and a field this build classifies as belonging to "
+            "neither level is not writable at all."
         ),
     ),
     if_match: str | None = Header(
@@ -5336,6 +5853,40 @@ def post_answers(
         )
         if refusal is not None:
             return refusal
+        # THE RECORD-LEVEL KEYS ARE RESOLVED AND VALUE-SCREENED BEFORE THE PRECONDITION,
+        # and only the value screens are here. The split is the whole of the ordering
+        # argument and is worth stating rather than leaving to be inferred:
+        #
+        #   * a VALUE screen reads the BODY and the vendored schema and nothing else, so
+        #     its answer is the same whether or not the caller's `If-Match` is current.
+        #     Answering `412` first would send a compliant client to refresh and rebuild
+        #     a request that is still unreadable — the loop that cannot terminate that
+        #     `_refuse_answers_that_are_not_an_object` sits above the precondition to
+        #     avoid. This is the same rule `post_note` states for itself ("every input is
+        #     resolved before the precondition is even checked").
+        #   * a STATE screen (`already_answered` below) reads what the RECORD currently
+        #     holds, and answering about that state to a caller whose token does not
+        #     match it would describe a record they have not seen. Those stay AFTER the
+        #     precondition, where they always were.
+        #
+        # This MOVES `not_an_allowed_value` earlier than it used to run, which is a
+        # deliberate behaviour change in the direction the module already argues for: an
+        # off-enum value with a stale token was a `412` and is now a `422`.
+        record_fields = _record_field_answers(body.get("answers") or {})
+        record_blocks = _record_block_answers(body.get("answers") or {})
+        refusal = _refuse_a_value_the_schema_does_not_allow(
+            record_fields, {"experiment_id": exp.id}
+        )
+        if refusal is None:
+            refusal = _refuse_a_record_value_the_record_cannot_hold(
+                record_fields, {"experiment_id": exp.id}
+            )
+        if refusal is None:
+            refusal = _refuse_a_record_block_the_record_cannot_hold(
+                record_blocks, {"experiment_id": exp.id}
+            )
+        if refusal is not None:
+            return refusal
         err = _check_if_match(if_match, exp)
         if err is not None:
             return err
@@ -5352,35 +5903,29 @@ def post_answers(
         # honestly about a key it can no longer see. It walks keys only, never values, so
         # it does not front-run the depth guard below (the one refusal that must precede
         # anything that walks a submitted value).
+        # THE RECORD-LEVEL KEYS ARE DECLARED KNOWN, so a body naming only one of them is
+        # not refused as unrecognised by the route that is about to write it. Both key
+        # sets are passed: the field paths (`_record_writable_fields`) and the two block
+        # addresses. `_record_enum_fields()` alone would have left the twelve
+        # facility/sample paths and both blocks reported as dropped.
         dropped = _dropped_answer_keys(
             body.get("answers") or {},
             exp.draft,
             edit_only=False,
-            extra_known=_record_enum_fields(),
+            extra_known={*_record_writable_fields(), *RECORD_WRITABLE_BLOCK_ADDRESSES},
         )
         refusal = _refuse_a_body_that_names_nothing_answerable(
             body.get("answers") or {}, dropped, {"experiment_id": exp.id}
         )
         if refusal is not None:
             return refusal
-        # THE RECORD-LEVEL SCHEMA-ENUM FIELDS, handled beside the shaped answers rather
+        # THE RECORD-LEVEL FIELDS AND BLOCKS, handled beside the shaped answers rather
         # than through them. `complete.apply_answers` has no branch for a dotted field
         # path — it writes the blocks its blockers name — and it is truth-path code
         # (`CLAUDE.md` §13) that this slice deliberately does not touch. So the two
         # paths run side by side inside the same lock, the same precondition and the
-        # same `_save_versioned` compare-and-swap.
-        enum_answers = _record_enum_field_answers(body.get("answers") or {})
-        # FIRST OF THE ENUM REFUSALS, AND ORDERED BY THE ARGUMENT `_refuse_unstorable_answer`
-        # ALREADY MAKES FOR ITS SIZE HALF: a value outside the schema's own enum can be
-        # stored at NO level, so answering "send it to the run" first would spend the
-        # caller's retry on a round trip ending in a refusal. It is also cheap and walks
-        # nothing — membership in a tuple of short strings — so it costs the common path
-        # nothing and cannot front-run the depth guard below.
-        refusal = _refuse_a_value_the_schema_does_not_allow(
-            enum_answers, {"experiment_id": exp.id}
-        )
-        if refusal is not None:
-            return refusal
+        # same `_save_versioned` compare-and-swap. They were resolved and value-screened
+        # ABOVE the precondition; only the STATE screen is left, and it is below.
         apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
         # FIRST OF THE REFUSALS, AND ONLY ITS SIZE HALF — the SHAPE half runs after the
         # `409` below, because it preempted it. See `_refuse_unstorable_answer`.
@@ -5439,12 +5984,14 @@ def post_answers(
         )
         if refusal is not None:
             return refusal
-        # THE SAME RULE FOR THE ENUM FIELDS, whose state lives in `draft["fields"]`
-        # rather than in `draft["pending"]`, so the probe above cannot see it. Placed
-        # beside its sibling deliberately: they are one contract with one error code.
-        refusal = _refuse_answering_an_already_confirmed_enum_field(
+        # THE SAME RULE FOR THE RECORD-LEVEL KEYS, whose state lives in `draft["fields"]`
+        # or in the top-level block itself rather than in `draft["pending"]`, so the
+        # probe above cannot see it. Placed beside its sibling deliberately: they are one
+        # contract with one error code. This is a STATE screen, which is why it is here
+        # and not above the precondition with the value screens.
+        refusal = _refuse_answering_an_already_confirmed_record_key(
             exp.draft,
-            enum_answers,
+            {**record_fields, **record_blocks},
             edit_at=_EDIT_OPERATION_RECORD,
             identifiers={"experiment_id": exp.id},
         )
@@ -5453,23 +6000,29 @@ def post_answers(
         draft_before = exp.draft
         # `apply_answers` deep-copies its input and returns a NEW draft, so
         # `draft_before` is the pre-write document and stays that way — including for
-        # the enum write below, which mutates only the fresh copy.
+        # the record-level writes below, which mutate only the fresh copy.
         exp.draft = apply_answers(exp.draft, apply_shape)
-        enum_written = _apply_record_enum_fields(exp.draft, enum_answers, timestamp)
+        enum_written = [
+            *_apply_record_fields(exp.draft, record_fields, timestamp),
+            *_apply_record_blocks(exp.draft, record_blocks, timestamp),
+        ]
         # answer_log is EXCLUDED from the rev signature: log the submission only when it
         # actually changes the authoritative draft, so an identical re-entry is neither
         # logged nor rewritten (byte-stable) and never bumps rev. save_versioned decides
         # by comparing the on-disk authoritative signature.
         #
-        # `fields` IS ADDED ONLY WHEN AN ENUM FIELD ACTUALLY LANDED. `answer_log` is the
-        # audit trail `workspace._at_risk_summary` counts before a destructive reset, and
-        # an entry recording an empty `apply_shape` and nothing else would under-describe
-        # confirmed work exactly as the missing run-level entry once did. The key is
-        # additive and the log is already shape-varying (the run path adds `run_id`);
-        # nothing reads it but `len()`.
+        # `fields` IS ADDED ONLY WHEN A RECORD-LEVEL KEY ACTUALLY LANDED. `answer_log` is
+        # the audit trail `workspace._at_risk_summary` counts before a destructive reset,
+        # and an entry recording an empty `apply_shape` and nothing else would
+        # under-describe confirmed work exactly as the missing run-level entry once did.
+        # The key is additive and the log is already shape-varying (the run path adds
+        # `run_id`); nothing reads it but `len()`.
+        submitted_record_values = {**record_fields, **record_blocks}
         log_entry: dict = {"applied": apply_shape, "at": timestamp}
         if enum_written:
-            log_entry["fields"] = {path: enum_answers[path] for path in enum_written}
+            log_entry["fields"] = {
+                key: submitted_record_values[key] for key in enum_written
+            }
         exp.answer_log.append(log_entry)
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
@@ -5491,12 +6044,12 @@ def post_answers(
             if changed
             else []
         )
-        # THE ENUM FIELDS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
+        # THE RECORD-LEVEL KEYS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
         # `_fields_the_shape_carries` removes every key `apply_shape` does not carry, and
         # `apply_shape` deliberately never carries these. Without this, a write that
         # landed would be reported as `Updated 0 field(s)` — the same understatement the
         # function above exists to prevent in the other direction, arriving from the one
-        # key set it cannot see. `enum_written` is what the writer actually changed, not
+        # key set it cannot see. `enum_written` is what the writers actually changed, not
         # what was submitted, so an idempotent re-submission still reports nothing.
         if changed and enum_written:
             landed = set(changed_fields) | set(enum_written)
@@ -5649,11 +6202,12 @@ _NOT_AN_ALLOWED_VALUE_IN_CORRECTION_HEAD: str = (
     "vendored schema document rather than restated here), "
 )
 _NOT_YET_ANSWERED_COVERS_THE_ENUM_FIELDS: str = (
-    "`not_yet_answered` ALSO COVERS THOSE TWO FIELDS. This operation corrects a "
-    "value the record already holds; a record that has never been given a domain "
-    "or a technique is answered at the answers operation instead, which "
-    "`answer_at` names. Neither field is ever derived from the other, defaulted, "
-    "or inferred, so a record given only one keeps the other missing.\n\n"
+    "`not_yet_answered` ALSO COVERS EVERY RECORD-LEVEL FIELD PATH AND BLOCK ADDRESS "
+    "described above. This operation corrects a value the record already holds; a "
+    "record that has never been given one is answered at the answers operation "
+    "instead, which `answer_at` names. No record-level value is ever derived from "
+    "another, defaulted, or inferred, so a record given only one keeps the rest "
+    "missing.\n\n"
 )
 
 #: The COMPLETE ``422`` that BOTH correction operations serve, built by merging the
@@ -5696,6 +6250,7 @@ _R_CORRECTION_REFUSED_RECORD: dict = {
             _CORRECTION_REFUSED_HEAD_LEAD
             + _NOT_AN_ALLOWED_VALUE_IN_CORRECTION_HEAD
             + _CORRECTION_REFUSED_HEAD_TAIL
+            + _RECORD_LEVEL_WRITE_PARAGRAPH
             + _NOT_YET_ANSWERED_COVERS_THE_ENUM_FIELDS
             + _R_NOT_YET_ANSWERED[422]["description"]
         ),
@@ -6215,13 +6770,17 @@ def post_edit(
             "each key names a field already present in the draft. Omitting "
             "`confirmed_by_user: true`, or naming no recognised editable field, is "
             "rejected with `422`.\n\n"
-            "`system.domain` and `system.technique` are correctable here once the "
-            "record holds a value for them — the two record-level fields the official "
-            "ISAAC schema declares required on `system` and closes with a fixed list of "
-            "values. A value outside that list is refused with `422 "
-            "not_an_allowed_value`, which carries the permitted list; a field the "
-            "record has never been given is refused with `422 not_yet_answered` and "
-            "answered at the answers operation instead."
+            "EVERY RECORD-LEVEL FIELD PATH AND BLOCK ADDRESS is correctable here once "
+            "the record holds a value for it — the sample, the facility, "
+            "`system.domain`, `system.technique`, `block:attribution` and `block:tags`. "
+            "The set is derived at runtime from the same classification the answers "
+            "operation uses, so the two cannot disagree. A value outside a schema-closed "
+            "list is refused with `422 not_an_allowed_value`, which carries the "
+            "permitted list; a value of the wrong declared JSON type with `422 "
+            "invalid_field_value` and its `expected_types`; a malformed block payload "
+            "with `422 invalid_block_payload`. A field the record has never been given "
+            "is refused with `422 not_yet_answered` and answered at the answers "
+            "operation instead."
         ),
     ),
     if_match: str | None = Header(
@@ -6260,6 +6819,26 @@ def post_edit(
         )
         if refusal is not None:
             return refusal
+        # RESOLVED AND VALUE-SCREENED BEFORE THE PRECONDITION, the same split
+        # `post_answers` states at length: a screen that reads only the body and the
+        # vendored schema answers the same thing whether or not the caller's token is
+        # current, and answering `412` first would send a compliant client to rebuild a
+        # request that is still unreadable. The STATE screens stay below.
+        record_fields = _record_field_answers(body.get("answers") or {})
+        record_blocks = _record_block_answers(body.get("answers") or {})
+        refusal = _refuse_a_value_the_schema_does_not_allow(
+            record_fields, {"experiment_id": exp.id}
+        )
+        if refusal is None:
+            refusal = _refuse_a_record_value_the_record_cannot_hold(
+                record_fields, {"experiment_id": exp.id}
+            )
+        if refusal is None:
+            refusal = _refuse_a_record_block_the_record_cannot_hold(
+                record_blocks, {"experiment_id": exp.id}
+            )
+        if refusal is not None:
+            return refusal
         err = _check_if_match(if_match, exp)
         if err is not None:
             return err
@@ -6287,18 +6866,8 @@ def post_edit(
             body.get("answers") or {},
             exp.draft,
             edit_only=True,
-            extra_known=_record_enum_fields(),
+            extra_known={*_record_writable_fields(), *RECORD_WRITABLE_BLOCK_ADDRESSES},
         )
-        # THE RECORD-LEVEL SCHEMA-ENUM FIELDS — see `post_answers` for why they are
-        # handled beside the shaped answers and not through them. The value screen runs
-        # first here for the same reason it does there: a value outside the schema's own
-        # enum can be stored nowhere, so no other refusal has a more useful answer.
-        enum_answers = _record_enum_field_answers(body.get("answers") or {})
-        refusal = _refuse_a_value_the_schema_does_not_allow(
-            enum_answers, {"experiment_id": exp.id}
-        )
-        if refusal is not None:
-            return refusal
         refusal = _refuse_run_level_on_the_record(exp, apply_shape)
         if refusal is not None:
             return refusal
@@ -6323,26 +6892,27 @@ def post_edit(
         )
         if refusal is not None:
             return refusal
-        # THE SAME RULE FOR THE ENUM FIELDS, whose state lives in `draft["fields"]` and
-        # is therefore invisible to the pending-list probe above. It runs BEFORE the
-        # "nothing to correct" refusal for the reason that refusal's sibling gives:
-        # "still open" is more specific than "not recognised", and sending a scientist
-        # to look for a misspelling in a correctly spelled field name is the mistake
-        # this module has already made once.
-        refusal = _refuse_correcting_an_unconfirmed_enum_field(
+        # THE SAME RULE FOR THE RECORD-LEVEL KEYS, whose state lives in `draft["fields"]`
+        # or in the top-level block itself and is therefore invisible to the pending-list
+        # probe above. It runs BEFORE the "nothing to correct" refusal for the reason
+        # that refusal's sibling gives: "still open" is more specific than "not
+        # recognised", and sending a scientist to look for a misspelling in a correctly
+        # spelled field name is the mistake this module has already made once.
+        record_answers = {**record_fields, **record_blocks}
+        refusal = _refuse_correcting_an_unconfirmed_record_key(
             exp.draft,
-            enum_answers,
+            record_answers,
             answer_at=_ANSWERS_OPERATION_RECORD,
             identifiers={"experiment_id": exp.id},
         )
         if refusal is not None:
             return refusal
-        if not _has_correction_target(apply_shape) and not enum_answers:
-            # No recognized field to correct — never invent one. `enum_answers` is
-            # consulted beside the apply-shape because this operation now writes a key
-            # set the shape does not carry: without it, a body naming ONLY a confirmed
-            # `system.domain` would be refused as unrecognised by the route that is
-            # about to write it.
+        if not _has_correction_target(apply_shape) and not record_answers:
+            # No recognized field to correct — never invent one. `record_answers` is
+            # consulted beside the apply-shape because this operation writes a key set
+            # the shape does not carry: without it, a body naming ONLY a confirmed
+            # `system.domain` or `block:tags` would be refused as unrecognised by the
+            # route that is about to write it.
             return JSONResponse(
                 status_code=422,
                 content={
@@ -6419,13 +6989,17 @@ def post_edit(
         # invents a value (a malformed sha256 / off-enum qc leaves the value as-is).
         draft_before = exp.draft  # `apply_corrections` deep-copies; this stays pre-write
         exp.draft = apply_corrections(exp.draft, apply_shape)
-        enum_written = _apply_record_enum_fields(exp.draft, enum_answers, timestamp)
-        # `fields` is added only when an enum field actually landed — see `post_answers`
-        # for the audit-trail argument. A correction that re-submits the stored value is
-        # idempotent in the writer, so it lands nothing and logs nothing extra.
+        enum_written = [
+            *_apply_record_fields(exp.draft, record_fields, timestamp),
+            *_apply_record_blocks(exp.draft, record_blocks, timestamp),
+        ]
+        # `fields` is added only when a record-level key actually landed — see
+        # `post_answers` for the audit-trail argument. A correction that re-submits the
+        # stored value is idempotent in the writers, so it lands nothing and logs nothing
+        # extra.
         log_entry: dict = {"edited": apply_shape, "at": timestamp}
         if enum_written:
-            log_entry["fields"] = {path: enum_answers[path] for path in enum_written}
+            log_entry["fields"] = {key: record_answers[key] for key in enum_written}
         exp.answer_log.append(log_entry)
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
@@ -6445,12 +7019,12 @@ def post_edit(
             if changed
             else []
         )
-        # THE ENUM FIELDS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
+        # THE RECORD-LEVEL KEYS ARE ADDED BACK, IN SUBMISSION ORDER, and they have to be:
         # `_fields_the_shape_carries` removes every key `apply_shape` does not carry, and
         # `apply_shape` deliberately never carries these. Without this, a write that
         # landed would be reported as `Updated 0 field(s)` — the same understatement the
         # function above exists to prevent in the other direction, arriving from the one
-        # key set it cannot see. `enum_written` is what the writer actually changed, not
+        # key set it cannot see. `enum_written` is what the writers actually changed, not
         # what was submitted, so an idempotent re-submission still reports nothing.
         if changed and enum_written:
             landed = set(changed_fields) | set(enum_written)
@@ -7171,18 +7745,76 @@ def _select_runs(
     return selected
 
 
-EXPERIMENT_OVERRIDABLE_ADDRESSES: frozenset[str] = frozenset(
-    [
-        ws.field_address(path)
-        for path, _coercer in EXTRACTOR_FIELD_MAP.values()
-        if ws.field_level(path) == ws.LEVEL_EXPERIMENT
-    ]
-    + [
-        ws.block_address(key)
-        for key in (*ws.EXPERIMENT_LEVEL_BLOCKS, *ws.RUN_LEVEL_BLOCKS)
-        if ws.block_level(key) == ws.LEVEL_EXPERIMENT
-    ]
+#: THE RECORD-LEVEL FIELD PATHS THE RECORD ITSELF MAY BE GIVEN A VALUE AT.
+#:
+#: **THE DEFECT THIS SET EXISTS TO CLOSE**, measured over HTTP against a record created
+#: through this application's own ``POST /api/experiments`` path, at 121 field/block
+#: addresses × the 5 write routes: a scientist could not enter a facility, a sample or a
+#: contributor ON THE RECORD by any request. The twelve paths below other than
+#: ``system.technique`` were accepted at exactly ONE route — ``POST
+#: .../runs/{run_id}/overrides`` — and an override is a RUN's recorded DIVERGENCE from a
+#: value the record holds. :func:`_record_enum_fields` already says why that is not a
+#: substitute: *"It is not a way to say what the record is."* The consequence was
+#: visible on the run view, which reported ``inherited == ['block:attribution']`` and
+#: nothing else, because an address appears there only once the record CARRIES a value
+#: at it — which no route could put there.
+#:
+#: DERIVED FROM THE SAME ONE EXPRESSION :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` USED TO
+#: HOLD INLINE, and that is the whole point of hoisting it. The two questions — "may a
+#: run record a divergence here?" and "may the record be given a value here?" — are
+#: answered by the same classification, and writing the comprehension twice would put a
+#: second copy of it in this file, free to drift the moment ``EXTRACTOR_FIELD_MAP`` or
+#: ``workspace.field_level`` moves. The override set is now built FROM these two
+#: constants rather than beside them, so a path cannot leave one and stay in the other.
+#: ``test_the_record_writable_set_is_derived_not_transcribed`` re-derives it from
+#: ``EXTRACTOR_FIELD_MAP`` rather than asserting its members.
+#:
+#: TWO GATES ON THE FIELD HALF, unchanged and load-bearing — see
+#: :data:`RUN_WRITABLE_FIELD_PATHS` for the measurement that put them there.
+#: ``field_level`` is a segment-aware PREFIX test, so on its own it answers
+#: ``LEVEL_EXPERIMENT`` for ``sample.material.typo``; membership in
+#: ``EXTRACTOR_FIELD_MAP`` is what makes the path a REAL official field path.
+#:
+#: FAIL-CLOSED, AND THE SIX ``system.configuration.*`` PATHS ARE WHY IT MATTERS. They
+#: are ``LEVEL_UNCLASSIFIED`` — whether two runs of one experiment may legitimately
+#: differ in detector model is a scientific question this repository has no answer to
+#: (``CLAUDE.md`` §15 records all six as *"unclassified, verified"* pending an external
+#: answer) — so the filter excludes them WITHOUT a special case, and
+#: ``timestamps.created_utc`` with them. Nothing here guesses an unclassified path into
+#: a level, and ``test_the_unclassified_paths_are_excluded_by_the_derivation`` asserts
+#: that the exclusion comes from the filter rather than from a list.
+RECORD_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
+    path
+    for path, _coercer in EXTRACTOR_FIELD_MAP.values()
+    if ws.field_level(path) == ws.LEVEL_EXPERIMENT
 )
+
+
+#: THE RECORD-LEVEL BLOCK ADDRESSES the record itself may be given a payload at.
+#:
+#: FILTERED, NOT COPIED, exactly as :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` filtered it
+#: inline before: iterating ``EXPERIMENT_LEVEL_BLOCKS`` alone would be tautological, so
+#: the comprehension runs over BOTH block tuples and lets ``block_level`` decide. Moving
+#: ``tags`` between those tuples therefore updates this set from the one place the
+#: classification lives.
+RECORD_WRITABLE_BLOCK_ADDRESSES: frozenset[str] = frozenset(
+    ws.block_address(key)
+    for key in (*ws.EXPERIMENT_LEVEL_BLOCKS, *ws.RUN_LEVEL_BLOCKS)
+    if ws.block_level(key) == ws.LEVEL_EXPERIMENT
+)
+
+
+#: THE COMPLETE SET OF NAMESPACED ADDRESSES A RUN MAY RECORD AN OVERRIDE AT.
+#:
+#: Now COMPOSED from the two constants above rather than re-deriving them, so the
+#: address set this route enforces and the path set the RECORD-level write routes
+#: enforce cannot disagree about what "experiment-level" means. The value is unchanged —
+#: ``test_run_api.py::test_the_overridable_set_is_derived_from_the_field_map`` recomputes
+#: it from ``EXTRACTOR_FIELD_MAP`` and still passes — and the long argument for each gate
+#: now lives on the constants that apply it.
+EXPERIMENT_OVERRIDABLE_ADDRESSES: frozenset[str] = frozenset(
+    ws.field_address(path) for path in RECORD_WRITABLE_FIELD_PATHS
+) | RECORD_WRITABLE_BLOCK_ADDRESSES
 
 
 #: The exact call Starlette's ``JSONResponse.render`` makes, transcribed rather than
@@ -7344,7 +7976,7 @@ def _apply_run_field(
 
     ``question`` OVERRIDES THE TEXT THE CONFIRMATION RECORDS, and defaults to this
     function's original run-level wording so every existing caller is byte-identical.
-    It exists so :func:`_apply_record_enum_fields` can reuse this writer for a
+    It exists so :func:`_apply_record_fields` can reuse this writer for a
     RECORD-level field instead of building a second envelope: the two levels record
     different true sentences ("on this run" / "on this record"), and everything else
     about a confirmed field — the envelope shape, the four-key evidence entry, the
@@ -8234,8 +8866,33 @@ def _not_overridable(address: object) -> JSONResponse:
     )
 
 
-def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONResponse | None:
+def _refuse_override_payload(
+    kind: str,
+    name: str,
+    payload: object,
+    *,
+    identifiers: dict | None = None,
+    subject: str = "override",
+) -> JSONResponse | None:
     """A 422 if this payload cannot be stored at this address, else ``None``.
+
+    TWO KEYWORDS EXIST SO THE RECORD-LEVEL BLOCK WRITE CAN REUSE THIS GATE RATHER THAN
+    COPY IT, and neither changes a single verdict:
+
+    * ``identifiers`` — merged into every refusal body, because the record-level
+      operations name ``experiment_id`` in every refusal they serve and a body arriving
+      without it would be the one exception a client has to special-case. The override
+      route passes nothing and its bodies are byte-identical to what they always were.
+    * ``subject`` — the NOUN the prose uses for what was refused. It is a parameter and
+      not a hardcoded "override" because a record-level write is not an override, and a
+      refusal that calls it one describes the wrong act on the one screen a scientist
+      reads to work out what to fix. The RULES are identical, which is why this function
+      is shared; only the name of the thing being refused differs, so only that is
+      passed. The ``field:`` branch is deliberately NOT parameterised: the record-level
+      FIELD write does not use this function at all (a record answer carries a bare
+      value, not a draft envelope — see
+      :func:`_refuse_a_record_value_the_record_cannot_hold`), so that branch has one
+      caller and its wording stays exactly true for it.
 
     THREE GATES, and each one closes something measured rather than imagined.
 
@@ -8307,18 +8964,20 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
     clear operation below. That is the same posture as any other unfinished draft
     content, and it is fail-closed at the boundary that mints an official record.
     """
+    identifiers = identifiers or {}
     if not _is_storable_value(payload):
         return JSONResponse(
             status_code=422,
             content={
                 "error": "unrepresentable_value",
+                **identifiers,
                 "address": (
                     ws.field_address(name)
                     if kind == ws.ADDRESS_FIELD
                     else ws.block_address(name)
                 ),
                 "message": (
-                    "This override cannot be stored. Either it cannot be represented "
+                    f"This {subject} cannot be stored. Either it cannot be represented "
                     "in JSON — `NaN`, `Infinity` and `-Infinity` are accepted by some "
                     "parsers but are not JSON, and a record containing one could not "
                     "be read back or exported — or it nests more deeply, or is larger, "
@@ -8348,6 +9007,7 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
                 status_code=422,
                 content={
                     "error": "invalid_envelope",
+                    **identifiers,
                     "address": ws.field_address(name),
                     "findings": findings,
                     "message": (
@@ -8374,10 +9034,11 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
             status_code=422,
             content={
                 "error": "invalid_block_payload",
+                **identifiers,
                 "address": ws.block_address(name),
                 "expected_type": declared,
                 "message": (
-                    "A record-level block override must be the block itself, of the "
+                    f"A record-level block {subject} must be the block itself, of the "
                     "type the official schema declares for it — an object for "
                     "`attribution`, an array of labels for `tags`. A payload of "
                     "another type is refused rather than stored: it has no valid "
@@ -8407,10 +9068,11 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
             status_code=422,
             content={
                 "error": "invalid_block_payload",
+                **identifiers,
                 "address": ws.block_address(name),
                 "expected_type": declared,
                 "message": (
-                    "This block override is the type the official schema declares, but "
+                    f"This block {subject} is the type the official schema declares, but "
                     "its CONTENTS are not a shape the deterministic checks can read — "
                     "`attribution.contributors` must be a list of contributor objects, "
                     "each an object. It is refused rather than stored: the checks that "
@@ -8424,11 +9086,12 @@ def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONRespo
             status_code=422,
             content={
                 "error": "invalid_block_payload",
+                **identifiers,
                 "address": ws.block_address(name),
                 "expected_type": declared,
                 "findings": identity_findings,
                 "message": (
-                    "This block override names a field no client may author. The "
+                    f"This block {subject} names a field no client may author. The "
                     "finding is the deterministic draft validator's own words. "
                     "Nothing was written."
                 ),
@@ -8470,6 +9133,31 @@ _ATTRIBUTION_CONFIRMATION_QUESTION = (
     "identity, so WHO confirmed it is deliberately not recorded."
 )
 
+#: The same question, for a contributor confirmed on the RECORD rather than on one run.
+#:
+#: A SEPARATE CONSTANT BECAUSE THE ONE ABOVE WOULD BE FALSE HERE, in both halves that
+#: matter: it says *"this run"* and it names the override operation. Stored evidence is
+#: read by a person deciding whether a claim is trustworthy, so an entry describing an
+#: act nobody performed is exactly the fabricated provenance ``CLAUDE.md`` §5 forbids —
+#: and the entry is what ``export.build_sidecar`` publishes.
+#:
+#: IT KEEPS THE ONE RESTRAINT THE ORIGINAL EXISTS FOR: it names the OPERATION and refuses
+#: to name the PERSON. What this application can honestly assert is that a request
+#: arrived at one named operation carrying ``confirmed_by_user: true`` with this
+#: contributor in its payload. WHO sent it is not recorded, because no trusted
+#: authentication boundary exists to read an identity from.
+#:
+#: THE TWO QUESTIONS DIFFER, WHICH IS ALSO WHY THE IDEMPOTENCE STAYS HONEST: an entry
+#: minted by a run override does not silently satisfy a record-level confirmation, and
+#: vice versa, because ``_rewrite_attribution_evidence``'s ``_same`` compares the
+#: question text. Each level's evidence says what actually happened at that level.
+_RECORD_ATTRIBUTION_CONFIRMATION_QUESTION = (
+    "Who contributed to this record, and in what role? Confirmed by whoever sent POST "
+    "/api/experiments/{experiment_id}/answers (or .../edit) for block:attribution with "
+    "confirmed_by_user: true. This application receives no verified user identity, so "
+    "WHO confirmed it is deliberately not recorded."
+)
+
 
 def _attribution_evidence_key(name: str, role: str) -> str:
     """The ``block_evidence`` key ``draft_validator`` looks a contributor up under.
@@ -8481,8 +9169,19 @@ def _attribution_evidence_key(name: str, role: str) -> str:
     return f"attribution:{name}|{role}"
 
 
-def _attribution_confirmations(payload: object, timestamp: str) -> dict[str, list[dict]]:
+def _attribution_confirmations(
+    payload: object,
+    timestamp: str,
+    *,
+    question: str = _ATTRIBUTION_CONFIRMATION_QUESTION,
+) -> dict[str, list[dict]]:
     """The ``block_evidence`` entries a confirmed ``block:attribution`` payload earns.
+
+    ``question`` NAMES THE ACT BEING RECORDED and defaults to the run override's own
+    wording, so every existing caller is byte-identical. The record-level block write
+    passes :data:`_RECORD_ATTRIBUTION_CONFIRMATION_QUESTION` instead, because the default
+    would state two things that did not happen — see that constant. Everything else about
+    the entry is shared and must stay that way.
 
     **THE DEFECT THIS CLOSES, measured over HTTP.** An override at ``block:attribution``
     carrying one contributor was accepted with ``200``, and the export then refused at
@@ -8532,15 +9231,19 @@ def _attribution_confirmations(payload: object, timestamp: str) -> dict[str, lis
         if not (isinstance(name, str) and name and isinstance(role, str) and role):
             continue
         entries[_attribution_evidence_key(name, role)] = [
-            user_confirmation(
-                _ATTRIBUTION_CONFIRMATION_QUESTION, f"{name} | {role}", timestamp
-            )
+            user_confirmation(question, f"{name} | {role}", timestamp)
         ]
     return entries
 
 
-def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dict]]) -> None:
+def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dict]]) -> bool:
     """Make the RUN's own ``attribution:`` block evidence exactly ``entries``.
+
+    A THIN NORMALISER OVER :func:`_rewrite_attribution_evidence`, which does the work and
+    carries the argument. It exists because the RUN's draft may be a non-dict and has to
+    be replaced on the ``Run`` before anything writes into it, while the record's draft
+    is always a dict by the time a write reaches it. Splitting the two means the RECORD
+    -level write reuses this rule instead of holding a second copy of it.
 
     **REPLACE, NOT MERGE, and the direction matters twice.** An override REPLACES the
     run's whole ``attribution`` block, so a contributor dropped from the payload is gone
@@ -8565,6 +9268,24 @@ def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dic
     """
     draft = run.draft if isinstance(run.draft, dict) else {}
     run.draft = draft
+    return _rewrite_attribution_evidence(draft, entries)
+
+
+def _rewrite_attribution_evidence(draft: dict, entries: dict[str, list[dict]]) -> bool:
+    """Make ONE draft's ``attribution:`` block evidence exactly ``entries``. Changed?
+
+    THE RULE, SHARED BY THE RUN OVERRIDE AND THE RECORD-LEVEL BLOCK WRITE — see
+    :func:`_rewrite_run_attribution_evidence` for the argument, which applies at both
+    levels because both REPLACE the whole ``attribution`` block rather than merging into
+    it. Whose ``block_evidence`` is written is decided by the CALLER handing in its own
+    draft, which is the one thing that must not be shared: writing a run's confirmation
+    onto the experiment would attach it to every sibling that never received it, and
+    writing the experiment's onto one run would hide it from the others.
+
+    IT NOW REPORTS WHETHER ANYTHING CHANGED, because the record-level writer needs that
+    to decide whether the request wrote anything at all. The override route ignores the
+    answer and relies on ``_save_versioned``'s signature comparison exactly as before.
+    """
     existing = draft.get("block_evidence")
     existing = existing if isinstance(existing, dict) else {}
 
@@ -8587,9 +9308,12 @@ def _rewrite_run_attribution_evidence(run: "ws.Run", entries: dict[str, list[dic
         prior = existing.get(key)
         rebuilt[key] = prior if _same(prior, fresh) else fresh
     if rebuilt:
+        changed = draft.get("block_evidence") != rebuilt
         draft["block_evidence"] = rebuilt
     else:
+        changed = "block_evidence" in draft
         draft.pop("block_evidence", None)
+    return changed
 
 
 @router.post(
@@ -8864,13 +9588,11 @@ def post_run_override_clear(
         "will not match.\n\n"
         "The keys are the same keys the record's `/answers` takes, and come from "
         "`GET /api/experiments/{experiment_id}/pending`, where a run-owned question "
-        "carries the `run_id` it belongs to. ~~An UNRECOGNISED key is ignored rather "
-        "than invented, exactly as on the record~~ — it is now REFUSED with `422 "
+        "carries the `run_id` it belongs to. An UNRECOGNISED key is REFUSED with `422 "
         "unrecognized_field`, exactly as on the record, because dropping it silently "
         "produced a `200` claiming the submitted value was identical to one this run "
-        "had never held. **THAT REFUSAL IS NARROWER THAN ~~\"either acted on or "
-        "refused by name\"~~, AND THE SCOPE IS STATED RATHER THAN LEFT TO BE "
-        "DISCOVERED:** it "
+        "had never held. **THE SCOPE OF THAT REFUSAL IS STATED RATHER THAN LEFT TO "
+        "BE DISCOVERED:** it "
         "fires only where NOTHING in the body is recognised. An unrecognised key "
         "travelling beside a recognised one is still dropped on a `200` that does not "
         "name it \u2014 what that `200` may no longer do is claim the submitted value "
@@ -9706,54 +10428,38 @@ NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
 #: sixth changed no member and was still worth fixing.)
 #:
 #: TWO THINGS IT DOES NOT PROMISE, and both matter to the copy built on it. It does
-#: not promise the value will be ACCEPTED — a closed enum, a required sibling
-#: property or the no-guessing rules may still refuse the particular value. And
+#: not promise the value will be ACCEPTED — a closed enum, a declared JSON type, a
+#: required sibling property or the no-guessing rules may still refuse the particular
+#: value. And
 #: ~~every one of these routes is a RUN's, so a record with no runs yet can write none
-#: of them~~ — **CORRECTED: TRUE OF ~~18 OF THE 19~~ 17 OF THE 18, AND FALSE OF ONE.**
-#: ``system.technique`` is now also accepted by ``POST /api/experiments/{id}/answers``
-#: and its correction operation (see :func:`_record_enum_fields`), which are the
-#: RECORD's, so that one path IS writable on a record with no runs. Membership still
-#: means "a route exists", not "you can do it right now".
+#: of them~~ — ~~**CORRECTED: TRUE OF 18 OF THE 19, AND FALSE OF ONE**~~ —
+#: **CORRECTED AGAIN 2026-08-30: TRUE OF 5 OF THE 19, AND FALSE OF THE OTHER 14.**
+#: Every EXPERIMENT-level path in this set is now accepted by ``POST
+#: /api/experiments/{id}/answers`` and its correction operation, which are the
+#: RECORD's — so 13 of the 18 mappable-and-writable paths are writable on a record
+#: with no runs, and only the 5 RUN-level ones (``context.*``,
+#: ``timestamps.acquired_*``) need a run to exist. Both earlier readings are kept
+#: struck rather than replaced, because each was true of the build it described and
+#: the sequence is what stops the next reader trusting a number nobody re-measured.
+#: Membership still means "a route exists", not "you can do it right now".
 #:
-#: (The **19** was arithmetic, not a measurement, and it was wrong in the correction
-#: that fixed a different false claim — re-measured 2026-08-29, this set has **18**
-#: members, of which one is the record-level exception, leaving **17**. Struck rather
-#: than silently swapped because a wrong count inside a paragraph headed "CORRECTED"
-#: is the hardest kind to doubt. Both halves are now measured by
-#: ``test_the_served_record_writable_set_is_what_the_record_routes_actually_do``, so
-#: neither number can drift again without a test moving.)
-#:
-#: ~~**THE SERVED SENTENCE STILL SAYS THE OLD THING, AND THAT IS NAMED RATHER THAN
-#: LEFT TO BE FOUND.** The notes-listing operation's description ends *"Both routes
-#: are a run's, so a record with no runs can write none of them yet"* … It is not
-#: corrected in this change because ``apps/web/src/test/apiFixtures.ts`` transcribes
-#: that description verbatim … and this slice is scoped to the backend.~~ —
-#: **CLOSED 2026-08-29.** The served sentence no longer says it: the description now
-#: names the record-level pair beside the two run routes, and the transcription in
-#: ``apps/web/src/test/apiFixtures.ts`` moved in the same change, which is what the
-#: deferral was waiting for. Kept struck rather than deleted because "the served
-#: sentence is false" is exactly the claim a future session would otherwise re-derive
-#: from scratch — and because the reason it was deferred (two files that must move
-#: together) is the reason it stayed false for a while, which is worth remembering.
-#: The defect it left was the MILD direction (a reader told they need a run when they
-#: no longer do), not the direction this repository's disclosure rules exist to
-#: prevent (a sentence pointing at a locked door) — that is why deferring it was
-#: defensible and why closing it is still the right end state.
-#:
-#: **AND THE PER-PATH ANSWER IS NOW SERVED TOO, not left to the reader's arithmetic.**
-#: A client cannot tell WHICH of the 18 is the record-level one from
-#: ``value_writable_field_paths`` alone, and the panel's hint is read about one field.
-#: :data:`NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD` is the subset a RECORD-level
-#: operation accepts, served as ``record_writable_field_paths`` — derived here, never
-#: transcribed into the frontend, for the same reason this constant is.
-#:
-#: THE THIRD ROUTE IS IN THE DERIVATION EVEN THOUGH IT CHANGES NO MEMBER TODAY.
-#: ``system.technique`` is already admitted by the override clause and
-#: ``system.domain`` is not in :data:`NOTE_MAPPABLE_FIELD_PATHS` at all, so the set is
-#: byte-identical either way — which is exactly why the clause is written now rather
-#: than when it first matters: this constant's whole discipline is that it is derived
-#: from the routes that enforce it, and a route that accepts a value belongs in the
-#: derivation whether or not it happens to be load-bearing this week.
+#: ~~**THE SERVED SENTENCE STILL SAYS THE OLD THING**~~ — **CLOSED 2026-08-30.** The
+#: notes-listing operation's description used to end *"Both routes are a run's, so a
+#: record with no runs can write none of them yet"*, and the previous session left it
+#: standing because ``apps/web/src/test/apiFixtures.ts`` transcribes that description
+#: verbatim and ``test_contract_description_parity`` compares the two. The sentence and
+#: its transcription have now been moved together, in one change, and the served
+#: paragraph names all three write routes rather than two.#:
+#: THE RECORD ROUTE IS IN THE DERIVATION AND NOW CHANGES NO MEMBER — WHICH IS A
+#: DIFFERENT FACT FROM THE ONE THIS COMMENT USED TO STATE, and worth being exact
+#: about. When the clause was written, ``system.technique`` was already admitted by
+#: the override clause and ``system.domain`` is not in
+#: :data:`NOTE_MAPPABLE_FIELD_PATHS` at all, so the set was byte-identical either way.
+#: That is still so, and for a stronger reason: the record-level write surface is now
+#: derived from the SAME expression :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` is
+#: (:data:`RECORD_WRITABLE_FIELD_PATHS`), so the two clauses cannot select different
+#: paths. The clause stays because this constant's whole discipline is that it is
+#: derived from the routes that enforce it.
 #:
 #: IT MOVES THE SCHEMA READ TO IMPORT TIME, which is a real consequence and is stated
 #: rather than discovered. :func:`_record_enum_fields` is otherwise called lazily, on
@@ -9803,10 +10509,30 @@ NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT: frozenset[str] = frozenset(
 #: not_an_allowed_value``), and not that the run routes stop working for it.
 #: ``system.technique`` is accepted by ``POST .../runs/{run_id}/overrides`` as well;
 #: membership here says a record-level route ALSO exists, never that it is the only one.
+#: DERIVED FROM ``_record_writable_fields()``, NOT FROM ``_record_enum_fields()``, AND
+#: THE CHANGE IS A MERGE FIX THAT A TEST CAUGHT RATHER THAN A REFINEMENT.
+#:
+#: This constant used to filter on ``_record_enum_fields()`` — the two paths the schema
+#: closes with a REQUIRED enum — because those were the only two a record-level route
+#: accepted. The campaign-sheet slice widened the record routes to 14 field paths and 2
+#: block addresses, and on the merged tree the SERVED key went on saying
+#: ``['system.technique']`` while the ROUTES accepted THIRTEEN more — fourteen field
+#: paths in total, of which twelve are additional members of the mappable set this
+#: constant intersects. (An earlier revision said "fourteen more", conflating the
+#: total with the excess.)
+#: ``test_the_served_record_writable_set_is_what_the_record_routes_actually_do`` failed
+#: with the two lists side by side, which is exactly the defect it was written to catch:
+#: a surface describing a capability it no longer bounds.
+#:
+#: Filtering on ``_record_writable_fields()`` makes the served set and the enforcing
+#: routes read the same derivation, so a future widening moves both together or moves
+#: neither. The intersection with ``NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT`` is
+#: kept: this key answers "which MAPPABLE path can be given a value on the record", and
+#: a record-writable path outside the extractor's field map is not a note's target.
 NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD: frozenset[str] = frozenset(
     path
     for path in NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT
-    if path in _record_enum_fields()
+    if path in _record_writable_fields()
 )
 
 
@@ -9977,11 +10703,26 @@ def capture_facts(paths) -> dict[str, dict]:
     ``None`` and every ``record_writable`` is ``False``: the same fail-closed direction
     ``_record_enum_fields`` documents for itself.
     """
+    # ── MERGE FIX, 2026-08-30: `record_writable` FOLLOWS THE ENFORCING SET ───────
+    # This read `path in enums`, and `_record_enum_fields()` was the right source when
+    # the record routes accepted exactly the two schema-enum paths. The campaign-sheet
+    # slice widened them to fourteen field paths, so on the merged tree the CAPTURE
+    # SURFACE would have gone on telling a scientist that twelve sample and facility
+    # values cannot be entered on the record — one screen away from an operation that
+    # accepts them. `test_each_served_capture_fact_is_what_the_routes_actually_do`
+    # failed on twelve paths, which is exactly the defect it was written to catch: a
+    # surface describing a capability it no longer bounds.
+    #
+    # `_record_writable_fields()` is the expression the write routes themselves gate
+    # on, so a future widening moves the routes and this surface together or moves
+    # neither. `enums` is still read below for `choices`, which is a different question
+    # — WHICH VALUES are allowed, not WHETHER a route accepts the path.
+    writable = _record_writable_fields()
     enums = _record_enum_fields()
     return {
         path: {
             "level": ws.field_level(path),
-            "record_writable": path in enums,
+            "record_writable": path in writable,
             "run_field_writable": path in RUN_WRITABLE_FIELD_PATHS,
             "run_overridable": ws.field_address(path) in EXPERIMENT_OVERRIDABLE_ADDRESSES,
             "choices": list(enums[path]) if path in enums else None,
@@ -10214,36 +10955,29 @@ _NOTE_LIST_DESC = (
         "`value_writable_field_paths` is the SUBSET of those paths that some "
         "write operation in this build accepts a value at — `PATCH "
         "/api/experiments/{experiment_id}/runs/{run_id}` for a run's own field, "
-        "`POST /api/experiments/{experiment_id}/runs/{run_id}/overrides` for a "
-        "record-level one, and the record's own pair named at the end of this "
-        "paragraph for the RECORD-LEVEL paths the official schema closes with a "
-        "required enum. "
-        "MAPPING A NOTE AND ENTERING ITS VALUE ARE DIFFERENT "
-        "ACTS, and for 7 of the 25 mappable paths the second one has no route at "
-        "all: every write operation refuses them. Mapping to such a path is still "
-        "correct and still keeps the content on the record in full — this key "
-        "says only that no request can then put a value there, so a client must "
-        "not tell a person to go and do it. It promises nothing about a value "
-        "being ACCEPTED: a closed enum, a required sibling property or the "
-        "no-guessing rules may still refuse the particular value. AND NOT EVERY "
-        "ACCEPTING ROUTE IS A RUN'S — this sentence used to end \"Both routes are "
-        "a run's, so a record with no runs can write none of them yet\", which "
-        "stopped being true when the record-level enum write shipped. "
+        "`POST /api/experiments/{experiment_id}/answers` (corrected at "
+        "`.../edit`) for a record-level one, and `POST "
+        "/api/experiments/{experiment_id}/runs/{run_id}/overrides` to record ONE "
+        "run's divergence from a record-level value. MAPPING A NOTE AND ENTERING "
+        "ITS VALUE ARE DIFFERENT ACTS, and for 7 of the 25 mappable paths the "
+        "second one has no route at all: every write operation refuses them. "
+        "Mapping to such a path is still correct and still keeps the content on "
+        "the record in full — this key says only that no request can then put a "
+        "value there, so a client must not tell a person to go and do it. It "
+        "promises nothing about a value being ACCEPTED: a closed enum, a declared "
+        "JSON type, a required sibling property or the no-guessing rules may still "
+        "refuse the particular value. The record-level paths "
+        "are writable on a record with no runs at all, through the record's own "
+        "answers operation; only the 5 run-level paths need a run to exist. "
         "`record_writable_field_paths` is the sub-subset a RECORD-level operation "
-        "also accepts — `POST /api/experiments/{experiment_id}/answers` to answer "
-        "and `POST /api/experiments/{experiment_id}/edit` to correct, for the "
-        "RECORD-LEVEL paths the schema closes with a REQUIRED enum. ~~\"for the "
-        "paths the official schema closes with an enum\"~~ named ONE of three "
-        "gates and so over-generalised: `context.environment` is mappable, "
-        "value-writable and enum-closed, and this pair REFUSES it, because it is "
-        "run-level. Derive the set from this key, never from the sentence. "
-        "A path in it can be given "
-        "a value on a record that has no runs at all; a path outside it needs a "
-        "run first. The two keys are served separately because a client that "
-        "tells a person WHERE to enter the value must be right about the path in "
-        "front of them, and that answer cannot be inferred from the wider "
-        "subset.\n\n"
-        "`unreadable_entries` counts stored entries this build cannot present as "
+        "also accepts — `POST /api/experiments/{experiment_id}/answers` to answer and "
+        "`POST /api/experiments/{experiment_id}/edit` to correct. It is DERIVED from "
+        "the same expression the record routes enforce, so it cannot describe a "
+        "capability they do not have; a path in it can be given a value on a record "
+        "with no runs at all, and a path outside it needs a run first. The two keys "
+        "are served separately because a client that tells a person WHERE to enter a "
+        "value must be right about the path in front of them, and that answer cannot "
+        "be inferred from the wider subset.\n\n"        "`unreadable_entries` counts stored entries this build cannot present as "
         "notes. There are two kinds and the count does not separate them: an "
         "entry the note model refused, and an entry whose id another note already "
         "holds — a duplicate is perfectly readable, but two notes cannot answer "
@@ -10648,6 +11382,1961 @@ def post_note_review(
             return stale  # another writer won the race; this act was not recorded
         response.headers["ETag"] = exp.etag()
         return {"note": _note_view(revised), "experiment_version": exp.version_token()}
+
+
+# --- 7c. persistent ingestion proposals ---------------------------------------
+#
+# WHAT THESE FOUR OPERATIONS ARE FOR, AND WHAT ALREADY EXISTED. A note stores the
+# TARGET half of a proposal — `candidate_field_path` plus `candidate_rule` — and
+# deliberately carries no value: "a mapped note says 'this belongs there'; a person
+# still says what the value is". `providers/extraction.py`'s `FieldCandidate` is the
+# VALUED half, and it is deliberately never stored, so a candidate nobody confirms
+# within one request leaves no trace at all. These operations are the destination
+# that now exists for the valued half, and nothing else about either changes.
+#
+# NOTHING WAS REWIRED TO FEED THEM. There is no automatic producer: the transcript
+# reader still returns its `candidates` unstored, `extraction.py` still discards its
+# `unrecognised_labels`, and CSV ingest still reconciles rather than applies. Reading
+# this vocabulary as evidence that a producer exists is the misreading `notes.py`'s
+# own header is worded to prevent, and it is repeated here for the same reason.
+#
+# WHAT THEY ARE NOT. A proposal is not a value, not evidence and not a confirmation.
+# `isaac_api.proposals.IngestionProposal` cannot even REPRESENT a confirmed value:
+# `status`, `verified`, `is_evidence` and `is_field_value` are read-only constants on
+# a frozen, slotted dataclass, and they are serialised on the wire so the guarantee
+# survives the boundary. `src/isaac_records/` and `schema/` are untouched by this
+# feature, and no export path reads a proposal: `export_draft` reads
+# `Experiment.draft`, and proposals live beside `notes` OUTSIDE it.
+#
+# ACCEPTING ONE DOES NOT MAKE THIS A SECOND WRITE PATH. The value is written by the
+# writer that already owns the target — `_apply_run_field`, `set_run_override` or
+# `_apply_record_fields`, one of exactly three, recorded per proposal as
+# `applied_via`. `proposals.py` builds no envelope and mints no evidence entry; a
+# second envelope builder would be a second definition of "what a confirmed field
+# looks like", free to drift from the one the exporter and the draft validator read.
+#
+# ONE VALIDATOR, THE RECORD'S. Proposals live inside the experiment's state document,
+# so every write here rewrites the experiment and takes the RECORD's `If-Match` —
+# never a run's, and there is deliberately no per-proposal validator. The acceptance
+# precondition is a SECOND, different check (`target_digest`) and is not a second
+# concurrency scheme: it guards the TARGET's content, which the record's ETag cannot,
+# because the record's rev moves on every unrelated act.
+#
+# NO NEW TABLE AND NO MIGRATION. `db_write.OWNED_TABLES` is unchanged. The state
+# document is already upserted whole into `isaac_experiments.state`, so a new key
+# inside it needs no DDL — and a feature needing a `0006` would not work until an
+# operator applied it, which is a hard stop no authorization lifts.
+#
+# NO MCP TOOL, AND NO PROPOSAL IN AN MCP-REACHABLE PAYLOAD. `PERMITTED_TOOL_NAMES` is
+# closed and `mcp/policy.py`'s import-time guard turns "we decided not to" into an
+# `ImportError`; nothing here adds a name. The narrower half is easier to lose:
+# `mcp/client.py` is bound to the OPERATION allowlist and not to a response SHAPE, so
+# adding a `proposals` key to `GET /api/experiments/{id}` — which `isaac_get_experiment`
+# reaches — would widen external-agent reads with no reviewed decision. It is not
+# added, and a test asserts the absence rather than trusting this comment.
+
+
+#: THE FIELD PATHS A PROPOSAL MAY TARGET. DERIVED, never listed.
+#:
+#: `NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT` and not
+#: `NOTE_MAPPABLE_FIELD_PATHS`, and the difference is 7 paths and the whole design.
+#: A note may be MAPPED to all 25 — refusing that would throw away a scientist's own
+#: judgement about where their prose belongs — but only 18 have a route that accepts
+#: a value, and a proposal that could be created and never applied would reproduce
+#: this repository's most-repeated defect: a surface returning success for work it
+#: had not done. So the permitted target set is the writable one, which makes
+#: "created and accepted but never applied" UNCONSTRUCTIBLE rather than merely
+#: unlikely, and is why there is no separate `applied` state to diverge from
+#: `accepted`.
+#:
+#: The 7 are the six `system.configuration.*` paths and `timestamps.created_utc`.
+#: Their absence is NOT an oversight to be fixed in passing: `system.configuration`
+#: is a designated OPEN namespace in the vendored schema (it declares no
+#: `properties`), `field_level` leaves it unclassified, and `CLAUDE.md` §15 records
+#: the six as `unclassified, verified` pending an external answer. Classifying them
+#: here would be deciding an open question, not reporting a fact. A candidate at one
+#: of them is still captured in full, as a Note, exactly as today.
+#:
+#: When somebody does give those 7 a write route, this set widens automatically,
+#: because it is derived from the routes that enforce it and never transcribed.
+PROPOSAL_TARGET_PATHS: frozenset[str] = NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT
+
+
+def _proposal_writer_for(path: str) -> str | None:
+    """WHICH existing writer applies a value at ``path``, or ``None`` if none does.
+
+    ONE derivation, used three times — by the import-time guard below, by the create
+    route to decide whether the proposal needs a run, and by the review route to
+    dispatch the write. Three copies of this branch would be three chances for the
+    set a route ADMITS and the set it can APPLY to disagree, which is exactly the
+    divergence the guard exists to catch.
+
+    THE ENUM CLAUSE IS FIRST, AND THE ORDER IS THE RULE. `system.technique` is BOTH a
+    record-level closed enum and a member of `EXPERIMENT_OVERRIDABLE_ADDRESSES`, and
+    its run override returns 200 **while accepting off-enum values** — a pre-existing
+    divergence `CLAUDE.md` §11 records and deliberately leaves alone. An accepted
+    proposal at that path must therefore route through `_apply_record_fields`,
+    which checks the enum, and not through the override, which does not. Reversing
+    these two clauses would silently inherit a hole this feature must not widen.
+
+    THE FIRST CLAUSE IS ``_record_enum_fields()`` AND NOT ``_record_writable_fields()``,
+    WHICH LOOKS LIKE THE DEFECT THE SAME SESSION FIXED IN
+    ``NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD`` AND IS NOT. An independent review
+    raised exactly that, correctly observing that two served keys now answer "which
+    paths are the RECORD's" differently — ``record_writable_field_paths`` says 13 and
+    ``record_scoped_target_field_paths`` says 1. Widening this clause was MEASURED and
+    REJECTED, and the reason is recorded here so nobody re-derives it as an improvement:
+
+    this function maps a PATH to a writer, and :data:`_PROPOSAL_WRITER_SCOPE` then makes
+    that writer's scope the path's scope. Returning the record writer for the twelve
+    sample/facility paths would therefore make them ``record``-scoped, and the create
+    route refuses a proposal that names a run at a record-scoped target
+    (``target_is_record_scoped``). **A run override could then never be PROPOSED for a
+    sample or facility value** — which is precisely what an override is for, and what
+    ``7822b13``'s own message calls "a RUN's deliberate DIVERGENCE". The widening would
+    close a documentation gap by deleting a capability.
+
+    The honest fix is a writer chosen from ``(path, run_id)`` rather than from ``path``
+    alone, so one path can carry a record-scoped proposal AND a run-scoped one. That is
+    a real design change with its own tests and is deliberately NOT done here. Two
+    smaller things ARE done, because they are what actually misled a reader: the
+    ``target_requires_a_run`` refusal no longer claims "a value at this path is written
+    on a RUN" (false since the record answers operation accepted these paths), and it
+    now names the operation that does accept them.
+
+    A SECOND THING A WIDENING WOULD HAVE TO CARRY, recorded because it is not obvious:
+    :func:`_apply_accepted_proposal`'s record branch reads
+    ``_record_enum_fields().get(path) or ()`` and refuses when ``value not in allowed``.
+    For a path with no enum that set is empty, so EVERY value would be refused
+    ``not_an_allowed_value`` with an empty ``allowed`` list. The branch would need
+    ``if allowed and value not in allowed`` plus the storability/declared-type checks
+    :func:`_refuse_a_record_value_the_record_cannot_hold` performs, or a proposal would
+    be able to write a wrong-typed value that ``POST .../answers`` refuses.
+    """
+    if path in _record_enum_fields():
+        return proposals.APPLIED_VIA_RECORD_ENUM
+    if path in RUN_WRITABLE_FIELD_PATHS:
+        return proposals.APPLIED_VIA_RUN_FIELD
+    if ws.field_address(path) in EXPERIMENT_OVERRIDABLE_ADDRESSES:
+        return proposals.APPLIED_VIA_RUN_OVERRIDE
+    return None
+
+
+#: The scope each writer works at. `record` means the proposal must NOT name a run;
+#: `run` means it must. Derived from what the writers are rather than asserted:
+#: `_apply_record_fields` writes the RECORD's own field map, and the other two
+#: are a run's.
+_PROPOSAL_WRITER_SCOPE: Mapping[str, str] = MappingProxyType(
+    {
+        proposals.APPLIED_VIA_RECORD_ENUM: "record",
+        proposals.APPLIED_VIA_RUN_FIELD: "run",
+        proposals.APPLIED_VIA_RUN_OVERRIDE: "run",
+    }
+)
+
+
+#: A TARGET THIS BUILD WOULD ADMIT AND COULD NOT APPLY MUST FAIL AT IMPORT, NOT AT A
+#: SCIENTIST'S CLICK.
+#:
+#: The same construction-time guard `_UNACCEPTABLE_READER_PATHS` uses one section
+#: over, in the same shape and for the same reason: `PROPOSAL_TARGET_PATHS` is
+#: derived from one expression and `_proposal_writer_for` dispatches on another, and
+#: if the first ever grew a path the second could not place, this operation would
+#: accept a proposal whose only possible outcome is a refusal at review — after the
+#: person had already written it down. Failing to construct is louder than any
+#: comment. It raises `RuntimeError` while the module loads, so the application fails
+#: to START; the `ImportError` mechanism is `mcp/policy.py`'s and the two are
+#: different mechanisms with the same purpose.
+_PROPOSAL_TARGETS_WITH_NO_WRITER = frozenset(
+    path for path in PROPOSAL_TARGET_PATHS if _proposal_writer_for(path) is None
+)
+if _PROPOSAL_TARGETS_WITH_NO_WRITER:  # pragma: no cover - a construction-time guard
+    raise RuntimeError(
+        "these proposal target paths have no writer to apply them: "
+        f"{sorted(_PROPOSAL_TARGETS_WITH_NO_WRITER)}. A proposal at one of them "
+        "could be created and never applied."
+    )
+
+
+#: The largest one proposal's value and rule may serialise to together. A REFUSAL,
+#: NEVER A TRUNCATION — a shortened proposal misrepresents what was proposed, and a
+#: shortened rule misrepresents why.
+#:
+#: READ FROM `_MAX_NOTE_BYTES` rather than restated, so it cannot drift from the
+#: bound on the note the proposal came from: the content behind a proposal is a
+#: note's text, and a proposal whose ceiling was lower than its source's would refuse
+#: a value read out of a note this application had already accepted. The contract
+#: asked for "the `_MAX_NOTE_BYTES` scale"; reading the constant is the only way that
+#: stays true after somebody changes it.
+_MAX_PROPOSAL_BYTES = _MAX_NOTE_BYTES
+
+#: How many proposals one record may hold.
+#:
+#: **THIS NUMBER IS NOT DERIVED FROM A MEASUREMENT, AND SAYING SO IS PART OF IT.**
+#: `Experiment.runs` states the honest position for its own list — "a defensive bound
+#: is only honest when it is derived from a measured resource limit, and nothing here
+#: has been measured" — and notes impose no cap at all for that reason.
+#:
+#: A cap is imposed here anyway, and the difference from notes is the reason: a note
+#: has exactly one producer, a person typing into a box, so an unbounded count needs
+#: an unbounded typist. A proposal's INTENDED producer is automatic — the extraction
+#: seam, the transcript reader, CSV ingest — and a retrying client with no
+#: `client_request_key` reaches an unbounded count with no person involved at all.
+#: There is also no delete, so a queue that grows cannot be cleared by shrinking it.
+#:
+#: What the number IS derived from is the paging contract, which is the only property
+#: it actually decides: at `_PROPOSAL_WINDOW_MAX` a client can walk the whole list in
+#: `1000 / 200 = 5` requests, and at the default window in 20. It bounds ROWS, not
+#: bytes — bytes are `_MAX_PROPOSAL_BYTES`'s job, per proposal, and
+#: `_MAX_PROPOSAL_STATE_BYTES`'s job, per record.
+_MAX_PROPOSALS_PER_RECORD = 1000
+
+#: The largest `state["proposals"]` may serialise to for ONE record, in bytes.
+#:
+#: **THE TWO BOUNDS ABOVE DO NOT COMPOSE, AND THIS EXISTS BECAUSE THEY DO NOT.**
+#: `_MAX_PROPOSAL_BYTES` (256 KiB) bounds ONE proposal and
+#: `_MAX_PROPOSALS_PER_RECORD` (1000) bounds the ROW COUNT, so their product — a
+#: **262 MB** experiment document — was constructible through this route with every
+#: individual refusal working exactly as designed. That matters here and not for
+#: notes because of what the document costs: `load_experiment` parses the WHOLE
+#: document on every read, and `_authoritative_signature` sha256s the whole of it on
+#: every save. `CLAUDE.md` §11 records this repository paying 1,772,692 B for an
+#: unpaginated LIST and bounding it (contract §10 DEC-5); the DOCUMENT was left three
+#: orders of magnitude looser, and a bound on rows that a client can defeat by making
+#: each row large is not a bound.
+#:
+#: **THE NUMBER IS A JUDGEMENT, NOT A MEASUREMENT, AND SAYING SO IS PART OF IT** —
+#: `_MAX_PROPOSALS_PER_RECORD` makes the same disclosure for the same reason. NOTHING
+#: HERE HAS MEASURED A PARSE OR A HASH COST at any document size, on this machine or
+#: on the deployed pod, so no figure in this comment is derived from one. What the
+#: number IS derived from is the two constants it sits between: it admits **sixteen**
+#: proposals at the per-proposal ceiling, or the full thousand rows at roughly 4 KiB
+#: each — far above anything a deterministic rule over one sentence of a note
+#: produces. It is written as a multiple of `_MAX_PROPOSAL_BYTES` rather than as a
+#: literal so it follows that constant — which follows `_MAX_NOTE_BYTES` — instead of
+#: drifting from it.
+#:
+#: **A CONSEQUENCE TO STATE RATHER THAN LET A CLIENT DISCOVER:** whichever bound
+#: binds first refuses, so a record whose proposals are large meets this ceiling
+#: BEFORE it reaches 1000 rows and never sees `too_many_proposals`. The two carry
+#: different `error` values for exactly that reason. Like every other bound on this
+#: route it REFUSES and never truncates: dropping the oldest proposal to make room
+#: would delete a recorded human judgement, which is the one thing this feature
+#: exists not to do.
+#:
+#: **IT GATES CREATE ONLY, DELIBERATELY, AND THE REVIEW ROUTE IS NOT SUBJECT TO IT.**
+#: Reviewing appends an `accepted_value` and a transition, so an acceptance does make
+#: this key a little larger — but refusing an acceptance because the AUDIT TRAIL
+#: would not fit would leave a stored proposal permanently un-acceptable with no
+#: operation able to clear it, which is the unclearable-queue defect contract §10
+#: DEC-9 exists to prevent and is far worse than the growth. The ceiling is aimed at
+#: what it was written against: an automatic producer, or a retrying client with no
+#: `client_request_key`, ADDING rows with no person involved. Reviewing is a person
+#: answering for rows that are already there.
+_MAX_PROPOSAL_STATE_BYTES = _MAX_PROPOSAL_BYTES * 16
+
+#: The list window. **OMITTING `limit` RETURNS AT MOST `_PROPOSAL_WINDOW_DEFAULT`,
+#: WHICH IS A DELIBERATE DEPARTURE FROM `GET .../runs` AND `GET .../pending`.**
+#:
+#: Those two return everything by default and treat `limit` as bounding one response,
+#: and their own comments say the default must not quietly become a cap. That was the
+#: right call for lists a person creates one at a time. It is the wrong call here:
+#: `CLAUDE.md` §11 records this repository paying **1,772,692 B** for exactly the
+#: unpaginated shape, on a route whose entries a client also did not create by hand,
+#: and contract §10 DEC-5 makes the bounded window this feature's foundation rather
+#: than a later optimisation. `total` is still what the record HOLDS, never what was
+#: returned, so a client can always say how much of the list it is showing.
+_PROPOSAL_WINDOW_DEFAULT = 50
+_PROPOSAL_WINDOW_MAX = 200
+
+
+#: The path parameter naming a proposal. One description, so the wording cannot drift.
+ProposalId = Annotated[
+    str,
+    Path(
+        description=(
+            "The id of a proposal on this experiment, as returned by "
+            "`GET /api/experiments/{experiment_id}/proposals`."
+        )
+    ),
+]
+
+_R_PROPOSAL_NOT_FOUND: dict = {
+    404: {
+        "description": (
+            "No experiment in the selected workspace has that id, that experiment "
+            "holds no proposal with that id, or the `X-Isaac-Tutorial-Session` "
+            "header named a worked-example session that does not exist. A REJECTED "
+            "or WITHDRAWN proposal is not one of these cases — those are states, so "
+            "such a proposal is still returned by this operation."
+        )
+    },
+}
+
+#: The body keys `POST .../proposals` accepts. Anything else is REFUSED rather than
+#: ignored — the closed-allowlist defence the note operations already use, so a
+#: client that sends `{"verified": true}` gets a 422 naming the key instead of a 201
+#: whose body reports `verified: false` while the caller believes otherwise.
+#:
+#: `source` is deliberately NOT here. It is read off the NOTE this proposal cites,
+#: because the note already records what produced its content and a second,
+#: client-supplied answer could disagree with it — one fact, one home.
+_PROPOSAL_CREATE_KEYS = frozenset(
+    {
+        "note_id",
+        "target_field_path",
+        "proposed_value",
+        "rule",
+        "run_id",
+        "start_char",
+        "end_char",
+        "client_request_key",
+    }
+)
+
+_PROPOSAL_REVIEW_KEYS = frozenset(
+    {"action", "confirmed_by_user", "value", "accepted_from", "reason"}
+)
+
+#: Keys refused BY NAME, with the reason, rather than by falling through to the
+#: generic unknown-key refusal.
+#:
+#: Each is a field the master requirement asked for and this contract declined, and a
+#: caller who sends one has read a version of the design that no longer holds. A
+#: message naming the decision is worth more than "unrecognized_field" to a client
+#: that is trying to do the right thing. See `proposals.py`'s header for each reason;
+#: `uncertainty` additionally closes the one gap the reused confidence guard leaves —
+#: that scan's key set is `{confidence, probability, score}` and does not include the
+#: word, so a bare `uncertainty` would otherwise arrive unremarked.
+_PROPOSAL_DECLINED_KEYS: Mapping[str, str] = MappingProxyType(
+    {
+        "unit": (
+            "a unit not stated in the source is a guess, and nothing here requires "
+            "the `rule` sentence to cover one; state the unit in `rule` if the "
+            "source gave it"
+        ),
+        "quote": (
+            "the words live on the note. Send `start_char`/`end_char` and the "
+            "excerpt is derived on read, so an edited note cannot leave a stale copy "
+            "of a scientist's text somewhere the retention disclosure does not "
+            "describe"
+        ),
+        "uncertainty": (
+            "a stored uncertainty is a confidence score with a different name. The "
+            "`rule` sentence already says what was and was not established"
+        ),
+        "confidence": (
+            "a confidence number is a claim about a predictor, not about this record"
+        ),
+        "probability": (
+            "a probability is a claim about a predictor, not about this record"
+        ),
+        "score": ("a score is a claim about a predictor, not about this record"),
+        "expires_utc": (
+            "nothing in this build runs on a timer — no scheduler, no sweeper, no "
+            "cron — so a stored expiry no process enforces is a promise the system "
+            "cannot keep. Staleness is derived from the target instead"
+        ),
+    }
+)
+
+
+def _proposal_not_found(experiment_id: str, proposal_id: str) -> JSONResponse:
+    """A proposal this experiment does not hold. Distinct from `_not_found`.
+
+    The two 404s are deliberately different bodies, for the reason `_note_not_found`
+    gives: `experiment_not_found` means the workspace has no such record,
+    `proposal_not_found` means the record was read successfully and holds no proposal
+    under that id. Collapsing them sends a client looking in the wrong place.
+    """
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "proposal_not_found",
+            "experiment_id": experiment_id,
+            "id": proposal_id,
+        },
+    )
+
+
+def _proposal_refusal(error: str, message: str, **extra) -> JSONResponse:
+    """One typed 422. Every 422 on these routes is one of these."""
+    return JSONResponse(
+        status_code=422, content={"error": error, "message": message, **extra}
+    )
+
+
+def _proposal_conflict(error: str, message: str, **extra) -> JSONResponse:
+    """One typed 409 — a request that conflicts with the record's current state.
+
+    Separate from `_proposal_refusal` because the two say different things and the
+    remedy differs. A 422 says the body is wrong and the caller fixes it; a 409 says
+    the body was fine and the world moved, and the caller re-reads first.
+    """
+    return JSONResponse(
+        status_code=409, content={"error": error, "message": message, **extra}
+    )
+
+
+def _unknown_proposal_keys(body: dict, allowed: frozenset[str]) -> JSONResponse | None:
+    """Refuse a body key this operation does not accept, naming the declined ones."""
+    refused = sorted(str(key) for key in body if key not in allowed)
+    if not refused:
+        return None
+    declined = [key for key in refused if key in _PROPOSAL_DECLINED_KEYS]
+    if declined:
+        return _proposal_refusal(
+            "unrecognized_field",
+            (
+                f"`{declined[0]}` is not part of a proposal in this build, and it is "
+                "refused rather than accepted and ignored: "
+                f"{_PROPOSAL_DECLINED_KEYS[declined[0]]}. Nothing was written."
+            ),
+            key=declined[0],
+            keys=refused,
+            declined=declined,
+        )
+    return _proposal_refusal(
+        "unrecognized_field",
+        (
+            "These keys are not part of this request. Nothing was written. A "
+            "proposal records a value, the target it is for, and the rule that "
+            "produced them; it carries no status, no verification and no evidence, "
+            "so a key naming one of those is refused rather than accepted and "
+            "quietly dropped."
+        ),
+        key=refused[0],
+        keys=refused,
+    )
+
+
+def _proposal_target_state(exp: Experiment, run, path: str) -> dict:
+    """What the target at ``path`` currently holds. ONE read, digested by one function.
+
+    Both halves are included unconditionally rather than branched on the writer
+    class, and that is deliberate: the digest must move when EITHER the field
+    envelope or the run's override at the address moves, and a branch that read only
+    the half a path "should" use would go blind the moment a document carried the
+    other one. `resolved_run_draft` is deliberately NOT called — it composes
+    inheritance for a whole run, which is both far more expensive and broader than
+    "what does this one address hold".
+
+    The envelope carries the field's evidence as well as its value, so a confirmation
+    appended at the address moves the digest even when the value did not change.
+    That is the correct direction: an acceptance is a judgement about a target as it
+    stood, and evidence arriving is a change to it.
+    """
+    subject = run.draft if run is not None else exp.draft
+    fields = subject.get("fields") if isinstance(subject, dict) else None
+    envelope = fields.get(path) if isinstance(fields, dict) else None
+    override = None
+    if run is not None:
+        stored = run.overrides.get(ws.field_address(path))
+        override = stored.to_state() if stored is not None else None
+    return {"envelope": envelope, "override": override}
+
+
+def _current_target_digest(exp: Experiment, proposal) -> str | None:
+    """This proposal's target digest AS IT STANDS, or ``None`` if it cannot be read.
+
+    ``None`` when the run the proposal names no longer exists — `remove_run` does not
+    renumber survivors, so a removed run's id is never reissued and the target is
+    permanently gone rather than shifted onto a neighbour. `None` and not a digest
+    over an empty target: those are different facts, and a digest would say "the
+    target is empty" about a target that is absent.
+    """
+    run = None
+    if proposal.run_id is not None:
+        run = exp.get_run(proposal.run_id)
+        if run is None:
+            return None
+    try:
+        state = _proposal_target_state(exp, run, proposal.target_field_path)
+    except (TypeError, ValueError, AttributeError):  # pragma: no cover - hand-edited doc
+        return None
+    try:
+        return proposals.target_digest(state)
+    except (TypeError, ValueError):  # pragma: no cover - unserialisable stored content
+        return None
+
+
+def _proposal_view(exp: Experiment, proposal, *, notes_by_id: dict | None = None) -> dict:
+    """One proposal as this API presents it, with its three derived reads.
+
+    `notes_by_id` is an optional index so a LIST does not walk `exp.notes` once per
+    proposal; the single-proposal reads pass nothing and look the note up directly.
+    The excerpt is derived from the note's VERBATIM `text`, never `display_text` —
+    the capture is immutable, so a span into it cannot go stale, while a span into an
+    editable string would silently start naming different words.
+    """
+    if notes_by_id is None:
+        note = exp.get_note(proposal.note_id)
+    else:
+        note = notes_by_id.get(proposal.note_id)
+    return proposals.proposal_view(
+        proposal,
+        current_target_digest=_current_target_digest(exp, proposal),
+        note_text=note.text if note is not None else None,
+    )
+
+
+def _proposals_payload(
+    exp: Experiment,
+    *,
+    selected: list,
+    has_more: bool,
+    next_cursor: str | None,
+) -> dict:
+    """The list body. ``total`` counts what EXISTS, never what was returned."""
+    by_state = {state: 0 for state in proposals.PROPOSAL_STATES}
+    for proposal in exp.proposals:
+        by_state[proposal.state] = by_state.get(proposal.state, 0) + 1
+    notes_by_id = {note.id: note for note in exp.notes}
+    return {
+        "proposals": [
+            _proposal_view(exp, proposal, notes_by_id=notes_by_id)
+            for proposal in selected
+        ],
+        # THE NUMBERS A BOUNDED LIST CANNOT BE HONEST WITHOUT. `total` is how many
+        # proposals this record HOLDS, not how many were returned, so a client
+        # showing one window still states the record's true size rather than
+        # implying the rest are gone.
+        "total": len(exp.proposals),
+        "returned": len(selected),
+        "by_state": by_state,
+        "has_more": has_more,
+        "next_cursor": next_cursor,
+        "window_default": _PROPOSAL_WINDOW_DEFAULT,
+        "window_max": _PROPOSAL_WINDOW_MAX,
+        "max_per_record": _MAX_PROPOSALS_PER_RECORD,
+        # A DISCLOSURE OF WHAT THIS BUILD CANNOT PRESENT AS A PROPOSAL, counted
+        # rather than rendered, for the reason the notes list counts its own: this
+        # server can neither say what a refused entry contains without inventing it
+        # nor drop it. Both kinds — an entry the model refused, and an entry whose id
+        # another proposal already holds — are preserved in the record verbatim and
+        # written back out on every save.
+        "unreadable_entries": len(exp.unreadable_proposals),
+        # THE SERVER'S OWN VOCABULARIES AND ITS OWN ANSWER TO "WHAT MAY I TARGET?",
+        # for the reason the notes list serves `mappable_field_paths`: the
+        # alternative is transcribing four closed sets and a derived path set into a
+        # client bundle, where they are free to drift from what these routes enforce.
+        "target_field_paths": sorted(PROPOSAL_TARGET_PATHS),
+        "record_scoped_target_field_paths": sorted(
+            path
+            for path in PROPOSAL_TARGET_PATHS
+            if _PROPOSAL_WRITER_SCOPE[_proposal_writer_for(path)] == "record"
+        ),
+        "states": list(proposals.PROPOSAL_STATES),
+        "review_actions": list(proposals.REVIEW_ACTIONS),
+        "accepted_from_values": list(proposals.ACCEPTED_FROM_VALUES),
+        "experiment_version": exp.version_token(),
+    }
+
+
+_PROPOSAL_LIST_STATE_DESC = (
+    "Return only proposals in this state. Omit it to return every proposal, which "
+    "is the default and includes accepted, rejected, superseded and withdrawn ones."
+)
+
+_PROPOSAL_LIST_LIMIT_DESC = (
+    "How many proposals to return, at most. Unlike this API's other lists, OMITTING "
+    "IT DOES NOT RETURN EVERYTHING — the default is a window and the server caps it, "
+    "so one record's proposals can never arrive as one unbounded response. `total` "
+    "is still how many the record holds."
+)
+
+_PROPOSAL_LIST_AFTER_DESC = (
+    "Continue after this proposal id, which is what the previous page returned as "
+    "`next_cursor`. An id this record does not hold is refused rather than treated "
+    "as the beginning of the list, because silently restarting a page walk would "
+    "return the same window forever."
+)
+
+
+@router.get(
+    "/experiments/{experiment_id}/proposals",
+    tags=[TAG_EXPERIMENTS],
+    summary="List a Record's Ingestion Proposals",
+    description=(
+        "Lists the stored suggestions made against this record — each a proposed "
+        "value, the official field path it is for, the deterministic rule that "
+        "produced them, and the note the content came from. Read-only.\n\n"
+        "A PROPOSAL IS NOT A CONFIRMED VALUE, and it is not evidence. Every "
+        "proposal carries `verified: false`, `is_evidence: false`, "
+        "`is_field_value: false` and a `status` of `ingestion_proposal`, which is "
+        "deliberately not one of the draft field statuses — these are constants of "
+        "the shape, not fields a request can set. `applied` says whether a value "
+        "was actually written through it, and it is true only in state `accepted`.\n\n"
+        "THIS LIST IS BOUNDED AND THE OTHER LISTS IN THIS API ARE NOT. Omitting "
+        "`limit` returns a window, not everything; `has_more` and `next_cursor` "
+        "page through the rest, and `total` remains how many proposals the record "
+        "HOLDS so a client can always say how much of the list it is showing. "
+        "CLOSED PROPOSALS ARE INCLUDED — accepting, rejecting, superseding and "
+        "withdrawing are states reached by explicit acts and recorded in each "
+        "proposal's history, and this API has no operation that deletes a "
+        "proposal.\n\n"
+        "`target_stale` and `still_current` are DERIVED on every read by "
+        "re-digesting what the target holds now, and neither is stored. "
+        "`target_stale` says the target moved since the proposal was made, so "
+        "accepting it would be accepting a judgement about content that is no "
+        "longer there. `still_current` is for an ACCEPTED proposal and says whether "
+        "the target still holds what the acceptance wrote — the value can be "
+        "corrected afterwards through the ordinary write routes, and without this "
+        "an accepted proposal would read as a standing claim about the record's "
+        "present content. Each is `null` when it cannot be answered, which happens "
+        "when the run the proposal names has been removed; `null` is not `false`.\n\n"
+        "`excerpt` is derived from the note's verbatim text and the stored offsets. "
+        "The words are NOT stored on the proposal: a second copy of a scientist's "
+        "text would sit somewhere the transcript retention disclosure does not "
+        "describe, and an edited note would leave it stale.\n\n"
+        "`target_field_paths` is the server's own list of the paths a proposal may "
+        "target. It is the subset of the paths a note may be mapped to that some "
+        "write operation in this build accepts a value at — "
+        # DERIVED AND INTERPOLATED, NEVER TRANSCRIBED. This sentence read "18 of 25"
+        # as a literal, which is a second copy of a number the two constants beside
+        # it already decide — and the whole design of `PROPOSAL_TARGET_PATHS` is that
+        # it widens automatically when somebody gives one of the remaining paths a
+        # write route. A transcribed count would have gone stale in the same commit
+        # that made the feature better, in the text a client author reads.
+        f"{len(PROPOSAL_TARGET_PATHS)} of {len(NOTE_MAPPABLE_FIELD_PATHS)} — because a "
+        "proposal that could be created and never applied would be a surface "
+        "promising work it cannot do. The other "
+        f"{len(NOTE_MAPPABLE_FIELD_PATHS) - len(PROPOSAL_TARGET_PATHS)} can still be "
+        "captured as notes and mapped; that this build has no write route for them "
+        "is a fact about this application and NOT a statement about the official "
+        "ISAAC schema.\n\n"
+        "`unreadable_entries` counts stored entries this build cannot present as "
+        "proposals. There are two kinds and the count does not separate them: an "
+        "entry the model refused, and an entry whose id another proposal already "
+        "holds. Either way the entry is preserved in the record untouched and is "
+        "counted rather than rendered — for a refused entry this server cannot say "
+        "what it contains without inventing it, and for a duplicate it cannot say "
+        "which entry the id names."
+    ),
+    response_description=(
+        "One window of the record's proposals in proposal order, the per-state "
+        "counts, the paths a proposal may target, the cursor for the next window, "
+        "and the record's current `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
+        # DECLARED, because this operation emits a 422 OF ITS OWN and the framework's
+        # generated one describes only the other kind. `unknown_cursor` is a refusal
+        # this handler writes — `after` naming a proposal this record does not hold —
+        # and it is refused rather than treated as the start of the list, because
+        # silently restarting a page walk returns the same window forever. Leaving
+        # the description at FastAPI's default would have documented a validation
+        # error shape that this refusal does not use.
+        422: {
+            "description": (
+                "`unknown_cursor` — `after` does not name a proposal this record "
+                "holds, so the window it asks to continue from does not exist. It is "
+                "refused rather than restarted from the beginning, which would return "
+                "the same window forever to a client that believed it was advancing. "
+                "This code also carries the framework's own parameter-validation "
+                "error, for example a `limit` outside the permitted range; the two "
+                "are told apart by the body, which carries `error` and `message` here "
+                "and the `HTTPValidationError` `detail` shape below there. Nothing is "
+                "written by this operation in any case — it is a read."
+            ),
+            # THE SCHEMA REF IS PART OF THE DECLARATION, exactly as it is in
+            # `_R_ANSWER_REFUSED`, and for the reason that constant states: FastAPI
+            # SKIPS generating its own 422 the moment a route declares one, silently
+            # stripping the `HTTPValidationError` ref that
+            # `test_operations_with_parameters_keep_the_validation_error_schema` pins
+            # for every operation with a parameter. That framework shape is still
+            # reachable here — `limit` outside `[1, _PROPOSAL_WINDOW_MAX]` produces
+            # it — so the ref describes a real answer rather than being carried to
+            # satisfy a test, and the description above says which body is which.
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                }
+            },
+        },
+    },
+)
+def list_proposals(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    state: Annotated[
+        Literal["open", "accepted", "rejected", "superseded", "withdrawn"] | None,
+        Query(description=_PROPOSAL_LIST_STATE_DESC),
+    ] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=_PROPOSAL_WINDOW_MAX, description=_PROPOSAL_LIST_LIMIT_DESC)
+    ] = _PROPOSAL_WINDOW_DEFAULT,
+    after: Annotated[str | None, Query(description=_PROPOSAL_LIST_AFTER_DESC)] = None,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    ordered = exp.sorted_proposals()
+    if after is not None:
+        # A CURSOR THIS RECORD DOES NOT HOLD IS REFUSED, NOT CLAMPED. Treating it as
+        # the beginning would return the FIRST window again, so a client paging
+        # forward would loop over the same rows believing it was advancing.
+        position = next(
+            (
+                index
+                for index, proposal in enumerate(ordered)
+                if proposal.proposal_id == after
+            ),
+            None,
+        )
+        if position is None:
+            return _proposal_refusal(
+                "unknown_cursor",
+                (
+                    "`after` must name a proposal this record holds, exactly as a "
+                    "previous window returned it in `next_cursor`. It is refused "
+                    "rather than treated as the start of the list, because silently "
+                    "restarting would return the same window forever."
+                ),
+                after=after,
+            )
+        ordered = ordered[position + 1 :]
+    selected = [p for p in ordered if state is None or p.state == state]
+    window = selected[:limit]
+    has_more = len(selected) > len(window)
+    response.headers["ETag"] = exp.etag()
+    return _proposals_payload(
+        exp,
+        selected=window,
+        has_more=has_more,
+        next_cursor=window[-1].proposal_id if has_more and window else None,
+    )
+
+
+@router.get(
+    "/experiments/{experiment_id}/proposals/{proposal_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read One Ingestion Proposal",
+    description=(
+        "Returns one proposal: the value it proposes, the field path it is for, the "
+        "rule that produced them, the note the content came from, the excerpt of "
+        "that note, its state, and the full history of the acts performed on it. "
+        "Read-only.\n\n"
+        "A REJECTED, SUPERSEDED OR WITHDRAWN PROPOSAL IS RETURNED NORMALLY. Those "
+        "are states, not deletions, and the history records when each act happened "
+        "and what it moved from. The note behind the proposal is untouched by every "
+        "outcome, which is why refusing a proposal can never destroy the words that "
+        "produced it.\n\n"
+        "`target_stale` and `still_current` are derived by re-digesting the target "
+        "on this read and are never stored, and either is `null` when the run this "
+        "proposal names has been removed. `accepted_by` is read off the accept act "
+        "in the history; its `subject` is `null` whenever the act was unattributed, "
+        "and no placeholder name is ever substituted.\n\n"
+        "The `ETag` header carries THE RECORD's current revision, which is what "
+        "creating or reviewing a proposal requires in `If-Match`. Proposals have no "
+        "separate validator of their own, because a proposal is stored inside the "
+        "record's own document."
+    ),
+    response_description="The proposal, with the record's current `ETag`.",
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_PROPOSAL_NOT_FOUND},
+)
+def get_proposal(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    proposal_id: ProposalId,
+    response: Response,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    proposal = exp.get_proposal(proposal_id)
+    if proposal is None:
+        return _proposal_not_found(experiment_id, proposal_id)
+    response.headers["ETag"] = exp.etag()
+    return {"proposal": _proposal_view(exp, proposal)}
+
+
+def _proposal_value_refusal(value, rule: str) -> JSONResponse | None:
+    """Refuse a value+rule pair that is too large or could not be stored intact.
+
+    TWO REFUSALS AND NOT ONE, deliberately, where `_is_storable_value` collapses them
+    into a boolean. "This is bigger than one proposal may be" and "this contains
+    something JSON cannot represent" have different remedies — shorten it, versus fix
+    the encoding — and one code for the two would be one name for two repairs.
+    """
+    if not _value_depth_within(value, _MAX_VALUE_DEPTH):
+        return _proposal_refusal(
+            "unrepresentable_value",
+            (
+                "This value is nested more deeply than a stored value may be, so a "
+                "record containing it could not be read back reliably. It is REFUSED "
+                "rather than reshaped. Nothing was written."
+            ),
+        )
+    try:
+        rendered = _render_exactly_as_a_response_would(
+            {"proposed_value": value, "rule": rule}
+        )
+    except (ValueError, TypeError, UnicodeEncodeError):
+        return _proposal_refusal(
+            "unrepresentable_value",
+            (
+                "This value could not be stored intact — it contains something JSON "
+                "cannot represent, such as a lone surrogate or a non-finite number — "
+                "so a record containing it could not be read back. It is REFUSED "
+                "rather than reshaped. Nothing was written."
+            ),
+        )
+    if len(rendered) > _MAX_PROPOSAL_BYTES:
+        return _proposal_refusal(
+            "value_too_large",
+            (
+                "The proposed value and its rule are larger together than one "
+                "proposal may be. They are REFUSED rather than shortened, because a "
+                "truncated value misrepresents what was proposed and a truncated "
+                "rule misrepresents why. Nothing was written."
+            ),
+            max_bytes=_MAX_PROPOSAL_BYTES,
+            bytes=len(rendered),
+        )
+    return None
+
+
+#: **ONE SUCCESS CODE, `200`, AND THE DEPARTURE FROM THE THREE SIBLING CREATE ROUTES
+#: IS DELIBERATE.** `POST /api/experiments`, `POST .../runs` and `POST .../notes` each
+#: answer `201`, because each has exactly one outcome and it creates. This operation
+#: has TWO — it mints a proposal, or it finds one already carrying the caller's
+#: `client_request_key` and mints nothing — so a `201` declared at the operation level
+#: would be an operation-wide claim that this operation creates, which is not true of
+#: the second outcome. The repository's own contract test states the rule this obeys:
+#: *"an operation with two success codes has an ambiguous contract"*
+#: (`test_about_and_openapi.py::test_every_success_response_has_its_own_description`).
+#: So the STATUS says the request succeeded and the BODY's `deduplicated` says which
+#: of the two happened, which is this API's established division of labour between a
+#: code and a payload. Nothing here weakens that test to accommodate this route.
+@router.post(
+    "/experiments/{experiment_id}/proposals",
+    tags=[TAG_EXPERIMENTS],
+    responses={
+        200: {
+            "description": (
+                "The proposal this record now holds, with the record's revision. "
+                "`deduplicated: false` means this request minted it. "
+                "`deduplicated: true` means a proposal with this "
+                "`client_request_key` was already on the record, so the EXISTING "
+                "one is returned and nothing was minted — the record is byte-for-byte "
+                "what it was, and its `ETag` is unchanged."
+            )
+        },
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
+        **_R_PRECONDITION,
+    },
+    summary="Propose a Value for a Record Field",
+    description=(
+        "Stores one suggestion — a value, the official field path it is for, and "
+        "the deterministic rule that produced them — against the note whose content "
+        "it was read from, and returns it with the record's new revision.\n\n"
+        "IT WRITES NO SCIENTIFIC VALUE AND MINTS NO EVIDENCE. Creating a proposal "
+        "leaves every field of this record, and of every run, byte-for-byte "
+        "unchanged; a proposal is a suggestion awaiting a person's judgement, and it "
+        "is inert to export. Only the separate review operation writes anything, "
+        "and it writes through the same routes manual entry already uses.\n\n"
+        "`note_id` is REQUIRED and must name a note this record holds. The verbatim "
+        "words stay on that note, which survives every outcome including rejection, "
+        "so refusing a proposal can never destroy the content behind it. "
+        "`start_char` and `end_char` are optional and travel together; they index "
+        "the note's verbatim text and the excerpt is derived on read.\n\n"
+        "`target_field_path` must be one of the paths `GET .../proposals` reports "
+        "under `target_field_paths`. A path this build can map a note to but has no "
+        "write route for is refused with `no_write_path_for_field` naming it — the "
+        "note is still stored and still mappable, and this refusal describes a "
+        "limitation of THIS BUILD and never asserts anything about the official "
+        "ISAAC schema. A path outside the mappable set entirely is "
+        "`unrecognized_field`.\n\n"
+        "`run_id` is required for every target except the record-scoped ones "
+        "reported under `record_scoped_target_field_paths`, and is refused for "
+        "those. It is never inferred from the only run that happens to exist. "
+        "`rule` is required and must be the sentence that produced the proposal, "
+        "not an identifier — an unexplained proposal is a guess wearing a field "
+        "name.\n\n"
+        "`client_request_key` is optional and makes creation exactly-once within "
+        "this record: a key already present returns the EXISTING proposal with "
+        "`deduplicated: true`, rather than minting a second one. Without it, two "
+        "identical requests create two proposals, because they are two acts. The "
+        "status is `200` either way and the body says which happened; this "
+        "operation does not answer `201`, because an operation that may mint "
+        "nothing must not declare at the operation level that it creates.\n\n"
+        "Creating a proposal rewrites the record, so this requires the RECORD's "
+        "current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and "
+        "stale is `412` with nothing written. THAT INCLUDES THE DEDUPLICATED "
+        "OUTCOME AND THE PER-RECORD CEILING: the precondition is checked before "
+        "either, so no request without a current `ETag` is ever answered `200`, and "
+        "a client whose `If-Match` is stale learns that first. Every part of the "
+        "body is resolved BEFORE the precondition is checked, so a malformed "
+        "request is refused whether or not the caller's `ETag` happens to be "
+        "current.\n\n"
+        "Any other body key is refused with `422` naming it. `unit`, `quote`, "
+        "`uncertainty`, `confidence`, `probability`, `score` and `expires_utc` are "
+        "refused BY NAME with the reason: a unit the source never stated is a guess, "
+        "the quoted words belong on the note, a stored confidence is a claim about a "
+        "predictor rather than about this record, and nothing in this build runs on "
+        "a timer, so an expiry no process enforces is a promise it cannot keep."
+    ),
+    response_description=(
+        "The stored proposal and the record's new revision, with the record's new "
+        "`ETag`."
+    ),
+)
+def post_proposal(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"note_id\": \"<a note on this record>\", \"target_field_path\": "
+            "\"<one of the reported target paths>\", \"proposed_value\": <any JSON "
+            "value>, \"rule\": \"<the sentence that produced it>\", \"run_id\": "
+            "\"<required except for a record-scoped path>\", \"start_char\": "
+            "<optional>, \"end_char\": <optional>, \"client_request_key\": "
+            "\"<optional>\"}`. Any other key is refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. Proposals have no separate validator of their own."
+        ),
+    ),
+):
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does it,
+    # so a bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock window
+        if not isinstance(body, dict):
+            return _proposal_refusal(
+                "invalid_body", "The request body must be a JSON object."
+            )
+        refused = _unknown_proposal_keys(body, _PROPOSAL_CREATE_KEYS)
+        if refused is not None:
+            return refused
+
+        # EVERY INPUT IS RESOLVED BEFORE THE PRECONDITION IS EVEN CHECKED, so a
+        # malformed request is a 422 whether or not the caller's `If-Match` happens
+        # to be current, and a refused request can never leave a partial act behind.
+        note_id = body.get("note_id")
+        note = exp.get_note(note_id) if isinstance(note_id, str) else None
+        if note is None:
+            # A `422` and not a `404`: the request is to create a proposal, the
+            # record exists, and what is wrong is one field of the body — the same
+            # reasoning `post_note` applies to an unknown `run_id`.
+            return _proposal_refusal(
+                "unknown_note",
+                (
+                    "`note_id` must name a note this record holds. A proposal cites "
+                    "the note its content was read from, and that citation is what "
+                    "keeps the verbatim words safe from every outcome — so it is "
+                    "required and is never invented. Nothing was written."
+                ),
+                note_id=note_id if isinstance(note_id, str) else None,
+            )
+
+        path = body.get("target_field_path")
+        if not isinstance(path, str) or path not in NOTE_MAPPABLE_FIELD_PATHS:
+            return _proposal_refusal(
+                "unrecognized_field",
+                (
+                    "`target_field_path` must be one of the paths this build can "
+                    "place a value at — the list `GET .../proposals` reports under "
+                    "`target_field_paths`. That list is a SUBSET of the official "
+                    "schema's field paths, so this refusal says the path is not one "
+                    "this application can propose a value for; it does NOT say the "
+                    "official schema has no such field. Nothing was written."
+                ),
+                key=path if isinstance(path, str) else None,
+            )
+        if path not in PROPOSAL_TARGET_PATHS:
+            # THE SEVEN. Named as a limitation of this build, never as a statement
+            # about the schema — `CLAUDE.md` §1 makes the official schema not ours to
+            # speak for, and these paths are real fields it defines.
+            return _proposal_refusal(
+                "no_write_path_for_field",
+                (
+                    "No write operation in this build accepts a value at this path, "
+                    "so a proposal for it could be created and never applied — which "
+                    "would be a queue entry promising work this application cannot "
+                    "do. Your note IS stored and can still be mapped to this path; "
+                    "what is missing is a route that writes a value there. THIS IS A "
+                    "LIMITATION OF THIS BUILD AND NOT A STATEMENT ABOUT THE OFFICIAL "
+                    "ISAAC SCHEMA, which defines this field. Nothing was written."
+                ),
+                key=path,
+                writable_field_paths=sorted(PROPOSAL_TARGET_PATHS),
+            )
+
+        writer = _proposal_writer_for(path)
+        scope_of_target = _PROPOSAL_WRITER_SCOPE[writer]
+        run_id = body.get("run_id")
+        if run_id is not None and (
+            not isinstance(run_id, str) or exp.get_run(run_id) is None
+        ):
+            return _proposal_refusal(
+                "unknown_run",
+                (
+                    "This record has no run with that id, so a proposal cannot be "
+                    "made against it. It is never inferred from the only run that "
+                    "happens to exist. Nothing was written."
+                ),
+                run_id=run_id if isinstance(run_id, str) else None,
+            )
+        if scope_of_target == "run" and run_id is None:
+            # REFUSED AT CREATE, NOT AT REVIEW. The writer for this path is a run's,
+            # so a record-scoped proposal for it could never be applied — and a
+            # proposal that can only ever be refused is exactly the shape the target
+            # set's derivation exists to prevent.
+            # ── THE MESSAGE IS ABOUT PROPOSALS, NOT ABOUT THE RECORD'S WRITE
+            # SURFACE, AND IT USED TO CONFLATE THEM ────────────────────────────
+            # It said "A value at this path is written on a RUN", which became FALSE
+            # for the twelve sample/facility paths the moment the record-level
+            # answers operation accepted them: `POST .../answers` writes
+            # `sample.material.name` on a record with NO runs and returns 200. The
+            # true statement is narrower and is the one a client can act on — this
+            # PROPOSAL applies through a run's writer, so it needs a run — and it is
+            # said beside the operation that does not.
+            return _proposal_refusal(
+                "target_requires_a_run",
+                (
+                    "A PROPOSAL at this path is applied through a run's writer, so "
+                    "it must name the run it is about; it is not inferred, and a "
+                    "record with no runs cannot yet hold a proposal for this path. "
+                    "That is a fact about the proposal mechanism, NOT about where "
+                    "the value may be entered: a path served in "
+                    "`record_writable_field_paths` by "
+                    "`GET /api/experiments/{experiment_id}/notes` can be given a "
+                    "value directly on the record, with no run, through "
+                    "`POST /api/experiments/{experiment_id}/answers`. Nothing was "
+                    "written."
+                ),
+                key=path,
+                run_id=None,
+            )
+        if scope_of_target == "record" and run_id is not None:
+            return _proposal_refusal(
+                "target_is_record_scoped",
+                (
+                    "A value at this path is written on the RECORD, not on a run, so "
+                    "a proposal for it must not name one. A run override at this "
+                    "path records a DIVERGENCE from what the record says rather than "
+                    "saying what the record is, and the two are different acts. "
+                    "Nothing was written."
+                ),
+                key=path,
+                run_id=run_id,
+            )
+
+        rule = body.get("rule")
+        if not isinstance(rule, str) or not rule.strip():
+            return _proposal_refusal(
+                "invalid_rule",
+                (
+                    "`rule` must be the non-blank sentence that produced this value "
+                    "and this target — the sentence, not an identifier, so a reader "
+                    "can check the proposal without a lookup table. An unexplained "
+                    "proposal is a guess wearing a field name. Nothing was written."
+                ),
+            )
+        if "proposed_value" not in body:
+            return _proposal_refusal(
+                "invalid_proposed_value",
+                (
+                    "`proposed_value` is required. A proposal with no value is a "
+                    "mapping, and a note can already record one. Nothing was written."
+                ),
+            )
+        proposed_value = body["proposed_value"]
+        if proposed_value is None:
+            return _proposal_refusal(
+                "invalid_proposed_value",
+                (
+                    "`proposed_value` must not be null. A null would CLEAR the field "
+                    "if it were ever applied, and clearing a confirmed value is a "
+                    "different act with its own questions — it is not something a "
+                    "proposal may smuggle in. Nothing was written."
+                ),
+            )
+        size_refusal = _proposal_value_refusal(proposed_value, rule)
+        if size_refusal is not None:
+            return size_refusal
+
+        start_char = body.get("start_char")
+        end_char = body.get("end_char")
+        if (start_char is None) != (end_char is None):
+            return _proposal_refusal(
+                "invalid_span",
+                (
+                    "`start_char` and `end_char` travel together. Half a span names a "
+                    "position in the note without saying where it ends. Nothing was "
+                    "written."
+                ),
+            )
+        if start_char is not None:
+            valid = all(
+                isinstance(offset, int) and not isinstance(offset, bool) and offset >= 0
+                for offset in (start_char, end_char)
+            )
+            # `0 <= start <= end <= len(note.text)`, all four bounds, against the
+            # VERBATIM capture — which is immutable, so a span that fits today cannot
+            # stop fitting. An out-of-range span is refused rather than clamped: a
+            # clamped excerpt quotes words nobody wrote.
+            if not valid or start_char > end_char or end_char > len(note.text):
+                return _proposal_refusal(
+                    "invalid_span",
+                    (
+                        "`start_char` and `end_char` must satisfy 0 <= start <= end "
+                        "<= the length of the note's verbatim text. A span outside "
+                        "it is refused rather than clamped, because a clamped "
+                        "excerpt would quote words nobody wrote. Nothing was written."
+                    ),
+                    note_text_length=len(note.text),
+                )
+
+        client_request_key = body.get("client_request_key")
+        if client_request_key is not None and (
+            not isinstance(client_request_key, str) or not client_request_key.strip()
+        ):
+            return _proposal_refusal(
+                "invalid_client_request_key",
+                (
+                    "`client_request_key` must be a non-blank string when supplied. "
+                    "Absent is a meaning here — omit it rather than sending an empty "
+                    "string, which would match every other empty one. Nothing was "
+                    "written."
+                ),
+            )
+
+        # THE PRECONDITION, AND IT PRECEDES BOTH OF THE TWO STATE CHECKS BELOW.
+        #
+        # It did not, once, and the consequence was a published claim this route
+        # falsified: the description says an omitted `If-Match` is `428`, while the
+        # deduplication branch answered `200` and the per-record ceiling answered
+        # `422` without the header being looked at. Neither wrote anything, so
+        # nothing was corrupted — but a `200` for a request that never presented a
+        # precondition is a surface reporting a completed act on terms it did not
+        # check, which is this repository's most-repeated defect.
+        #
+        # The body is still resolved FIRST (above), which is the contract's other
+        # ordering rule and is a different rule: a malformed body is the caller's to
+        # fix regardless of any version, so it is refused whether or not the `ETag`
+        # is current. What follows the precondition is everything that is a question
+        # about THE RECORD's current state, and a question about the record's state
+        # may only be answered for a caller holding the record's current version.
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        # EXACTLY-ONCE, INSIDE THE LOCK. Every write to one experiment holds this
+        # lock, so a key already present cannot be missed by a concurrent create and
+        # no uniqueness constraint is needed. The EXISTING proposal is returned —
+        # with the id the first attempt established, never a later one — because a
+        # retrying client's whole requirement is that it end up with one proposal and
+        # know which.
+        #
+        # WHAT THE PRECONDITION ABOVE CHANGES ABOUT THIS BRANCH, STATED RATHER THAN
+        # DISCOVERED: a client that retries with the `ETag` it held BEFORE its first
+        # attempt now meets `412`, because that first attempt advanced the record. It
+        # re-reads and retries, and it is that second attempt this branch answers.
+        # The exactly-once guarantee is unchanged — no second proposal is ever minted
+        # for one key — and it is now delivered by two mechanisms rather than one,
+        # which is the correct direction for a guarantee.
+        if client_request_key is not None:
+            existing = proposals.find_by_client_request_key(
+                exp.sorted_proposals(), client_request_key
+            )
+            if existing is not None:
+                # `response.headers` is deliberately NOT set here: this returns a
+                # `JSONResponse` of its own, and FastAPI applies the injected
+                # `Response`'s headers only to a body it serialises itself. An
+                # assignment here would read as though it did something.
+                return JSONResponse(
+                    status_code=200,
+                    headers={"ETag": exp.etag()},
+                    content=jsonable_encoder(
+                        {
+                            "proposal": _proposal_view(exp, existing),
+                            "deduplicated": True,
+                            "experiment_version": exp.version_token(),
+                        }
+                    ),
+                )
+
+        if len(exp.proposals) >= _MAX_PROPOSALS_PER_RECORD:
+            return _proposal_refusal(
+                "too_many_proposals",
+                (
+                    "This record already holds the maximum number of proposals. They "
+                    "are not removed by reviewing them — accepting, rejecting and "
+                    "withdrawing are states, and this API has no delete — so the "
+                    "bound is on how many one record may ever hold. Nothing was "
+                    "written."
+                ),
+                max_per_record=_MAX_PROPOSALS_PER_RECORD,
+                total=len(exp.proposals),
+            )
+
+        run = exp.get_run(run_id) if run_id is not None else None
+        try:
+            digest = proposals.target_digest(_proposal_target_state(exp, run, path))
+        except (TypeError, ValueError) as refusal:  # pragma: no cover - hand-edited doc
+            return _proposal_refusal(
+                "unrepresentable_value",
+                (
+                    "What this record currently holds at that path could not be "
+                    "digested, so a proposal for it would have no acceptance "
+                    f"precondition to check against: {refusal}. Nothing was written."
+                ),
+            )
+        try:
+            proposal = proposals.new_proposal(
+                proposal_id=new_record_id(),
+                experiment_id=exp.id,
+                note_id=note.id,
+                target_field_path=path,
+                proposed_value=proposed_value,
+                rule=rule,
+                # READ OFF THE NOTE, never off the body — the note already records
+                # what produced its content, and a second answer could disagree.
+                source=note.source,
+                proposed_utc=_now_iso(),
+                base_rev=exp.rev,
+                target_digest=digest,
+                # THE PROPOSER'S ACTOR SEAM STAYS UNSET, and that is the honest
+                # answer rather than a gap. Creating a proposal requires no
+                # attributable actor — it writes no scientific value — so nothing
+                # here establishes one, and a subject beside a recognised basis would
+                # be a name nothing vouched for.
+                trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+                run_id=run_id,
+                start_char=start_char,
+                end_char=end_char,
+                client_request_key=client_request_key,
+            )
+        except proposals.UnsupportedProposal as refusal:
+            # THE MODEL'S OWN REFUSALS REACH THE CLIENT AS A TYPED 422, NEVER A 500.
+            # The checks above cover every shape a UI can send; this covers the ones
+            # only the model knows — a confidence buried in a nested value, a blank
+            # optional sent as `""` — so a malformed payload can never escape as a
+            # traceback out of the store.
+            return _proposal_refusal("unsupported_proposal", str(refusal))
+
+        # THE PER-RECORD BYTE CEILING, MEASURED OVER THE PROPOSAL THAT WOULD BE
+        # STORED. Minting is pure — nothing is on the record until `add_proposal`
+        # below — so measuring the projected payload here and refusing costs the
+        # caller nothing and writes nothing.
+        #
+        # THE UNREADABLE RAW ENTRIES ARE DELIBERATELY OUTSIDE THIS MEASUREMENT, and
+        # the reason is that they are outside this build's ability to describe: they
+        # are entries `IngestionProposal.from_state` refused, kept verbatim so a save
+        # cannot discard them (contract §10 DEC-6), and rendering one to measure it
+        # would be this route choosing an encoding for content it has already said it
+        # cannot read. They also cannot grow: nothing in this application creates one.
+        # So the ceiling bounds what THIS FEATURE can add, which is what it is for.
+        try:
+            projected = _render_exactly_as_a_response_would(
+                [existing.to_state() for existing in exp.proposals] + [proposal.to_state()]
+            )
+        except (ValueError, TypeError, UnicodeEncodeError):  # pragma: no cover - see below
+            # Unreachable through any route: every stored proposal's value passed
+            # `_proposal_value_refusal` when it was created, and a hydrated one can
+            # hold only what `json.loads` produced. It is written rather than
+            # asserted-away because the alternative to a refusal here is a traceback
+            # out of a size check, and fail-closed on a document this build cannot
+            # measure is the correct direction.
+            return _proposal_refusal(
+                "unrepresentable_value",
+                (
+                    "This record already holds a proposal that could not be measured, "
+                    "so the per-record ceiling could not be checked and nothing was "
+                    "written."
+                ),
+            )
+        if len(projected) > _MAX_PROPOSAL_STATE_BYTES:
+            return _proposal_refusal(
+                "proposals_too_large",
+                (
+                    "This record's proposals would be larger together than one "
+                    "record's may be. They are REFUSED rather than trimmed to make "
+                    "room, because the oldest proposal is a recorded judgement and "
+                    "removing one is not something a create may do. This is a "
+                    "DIFFERENT bound from `too_many_proposals`, which counts rows: "
+                    "whichever binds first refuses. Nothing was written."
+                ),
+                max_bytes=_MAX_PROPOSAL_STATE_BYTES,
+                bytes=len(projected),
+                total=len(exp.proposals),
+            )
+
+        exp.add_proposal(proposal)
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this proposal was not stored
+        response.headers["ETag"] = exp.etag()
+        return {
+            "proposal": _proposal_view(exp, proposal),
+            "deduplicated": False,
+            "experiment_version": exp.version_token(),
+        }
+
+
+def _apply_accepted_proposal(
+    exp: Experiment, run, proposal, value, at: str
+) -> tuple[str, JSONResponse | None]:
+    """Write an accepted value through the writer that OWNS its target.
+
+    THE THREE WRITERS ARE REUSED BY NAME AND NOTHING IS REIMPLEMENTED — contract §5
+    invariant **I3**. `_apply_run_field` mints the four-key `user_confirmation`
+    entry, carries the envelope's prior evidence and its `unit` forward, and is
+    idempotent; `_apply_record_fields` reuses it in turn for a record-level
+    field, differing only in the question the confirmation records; and
+    `set_run_override` records a run's explicit divergence with what it displaced.
+    Building an envelope here would be a second definition of what a confirmed field
+    looks like, free to drift from the one the exporter and the draft validator read.
+
+    Returns ``(applied_via, None)`` or ``(applied_via, <refusal>)``. The refusal
+    branch exists because a writer can still say no — `set_run_override` raises
+    `NotOverridable` for an address that is not experiment-level, and a schema
+    refresh could move a path out from under this dispatch — and a refusal from the
+    writer must reach the client typed rather than as a traceback.
+
+    ON THE REFUSAL BRANCH THE FIRST ELEMENT MAY BE ``None``, which the accepted path
+    can never see: the caller uses ``applied_via`` only after checking that the
+    refusal is ``None``, and ``proposals.accept_proposal`` would refuse a ``None``
+    ``applied_via`` outright if it ever reached there. It is returned rather than
+    suppressed because "no writer owns this path" is the fact the scope refusal
+    below is reporting.
+    """
+    writer = _proposal_writer_for(proposal.target_field_path)
+
+    # THE WRITER'S SCOPE AND THE PROPOSAL'S MUST AGREE, AND THIS IS A REFUSAL RATHER
+    # THAN AN ASSERTION BECAUSE THE ALTERNATIVE WAS A MEASURED `500`.
+    #
+    # `_proposal_writer_for` is re-evaluated HERE, at review time, over a proposal
+    # whose `run_id` was fixed at CREATE time — and the create route's scope check
+    # cannot bind a later read. Two ways they come apart, neither hypothetical:
+    #
+    #   * a stored proposal naming a run-scoped `target_field_path` with `run_id:
+    #     null`. `IngestionProposal.from_state` accepts it (this model performs no
+    #     schema lookup and deliberately does not learn to), so a hand-edited or
+    #     legacy document produces one. `run` is then `None` and the run-field branch
+    #     below did `run.draft.get("fields")` — **measured: `AttributeError: 'NoneType'
+    #     object has no attribute 'draft'`, escaping as a 500 from the WRITE path.**
+    #   * a schema refresh, or a change to any of the three sets `_proposal_writer_for`
+    #     dispatches on, moving a path between writer classes after proposals for it
+    #     were already stored. The same dispatch then selects a writer of the other
+    #     scope, or none at all.
+    #
+    # The read path already handles this class correctly — `_hydrate_proposals` files
+    # a pair-shape it cannot represent as unreadable rather than raising — and the
+    # write path must match it. A `409` and not a `422`: the body was fine, the
+    # record's own stored state is what refuses, and that is exactly the distinction
+    # `_proposal_conflict` exists to carry. Modelled on `target_run_removed`, which is
+    # the same shape of fact one step earlier: there the run is gone, here the writer
+    # that owns the path does not work at the scope this proposal names.
+    #
+    # `.get` and not `[...]`: `_PROPOSAL_WRITER_SCOPE[None]` is a `KeyError`, which is
+    # the same 500 arriving through a different door.
+    target_scope = "run" if run is not None else "record"
+    if _PROPOSAL_WRITER_SCOPE.get(writer) != target_scope:
+        return writer, _proposal_conflict(
+            "target_scope_mismatch",
+            (
+                "This proposal was stored against "
+                + (
+                    "a run"
+                    if target_scope == "run"
+                    else "the record itself, naming no run"
+                )
+                + ", and the write route this build now uses for that path "
+                + (
+                    "does not exist — no write operation here accepts a value at it."
+                    if writer is None
+                    else (
+                        "writes "
+                        + (
+                            "a run's value."
+                            if _PROPOSAL_WRITER_SCOPE[writer] == "run"
+                            else "the record's own value, not a run's."
+                        )
+                    )
+                )
+                + " It is refused rather than re-aimed: writing the value somewhere "
+                "other than where the proposal says it belongs would be inferring "
+                "what was meant. The proposal stays readable, its note is untouched, "
+                "and a person may withdraw it. Nothing was written."
+            ),
+            key=proposal.target_field_path,
+            run_id=proposal.run_id,
+            applied_via=writer,
+            proposal_scope=target_scope,
+            writer_scope=_PROPOSAL_WRITER_SCOPE.get(writer),
+        )
+
+    if writer == proposals.APPLIED_VIA_RECORD_ENUM:
+        allowed = _record_enum_fields().get(proposal.target_field_path) or ()
+        if value not in allowed:
+            # THE ENUM IS CHECKED HERE AND NOT AT THE OVERRIDE, which is the whole
+            # reason `_proposal_writer_for` puts this clause first: the run override
+            # at this same path returns 200 for an off-enum value, a pre-existing
+            # divergence this feature must not inherit.
+            return writer, _proposal_refusal(
+                "not_an_allowed_value",
+                (
+                    "The official schema closes this field with an enum, and this "
+                    "value is not one of its members. The allowed values are read "
+                    "from the vendored schema rather than transcribed, so this "
+                    "refusal reports what the schema says and not what this "
+                    "application believes. Nothing was written."
+                ),
+                key=proposal.target_field_path,
+                allowed=list(allowed),
+            )
+        _apply_record_fields(exp.draft, {proposal.target_field_path: value}, at)
+        return writer, None
+    if writer == proposals.APPLIED_VIA_RUN_FIELD:
+        existing = run.draft.get("fields")
+        fields = existing if isinstance(existing, dict) else {}
+        wrote = _apply_run_field(fields, proposal.target_field_path, value, at)
+        # The field map is attached only when something was actually written —
+        # `_apply_record_fields`'s discipline for the same map and for the same
+        # reason: the map is part of the run's authoritative signature, and creating
+        # an empty one would advance a revision for a request that wrote nothing.
+        if wrote and not isinstance(existing, dict):
+            run.draft["fields"] = fields
+        return writer, None
+    try:
+        exp.set_run_override(
+            run,
+            ws.field_address(proposal.target_field_path),
+            # THE ENVELOPE IS BUILT BY `_apply_run_field`, NOT HERE. An override's
+            # payload for a `field:` address IS a draft field envelope, so it is
+            # composed by handing the writer an empty map and taking what it wrote —
+            # which means the evidence entry, the status and the shape are the one
+            # definition this application has, rather than a second one that happens
+            # to look the same today.
+            _override_envelope(exp, proposal.target_field_path, value, at),
+        )
+    except (ws.NotOverridable, ValueError) as refusal:
+        return writer, _proposal_refusal(
+            "no_write_path_for_field",
+            (
+                "The write route that owns this path refused it: "
+                f"{refusal}. Nothing was written. This is a limitation of this "
+                "build and not a statement about the official ISAAC schema."
+            ),
+            key=proposal.target_field_path,
+        )
+    return writer, None
+
+
+def _override_envelope(exp: Experiment, path: str, value, at: str) -> dict:
+    """The draft field envelope an accepted record-level value overrides WITH.
+
+    `_apply_run_field` composes it, against a map seeded with whatever the RECORD
+    currently holds at the path, so the prior evidence and any `unit` on the
+    inherited envelope are carried exactly as they are for a direct edit. Composing
+    it by hand here would be the second envelope builder this feature exists not to
+    become.
+    """
+    fields = exp.draft.get("fields")
+    inherited = fields.get(path) if isinstance(fields, dict) else None
+    staged: dict = {path: copy.deepcopy(inherited)} if isinstance(inherited, dict) else {}
+    _apply_run_field(staged, path, value, at)
+    return staged[path]
+
+
+@router.post(
+    "/experiments/{experiment_id}/proposals/{proposal_id}/review",
+    tags=[TAG_EXPERIMENTS],
+    summary="Review One Ingestion Proposal",
+    description=(
+        "Performs one of the four review acts on a proposal — `accept`, `reject`, "
+        "`supersede` or `withdraw` — and returns the proposal as it now stands. Each "
+        "act is appended to the proposal's history with the state it moved from, the "
+        "time it happened, and who performed it; nothing is ever removed.\n\n"
+        "ACCEPT REQUIRES AN ATTRIBUTABLE HUMAN ACTOR, AND IN EVERY DEFAULT-CONFIGURED "
+        "DEPLOYMENT THIS OPERATION ANSWERS `409 human_actor_required` FOR IT AND "
+        "WRITES NOTHING. That is a fact about configuration rather than a defect: no "
+        "verifier in this build reads a request, so an arriving edge identity header "
+        "is worth nothing here, and the trusted authentication boundary that would "
+        "change it has not been built. Writing a scientific value into a record is "
+        "an attributable act, and recording one against nobody would be worse than "
+        "refusing it.\n\n"
+        "`reject`, `supersede` and `withdraw` REQUIRE NO ACTOR, and the asymmetry is "
+        "deliberate. They record that nobody wants the proposal, which attributes "
+        "nothing to anybody; gating them would leave the review queue permanently "
+        "unclearable in exactly the deployments where acceptance is already refused. "
+        "The consequence is stated rather than hidden: any caller this deployment "
+        "admits can withdraw any proposal, and the act is recorded as unattributed, "
+        "which is what it is.\n\n"
+        "ACCEPTING WRITES THE VALUE THROUGH THE SAME ROUTE MANUAL ENTRY USES — the "
+        "run field edit, the run override, or the record-level enum write, whichever "
+        "owns the target — so the value is stored in exactly the envelope a person "
+        "typing it would produce, with the same `user_confirmation` evidence entry "
+        "and the same no-guessing checks. Nothing about export, official validation "
+        "or the schema changes, and the proposal itself never becomes the field's "
+        "value: it records that a value was written, and `is_field_value` stays "
+        "`false`.\n\n"
+        "A PROPOSAL WHOSE TARGET HAS MOVED IS REFUSED WITH `409 proposal_stale` AND "
+        "NOTHING IS WRITTEN. The check is a digest of what the target holds — its "
+        "value and its evidence — taken when the proposal was made and re-taken "
+        "inside the same lock as the write. It is not the record's revision, which "
+        "moves on every unrelated act and would make every proposal on an active "
+        "record permanently un-acceptable while leaving the target itself unchecked. "
+        "A stale proposal stays readable and a person may withdraw it, supersede it, "
+        "or make a new one against the value that is now there.\n\n"
+        "A PROPOSAL WHOSE RUN HAS BEEN REMOVED IS REFUSED WITH `409 "
+        "target_run_removed` and is NEVER silently re-targeted. Removing a run does "
+        "not renumber the survivors, so the removed id is never reissued and the "
+        "target is permanently gone rather than shifted onto a neighbour; re-aiming "
+        "it would be inferring which run a scientist meant. The proposal stays "
+        "readable, its note is untouched, and a person may withdraw it.\n\n"
+        "`accept` takes `accepted_from`: `candidate` means the proposed value is "
+        "written as it stands, and `edited` means it was wrong and `value` carries "
+        "the corrected one. The two are different claims and neither is a default. "
+        "`reject`, `supersede` and `withdraw` take an optional `reason`, stored when "
+        "given and left absent when not, because a justification nobody wrote is not "
+        "invented on their behalf. `accept` REFUSES a `reason` with `422` rather "
+        "than accepting and dropping it: nothing stores one on an acceptance, and a "
+        "sentence a scientist wrote must not disappear into a success response.\n\n"
+        "A REVIEW ACT REACHES AN OPEN PROPOSAL OR IT REACHES NONE. A proposal that "
+        "has already been accepted, rejected, superseded or withdrawn is refused "
+        "with `422 proposal_not_open`, so a recorded judgement can never be replaced "
+        "by a later one — a further view is a NEW proposal, with its own id and its "
+        "own audit trail. There is no delete, and rejecting one leaves its note "
+        "listed, readable and unchanged.\n\n"
+        "Requires `confirmed_by_user: true` and the RECORD's current `ETag` in "
+        "`If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with "
+        "nothing written. Every part of the body is resolved BEFORE the precondition "
+        "is checked, so a malformed request is refused whether or not the caller's "
+        "`ETag` happens to be current, and a refused request leaves no partial act "
+        "behind. "
+        "ONE ORDERING IS STATED RATHER THAN LEFT TO BE DISCOVERED: FOR `accept`, THE "
+        "ATTRIBUTABILITY REFUSAL IS EVALUATED BEFORE THE `If-Match` PRECONDITION. So "
+        "in a deployment that establishes no attributable human actor — which is "
+        "every default-configured one — `accept` answers `409 human_actor_required` "
+        "even when `If-Match` is omitted or stale, and never `428` or `412`. That "
+        "order is deliberate and is the truthful one: `428` and `412` both mean *this "
+        "request can succeed once you re-read and retry*, and for an acceptance in "
+        "such a deployment retrying can never succeed. Reporting a permanent refusal "
+        "as a transient one would send a client round a loop it cannot leave. "
+        "`reject`, `supersede` and `withdraw` need no actor, so nothing of that "
+        "kind precedes their precondition and `428`/`412` mean exactly what they "
+        "say for all three. Body validation precedes the precondition for all four, "
+        "which is a different rule and is stated above."
+    ),
+    response_description=(
+        "The proposal as it now stands, including its full history, and the "
+        "record's new `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_PROPOSAL_NOT_FOUND,
+        **_R_PRECONDITION,
+        409: {
+            "description": (
+                "The body was well formed and the record's state refuses it. "
+                "`human_actor_required` — this deployment establishes no "
+                "attributable human actor, which is the case in every "
+                "default-configured deployment, and only `accept` needs one. "
+                "`proposal_stale` — the target's content has moved since the "
+                "proposal was made, so accepting it would overwrite a newer value. "
+                "`target_run_removed` — the run this proposal names no longer "
+                "exists, and it is never re-aimed at another. "
+                "`target_scope_mismatch` — the proposal names a run and the write "
+                "route for its path writes the record's own value, or the other way "
+                "round, or no write route in this build owns the path any more; the "
+                "value is never written somewhere other than where the proposal says "
+                "it belongs. Nothing was written in any of these cases."
+            )
+        },
+    },
+)
+def post_proposal_review(
+    request: Request,
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    proposal_id: ProposalId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"action\": "
+            "\"accept|reject|supersede|withdraw\", \"accepted_from\": "
+            "\"candidate|edited\" (required for accept), \"value\": \"<required "
+            "when accepted_from is edited>\", \"reason\": \"<optional for reject, "
+            "supersede and withdraw; REFUSED for accept>\"}`. Any other key is "
+            "refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. Proposals have no separate validator of their own, and the "
+            "acceptance precondition over the target's own content is a SECOND, "
+            "different check that this header cannot express."
+        ),
+    ),
+):
+    """One review act on one proposal, with the write inside the same critical section.
+
+    THE ATTRIBUTABILITY REFUSAL IS RAISED IN THE HANDLER AND NOT DECLARED AS A
+    DEPENDENCY, which is the opposite of `post_submit`, and the difference is
+    required rather than stylistic. FastAPI resolves dependencies before the handler
+    runs, unconditionally — so declaring `require_human_actor` here would refuse
+    `reject`, `supersede` and `withdraw` as well, and those deliberately need no
+    actor. In a deployment that establishes nobody, which is every default one, that
+    would leave the review queue permanently unclearable: the exact defect
+    `conflict_resolution.py` exists to fix, reintroduced one feature over.
+
+    One observable consequence, stated rather than discovered: because the check is
+    in the handler, a `404` for an unknown record or proposal PRECEDES the `409`
+    here, where on `POST .../submit` the `409` precedes the `404`. Both orders are
+    deliberate in their own place.
+
+    A SECOND ORDERING, DISCLOSED THE SAME WAY BECAUSE IT WAS FOUND BY MEASUREMENT AND
+    NOT BY READING: the attributability gate runs BEFORE `_check_if_match`, so an
+    `accept` with no `If-Match` at all answers `409 human_actor_required` and not the
+    `428` this operation's `If-Match` sentence promises. The description now says so
+    rather than the code being reordered to match it, and the reason is which of the
+    two refusals is TRUE for longer. `428` and `412` are transient by definition —
+    their remedy is "re-read and send the current validator" — while in a deployment
+    that establishes no actor an acceptance can never succeed, no matter what header
+    arrives. Answering the transient refusal first would hand a client a remedy that
+    cannot work and a loop with no exit, which is the shape `CLAUDE.md` §11 records
+    the reset paying for when a permanent condition was reported as
+    `plan_digest_stale`. The three acts that need no actor are unaffected: no actor
+    gate precedes their precondition, so `428`/`412` mean exactly what they say. (The
+    BODY is resolved before the precondition for all four — that is the contract's
+    separate ordering rule and is unchanged.)
+
+    THE DIGEST RE-READ, ITS COMPARISON AND THE MUTATION ARE IN ONE `record_lock`
+    BLOCK, IN THAT ORDER, BEFORE ANY WRITE. A digest read before the lock would let
+    two accepts both pass their precondition and the second overwrite the first —
+    which is the discipline the reset `plan_digest` already follows, whose match is
+    verified inside the same critical section as the mutation.
+    """
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock window
+        proposal = exp.get_proposal(proposal_id)
+        if proposal is None:
+            return _proposal_not_found(experiment_id, proposal_id)
+        if not isinstance(body, dict):
+            return _proposal_refusal(
+                "invalid_body", "The request body must be a JSON object."
+            )
+        refused = _unknown_proposal_keys(body, _PROPOSAL_REVIEW_KEYS)
+        if refused is not None:
+            return refused
+        action = body.get("action")
+        # `isinstance(action, str)` FIRST, and it is not redundant with the `in`: a
+        # membership test against a tuple of strings would compare a dict happily,
+        # but the same shape against a frozenset HASHES its operand and 500s. The
+        # notes routes paid for that twice; the ordering is copied, not re-derived.
+        if not isinstance(action, str) or action not in proposals.REVIEW_ACTIONS:
+            return _proposal_refusal(
+                "unknown_proposal_action",
+                (
+                    "`action` must be one of `accept`, `reject`, `supersede` or "
+                    "`withdraw`. There is no delete: every one of the four is a "
+                    "state recorded in the proposal's history, and the note behind "
+                    "the proposal is untouched by all of them."
+                ),
+                action=action if isinstance(action, str) else None,
+                allowed=list(proposals.REVIEW_ACTIONS),
+            )
+        if body.get("confirmed_by_user") is not True:
+            return _confirmation_required("review a proposal")
+        if proposal.state != proposals.STATE_OPEN:
+            return _proposal_refusal(
+                "proposal_not_open",
+                (
+                    "This proposal has already been reviewed, so a second act on it "
+                    "is refused and nothing was written. Every recorded judgement "
+                    "stays exactly as it was made; a later view is a NEW proposal, "
+                    "with its own id and its own audit trail."
+                ),
+                state=proposal.state,
+            )
+
+        # THE TWO ASYMMETRIES BETWEEN `accept` AND THE OTHER THREE, BOTH REFUSED
+        # RATHER THAN ACCEPTED AND IGNORED — this route's own rule, stated at
+        # `_PROPOSAL_CREATE_KEYS`: a key that cannot be stored is refused with a 422
+        # naming it, never dropped while the response reports success.
+        #
+        # `reason` WAS SILENTLY DISCARDED HERE. It is in `_PROPOSAL_REVIEW_KEYS`, so
+        # the unknown-key allowlist admitted it for all four acts, and
+        # `proposals.accept_proposal` takes no `reason` — so an accept carrying one
+        # returned `200` and stored nothing, and the scientist's sentence was gone
+        # with no refusal anywhere. It is refused rather than carried onto the accept
+        # transition because the two are different records: `ProposalTransition.reason`
+        # is the sentence somebody gives for REFUSING a value, and an accept already
+        # records what it did in `accepted_from` — `candidate` or `edited` — which is
+        # the claim an acceptance actually makes. Adding a second free-text field to
+        # the accept path is a design decision this slice has no reason to take, and
+        # refusing is the direction that loses nothing: the client is told, and the
+        # sentence is still theirs to send with a `reject`.
+        if action == proposals.ACTION_ACCEPT:
+            if "reason" in body:
+                return _proposal_refusal(
+                    "unrecognized_field",
+                    (
+                        "`reason` belongs to `reject`, `supersede` and `withdraw` "
+                        "alone — it records why somebody did not want the value. An "
+                        "acceptance already says what it did in `accepted_from`: "
+                        "`candidate` means the proposed value was written as it "
+                        "stands and `edited` means it was corrected first. `reason` "
+                        "is refused here rather than accepted and dropped, because a "
+                        "sentence a scientist wrote must not disappear into a `200`. "
+                        "Nothing was written."
+                    ),
+                    key="reason",
+                    action=action,
+                )
+        elif "value" in body or "accepted_from" in body:
+            return _proposal_refusal(
+                "unrecognized_field",
+                (
+                    "`value` and `accepted_from` belong to `accept` alone. Refusing "
+                    "a proposal records that nobody wants it, so a value under that "
+                    "act would store a choice beneath an act that says none was "
+                    "made. Nothing was written."
+                ),
+                action=action,
+            )
+
+        # RESOLVE EVERY INPUT BEFORE ANYTHING IS WRITTEN.
+        reason = body.get("reason")
+        if reason is not None:
+            if not isinstance(reason, str) or not reason.strip():
+                return _proposal_refusal(
+                    "invalid_reason",
+                    (
+                        "`reason` must be a non-blank string when it is supplied. "
+                        "Absent is a meaning here — omit it rather than sending an "
+                        "empty string, which would be stored as though somebody had "
+                        "written a reason. Nothing was written."
+                    ),
+                )
+            if not _is_storable_value(reason, max_bytes=_MAX_PROPOSAL_BYTES):
+                return _proposal_refusal(
+                    "unrepresentable_value",
+                    (
+                        "This reason could not be stored intact — either it is "
+                        "larger than one may be, or it contains characters JSON "
+                        "cannot represent. It is REFUSED rather than shortened. "
+                        "Nothing was written."
+                    ),
+                )
+        accepted_from = None
+        accepted_value = None
+        if action == proposals.ACTION_ACCEPT:
+            accepted_from = body.get("accepted_from")
+            if accepted_from not in proposals.ACCEPTED_FROM_VALUES:
+                return _proposal_refusal(
+                    "unknown_accepted_from",
+                    (
+                        "`accepted_from` must be `candidate` — the proposed value is "
+                        "right and is written as it stands — or `edited` — the "
+                        "proposed value was wrong and `value` carries the corrected "
+                        "one. They are different claims and neither is a default."
+                    ),
+                    accepted_from=accepted_from
+                    if isinstance(accepted_from, str)
+                    else None,
+                    allowed=list(proposals.ACCEPTED_FROM_VALUES),
+                )
+            if accepted_from == proposals.ACCEPTED_FROM_CANDIDATE:
+                if "value" in body and body["value"] != proposal.proposed_value:
+                    return _proposal_refusal(
+                        "value_is_not_the_candidate",
+                        (
+                            "`accepted_from` says the proposed value is being "
+                            "accepted as it stands, and `value` differs from it. A "
+                            "different value is an `edited` acceptance; labelling it "
+                            "`candidate` would record that the proposal was accepted "
+                            "unchanged when it was not. Nothing was written."
+                        ),
+                    )
+                accepted_value = proposal.proposed_value
+            else:
+                if "value" not in body:
+                    return _proposal_refusal(
+                        "invalid_value",
+                        (
+                            "`accepted_from: \"edited\"` says the proposed value was "
+                            "wrong, so the corrected `value` is required. Nothing "
+                            "here composes one. Nothing was written."
+                        ),
+                    )
+                accepted_value = body["value"]
+                if accepted_value is None:
+                    return _proposal_refusal(
+                        "invalid_value",
+                        (
+                            "`value` must not be null. A null would CLEAR the field, "
+                            "and clearing a confirmed value is a different act with "
+                            "its own questions. Nothing was written."
+                        ),
+                    )
+                size_refusal = _proposal_value_refusal(accepted_value, proposal.rule)
+                if size_refusal is not None:
+                    return size_refusal
+
+        # THE RUN, RESOLVED BEFORE THE PRECONDITION so a dangling proposal is
+        # refused whether or not the caller's validator is current.
+        #
+        # **THE REFUSAL GATES `accept` ALONE, AND THAT IS THE WHOLE POINT OF THE
+        # REFUSAL.** `target_run_removed` says there is nowhere to WRITE the value.
+        # Rejecting, superseding or withdrawing writes nothing — they record that
+        # nobody wants the proposal — so gating them on a run that has gone would
+        # leave a dangling proposal permanently unclearable, which is the exact
+        # outcome §4 forbids when it says the proposal "stays readable, its note is
+        # untouched, and a person may withdraw it". The first version of this route
+        # gated all four and made that sentence false.
+        run = None
+        if proposal.run_id is not None:
+            run = exp.get_run(proposal.run_id)
+            if run is None and action == proposals.ACTION_ACCEPT:
+                return _proposal_conflict(
+                    "target_run_removed",
+                    (
+                        "The run this proposal names no longer exists on this "
+                        "record, so there is nothing to write it to. Removing a run "
+                        "does not renumber the survivors, so its id is never "
+                        "reissued and this proposal is not re-aimed at another run — "
+                        "that would be inferring which run was meant. The proposal "
+                        "stays readable and can be withdrawn. Nothing was written."
+                    ),
+                    run_id=proposal.run_id,
+                )
+
+        # THE ATTRIBUTABILITY GATE, FOR `accept` ONLY. See the docstring for why it
+        # is here rather than in the signature. It raises, and the raise is rendered
+        # as a typed 409 by the handler `create_app` registers; nothing has been
+        # mutated at this point, so the refusal writes nothing.
+        actor_subject = None
+        actor_trust_basis = submissions.TRUST_BASIS_UNATTRIBUTED
+        if action == proposals.ACTION_ACCEPT:
+            identity = require_human_actor("accept an ingestion proposal")(request)
+            # `stamp_actor` rather than `identity.human.subject`: it is the one place
+            # the worked-example rule and the tier rule are written down, and
+            # reaching past it would be the "a later slice writes the subject
+            # directly" shape the identity contract warns about. Inside a tutorial
+            # session it returns `None` unconditionally and first, so an acceptance
+            # there is recorded UNATTRIBUTED even under the fixture verifier — which
+            # is correct, because the session is discardable and synthetic.
+            actor_subject = identity_module.stamp_actor(identity, scope)
+            actor_trust_basis = (
+                identity.human.trust_basis
+                if actor_subject is not None and identity.human is not None
+                else submissions.TRUST_BASIS_UNATTRIBUTED
+            )
+
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        at = _now_iso()
+        if action == proposals.ACTION_ACCEPT:
+            # ---- THE CRITICAL SECTION ----------------------------------------
+            # Re-read, compare, mutate — in that order, inside this one lock, before
+            # any write. A digest read before the lock would let two accepts both
+            # pass and the second overwrite the first.
+            current = proposals.target_digest(_proposal_target_state(exp, run, proposal.target_field_path))
+            if current != proposal.target_digest:
+                return _proposal_conflict(
+                    "proposal_stale",
+                    (
+                        "What this record holds at that path has changed since this "
+                        "proposal was made, so accepting it now would write a "
+                        "judgement about content that is no longer there — over a "
+                        "newer value. Nothing was written. The proposal stays "
+                        "readable: withdraw it, supersede it, or make a new one "
+                        "against the value that is there now.\n\n"
+                        "This is deliberately NOT the record's revision. That moves "
+                        "on every unrelated act, so using it would make every "
+                        "proposal on an active record permanently un-acceptable "
+                        "while leaving the target itself unchecked."
+                    ),
+                    target_field_path=proposal.target_field_path,
+                    run_id=proposal.run_id,
+                )
+            applied_rev = exp.rev
+            applied_via, write_refusal = _apply_accepted_proposal(
+                exp, run, proposal, accepted_value, at
+            )
+            if write_refusal is not None:
+                return write_refusal
+            applied_digest = proposals.target_digest(
+                _proposal_target_state(exp, run, proposal.target_field_path)
+            )
+            try:
+                revised = proposals.accept_proposal(
+                    proposal,
+                    at=at,
+                    accepted_value=accepted_value,
+                    accepted_from=accepted_from,
+                    applied_via=applied_via,
+                    applied_rev=applied_rev,
+                    applied_target_digest=applied_digest,
+                    applied_run_id=proposal.run_id,
+                    actor_trust_basis=actor_trust_basis,
+                    actor_subject=actor_subject,
+                )
+            except (proposals.UnsupportedProposal, proposals.ImmutableProposal) as refusal:
+                return _proposal_refusal("unsupported_proposal", str(refusal))
+        else:
+            act = {
+                proposals.ACTION_REJECT: proposals.reject_proposal,
+                proposals.ACTION_SUPERSEDE: proposals.supersede_proposal,
+                proposals.ACTION_WITHDRAW: proposals.withdraw_proposal,
+            }[action]
+            try:
+                revised = act(
+                    proposal,
+                    at=at,
+                    reason=reason,
+                    actor_trust_basis=actor_trust_basis,
+                    actor_subject=actor_subject,
+                )
+            except (proposals.UnsupportedProposal, proposals.ImmutableProposal) as refusal:
+                # A refusal from the model reaches the client as a typed 422, never a
+                # traceback. `ImmutableProposal` is caught alongside because an act
+                # added later that tried to rewrite what was proposed must fail
+                # loudly at the boundary rather than 500 out of the store.
+                return _proposal_refusal("unsupported_proposal", str(refusal))
+
+        exp.replace_proposal(revised)
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this act was not recorded
+        response.headers["ETag"] = exp.etag()
+        return {
+            "proposal": _proposal_view(exp, revised),
+            "experiment_version": exp.version_token(),
+        }
 
 
 # --- 7e. transcript capture ----------------------------------------------------
@@ -11071,11 +13760,19 @@ def post_assistant_ask(
         "words it came from, the rule that read them, `verified: false`, "
         "`is_evidence: false` and a `status` of `needs_confirmation`, which are "
         "constants of the shape rather than fields a request can set. A candidate "
-        "becomes a value only when a person accepts it through "
+        "RETURNED HERE becomes a value only when a person accepts it through "
         "`PATCH /api/experiments/{experiment_id}/runs/{run_id}` with "
         "`confirmed_by_user: true` and that run's own `ETag` — this operation "
         "writes no field, and `accept_contract` in the response says where the "
-        "write happens.\n\n"
+        "write happens. "
+        "THAT IS A CLAIM ABOUT THESE CANDIDATES, WHICH ARE NOT STORED, AND NOT "
+        "ABOUT THE NOTES BELOW. A note this operation stores can afterwards be "
+        "cited by a persistent ingestion proposal, and accepting one writes "
+        "through whichever of three routes owns its target — the run field edit, "
+        "the run override, or the record-level enum write. For a record-scoped "
+        "path such as `system.technique` that is NOT the run `PATCH` above. Both "
+        "paths require a person and neither is automatic, and no proposal is "
+        "created by this operation.\n\n"
         "EVERY SEGMENT OF THE TRANSCRIPT BECOMES AN UNMAPPED NOTE, including the "
         "segments that produced a candidate. That redundancy is deliberate: a "
         "candidate is not stored anywhere, so rejecting one — or failing to "
@@ -11295,8 +13992,13 @@ def post_transcript(
                     "If-Match set to that run's own current ETag",
                 ],
                 "message": (
-                    "This operation writes no field. A candidate becomes a value "
-                    "only through that request, made by a person who accepted it."
+                    "This operation writes no field. A candidate RETURNED HERE "
+                    "becomes a value only through that request, made by a person "
+                    "who accepted it. This says nothing about the notes stored "
+                    "beside it: one of those may later be cited by an ingestion "
+                    "proposal, and accepting that proposal writes through "
+                    "whichever route owns its target — for a record-scoped path, "
+                    "not this one."
                 ),
             },
             "experiment_version": exp.version_token(),

@@ -1087,7 +1087,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 71 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 75 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1716,7 +1716,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // writing nothing, any record that has ever been submitted, has exported, has an
     // exported run, has a published artifact on disk, or is a built-in worked
     // example. RE-MEASURED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(71);
+    // 71 -> 75: the four PERSISTENT INGESTION PROPOSAL operations — list, create,
+    // read one, review one. They are transcribed from the generated document by the
+    // same rule every other row here is, and `test_contract_description_parity.py`
+    // proves the transcription rather than leaving it asserted here.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(75);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2049,7 +2053,111 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // remainder runs well past `PURPOSE_DISCLOSURE_MIN_CHARS` and stays inline because
     // it carries `refusal` — a `BOUNDARY_CAVEAT_MARKERS` entry — in the sentence saying
     // a surface can decline to offer a control whose only outcome would be one.
-    expect(total).toBe(106511);
+    // ── MERGE RE-MEASUREMENT, 2026-08-30. Both lineages above are kept because both
+    // are real, and NEITHER number survived: `main` (campaign-sheet + strike sweep) took
+    // the served contract to 118,276 / 236, and this branch's capture-surface prose took
+    // it elsewhere from the same base. The merged tree carries both sets of bytes, and
+    // the `GET .../draft` description now documents BOTH additions to that one read —
+    // the capture model and `record_blocks` — because both sides added to it.
+    // RE-DERIVED from `create_app().openapi()` over the merged document rather than
+    // composed by adding two deltas: 75 operations, 119,600 characters, 239 post-lead
+    // paragraphs. The paragraph count moves, so `settings-explorer` a11y cells
+    // re-baseline and CI on the merged head is the authority for the linux figures.
+    expect(total).toBe(119600);
+    // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
+    // description changed — `test_contract_description_parity.py` proves that rather
+    // than leaving it asserted here. RE-DERIVED from the served document and never
+    // incremented: raw sum over the 75 operations = 115,429, minus 2 per `\n\n`
+    // separator (235 x 2 = 470) = 114,959.
+    // 114,959 -> 117,038 (+2,079): THREE descriptions were corrected and NO operation
+    // was added — the count above stays at 75. Per operation, re-derived rather than
+    // apportioned: `POST .../proposals` 2,781 -> 3,205 (+424, the `201`/`200` and
+    // precondition-ordering corrections), `POST .../proposals/{id}/review` 3,971 ->
+    // 5,096 (+1,125, the fourth `409` and the disclosed accept-before-precondition
+    // ordering), `POST .../transcript` 2,580 -> 3,110 (+530, its `accept_contract`
+    // prose no longer claims a candidate can become a value ONLY through
+    // `PATCH .../runs/{run_id}` now that a second write path exists for the same note
+    // content).
+    //
+    // THE PARAGRAPH COUNT DELIBERATELY DOES NOT MOVE, and it was written that way on
+    // purpose rather than happening to: every one of the three corrections was woven
+    // INTO an existing paragraph. Appending would have re-baselined the
+    // `settings-explorer` accessibility cells on two platforms — the Endpoint Explorer
+    // renders each paragraph as its own `<p class="api-docs-description">` — which the
+    // 104,045 entry above already names as a hard constraint rather than a preference.
+    // Per operation the remainder counts are unchanged at 7, 8 and 6.
+    //
+    // RE-DERIVED from the served document three ways, never incremented:
+    //   · the splitPurpose rule transcribed into Python over `create_app().openapi()`,
+    //     restricted to the 75 operations this array names: total 117,038, rest 235;
+    //   · the same rule over the transcribed array: the same two numbers;
+    //   · internal consistency: raw sum of `d.description.length` = 117,508, minus 2
+    //     per `\n\n` separator (235 x 2 = 470) = 117,038.
+    // The array's own copy was re-transcribed FROM `create_app().openapi()` and
+    // `test_contract_description_parity.py` proves it matches, in both directions.
+    //
+    // MERGE, 2026-08-30. BOTH LINEAGES ABOVE ARE REAL AND NEITHER SUBSUMES THE OTHER,
+    // which is why both are kept rather than one being chosen. `main` corrected ONE
+    // existing description twice (104,045 -> 104,871 -> 105,187); this branch ADDED
+    // FOUR operations and corrected THREE descriptions from the same 104,045 base.
+    // The merged tree therefore carries both sets of bytes, and the total below is
+    // RE-MEASURED over the merged served document rather than composed by adding the
+    // two deltas — composing them would assume the two edits touch disjoint text,
+    // which is exactly the kind of arithmetic this test's header lectures about.
+    // Measured on the merged tree: 75 operations, raw sum 118,650, 235 `\n\n`
+    // separators, so 118,650 - 470 = 118,180. The two lineages DO reconcile, which
+    // is a check rather than the derivation: main's raw grew 104,467 -> 105,609
+    // (+1,142) and the branch's raw was 117,508, and 117,508 + 1,142 = 118,650.
+    // Separators go 211 + 24 = 235 — the 24 are the four new operations', and
+    // neither lineage's prose corrections added one.
+    // 117,944 -> 118,276 (+332), 2026-08-30. CORRECTED AFTER INDEPENDENT REVIEW, and
+    // the correction is the point: this entry first read "118,578 -> 118,276 (-302)",
+    // which stated a PREDECESSOR THAT NEVER EXISTED IN THIS FILE. `git log --all
+    // -S"118578" -- <this file>` returns no commit. 118,578 was an INTERMEDIATE,
+    // UNCOMMITTED state — the `record_writable_field_paths` prose applied, the strike
+    // sweep not yet — and quoting it as the committed baseline put a missing step and a
+    // wrong sign into the one comment block whose stated purpose is not to leave
+    // arithmetic behind. Committed predecessor: `git show 6f4aac4:...` line 2070 =
+    // 117,944.
+    //
+    // THE +332 IS TWO EFFECTS IN ONE COMMIT, and they pull opposite ways, which is why
+    // neither may be quoted alone. Per operation, re-derived from the served document:
+    //   * `GET .../notes`            +541  the `record_writable_field_paths` paragraph
+    //   * `POST .../answers`          -78  strike sweep
+    //   * `POST .../runs/{id}/answers` -131  strike sweep
+    // 541 - 78 - 131 = +332. The strike sweep's own contribution is -302 across the
+    // three operation descriptions it touched (-93 notes, -78, -131); the notes figure
+    // is a removal INSIDE the same paragraph the +541 added, so the two are not
+    // separable by subtraction and are stated as measured rather than apportioned.
+    //
+    // STRIKE SWEEP. Six served strings wrapped a
+    // retracted sentence in `~~ ~~`. This screen renders every description as PLAIN
+    // TEXT — `apps/web` declares no markdown dependency and imports no renderer — so the
+    // markers
+    // reached the reader as literal tildes around a sentence that is not true. The
+    // retracted halves were removed from the SERVED copy and the history moved to
+    // `notes.__doc__`; `test_no_served_description_carries_editorial_strike_typography`
+    // now pins the absence as a property of the whole document.
+    //
+    // THREE of the six are operation descriptions and so move this number: `POST
+    // .../answers`, `POST .../runs/{run_id}/answers`, `GET .../notes`. The other three
+    // are a request-body and two `422` response descriptions, which this total does not
+    // read. RE-DERIVED from the served document, never subtracted: raw sum over the 75
+    // operations = 118,748, 236 `\n\n` separators, 118,748 - 472 = 118,276.
+    //
+    // THE PARAGRAPH COUNT BELOW DELIBERATELY DOES NOT MOVE and stays 236: every one of
+    // the three edits was woven INTO an existing paragraph rather than removing one, so
+    // the Endpoint Explorer emits the same number of `<p class="api-docs-description">`
+    // nodes and NO `settings-explorer` accessibility cell is re-baselined on either
+    // platform. A change that moved this total while leaving 236 alone is the expected
+    // signature of a prose correction; one that moved both would mean a paragraph had
+    // been added or dropped and the a11y baseline would need a CI round-trip.
+    //
+    // (The pre-existing comment lineage above states "raw sum 118,650, 235 separators,
+    // so 118,180". That arithmetic never reproduced — the assertion it sits above was
+    // 117,944, and re-measuring the unmodified tree gives raw 118,416 / 236. It is left in
+    // place as history rather than silently rewritten, but it is not the derivation.)
+
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
@@ -2095,7 +2203,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // the character total for the measurement and for why three appended paragraphs
     // rather than woven prose was the deliberate choice. RE-MEASURED from the served
     // document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(214);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(239);
+    // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
+    // paragraphs between them. It is asserted separately from the character total
+    // for the reason every entry above gives: a change that moved one and not the
+    // other would mean prose had been woven into an existing paragraph rather than
+    // appended, and neither number may be inferred from the other. RE-DERIVED from
+    // the served document, not incremented.
+
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other
     // description moved, and `test_contract_description_parity.py` proves that rather

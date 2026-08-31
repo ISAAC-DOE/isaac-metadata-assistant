@@ -1047,8 +1047,21 @@ export const api = {
     throw httpError(res, path);
   },
 
+  /**
+   * The WHOLE draft read — the grouped fields AND the record-level block payloads.
+   *
+   * ONE READER, TWO CALLERS. `getDraftGroups` below narrows this to `.groups` for the
+   * screens that render only fields; the record-description panel needs the blocks
+   * beside them, because a client that could read a facility name but not the
+   * contributors would have to overwrite a block it had never seen in order to add to
+   * it. A second `fetch` of the same route would let the two disagree about one record.
+   */
+  async getDraft(id: string): Promise<ApiDraftResponse> {
+    return getJson<ApiDraftResponse>(`/experiments/${enc(id)}/draft`);
+  },
+
   async getDraftGroups(id: string) {
-    return (await getJson<ApiDraftResponse>(`/experiments/${enc(id)}/draft`)).groups;
+    return (await this.getDraft(id)).groups;
   },
 
   /*

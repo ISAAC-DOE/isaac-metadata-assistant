@@ -839,6 +839,18 @@ export interface ApiDraftGroup {
 
 export interface ApiDraftResponse {
   groups: ApiDraftGroup[];
+  /**
+   * The record-level BLOCK payloads, keyed by the same namespaced address the write
+   * operations take (`block:attribution`, `block:tags`). `null` means the record
+   * carries nothing there.
+   *
+   * THEY ARE NOT `fields`, so they can appear in no group — and a client that could
+   * read a facility name but not the contributors beside it would have to overwrite a
+   * block it had never seen in order to add to it. The value is whatever is stored,
+   * unshaped: `CLAUDE.md` §11's read-path doctrine keeps a malformed persisted block
+   * readable, and a client about to REPLACE one needs to see what it is replacing.
+   */
+  record_blocks: Record<string, unknown>;
 }
 
 export interface ApiDemoAnswer {

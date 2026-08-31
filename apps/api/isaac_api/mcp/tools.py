@@ -62,11 +62,12 @@ which run whatever a client does with the annotation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping
 
 from .. import serialize
+from ..identity import IdentityRefusal, RequestIdentity
 from .client import ApiResult, IsaacApiClient
 from .policy import (
     OPERATIONS,
@@ -123,9 +124,26 @@ class InvalidArguments(Exception):
 @dataclass(frozen=True)
 class ToolContext:
     """Everything a handler is allowed to know. Note what is absent: the app, the
-    environment, and any way to reach a route that is not an allowlisted operation."""
+    environment, and any way to reach a route that is not an allowlisted operation.
+
+    :attr:`identity` is the settled identity-plane answer for the request the call
+    arrived on — ``SERVICE`` for a verified OAuth token, ``UNTRUSTED`` for every
+    binding that identifies nobody. It is present so that a handler needing to know
+    whether a *person* is present asks the type that can answer, and gets ``None``
+    from :attr:`~..identity.RequestIdentity.human`, rather than reaching for a
+    header that this layer does not have and could not trust if it did.
+    """
 
     client: IsaacApiClient
+    #: Defaulted so a handler test can build a context without an identity plane.
+    #: The default is the SAFE one: nobody was identified, and the refusal says
+    #: why. A default of "some principal" would be a test-shaped hole in the one
+    #: field whose whole job is to be honest about who is calling.
+    identity: RequestIdentity = field(
+        default_factory=lambda: RequestIdentity.untrusted(
+            IdentityRefusal.NO_VERIFIER_CONFIGURED
+        )
+    )
 
 
 @dataclass(frozen=True)
