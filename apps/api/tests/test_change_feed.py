@@ -141,9 +141,28 @@ def test_each_published_property_reaches_the_served_document_verbatim(client, cl
 
 
 def test_the_gap_guarantee_names_its_own_failure_mode_rather_than_promising_none():
-    """The honest half has to be present, not just the reassuring half."""
-    assert "PROVIDED `updated_utc` never moves backwards" in cf.GAP_GUARANTEE
+    """The honest half has to be present, not just the reassuring half.
+
+    THIS TEST USED TO REQUIRE THE LITERAL "PROVIDED `updated_utc` never moves
+    backwards", AND THAT PROVISO WAS FALSE — which is the reason the assertion is
+    replaced rather than extended. A backwards clock is not the only way to lose a
+    change: a write landing inside the SAME ONE-SECOND STAMP a cursor already names
+    moves an entity's `version` without moving its key, and the entity is then never
+    reported. That is a monotonic clock, so the old proviso held while the guarantee
+    it protected did not, and a test requiring the old words was mechanically keeping
+    the false version in place. See
+    ``test_a_same_second_write_behind_the_cursor_is_a_measured_gap``, which
+    demonstrates the loss rather than asserting prose about it.
+    """
+    # The proviso is now about the entity advancing, which is what the order needs —
+    # not about the direction of the clock, which is only one way to break it.
+    assert "STRICTLY ADVANCES" in cf.GAP_GUARANTEE
     assert "not claimed to be" in cf.GAP_GUARANTEE
+    # BOTH failure modes are named. The second is the ordinary one and is the half a
+    # later "tidy-up" would drop, because it is the one that sounds like a detail.
+    assert "steps BACKWARDS" in cf.GAP_GUARANTEE
+    assert "SAME ONE-SECOND STAMP" in cf.GAP_GUARANTEE
+    assert "not the clock moving backwards" in cf.GAP_GUARANTEE
     # The single-pod argument is offered as the REASON the exposure is small, and is
     # explicitly refused as a proof that it is zero. That distinction is the whole
     # point of the sentence and is the thing a later edit would smooth away.
@@ -223,6 +242,82 @@ def test_the_order_does_not_depend_on_the_stored_list_order(client):
     exp.runs.reverse()
     entries = [e.to_wire() for e in cf.collect(exp)]
     assert entries == forward
+
+
+class _NoTieBreak(cf.ChangeEntry):
+    """A `ChangeEntry` whose key is THE TIMESTAMP ALONE, padded to the same arity.
+
+    This is the mutant: `(updated_utc, "", "")` keeps the tuple three components wide
+    so `encode_cursor` still works, while removing every component that distinguishes
+    two entities stamped in the same second. It is what `ChangeEntry.key` would be if
+    someone "simplified" the tie-break away, and the test below shows what that costs.
+    """
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.updated_utc, "", "")
+
+
+def _tie_break_removed(exp):
+    """`RECORD_COLLECTORS`' entries, re-minted with the tie-break stripped out."""
+    for e in cf.collect(exp):
+        yield _NoTieBreak(
+            kind=e.kind,
+            entity_id=e.entity_id,
+            updated_utc=e.updated_utc,
+            rev=e.rev,
+            generation=e.generation,
+        )
+
+
+def _walk(exp, collectors, *, limit):
+    """Page to exhaustion, returning every entity id handed out, duplicates kept."""
+    seen: list[str] = []
+    cursor = None
+    for _ in range(100):  # bounded so a broken cursor cannot hang the suite
+        page = cf.changes_page(exp, scope_tag="t", cursor=cursor, limit=limit, collectors=collectors)
+        seen.extend(c["entity_id"] for c in page["changes"])
+        cursor = page["next_cursor"]
+        if not page["has_more"]:
+            return seen
+    raise AssertionError("the walk did not terminate")
+
+
+def test_removing_the_tie_break_loses_entities_at_a_page_boundary(client):
+    """THE MUTATION TEST THE TIE-BREAK EXISTS FOR, and it is about PAGING, not sorting.
+
+    `test_the_order_does_not_depend_on_the_stored_list_order` above already shows the
+    tie-break fixing the ORDER. This shows the consequence that actually matters: with
+    the tie-break removed, every entity of one record shares one key, so the cursor
+    minted from page one sits at or after every remaining entity and `key > start`
+    excludes all of them. The walk terminates having handed out `limit` entities and
+    silently dropped the rest — no error, no `has_more`, a page that looks complete.
+
+    The control is the same walk with the real collectors: it must reach everything.
+    Without that half the test would pass on a feed that was broken for both.
+    """
+    exp = ws.load_experiment(_with_runs(client, 7))
+    everything = {e.entity_id for e in cf.collect(exp)}
+    assert len(everything) == 8  # the record plus seven runs
+    # The precondition the whole test rests on: one write, one second, one stamp.
+    assert len({e.updated_utc for e in cf.collect(exp)}) == 1
+
+    intact = _walk(exp, cf.RECORD_COLLECTORS, limit=3)
+    assert len(intact) == len(set(intact)), "the real feed returned an entity twice"
+    assert set(intact) == everything, "the real feed skipped an entity"
+
+    mutant = (cf.KindCollector(kind="run", read=_tie_break_removed),)
+    lost = _walk(exp, mutant, limit=3)
+    assert set(lost) < everything, "the mutant did not lose anything — the test is vacuous"
+    assert len(lost) == 3, lost
+    # And it lies about it: the page that dropped five entities said there were none
+    # left, which is exactly why a cursor-paged reader cannot detect this itself.
+    last = cf.changes_page(
+        exp, scope_tag="t", cursor=cf.encode_cursor(("", "", ""), scope="t"), limit=3, collectors=mutant
+    )
+    assert last["has_more"] is True
+    resumed = cf.changes_page(exp, scope_tag="t", cursor=last["next_cursor"], collectors=mutant)
+    assert resumed["changes"] == [] and resumed["has_more"] is False and resumed["remaining"] == 0
 
 
 # =============================================================================
@@ -468,6 +563,95 @@ def test_a_cursorless_read_is_the_resync_and_returns_the_start_of_the_order(clie
     assert resync["changes"][0]["kind"] == "experiment"
 
 
+def test_replaying_a_cursor_returns_the_identical_page(client):
+    """IDEMPOTENT REPLAY, which the brief requires and nothing else here covered.
+
+    A poller that cannot tell whether its last request landed must be able to send the
+    same cursor again. That is safe only if the page is a pure function of (stored
+    state, cursor, limit) — no server-side offset, no consumption, no "seen" set. It
+    is, and the assertion is over the serialised BODY rather than over a subset of
+    keys, so a future field that happened to be non-deterministic (a timestamp, a
+    nonce, an iteration-ordered dict) would fail here rather than in production.
+    """
+    exp_id = _with_runs(client, 5)
+    cursor = _feed(client, exp_id, limit=2)["next_cursor"]
+
+    bodies = [
+        client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": cursor, "limit": 2}).content
+        for _ in range(3)
+    ]
+    assert bodies[0] == bodies[1] == bodies[2]
+    # Replay is idempotent because it makes no progress on its own: the cursor a
+    # replayed page hands back is the one a first read handed back.
+    assert json.loads(bodies[0])["next_cursor"] == json.loads(bodies[2])["next_cursor"]
+
+    # A cursorless read is replayable too — that is what makes the resync remedy in
+    # `GAP_GUARANTEE` something a client can retry rather than something it gets one
+    # attempt at.
+    plain = [client.get(f"/api/experiments/{exp_id}/changes").content for _ in range(2)]
+    assert plain[0] == plain[1]
+
+
+def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeypatch):
+    """THE EXPOSURE `GAP_GUARANTEE` NAMES, DEMONSTRATED — and it is not a clock step.
+
+    This is the case the guarantee's first wording missed, and it is the ordinary one
+    rather than the exotic one. `updated_utc` is `%Y-%m-%dT%H:%M:%SZ`, so two writes
+    inside one wall-clock second carry the SAME stamp. An entity that sorts before the
+    cursor within that second therefore changes its `version` WITHOUT changing its
+    key, and `key > start` excludes it: the change is not reported, and the clock
+    never moved backwards.
+
+    THE CLOCK IS FROZEN RATHER THAN RACED. Pinning `_now_iso` to the stamp the record
+    already carries reproduces exactly the production condition — a second write
+    landing in the same second as the first — without a sleep, a retry, or a test
+    that passes or fails on how fast the machine is.
+
+    IT ASSERTS THE REMEDY IN THE SAME BREATH, because a test that only demonstrated
+    the loss would read as an argument for removing the feature. The cursorless
+    resync is computed from current state, so it reports the entity at its new
+    version; that is why `GAP_GUARANTEE` offers it as the answer and why it costs one
+    request.
+    """
+    exp_id = _with_runs(client, 6)
+    page = _feed(client, exp_id, limit=4)
+    assert page["has_more"] is True
+    stamp = page["changes"][0]["updated_utc"]
+    assert {c["updated_utc"] for c in _feed(client, exp_id)["changes"]} == {stamp}
+
+    # A run that page one already handed out, i.e. one BEHIND the cursor.
+    target_id = next(c["entity_id"] for c in page["changes"] if c["kind"] == "run")
+    before_version = next(c["version"] for c in page["changes"] if c["entity_id"] == target_id)
+
+    monkeypatch.setattr(ws, "_now_iso", lambda: stamp)
+    exp = ws.load_experiment(exp_id)
+    target = next(r for r in exp.runs if r.id == target_id)
+    target.draft.setdefault("fields", {})["context.beamline"] = {
+        "value": "BL-SYNTH",
+        "status": "verified",
+    }
+    assert exp.save_versioned() is True
+
+    # The write really happened, and it really did not move the key.
+    #
+    # `Run.version_token` is a METHOD here, unlike `ChangeEntry.version_token`, which
+    # is a property. Calling it matters: `written.version_token != before_version`
+    # compares a bound method to a string and is trivially, silently true — a vacuous
+    # assertion in the one place this test needs a real one.
+    written = next(r for r in ws.load_experiment(exp_id).runs if r.id == target_id)
+    written_version = written.version_token()
+    assert isinstance(written_version, str) and written_version != before_version
+    assert written.updated_utc == stamp
+
+    # ...and the cursor cannot see it. THIS IS THE GAP.
+    resumed = _feed(client, exp_id, cursor=page["next_cursor"])
+    assert target_id not in {c["entity_id"] for c in resumed["changes"]}
+
+    # The published remedy does see it.
+    resync = {c["entity_id"]: c["version"] for c in _feed(client, exp_id)["changes"]}
+    assert resync[target_id] == written_version != before_version
+
+
 # =============================================================================
 # 6. scope
 # =============================================================================
@@ -607,6 +791,73 @@ def test_the_module_names_no_feature_it_does_not_have():
         and id(n) not in docstrings
     ]
     assert not [s for s in literals if "proposal" in s.lower()], literals
+
+
+def test_a_proposal_act_moves_the_records_own_entry_and_nothing_finer(client):
+    """WHAT THE FEED ACTUALLY SAYS ABOUT PROPOSALS, MEASURED IN BOTH DIRECTIONS.
+
+    The brief asks for proposal events. This feed serves no `proposal` kind, and the
+    module's docstring used to explain that by saying proposals "do not exist at this
+    commit — [they live] in an unmerged PR". THAT IS FALSE AT THIS COMMIT: the
+    proposals work merged into this branch's own history, `isaac_api/proposals.py` is
+    in this tree, and every `Experiment` carries `.proposals`. So the shortfall is
+    real and is measured here rather than explained away.
+
+    WHAT HOLDS (asserted first, because it is the half a client can build on):
+    proposals are part of the record's authoritative signature, so a proposal act
+    moves the record's own `rev`/`updated_utc` and therefore moves the `experiment`
+    entry of this feed. A polling surface DOES learn "this record moved, re-read it".
+
+    WHAT DOES NOT (asserted second, because it is the half a reader would otherwise
+    assume): no `proposal` kind is served, no page carries a proposal id, and no
+    entry distinguishes a proposal act from a title edit. A client cannot tell WHICH
+    proposal moved, or that a proposal moved at all, from this feed alone.
+
+    If a later slice takes proposals OUT of the signature, this feed goes silent
+    about them entirely and the first assertion fails — which is the point of
+    pinning the mechanism rather than trusting it.
+    """
+    # Imported inside the test on purpose: `change_feed.py` itself must import nothing
+    # from here (`test_the_module_names_no_feature_it_does_not_have` asserts that over
+    # the parsed module), and a module-level import would read as though it did.
+    from isaac_api import proposals as proposals_module
+
+    exp_id = _with_runs(client, 1, title="proposal visibility")
+    before = {(c["kind"], c["entity_id"]): c["version"] for c in _feed(client, exp_id)["changes"]}
+
+    exp = ws.load_experiment(exp_id)
+    exp.proposals.append(
+        proposals_module.new_proposal(
+            proposal_id="01SYNTHETICPROPOSALPROPOS",
+            experiment_id=exp_id,
+            note_id="01SYNTHETICNOTENOTENOTENO",
+            target_field_path="field:system.technique",
+            proposed_value="XANES",
+            rule="synthetic fixture rule — this test asserts visibility, not science",
+            source=sorted(proposals_module.PROPOSAL_SOURCES)[0],
+            proposed_utc="2026-01-01T00:00:00Z",
+            base_rev=exp.rev,
+            target_digest="0000000000000000",
+            trust_basis=proposals_module._unattributed(),
+        )
+    )
+    assert exp.save_versioned() is True, "a proposal act must be a real write"
+
+    after_page = _feed(client, exp_id)
+    after = {(c["kind"], c["entity_id"]): c["version"] for c in after_page["changes"]}
+
+    # WHAT HOLDS — the record's own entry moved, so a poller is told to re-read.
+    assert after[("experiment", exp_id)] != before[("experiment", exp_id)]
+
+    # WHAT DOES NOT — and each of these is a separate way a reader could over-read the
+    # line above, so each is asserted rather than left to the first one to imply.
+    assert "proposal" not in after_page["kinds"]
+    assert {c["kind"] for c in after_page["changes"]} <= {"experiment", "run"}
+    assert "01SYNTHETICPROPOSALPROPOS" not in {c["entity_id"] for c in after_page["changes"]}
+    # The run did not move: a proposal is not a run act, and the feed does not pretend
+    # otherwise by bumping everything.
+    run_key = next(k for k in before if k[0] == "run")
+    assert after[run_key] == before[run_key]
 
 
 # =============================================================================

@@ -28,6 +28,8 @@ import {
   useChangeFeed,
   CHANGE_FEED_CADENCE_CLAIM,
   CHANGE_FEED_LIMITS_CLAIM,
+  CHANGE_FEED_DRAIN_DELAY_MS,
+  CHANGE_FEED_MAX_CONSECUTIVE_DRAINS,
   POLL_INTERVAL_MS,
   POLL_MAX_BACKOFF_MS,
   DEGRADED_THRESHOLD,
@@ -386,5 +388,142 @@ describe('useChangeFeed', () => {
     const last = spy.mock.calls[spy.mock.calls.length - 1];
     expect(last[0]).toBe('01OTHEREXPERIMENT000000000');
     expect(last[1]).toEqual({});
+  });
+
+  // ===========================================================================
+  // draining a BACKLOG — the feed is bounded, so the client has to page
+  // ===========================================================================
+  //
+  // `has_more` was returned by the server, typed in `ApiChangeFeedPage`, and read by
+  // NOTHING. No fixture in this file ever set it to `true`, so the gap was invisible
+  // to every test here: the hook drained one page per 8 s cadence, which on the
+  // 1,000-run record this feature exists for is 20 pages and over two and a half
+  // minutes to reach the present — while the copy promises "shortly after".
+
+  it('pages straight through a backlog instead of waiting a cadence per page', async () => {
+    const onChanges = vi.fn();
+    const spy = vi
+      .spyOn(api, 'getChanges')
+      .mockResolvedValueOnce(page({ changes: [ENTRY], has_more: true, next_cursor: 'C-1' }))
+      .mockResolvedValueOnce(page({ changes: [ENTRY], has_more: true, next_cursor: 'C-2' }))
+      .mockResolvedValueOnce(page({ changes: [ENTRY], has_more: false, next_cursor: 'C-3' }));
+    renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // The next two pages arrive at the DRAIN delay, not at the cadence.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS);
+    });
+    expect(spy).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS);
+    });
+    expect(spy).toHaveBeenCalledTimes(3);
+
+    // Each page resumed from the cursor the one before it issued.
+    expect(spy.mock.calls.map((c) => c[1]?.cursor)).toEqual([undefined, 'C-1', 'C-2']);
+    expect(onChanges).toHaveBeenCalledTimes(3);
+
+    // `has_more: false` ends the drain: the ordinary cadence resumes, so nothing
+    // further happens at the drain delay.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS * 4);
+    });
+    expect(spy).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
+
+  it('refuses to fast-follow when has_more is true but the cursor did not move', async () => {
+    // The defensive half, and it is about a SERVER defect rather than a client one: a
+    // page that says "there is more" while handing back the position you already held
+    // is a page a fast follow-up would ask again, identically, forever.
+    const spy = vi
+      .spyOn(api, 'getChanges')
+      .mockResolvedValue(page({ has_more: true, next_cursor: 'STUCK' }));
+    renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    // The FIRST page does move the cursor (undefined -> 'STUCK'), so one drain is
+    // legitimate; the one after it is not, because the cursor stops moving.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS);
+    });
+    expect(spy).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS * 6);
+    });
+    expect(spy).toHaveBeenCalledTimes(2);
+    // ...and the ordinary cadence still runs, so the client is slowed, never stopped.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it('caps consecutive drains and falls back to the ordinary cadence, losing nothing', async () => {
+    let n = 0;
+    const spy = vi
+      .spyOn(api, 'getChanges')
+      .mockImplementation(async () =>
+        page({ changes: [ENTRY], has_more: true, next_cursor: `C-${++n}` }),
+      );
+    renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+      await vi.advanceTimersByTimeAsync(
+        CHANGE_FEED_DRAIN_DELAY_MS * (CHANGE_FEED_MAX_CONSECUTIVE_DRAINS + 4),
+      );
+    });
+    // One cadence poll plus exactly the budget — the burst is bounded.
+    const capped = spy.mock.calls.length;
+    expect(capped).toBe(1 + CHANGE_FEED_MAX_CONSECUTIVE_DRAINS);
+
+    // The budget really is spent: more drain delay buys nothing.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS * 6);
+    });
+    expect(spy.mock.calls.length).toBe(capped);
+
+    // FALLS BACK rather than stops: the next cadence tick resumes progress with a
+    // fresh budget, so a genuine backlog longer than the cap still drains — more
+    // slowly, which is the whole intent of a cap aimed at a server defect. The
+    // assertion is "progress resumed", not an exact count: how many drains fit inside
+    // one advanced cadence window is timer bookkeeping, and pinning it would make
+    // this test about `vi.advanceTimersByTimeAsync` rather than about the cap.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(spy.mock.calls.length).toBeGreaterThan(capped);
+  });
+
+  it('does not drain while the tab is hidden', async () => {
+    const spy = vi
+      .spyOn(api, 'getChanges')
+      .mockImplementation(async () => page({ has_more: true, next_cursor: `H-${Math.random()}` }));
+    renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      setVisibility('hidden');
+      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS * 8);
+    });
+    // A backlog is not a reason to keep polling a tab nobody is looking at: the drain
+    // is scheduled through the same `schedule` that the visibility gate guards.
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

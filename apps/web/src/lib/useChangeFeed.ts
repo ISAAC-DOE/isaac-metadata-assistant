@@ -1,16 +1,21 @@
 /*
- * NEAR-REAL-TIME polling of one record's COALESCING STATE FEED.
+ * POLLING of one record's COALESCING STATE FEED.
  *
  * TWO WORDS IN THAT SENTENCE ARE LOAD-BEARING AND NEITHER IS DECORATION.
  *
- * "Near-real-time", never "real-time" and never "live". The cadence is a timer with
- * jitter and an exponential backoff, and it pauses entirely while the tab is hidden,
- * so the delay between a change and this hook seeing it is bounded by nothing this
- * repository has measured. "Live" is a claim about latency; this is a claim about
- * eventual arrival, and `CHANGE_FEED_CADENCE_CLAIM` is the copy that says so to a
- * person. There is no SSE and no WebSocket here — deliberately, and not merely
- * because the brief said so: a push channel would be a second synchronisation scheme
- * beside `useRecordSync`, and this file exists precisely to avoid inventing one.
+ * "Polling", never "real-time", never "near-real-time" and never "live". THIS HEADING
+ * USED TO READ "NEAR-REAL-TIME", and the paragraph under it then admitted, in its own
+ * words, that "the delay between a change and this hook seeing it is bounded by
+ * nothing this repository has measured" — which is precisely the reason the phrase was
+ * not available to use. It is a claim about LATENCY, and a latency claim is earned by
+ * a measurement or not made; the cadence is a timer with jitter and an exponential
+ * backoff that pauses entirely while the tab is hidden, so no bound exists to claim.
+ * What this file can honestly claim is EVENTUAL ARRIVAL while the surface is open, and
+ * `CHANGE_FEED_CADENCE_CLAIM` is the copy that says exactly that to a person — it was
+ * already right, which is why it does not change. There is no SSE and no WebSocket
+ * here — deliberately, and not merely because the brief said so: a push channel would
+ * be a second synchronisation scheme beside `useRecordSync`, and this file exists
+ * precisely to avoid inventing one.
  *
  * "Coalescing state feed", never "event log". The server reports that an entity is at
  * a version later than your cursor. It does not report every act, it cannot report
@@ -21,10 +26,20 @@
  * ARCHITECTURE: the SAME shape as `useRecordSync` — one poller per mounted surface,
  * per-effect-run locals, a `setTimeout` chain rather than `setInterval` so polls can
  * never overlap, ±20% jitter so two tabs desync, exponential backoff to 60 s, and an
- * honest `degraded` flag after three consecutive failures. The constants are IMPORTED
- * from that module rather than re-declared: two pollers against one deployment with
- * two different cadences would be two things to reason about, and nothing here
- * justifies a second number.
+ * honest `degraded` flag after three consecutive failures. The CADENCE constants are
+ * IMPORTED from that module rather than re-declared: two pollers against one
+ * deployment with two different cadences would be two things to reason about.
+ *
+ * ONE DELIBERATE DIVERGENCE, AND THE SENTENCE ABOVE USED TO DENY IT. It read "nothing
+ * here justifies a second number", and then this file grew one — so the claim is
+ * narrowed to CADENCE rather than left standing while being false. `useRecordSync`
+ * watches a single record whose answer is one bit; this feed is BOUNDED and PAGED, so
+ * a client that only ever polls at the cadence drains one page per interval and a
+ * 1,000-run backlog takes twenty intervals to reach the present. `has_more` is what
+ * the server says about that, the first version of this hook read it NOWHERE, and no
+ * test caught it because no fixture ever set it. `CHANGE_FEED_DRAIN_DELAY_MS` is that
+ * second number, and it is a different KIND of number — the gap between two pages of
+ * one read, not the gap between two reads.
  *
  * WHAT IT NEVER DOES, in the same spirit as `useRecordSync`: it does not fetch the
  * record, does not merge anything, does not submit anything, and does not overwrite
@@ -41,6 +56,39 @@ import {
 } from './useRecordSync';
 
 export { DEGRADED_THRESHOLD, POLL_INTERVAL_MS, POLL_MAX_BACKOFF_MS };
+
+/**
+ * HOW LONG TO WAIT BEFORE FETCHING THE **NEXT PAGE** OF A BACKLOG.
+ *
+ * The feed is bounded — the server hands back at most `limit` entries and says
+ * `has_more` — so a client that always waits a full cadence between requests drains
+ * at one page per interval. On the workload this feature exists for that is not a
+ * detail: a 1,000-run record is 20 pages, which at the 8 s cadence is over two and a
+ * half MINUTES before the surface has caught up to now, while `CHANGE_FEED_CADENCE_CLAIM`
+ * tells the reader an update "appears shortly after it is made". The first version of
+ * this hook ignored `has_more` altogether and no test noticed, because no fixture ever
+ * set it.
+ *
+ * It is deliberately NOT zero and deliberately NOT jittered. Not zero, because a
+ * backlog should not become the fastest request loop this application can make; not
+ * jittered, because jitter exists to desync two TABS at the cadence, and these
+ * requests are continuations of one read rather than a new cadence tick.
+ */
+export const CHANGE_FEED_DRAIN_DELAY_MS = 250;
+
+/**
+ * HOW MANY CONSECUTIVE BACKLOG PAGES BEFORE FALLING BACK TO THE ORDINARY CADENCE.
+ *
+ * A bound on a SERVER defect, not on legitimate paging. Draining is guaranteed to
+ * terminate on its own — every accepted page moves the cursor past what it returned,
+ * so `remaining` strictly decreases — and the fast-follow additionally requires the
+ * cursor to have MOVED, so a server answering `has_more: true` with an unchanged
+ * cursor is refused a second fast request rather than being hammered. This cap is the
+ * belt to that pair of braces: 20 pages is 1,000 entries at the default window, past
+ * which the client keeps draining at the ordinary cadence rather than stopping. No
+ * entry is skipped either way; only the rate changes.
+ */
+export const CHANGE_FEED_MAX_CONSECUTIVE_DRAINS = 20;
 
 /**
  * THE CADENCE CLAIM, as a person would read it.
@@ -143,6 +191,9 @@ export function useChangeFeed(
     let failures = 0;
     let interval = POLL_INTERVAL_MS;
     let cancelled = false;
+    // Consecutive backlog pages fetched at `CHANGE_FEED_DRAIN_DELAY_MS`. Reset by any
+    // poll that is not a drain, so a later backlog gets a full budget of its own.
+    let drains = 0;
 
     // A fresh record starts a fresh feed: drop the previous record's cursor rather
     // than resuming a position in an order it does not belong to. The server would
@@ -173,6 +224,11 @@ export function useChangeFeed(
       inFlight = true;
       const ac = new AbortController();
       controller = ac;
+      // Decided in `.then`, read in `.finally`. A per-poll local rather than a shared
+      // one, for the reason every other local in this effect is per-run: a settled
+      // poll must never steer a scheduling decision that belongs to a later one.
+      let drainNext = false;
+      const cursorBefore = cursorRef.current;
 
       api
         .getChanges(
@@ -194,19 +250,31 @@ export function useChangeFeed(
           cursorRef.current = page.next_cursor;
           setCursor(page.next_cursor);
           if (page.changes.length > 0) onChangesRef.current(page.changes);
+          // PAGE THROUGH A BACKLOG rather than waiting a full cadence per page. All
+          // three conditions are load-bearing: the server has to SAY there is more,
+          // the cursor has to have MOVED (otherwise a fast follow-up would ask the
+          // identical question), and the budget has to be unspent.
+          drainNext =
+            page.has_more &&
+            page.next_cursor !== cursorBefore &&
+            drains < CHANGE_FEED_MAX_CONSECUTIVE_DRAINS;
+          drains = drainNext ? drains + 1 : 0;
         })
         .catch(() => {
           if (cancelled || ac.signal.aborted) return;
           failures += 1;
           if (failures >= DEGRADED_THRESHOLD) setDegraded(true);
           interval = Math.min(interval * 2, POLL_MAX_BACKOFF_MS);
+          // A failed poll is never a drain, and it forfeits the budget: backing off
+          // and fast-following are contradictory instructions.
+          drains = 0;
         })
         .finally(() => {
           inFlight = false;
           controller = null;
           // The next poll is scheduled only after this one SETTLED — a setTimeout
           // chain, never setInterval, which is what makes non-overlap structural.
-          schedule(withJitter(interval));
+          schedule(drainNext ? CHANGE_FEED_DRAIN_DELAY_MS : withJitter(interval));
         });
     }
 

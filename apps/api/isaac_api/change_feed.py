@@ -26,8 +26,14 @@ bitten by, so each is published rather than buried:
 
 WHAT IT IS FOR
 ==============
-A near-real-time change signal that is O(returned) in what it sends, so a surface
-watching a 1,000-run record does not download the record to learn that nothing moved.
+A POLLED change signal that is O(returned) in what it sends, so a surface watching a
+1,000-run record does not download the record to learn that nothing moved.
+
+IT IS CALLED POLLING RATHER THAN "near-real-time", WHICH IS WHAT THIS LINE USED TO
+SAY. "Near-real-time" is a claim about LATENCY, and no latency figure is measured
+anywhere in this repository — the delay depends on a client's cadence, its jitter,
+its backoff and whether its tab is visible, none of which this module can see or
+bound. The word is only earned by a measurement, so the honest word is the mechanism.
 `useRecordSync`'s conditional GET already answers "did the RECORD change?" in one
 bit; this answers "WHICH entities changed, and to what version?" without composing a
 single draft.
@@ -88,15 +94,26 @@ ZERO_KEY: tuple[str, str, str] = ("", "", "")
 #: THE GAP GUARANTEE, stated honestly. Quoted verbatim by the route description and
 #: pinned by `test_change_feed.py`.
 GAP_GUARANTEE = (
-    "Paging this feed returns no entity twice and skips none, PROVIDED `updated_utc` "
-    "never moves backwards. That is a guarantee about ordering, not exactly-once "
-    "delivery, and it is not claimed to be: the order is keyed on a wall-clock "
-    "timestamp, so if the clock steps backwards an entity can be written with a key "
-    "that already sits behind a cursor you hold, and that change will not appear "
-    "until the entity changes again. The exposure is small because this application "
-    "runs as a single pod reading one clock — that is the REASON it is small, not a "
-    "proof that it is zero. The remedy is always available and costs one request: ask "
-    "for the feed with no cursor at all, which returns the whole order from the start."
+    "Paging this feed returns no entity twice and skips none, PROVIDED an entity's "
+    "`updated_utc` STRICTLY ADVANCES whenever that entity changes. That is a "
+    "guarantee about ordering, not exactly-once delivery, and it is not claimed to "
+    "be. TWO things break the proviso, and the second is the ordinary one, so it is "
+    "named here rather than left to be discovered. (1) The clock steps BACKWARDS: an "
+    "entity is then written with a key that already sits behind a cursor you hold. "
+    "(2) The entity is written inside the SAME ONE-SECOND STAMP its key already "
+    "carries — `updated_utc` is formatted to whole seconds, so a change landing in "
+    "that second moves the entity's `version` WITHOUT moving its key, and an entity "
+    "whose key is at or behind your cursor is therefore not reported. This is not "
+    "the clock moving backwards; it is the clock not moving at all, and the "
+    "one-second stamp is the same property that makes the `kind`/`entity_id` "
+    "tie-break load-bearing. In both cases the change appears the next time that "
+    "entity moves into a later second, so nothing is lost permanently on an entity "
+    "that is still being written. The exposure is bounded by one second per poll, "
+    "and it is small because this application runs as a single pod reading one clock "
+    "— that is the REASON it is small, not a proof that it is zero. The remedy is "
+    "always available and costs one request: ask for the feed with no cursor at all, "
+    "which is computed from current state and so reports every entity at the version "
+    "it holds right now."
 )
 
 #: THE DELETION LIMITATION. Quoted verbatim by the route description and pinned by test.
@@ -200,13 +217,30 @@ class ChangeEntry:
 class KindCollector:
     """One entity kind and the function that reads its entries off an experiment.
 
-    WHY A REGISTRY RATHER THAN TWO INLINE LOOPS. The brief names a third kind
-    (`proposal`) that does NOT exist at this commit — it lives in an unmerged PR — and
-    the wrong way to prepare for it is a `try: import proposals` or a branch on a
-    feature flag, either of which is a dependency on code that is not here. A
-    collector tuple lets the kind that lands later be added in the slice that owns it,
-    with this module unchanged, and lets `feed_kinds()` publish the truth about which
-    kinds a deployment actually serves instead of a hopeful literal.
+    WHY A REGISTRY RATHER THAN TWO INLINE LOOPS. The brief names a third kind,
+    `proposal`, and a collector tuple is what lets the slice that owns that kind add
+    it without touching this module, while `feed_kinds()` publishes the truth about
+    which kinds a deployment actually serves instead of a hopeful literal. The wrong
+    way to prepare for it would be a `try: import proposals` here, or a branch on a
+    feature flag; a collector passed in as a parameter needs neither.
+
+    THIS PARAGRAPH USED TO SAY THAT KIND "does NOT exist at this commit — it lives in
+    an unmerged PR", AND THAT IS CORRECTED RATHER THAN REPHRASED, because it was true
+    when written and is FALSE at this commit. The proposals work merged into this
+    branch's own history: `isaac_api/proposals.py` is in this tree and every
+    `Experiment` carries `.proposals`. A future reader must not take this docstring
+    as evidence that the feature is unavailable.
+
+    SERVING A `proposal` KIND IS STILL DELIBERATELY NOT DONE, and what IS observable
+    today is stated so the shortfall is measured rather than implied: proposals are
+    part of the record's AUTHORITATIVE SIGNATURE (`workspace._authoritative_signature`
+    hashes them), so proposing, accepting or refusing one moves the record's own `rev`
+    and `updated_utc`, and therefore moves the `experiment` entry of this feed. A
+    client learns "something about this record moved" and must re-read to learn what;
+    it does NOT learn which proposal moved, and no page carries a proposal id.
+    `test_change_feed.py` pins that mechanism, so a later change that took proposals
+    out of the signature — which would make this feed silent about them altogether —
+    fails a test instead of passing quietly.
 
     IT IS A TUPLE PASSED BY THE CALLER, NOT A MUTABLE MODULE-LEVEL REGISTRY. A global
     that tests append to is a global that leaks between tests; `changes_page` takes
@@ -460,8 +494,21 @@ def changes_page(
     STRICTLY AFTER, never at-or-after: `key > start` is what makes the page boundary
     non-overlapping, and it is why `next_cursor` is the key of the LAST RETURNED entry
     rather than one past it. A cursor that names an entity which has since changed
-    still resumes correctly, because the entity's NEW key is later than the old one
-    and so is still ahead of the cursor.
+    resumes correctly WHENEVER that change moved the entity into a later second,
+    because its new key is then later than the old one and so is ahead of the cursor.
+
+    IT DOES **NOT** RESUME CORRECTLY WHEN THE CHANGE LANDED IN THE SAME SECOND, and
+    that is stated here rather than only in `GAP_GUARANTEE` because this is the
+    comparison it is a property of. `updated_utc` is whole seconds, so a write inside
+    the second a key already names moves `rev` without moving the key; `key > start`
+    is then false and the change is not reported until the entity moves again. The
+    strictness is still right — relaxing it to `>=` would re-emit every entity of the
+    boundary second on every poll while STILL missing an entity earlier in that
+    second, so it would buy duplicates without buying the gap back. Closing the gap
+    properly needs either a sub-second stamp (a storage change, in `workspace`) or a
+    lagging watermark that deliberately trades the no-duplicate property for it;
+    neither is this function's to choose, and `test_change_feed.py` measures the
+    exposure so it cannot be re-described as absent.
 
     MEASURED, at this commit, over HTTP against a record created through
     `POST /api/experiments` and given N runs in process (the `_with_runs` harness

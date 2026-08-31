@@ -2079,7 +2079,25 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // (+1,142) and the branch's raw was 117,508, and 117,508 + 1,142 = 118,650.
     // Separators go 211 + 24 = 235 — the 24 are the four new operations', and
     // neither lineage's prose corrections added one.
-    expect(total).toBe(121428);
+    //
+    // 121,428 -> 122,207 (+779), 2026-08-30, AND THIS ONE IS A CORRECTION RATHER THAN
+    // AN ADDITION: `GET .../changes` published a gap guarantee that was FALSE, and
+    // the operation description quotes that constant verbatim, so correcting it moves
+    // this total. The old text promised "no entity twice and skips none, PROVIDED
+    // `updated_utc` never moves backwards" — but a write landing inside the SAME
+    // one-second stamp a cursor already names moves an entity's `version` without
+    // moving its key, and the entity is then never reported. That is a MONOTONIC
+    // clock, so the published proviso held while the guarantee it protected did not.
+    // The corrected text names both failure modes.
+    //
+    // THE `rest` COUNT DELIBERATELY DOES NOT MOVE AND IS STILL 242. The correction
+    // was written INTO the existing paragraph rather than appended as a new one,
+    // precisely so it does not re-baseline the transcribed `settings-explorer` a11y
+    // cells — those count rendered nodes, and a longer paragraph is the same node. A
+    // change that moved BOTH numbers would mean a paragraph had been added; one that
+    // moved `rest` alone would mean prose had been moved between paragraphs.
+    // RE-MEASURED over the served document, not incremented.
+    expect(total).toBe(122207);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
