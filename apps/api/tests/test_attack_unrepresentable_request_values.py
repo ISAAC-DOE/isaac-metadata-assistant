@@ -4,9 +4,20 @@ THE ATTACK, AND WHAT IT FOUND
 =============================
 This file was written as an attack pass, not as a regression guard: the sweep below
 was run against ``main`` at ``c2a93a7`` BEFORE any fix existed, and it succeeded.
-**210 probes, 79 unhandled ``500``s, across 25 of the application's 71 operations** —
-every operation whose request body is validated by a Pydantic model, plus every
-operation reachable with a top-level scalar body.
+**210 probes, 79 unhandled ``500``s, across 25 of the 71 operations the application
+published AT THAT COMMIT** — every operation whose request body is validated by a
+Pydantic model, plus every operation reachable with a top-level scalar body.
+
+**THAT DENOMINATOR HAS SINCE MOVED, AND THE SWEEP CAUGHT WHAT MOVED WITH IT.** At
+``bc8b32a`` the application publishes **75** operations (re-measured over
+``app.openapi()``; the four new ones are the ingestion-proposal routes that arrived
+with ``origin/main``). One of them, ``POST .../proposals``, answered **500** to the
+``lone-surrogate-in-a-key`` shape the day it merged — a FOURTH instance of the
+crash site section 5 describes, in a helper written after section 5's fix. The
+sweep below is driven off ``app.openapi()`` rather than a transcribed list
+precisely so that an operation added tomorrow is probed the day it exists, and this
+is that mechanism working: **no human re-enumerated anything, and the branch went
+red on merge.** Do not replace the sweep with a list.
 
 The five shapes that did it, all of which a client can put on the wire and none of
 which ``JSON.stringify`` can produce (they need a hand-written body, which is what an
@@ -670,3 +681,259 @@ def test_the_helper_is_the_same_predicate_as_the_handlers_check(client):
     # And the placeholder is itself publishable, or the fix would crash on its own
     # replacement.
     routes._render_exactly_as_a_response_would(routes.UNRENDERABLE_KEY_PLACEHOLDER)
+
+
+# =============================================================================
+# 6. THE THREE SITES SECTION 5's ENUMERATION MISSED
+# =============================================================================
+#
+# Section 5 said "five operations, one shared remedy" and `_echoable_key`'s docstring
+# named "three helpers". BOTH WERE PUBLISHED WITHOUT BEING CHECKED, and re-measuring
+# on `bc8b32a` found three more sites answering 500 on the same input. That is the
+# pattern `CLAUDE.md` §15 records four separate times about `OWNED_TABLES`: an
+# enumeration is itself a checkable claim.
+#
+# What matters more than the count is WHY the section-1 sweep could not see two of
+# them, because the same blind spot will hide the next one:
+#
+#   * `POST .../proposals` — it did not exist when section 5 was written. The sweep
+#     DID catch this one, on the merge, without anyone re-enumerating.
+#   * the assistant's per-context-item key check — the hostile key is NESTED one
+#     level down, and the sweep makes the body's TOP level hostile.
+#   * `assets.build_asset`'s unknown-key branch — `POST .../assets` refuses a body
+#     with no `confirmed_by_user` FIRST, so the sweep's probe is shadowed by an
+#     earlier guard and never reaches the key check.
+#
+# THE GENERAL LESSON, stated so it survives this file: a sweep is evidence about the
+# shapes it can reach, and a route that refuses early for an unrelated reason is a
+# shape it cannot reach. Neither a green sweep nor an effective mutation is evidence
+# that a probe got as deep as its name implies.
+
+
+def test_the_proposal_routes_survive_a_key_they_cannot_name(client, targets):
+    """``POST .../proposals`` — the fourth crash site, and the one the sweep caught.
+
+    It answered an unhandled ``500`` to ``{"\\ud800": 1}`` at ``bc8b32a``, from
+    ``_unknown_proposal_keys``, which named the caller's key in its own ``422``
+    exactly as the three helpers section 5 fixed had. The route arrived from
+    ``origin/main`` after that fix, so nothing was regressed — the enumeration was
+    simply never a closed set.
+
+    MUTATION: reverting ``_unknown_proposal_keys`` to ``sorted(str(key) for key in
+    body if key not in allowed)`` turns this RED::
+
+        AssertionError: ('/api/experiments/…/proposals', 'Internal Server Error')
+        assert 500 != 500
+    """
+    url = f"/api/experiments/{targets['{experiment_id}']}/proposals"
+    response = client.post(
+        url,
+        content=rb'{"\ud800": 1}',
+        headers={
+            "If-Match": targets["_etag"](),
+            "content-type": "application/json",
+        },
+    )
+    assert response.status_code != 500, (url, response.text[:200])
+    assert response.status_code == 422, (response.status_code, response.text[:200])
+    body = response.json()
+    assert body["error"] == "unrecognized_field", body
+    from isaac_api import routes
+
+    assert body["keys"] == [routes.UNRENDERABLE_KEY_PLACEHOLDER], body
+    assert "ud800" not in response.text
+
+
+def test_an_ordinary_unrecognised_proposal_key_is_still_named_verbatim(client, targets):
+    """The negative control for the test above.
+
+    The proposal refusal earns its keep by telling a caller WHICH key was wrong, and
+    it also has a second branch — ``declined`` — that recognises specific key names
+    and explains each. Both must be untouched: only an unrenderable key is replaced.
+
+    MUTATION: making ``_echoable_key`` always return the placeholder turns this RED
+    on BOTH assertions, and the ``declined`` one is the informative half — it shows
+    that a blanket redaction would break membership, not merely presentation::
+
+        assert '<a key this response cannot quote>' == 'zzz_typo'
+    """
+    from isaac_api import routes
+
+    url = f"/api/experiments/{targets['{experiment_id}']}/proposals"
+    ordinary = client.post(
+        url, json={"zzz_typo": 1}, headers={"If-Match": targets["_etag"]()}
+    )
+    assert ordinary.status_code == 422, ordinary.text
+    assert ordinary.json()["keys"] == ["zzz_typo"], ordinary.text
+
+    # And the `declined` branch, whose membership test runs on the published list,
+    # still recognises a declined name.
+    declined_name = sorted(routes._PROPOSAL_DECLINED_KEYS)[0]
+    declined = client.post(
+        url, json={declined_name: "x"}, headers={"If-Match": targets["_etag"]()}
+    )
+    assert declined.status_code == 422, declined.text
+    assert declined.json()["declined"] == [declined_name], declined.text
+
+
+def test_a_hostile_key_NESTED_in_an_assistant_context_item_is_not_a_500(client):
+    """The fifth site, and the one no top-level sweep can reach.
+
+    ``POST /api/assistant/ask`` screens its TOP-level keys through
+    ``_echoable_key`` (section 5). ``context`` is an ACCEPTED key, so a hostile key
+    inside one of its items never meets that screen and reached a second,
+    unscreened refusal that published it — an unhandled ``500`` at ``bc8b32a``.
+
+    This is why the file now says a sweep is evidence only about the shapes it can
+    reach: every probe in section 1 makes the body's outermost level hostile.
+
+    MUTATION: reverting the per-item check to ``sorted(set(entry) -
+    _ASSISTANT_CONTEXT_KEYS)`` turns this RED::
+
+        assert 500 != 500
+    """
+    response = client.request(
+        "POST",
+        "/api/assistant/ask",
+        content=rb'{"question": "hi", "context": [{"\ud800": 1}]}',
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code != 500, response.text[:200]
+    assert response.status_code == 422, (response.status_code, response.text[:200])
+    body = response.json()
+    assert body["error"] == "unrecognized_field", body
+    from isaac_api import routes
+
+    assert body["keys"] == [routes.UNRENDERABLE_KEY_PLACEHOLDER], body
+    assert "ud800" not in response.text
+
+
+def test_an_ordinary_nested_context_key_is_still_named_verbatim(client):
+    """The negative control for the nested screen.
+
+    MUTATION: making ``_echoable_key`` always return the placeholder turns this
+    RED::
+
+        assert ['<a key this response cannot quote>'] == ['zzz_typo']
+    """
+    response = client.post(
+        "/api/assistant/ask",
+        json={
+            "question": "hi",
+            "context": [{"key": "k", "text": "t", "origin": "o", "zzz_typo": 1}],
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["keys"] == ["zzz_typo"], response.text
+
+
+def test_the_asset_routes_survive_a_key_and_a_run_id_they_cannot_name(client, targets):
+    """The sixth and seventh sites, both behind a guard that shadowed the sweep.
+
+    ``POST .../assets`` refuses a body with no ``confirmed_by_user`` before it looks
+    at any key, so the section-1 probe — a bare ``{"\\ud800": 1}`` — never reached
+    ``assets.build_asset``'s unknown-key branch. With the confirmation supplied it
+    did, and answered **500** at ``bc8b32a``.
+
+    The SECOND half is not a body key at all and is the reason the remedy grew a
+    ``placeholder`` parameter: ``_resolve_run_ids`` names the caller's own run id
+    back so the caller learns which one was wrong, and a run id of ``"\\ud800"``
+    destroyed the response the same way. Reachable through
+    ``PATCH .../assets/{id}``, which needs a real asset first — which is why the
+    sweep, whose ``{asset_id}`` target deliberately addresses nothing, could not
+    have found it either.
+
+    MUTATION: removing the ``key``/``keys`` screen from ``_asset_refusal`` turns the
+    first half RED; reverting ``_resolve_run_ids`` to publish ``unknown`` directly
+    turns the second half RED::
+
+        AssertionError: ('assets create', 'Internal Server Error')
+        assert 500 != 500
+    """
+    from isaac_api import routes
+
+    eid = targets["{experiment_id}"]
+    valid = b'"confirmed_by_user": true, "uri": "file:///x", "content_role": "raw_data"'
+
+    unknown_key = client.request(
+        "POST",
+        f"/api/experiments/{eid}/assets",
+        content=b"{" + valid + rb', "\ud800": 1}',
+        headers={"If-Match": targets["_etag"](), "content-type": "application/json"},
+    )
+    assert unknown_key.status_code != 500, ("assets create", unknown_key.text[:200])
+    assert unknown_key.status_code == 422, unknown_key.text[:200]
+    assert unknown_key.json()["keys"] == [routes.UNRENDERABLE_KEY_PLACEHOLDER]
+    assert "ud800" not in unknown_key.text
+
+    created = client.post(
+        f"/api/experiments/{eid}/assets",
+        json={
+            "confirmed_by_user": True,
+            "asset_id": "an-asset-that-does-exist",
+            "uri": "file:///x",
+            "content_role": "raw_data",
+            "sha256": "a" * 64,
+        },
+        headers={"If-Match": targets["_etag"]()},
+    )
+    assert created.status_code == 201, created.text
+
+    hostile_run = client.request(
+        "PATCH",
+        f"/api/experiments/{eid}/assets/an-asset-that-does-exist",
+        content=rb'{"confirmed_by_user": true, "run_ids": ["\ud800"]}',
+        headers={"If-Match": targets["_etag"](), "content-type": "application/json"},
+    )
+    assert hostile_run.status_code != 500, ("assets patch", hostile_run.text[:200])
+    assert hostile_run.status_code == 422, hostile_run.text[:200]
+    body = hostile_run.json()
+    assert body["error"] == "unknown_run", body
+    assert body["run_ids"] == [routes.UNRENDERABLE_VALUE_PLACEHOLDER], body
+    assert "ud800" not in hostile_run.text
+
+    # NEGATIVE CONTROL, in the same test because the two share a fixture and the
+    # point is the contrast: an ordinary unknown run id is still named verbatim, or
+    # the refusal would have stopped being actionable.
+    ordinary_run = client.patch(
+        f"/api/experiments/{eid}/assets/an-asset-that-does-exist",
+        json={"confirmed_by_user": True, "run_ids": ["not-a-run-of-this-record"]},
+        headers={"If-Match": targets["_etag"]()},
+    )
+    assert ordinary_run.status_code == 422, ordinary_run.text
+    assert ordinary_run.json()["run_ids"] == ["not-a-run-of-this-record"]
+
+
+def test_the_value_placeholder_is_distinct_from_the_key_one_and_both_render(client):
+    """Two placeholders, one predicate — asserted so a future edit cannot merge them
+    into a single string that lies about half its uses.
+
+    ``"run_id": "<a key this response cannot quote>"`` would be a small untruth in
+    a refusal whose whole job is to say precisely what was wrong. The PREDICATE is
+    shared (``_echoable_key`` takes the placeholder as a parameter); only the noun
+    differs.
+
+    MUTATION: defaulting the parameter away — making ``_resolve_run_ids`` call
+    ``_echoable_key(run_id)`` — turns this RED at the distinctness assertion only
+    if the strings are also merged, which is the point: the two assertions below
+    are a pair, and the second is what catches a merge::
+
+        assert '<a key this response cannot quote>' != '<a key this response cannot quote>'
+    """
+    from isaac_api import routes
+
+    assert routes.UNRENDERABLE_KEY_PLACEHOLDER != routes.UNRENDERABLE_VALUE_PLACEHOLDER
+    # Both must themselves be publishable, or the fix crashes on its own replacement.
+    for placeholder in (
+        routes.UNRENDERABLE_KEY_PLACEHOLDER,
+        routes.UNRENDERABLE_VALUE_PLACEHOLDER,
+    ):
+        routes._render_exactly_as_a_response_would(placeholder)
+    # One predicate, two nouns.
+    assert (
+        routes._echoable_key("\ud800", routes.UNRENDERABLE_VALUE_PLACEHOLDER)
+        == routes.UNRENDERABLE_VALUE_PLACEHOLDER
+    )
+    assert routes._echoable_key("ordinary", routes.UNRENDERABLE_VALUE_PLACEHOLDER) == (
+        "ordinary"
+    )

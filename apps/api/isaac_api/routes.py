@@ -7249,23 +7249,53 @@ def _render_exactly_as_a_response_would(value) -> bytes:
 #: reason it exists is that the key could not be rendered.
 UNRENDERABLE_KEY_PLACEHOLDER = "<a key this response cannot quote>"
 
+#: The same, for a caller-supplied VALUE this application names back — a run id, an
+#: identifier, anything a refusal quotes so the caller learns *which* one was wrong.
+#: A separate string only because ``"run_id": "<a key …>"`` would be a small lie
+#: about what could not be quoted; the PREDICATE behind both is the one below.
+UNRENDERABLE_VALUE_PLACEHOLDER = "<a value this response cannot quote>"
 
-def _echoable_key(raw: object) -> str:
+
+def _echoable_key(raw: object, placeholder: str = UNRENDERABLE_KEY_PLACEHOLDER) -> str:
     """A caller-supplied body KEY, made safe to name in a refusal body.
 
-    THE DEFECT THIS CLOSES, MEASURED OVER HTTP ON ``c2a93a7``. Three helpers —
-    :func:`_unknown_note_keys`, :func:`_unknown_conflict_keys` and the
-    ``unrecognized_field`` branch of ``POST /api/assistant/ask`` — refuse a body key
-    they do not accept and NAME IT in the ``422``. A body of ``{"\\ud800": 1}``
-    therefore built a ``JSONResponse`` carrying a lone surrogate, and Starlette's
-    render (``ensure_ascii=False`` … ``.encode("utf-8")``) raised
-    ``UnicodeEncodeError`` — an unhandled **500** on five operations, from inside the
-    refusal that was doing exactly the right thing.
+    THE DEFECT THIS CLOSES, MEASURED OVER HTTP ON ``c2a93a7``. Helpers that refuse a
+    body key they do not accept and NAME IT in the ``422`` built a ``JSONResponse``
+    carrying whatever the caller sent, so a body of ``{"\\ud800": 1}`` put a lone
+    surrogate into it and Starlette's render (``ensure_ascii=False`` …
+    ``.encode("utf-8")``) raised ``UnicodeEncodeError`` — an unhandled **500**, from
+    inside the refusal that was doing exactly the right thing.
 
     It is a SECOND crash site, not the one
     :func:`request_validation_error_handler` covers, and finding it required looking:
     the handler's fix makes every route whose body is validated by a model safe, and
-    these three build their own bodies from an untyped ``dict`` and never reach it.
+    these build their own bodies from an untyped ``dict`` and never reach it.
+
+    **THE ENUMERATION OF CALL SITES WAS PUBLISHED BEFORE IT WAS CHECKED, AND IT WAS
+    WRONG. IT IS CORRECTED HERE RATHER THAN REWRITTEN, because "these three are the
+    set" is exactly the kind of claim a future session acts on.** This docstring
+    read *"Three helpers — :func:`_unknown_note_keys`, :func:`_unknown_conflict_keys`
+    and the ``unrecognized_field`` branch of ``POST /api/assistant/ask``"* and
+    *"five operations"*. Re-measured over HTTP on ``bc8b32a``, **three more sites
+    answered 500 on the same input**, one of which turned this branch's own sweep
+    RED the moment ``origin/main``'s ingestion-proposals routes merged in:
+
+    * :func:`_unknown_proposal_keys` — ``POST .../proposals`` and the review
+      operation. It did not exist when the three above were enumerated; the sweep in
+      ``test_attack_unrepresentable_request_values.py`` is driven off
+      ``app.openapi()`` and caught it, which is the whole reason that test is a
+      sweep rather than a transcribed list.
+    * the per-item context check in ``POST /api/assistant/ask`` — a NESTED object's
+      keys, one level below the top-level check that was fixed. The top-level sweep
+      cannot see it, because the sweep sends a body whose *top* level is hostile.
+    * ``assets.build_asset``'s ``unrecognized_field`` branch, published through
+      :func:`_asset_refusal`. The sweep cannot see it either: ``POST .../assets``
+      refuses a body with no ``confirmed_by_user`` first, so the probe never
+      reaches the key check.
+
+    The durable lesson is the one ``CLAUDE.md`` §15 records four times about
+    ``OWNED_TABLES``: *an enumeration is itself a checkable claim*, and a green
+    sweep over the shapes it can reach is not evidence about the shapes it cannot.
 
     THE PREDICATE IS THE RENDER, not an approximation of it — the same call, and the
     same reasoning, as the handler's check. So a key that renders is returned
@@ -7275,12 +7305,17 @@ def _echoable_key(raw: object) -> str:
     It is deliberately NOT applied to the ``key not in allowed`` test at any call
     site: membership is decided on the REAL key, so an unrenderable key is still
     correctly identified as unaccepted. Only what is *published* changes.
+
+    ``placeholder`` exists so that :func:`_resolve_run_ids` — which quotes a caller's
+    run *id*, not a body key — can share this one predicate rather than grow a
+    second copy of it. A second, independently-written predicate is how two crash
+    sites drift apart, one accepting what the other refuses.
     """
     key = str(raw)
     try:
         _render_exactly_as_a_response_would(key)
     except (ValueError, TypeError):
-        return UNRENDERABLE_KEY_PLACEHOLDER
+        return placeholder
     return key
 
 
@@ -10909,7 +10944,11 @@ def _proposal_conflict(error: str, message: str, **extra) -> JSONResponse:
 
 def _unknown_proposal_keys(body: dict, allowed: frozenset[str]) -> JSONResponse | None:
     """Refuse a body key this operation does not accept, naming the declined ones."""
-    refused = sorted(str(key) for key in body if key not in allowed)
+    # `_echoable_key` bounds only what is PUBLISHED; membership is still decided on
+    # the real key, and `declined` below is still tested against the real names —
+    # every one of which renders, so that test is unmoved. See its docstring for the
+    # 500 this closes, and for why this site was missed the first time.
+    refused = sorted(_echoable_key(key) for key in body if key not in allowed)
     if not refused:
         return None
     declined = [key for key in refused if key in _PROPOSAL_DECLINED_KEYS]
@@ -12813,7 +12852,12 @@ def post_assistant_ask(
                 "Each context item must be an object.",
                 key=f"context[{index}]",
             )
-        extra = sorted(set(entry) - _ASSISTANT_CONTEXT_KEYS)
+        # NESTED, one level below the top-level `_ASSISTANT_KEYS` check. `context`
+        # is an ACCEPTED key, so a hostile key inside one of its items never meets
+        # that check — which is why a sweep that makes the body's TOP level hostile
+        # cannot reach here, and why this site survived the first fix. Same
+        # predicate, same reason.
+        extra = sorted(_echoable_key(key) for key in set(entry) - _ASSISTANT_CONTEXT_KEYS)
         if extra:
             return _transcript_refusal(
                 "unrecognized_field",
@@ -13217,10 +13261,43 @@ def _asset_refusal(exc: "assets.UnsupportedAsset") -> JSONResponse:
     surface must not reopen that. Every shape `isaac_api.assets` refuses arrives
     here carrying its own error code and its own extra body keys, so a malformed
     payload can never surface as a traceback.
+
+    **EXCEPT THAT ONE SHAPE DID, AND IT IS CLOSED HERE.**
+    ``assets.build_asset``'s ``unrecognized_field`` branch names the caller's own
+    body key in ``key``/``keys``, so ``{"\\ud800": 1}`` put a lone surrogate into
+    this response and Starlette's render raised ``UnicodeEncodeError`` — a 500 from
+    the refusal, which is precisely what this function's second paragraph promises
+    cannot happen. Measured over HTTP on ``bc8b32a``: ``POST .../assets`` and
+    ``PATCH .../assets/{id}``.
+
+    THE BOUND IS APPLIED HERE, AT THE PUBLICATION BOUNDARY, NOT IN
+    ``isaac_api.assets``. ``routes`` imports ``assets``, so ``assets`` cannot import
+    :func:`_echoable_key` back, and writing a second copy of the predicate there is
+    the drift that ``test_the_helper_is_the_same_predicate_as_the_handlers_check``
+    exists to forbid. This is also the only place every ``UnsupportedAsset``
+    passes through, so a branch added tomorrow is covered without being enumerated.
+
+    Only ``key`` and ``keys`` are screened, because they are the only extras a
+    caller's bytes reach: ``allowed`` and ``expected`` come from the vendored
+    schema, and ``where`` from the record's own run ids. Screening them anyway
+    would cost nothing — a value that renders is returned unchanged — but naming
+    the two that matter says which ones were checked.
     """
+    # `isinstance(..., str)` rather than a bare presence test: `_echoable_key`
+    # applies `str()`, so screening a non-string extra would silently change its
+    # TYPE on the wire. Every `key`/`keys` this module raises today is a string, and
+    # this guarantees the screen is a no-op for anything that is not.
+    extra = dict(exc.extra)
+    if isinstance(extra.get("key"), str):
+        extra["key"] = _echoable_key(extra["key"])
+    if isinstance(extra.get("keys"), list):
+        extra["keys"] = [
+            _echoable_key(key) if isinstance(key, str) else key
+            for key in extra["keys"]
+        ]
     return JSONResponse(
         status_code=422,
-        content={"error": exc.error, "message": exc.message, **exc.extra},
+        content={"error": exc.error, "message": exc.message, **extra},
     )
 
 
@@ -13326,6 +13403,16 @@ def _resolve_run_ids(exp: Experiment, raw: object) -> tuple[set[str] | None, JSO
     known = {run.id for run in exp.sorted_runs()}
     unknown = sorted(set(raw) - known)
     if unknown:
+        # THE THIRD SITE THIS CLASS OF DEFECT REACHED, and the one that is not a
+        # body KEY at all: the refusal names the caller's own run id so the caller
+        # learns WHICH id was wrong, and a run id of `"\ud800"` therefore destroyed
+        # the response — measured as a 500 over HTTP on `bc8b32a` against
+        # `PATCH .../assets/{id}`. `_echoable_key` bounds only what is PUBLISHED;
+        # membership was decided on the real id above, so an unknown run is still
+        # correctly refused and an ordinary typo is still named verbatim.
+        echoable = [
+            _echoable_key(run_id, UNRENDERABLE_VALUE_PLACEHOLDER) for run_id in unknown
+        ]
         return None, JSONResponse(
             status_code=422,
             content={
@@ -13336,8 +13423,8 @@ def _resolve_run_ids(exp: Experiment, raw: object) -> tuple[set[str] | None, JSO
                     "`GET /api/experiments/{experiment_id}/runs`; none is inferred. "
                     "Nothing was written."
                 ),
-                "run_id": unknown[0],
-                "run_ids": unknown,
+                "run_id": echoable[0],
+                "run_ids": echoable,
             },
         )
     return set(raw), None

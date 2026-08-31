@@ -284,6 +284,29 @@ def test_a_record_CORRECTION_and_a_run_override_at_one_address_do_not_tear(
     record is answered first, so ``/edit`` has something to correct — an edit at an
     unanswered address is a documented refusal and would make the race trivial.
 
+    **THE CORRECTION USED TO BE UNREACHABLE, AND THE TEST PASSED ANYWAY. Found and
+    fixed 2026-08-30, recorded rather than quietly corrected, because a race whose
+    two writers are not both live is precisely the failure this file's own
+    ``_LockRendezvous`` docstring warns about.** The body was
+    ``{"confirmed_by_user": True, "field": …, "value": …}``; ``post_edit`` reads
+    ``body.get("answers")`` and answers **422 ``unrecognized_field``** ("No
+    editable field was recognized in the request") to every other spelling, above
+    the handler. Measured directly, outside any race, on ``bc8b32a``::
+
+        edit field/value  -> 422 {"error":"unrecognized_field", …}
+        edit answers dict -> 200
+
+    So ``edit_response.status_code == 200`` could never be taken: whichever way the
+    race went the correction was refused — ``412`` when the override won, ``422``
+    when it did not — and the test degenerated into "an override races something
+    that is always refused" while claiming to cover a second handler. **Measured
+    over 12 runs before and after: ``200`` occurred 0 times, and now occurs 5.**
+
+    The recorded mutation below still turned it RED, which is *why* this went
+    unnoticed for a whole branch: that mutation is about the OVERRIDE half, and the
+    ``else`` branch it lands in was the only branch reachable. An effective
+    mutation is not evidence that both writers are live.
+
     MUTATION: making ``set_run_override`` ALSO write the record's own field turns
     this RED — the correction's address ends up holding the RUN's value::
 
@@ -308,10 +331,11 @@ def test_a_record_CORRECTION_and_a_run_override_at_one_address_do_not_tear(
     responses = _race([
         lambda: client.post(
             f"/api/experiments/{eid}/edit",
+            # `answers`, NOT `field`/`value` — see the docstring. The wrong
+            # spelling made this writer a permanent 422 and the race one-sided.
             json={
                 "confirmed_by_user": True,
-                "field": RECORD_ANSWER_KEY,
-                "value": CORRECTED_VALUE,
+                "answers": {RECORD_ANSWER_KEY: CORRECTED_VALUE},
             },
             headers={"If-Match": record_token},
         ),

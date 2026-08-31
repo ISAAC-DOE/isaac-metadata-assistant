@@ -60,6 +60,7 @@ import isaac_api.workspace as ws
 from isaac_api import identity
 
 from conftest import client_ws, tutorial_client
+from test_lifecycle_concurrency import _confirmed
 
 #: A name this application can never invent. `assert PLANTED not in <anything>` is
 #: therefore a real statement rather than a coincidence.
@@ -152,6 +153,40 @@ def _write_table(client, headers=None) -> list[tuple[str, str, dict]]:
     in the same workspace: the statuses are then comparable without either run
     seeing the other's side effects, which is what makes a status-by-status
     comparison a fair test rather than an ordering artefact.
+
+    **THREE ROWS USED TO BE REFUSED BEFORE THEY REACHED A HANDLER, AND THE FILE
+    READ AS THOUGH THEY WERE NOT. Measured on ``bc8b32a``, control run:**
+
+    ==========================================  =========  ==========================
+    row                                         was        because
+    ==========================================  =========  ==========================
+    ``POST .../edit``                           ``422``    the body used ``field``/
+                                                           ``value``; the route reads
+                                                           ``answers`` (routes.py's
+                                                           ``body.get("answers")``)
+    ``PATCH .../runs/{run_id}``                 ``412``    :func:`_drive` sent the
+                                                           RECORD's ETag to a route
+                                                           validated by the RUN's
+    ``POST .../runs/{run_id}/overrides``        ``412``    the same, and its body was
+                                                           ``value`` rather than a
+                                                           draft-field ``payload``
+                                                           envelope
+    ==========================================  =========  ==========================
+
+    A ``412``/``422`` is answered by the precondition check *above* every handler,
+    so for those three the header-forging comparison was comparing two refusals
+    that no route function ever saw — and **two of the three are the run-level
+    write routes**, exactly where a header-reading defect would have been invisible.
+    The bodies and the validators are corrected here; all twelve now reach a
+    handler in the control run (``201 200 200 200 201 200 200 201 201 200 200
+    409``), which is what makes *"a route that read a header would show up here as
+    a single differing cell"* true rather than aspirational.
+
+    ``scope`` is ``"run"`` for a row whose precondition is the RUN's validator and
+    ``"record"`` otherwise; :func:`_drive` reads it. It is carried per row rather
+    than inferred from the path because ``POST .../runs`` is record-scoped while
+    ``PATCH .../runs/{id}`` is run-scoped, and a path-shape heuristic gets that
+    pair wrong.
     """
     extra = dict(headers or {})
     created = client.post("/api/experiments", json={"title": "attack"}, headers=extra)
@@ -165,34 +200,51 @@ def _write_table(client, headers=None) -> list[tuple[str, str, dict]]:
     assert run.status_code == 201, run.text
     run_id = run.json()["run"]["id"]
     return eid, run_id, [
-        ("POST", "/api/experiments", {"title": "second"}),
-        ("PATCH", f"/api/experiments/{eid}", {"title": "renamed"}),
+        ("POST", "/api/experiments", {"title": "second"}, "record"),
+        ("PATCH", f"/api/experiments/{eid}", {"title": "renamed"}, "record"),
         (
             "POST",
             f"/api/experiments/{eid}/answers",
             {"confirmed_by_user": True, "answers": {"system.technique": "XAS"}},
+            "record",
         ),
         (
+            # `answers`, NOT `field`/`value`: `post_edit` reads `body.get("answers")`
+            # and answers `422 unrecognized_field` ("No editable field was
+            # recognized") to any other spelling, above every handler.
             "POST",
             f"/api/experiments/{eid}/edit",
-            {"confirmed_by_user": True, "field": "system.technique", "value": "XES"},
+            {"confirmed_by_user": True, "answers": {"system.technique": "XES"}},
+            "record",
         ),
-        ("POST", f"/api/experiments/{eid}/runs", {"label": "run B"}),
+        ("POST", f"/api/experiments/{eid}/runs", {"label": "run B"}, "record"),
         (
             "PATCH",
             f"/api/experiments/{eid}/runs/{run_id}",
             {"confirmed_by_user": True, "label": "run A2"},
+            "run",
         ),
         (
+            # A draft-field ENVELOPE under `payload`. A bare `value` is refused
+            # `invalid_envelope` ("must be a field envelope"), and an envelope with
+            # no evidence is refused "verified field has no observed evidence or
+            # user confirmation" — so both spellings the obvious body reaches for
+            # never enter the override handler.
             "POST",
             f"/api/experiments/{eid}/runs/{run_id}/overrides",
             {
                 "confirmed_by_user": True,
                 "address": "field:system.technique",
-                "value": "XAS",
+                "payload": _confirmed("XAS"),
             },
+            "run",
         ),
-        ("POST", f"/api/experiments/{eid}/notes", {"text": "n", "source": "typed_note"}),
+        (
+            "POST",
+            f"/api/experiments/{eid}/notes",
+            {"text": "n", "source": "typed_note"},
+            "record",
+        ),
         (
             "POST",
             f"/api/experiments/{eid}/assets",
@@ -203,11 +255,18 @@ def _write_table(client, headers=None) -> list[tuple[str, str, dict]]:
                 "uri": "ssrl-archive://BL15-2/x/raw/",
                 "sha256": "a" * 64,
             },
+            "record",
         ),
-        ("POST", f"/api/experiments/{eid}/validate", {}),
-        ("POST", f"/api/experiments/{eid}/export", {"confirmed_by_user": True}),
-        ("POST", f"/api/experiments/{eid}/submit", {"confirmed_by_user": True}),
+        ("POST", f"/api/experiments/{eid}/validate", {}, "record"),
+        ("POST", f"/api/experiments/{eid}/export", {"confirmed_by_user": True}, "record"),
+        ("POST", f"/api/experiments/{eid}/submit", {"confirmed_by_user": True}, "record"),
     ]
+
+
+def _run_etag(client, eid: str, run_id: str) -> str:
+    response = client.get(f"/api/experiments/{eid}/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    return response.headers["ETag"]
 
 
 def _drive(client, table, eid, run_id, *, headers=None, body_extra=None, query=""):
@@ -217,14 +276,22 @@ def _drive(client, table, eid, run_id, *, headers=None, body_extra=None, query="
     The ids differ between two runs by construction — that is the whole point of
     giving each run its own record — so comparing raw paths would compare the ids
     rather than the outcomes.
+
+    **THE VALIDATOR IS CHOSEN PER ROW**, from the ``scope`` the table carries. It
+    used to be the record's ETag for every row, so the two run-scoped operations
+    answered ``412 stale_write`` from the precondition check and never entered a
+    handler — a header-reading defect in either would have shown as no difference
+    at all. See :func:`_write_table` for the measurement.
     """
     rows = []
-    for method, path, body in table:
+    for method, path, body, scope in table:
         payload = dict(body)
         if body_extra:
             payload.update(body_extra)
         sent = dict(headers or {})
-        sent["If-Match"] = _etag(client, eid)
+        sent["If-Match"] = (
+            _run_etag(client, eid, run_id) if scope == "run" else _etag(client, eid)
+        )
         url = path + (("?" + query) if query else "")
         response = client.request(method, url, json=payload, headers=sent)
         shape = path.replace(eid, "{experiment_id}").replace(run_id, "{run_id}")
@@ -305,13 +372,16 @@ def test_a_forged_header_is_never_echoed_and_never_persisted(client, tmp_path):
         assert 'mallory-the-forger-4711' not in
                '…"title":"secondmallory-the-forger-4711","scenario":null,…'
     """
-    eid, _, table = _write_table(client, headers=FORGED_HEADERS)
-    for method, path, body in table:
+    eid, run_id, table = _write_table(client, headers=FORGED_HEADERS)
+    for method, path, body, scope in table:
+        validator = (
+            _run_etag(client, eid, run_id) if scope == "run" else _etag(client, eid)
+        )
         response = client.request(
             method,
             path,
             json=body,
-            headers={**FORGED_HEADERS, "If-Match": _etag(client, eid)},
+            headers={**FORGED_HEADERS, "If-Match": validator},
         )
         assert PLANTED not in response.text, (method, path)
 
@@ -390,14 +460,19 @@ def test_no_write_route_lets_the_body_name_an_actor(client):
     """Nine spellings, twelve operations: each is REFUSED or IGNORED, never obeyed.
 
     **The two outcomes are both acceptable and they are not the same, so the
-    measurement is recorded rather than averaged.** On ``c2a93a7``:
+    measurement is recorded rather than averaged.** On ``c2a93a7``, and re-measured
+    on ``bc8b32a`` after :func:`_write_table` was corrected so that all twelve
+    reach a handler — **the split is unchanged, four and eight**:
 
     * REFUSED with ``422`` — ``POST /api/experiments`` and
       ``PATCH /api/experiments/{id}`` (their models set ``extra="forbid"``),
       ``POST .../notes`` and ``POST .../assets`` (``unrecognized_field``).
     * ACCEPTED AND IGNORED — the rest, whose bodies are untyped ``dict``s that read
       only the keys they name. ``POST .../runs`` returns ``201`` with all nine keys
-      present.
+      present. Three of these eight — ``/edit``, ``PATCH .../runs/{id}`` and
+      ``.../overrides`` — were previously refused above the handler for reasons
+      that had nothing to do with the actor keys, so their membership here is new
+      information rather than a restatement.
 
     What must hold either way is that nothing is obeyed, which the workspace scan
     below is the actual assertion for.
@@ -432,11 +507,23 @@ def test_the_refusing_routes_and_the_ignoring_routes_are_both_still_there(client
 
     "Refused or ignored" is satisfied by an application that refuses everything, so
     the claim is made per operation and against a control rather than over the set
-    of statuses — a ``422`` appears in the control run anyway (``/edit`` refuses the
-    control body's shape), which is exactly how a set-level assertion would have
-    read as coverage while proving nothing.
+    of statuses.
 
-    Two named exemplars, each measured both ways on ``c2a93a7``:
+    ~~"a ``422`` appears in the control run anyway (``/edit`` refuses the control
+    body's shape), which is exactly how a set-level assertion would have read as
+    coverage while proving nothing"~~ — **struck 2026-08-30 rather than deleted,
+    because it was a true observation used as an argument and the observation has
+    since been made false by a FIX rather than by a change of mind.** ``/edit``'s
+    control body was wrong (``field``/``value`` where the route reads ``answers``),
+    so its ``422`` was a body-shape refusal that reached no handler; the control
+    run now answers ``201 200 200 200 201 200 200 201 201 200 200 409`` with **no
+    ``422`` at all**. The reasoning it supported still stands and is now stronger:
+    a set-level assertion would prove nothing *because the control establishes what
+    each operation answers WITHOUT the attack*, and every difference is therefore
+    attributable. See :func:`_write_table`.
+
+    Two named exemplars, each measured both ways — on ``c2a93a7`` and re-measured
+    on ``bc8b32a`` after the table was corrected, with the same result:
 
     * ``POST /api/experiments`` — ``201`` without the actor keys, ``422``
       ``extra_forbidden`` with them. A REFUSER.
