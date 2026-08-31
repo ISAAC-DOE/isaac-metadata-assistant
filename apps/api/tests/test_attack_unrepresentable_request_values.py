@@ -937,3 +937,122 @@ def test_the_value_placeholder_is_distinct_from_the_key_one_and_both_render(clie
     assert routes._echoable_key("ordinary", routes.UNRENDERABLE_VALUE_PLACEHOLDER) == (
         "ordinary"
     )
+
+
+# --- Section 7: the five VALUE echoes the corrected enumeration ALSO missed ------
+
+
+_SURROGATE_JSON = '"\\ud800"'
+
+
+def _post_raw(client: TestClient, url: str, body: str, etag: str | None = None):
+    """POST a body this test controls byte-for-byte.
+
+    `json=` would encode the surrogate through the client's own serializer; the
+    defect is about what arrives, so the bytes are written here.
+    """
+    headers = {"content-type": "application/json"}
+    if etag is not None:
+        headers["If-Match"] = etag
+    return client.request("POST", url, content=body.encode(), headers=headers)
+
+
+def test_the_note_routes_survive_the_five_VALUES_they_echo_back(client, targets):
+    """THE ENUMERATION WAS PUBLISHED WRONG TWICE, AND THIS IS THE SECOND CORRECTION.
+
+    Section 6 fixed the four sites the first enumeration missed. An independent
+    review then measured FIVE MORE, all through :func:`routes._note_refusal`, all
+    answering an unhandled ``500`` on a default deployment, all pre-existing on
+    ``origin/main``. They are VALUE echoes rather than KEY echoes, which is why
+    fixing :func:`routes._unknown_note_keys` — a caller of that same helper — did
+    not touch them:
+
+    ``source``, ``run_id`` and ``candidate_field_path`` on ``POST .../notes``;
+    ``action`` and ``field_path`` on ``POST .../notes/{id}/review``.
+
+    ``field_path`` is the one no sweep in this file could ever have reached:
+    ``_confirmation_required`` refuses first, so a hostile body without
+    ``confirmed_by_user`` never gets to the key check. It is sent WITH the
+    confirmation here for exactly that reason.
+
+    THE REMEDY IS NOT A SIXTH ENUMERATION. The screen now lives in ``_note_refusal``
+    itself, so a branch added tomorrow is covered without anybody listing it — the
+    posture ``_asset_refusal`` already had. This test pins the five that were
+    measured; the *structural* claim is pinned by the fact that they are fixed by a
+    change to the shared helper and not by five edits.
+
+    MUTATION: revert ``_note_refusal`` to ``{**extra}`` and every case below turns
+    RED with a 500.
+    """
+    experiment_id = targets["{experiment_id}"]
+    base = f"/api/experiments/{experiment_id}"
+
+    def etag() -> str:
+        return client.get(base).headers["ETag"]
+
+    capture_cases = {
+        "source": '{"text":"t","source":%s}' % _SURROGATE_JSON,
+        "run_id": '{"text":"t","source":"typed_note","run_id":%s}' % _SURROGATE_JSON,
+        "candidate_field_path": (
+            '{"text":"t","source":"typed_note","candidate_field_path":%s}'
+            % _SURROGATE_JSON
+        ),
+    }
+    observed: dict[str, int] = {}
+    for name, body in capture_cases.items():
+        response = _post_raw(client, f"{base}/notes", body, etag())
+        observed[name] = response.status_code
+        assert response.status_code == 422, (name, response.status_code)
+        assert response.json()["error"], name
+
+    created = client.post(
+        f"{base}/notes",
+        json={"text": "a note to review", "source": "typed_note"},
+        headers={"If-Match": etag()},
+    )
+    assert created.status_code == 201, created.text
+    note_id = created.json()["note"]["id"]
+
+    review_cases = {
+        "action": '{"action":%s}' % _SURROGATE_JSON,
+        # WITH the confirmation, because `_confirmation_required` refuses above the
+        # key check and would otherwise shadow this case entirely.
+        "field_path": (
+            '{"action":"map","confirmed_by_user":true,"field_path":%s}'
+            % _SURROGATE_JSON
+        ),
+    }
+    for name, body in review_cases.items():
+        response = _post_raw(client, f"{base}/notes/{note_id}/review", body, etag())
+        observed[name] = response.status_code
+        assert response.status_code == 422, (name, response.status_code)
+        assert response.json()["error"], name
+
+    # NOT VACUOUS: all five must actually have been exercised.
+    assert len(observed) == 5, observed
+    assert set(observed.values()) == {422}, observed
+
+
+def test_an_ordinary_note_value_is_still_named_verbatim(client, targets):
+    """The screen must not redact what it can quote — the control for the test above.
+
+    A refusal that replaced every caller value with a placeholder would pass the
+    no-500 assertion while telling a scientist nothing about WHICH value was wrong,
+    which is the failure mode `_echoable_key`'s own docstring warns against.
+    """
+    experiment_id = targets["{experiment_id}"]
+    base = f"/api/experiments/{experiment_id}"
+    etag = client.get(base).headers["ETag"]
+
+    response = client.post(
+        f"{base}/notes",
+        json={"text": "t", "source": "not_a_real_source"},
+        headers={"If-Match": etag},
+    )
+    from isaac_api import routes
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "unknown_note_source"
+    assert body["source"] == "not_a_real_source"
+    assert routes.UNRENDERABLE_VALUE_PLACEHOLDER not in response.text

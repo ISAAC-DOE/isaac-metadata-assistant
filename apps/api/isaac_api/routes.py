@@ -607,7 +607,12 @@ async def request_validation_error_handler(request, exc) -> JSONResponse:
 
     THE SECOND DEFECT, FOUND BY AN ATTACK PASS ON 2026-08-30 AND FIXED HERE. Depth was
     one way the echo could destroy the response; **representability is another, and it
-    was open on 25 of this application's 71 operations.** A body carrying ``NaN``,
+    was open on 25 of this application's operations.** The denominator was **71** when
+    that was measured, at ``c2a93a7``; this application publishes **75** at this head,
+    and the four that arrived in between are why a later sweep found a site this
+    paragraph's own enumeration had missed. The count is attributed rather than
+    updated in place, because a bare number with no commit against it is what let
+    the stale one sit here. A body carrying ``NaN``,
     ``Infinity``, a lone surrogate in a value, a lone surrogate in a KEY, or a
     top-level scalar of either produced an unhandled ``500`` — measured over HTTP as
     **79 of 210 probes** (``test_attack_unrepresentable_request_values.py``). Two
@@ -9993,10 +9998,70 @@ def _note_not_found(experiment_id: str, note_id: str) -> JSONResponse:
 
 
 def _note_refusal(error: str, message: str, **extra) -> JSONResponse:
-    """One typed 422. Every refusal on these routes is one of these."""
+    """One typed 422. Every refusal on these routes is one of these.
+
+    **EVERY CALLER-SUPPLIED STRING IT PUBLISHES IS SCREENED HERE, AND THE REASON IS
+    THAT THE PREVIOUS ENUMERATION WAS WRONG A SECOND TIME.** The slice that introduced
+    :func:`_echoable_key` fixed the KEY echo in :func:`_unknown_note_keys` — which
+    calls this function — and left five VALUE echoes in the same helper unscreened.
+    An independent review measured them, all answering an unhandled **500** on a
+    default deployment, identical on ``origin/main``:
+
+    ============================================  ============================
+    published field                               refusal
+    ============================================  ============================
+    ``source`` (``post_note``)                    ``unknown_note_source``
+    ``run_id`` (``post_note``)                    ``unknown_run``
+    ``candidate_field_path`` (``post_note``)      ``unrecognized_field``
+    ``action`` (``post_note_review``)             ``unknown_note_action``
+    ``field_path`` (``post_note_review``)         ``unrecognized_field``
+    ============================================  ============================
+
+    The last one is shadowed by ``_confirmation_required``, so a sweep that sends a
+    hostile body without ``confirmed_by_user`` never reaches it — the branch's own
+    note about shapes a sweep cannot reach, arriving through a shape that sweep could
+    not reach.
+
+    THE BOUND IS AT THE PUBLICATION BOUNDARY, matching :func:`_asset_refusal`'s
+    posture rather than the five call sites, for the reason that helper already
+    records: this is the ONE place every note refusal passes through, so a branch
+    added tomorrow is covered without being enumerated. That is the whole remedy for
+    an enumeration that has now been published wrong twice — stop enumerating.
+
+    A RENDERABLE STRING IS UNCHANGED. :func:`_echoable_key` returns the value verbatim
+    unless the exact render a response would perform raises, so ordinary ids, paths
+    and actions are still named in full and nothing is redacted that could be shown.
+    Membership and lookup decisions are made on the REAL value at every call site,
+    above this function; only what is PUBLISHED is bounded.
+    """
     return JSONResponse(
-        status_code=422, content={"error": error, "message": message, **extra}
+        status_code=422,
+        content={"error": error, "message": message, **_echoable_extras(extra)},
     )
+
+
+def _echoable_extras(extra: dict) -> dict:
+    """Screen the caller-supplied strings in a refusal body, leaving everything else.
+
+    Strings and lists-of-strings are what a caller controls and what this application
+    echoes back; numbers, booleans and ``None`` cannot carry an unpaired surrogate and
+    are passed through untouched rather than coerced, because coercing them would
+    change a published type to fix a problem they do not have.
+    """
+    screened: dict = {}
+    for name, value in extra.items():
+        if isinstance(value, str):
+            screened[name] = _echoable_key(value, UNRENDERABLE_VALUE_PLACEHOLDER)
+        elif isinstance(value, list):
+            screened[name] = [
+                _echoable_key(item, UNRENDERABLE_VALUE_PLACEHOLDER)
+                if isinstance(item, str)
+                else item
+                for item in value
+            ]
+        else:
+            screened[name] = value
+    return screened
 
 
 def _unknown_note_keys(body: dict, allowed: frozenset[str]) -> JSONResponse | None:
