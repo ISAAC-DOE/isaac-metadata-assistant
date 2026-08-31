@@ -49,6 +49,7 @@ from isaac_records.portal_warnings import portal_warnings
 from . import __version__
 from . import assets
 from . import assistant_query
+from . import change_feed as cf
 from . import csv_ingest
 from . import db_provider
 from . import db_recon
@@ -3759,6 +3760,141 @@ def get_pending(
     )
     result["pending_page"] = page
     return result
+
+
+# --- 6b. change feed (a COALESCING STATE FEED, not an event log) ---------------
+#
+# NAMING IS THE DESIGN HERE, so it is stated once at the top of the section and then
+# repeated in the published description, in the frontend copy constant and in the
+# tests: this reports "this entity is at a version later than your cursor", never
+# "here is every act that happened". `change_feed.py`'s module docstring sets out why
+# the storage forces that (there is no event table, and §15 does not permit one), and
+# what the three published consequences are.
+
+_CHANGES_CURSOR_DESC = (
+    "An opaque cursor from a previous response's `next_cursor`. **Do not construct "
+    "or parse one** — its payload is versioned and the server is free to change its "
+    "shape. Omit it entirely to read the feed from the start of the order, which is "
+    "the resync path and is always available."
+)
+
+_CHANGES_LIMIT_DESC = (
+    "How many entries to return. Default "
+    f"{cf.CHANGE_FEED_WINDOW}, server maximum {cf.CHANGE_FEED_LIMIT_MAX}. A value "
+    "outside that range is CLAMPED to the nearest end rather than refused, and the "
+    "value actually used is reported back as `limit`, so a clamp is never silent. "
+    "(A non-integer is still a `422` — that is a type refusal from the parameter "
+    "layer, not a bound.)"
+)
+
+#: THE CURSOR REFUSAL. It carries the ``HTTPValidationError`` ref for the reason
+#: :data:`_R_ANSWER_REFUSED` does: declaring a ``422`` of one's own makes FastAPI skip
+#: generating its own, which silently drops the framework's content ref for an
+#: operation that still has parameters it can reject on type
+#: (``test_operations_with_parameters_keep_the_validation_error_schema``).
+_R_MALFORMED_CURSOR: dict = {
+    422: {
+        "description": (
+            "The `cursor` could not be decoded, or it was issued by a different "
+            "feed — a different record, or a different workspace scope. The body's "
+            "`reason` says which (`not_decodable` / `wrong_feed`). There is no "
+            "third cause: a cursor cannot expire. The remedy for both is the same "
+            "and costs one request — ask again with no `cursor` at all. This status "
+            "is also what the parameter layer returns for a `limit` that is not a "
+            "number at all; an out-of-range `limit` is clamped rather than refused."
+        ),
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+            }
+        },
+    },
+}
+
+
+@router.get(
+    "/experiments/{experiment_id}/changes",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read a Record's Change Feed",
+    description=(
+        "**A coalescing STATE feed, not an event log.** It reports that an entity of "
+        "this record is at a version later than your cursor; it does not report every "
+        "act that happened. Ten edits to one run between two reads are ONE entry, and "
+        "nothing here can tell you how many there were, in what order, or what the "
+        "intermediate values were.\n\n"
+        "That is a property of the storage rather than a choice of scope. This "
+        "application keeps no event table, so the only thing a feed can be derived "
+        "from is where each entity stands now: every experiment and every run carries "
+        "a stored `rev`, `updated_utc` and `generation`, and this feed is a bounded, "
+        "ordered projection of those.\n\n"
+        "Entries are returned in a total order — `updated_utc`, then `kind`, then "
+        "`entity_id`. The tie-break is not decoration: `updated_utc` has one-second "
+        "resolution and one write stamps every changed run with the same instant, so "
+        "on a record whose runs were written together the last two components are "
+        "doing all of the ordering, and without them a page boundary could reorder "
+        "between two requests.\n\n"
+        "The kinds served are reported as `kinds` rather than fixed in this text, so "
+        "a client reads the set from the server instead of from a literal in its own "
+        "bundle.\n\n"
+        f"{cf.GAP_GUARANTEE}\n\n"
+        f"{cf.DELETION_LIMITATION}\n\n"
+        f"{cf.EXPIRY_PROPERTY}\n\n"
+        "Read-only: nothing here writes, and nothing here composes a draft, resolves "
+        "inheritance, runs an export dry run or asks what is pending. That is what "
+        "keeps the response flat in the number of runs — measured at this commit, a "
+        "250-run and a 1,000-run record differ by single-digit bytes."
+    ),
+    response_description=(
+        "A bounded page of the record's state feed: the entities at a version later "
+        "than the cursor, the `next_cursor` to resume from, whether more remain, and "
+        "the effective `limit`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_MALFORMED_CURSOR,
+    },
+)
+def get_changes(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    cursor: Annotated[str | None, Query(description=_CHANGES_CURSOR_DESC)] = None,
+    limit: Annotated[int | None, Query(description=_CHANGES_LIMIT_DESC)] = None,
+):
+    """One bounded page of the record's coalescing state feed.
+
+    NO `ETag` IS SET ON THIS RESPONSE, deliberately. The body depends on the CURSOR as
+    well as on the record, so an experiment-level tag would be the same for two
+    different pages of the same record — which is exactly the trap `get_pending`'s own
+    ETag note names and leaves open. Rather than publish a validator that a
+    conditional GET would misuse, this route publishes none.
+
+    THE SCOPE IS ENFORCED TWICE, and the second time is not redundant. `TutorialScopeDep`
+    decides WHICH workspace `load_experiment` reads, so a worked-example record is a
+    `404` in ordinary scope and vice versa. The cursor then carries a digest of
+    `(record, scope)`, so a cursor minted in one feed is REFUSED by another instead of
+    being answered from the wrong order — a wrong answer being worse than an error.
+    """
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    try:
+        return cf.changes_page(
+            exp,
+            scope_tag=cf.record_scope_tag(experiment_id, scope),
+            cursor=cursor,
+            limit=limit,
+        )
+    except cf.MalformedCursor as err:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "malformed_cursor",
+                "reason": err.reason,
+                "message": err.message,
+            },
+        )
 
 
 # --- 7. answers ---------------------------------------------------------------

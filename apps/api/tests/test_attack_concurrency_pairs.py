@@ -432,32 +432,55 @@ def test_the_two_writes_take_the_same_record_lock(client, monkeypatch):
 # =============================================================================
 
 
-def test_the_change_feed_route_does_not_exist_and_this_records_it(client):
-    """**THE BRIEF ASKED FOR A ROUTE THIS BUILD DOES NOT HAVE**, and inventing a
-    test that passed against something else would be worse than saying so.
+def test_the_change_feed_route_SHIPPED_and_this_is_the_real_thing(client):
+    """**THE PREDICTION CAME TRUE, AND THE TEST IS INVERTED RATHER THAN DELETED.**
 
-    ``GET /api/experiments/{id}/changes`` is absent. Asserted over the published
-    OpenAPI document rather than described, so the day it ships this test goes red
-    and the substitute below is replaced by the real thing.
+    This was ``test_the_change_feed_route_does_not_exist_and_this_records_it``, which
+    asserted ``GET /api/experiments/{id}/changes`` was ABSENT and said, in as many
+    words: *"Asserted over the published OpenAPI document rather than described, so the
+    day it ships this test goes red and the substitute below is replaced by the real
+    thing."*
 
-    ``test_live_sync.py`` records the design decision behind the absence: live sync
-    is conditional polling on the existing detail route, and *"no new revision
-    endpoint … no new route is warranted"*.
+    That day is this merge. The route shipped on ``feat/bounded-change-feed``, the
+    absence assertion went red on the merged tree, and this is the replacement it asked
+    for. Inverting rather than deleting is the house remedy — CLAUDE.md §11 records it
+    for several tests that pinned a defect — and it matters here because the OLD test
+    was RIGHT about its own build. Deleting it would erase the record that the
+    substitute below exists for a reason.
 
-    MUTATION: adding a ``@router.get("/experiments/{experiment_id}/changes")``
-    turns this RED::
+    WHAT THE SUBSTITUTE WAS STANDING IN FOR, and why it stays. The test after this one
+    proves the property a polling client depends on — that a concurrent write never
+    advances a version without changing the document — against the DETAIL route,
+    because that is what a client had. It is not superseded by the feed: the feed
+    reports version coordinates, so the detail route's property is exactly what makes
+    the feed's entries meaningful. Both are kept.
 
-        AssertionError: a /changes route now exists:
-        ['/api/experiments/{experiment_id}/changes']
-        assert not ['/api/experiments/{experiment_id}/changes']
+    MUTATION: removing the ``@router.get(".../changes")`` registration turns this RED
+    on the first assertion, which is the same signal the old test gave in the opposite
+    direction.
     """
     from isaac_api.app import create_app
 
     paths = create_app().openapi()["paths"]
     feeds = sorted(p for p in paths if p.rstrip("/").endswith("/changes"))
-    assert not feeds, f"a /changes route now exists: {feeds}"
-    # And the substitute this file uses instead is present.
+    assert feeds == ["/api/experiments/{experiment_id}/changes"], feeds
+    # The substitute route this file uses is still present; the feed did not replace it.
     assert "/api/experiments/{experiment_id}" in paths
+
+    # AND IT ANSWERS, rather than merely being registered. A route in the document that
+    # 404s or 500s would satisfy the assertion above while giving a client nothing.
+    # A record this scope ALREADY HAS, rather than a created one: `client` here is
+    # worked-example-scoped, and tutorial isolation deliberately refuses to persist an
+    # ordinary experiment in that scope (three separate guards, per CLAUDE.md §15).
+    listing = client.get("/api/experiments")
+    assert listing.status_code == 200, listing.text
+    eid = listing.json()["experiments"][0]["id"]
+    page = client.get(f"/api/experiments/{eid}/changes")
+    assert page.status_code == 200, page.text
+    body = page.json()
+    # The three keys a caller cannot page without. Not a full contract test — that is
+    # `test_change_feed.py`'s job — just proof this route is real from here.
+    assert {"changes", "next_cursor", "has_more"} <= set(body), sorted(body)
 
 
 def test_concurrent_writes_never_advance_the_version_without_changing_the_document(

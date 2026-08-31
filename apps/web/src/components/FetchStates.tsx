@@ -217,6 +217,12 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   assets: 'the asset references',
   assistant: 'an assistant answer',
   audit: 'the evidence audit',
+  // `GET .../changes`, the record's change feed. "Recent changes" rather than "the
+  // change feed": the reader is a scientist being told which read failed, and "feed"
+  // is a wire word for a shape they never see. It is deliberately NOT "recent
+  // activity" — the feed reports which parts of the record moved, not who did what,
+  // and copy naming acts would describe a product this one is not.
+  changes: 'recent changes',
   // The two conflict operations. "Conflicting evidence" is the product's word for
   // this axis everywhere else on the Evidence screen (`ATTENTION_CLASSES` in
   // ValidateReview, the Evidence Support chip); `conflicts` is the wire segment

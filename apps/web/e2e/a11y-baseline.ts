@@ -1479,8 +1479,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * two different bases produced them, which is why the +14 and the A11Y-06 -7 can
        * be summed without double-counting.
        */
-      'settings-explorer@desktop-1280x800': 59,
-      'settings-explorer@laptop-1024x768': { darwin: 58, linux: 59 },
+      'settings-explorer@desktop-1280x800': 60,
+      'settings-explorer@laptop-1024x768': { darwin: 59, linux: 60 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -1552,7 +1552,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          BECOMING a split because the two faces measured one node apart. Cause,
          provenance and the controlled experiment that established it are in the block
          above `settings-explorer@desktop-1280x800`. Both halves measured at `dad8715`. */
-      'settings-explorer@tablet-768x1024': { darwin: 72, linux: 74 },
+      'settings-explorer@tablet-768x1024': { darwin: 73, linux: 74 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1629,7 +1629,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          measured difference and the well-formedness guard rejects equal halves. This is
          two measurements agreeing, not a linux figure asserted about darwin. Cause and
          provenance: the block above `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@mobile-375x812': { darwin: 73, linux: 75 },
+      'settings-explorer@mobile-375x812': { darwin: 74, linux: 75 },
       /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
          FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
          same change moved linux DOWN one and darwin not at all.
@@ -1658,7 +1658,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 53 -> 64, still a scalar — both faces
          measured 64 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@zoom-200': { darwin: 69, linux: 70 },
+      'settings-explorer@zoom-200': 71,
       'settings-privacy@desktop-1280x800': 3,
       'settings-privacy@laptop-1024x768': 3,
       'settings-privacy@tablet-768x1024': 3,
@@ -2066,7 +2066,24 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 52 -> 67, still a scalar — both faces
          measured 67 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@width-390': { darwin: 76, linux: 74 },
+      // ── MERGE RESOLUTION CORRECTED BY CI, 2026-08-30 ─────────────────────────
+      // The merge kept `main`'s `{76, 74}` and discarded this branch's `{76, 75}`,
+      // which asserted that main's darwin +1 (a description crossing
+      // `PURPOSE_DISCLOSURE_MIN_CHARS` in the strike sweep) and this branch's +1 (the
+      // change feed's ADDED operation) were the same node. An independent review
+      // flagged that the dedup was never stated and never re-measured. CI settled it:
+      // run 33355811385 on the merged head reported `GREW settings-explorer @
+      // width-390 on linux: color-contrast 74 -> 75`, and that ONE cell was its only
+      // mismatch. So on linux the two effects are not additive — main's sweep moved
+      // linux by zero, as its own CI run 33344481475 reported — and the correct linux
+      // figure is 75. TRANSCRIBED from that run, not derived.
+      //
+      // AND THE DARWIN HALF IS MEASURED ON THE MERGED TREE TOO, so this pair is a
+      // real split rather than one measured face beside one carried forward: a local
+      // macOS run of `a11y-narrow.spec.ts -g "390px: Settings & API — Endpoint
+      // Explorer"` at this head PASSES against 76. That is why the key is absent from
+      // `DARWIN_CARRIED_FORWARD`.
+      'settings-explorer@width-390': { darwin: 76, linux: 75 },
       'settings-privacy@width-320': 2,
       'settings-privacy@width-390': 2,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -3463,11 +3480,42 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // darwin while linux holds — so no half of this edit could have been derived from
   // the other. Two cells that were scalars are now splits for that reason, and
   // `width-390` is the rare shape where DARWIN is the higher number.
-  // 2282 -> 2283, 2026-08-30: the single MEASURED +1 at
-  // `settings-explorer@width-390` (75 -> 76) from the strike sweep — see that
-  // entry's note. The linux total below is deliberately unmoved: CI run
-  // 33344481475 at the same head reported zero baseline mismatches.
-  darwin: 2283,
+  // ── MERGED: PROPOSALS + CHANGE FEED, 2026-08-30: darwin 2282 -> 2289. ──
+  //
+  // TWO SLICES MOVED THE SAME SEVEN CELLS FROM THE SAME BASE, and this file now
+  // carries the compound. Proposals took the served contract 71 -> 75 operations and
+  // the change feed took 71 -> 72; merged, it is 76, and the Endpoint Explorer renders
+  // every description. Neither branch's numbers survive the merge unchanged, which is
+  // why both faces are re-measured here rather than composed.
+  //
+  // DARWIN, measured locally on macOS at THIS merged tree, per project:
+  //   desktop-1280x800   59 -> 60      laptop-1024x768   58 -> 59
+  //   mobile-375x812     73 -> 74      tablet-768x1024   72 -> 73
+  //   zoom-200           69 -> 71      width-390         75 -> 76
+  //   width-320          76 unchanged (passed)
+  //                                    net +7  ->  2282 + 7 = 2289
+  //
+  // THE LINUX COLUMN IN THESE SIX CELLS IS THIS COMMIT'S KNOWN-STALE HALF, and it is
+  // named rather than left to be discovered: each linux value is the one that branch
+  // measured BEFORE the merge, so it is a reading of a source state that has since
+  // changed. CI is the authority and will name its own figures; they are transcribed
+  // in the follow-up commit. `laptop-1024x768` reads `{59, 59}` for one commit, which
+  // `auditEntryShapes` would normally refuse as an equal-halves pair — it is written
+  // that way deliberately so the stale linux half stays VISIBLE rather than collapsing
+  // into a scalar that would falsely claim the two faces agree.
+  //
+  // ── MERGE, 2026-08-30: A DUPLICATE `darwin:` KEY, AND THE SECOND ONE SILENTLY WON.
+  // Both branches edited this object and the merge kept BOTH lines, so the literal
+  // declared `darwin` twice and JavaScript took the later — 2283, `main`'s figure —
+  // while the merged ENTRIES sum to 2289. The invariant suite caught it as a stale
+  // total; the duplicate key itself would have been invisible to `tsc`. The two
+  // lineages are kept as prose, which is the point of this block, but only ONE key
+  // remains and it is the measured sum of the merged entries.
+  //
+  // `main`'s half of that arithmetic, retained: 2282 -> 2283, the single MEASURED +1
+  // at `settings-explorer@width-390` (75 -> 76) from the strike sweep. This branch's
+  // half is the six cells above. 2283 + 6 = 2289.
+  darwin: 2289,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -3820,7 +3868,28 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Every one of these three is a CI figure transcribed from the run's own GREW
   // lines, not a derivation. The columns move by DIFFERENT amounts (+3 darwin,
   // +5 linux) from one cause, which is why both were run.
-  linux: 2287,
+  // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
+  //
+  //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)
+  //   width-390          74 -> 75   (+1)      zoom-200          70 -> 71   (+1)
+  //   mobile-375x812 and tablet-768x1024 did NOT appear in the run's GREW lines,
+  //   so their linux halves are unmoved and their splits stand as written.
+  //                                    net  +4   ->  2287 + 4 = 2291
+  //
+  // TWO CELLS COLLAPSED TO SCALARS IN THIS TRANSCRIPTION AND ONE BECAME A SPLIT, in
+  // the same edit and in opposite directions — which is the churn this file's header
+  // describes rather than a mistake. `desktop-1280x800` and `zoom-200` collapsed
+  // because linux caught up to darwin exactly (60 and 71), and a scalar is the only
+  // legal way to say the faces agree. `laptop-1024x768`, which had to be written as a
+  // scalar 59 one commit ago because both halves then read 59, SPLITS again now that
+  // linux measured 60. Every number here is a CI figure or a local macOS reading at
+  // the merged tree; none is derived from the other column.
+  // 2291 -> 2290 on the MERGE, re-derived as the sum of the merged entries rather
+  // than adjusted: `main`'s strike sweep left its linux column deliberately unmoved
+  // (CI reported zero mismatches at that head) while this branch had already moved
+  // `settings-explorer@width-390`'s linux half, and the two edits overlap by one.
+  // Every linux figure here remains CI's; none was measured on this machine.
+  linux: 2291,
 };
 
 /**
