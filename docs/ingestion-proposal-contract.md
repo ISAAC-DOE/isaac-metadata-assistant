@@ -135,7 +135,7 @@ nothing does) could never destroy content.
 | optional run id | **exists**, and the rule travels with it: never inferred from the only run that happens to exist | `notes.py:349-352`, `conflict_resolution.py:390-392` |
 | target scope | **derived, not stored** — `run_id is None` ⇒ record scope. Storing both is two sources for one fact | `conflict_resolution.py:392` |
 | field path | **exists as a concept**, new field `target_field_path`; membership-gated, see §6 | `notes.py:355`, `routes.py:9613` |
-| question key | **decline** — the answer routes are keyed to a record's *open blocking questions*, not to field paths. ~~which is exactly why all 25 mappable paths return `422 unrecognized_field` there (`notes.py:98-111`)~~ **— STRUCK 2026-08-29: MEASURED FALSE. `system.technique` IS one of the 25 and IS accepted by `POST /answers` via `_apply_record_enum_fields` (`routes.py:3883`, called at `:5431` and `:6395`). The cited docstring is itself stale and is corrected separately. The DECISION survives — a proposal targets a path, a question key is a different address space — but this justification did not.** A proposal targets a path; a question key is a different address space |
+| question key | **decline** — the answer routes are keyed to a record's *open blocking questions*, not to field paths. ~~which is exactly why all 25 mappable paths return `422 unrecognized_field` there (`notes.py:98-111`)~~ **— STRUCK 2026-08-29: MEASURED FALSE. `system.technique` IS one of the 25 and IS accepted by `POST /answers` via `_apply_record_fields` (`routes.py:3883`, called at `:5431` and `:6395`). The cited docstring is itself stale and is corrected separately. The DECISION survives — a proposal targets a path, a question key is a different address space — but this justification did not.** A proposal targets a path; a question key is a different address space |
 | proposed value | **genuinely new here**; exists unstored at `extraction.py` `FieldCandidate.proposed_value`, and stored-but-not-applied at `conflict_resolution.py:397` |
 | unit | ~~**new, optional, never derived.**~~ **DROPPED 2026-08-29 (§10, DEC-11): "optional, never derived" still permits a unit the source never stated, with nothing requiring the `rule` sentence to cover it. A unit not stated in the source IS a guess (CLAUDE.md §5). Dropping is simpler than constraining.** Original reasoning: `_apply_run_field` carries an existing envelope's `unit` forward and never re-derives it (`routes.py:7379-7383`); a proposal must not invent one |
 | vocabulary | **derived, not stored.** The closed-enum set is read from the vendored schema at runtime by `_record_enum_fields` (`routes.py:3883`); transcribing it into a proposal creates a second copy free to drift |
@@ -358,7 +358,7 @@ record is byte-identical and `export.transform` reads only its named keys
 |---|---|---|
 | 5 run-level paths (`RUN_WRITABLE_FIELD_PATHS`) | `PATCH /experiments/{id}/runs/{run_id}` | **`routes._apply_run_field`** (`routes.py:7313`) |
 | 13 `field:` addresses (of `EXPERIMENT_OVERRIDABLE_ADDRESSES`, `routes.py:7147`, which has **15** members — 13 `field:` plus `block:tags` and `block:attribution`) | `POST .../runs/{run_id}/overrides` (`routes.py:8613`) | **`workspace.Experiment.set_run_override`** (`workspace.py:3213`) |
-| `system.technique` (record-level closed enum) | `POST /experiments/{id}/answers`, `.../edit` | **`routes._apply_record_enum_fields`** (`routes.py:4190`), which itself reuses `_apply_run_field` (`routes.py:7320-7324`) |
+| `system.technique` (record-level closed enum) | `POST /experiments/{id}/answers`, `.../edit` | **`routes._apply_record_fields`** (`routes.py:4190`), which itself reuses `_apply_run_field` (`routes.py:7320-7324`) |
 | open blocking questions | `POST .../answers` | **`isaac_records.complete.apply_answers`** (`src/isaac_records/complete.py:153`) / `apply_corrections` (`:490`) |
 
 Test: monkeypatch each of the four and assert the accept path calls it. Negative control:
@@ -490,7 +490,7 @@ is derived from the routes that enforce it and never listed by hand.
 **A known pre-existing divergence this contract must not inherit:** `field:system.technique` **is**
 in `EXPERIMENT_OVERRIDABLE_ADDRESSES` and its run override returns 200 while accepting off-enum
 values (`CLAUDE.md` §11, 2026-08-27). A proposal accepted at that path must route through
-`_apply_record_enum_fields`, which checks the enum — not through the override.
+`_apply_record_fields`, which checks the enum — not through the override.
 
 ---
 

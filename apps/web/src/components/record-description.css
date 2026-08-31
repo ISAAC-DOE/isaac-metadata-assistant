@@ -1,0 +1,194 @@
+/*
+ * RECORD DESCRIPTION — the record-level capture form inside the record screen.
+ *
+ * WHY ITS OWN FILE rather than borrowing `.rename-*`: the same argument that file
+ * makes for not borrowing `.create-experiment-*`. Those rules belong to another
+ * component and another section; sharing class names would make this form's
+ * appearance depend on which components a screen happened to mount. Same tokens,
+ * same declarations, own names.
+ *
+ * NO NEW TOKENS AND NO NEW COLOURS. Every value below is an existing custom property
+ * from `styles/tokens.css`.
+ *
+ * `--text-secondary`, NEVER `--text-tertiary`, for hints and secondary lines. The
+ * tertiary token measures 3.86:1 on this surface and is the contrast debt `CLAUDE.md`
+ * records app-wide; adding a new instance of a known defect while building a new
+ * surface is not a trade worth making.
+ */
+
+.rdesc {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.rdesc-lead {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 78ch;
+}
+
+.rdesc-status {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.rdesc-summary,
+.rdesc-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-strong);
+}
+
+.rdesc-summary-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.rdesc-summary-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rdesc-conflict p {
+  margin: 0;
+  max-width: 78ch;
+}
+
+.rdesc-conflict .btn {
+  align-self: flex-start;
+}
+
+.rdesc-group {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.rdesc-legend {
+  padding: 0 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.rdesc-rows {
+  display: grid;
+  /* One column on narrow viewports, two where there is room. `auto-fit` with a
+     `minmax` floor keeps every control usable at 320 px and at 200% zoom without a
+     media query per breakpoint. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26ch), 1fr));
+  gap: 12px;
+}
+
+.rdesc-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rdesc-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.rdesc-input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  /* 8px + 8px + a 13px line box clears the 44px touch target on every control. */
+  min-height: 34px;
+  padding: 8px 10px;
+  color: var(--text-strong);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+}
+
+.rdesc-input:focus-visible {
+  border-color: var(--action);
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.rdesc-input[aria-invalid='true'] {
+  border-color: var(--danger, var(--border-strong));
+}
+
+.rdesc-input:disabled {
+  background: var(--surface-muted, var(--surface));
+  color: var(--text-secondary);
+}
+
+.rdesc-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.rdesc-hint .mono {
+  font-family: var(--font-mono);
+}
+
+.rdesc-error,
+.rdesc-readonly,
+.rdesc-empty {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-strong);
+  max-width: 78ch;
+}
+
+.rdesc-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rdesc-list-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18ch), 1fr));
+  align-items: end;
+  gap: 8px;
+}
+
+.rdesc-remove {
+  align-self: end;
+  min-height: 34px;
+}
+
+.rdesc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.rdesc-pending-count {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}

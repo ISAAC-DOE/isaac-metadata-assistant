@@ -196,3 +196,39 @@
     margin-bottom: 8px;
   }
 }
+
+/* NARROW VIEWPORTS: the collapsible header wraps instead of overflowing.
+   MEASURED DEFECT, CI run 33344481475 at head 202a319, `layout-widths.spec.ts`
+   @width-320 on `record-detail`:
+
+     [clip] section.field-group < div#record-view-panel-fields.record-view-panel
+            scrollWidth 265 vs clientWidth 240 (overflow-x: hidden)
+       widest overflowing child: span.record-section-summary < button.fg-header
+                                 (right edge 305 vs 280)
+
+   `.fg-header` is a single-line flex row and `.record-section-summary` carries
+   `margin-left: auto`, so at 320px the summary is pushed past the panel's own
+   `overflow-x: hidden` and the text it holds is CLIPPED — not scrolled to, not
+   wrapped, simply unreachable. `RecordInfoPanel` reuses `.fg-header` (see its own
+   comment on why it does not reuse `.fg-sublabel`/`.fg-summary`), so the rule lives
+   here beside the two spans that overflow rather than in `fields.css`.
+
+   SCOPED TO 400px AND BELOW ON PURPOSE. Every other viewport the sweep measures —
+   desktop 1280, laptop, tablet, 390 — is untouched, so no baseline cell outside
+   `@width-320`/`@width-390` can move. Allowing the row to wrap adds height at those
+   two widths; the sweep asserts about overflow and clipping, not height, and a
+   wrapped label is readable where a clipped one is not. */
+@media (max-width: 400px) {
+  .fg-header {
+    flex-wrap: wrap;
+  }
+  .record-section-key,
+  .record-section-summary {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .record-section-summary {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}

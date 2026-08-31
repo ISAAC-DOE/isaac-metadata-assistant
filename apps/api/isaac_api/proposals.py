@@ -1095,7 +1095,7 @@ def accept_proposal(
 
     **THIS FUNCTION WRITES NOTHING.** The caller has already applied the value
     through the writer that owns the target — ``routes._apply_run_field``,
-    ``workspace.Experiment.set_run_override`` or ``routes._apply_record_enum_fields``
+    ``workspace.Experiment.set_run_override`` or ``routes._apply_record_fields``
     — and passes ``applied_via`` naming which one ran. Building an envelope here
     would be a second definition of what a confirmed field looks like, free to drift
     from the one the exporter and the draft validator read.
