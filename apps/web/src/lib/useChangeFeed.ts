@@ -258,7 +258,19 @@ export function useChangeFeed(
             page.has_more &&
             page.next_cursor !== cursorBefore &&
             drains < CHANGE_FEED_MAX_CONSECUTIVE_DRAINS;
-          drains = drainNext ? drains + 1 : 0;
+          // THE BUDGET IS SPENT PER BACKLOG, NOT PER POLL, AND THAT DISTINCTION IS THE
+          // WHOLE CAP. It used to reset to 0 on the poll that hit the ceiling, so the
+          // next cadence tick began a FRESH 20-page burst: against a server answering
+          // `has_more: true` with a moving cursor forever, the sustained rate was
+          // ~21 requests per (8s + 20x250ms) — about 1.6 req/s indefinitely, ~13x the
+          // ordinary cadence — while the constant's own docstring promised the client
+          // "keeps draining at the ORDINARY CADENCE". An independent review measured
+          // that; the claim was false and the belt re-buckled itself.
+          //
+          // It now clears only when the server says the backlog is done. So a capped
+          // client really does fall back to one request per cadence until `has_more`
+          // goes false, which is what the sentence above has always said.
+          drains = page.has_more ? drains + 1 : 0;
         })
         .catch(() => {
           if (cancelled || ac.signal.aborted) return;

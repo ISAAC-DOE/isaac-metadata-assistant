@@ -154,15 +154,31 @@ def test_the_gap_guarantee_names_its_own_failure_mode_rather_than_promising_none
     ``test_a_same_second_write_behind_the_cursor_is_a_measured_gap``, which
     demonstrates the loss rather than asserting prose about it.
     """
-    # The proviso is now about the entity advancing, which is what the order needs —
-    # not about the direction of the clock, which is only one way to break it.
-    assert "STRICTLY ADVANCES" in cf.GAP_GUARANTEE
+    # ── RE-PINNED 2026-08-30, AND THIS IS THE SECOND TIME THIS ASSERTION HAS BEEN
+    # THE THING KEEPING A FALSE SENTENCE IN PLACE ─────────────────────────────────
+    #
+    # It first required "never moves backwards", which was false. It was then changed
+    # to require "STRICTLY ADVANCES", which an independent review ALSO measured false
+    # — reproduced with no clock manipulation at all: an entity's `updated_utc`
+    # advanced strictly, INTO the second the cursor already sat in, and the
+    # `kind`/`entity_id` tie-break still placed its key behind the cursor, so it was
+    # never reported. The stamp advanced; the entity was skipped.
+    #
+    # Two wrong provisos in a row is the signal that the sentence was being written
+    # about the wrong thing. The guarantee is a property of the KEY, not of the clock:
+    # an entity is reported exactly when its key advances strictly past the cursor.
+    # That one statement subsumes every mode — stamp unchanged, stamp advanced within
+    # the cursor's second, and the clock stepping backwards — so this test now pins
+    # THAT, and explicitly refuses the clock-only framing that failed twice.
+    assert "SORT KEY advances strictly past" in cf.GAP_GUARANTEE
     assert "not claimed to be" in cf.GAP_GUARANTEE
-    # BOTH failure modes are named. The second is the ordinary one and is the half a
-    # later "tidy-up" would drop, because it is the one that sounds like a detail.
-    assert "steps BACKWARDS" in cf.GAP_GUARANTEE
-    assert "SAME ONE-SECOND STAMP" in cf.GAP_GUARANTEE
-    assert "not the clock moving backwards" in cf.GAP_GUARANTEE
+    # The CAUSE is still named, because a rule with no mechanism beside it reads as
+    # arbitrary and is the half a later tidy-up drops.
+    assert "WHOLE SECONDS" in cf.GAP_GUARANTEE
+    assert "kind`/`entity_id` tie-break" in cf.GAP_GUARANTEE
+    # AND THE FALSE FRAMING IS REFUSED BY NAME, so it cannot come back a third time.
+    assert "does NOT cover that second case" in cf.GAP_GUARANTEE
+    assert "measured false" in cf.GAP_GUARANTEE
     # The single-pod argument is offered as the REASON the exposure is small, and is
     # explicitly refused as a proof that it is zero. That distinction is the whole
     # point of the sentence and is the thing a later edit would smooth away.
@@ -645,6 +661,12 @@ def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeyp
 
     # ...and the cursor cannot see it. THIS IS THE GAP.
     resumed = _feed(client, exp_id, cursor=page["next_cursor"])
+    # NOT VACUOUS, and it was: `target_id not in {...}` is satisfied by an EMPTY page,
+    # so a resume that returned nothing at all would have "demonstrated" the gap
+    # without demonstrating anything. Six runs plus the experiment is seven entities
+    # and page one took four, so the resume must carry exactly the other three — the
+    # page has to WORK, and the target has to be missing from a page that worked.
+    assert resumed["returned"] == 3, resumed
     assert target_id not in {c["entity_id"] for c in resumed["changes"]}
 
     # The published remedy does see it.
@@ -1050,3 +1072,53 @@ def test_benchmark_prints_the_table_in_the_docstring(client):
             f"{counted.counts['export_draft']:>7} {counted.counts['pending']:>8}"
         )
         assert sum(counted.counts.values()) == 0
+
+
+def test_a_cursor_this_feed_did_not_issue_is_refused_on_its_ALPHABET(client):
+    """The strictness `decode_cursor`'s docstring promises, measured rather than described.
+
+    THE DEFECT AN INDEPENDENT REVIEW FOUND, and why the existing case did not catch it.
+    The parametrised `not-base64url` case sends ``"!!!not base64!!!"``, which is refused
+    because the SURVIVING characters are not valid JSON — not because a non-alphabet
+    character was rejected. So the alphabet claim had no test, and it was false three
+    ways at once:
+
+    * the comment said ``validate=True``, and **`urlsafe_b64decode` has no such
+      parameter** — its signature is ``(s)``, so passing it raises ``TypeError``;
+    * appending ``****`` to a valid cursor decoded to the IDENTICAL key and the route
+      answered ``200``;
+    * so did appending ``=``, because ``encode_cursor`` strips padding but nothing
+      refused a token that carried it.
+
+    Two distinct strings therefore named one position, while the docstring said "STRICT
+    AT EVERY STEP" and the wire-published ``EXPIRY_PROPERTY`` told clients a cursor is
+    refused for exactly two reasons.
+
+    MUTATION: dropping `validate=True` turns the `****` case green again; dropping the
+    `"=" in token` guard turns the padding case green again.
+    """
+    from isaac_api import change_feed as cf
+
+    scope = "record|scope"
+    issued = cf.encode_cursor(("2026-08-31T00:00:00Z", "run", "01ABC"), scope=scope)
+    # The control: what the feed actually issues still decodes.
+    assert cf.decode_cursor(issued, scope=scope) is not None
+
+    refused: dict[str, str] = {}
+    for label, token in {
+        "trailing-non-alphabet": issued + "****",
+        "interior-non-alphabet": issued[:5] + "!" + issued[5:],
+        "padding-the-encoder-strips": issued + "=",
+    }.items():
+        try:
+            cf.decode_cursor(token, scope=scope)
+        except cf.MalformedCursor as exc:
+            refused[label] = exc.reason
+        else:  # pragma: no cover - the defect this test exists for
+            refused[label] = "ACCEPTED"
+
+    assert refused == {
+        "trailing-non-alphabet": "not_decodable",
+        "interior-non-alphabet": "not_decodable",
+        "padding-the-encoder-strips": "not_decodable",
+    }, refused

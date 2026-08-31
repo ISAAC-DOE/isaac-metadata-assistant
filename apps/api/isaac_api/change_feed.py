@@ -94,26 +94,26 @@ ZERO_KEY: tuple[str, str, str] = ("", "", "")
 #: THE GAP GUARANTEE, stated honestly. Quoted verbatim by the route description and
 #: pinned by `test_change_feed.py`.
 GAP_GUARANTEE = (
-    "Paging this feed returns no entity twice and skips none, PROVIDED an entity's "
-    "`updated_utc` STRICTLY ADVANCES whenever that entity changes. That is a "
-    "guarantee about ordering, not exactly-once delivery, and it is not claimed to "
-    "be. TWO things break the proviso, and the second is the ordinary one, so it is "
-    "named here rather than left to be discovered. (1) The clock steps BACKWARDS: an "
-    "entity is then written with a key that already sits behind a cursor you hold. "
-    "(2) The entity is written inside the SAME ONE-SECOND STAMP its key already "
-    "carries — `updated_utc` is formatted to whole seconds, so a change landing in "
-    "that second moves the entity's `version` WITHOUT moving its key, and an entity "
-    "whose key is at or behind your cursor is therefore not reported. This is not "
-    "the clock moving backwards; it is the clock not moving at all, and the "
-    "one-second stamp is the same property that makes the `kind`/`entity_id` "
-    "tie-break load-bearing. In both cases the change appears the next time that "
-    "entity moves into a later second, so nothing is lost permanently on an entity "
-    "that is still being written. The exposure is bounded by one second per poll, "
-    "and it is small because this application runs as a single pod reading one clock "
-    "— that is the REASON it is small, not a proof that it is zero. The remedy is "
-    "always available and costs one request: ask for the feed with no cursor at all, "
-    "which is computed from current state and so reports every entity at the version "
-    "it holds right now."
+    "Paging this feed returns no entity twice, and reports an entity exactly when its "
+    "SORT KEY advances strictly past the cursor you hold. That is the whole rule, and "
+    "it is stated as a property of the KEY rather than of the clock because two "
+    "earlier versions of this sentence were stated about the clock and both were "
+    "measured false. The key is `(updated_utc, kind, entity_id)` and `updated_utc` is "
+    "formatted to WHOLE SECONDS, so any change that leaves an entity's key at or "
+    "behind your cursor is not reported by that cursor — whether the stamp did not "
+    "move at all, or moved forward only into the second your cursor already sits in, "
+    "where the `kind`/`entity_id` tie-break can still place it behind. A guarantee "
+    "worded as *\"provided `updated_utc` strictly advances\"* does NOT cover that "
+    "second case: the stamp genuinely advances and the entity is still skipped, which "
+    "is why the wording here is about the key. This is a guarantee about ORDERING, not "
+    "exactly-once delivery, and it is not claimed to be. In every such case the change "
+    "appears the next time that entity moves into a LATER second, so nothing is lost "
+    "permanently on an entity that is still being written. The exposure is bounded by "
+    "one second per poll, and it is small because this application runs as a single "
+    "pod reading one clock \u2014 that is the REASON it is small, not a proof that it "
+    "is zero. The remedy is always available and costs one request: ask for the feed "
+    "with no cursor at all, which is computed from current state and so reports every "
+    "entity at the version it holds right now."
 )
 
 #: THE DELETION LIMITATION. Quoted verbatim by the route description and pinned by test.
@@ -385,6 +385,12 @@ def encode_cursor(key: tuple[str, str, str], *, scope: str) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
+#: `-_` -> `+/`, so a base64url token can be handed to `b64decode(validate=True)`.
+#: `urlsafe_b64decode` has no `validate` parameter (signature `(s)`), which is why the
+#: translation is done here rather than by asking that function for strictness.
+_B64URL_TO_STANDARD = str.maketrans("-_", "+/")
+
+
 def decode_cursor(token: str, *, scope: str) -> tuple[str, str, str]:
     """The key a cursor names, or `MalformedCursor`.
 
@@ -401,11 +407,38 @@ def decode_cursor(token: str, *, scope: str) -> tuple[str, str, str]:
     """
     if not isinstance(token, str) or not token:
         raise MalformedCursor("not_decodable", "The cursor is empty.")
-    # `+ "=" * (-len % 4)` restores the padding `encode_cursor` stripped. `validate=True`
-    # so a token containing characters outside the base64url alphabet is refused rather
-    # than silently having them discarded, which is `b64decode`'s default.
+    # `encode_cursor` STRIPS padding, so a token carrying `=` is not one this feed
+    # issued. It is refused explicitly because `=` is a legal base64 character and
+    # `validate=True` therefore accepts it: without this line `<cursor>` and
+    # `<cursor>=` both decode to the identical key, and two distinct strings naming
+    # one position is exactly what the strictness the docstring promises rules out.
+    if "=" in token:
+        raise MalformedCursor(
+            "not_decodable", "The cursor is not one this feed issued."
+        )
+    # `+ "=" * (-len % 4)` restores the padding `encode_cursor` stripped, and
+    # `validate=True` refuses a token containing characters outside the base64url
+    # alphabet rather than silently DISCARDING them, which is `b64decode`'s default.
+    #
+    # THE FLAG WAS DESCRIBED HERE BEFORE IT WAS PASSED, and an independent review
+    # measured the difference over HTTP: appending `****` to a valid cursor decoded to
+    # the IDENTICAL key and answered `200`, as did appending stray `=`. Two distinct
+    # cursor strings therefore named one position, while this comment, the docstring's
+    # "STRICT AT EVERY STEP", and the wire-published `EXPIRY_PROPERTY` — which tells
+    # clients a cursor is refused for exactly two reasons — all said otherwise. No
+    # security consequence (the scope digest must still match and the caller already
+    # holds the record), but three published claims were false, which is the defect.
+    #
+    # AND `urlsafe_b64decode` CANNOT TAKE THAT FLAG AT ALL — its signature is `(s)`.
+    # Passing it raises `TypeError`, so the fix is not a keyword: the token is
+    # translated to the standard alphabet first and `b64decode` is called with
+    # `validate=True`, which is the only way to get the refusal this comment has
+    # always described.
     try:
-        raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+        raw = base64.b64decode(
+            token.translate(_B64URL_TO_STANDARD) + "=" * (-len(token) % 4),
+            validate=True,
+        )
     except (binascii.Error, ValueError):
         raise MalformedCursor(
             "not_decodable", "The cursor is not one this feed issued."
