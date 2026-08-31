@@ -3486,12 +3486,19 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // `auditEntryShapes` would normally refuse as an equal-halves pair — it is written
   // that way deliberately so the stale linux half stays VISIBLE rather than collapsing
   // into a scalar that would falsely claim the two faces agree.
+  //
+  // ── MERGE, 2026-08-30: A DUPLICATE `darwin:` KEY, AND THE SECOND ONE SILENTLY WON.
+  // Both branches edited this object and the merge kept BOTH lines, so the literal
+  // declared `darwin` twice and JavaScript took the later — 2283, `main`'s figure —
+  // while the merged ENTRIES sum to 2289. The invariant suite caught it as a stale
+  // total; the duplicate key itself would have been invisible to `tsc`. The two
+  // lineages are kept as prose, which is the point of this block, but only ONE key
+  // remains and it is the measured sum of the merged entries.
+  //
+  // `main`'s half of that arithmetic, retained: 2282 -> 2283, the single MEASURED +1
+  // at `settings-explorer@width-390` (75 -> 76) from the strike sweep. This branch's
+  // half is the six cells above. 2283 + 6 = 2289.
   darwin: 2289,
-  // 2282 -> 2283, 2026-08-30: the single MEASURED +1 at
-  // `settings-explorer@width-390` (75 -> 76) from the strike sweep — see that
-  // entry's note. The linux total below is deliberately unmoved: CI run
-  // 33344481475 at the same head reported zero baseline mismatches.
-  darwin: 2283,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -3860,7 +3867,12 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // scalar 59 one commit ago because both halves then read 59, SPLITS again now that
   // linux measured 60. Every number here is a CI figure or a local macOS reading at
   // the merged tree; none is derived from the other column.
-  linux: 2291,
+  // 2291 -> 2290 on the MERGE, re-derived as the sum of the merged entries rather
+  // than adjusted: `main`'s strike sweep left its linux column deliberately unmoved
+  // (CI reported zero mismatches at that head) while this branch had already moved
+  // `settings-explorer@width-390`'s linux half, and the two edits overlap by one.
+  // Every linux figure here remains CI's; none was measured on this machine.
+  linux: 2290,
 };
 
 /**
