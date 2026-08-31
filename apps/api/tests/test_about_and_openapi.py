@@ -648,7 +648,28 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # adds none, deliberately.
     #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 75, f"expected 75 documented operations, found {checked}"
+    # 71 -> 72: `GET /api/experiments/{experiment_id}/changes`, the record's change
+    # feed. It is a COALESCING STATE FEED and not an event log, and the distinction is
+    # forced rather than chosen: there is no event table, §15's 2026-08-29 extension
+    # deliberately adds none, so the only thing derivable is a bounded ordered
+    # projection of where each entity stands NOW. Ten edits to one run between two
+    # reads are one entry, deletions cannot be reported at all, and both limitations
+    # are published in the description rather than left to be discovered. It exists
+    # because `useRecordSync`'s conditional GET answers "did the record change?" in one
+    # bit while a surface watching a 1,000-run record needs "WHICH entities changed" —
+    # and answering that by re-reading the record is the shape this API has twice had
+    # to be un-picked from.
+    #
+    # MEASURED from `create_app().openapi()`, not derived from the line above it.
+    #
+    # ── MERGED 2026-08-30: 75 + 1 = 76, AND THE TWO NARRATIVES ABOVE ARE BOTH KEPT ──
+    # The proposals slice took 71 -> 75 and the change-feed slice took 71 -> 72, from
+    # the SAME base. Neither number is wrong; each was measured on its own branch. On
+    # the merged tree the operations are disjoint (four proposal operations, one feed),
+    # so the count is 76 — RE-MEASURED from `create_app().openapi()` on this tree, and
+    # the arithmetic below is stated as a CHECK rather than as the derivation:
+    # 71 + 4 + 1 = 76.
+    assert checked == 76, f"expected 76 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -864,6 +885,15 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/artifacts", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/assistant/query", "post"): ["200", "400", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/audit", "post"): ["200", "401", "404", "422", "503"],
+    # THE CHANGE FEED, and its `422` is doing two jobs that its own description
+    # separates: a `cursor` this feed did not issue (or one issued by a DIFFERENT
+    # feed — another record, another workspace scope), and the parameter layer's
+    # ordinary type refusal. It is deliberately NOT the answer to an out-of-range
+    # `limit`, which is CLAMPED and reported back. There is no `412`, no `428` and
+    # no fifth code, because the operation reads and writes nothing — and, in
+    # particular, no code means "your cursor expired": the feed is derived from
+    # current state rather than from a retained log, so no such state exists.
+    ("/api/experiments/{experiment_id}/changes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/draft", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/edit", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/evidence", "get"): ["200", "401", "404", "422", "503"],

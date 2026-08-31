@@ -1087,7 +1087,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 75 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 76 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1720,7 +1720,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // read one, review one. They are transcribed from the generated document by the
     // same rule every other row here is, and `test_contract_description_parity.py`
     // proves the transcription rather than leaving it asserted here.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(75);
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(76);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2063,7 +2063,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // composed by adding two deltas: 75 operations, 119,600 characters, 239 post-lead
     // paragraphs. The paragraph count moves, so `settings-explorer` a11y cells
     // re-baseline and CI on the merged head is the authority for the linux figures.
-    expect(total).toBe(119600);
+    // ── FINAL MERGE RE-MEASUREMENT, 2026-08-31. Three slices reached this file from
+    // the same base and NONE of their numbers survived: the campaign-sheet + strike
+    // sweep (118,276 / 236), the bounded change feed (122,363 / 243, adding an
+    // operation) and this branch's capture-surface prose. RE-DERIVED over the merged
+    // document from `create_app().openapi()` rather than composed from three deltas:
+    // 76 operations, 123,687 characters, 246 post-lead paragraphs.
+    expect(total).toBe(123687);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2104,12 +2110,57 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // RE-MEASURED over the merged served document rather than composed by adding the
     // two deltas — composing them would assume the two edits touch disjoint text,
     // which is exactly the kind of arithmetic this test's header lectures about.
+    // 118,180 -> 121,428 (+3,248), 2026-08-30, SECOND merge of the day into this
+    // assertion: the change feed adds ONE operation (`GET .../changes`) on top of the
+    // proposals slice's four, from the SAME 71-operation base. 75 + 1 = 76, and the
+    // operations are disjoint, so nothing double-counts. RE-MEASURED on the merged
+    // tree — 76 operations, raw 121,912, 242 separators, 121,912 - 484 = 121,428 —
+    // and the arithmetic is a CHECK, not the derivation. The `rest` count moves 235
+    // -> 242 because the new operation's description carries 7 post-lead paragraphs
+    // of its own; that is an ADDED operation, not an appended paragraph on an
+    // existing one, so it does not re-baseline the `settings-explorer` cells beyond
+    // the four already measured on both faces in this branch's a11y commit.
+    //
+    // Superseded line kept for the trail:
     // Measured on the merged tree: 75 operations, raw sum 118,650, 235 `\n\n`
     // separators, so 118,650 - 470 = 118,180. The two lineages DO reconcile, which
     // is a check rather than the derivation: main's raw grew 104,467 -> 105,609
     // (+1,142) and the branch's raw was 117,508, and 117,508 + 1,142 = 118,650.
     // Separators go 211 + 24 = 235 — the 24 are the four new operations', and
     // neither lineage's prose corrections added one.
+    //
+    // 121,428 -> 122,207 (+779), 2026-08-30, AND THIS ONE IS A CORRECTION RATHER THAN
+    // AN ADDITION: `GET .../changes` published a gap guarantee that was FALSE, and
+    // the operation description quotes that constant verbatim, so correcting it moves
+    // this total. The old text promised "no entity twice and skips none, PROVIDED
+    // `updated_utc` never moves backwards" — but a write landing inside the SAME
+    // one-second stamp a cursor already names moves an entity's `version` without
+    // moving its key, and the entity is then never reported. That is a MONOTONIC
+    // clock, so the published proviso held while the guarantee it protected did not.
+    // The corrected text names both failure modes.
+    //
+    // THE `rest` COUNT DELIBERATELY DOES NOT MOVE AND IS STILL 242. The correction
+    // was written INTO the existing paragraph rather than appended as a new one,
+    // precisely so it does not re-baseline the transcribed `settings-explorer` a11y
+    // cells — those count rendered nodes, and a longer paragraph is the same node. A
+    // change that moved BOTH numbers would mean a paragraph had been added; one that
+    // moved `rest` alone would mean prose had been moved between paragraphs.
+    // RE-MEASURED over the served document, not incremented.
+    // ── MERGE RE-MEASUREMENT, 2026-08-30. NEITHER SIDE'S NUMBER SURVIVED, and both
+    // lineages above are kept because both are real. `main` (campaign-sheet + strike
+    // sweep) took the served contract to 75 operations / 118,276 / 236 paragraphs;
+    // this branch took it to 76 / 122,207 / 242. The merged tree carries BOTH sets of
+    // bytes, so the figures below are RE-DERIVED from `create_app().openapi()` over the
+    // merged document rather than composed by adding the two deltas — composing them
+    // would assume the edits touch disjoint text, which is exactly the arithmetic this
+    // block exists to refuse. Measured: 76 operations, raw sum 122,849, 243 `\n\n`
+    // separators, 122,849 - 486 = 122,363; and 243 post-lead paragraphs.
+    //
+    // The paragraph count MOVES here (242 -> 243) because the merge brings in the
+    // change feed's own operation, which carries one. That is an ADDED operation, not
+    // prose woven into an existing one, so the `settings-explorer` a11y cells re-baseline
+    // and CI on the merged head is the authority for the linux figures.
+
     // 117,944 -> 118,276 (+332), 2026-08-30. CORRECTED AFTER INDEPENDENT REVIEW, and
     // the correction is the point: this entry first read "118,578 -> 118,276 (-302)",
     // which stated a PREDECESSOR THAT NEVER EXISTED IN THIS FILE. `git log --all
@@ -2203,13 +2254,15 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // the character total for the measurement and for why three appended paragraphs
     // rather than woven prose was the deliberate choice. RE-MEASURED from the served
     // document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(239);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(246);
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
     // for the reason every entry above gives: a change that moved one and not the
     // other would mean prose had been woven into an existing paragraph rather than
     // appended, and neither number may be inferred from the other. RE-DERIVED from
     // the served document, not incremented.
+
+
 
     // 194 -> 195 (+1): the pending description gained ONE post-lead paragraph — the
     // `offset=0` bounds nothing / `complete` is relative to the filter block. No other

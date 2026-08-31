@@ -419,36 +419,23 @@ describe('the darwin column says how much of itself is measured', () => {
         'both, add it here and say where the darwin reading came from.'
     ).toEqual(
       [
+        // ── RE-DERIVED 2026-08-30 after the merged proposals + change-feed round ──
+        // Seven, and the membership CHURNED IN BOTH DIRECTIONS in one transcription:
+        // `desktop-1280x800` and `zoom-200` LEFT (linux caught up to darwin exactly,
+        // 60 and 71, and a scalar is the only legal way to say the faces agree);
+        // `laptop-1024x768` and `width-390` JOINED (linux moved to a different number
+        // than darwin). `laptop` had been forced to a scalar one commit earlier when
+        // both halves read 59 — it splits again now that linux measured 60.
+        // Every half here is a CI figure or a local macOS reading AT THE MERGED TREE.
+        // `DARWIN_CARRIED_FORWARD` stays empty and
+        // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0: nothing is carried forward.
         'color-contrast @ memory-graph@zoom-200',
         'color-contrast @ settings-about@width-320',
         'color-contrast @ settings-explorer@laptop-1024x768',
-        'color-contrast @ settings-explorer@tablet-768x1024',
-        'color-contrast @ validator@zoom-200',
-        // ── ADDED 2026-08-30, AND EVERY DARWIN HALF HERE IS A LOCAL macOS READING ──
-        //
-        // The proposals slice takes the served contract 71 -> 75 operations and the
-        // Endpoint Explorer renders every description, so these three moved. They are
-        // splits rather than scalars for the strongest possible reason: THE TWO FACES
-        // DISAGREE, and each half was run.
-        //
-        //   mobile-375x812  { darwin: 73, linux: 75 }  darwin did NOT move at all;
-        //                                              linux grew by 2 (CI GREW line)
-        //   zoom-200        { darwin: 69, linux: 70 }  darwin IMPROVED by 1; linux
-        //                                              held — the rare downward move
-        //   width-390       { darwin: 75, linux: 74 }  darwin grew; linux held. This
-        //                                              is the unusual shape where the
-        //                                              DARWIN number is the higher one
-        //
-        // linux came from this branch's CI run (3 failed / 980 passed) naming its own
-        // figures; darwin was measured locally per project at the same tree minutes
-        // later. Neither half was derived from the other, and `zoom-200` and
-        // `width-390` could not have been: their columns move in OPPOSITE directions.
-        // `DARWIN_CARRIED_FORWARD` stays empty and
-        // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0 — correctly, because nothing
-        // here is carried forward.
         'color-contrast @ settings-explorer@mobile-375x812',
-        'color-contrast @ settings-explorer@zoom-200',
+        'color-contrast @ settings-explorer@tablet-768x1024',
         'color-contrast @ settings-explorer@width-390',
+        'color-contrast @ validator@zoom-200',
       ].sort()
     );
   });

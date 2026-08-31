@@ -3231,3 +3231,48 @@ export interface ApiProvenanceResponse {
   /** Blocks that carry no value envelope to describe. Owned up to, not passed over. */
   blocks_not_described: string[];
 }
+
+/*
+ * --- The record CHANGE FEED --------------------------------------------------
+ *
+ * A COALESCING STATE FEED, and the name is the contract rather than a label. Each
+ * entry says "this entity is at a version later than your cursor"; none of them
+ * says "here is an act that happened". Ten edits to one run between two reads are
+ * ONE entry, and nothing in this shape can tell a client how many there were.
+ *
+ * There is deliberately no `deleted` / `removed` kind, and its absence is not an
+ * omission to be filled in later: the feed is derived from the record document's
+ * CURRENT state, and a removed run is simply gone from it. See the operation's own
+ * description, which says so in the same words the server's `DELETION_LIMITATION`
+ * constant does.
+ */
+
+export interface ApiChangeEntry {
+  /** `experiment` or `run` today. DERIVED server-side; read `kinds`, never assume. */
+  kind: string;
+  entity_id: string;
+  /** `<generation>.<rev>` — the same value every other route publishes as `version`. */
+  version: string;
+  rev: number;
+  /** Minted fresh at genuine (re)creation, so a delete->recreate is visible at rev 0. */
+  generation: string;
+  updated_utc: string;
+}
+
+export interface ApiChangeFeedPage {
+  changes: ApiChangeEntry[];
+  /**
+   * ALWAYS PRESENT, including on an empty page — where it is the position the
+   * caller was already at, so a poller that keeps sending it back makes no
+   * progress and loses nothing. Opaque: never construct or parse one.
+   */
+  next_cursor: string;
+  has_more: boolean;
+  /** The EFFECTIVE limit, after the server clamped what was asked for. */
+  limit: number;
+  returned: number;
+  /** Entities after this page. `has_more` is `remaining > 0`, stated not inferred. */
+  remaining: number;
+  /** The kinds this deployment serves, derived server-side from its collectors. */
+  kinds: string[];
+}
