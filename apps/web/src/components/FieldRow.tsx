@@ -49,7 +49,10 @@ export function FieldRow({ field, capture }: FieldRowProps) {
   const needsYou = field.status === 'needs_confirmation';
   const missing = field.status === 'missing' || field.status === 'rejected';
   const offering = canEnterOnRecord(field.capture) && capture !== undefined;
-  const hint = captureHint(field.capture, offering);
+  /* The PATH is passed because one of the sentences is true of exactly one path — see
+     `captureHint`'s own note on the export stamp. Nothing else about the copy varies by
+     path; the rest is composed from the served facts. */
+  const hint = captureHint(field.capture, offering, field.path);
 
   return (
     <div className="field-row" data-present={field.present === false ? 'false' : undefined}>

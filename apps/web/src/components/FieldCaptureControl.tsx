@@ -72,6 +72,17 @@ export function canEnterOnRecord(capture: DraftFieldCapture | undefined): boolea
  * because it is the only one that needs no run, then the two run answers, then the
  * refusals. Reading them in any other order could tell a reader to go to a run for a
  * value they can enter where they are.
+ *
+ * EVERY SENTENCE IS ABOUT WHERE A VALUE MAY BE **ENTERED**, AND NEVER ABOUT WHETHER
+ * THE RECORD HOLDS ONE. That distinction was got wrong and is corrected here, because
+ * the row this sentence sits under RENDERS THE VALUE two lines above it. Measured over
+ * HTTP on a fixture-seeded record — which is every worked example a reader opens —
+ * `timestamps.created_utc` is `2099-03-05T20:15:00Z` and `system.configuration.n_scans`
+ * is `6`, both `present: true`, and both are refused by all six write routes. The
+ * earlier copy opened *"This version records no value here"*, so the screen displayed a
+ * value and denied it in the same row. `capture` says nothing about presence and cannot
+ * be asked to; the fix is to say the true thing it does describe — that no operation in
+ * this build ACCEPTS one — which reads correctly whether the row is filled or empty.
  */
 export function captureHint(
   capture: DraftFieldCapture | undefined,
@@ -82,6 +93,19 @@ export function captureHint(
    * the reader with no account of a field at all.
    */
   offeringControl = false,
+  /**
+   * The field's official path, when the caller has it.
+   *
+   * It gates ONE sentence: the exporter's, which is a claim about
+   * `timestamps.created_utc` alone and about no other path. Without it the last branch
+   * would tell any unwritable path outside an open namespace that an exporter stamps
+   * it — and that branch is reachable by more than one path today. A schema this
+   * process cannot read makes `_schema_open_namespaces()` fail closed to `()`, at which
+   * point all six `system.configuration.*` rows arrive with `open_namespace: null` and
+   * would have been told the export-stamp story. Omitted, the branch says only what is
+   * true of every path that reaches it.
+   */
+  path?: string,
 ): string | null {
   if (capture === undefined) {
     // The server did not say. Claim nothing — an absent fact is not a refusal, and a
@@ -100,16 +124,28 @@ export function captureHint(
     return 'A value for this field is entered and confirmed on this record. The choice cannot be offered right now, because the set of values the official schema allows here did not load.';
   }
   if (capture.run_field_writable) {
-    return 'This value belongs to one run rather than to the record. It is entered on a run, in the Runs section on this screen.';
+    return 'A value for this field is entered on a run rather than on the record — in the Runs section on this screen.';
   }
   if (capture.run_overridable) {
-    return 'This version has no operation that stores this value on the record itself. A run of this record can record its own value for it, entered on that run — and it belongs to that run, not to the record.';
+    return 'No operation in this version accepts a value for this field on the record itself. A run of this record can record its own value for it, entered on that run — and that value belongs to that run, not to the record.';
   }
   if (capture.open_namespace) {
-    return `This version records no value here, so there is nothing to type. The official schema leaves ${capture.open_namespace} open and names no fields inside it, and whether a value there belongs to the experiment or to each run is an open scientific question for a person to settle. This application does not decide it.`;
+    return `There is nothing to type here: no operation in this version accepts a value at this path. The official schema leaves ${capture.open_namespace} open and names no fields inside it, and whether a value there belongs to the experiment or to each run is an open scientific question for a person to settle. This application does not decide it.`;
   }
-  return 'This version records no value here, so there is nothing to type. When the record is exported, the exporter keeps a value the draft already holds and stamps the export time only when it holds none.';
+  if (path === CREATED_UTC_PATH) {
+    return 'There is nothing to type here: no operation in this version accepts a value at this path. When the record is exported, the exporter keeps a value the draft already holds and stamps the export time only when it holds none.';
+  }
+  return 'There is nothing to type here: no operation in this version accepts a value at this path.';
 }
+
+/**
+ * The one path the exporter sentence above is true of.
+ *
+ * Named rather than inlined so the branch reads as the single-path claim it is.
+ * `recordIdentity.ts` holds the same literal for its own reason; this is copy routing,
+ * not a second definition of anything the server derives.
+ */
+const CREATED_UTC_PATH = 'timestamps.created_utc';
 
 /**
  * The control itself. Rendered by `FieldRow` only when {@link canEnterOnRecord} holds.
@@ -161,14 +197,34 @@ export function FieldCaptureControl({
   const selectId = `${baseId}-value`;
   const errorId = `${baseId}-error`;
   const statusId = `${baseId}-status`;
+  const noteId = `${baseId}-note`;
 
   const isStale = staleAt !== null && staleAt === version;
 
-  /* The record's stored value is the source of truth for this box. When a refresh brings
-     a different one — this control's own save, or somebody else's — the box follows it,
-     rather than keeping a choice the record no longer holds. */
+  /*
+   * THE BOX FOLLOWS THE RECORD ONLY WHILE THE READER HAS CHOSEN NOTHING, and that
+   * condition is the whole of this effect rather than a refinement of it.
+   *
+   * A plain `setChoice(current)` on every change of the stored value was what this
+   * used to be, and it CONTRADICTED THE REFUSAL MESSAGE ONE LINE BELOW. `RecordWorkbench`
+   * holds a record session that silently refetches the whole bundle on any change
+   * signal, and the 412 branch calls `onSaved()` itself — so the common stale-write
+   * path is precisely the one where the stored value changes while a choice is held.
+   * The reader would see `STALE_MESSAGE`'s *"Nothing you chose has been lost"* beside a
+   * select the effect had just reset to somebody else's value.
+   *
+   * `serverValue` remembers what the record held when the reader last agreed with it.
+   * A choice that still equals that is not an edit, so the new stored value is adopted;
+   * a choice that differs is unsent work and is kept. What the record now holds is not
+   * hidden by keeping it: the row RENDERS the stored value two lines above this control,
+   * which is where `STALE_MESSAGE` sends the reader to look.
+   */
+  const serverValue = useRef(current);
   useEffect(() => {
-    setChoice(current);
+    if (serverValue.current === current) return;
+    const agreedWith = serverValue.current;
+    serverValue.current = current;
+    setChoice((chosen) => (chosen === agreedWith ? current : chosen));
   }, [current]);
 
   useEffect(() => {
@@ -191,6 +247,13 @@ export function FieldCaptureControl({
       setBusy(false);
       setSaved(true);
       setStaleAt(null);
+      /* FOCUS IS MOVED BEFORE THE REFRESH LANDS, and it is not a flourish. Save is
+         disabled while `busy` and disabled again the moment the refreshed record makes
+         `choice === current` — so a reader who ACTIVATED it would be left focused on a
+         disabled control, which drops focus to `<body>`. The select is the same control
+         group and still exists, so focus stays where the reader is working. The
+         confirmation is announced by the live region either way. */
+      selectRef.current?.focus();
       onSaved();
     } catch (err) {
       setBusy(false);
@@ -226,7 +289,11 @@ export function FieldCaptureControl({
           className="field-capture-select"
           value={choice}
           aria-invalid={error !== null || undefined}
-          aria-describedby={error !== null ? errorId : undefined}
+          /* The note is ALWAYS described, the same way the rename panel's character
+             count always is: a reader arriving on this control by keyboard hears that
+             the set comes from the official schema and that nothing is filled in for
+             them, rather than having to find the sentence below it. */
+          aria-describedby={error !== null ? `${errorId} ${noteId}` : noteId}
           onChange={(e) => {
             setChoice(e.target.value);
             setSaved(false);
@@ -263,7 +330,7 @@ export function FieldCaptureControl({
           {error}
         </p>
       )}
-      <p className="field-capture-note">
+      <p className="field-capture-note" id={noteId}>
         The value you choose is stored with your confirmation as its evidence. These are
         the values the official ISAAC schema allows here; nothing else is accepted, and
         nothing is filled in for you.

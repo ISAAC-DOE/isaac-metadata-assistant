@@ -38,6 +38,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
 import { captureHint, canEnterOnRecord } from '../components/FieldCaptureControl';
+import { FieldRow } from '../components/FieldRow';
 import { draftGroupsToFieldGroups } from '../lib/adapt';
 import { bundleRoutes, stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
 import type { DraftFieldCapture } from '../lib/types';
@@ -432,5 +433,170 @@ describe('the collapsed section summary', () => {
     );
     expect(group.summary).toBe('1 field need you');
     expect(group.needsYouCount).toBe(1);
+  });
+});
+
+// --- a row that HOLDS a value must not deny it -------------------------------
+
+/*
+ * THE DEFECT THESE CATCH, and why the fixtures above could not.
+ *
+ * Every row in `CREATED_DRAFT` is a skeleton (`present: false`), so every assertion
+ * before this point reads a row the record genuinely holds nothing at. On a
+ * fixture-seeded record — which is every worked example a reader opens — ALL 26 rows
+ * are `present: true`, and seven of them are still refused by all six write routes.
+ * Measured over HTTP on the first canonical example: `timestamps.created_utc` is
+ * `2099-03-05T20:15:00Z` and `system.configuration.n_scans` is `6`. The copy those two
+ * rows carried opened *"This version records no value here"*, one line under the value
+ * the same row renders.
+ */
+const recorded = (path: string, label: string, value: unknown, capture: DraftFieldCapture) => ({
+  path,
+  label,
+  value,
+  status: 'verified' as const,
+  evidence_count: 1,
+  source_types: ['campaign_sheet'] as string[],
+  present: true,
+  capture,
+});
+
+const SEEDED_DRAFT = {
+  groups: [
+    {
+      title: 'System & Instrument',
+      fields: [recorded('system.configuration.n_scans', 'N Scans', 6, NOWHERE_OPEN_NS)],
+    },
+    {
+      title: 'Timestamps',
+      fields: [
+        recorded('timestamps.created_utc', 'Created Utc', '2099-03-05T20:15:00Z', NOWHERE_STAMPED),
+      ],
+    },
+  ],
+};
+
+/** Phrasings that assert the record holds nothing here. None may sit under a value. */
+const DENIES_A_VALUE = /records no value|holds no value|has no value|there is no value/i;
+
+describe('a row the record HAS a value at', () => {
+  it('never denies the value it is rendering, on a path nothing can write', async () => {
+    renderRecord({ [`GET ${BASE}/draft`]: { body: SEEDED_DRAFT } });
+    const system = await openBlock(/System & Instrument/);
+    const timestamps = await openBlock(/Timestamps/);
+
+    const scans = rowFor(system, 'system.configuration.n_scans');
+    const stamp = rowFor(timestamps, 'timestamps.created_utc');
+
+    // The value is on the screen…
+    expect(scans.textContent).toContain('6');
+    expect(stamp.textContent).toContain('2099-03-05T20:15:00Z');
+    // …so nothing in the row may say the record holds none. The sentence is about
+    // where a value may be ENTERED, which is true whether or not one is there.
+    for (const row of [scans, stamp]) {
+      const hint = row.querySelector('.field-capture-hint')?.textContent ?? '';
+      expect(hint).not.toMatch(DENIES_A_VALUE);
+      expect(hint).toContain('nothing to type');
+    }
+    // And still no control, which is the rule these rows were always subject to.
+    expect(scans.querySelector('input, select, textarea')).toBeNull();
+    expect(stamp.querySelector('input, select, textarea')).toBeNull();
+  });
+
+  it('keeps the exporter sentence to the ONE path it is true of', () => {
+    /* The last branch is reachable by more than one path: an unreadable schema makes
+       `_schema_open_namespaces()` fail closed to `()`, and all six
+       `system.configuration.*` rows then arrive with `open_namespace: null`. Telling
+       them an exporter stamps the export time would be inventing a rule for them. */
+    expect(captureHint(NOWHERE_STAMPED, false, 'timestamps.created_utc')).toContain('exporter');
+    expect(captureHint(NOWHERE_STAMPED, false, 'system.configuration.n_scans')).not.toContain(
+      'exporter',
+    );
+    // …and it still says the one thing that IS true of every path reaching it.
+    expect(captureHint(NOWHERE_STAMPED, false, 'system.configuration.n_scans')).toContain(
+      'nothing to type',
+    );
+  });
+});
+
+// --- the refusal's promise about the reader's choice --------------------------
+
+describe('a refused write keeps what the reader chose', () => {
+  it('does not replace an unsent choice when the record moves underneath it', async () => {
+    /*
+     * `STALE_MESSAGE` ends *"Nothing you chose has been lost."* — and the 412 branch
+     * calls `onSaved()`, which silently refetches the whole record. So the ONE path
+     * that produces this message is also the path on which the stored value most
+     * plausibly changed. A box that follows the record unconditionally would reset the
+     * reader's selection to somebody else's value in the same frame as the promise.
+     */
+    let reads = 0;
+    renderRecord({
+      [`GET ${BASE}/draft`]: () => {
+        reads += 1;
+        // After the first read the record holds a value somebody else wrote.
+        return reads === 1
+          ? { body: CREATED_DRAFT }
+          : {
+              body: {
+                groups: [
+                  {
+                    title: 'System & Instrument',
+                    fields: [
+                      recorded('system.domain', 'Domain', 'experimental', RECORD_ENUM),
+                    ],
+                  },
+                ],
+              },
+            };
+      },
+      [`POST ${BASE}/answers`]: { status: 412, body: { error: 'stale_write' } },
+    });
+
+    const system = await openBlock(/System & Instrument/);
+    const row = rowFor(system, 'system.domain');
+    const select = row.querySelector('select') as HTMLSelectElement;
+
+    await act(async () => {
+      fireEvent.change(select, { target: { value: 'computational' } });
+    });
+    await act(async () => {
+      fireEvent.click(within(row).getByRole('button', { name: /Save/ }));
+    });
+
+    await waitFor(() => {
+      expect(reads).toBeGreaterThan(1);
+    });
+    // The reader's unsent choice is still theirs…
+    await waitFor(() => {
+      const live = rowFor(
+        document.querySelector('section[data-draft-block]') as HTMLElement,
+        'system.domain',
+      );
+      expect((live.querySelector('select') as HTMLSelectElement).value).toBe('computational');
+      // …and the record's own value is on the screen beside it, which is where the
+      // message sends them to look.
+      expect(live.textContent).toContain('experimental');
+    });
+  });
+
+  it('adopts a new stored value when the reader has chosen nothing', () => {
+    /* The other half, so the guard above cannot be satisfied by never syncing at all:
+       with no unsent choice the box must follow the record. Asserted directly on the
+       row, because the condition is a re-render with a different stored value and the
+       screen adds nothing to it. */
+    const capture = { experimentId: ID, version: 'v1', onSaved: () => {} };
+    const before = skeleton('system.domain', 'Domain', RECORD_ENUM);
+    const { rerender, container } = render(<FieldRow field={before as never} capture={capture} />);
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect(select.value).toBe('');
+
+    rerender(
+      <FieldRow
+        field={recorded('system.domain', 'Domain', 'experimental', RECORD_ENUM) as never}
+        capture={capture}
+      />,
+    );
+    expect((container.querySelector('select') as HTMLSelectElement).value).toBe('experimental');
   });
 });

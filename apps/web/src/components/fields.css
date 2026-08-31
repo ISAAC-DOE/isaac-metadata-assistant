@@ -193,13 +193,22 @@
   border-color: var(--fail-solid);
 }
 
-.field-capture-status:empty {
-  display: none;
-}
-
+/*
+ * NO `:empty { display: none }` HERE, and its absence is the point.
+ *
+ * The element is a `role="status"` live region mounted in both states, precisely so it
+ * is in the accessibility tree BEFORE it has anything to say — `FieldCaptureControl`'s
+ * own comment says so. `display: none` takes an element OUT of that tree, so hiding it
+ * while empty reproduces the exact defect the always-mounted region exists to avoid:
+ * the region and its text would arrive together, which is the case screen readers
+ * announce unreliably. `min-height` reserves the line instead, which is what
+ * `.rename-status` (rename-experiment.css) already does for the same reason.
+ */
 .field-capture-status {
   margin: 0;
+  min-height: 1.4em;
   font-size: 11.5px;
+  line-height: 1.4;
   color: var(--text-secondary);
 }
 

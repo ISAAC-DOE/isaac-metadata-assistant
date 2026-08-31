@@ -1172,13 +1172,16 @@
   padding: 2px 16px 12px;
 }
 
-.run-rename-status:empty {
-  display: none;
-}
-
+/* NO `:empty { display: none }` — see the same note on `.field-capture-status` in
+   fields.css. A `role="status"` region that is hidden while empty is not in the
+   accessibility tree, so its text arrives together with the region, which is the case
+   the always-mounted region exists to avoid. `min-height` reserves the line instead,
+   matching `.rename-status`. */
 .run-rename-status {
   margin: 0 0 8px;
+  min-height: 1.4em;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--text-secondary);
 }
 
