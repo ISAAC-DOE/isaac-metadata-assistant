@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
+import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
 import { RunsSection } from '../components/RunsSection';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
@@ -762,6 +763,27 @@ function LoadedWorkbench({
           to `<body>`. The first is the silent refetch plus the record-session
           recompute, which is what a version change actually calls for. */}
       <RenameExperimentPanel detail={detail} onSaved={onAgentRefresh} />
+      {/*
+        THE RECORD DESCRIPTION — the capture surface for what the record IS: its
+        technique and domain, the facility it was measured at, the sample, the
+        contributors and the tags. It sits beside the rename for that reason: both are
+        statements about the whole record rather than about one measurement, and both
+        are reference material a reader passes on the way out rather than the science
+        they came for. Collapsed on arrival like every section around it.
+
+        WHY IT IS HERE AND NOT INSIDE A RUN. Every value it writes is EXPERIMENT-level
+        by `workspace.field_level`, so a run inherits it and does not own it. Before
+        this panel existed, the only route that accepted twelve of them was a RUN's
+        override — which records a divergence from a value the record does not hold —
+        so the product could finish a record it could not describe.
+
+        IT SELF-FETCHES AND CARRIES ITS OWN VERSION TOKEN, the discipline
+        `UnmappedNotesPanel` already follows: it re-reads the record after each write
+        rather than reading `bundle`, because the next save partitions its keys on what
+        the SERVER says the record holds, and partitioning on what this screen last
+        believed is how a second save gets routed to the wrong operation.
+      */}
+      <RecordDescriptionPanel experimentId={id} />
       <RecordInfoPanel detail={detail} groups={bundle.groups} artifacts={bundle.artifacts} />
       <RecordLinksPanel artifacts={bundle.artifacts} />
         </div>
