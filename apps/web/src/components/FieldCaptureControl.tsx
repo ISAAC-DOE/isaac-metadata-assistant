@@ -40,7 +40,15 @@ import type { DraftField, DraftFieldCapture } from '../lib/types';
  *
  * ── Rule 2: the control is a CHOICE from the schema's own set, never a free box ──
  *
- * Both record-writable paths are closed enums the official schema declares, and the
+ * CORRECTED 2026-08-30: **the record-writable set is 14 paths, not 2, and only 2 of
+ * them are closed enums.** This read "Both record-writable paths are closed enums
+ * the official schema declares", which was true when the record routes accepted only
+ * `system.domain` and `system.technique`. The campaign-sheet slice widened them to
+ * fourteen; the twelve sample and facility paths are free text or numbers and carry
+ * no `choices`, so `canEnterOnRecord` is false for them and this component renders
+ * no control. That is a real gap — a text input for those twelve is its own slice —
+ * and `captureHint` must say so without blaming a load failure. The two enum paths
+ * are still enums, and the
  * values arrive on the wire in `capture.choices` — read from the vendored document at
  * request time, never transcribed here. That is what makes the act a user confirmation
  * over a bounded set rather than a guess (`CLAUDE.md` §5), and it means a schema refresh
@@ -119,9 +127,29 @@ export function captureHint(
       // that can write. Points at the one that can, and promises nothing here.
       return 'A value for this field is entered and confirmed on this record, on the Record Fields view.';
     }
-    // Accepted by a record-level route, but the schema's set did not arrive, so no
-    // screen can offer the choice. Says what is true and nothing more.
-    return 'A value for this field is entered and confirmed on this record. The choice cannot be offered right now, because the set of values the official schema allows here did not load.';
+    // ── CORRECTED 2026-08-30: THIS BLAMED A CAUSE THAT CANNOT HAPPEN ─────────────
+    // It read: *"The choice cannot be offered right now, because the set of values the
+    // official schema allows here did not load."* That asserts a TRANSIENT load
+    // failure, and "right now" invites a retry that can never succeed.
+    //
+    // It is unreachable for the reason it gave, and the server's fail-closed design is
+    // what makes it unreachable: `_record_writable_fields()` returns an EMPTY mapping
+    // when the vendored schema cannot be read, so an unreadable schema makes
+    // `record_writable` FALSE at every path and this branch is never entered.
+    // Measured: with `Path.read_text` raising, `capture_facts` reports
+    // `record_writable` on 0 of 26 paths; normally it reports 14, of which 12 carry no
+    // `choices`. So `record_writable && !choices` means one thing only — the schema WAS
+    // read and declares no fixed list of values at this path.
+    //
+    // That became the ordinary case rather than the exotic one when the campaign-sheet
+    // slice widened the record routes from the 2 schema-enum paths to 14: the twelve
+    // sample and facility paths are free-text or numeric, and always will be.
+    //
+    // NOT YET OFFERED HERE, and said plainly rather than implied: this component
+    // renders a `<select>`, so it has no control for a free-text path. A text input for
+    // those twelve is a real addition and belongs in its own reviewed slice; until then
+    // this sentence must not suggest the value is unavailable or that waiting helps.
+    return 'A value for this field is entered and confirmed on this record. The official schema declares no fixed list of values here, so it is typed rather than chosen — and this screen does not offer that input yet.';
   }
   if (capture.run_field_writable) {
     return 'A value for this field is entered on a run rather than on the record — in the Runs section on this screen.';

@@ -10662,7 +10662,16 @@ def capture_facts(paths) -> dict[str, dict]:
     routes, across all 26 paths:
 
     * ``record_writable`` — ``POST /api/experiments/{id}/answers`` (and ``/edit`` to
-      correct). **2 paths**: ``system.domain`` and ``system.technique``. These are the
+      correct). **14 paths** — RE-MEASURED 2026-08-30 on the merged tree, where this
+      line read "**2 paths**: ``system.domain`` and ``system.technique``" and had been
+      right until the campaign-sheet slice widened the record routes. It is the
+      contradicting half of the fix 40 lines below, which changed this key's derivation
+      from ``_record_enum_fields()`` to ``_record_writable_fields()``; leaving the
+      number would have made the docstring disagree with the code in the same function.
+      Twelve of the fourteen are free-text or numeric sample and facility paths and
+      carry NO ``choices``, which is why ``choices`` is null far more often than it used
+      to be. The other three buckets are unchanged and re-measured: 5, 13, 7. These are
+      the
       only ones a record with no runs can be given a value at.
     * ``run_field_writable`` — ``PATCH .../runs/{run_id}``. **5 paths** (the
       ``context.*`` trio and the two acquisition timestamps).

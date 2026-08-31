@@ -684,3 +684,58 @@ describe('the three defect classes 935fca5 fixed that nothing pinned', () => {
     expect(described.toLowerCase()).toContain('schema');
   });
 });
+
+describe('the sentence a record-writable path with no choices gets', () => {
+  /*
+   * AN INDEPENDENT REVIEW OF THE MERGE FOUND THIS, and it is the merge's own doing.
+   * Making `record_writable` follow `_record_writable_fields()` was correct on the
+   * backend — 14 paths accept a value on a record with no runs, measured over HTTP —
+   * but `canEnterOnRecord` also requires `choices`, and TWELVE of the fourteen are
+   * free-text or numeric sample and facility paths that have none. So twelve rows
+   * rendered no control and fell into a branch whose copy blamed a LOAD FAILURE:
+   * *"The choice cannot be offered right now, because the set of values the official
+   * schema allows here did not load."*
+   *
+   * THAT CAUSE IS STRUCTURALLY IMPOSSIBLE, which is what makes it a defect rather
+   * than a guess. `_record_writable_fields()` returns an EMPTY mapping when the
+   * vendored schema cannot be read, so an unreadable schema makes `record_writable`
+   * FALSE everywhere and the branch is never entered for that reason. Measured with
+   * `Path.read_text` raising: `record_writable` on 0 of 26 paths, against 14 normally.
+   * So `record_writable && !choices` means one thing — the schema WAS read and
+   * declares no fixed list here — and "right now" invited a retry that can never work.
+   */
+
+  const RECORD_FREE_TEXT = {
+    record_writable: true,
+    run_field_writable: false,
+    run_overridable: true,
+    choices: null,
+    level: 'experiment',
+  };
+
+  it('never blames a load failure for a list the schema does not declare', () => {
+    const hint = captureHint(RECORD_FREE_TEXT as never);
+    expect(hint).not.toBeNull();
+    // The false cause, and the word that invited the retry.
+    expect(hint).not.toContain('did not load');
+    expect(hint).not.toContain('right now');
+  });
+
+  it('says the value is enterable on the record and that no input is offered yet', () => {
+    /* Both halves matter. Dropping the first would leave a scientist thinking the
+       field is somebody else's; dropping the second would send them looking for a
+       control this component does not render. */
+    const hint = captureHint(RECORD_FREE_TEXT as never) ?? '';
+    expect(hint).toContain('entered and confirmed on this record');
+    expect(hint.toLowerCase()).toContain('no fixed list');
+    expect(hint.toLowerCase()).toContain('not offer');
+  });
+
+  it('still routes the two ENUM paths to the control, so this did not widen by accident', () => {
+    /* The negative control: a path that DOES carry choices must still be offered one,
+       or the fix above would have been "stop rendering controls". */
+    const withChoices = { ...RECORD_FREE_TEXT, choices: ['experimental', 'computational'] };
+    expect(canEnterOnRecord(withChoices as never)).toBe(true);
+    expect(canEnterOnRecord(RECORD_FREE_TEXT as never)).toBe(false);
+  });
+});
