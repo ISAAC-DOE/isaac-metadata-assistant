@@ -1042,8 +1042,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * below is now a reading. The mechanism this paragraph reasoned from was
        * correct; the cells were stale for eleven days because nothing could see it.
        */
-      'record-detail@desktop-1280x800': 21,
-      'record-detail@laptop-1024x768': 21,
+      'record-detail@desktop-1280x800': 46,
+      'record-detail@laptop-1024x768': 46,
       /* linux 15 -> 14: the 320px clipping fix (min-width/overflow-wrap on
          `.fg-summary`, scoped to `.record-view-panel`) let the summary WRAP
          instead of running past its clip, and one contrast node stopped firing
@@ -1051,9 +1051,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          loosening. darwin measured 16 on the same commit and is unchanged —
          the two faces wrap at different words, which is the entire reason this
          file has two columns. */
-      'record-detail@tablet-768x1024': 21,
-      'record-detail@mobile-375x812': 19,
-      'record-detail@zoom-200': 19,
+      'record-detail@tablet-768x1024': 46,
+      'record-detail@mobile-375x812': 44,
+      'record-detail@zoom-200': 44,
       'schema-reference@desktop-1280x800': 17,
       'schema-reference@laptop-1024x768': 17,
       'schema-reference@tablet-768x1024': 15,
@@ -1938,14 +1938,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          unmeasured darwin; the precedent is `settings-explorer@width-320` just
          below. Full reasoning, including what this figure does NOT measure, is in
          the block above `record-detail@desktop-1280x800`. */
-      'record-detail@width-320': 19,
+      'record-detail@width-320': 44,
       /* SPLIT, and CI is what established it. I measured darwin 13 after the
          Graph tab landed and recorded it as a bare number, saying in the commit
          that linux was not yet measured and CI would adjudicate. It did: linux
          stayed at 12. So the tab's extra node is measurable on the darwin face
          at 390 and not on the linux one — the two wrap at different words, which
          is the whole reason this file has two columns. */
-      'record-detail@width-390': 19,
+      'record-detail@width-390': 44,
       'schema-reference@width-320': 18,
       'schema-reference@width-390': 20,
       /* SPLIT 2026-08-16, and it is a fall rather than a rise. CI run 31968866824
@@ -3467,7 +3467,30 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // `settings-explorer@width-390` (75 -> 76) from the strike sweep — see that
   // entry's note. The linux total below is deliberately unmoved: CI run
   // 33344481475 at the same head reported zero baseline mismatches.
-  darwin: 2283,
+  // ── RECORD-DETAIL DISCLOSURES OPENED, 2026-08-30: +175 on BOTH faces (+25 x 7). ──
+  //
+  // `disclosures.ts` now opens `section[data-draft-block]` before every scan, and
+  // `FieldGroup` renders no body while collapsed — so axe had NEVER scanned a
+  // `.field-row` at any viewport. Three tokens that became visible were this slice's
+  // own and were FIXED rather than baselined (`.field-path`, `.ev-row`, `.ev-locator`,
+  // all moved to `--text-muted` at 5.93:1), which took `record-detail @ desktop` from
+  // 71 to 46. The residue recorded here is the app-wide `--text-tertiary` /
+  // `--text-quaternary` palette debt CLAUDE.md §11 calls **A3** — `asset-reach`,
+  // `asset-digest-note`, `needsyou-about`, `notes-capture-hint`, `vr-sub` and friends.
+  // Pre-existing failures becoming MEASURABLE, not new defects, and settling A3 is a
+  // palette decision this slice may not take alone.
+  //
+  // BOTH FACES ARE MEASURED AND THEY AGREE EXACTLY, so these stay SCALARS rather than
+  // becoming splits. darwin: a full local macOS sweep of `a11y-axe` + `a11y-narrow`.
+  // linux: CI run 33355971504 on this branch, which named the same seven cells and the
+  // same seven numbers. Contrast is colour arithmetic, so agreement is what one would
+  // expect — but it is recorded because it was measured on both faces, not assumed
+  // from one.
+  //
+  //   desktop / laptop / tablet   21 -> 46   (+25 each)
+  //   mobile / zoom-200 / 320 / 390   19 -> 44   (+25 each)
+  //   7 x 25 = +175 on each platform: darwin 2283 -> 2458, linux 2287 -> 2462.
+  darwin: 2458,
   // ── PROVENANCE CHIPS, 2026-08-17: linux 2601 -> 2804. darwin does NOT move. ──
   //
   // TRANSCRIBED from CI run 32064183439, read line by line from the GREW
@@ -3820,7 +3843,7 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Every one of these three is a CI figure transcribed from the run's own GREW
   // lines, not a derivation. The columns move by DIFFERENT amounts (+3 darwin,
   // +5 linux) from one cause, which is why both were run.
-  linux: 2287,
+  linux: 2462,
 };
 
 /**
