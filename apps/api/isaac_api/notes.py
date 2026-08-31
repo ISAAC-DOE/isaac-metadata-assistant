@@ -125,8 +125,8 @@ that turns a value into a confirmed field already exists and is unchanged — ``
 /experiments/{id}/answers`` / ``POST /experiments/{id}/edit`` with
 ``confirmed_by_user: true`` and a matching ``If-Match``, recorded as
 ``user_confirmation`` evidence."* Measured over HTTP against a record created through
-``POST /api/experiments``, at every one of the 25 mappable paths, those two routes
-accept ~~**none of them** — both answer ``422 unrecognized_field`` for all 25, because
+``POST /api/experiments``, at every one of the 25 mappable paths, ~~those two routes
+accept **none of them** — both answer ``422 unrecognized_field`` for all 25, because
 they are keyed to a record's open blocking questions and to fields the draft already
 holds, not to official field paths~~ — **CORRECTED 2026-08-30: they now accept 13 of
 the 25, and this paragraph is struck in place rather than rewritten because it is the
@@ -136,6 +136,32 @@ facility, ``system.technique`` — and the two record-level block addresses
 ``block:attribution`` and ``block:tags``, recording each as a ``user_confirmation`` on
 the record that every run then inherits. They were keyed only to blocking questions and
 to fields the draft already held when this was written; they no longer are.
+
+**ACCEPTING A PATH IS NOT ACCEPTING A VALUE, and the distinction is the one this module
+most needs a reader to keep.** Membership in the writable set says a ROUTE exists, never
+that a particular value will be stored. A closed enum still answers
+``not_an_allowed_value`` for a non-member, a declared JSON type still answers
+``invalid_field_value``, a malformed block payload still answers
+``invalid_block_payload``, and a value the store cannot represent still answers
+``unrepresentable_value``. A surface that reads "writable" as "will be accepted" tells a
+scientist to go and do something that then fails, which is the same class of defect as
+the struck sentence above and is why the two facts are named separately.
+
+**WHERE THE RETRACTIONS LIVE, AND WHERE THEY DELIBERATELY NO LONGER DO (2026-08-30).**
+This docstring keeps its struck sentences, and so do ``routes.py``'s ``#:`` comments:
+they are read by whoever edits the code, and a retraction left in place is what stops a
+future author reinstating a claim already measured false. The SERVED OpenAPI
+descriptions no longer do. Six of them — the record and run ``/answers`` operation
+descriptions, the record ``/answers`` request body, both ``422`` response descriptions,
+and ``/notes``'s own operation description — carried ``~~ ~~`` around a retracted
+sentence. That surface is rendered to scientists in Settings → API Docs as PLAIN TEXT
+(``ApiDocs.tsx``; there is no markdown renderer anywhere in ``apps/web``, and the tree's
+only ``dangerouslySetInnerHTML`` is a test asserting its own absence), so the markers
+reached the reader as literal tildes wrapped around a false sentence, and the reader was
+left to decide which half to believe. The API reference now states only what is true; the
+history is here. ``test_no_served_description_carries_editorial_strike_typography``
+pins it as a property of the whole document rather than as six absences, because
+asserting the six would have passed on the seventh.
 
 ~~The two routes that DO accept these paths are a RUN's~~ — **THREE routes accept them
 now.** ``PATCH /api/experiments/{id}/runs/{run_id}`` for the 5 run-level paths; ``POST

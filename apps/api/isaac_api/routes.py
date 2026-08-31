@@ -5506,10 +5506,8 @@ _ANSWER_REFUSED_SHARED_BODY: str = (
     "and they silently dropped it — which made a mistyped key indistinguishable "
     "from an accepted one, because the resulting `200` explained itself as "
     "*\"the submitted value was identical\"* about a key the record had never "
-    "held. ~~A key is now either acted on or refused by name.~~ "
-    "**OVERSTATED, AND SCOPED HERE RATHER THAN DELETED** \u2014 a key is acted "
-    "on, refused by name, or, WHEN AT LEAST ONE OTHER KEY IN THE SAME BODY WAS "
-    "RECOGNISED, dropped on a `200` that does not name it. Measured: `{\"qc\": "
+    "held. A key is acted on, refused by name, or, WHEN AT LEAST ONE OTHER KEY IN "
+    "THE SAME BODY WAS RECOGNISED, dropped on a `200` that does not name it. Measured: `{\"qc\": "
     "<valid>, \"sample.material.nmae\": \"Fe2O3\"}` answers `200` with "
     "`changed_fields: [\"qc\"]`, and the mistyped key appears nowhere in the "
     "response. What IS guaranteed for that key, and is the half this change "
@@ -5540,10 +5538,9 @@ _ANSWER_REFUSED_SHARED_BODY: str = (
     "code the correction operations serve for the same condition, deliberately: "
     "a client that already branches on `invalid_field_value` should not need a "
     "second code to learn that a value it sent is too big.\n\n"
-    "~~A wrong-TYPED value is NOT this refusal — it is dropped by the core and "
-    "its question is reported still open in the `200`, which is the behaviour "
-    "this operation has always had.~~ **WITHDRAWN 2026-08-25.** A wrong-typed "
-    "`series`, `qc` or `descriptor` IS this refusal now. The old behaviour "
+    "A wrong-typed `series`, `qc` or `descriptor` IS this refusal. Until "
+    "2026-08-25 such a value was instead dropped by the core, with its question "
+    "reported still open in the `200`. That earlier behaviour "
     "relied on the `200`'s question list to tell the caller nothing landed, "
     "while the `invalidation.reason` beside it said the submitted value was "
     "already stored — so the two halves of one response contradicted each "
@@ -5703,9 +5700,8 @@ def _refuse_run_level_on_the_record(exp, apply_shape: dict) -> JSONResponse | No
         "Requires `confirmed_by_user: true` and the record's current `ETag` in "
         "`If-Match`. A BLANK answer is dropped rather than invented, so a "
         "submission carrying only blanks is a no-op: it is not logged and does not "
-        "advance the revision. ~~Blank and unrecognised answers are dropped~~ — an "
-        "UNRECOGNISED KEY is now refused with `422 unrecognized_field` instead of "
-        "being dropped, and a `series`, `qc` or `descriptor` value the record "
+        "advance the revision. An UNRECOGNISED KEY is refused with `422 "
+        "unrecognized_field`, and a `series`, `qc` or `descriptor` value the record "
         "cannot hold is refused with `422 invalid_field_value`. Both used to be "
         "absorbed into a `200` whose `invalidation.reason` read *\"the submitted "
         "value was identical\"* about a value that had neither been stored nor been "
@@ -5755,15 +5751,15 @@ def post_answers(
             "`{\"confirmed_by_user\": true, \"answers\": {<key>: <value>}}`. The "
             "keys come from `GET /api/experiments/{experiment_id}/pending`. "
             "Omitting `confirmed_by_user: true` is rejected with `422`; an "
-            "UNRECOGNISED key is refused with `422 unrecognized_field` (~~is ignored "
-            "rather than invented~~, which was true and unhelpful — the drop was "
-            "silent and the resulting `200` claimed the value was identical); a "
+            "UNRECOGNISED key is refused with `422 unrecognized_field` (it used to be "
+            "dropped silently, and the resulting `200` then claimed the value was "
+            "identical); a "
             "`series`, `qc` or `descriptor` value the record cannot hold is refused "
             "with `422 invalid_field_value`; and a recognised key whose question is "
             "already closed, submitted with a DIFFERENT value, is refused with `422 "
             "already_answered`.\n\n"
-            "~~TWO RECORD-LEVEL FIELD PATHS ARE ALSO ANSWER KEYS HERE~~ — **THE WHOLE "
-            "RECORD-LEVEL SET IS.** Every official dotted path this build classifies "
+            "THE WHOLE RECORD-LEVEL SET IS AN ANSWER KEY HERE. Every official dotted path "
+            "this build classifies "
             "as the RECORD's rather than a run's is an answer key here — the sample, "
             "the facility, `system.domain` and `system.technique` — and so are the two "
             "record-level BLOCK addresses, `block:attribution` and `block:tags`. Send "
@@ -9560,13 +9556,11 @@ def post_run_override_clear(
         "will not match.\n\n"
         "The keys are the same keys the record's `/answers` takes, and come from "
         "`GET /api/experiments/{experiment_id}/pending`, where a run-owned question "
-        "carries the `run_id` it belongs to. ~~An UNRECOGNISED key is ignored rather "
-        "than invented, exactly as on the record~~ — it is now REFUSED with `422 "
+        "carries the `run_id` it belongs to. An UNRECOGNISED key is REFUSED with `422 "
         "unrecognized_field`, exactly as on the record, because dropping it silently "
         "produced a `200` claiming the submitted value was identical to one this run "
-        "had never held. **THAT REFUSAL IS NARROWER THAN ~~\"either acted on or "
-        "refused by name\"~~, AND THE SCOPE IS STATED RATHER THAN LEFT TO BE "
-        "DISCOVERED:** it "
+        "had never held. **THE SCOPE OF THAT REFUSAL IS STATED RATHER THAN LEFT TO "
+        "BE DISCOVERED:** it "
         "fires only where NOTHING in the body is recognised. An unrecognised key "
         "travelling beside a recognised one is still dropped on a `200` that does not "
         "name it \u2014 what that `200` may no longer do is claim the submitted value "
@@ -10483,10 +10477,27 @@ NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT: frozenset[str] = frozenset(
 #: not_an_allowed_value``), and not that the run routes stop working for it.
 #: ``system.technique`` is accepted by ``POST .../runs/{run_id}/overrides`` as well;
 #: membership here says a record-level route ALSO exists, never that it is the only one.
+#: DERIVED FROM ``_record_writable_fields()``, NOT FROM ``_record_enum_fields()``, AND
+#: THE CHANGE IS A MERGE FIX THAT A TEST CAUGHT RATHER THAN A REFINEMENT.
+#:
+#: This constant used to filter on ``_record_enum_fields()`` — the two paths the schema
+#: closes with a REQUIRED enum — because those were the only two a record-level route
+#: accepted. The campaign-sheet slice widened the record routes to 14 field paths and 2
+#: block addresses, and on the merged tree the SERVED key went on saying
+#: ``['system.technique']`` while the ROUTES accepted fourteen more.
+#: ``test_the_served_record_writable_set_is_what_the_record_routes_actually_do`` failed
+#: with the two lists side by side, which is exactly the defect it was written to catch:
+#: a surface describing a capability it no longer bounds.
+#:
+#: Filtering on ``_record_writable_fields()`` makes the served set and the enforcing
+#: routes read the same derivation, so a future widening moves both together or moves
+#: neither. The intersection with ``NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT`` is
+#: kept: this key answers "which MAPPABLE path can be given a value on the record", and
+#: a record-writable path outside the extractor's field map is not a note's target.
 NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD: frozenset[str] = frozenset(
     path
     for path in NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT
-    if path in _record_enum_fields()
+    if path in _record_writable_fields()
 )
 
 
@@ -10724,10 +10735,18 @@ _NOTE_LIST_DESC = (
         "value there, so a client must not tell a person to go and do it. It "
         "promises nothing about a value being ACCEPTED: a closed enum, a declared "
         "JSON type, a required sibling property or the no-guessing rules may still "
-        "refuse the particular value. ~~Both routes are a run's, so a record with "
-        "no runs can write none of them yet.~~ CORRECTED: the record-level paths "
+        "refuse the particular value. The record-level paths "
         "are writable on a record with no runs at all, through the record's own "
-        "answers operation; only the 5 run-level paths need a run to exist.\n\n"        "`unreadable_entries` counts stored entries this build cannot present as "
+        "answers operation; only the 5 run-level paths need a run to exist. "
+        "`record_writable_field_paths` is the sub-subset a RECORD-level operation "
+        "also accepts — `POST /api/experiments/{experiment_id}/answers` to answer and "
+        "`POST /api/experiments/{experiment_id}/edit` to correct. It is DERIVED from "
+        "the same expression the record routes enforce, so it cannot describe a "
+        "capability they do not have; a path in it can be given a value on a record "
+        "with no runs at all, and a path outside it needs a run first. The two keys "
+        "are served separately because a client that tells a person WHERE to enter a "
+        "value must be right about the path in front of them, and that answer cannot "
+        "be inferred from the wider subset.\n\n"        "`unreadable_entries` counts stored entries this build cannot present as "
         "notes. There are two kinds and the count does not separate them: an "
         "entry the note model refused, and an entry whose id another note already "
         "holds — a duplicate is perfectly readable, but two notes cannot answer "
@@ -11160,7 +11179,7 @@ def post_note_review(
 #
 # ACCEPTING ONE DOES NOT MAKE THIS A SECOND WRITE PATH. The value is written by the
 # writer that already owns the target — `_apply_run_field`, `set_run_override` or
-# `_apply_record_enum_fields`, one of exactly three, recorded per proposal as
+# `_apply_record_fields`, one of exactly three, recorded per proposal as
 # `applied_via`. `proposals.py` builds no envelope and mints no evidence entry; a
 # second envelope builder would be a second definition of "what a confirmed field
 # looks like", free to drift from the one the exporter and the draft validator read.
@@ -11225,7 +11244,7 @@ def _proposal_writer_for(path: str) -> str | None:
     record-level closed enum and a member of `EXPERIMENT_OVERRIDABLE_ADDRESSES`, and
     its run override returns 200 **while accepting off-enum values** — a pre-existing
     divergence `CLAUDE.md` §11 records and deliberately leaves alone. An accepted
-    proposal at that path must therefore route through `_apply_record_enum_fields`,
+    proposal at that path must therefore route through `_apply_record_fields`,
     which checks the enum, and not through the override, which does not. Reversing
     these two clauses would silently inherit a hole this feature must not widen.
     """
@@ -11240,7 +11259,7 @@ def _proposal_writer_for(path: str) -> str | None:
 
 #: The scope each writer works at. `record` means the proposal must NOT name a run;
 #: `run` means it must. Derived from what the writers are rather than asserted:
-#: `_apply_record_enum_fields` writes the RECORD's own field map, and the other two
+#: `_apply_record_fields` writes the RECORD's own field map, and the other two
 #: are a run's.
 _PROPOSAL_WRITER_SCOPE: Mapping[str, str] = MappingProxyType(
     {
@@ -12402,7 +12421,7 @@ def _apply_accepted_proposal(
     THE THREE WRITERS ARE REUSED BY NAME AND NOTHING IS REIMPLEMENTED — contract §5
     invariant **I3**. `_apply_run_field` mints the four-key `user_confirmation`
     entry, carries the envelope's prior evidence and its `unit` forward, and is
-    idempotent; `_apply_record_enum_fields` reuses it in turn for a record-level
+    idempotent; `_apply_record_fields` reuses it in turn for a record-level
     field, differing only in the question the confirmation records; and
     `set_run_override` records a run's explicit divergence with what it displaced.
     Building an envelope here would be a second definition of what a confirmed field
@@ -12506,14 +12525,14 @@ def _apply_accepted_proposal(
                 key=proposal.target_field_path,
                 allowed=list(allowed),
             )
-        _apply_record_enum_fields(exp.draft, {proposal.target_field_path: value}, at)
+        _apply_record_fields(exp.draft, {proposal.target_field_path: value}, at)
         return writer, None
     if writer == proposals.APPLIED_VIA_RUN_FIELD:
         existing = run.draft.get("fields")
         fields = existing if isinstance(existing, dict) else {}
         wrote = _apply_run_field(fields, proposal.target_field_path, value, at)
         # The field map is attached only when something was actually written —
-        # `_apply_record_enum_fields`'s discipline for the same map and for the same
+        # `_apply_record_fields`'s discipline for the same map and for the same
         # reason: the map is part of the run's authoritative signature, and creating
         # an empty one would advance a revision for a request that wrote nothing.
         if wrote and not isinstance(existing, dict):

@@ -2067,7 +2067,34 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // (+1,142) and the branch's raw was 117,508, and 117,508 + 1,142 = 118,650.
     // Separators go 211 + 24 = 235 — the 24 are the four new operations', and
     // neither lineage's prose corrections added one.
-    expect(total).toBe(117944);
+    // 118,578 -> 118,276 (-302), 2026-08-30, STRIKE SWEEP. Six served strings wrapped a
+    // retracted sentence in `~~ ~~`. This screen renders every description as PLAIN
+    // TEXT — there is no markdown renderer in `apps/web`, and the tree's only
+    // `dangerouslySetInnerHTML` is a test asserting its own absence — so the markers
+    // reached the reader as literal tildes around a sentence that is not true. The
+    // retracted halves were removed from the SERVED copy and the history moved to
+    // `notes.__doc__`; `test_no_served_description_carries_editorial_strike_typography`
+    // now pins the absence as a property of the whole document.
+    //
+    // THREE of the six are operation descriptions and so move this number: `POST
+    // .../answers`, `POST .../runs/{run_id}/answers`, `GET .../notes`. The other three
+    // are a request-body and two `422` response descriptions, which this total does not
+    // read. RE-DERIVED from the served document, never subtracted: raw sum over the 75
+    // operations = 118,748, 236 `\n\n` separators, 118,748 - 472 = 118,276.
+    //
+    // THE PARAGRAPH COUNT BELOW DELIBERATELY DOES NOT MOVE and stays 236: every one of
+    // the three edits was woven INTO an existing paragraph rather than removing one, so
+    // the Endpoint Explorer emits the same number of `<p class="api-docs-description">`
+    // nodes and NO `settings-explorer` accessibility cell is re-baselined on either
+    // platform. A change that moved this total while leaving 236 alone is the expected
+    // signature of a prose correction; one that moved both would mean a paragraph had
+    // been added or dropped and the a11y baseline would need a CI round-trip.
+    //
+    // (The pre-existing comment lineage above states "raw sum 118,650, 235 separators,
+    // so 118,180". That arithmetic never reproduced — the assertion it sits above was
+    // 118,578, and re-measuring the unmodified tree gives 236 separators. It is left in
+    // place as history rather than silently rewritten, but it is not the derivation.)
+    expect(total).toBe(118276);
     // 185 -> 187 (+2): the same two corrected descriptions each gained one
     // post-lead paragraph — the sentence naming `POST /api/validate/record` as the
     // operation that separates the gates. No other description moved, and
