@@ -60,11 +60,30 @@
   font-weight: 600;
   color: var(--text-primary);
 }
+/* `--text-muted`, NOT `--text-quaternary`, and this slice is the reason the choice
+   is forced rather than optional. `.field-path` renders once per `.field-row`, in the
+   row BODY. `FieldGroup` renders no body while collapsed and `RecordWorkbench`
+   defaults every draft block to collapsed, so axe had NEVER scanned a `.field-row` at
+   any viewport — until this branch's `disclosures.ts` began opening
+   `section[data-draft-block]` before every scan.
+
+   Recomputed here rather than quoted: `--text-quaternary` #9aa4af is **2.53:1** on
+   #ffffff, against WCAG 1.4.3's 4.5:1 for normal text. Newly scanning 26 rows on
+   `record-detail` at seven viewport cells would therefore have shipped ~26 NEW
+   `color-contrast` failures per cell under a commit whose stated purpose was to make
+   the record screen readable. `--text-muted` #5b6570 is **5.93:1** — the same narrow
+   remedy, and the same token, that closed the `.section-tab` item on 2026-08-27.
+
+   `.fg-sublabel` above keeps `--text-quaternary` DELIBERATELY: it renders on the
+   collapsed header, which was always visible and always scanned, so its count is
+   already in the baseline and changing it would move cells this slice did not touch.
+   That is the app-wide `--text-tertiary`/`--text-quaternary` palette question (A3),
+   which is a design decision and not this slice's to take. */
 .field-path {
   margin-top: 3px;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-quaternary);
+  color: var(--text-muted);
 }
 .field-value-col {
   flex: 1;

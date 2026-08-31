@@ -600,3 +600,87 @@ describe('a refused write keeps what the reader chose', () => {
     expect((container.querySelector('select') as HTMLSelectElement).value).toBe('experimental');
   });
 });
+
+describe('the three defect classes 935fca5 fixed that nothing pinned', () => {
+  /*
+   * AN INDEPENDENT REVIEW OF THAT COMMIT FOUND ITS OWN CLAIM INCOMPLETE. It said
+   * "tests 18 -> 22, each mutation-tested", which was true of the two COPY defects
+   * and false as a description of the commit: the live-region fix, the focus return
+   * and `aria-describedby` had NO test at all. `grep` for `activeElement`,
+   * `toHaveFocus` or `aria-describedby` across both new files returned nothing, so a
+   * future slice could reintroduce `:empty { display: none }` or drop the focus call
+   * and every test would stay green — the same shape as the defects being fixed.
+   *
+   * WHAT IS AND IS NOT TESTABLE HERE, stated rather than left implicit. jsdom applies
+   * no stylesheet, so `:empty { display: none }` itself cannot be asserted from a
+   * component test; what CAN be asserted — and is the behaviour the CSS rule was
+   * breaking — is that the live region is ALWAYS IN THE TREE rather than mounted
+   * together with its content. The CSS half is guarded by the axe sweep.
+   */
+
+  it('keeps the status live region mounted when it has nothing to say', async () => {
+    renderRecord();
+    const system = await openBlock(/System & Instrument/);
+    const row = rowFor(system, 'system.domain');
+
+    const status = row.querySelector('.field-capture-status');
+    expect(status).not.toBeNull();
+    expect(status?.getAttribute('role')).toBe('status');
+    // Empty, and still present: a live region inserted together with its content is
+    // announced unreliably, which is the reason both components say they stay mounted.
+    expect(status?.textContent).toBe('');
+  });
+
+  it('returns focus to the select after a save disables the button the reader pressed',
+    async () => {
+      /*
+       * Save is disabled while busy and disabled AGAIN once the refresh makes
+       * `choice === current`, so the control the reader activated goes away under
+       * them. Without the focus return, focus lands on `<body>` and a keyboard reader
+       * is dropped to the top of the document.
+       *
+       * MUTATION: delete `selectRef.current?.focus()` from the success path and this
+       * turns RED with activeElement === document.body.
+       */
+      renderRecord({
+        [`POST ${BASE}/answers`]: { status: 200, body: { ok: true } },
+      });
+      const system = await openBlock(/System & Instrument/);
+      const row = rowFor(system, 'system.domain');
+      const select = row.querySelector('select') as HTMLSelectElement;
+
+      await act(async () => {
+        fireEvent.change(select, { target: { value: 'experimental' } });
+      });
+      await act(async () => {
+        fireEvent.click(within(row).getByRole('button', { name: /Save/ }));
+      });
+
+      await waitFor(() => {
+        expect(document.activeElement).not.toBe(document.body);
+      });
+      expect((document.activeElement as HTMLElement)?.tagName).toBe('SELECT');
+    });
+
+  it('describes the select with the note that carries its no-guessing claim', async () => {
+    /*
+     * The note says these are the schema's own values and that nothing is filled in
+     * for the reader. A sighted reader sees it beside the box; without
+     * `aria-describedby` a screen-reader user hears the label and nothing else, so the
+     * one sentence that says "this is not a guess" is the sentence they lose.
+     */
+    renderRecord();
+    const system = await openBlock(/System & Instrument/);
+    const row = rowFor(system, 'system.domain');
+    const select = row.querySelector('select') as HTMLSelectElement;
+
+    const describedBy = select.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    const described = (describedBy as string)
+      .split(/\s+/)
+      .map((id) => row.querySelector(`#${CSS.escape(id)}`)?.textContent ?? '')
+      .join(' ');
+    expect(described).not.toBe('');
+    expect(described.toLowerCase()).toContain('schema');
+  });
+});
