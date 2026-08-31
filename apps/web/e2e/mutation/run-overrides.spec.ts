@@ -523,7 +523,7 @@ test.describe('per-run overrides of inherited record values', () => {
     ).toBe('');
   });
 
-  test('the two section disclosures carry no axe violation, open or collapsed', async ({
+  test('the three section disclosures carry no axe violation, open or collapsed', async ({
     page,
   }) => {
     /*
@@ -548,25 +548,45 @@ test.describe('per-run overrides of inherited record values', () => {
     await openRunsSection(page, SEED.fresh);
     const card = await addAndExpand(page, 1);
     const headings = card.locator('.run-section-heading');
-    await expect(headings).toHaveCount(2);
+    // ── 2 -> 3, 2026-08-30: the run RENAME section is the third. ─────────────────
+    // This branch adds a `RunSection` titled "Name for this run" to `RunCard`, so a
+    // card now carries three disclosures rather than two. The count is asserted (not
+    // just `>= 2`) for the reason the header gives: a scan of a subtree only means
+    // something if you know which subtree you scanned, and a silent fourth section
+    // would otherwise be scanned without anybody deciding it should be.
+    await expect(headings).toHaveCount(3);
 
     const open = await scan(page, { include: '.run-section-heading' });
     expect(
       open.violations.map(formatViolation).join('\n\n'),
-      'the section disclosures, both expanded',
+      'the section disclosures, all expanded',
     ).toBe('');
 
-    for (const nth of [0, 1]) {
-      await headings.nth(nth).getByRole('button').click();
-      await expect(headings.nth(nth).getByRole('button')).toHaveAttribute(
+    // ALL THREE are collapsed, not the first two: the loop used to be `[0, 1]`, which
+    // after the third section shipped would have left it unscanned in the collapsed
+    // state — the state this test exists for, since that is where an `aria-controls`
+    // pointing at nothing or a name that vanished with its content shows up.
+    // ASSERTS THE TOGGLE FLIPS, NOT THAT IT LANDS ON `false`, and the difference is
+    // what the third section taught. The loop used to be `[0, 1]` with a hard
+    // `aria-expanded === 'false'`, which silently assumed every section STARTS open.
+    // The rename section added by this branch starts CLOSED, so clicking it opened it
+    // and the old shape would have read a correct toggle as a failure. Reading each
+    // button's state first and asserting the inverse is state-independent: it is the
+    // property a disclosure has to have, and it holds however the section is seeded.
+    for (const nth of [0, 1, 2]) {
+      const button = headings.nth(nth).getByRole('button');
+      const before = await button.getAttribute('aria-expanded');
+      expect(before, `section ${nth} must declare its state`).toMatch(/^(true|false)$/);
+      await button.click();
+      await expect(button).toHaveAttribute(
         'aria-expanded',
-        'false',
+        before === 'true' ? 'false' : 'true',
       );
     }
     const collapsed = await scan(page, { include: '.run-section-heading' });
     expect(
       collapsed.violations.map(formatViolation).join('\n\n'),
-      'the section disclosures, both collapsed',
+      'the section disclosures, each toggled from its initial state',
     ).toBe('');
   });
 

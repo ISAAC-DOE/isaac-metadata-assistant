@@ -86,6 +86,7 @@ import './runs.css';
 import { useEffect, useId, useRef, useState } from 'react';
 import { StatusChip } from './StatusChip';
 import { RunInheritedPanel } from './RunInheritedPanel';
+import { RunRenameForm } from './RunRenameForm';
 import { RunSection } from './RunSection';
 import { FindingList } from './RunFindingList';
 import { inheritedTally, type InheritedTally } from '../lib/runOverrides';
@@ -793,6 +794,37 @@ export function RunCard({
             ) : (
               <InheritedEmpty tally={tally} />
             )}
+          </RunSection>
+
+          {/*
+            THE RENAME CLOSES THE CARD RATHER THAN OPENING IT, and it is the same
+            argument `RenameExperimentPanel` makes for sitting in the record screen's
+            footer: what a run IS CALLED is reference material about the whole of it,
+            while the two sections above are the science the reader came for. Closed on
+            arrival, so a reader who never renames anything pays one line for it.
+
+            IT IS A SECTION AND NOT A CONTROL IN THE HEADER, deliberately. The header
+            row of a collapsed card is scanned in a list of fifty; an edit control there
+            is one mis-click from a run's identity, and the reader has to open the card
+            to see what they are renaming anyway. The same reasoning already withholds
+            Remove from the collapsed header on this card.
+          */}
+          <RunSection
+            title="Name for this run"
+            defaultOpen={false}
+            summary={`currently ${run.label}`}
+          >
+            <RunRenameForm
+              experimentId={experimentId}
+              run={run}
+              onRun={onRun}
+              /* The card's OWN refresh, not a second reader. A second one would be a
+                 second opinion about what this run currently holds, and the autosave
+                 conflict block a few lines below already offers exactly this control
+                 under exactly these words. */
+              onRefresh={autosave.refresh}
+              refreshing={autosave.refreshing}
+            />
           </RunSection>
 
           {autosave.status === 'conflict' && (

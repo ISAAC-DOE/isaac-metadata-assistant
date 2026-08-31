@@ -1158,3 +1158,63 @@
     margin-left: 0;
   }
 }
+
+/* ---- rename this run ----------------------------------------------------
+ *
+ * The same shell the run's own fields use (`.run-input`, `.run-field-label`), so a
+ * reader who has just filled in the form above meets the same control here rather
+ * than a second visual language for one text box.
+ *
+ * `--text-muted` (5.93:1 on the card surface), never `--text-tertiary` (3.86:1) —
+ * the token the `.section-tab` fix retired for exactly this reason.
+ */
+.run-rename {
+  padding: 2px 16px 12px;
+}
+
+/* NO `:empty { display: none }` — see the same note on `.field-capture-status` in
+   fields.css. A `role="status"` region that is hidden while empty is not in the
+   accessibility tree, so its text arrives together with the region, which is the case
+   the always-mounted region exists to avoid. `min-height` reserves the line instead,
+   matching `.rename-status`. */
+.run-rename-status {
+  margin: 0 0 8px;
+  min-height: 1.4em;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.run-rename-hint {
+  margin: 0 0 10px;
+  max-width: 66ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.run-rename-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-rename-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Never colour alone: the sentence carries the state, the hue reinforces it. */
+.run-rename-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  max-width: 66ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--fail-text);
+}

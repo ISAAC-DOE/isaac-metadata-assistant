@@ -544,6 +544,42 @@ export const LABELS = {
   renameFailed: 'The name could not be saved.',
 
   /*
+   * RENAME ONE RUN — a backend that had no control until now.
+   *
+   * `PATCH /api/experiments/{id}/runs/{run_id}` has always documented itself as
+   * writing a run's fields "and optionally renaming it", and `api.updateRun`'s body
+   * type has always carried `label?`. Measured: NEITHER caller passed it
+   * (`lib/runAutosaveStore.ts` and `TranscriptCapturePanel` both send `{ fields }`),
+   * so every run kept the server-assigned `Run N` for good.
+   *
+   * THE COPY STATES NO LENGTH LIMIT, and that is a measurement rather than an
+   * omission — unlike the experiment rename above, which states one because
+   * `RenameExperimentRequest` declares `max_length`. The run route declares none: a
+   * 500-character label was accepted and stored verbatim. Stating a limit here would
+   * be inventing a rule the server does not have.
+   *
+   * `runRenameStale` IS THE ONE NAMED FAILURE, read from the 412 status rather than
+   * inferred; every other failure goes through `mutationFailureCopy`, which is what
+   * makes an expired session read as an expired session here exactly as it does at
+   * every other write in the app.
+   */
+  actionRenameRun: 'Rename',
+  runRenameLabel: 'Run name',
+  runRenameHint:
+    'Only the name changes. Nothing this run measured, and nothing it inherits from the record, is touched.',
+  runRenameSubmit: 'Save name',
+  runRenameSaving: 'Saving…',
+  /** Shown when the box is empty. States the fix, not the failure. */
+  runRenameRequired: 'A run needs a name. Type one, or cancel.',
+  /** Announced after a successful rename, so the act is confirmed and not merely done. */
+  runRenameSaved: 'Run name saved.',
+  runRenameStale:
+    'This run changed somewhere else while you were typing, so the new name was not saved and ' +
+    'nothing was written. Refresh this run to see what the server holds, then rename it again. ' +
+    'Nothing you typed has been lost.',
+  runRenameFailed: 'The run name could not be saved.',
+
+  /*
    * MY EXPERIMENTS, EMPTY — an invitation to act, not a report of absence.
    *
    * THE SENTENCE THIS REPLACES WAS "This deployment cannot yet create or import a

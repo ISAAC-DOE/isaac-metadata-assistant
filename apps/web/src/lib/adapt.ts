@@ -136,18 +136,60 @@ function blockOf(g: ApiDraftGroup): string {
   return first ? first.split('.')[0] : g.title.toLowerCase();
 }
 
+/**
+ * Whether this row is a value the record HOLDS, rather than the shape of one it does not.
+ *
+ * `present` is the server's own answer and is read first. The `status` fallback is for a
+ * response — or a fixture — written before that key existed, and it is the SAME test
+ * `recordIdentity.createdUtcOnDraft` has always used, so the two readers cannot disagree
+ * about what "the draft carries a value here" means.
+ */
+function isRecorded(field: DraftField): boolean {
+  if (field.present === false) return false;
+  return field.status !== 'missing' && field.status !== 'rejected';
+}
+
+/**
+ * THE COLLAPSED SECTION'S ONE LINE, AND WHY IT COUNTS TWO THINGS NOW.
+ *
+ * This used to read `${n} fields · all verified` whenever no field was awaiting
+ * confirmation — computed from the STATUS SET, where a section of nothing but `missing`
+ * rows has no `inferred` in it and therefore fell to `all verified`. That was harmless
+ * while every row was a value the record held. With the skeleton it is not: a freshly
+ * created record's `System & Instrument` section holds **13 rows, none of them
+ * recorded**, and the old line would have summarised it as *"13 fields · all verified"* —
+ * a green claim about an empty section, on the collapsed header a reader scans instead of
+ * opening.
+ *
+ * So the count of RECORDED fields leads whenever it is not the whole section, and the
+ * `verified/inferred` detail is computed over the recorded rows only — describing what is
+ * there rather than averaging it with what is not. A section where every row is recorded
+ * reads exactly as it did before.
+ *
+ * THE `needs you` BRANCH IS UNCHANGED AND STILL COMES FIRST. It is the one thing a
+ * collapsed section must never hide, and a `missing` skeleton row is not a blocker: the
+ * record's blocking questions are `series`, `qc`, `descriptor` and assets, none of which
+ * is a field row. `FieldGroup`'s amber chip counts `needs_confirmation` and is untouched.
+ */
 function summarize(fields: DraftField[], needsYouCount: number): string {
   const n = fields.length;
   if (needsYouCount > 0) {
     return `${needsYouCount} field${needsYouCount === 1 ? '' : 's'} need you`;
   }
-  const kinds = new Set(fields.map((f) => f.status));
+  const recorded = fields.filter(isRecorded);
+  if (recorded.length === 0) {
+    return `${n} field${n === 1 ? '' : 's'} · none recorded yet`;
+  }
+  const kinds = new Set(recorded.map((f) => f.status));
   const detail =
     kinds.has('inferred') && kinds.size > 1
       ? 'verified & inferred'
       : kinds.has('inferred')
         ? 'inferred'
         : 'all verified';
+  if (recorded.length < n) {
+    return `${recorded.length} of ${n} recorded · ${detail}`;
+  }
   return `${n} field${n === 1 ? '' : 's'} · ${detail}`;
 }
 
@@ -169,6 +211,11 @@ export function draftGroupsToFieldGroups(
       evidence_count: f.evidence_count,
       source_types: f.source_types,
       evidence: evidenceByPath.get(f.path)?.evidence,
+      // Both PASSED THROUGH, never computed here. `capture` is the server's derivation
+      // from the sets its write routes enforce, and a client-side copy of it could drift
+      // silently — see `DraftFieldCapture` and `UnmappedNotesPanel.valueWriteHint`.
+      present: f.present,
+      capture: f.capture,
     }));
     const needsYouCount = fields.filter((f) => f.status === 'needs_confirmation').length;
     return {

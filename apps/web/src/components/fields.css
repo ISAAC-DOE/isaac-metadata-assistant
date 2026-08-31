@@ -60,11 +60,30 @@
   font-weight: 600;
   color: var(--text-primary);
 }
+/* `--text-muted`, NOT `--text-quaternary`, and this slice is the reason the choice
+   is forced rather than optional. `.field-path` renders once per `.field-row`, in the
+   row BODY. `FieldGroup` renders no body while collapsed and `RecordWorkbench`
+   defaults every draft block to collapsed, so axe had NEVER scanned a `.field-row` at
+   any viewport — until this branch's `disclosures.ts` began opening
+   `section[data-draft-block]` before every scan.
+
+   Recomputed here rather than quoted: `--text-quaternary` #9aa4af is **2.53:1** on
+   #ffffff, against WCAG 1.4.3's 4.5:1 for normal text. Newly scanning 26 rows on
+   `record-detail` at seven viewport cells would therefore have shipped ~26 NEW
+   `color-contrast` failures per cell under a commit whose stated purpose was to make
+   the record screen readable. `--text-muted` #5b6570 is **5.93:1** — the same narrow
+   remedy, and the same token, that closed the `.section-tab` item on 2026-08-27.
+
+   `.fg-sublabel` above keeps `--text-quaternary` DELIBERATELY: it renders on the
+   collapsed header, which was always visible and always scanned, so its count is
+   already in the baseline and changing it would move cells this slice did not touch.
+   That is the app-wide `--text-tertiary`/`--text-quaternary` palette question (A3),
+   which is a design decision and not this slice's to take. */
 .field-path {
   margin-top: 3px;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-quaternary);
+  color: var(--text-muted);
 }
 .field-value-col {
   flex: 1;
@@ -82,16 +101,38 @@
   font-weight: 500;
   color: var(--text-primary);
 }
+/*
+ * `--text-tertiary` -> `--text-muted` ON THESE TWO, and the reason is this slice's
+ * own doing rather than a drive-by cleanup.
+ *
+ * Recomputed here, not quoted: `--text-tertiary` #78838f is 3.86:1 on #ffffff — below
+ * WCAG 1.4.3 — and `--text-muted` #5b6570 is 5.93:1. Same figures the `.section-tab`
+ * fix was made on, and the same in-repo precedent.
+ *
+ * WHY NOW. Both rules are pre-existing, and both were effectively unscanned: axe had
+ * never seen a `.field-row` at any viewport, because `FieldGroup` does not render its
+ * body while collapsed and `e2e/helpers/disclosures.ts` opened only the two Statistics
+ * disclosures. This slice opens the draft blocks so the new controls are actually
+ * scanned — AND it turns "honestly missing" from a rare state into the normal one, 26
+ * rows deep on a freshly created record. Leaving the token would have shipped a wall of
+ * newly-visible, newly-scanned 1.4.3 failures under a change whose whole point is that
+ * the rows are worth reading.
+ *
+ * SCOPED TO THE TWO RULES THIS SLICE MADE PROMINENT. `.fg-summary` and `.field-path`
+ * still use the lighter tokens: they render on the collapsed HEADER, which was always
+ * visible and always scanned, so their debt is the app-wide `--text-tertiary` palette
+ * question (CLAUDE.md §11's A3) and not this change's to settle.
+ */
 .field-value.awaiting {
   font-family: var(--font-ui);
   font-style: italic;
   font-weight: 400;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 .field-helper {
   margin-top: 6px;
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   line-height: 1.5;
 }
 .field-evidence {
@@ -105,6 +146,98 @@
 .field-path,
 .field-value {
   overflow-wrap: anywhere;
+}
+
+/* ---- capture: the sentence, and (for two paths) the control ---------------
+ *
+ * A skeleton row — a field path the record holds no value at — is not an error state
+ * and is not styled as one. It reads exactly as an honestly missing value always has;
+ * `data-present="false"` exists so a test and a stylesheet can tell the two apart
+ * without parsing copy, not so the row can be tinted.
+ *
+ * EVERY COLOUR HERE IS `--text-muted` (5.93:1 on white) OR DARKER. `--text-tertiary`
+ * (#78838f, 3.86:1) is used by the older rules above and is deliberately not extended to
+ * this new copy: it is the token the `.section-tab` fix retired for exactly this reason,
+ * and a sentence a reader must act on is the last place to reintroduce it.
+ */
+.field-capture-hint,
+.field-capture-note {
+  margin: 8px 0 0;
+  max-width: 66ch;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.field-capture {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.field-capture-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.field-capture-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Sized so the control clears the 24px minimum target height at every viewport. */
+.field-capture-select {
+  min-height: 32px;
+  max-width: 320px;
+  padding: 6px 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+}
+
+.field-capture-select:focus-visible {
+  outline: none;
+  border-color: var(--action);
+  box-shadow: var(--ring-active);
+}
+
+.field-capture-select[aria-invalid='true'] {
+  border-color: var(--fail-solid);
+}
+
+/*
+ * NO `:empty { display: none }` HERE, and its absence is the point.
+ *
+ * The element is a `role="status"` live region mounted in both states, precisely so it
+ * is in the accessibility tree BEFORE it has anything to say — `FieldCaptureControl`'s
+ * own comment says so. `display: none` takes an element OUT of that tree, so hiding it
+ * while empty reproduces the exact defect the always-mounted region exists to avoid:
+ * the region and its text would arrive together, which is the case screen readers
+ * announce unreliably. `min-height` reserves the line instead, which is what
+ * `.rename-status` (rename-experiment.css) already does for the same reason.
+ */
+.field-capture-status {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+/* Never colour alone: the sentence carries the state, the hue reinforces it. */
+.field-capture-error {
+  margin: 0;
+  max-width: 66ch;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fail-text);
 }
 
 /* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */

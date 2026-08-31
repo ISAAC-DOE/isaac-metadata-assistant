@@ -208,7 +208,25 @@ def test_draft_grouping(client):
     statuses = {f["status"] for g in groups for f in g["fields"]}
     assert "verified" in statuses and "inferred" in statuses
     a_field = groups[0]["fields"][0]
-    assert set(a_field) == {"path", "label", "value", "status", "evidence_count", "source_types"}
+    # `present` and `capture` joined the row when `GET /draft` began returning the group
+    # SKELETON — see `serialize.draft_to_groups`. The set is still asserted EXACTLY
+    # rather than loosened to a subset, because that is what makes this a contract test:
+    # a key appearing here without a decision is exactly what it should catch.
+    assert set(a_field) == {
+        "path",
+        "label",
+        "value",
+        "status",
+        "evidence_count",
+        "source_types",
+        "present",
+        "capture",
+    }
+    # THIS RECORD HOLDS ALL 26, so nothing here is a skeleton row. That is what makes
+    # the `26` above unchanged rather than newly satisfied by rows the record does not
+    # have — the assertion counted 26 before the skeleton existed and counts the same 26
+    # now, and this line is the reason a reader can tell those two apart.
+    assert all(f["present"] is True for g in groups for f in g["fields"])
 
 
 # --- 6. pending ---------------------------------------------------------------

@@ -3482,6 +3482,26 @@ def post_experiment_discard(
         "current value, the status derived from its evidence, and the kinds of "
         "source that evidence came from. Read-only; the response carries the "
         "record's current `ETag`.\n\n"
+        "A ROW IS RETURNED FOR EVERY FIELD PATH THIS BUILD CAN EXTRACT INTO OR WRITE "
+        "AT, not only the ones the draft already holds. `present` says which: `true` "
+        "means the draft carries an envelope at that path, `false` means the row is "
+        "the SHAPE of a value this record does not have — its `value` is `null` and "
+        "its `status` is `missing`. Nothing is written by reading this, and a `false` "
+        "row is not a field the record gained.\n\n"
+        "`capture` says WHERE, if anywhere, a value may be entered — "
+        "`record_writable` (this record's own answer/correct operations), "
+        "`run_field_writable` (`PATCH .../runs/{run_id}`) and `run_overridable` "
+        "(a single run's divergence from a record-level value, which is not a way to "
+        "state the record's own value). All three are `false` for a path no operation "
+        "in this build accepts, so a surface can decline to offer a control whose only "
+        "outcome would be a refusal. `choices` carries the official schema's own "
+        "closed set where it declares one, and `level` is this build's "
+        "experiment/run classification — `unclassified` where the contract assigns a "
+        "path to neither, which for the six `system.configuration.*` fields is an "
+        "open scientific question rather than an omission.\n\n"
+        "None of this describes the official ISAAC schema's full field set, which is "
+        "larger; it describes what this application can extract into and write at."
+        "\n\n"
         "`record_blocks` carries the record-level BLOCKS beside the fields — "
         "`block:attribution` and `block:tags`, keyed by the same namespaced address "
         "the write operations take. They are not `fields`, so they can appear in no "
@@ -3493,8 +3513,7 @@ def post_experiment_discard(
     ),
     response_description=(
         "The draft's fields, grouped, the record-level block payloads, and the "
-        "current `ETag`."
-    ),
+        "current `ETag`."    ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
 def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
@@ -3502,8 +3521,21 @@ def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Re
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
+    # BOTH SIDES OF THE MERGE ADDED TO THIS ONE RETURN, and both are kept: the capture
+    # model that says WHERE a value may be entered, and the record-level blocks that
+    # say what the record currently holds beside its fields. They answer different
+    # questions about the same read and neither subsumes the other.
+    #
+    # The capture model covers the skeleton AND whatever the draft happens to hold, so
+    # a path outside `CAPTURE_SURFACE_PATHS` — one a future extractor writes, say —
+    # still renders with real facts rather than with the fail-closed unknown. It is
+    # computed per request rather than once at import because `_record_enum_fields`
+    # already caches the only expensive part, and a module-level dict shared across
+    # requests would be a mutable object every response hands out.
+    fields = exp.draft.get("fields") or {}
+    known = CAPTURE_SURFACE_PATHS | {p for p in fields if isinstance(p, str)}
     return {
-        **serialize.draft_to_groups(exp.draft),
+        **serialize.draft_to_groups(exp.draft, capture=capture_facts(known)),
         # READ, NOT REFUSED, and no shape is asserted. A persisted block of any shape is
         # handed back as it is stored: `CLAUDE.md` §11's read-path doctrine says a
         # malformed value already on disk cannot be refused to a reader who did nothing
@@ -10780,6 +10812,211 @@ NOTE_MAPPABLE_PATHS_WRITABLE_ON_THE_RECORD: frozenset[str] = frozenset(
     for path in NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT
     if path in _record_writable_fields()
 )
+
+
+#: THE FIELD PATHS THE RECORD SCREEN RENDERS A ROW FOR, WHETHER OR NOT ONE IS FILLED.
+#:
+#: **IT EXISTS BECAUSE A CREATED RECORD RENDERED NO METADATA FIELD AT ALL.** Measured
+#: over HTTP on a record created through ``POST /api/experiments``::
+#:
+#:     GET /api/experiments/{id}/draft  ->  200  {"groups": []}     <- ZERO rows
+#:     GET /api/experiments/{id}/draft  ->  200  26 rows, 4 groups  <- a seeded record
+#:
+#: ``serialize.draft_to_groups`` iterated ``draft["fields"]``, which a created record's
+#: draft leaves empty, and ``FieldGroup`` is the only field-rendering component the
+#: frontend has. So a scientist who created a record could not see, and had no way to
+#: discover, that a record holds a `sample`, a `system.facility` or a `technique` at
+#: all. Serving the group SKELETON is what turns those four sections into a surface
+#: that can be read and — where a route exists — written.
+#:
+#: DERIVED FROM TWO EXISTING DERIVATIONS, never listed by hand, which is the discipline
+#: every constant around it keeps. :data:`NOTE_MAPPABLE_FIELD_PATHS` is the paths this
+#: build's extractor knows how to place (25); :func:`_record_enum_fields` is the paths a
+#: RECORD-level operation accepts (2). Their union is **26**, and that number is not a
+#: coincidence worth passing over: it is exactly the row set every committed fixture
+#: record already carries, so on a seeded record the skeleton adds nothing and the
+#: response is unchanged. ``system.domain`` is the one member the first set does not
+#: hold — it is absent from ``EXTRACTOR_FIELD_MAP`` — and it is exactly the field whose
+#: absence makes a record carrying a technique or a facility fail official validation,
+#: so the union is doing real work rather than restating its larger input.
+#:
+#: IT CLAIMS NOTHING ABOUT THE OFFICIAL SCHEMA, and no surface built on it may. The
+#: schema defines many more paths than these (``sample.sample_id``, ``measurement.*``,
+#: ``links``, ``tags``, ``assets``, ``descriptors``); ``CLAUDE.md`` §1 makes it not ours
+#: to speak for. This is a statement about what THIS BUILD can extract into or write at.
+#:
+#: IT ADDS NO SCHEMA READ AT IMPORT TIME. :func:`_record_enum_fields` is already called
+#: while this module loads, by :data:`NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT` a
+#: few lines above, which documents that consequence and why it is the fail-closed
+#: direction. This line reuses the same cached answer.
+CAPTURE_SURFACE_PATHS: frozenset[str] = NOTE_MAPPABLE_FIELD_PATHS | frozenset(
+    _record_enum_fields()
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _schema_open_namespaces() -> tuple[str, ...]:
+    """Dotted paths the vendored schema declares as an object with NO ``properties``.
+
+    **IT EXISTS SO ONE HONEST SENTENCE DOES NOT HAVE TO BE SAID ABOUT TWO DIFFERENT
+    THINGS.** Seven skeleton paths accept a value from no write route in this build:
+    the six ``system.configuration.*`` and ``timestamps.created_utc``. They are all
+    ``field_level == unclassified`` — but for DIFFERENT reasons, and
+    ``workspace.field_level``'s own docstring says so explicitly, adding that
+    ``timestamps.created_utc`` *"is the one member of this list that does NOT need a
+    scientific answer — stated here because grouping it with the six made it look as
+    though it did"*. A surface that told a reader the export timestamp's scope is an
+    open scientific question would be repeating exactly the conflation that comment was
+    written to stop.
+
+    THE DISCRIMINATOR IS READ FROM THE SCHEMA, NOT TRANSCRIBED, and it is the same fact
+    :data:`NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT` already cites in prose:
+    *"``system.configuration`` is a DESIGNATED OPEN NAMESPACE in the vendored schema
+    (it declares no ``properties``)"*. A namespace the schema leaves open is a namespace
+    whose members nobody has enumerated, which is why nobody has classified their scope
+    either. ``timestamps.created_utc`` is a DECLARED property of a declared object, so it
+    falls outside this set and gets its own sentence.
+
+    Measured over the vendored v1.05 document, this yields exactly four:
+    ``sample.composition``, ``system.configuration``,
+    ``context.transport.feed.partial_pressures`` and ``computation.corrections_applied``
+    — the same four ``_MAX_VALUE_DEPTH``'s comment enumerates from the other direction.
+    Nothing here decides anything about them; it reports that the schema declares no
+    members for them.
+
+    FAIL-CLOSED, exactly as :func:`_record_enum_fields`: an unreadable or unparseable
+    schema yields an EMPTY tuple, so no path is reported as sitting in an open
+    namespace and every such row falls to the sentence that claims less. The
+    ``lru_cache`` holds that answer for the life of the process, which is the same
+    already-accepted consequence that function documents.
+    """
+    try:
+        schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # unreadable or unparseable vendored schema
+        return ()
+    found: list[str] = []
+
+    def walk(node: object, prefix: str) -> None:
+        if not isinstance(node, dict):
+            return
+        properties = node.get("properties")
+        if not isinstance(properties, dict):
+            if prefix and node.get("type") == "object":
+                found.append(prefix)
+            return
+        for key, child in properties.items():
+            if isinstance(key, str) and isinstance(child, dict):
+                walk(child, f"{prefix}.{key}" if prefix else key)
+
+    walk(schema, "")
+    return tuple(sorted(found))
+
+
+def _open_namespace_of(path: str) -> str | None:
+    """The open namespace this path sits inside, or ``None``.
+
+    Segment-aware, exactly as ``workspace._path_matches`` is and for its reason: a bare
+    ``startswith`` would place ``system.configurations_note`` inside
+    ``system.configuration``.
+    """
+    for namespace in _schema_open_namespaces():
+        if path.startswith(namespace + "."):
+            return namespace
+    return None
+
+
+def capture_facts(paths) -> dict[str, dict]:
+    """Per path: WHERE a value can be written, and the closed set it may come from.
+
+    **FACTS, NOT COPY.** Every key is a boolean or a list read from the same
+    expressions the write routes gate on, and the sentence a scientist reads is
+    composed in the frontend from them. That split is deliberate: a served prose
+    string would be a second place for the rule to live, and the three sets below are
+    already the single definition each of their routes enforces.
+
+    THE THREE WRITABILITY KEYS ARE THREE DIFFERENT OPERATIONS, and collapsing them
+    into one "writable" boolean would lose exactly the distinction a surface has to
+    make. Measured over HTTP on a created record with one run, at all six write
+    routes, across all 26 paths:
+
+    * ``record_writable`` — ``POST /api/experiments/{id}/answers`` (and ``/edit`` to
+      correct). **14 paths** — RE-MEASURED 2026-08-30 on the merged tree, where this
+      line read "**2 paths**: ``system.domain`` and ``system.technique``" and had been
+      right until the campaign-sheet slice widened the record routes. It is the
+      contradicting half of the fix 40 lines below, which changed this key's derivation
+      from ``_record_enum_fields()`` to ``_record_writable_fields()``; leaving the
+      number would have made the docstring disagree with the code in the same function.
+      Twelve of the fourteen are free-text or numeric sample and facility paths and
+      carry NO ``choices``, which is why ``choices`` is null far more often than it used
+      to be. The other three buckets are unchanged and re-measured: 5, 13, 7. These are
+      the
+      only ones a record with no runs can be given a value at.
+    * ``run_field_writable`` — ``PATCH .../runs/{run_id}``. **5 paths** (the
+      ``context.*`` trio and the two acquisition timestamps).
+    * ``run_overridable`` — ``POST .../runs/{run_id}/overrides``, which records ONE
+      RUN's divergence from a record-level value. **13 paths**. It is emphatically not
+      a way to say what the RECORD is — ``_record_enum_fields``' docstring makes that
+      point about ``system.technique``, and it holds for all 13 — which is why a
+      surface must not render it as "enter the record's value here".
+    * none of the three — **7 paths**: the six ``system.configuration.*`` and
+      ``timestamps.created_utc``, refused by all six routes with ``422``.
+
+    (5 + 13 + 7 = 25, plus ``system.domain``, which only the record route accepts, is
+    26. ``system.technique`` is in two of the buckets, which is why the numbers are
+    stated per route rather than summed.)
+
+    ``level`` IS ``workspace.field_level``'s OWN THIRD ANSWER, passed through. It is
+    ``unclassified`` for exactly those 7, and that is a real answer rather than a gap:
+    the contract assigns them to neither the experiment nor a run. For the six
+    ``system.configuration.*`` fields, which of the two they belong to is an OPEN
+    SCIENTIFIC QUESTION recorded in ``docs/run-scope-decision-packet.md`` and in
+    ``CLAUDE.md`` §15 as ``unclassified, verified`` — a question for a person, not one
+    this application answers. ``timestamps.created_utc`` is unclassified for a
+    different reason (``workspace.field_level`` says so in as many words: it is a
+    record-creation stamp the exporter defaults, not an inherited scientific value),
+    and a surface must not pool the two into one sentence.
+
+    ``open_namespace`` IS WHY, FOR SIX OF THOSE SEVEN, ``level`` IS UNCLASSIFIED — see
+    :func:`_schema_open_namespaces`. It carries the namespace name rather than a boolean
+    so a surface can NAME it (``system.configuration``) instead of gesturing at it.
+
+    ``choices`` IS THE SCHEMA'S OWN CLOSED SET, or ``None``. It is served only for the
+    record-writable pair, because they are the only paths this response's consumer can
+    offer a control for; the run-level enum's values already reach the run card
+    through ``lib/runFields``. Serving the values means a scientist chooses from the
+    vendored document rather than from a list transcribed into a screen — which is
+    what makes the act a user confirmation over a bounded set (``CLAUDE.md`` §5) and
+    not a guess. An unreadable schema yields an empty mapping, so every ``choices`` is
+    ``None`` and every ``record_writable`` is ``False``: the same fail-closed direction
+    ``_record_enum_fields`` documents for itself.
+    """
+    # ── MERGE FIX, 2026-08-30: `record_writable` FOLLOWS THE ENFORCING SET ───────
+    # This read `path in enums`, and `_record_enum_fields()` was the right source when
+    # the record routes accepted exactly the two schema-enum paths. The campaign-sheet
+    # slice widened them to fourteen field paths, so on the merged tree the CAPTURE
+    # SURFACE would have gone on telling a scientist that twelve sample and facility
+    # values cannot be entered on the record — one screen away from an operation that
+    # accepts them. `test_each_served_capture_fact_is_what_the_routes_actually_do`
+    # failed on twelve paths, which is exactly the defect it was written to catch: a
+    # surface describing a capability it no longer bounds.
+    #
+    # `_record_writable_fields()` is the expression the write routes themselves gate
+    # on, so a future widening moves the routes and this surface together or moves
+    # neither. `enums` is still read below for `choices`, which is a different question
+    # — WHICH VALUES are allowed, not WHETHER a route accepts the path.
+    writable = _record_writable_fields()
+    enums = _record_enum_fields()
+    return {
+        path: {
+            "level": ws.field_level(path),
+            "record_writable": path in writable,
+            "run_field_writable": path in RUN_WRITABLE_FIELD_PATHS,
+            "run_overridable": ws.field_address(path) in EXPERIMENT_OVERRIDABLE_ADDRESSES,
+            "choices": list(enums[path]) if path in enums else None,
+            "open_namespace": _open_namespace_of(path),
+        }
+        for path in paths
+    }
 
 
 #: The largest one note's text may serialise to. A REFUSAL, NEVER A TRUNCATION.

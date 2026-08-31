@@ -144,7 +144,34 @@ def _source_types(evidence) -> list[str]:
     return seen
 
 
-def _draft_field(path: str, env: dict) -> dict:
+#: What is served about a path whose capture facts the caller did not supply.
+#:
+#: FAIL-CLOSED IN THE DIRECTION THAT MATTERS. Every boolean is False, so a row this
+#: module cannot classify renders as a row nothing can be typed into. The opposite
+#: default would put a control in front of a scientist whose only outcome is a typed
+#: 422 — the defect ``CLAUDE.md`` §11 records as *"a panel told the scientist to enter
+#: a value on 25 fields, and 7 accept none"*, which this whole structure exists to
+#: avoid repeating. ``level`` is ``None`` rather than ``"unclassified"``: "this build
+#: did not say" and "this build classified it as neither" are different claims, and
+#: only the second is a classification.
+_UNKNOWN_CAPTURE: dict = {
+    "level": None,
+    "record_writable": False,
+    "run_field_writable": False,
+    "run_overridable": False,
+    "choices": None,
+    "open_namespace": None,
+}
+
+
+def _capture_for(path: str, capture) -> dict:
+    facts = capture.get(path) if capture else None
+    if not isinstance(facts, dict):
+        return dict(_UNKNOWN_CAPTURE)
+    return {key: facts.get(key, default) for key, default in _UNKNOWN_CAPTURE.items()}
+
+
+def _draft_field(path: str, env: dict, capture=None) -> dict:
     evidence = env.get("evidence") or []
     return {
         "path": path,
@@ -153,19 +180,87 @@ def _draft_field(path: str, env: dict) -> dict:
         "status": env.get("status"),
         "evidence_count": len(evidence),
         "source_types": _source_types(evidence),
+        # The draft HOLDS an envelope here. It says nothing about the value being
+        # good — a `missing` envelope is present and empty, which is a different
+        # thing from a path the draft has never carried at all.
+        "present": True,
+        "capture": _capture_for(path, capture),
     }
 
 
-def draft_to_groups(draft: dict) -> dict:
-    """Group draft scalar fields into stable UI sections for the Review Record screen."""
+def _skeleton_field(path: str, capture=None) -> dict:
+    """A row for a path the draft carries NO envelope at.
+
+    ``status`` is ``missing`` because that is what the draft's own envelope
+    vocabulary calls a value that is not there, and it is what every existing reader
+    of these rows already tests for — ``recordIdentity.createdUtcOnDraft`` skips a
+    `missing` row, and `status.mapFieldStatus` already maps it to the `missing` chip.
+    Nothing is invented: the value is ``null``, there is no evidence, and ``present``
+    is ``False`` so no consumer has to infer the difference from the status alone.
+    """
+    return {
+        "path": path,
+        "label": _label(path),
+        "value": None,
+        "status": "missing",
+        "evidence_count": 0,
+        "source_types": [],
+        "present": False,
+        "capture": _capture_for(path, capture),
+    }
+
+
+def draft_to_groups(draft: dict, capture=None) -> dict:
+    """Group draft scalar fields into stable UI sections for the Review Record screen.
+
+    THE SKELETON, AND THE MEASUREMENT THAT MADE IT NECESSARY. Until this parameter
+    existed, this function iterated ``draft["fields"]`` and nothing else — so a record
+    created through ``POST /api/experiments`` served ``{"groups": []}``: **zero rows,
+    zero groups**, measured over HTTP. ``FieldGroup`` is the only field-rendering
+    component in the frontend, so a scientist creating a record saw no metadata field
+    at all and had no way to learn that the record has any. The same call on a
+    fixture-seeded record returned **26 rows in 4 groups**.
+
+    ``capture`` supplies the paths a row should exist for even when the draft carries
+    no envelope, together with the per-path facts a surface needs to decide whether to
+    offer a control. It is a MAPPING supplied by the caller and is deliberately not
+    computed here: the sets that decide writability (``RUN_WRITABLE_FIELD_PATHS``,
+    ``EXPERIMENT_OVERRIDABLE_ADDRESSES``, ``_record_enum_fields``) live in ``routes``
+    beside the operations that enforce them, and importing them here would either
+    invert the import graph or create a second copy of a classification that must have
+    exactly one definition.
+
+    WHAT IT DOES NOT DO. It writes nothing. A skeleton row exists only in this
+    response — ``draft["fields"]`` is untouched, so no record gains a field, no run
+    inherits one, and no export or validation verdict moves. It is a rendering of what
+    a record COULD hold beside what it does.
+
+    ORDER IS STABLE AND PUTS WHAT THE RECORD HOLDS FIRST: present rows in the draft's
+    own key order (unchanged), then absent rows sorted by path. On a record whose
+    draft already carries every capture path — every committed fixture record does —
+    the response is byte-identical to what it was before ``present``/``capture``
+    joined each row.
+    """
     fields = draft.get("fields") or {}
     buckets: dict[str, list[dict]] = {}
+
+    def bucket_for(path: str) -> list[dict]:
+        title = _GROUP_TITLES.get(path.split(".")[0], _OTHER)
+        return buckets.setdefault(title, [])
+
     for path, env in fields.items():
         if not isinstance(env, dict):
             continue
-        top = path.split(".")[0]
-        title = _GROUP_TITLES.get(top, _OTHER)
-        buckets.setdefault(title, []).append(_draft_field(path, env))
+        bucket_for(path).append(_draft_field(path, env, capture))
+
+    for path in sorted(capture or ()):
+        # `fields` is consulted rather than the rows already built, so a key whose
+        # envelope was skipped above (a wrong-typed persisted value) does NOT get a
+        # skeleton row inventing a clean one for it. Such a record is malformed and
+        # stays visibly so; see CLAUDE.md §11 on reading a persisted malformed value
+        # rather than refusing it, and on not manufacturing claims the draft never made.
+        if path not in fields:
+            bucket_for(path).append(_skeleton_field(path, capture))
 
     ordered_titles = [
         _GROUP_TITLES[k] for k in _GROUP_ORDER if _GROUP_TITLES[k] in buckets
