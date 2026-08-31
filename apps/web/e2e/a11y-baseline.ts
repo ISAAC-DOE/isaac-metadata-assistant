@@ -2066,7 +2066,24 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 52 -> 67, still a scalar — both faces
          measured 67 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@width-390': { darwin: 76, linux: 74 },
+      // ── MERGE RESOLUTION CORRECTED BY CI, 2026-08-30 ─────────────────────────
+      // The merge kept `main`'s `{76, 74}` and discarded this branch's `{76, 75}`,
+      // which asserted that main's darwin +1 (a description crossing
+      // `PURPOSE_DISCLOSURE_MIN_CHARS` in the strike sweep) and this branch's +1 (the
+      // change feed's ADDED operation) were the same node. An independent review
+      // flagged that the dedup was never stated and never re-measured. CI settled it:
+      // run 33355811385 on the merged head reported `GREW settings-explorer @
+      // width-390 on linux: color-contrast 74 -> 75`, and that ONE cell was its only
+      // mismatch. So on linux the two effects are not additive — main's sweep moved
+      // linux by zero, as its own CI run 33344481475 reported — and the correct linux
+      // figure is 75. TRANSCRIBED from that run, not derived.
+      //
+      // AND THE DARWIN HALF IS MEASURED ON THE MERGED TREE TOO, so this pair is a
+      // real split rather than one measured face beside one carried forward: a local
+      // macOS run of `a11y-narrow.spec.ts -g "390px: Settings & API — Endpoint
+      // Explorer"` at this head PASSES against 76. That is why the key is absent from
+      // `DARWIN_CARRIED_FORWARD`.
+      'settings-explorer@width-390': { darwin: 76, linux: 75 },
       'settings-privacy@width-320': 2,
       'settings-privacy@width-390': 2,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
@@ -3872,7 +3889,7 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // (CI reported zero mismatches at that head) while this branch had already moved
   // `settings-explorer@width-390`'s linux half, and the two edits overlap by one.
   // Every linux figure here remains CI's; none was measured on this machine.
-  linux: 2290,
+  linux: 2291,
 };
 
 /**
