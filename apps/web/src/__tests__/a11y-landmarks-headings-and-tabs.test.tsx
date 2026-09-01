@@ -342,6 +342,14 @@ describe('A11Y-06 residue · the Endpoint Explorer tab names one region, once', 
  * files test unrelated surfaces and a shared helper module for eight lines would
  * be the worse trade. Reproduces the two figures this repository already
  * records: #78838f on #ffffff = 3.86:1, #5b6570 on #ffffff = 5.93:1.
+ *
+ * A3 NOTE, so the next reader does not think the trade was reversed silently:
+ * `src/test/contrast.ts` now holds ONE shared copy, used by
+ * `palette-contrast.test.ts`. That extraction was made for the palette-wide
+ * guard, whose claim rests on the formula rather than merely using it, and it
+ * deliberately did NOT rewrite this file or `stats-charts.test.tsx` — the
+ * reasoning above still applies to them. `palette-contrast.test.ts` asserts the
+ * shared module reproduces the same two figures, so the copies cannot disagree.
  */
 const srgbOf = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
 const luminance = (hex: string) =>
@@ -426,14 +434,33 @@ describe('A16 · the inactive .section-tab label clears 4.5:1', () => {
   /*
    * VACUITY GUARD. The test above is only meaningful if the ratio it computes
    * can fail, and if the size threshold it invokes actually applies. Both are
-   * asserted here from the stylesheet rather than assumed: the old token really
+   * asserted here from the stylesheet rather than assumed: the old value really
    * does fail, and `.section-tab` really is below the WCAG large-text boundary,
    * so 4.5:1 and not 3:1 is the right bar.
+   *
+   * INVERTED BY A3 (the app-wide palette fix), and inverted rather than deleted
+   * because this assertion is the whole reason the test above is not vacuous.
+   *
+   * It USED TO READ `contrastRatio(declaredHex('--text-tertiary'),
+   * declaredHex('--surface')) < 4.5` — i.e. it reached the failing value
+   * THROUGH THE TOKEN. That was correct while `--text-tertiary` was #78838f,
+   * and it is a live illustration of a trap worth naming: a guard that proves
+   * "the discarded thing failed" must name the discarded VALUE, because a guard
+   * that names the TOKEN is silenced by the very palette edit it exists to
+   * justify. A3 darkened `--text-tertiary` to #626c77 (5.34:1 on white), so the
+   * old form would now assert that a passing token fails, and would fail.
+   *
+   * The literal is what mattered and the literal is what is asserted. The
+   * second half — that this fix moved `.section-tab` off it — is kept as a
+   * separate, still-meaningful claim: whatever token the tab uses today, it is
+   * not the one that carried #78838f.
    */
-  it('the discarded token really did fail, and the size threshold really applies', () => {
-    expect(contrastRatio(declaredHex('--text-tertiary'), declaredHex('--surface'))).toBeLessThan(
-      4.5,
-    );
+  it('the discarded value really did fail, and the size threshold really applies', () => {
+    // #78838f is the value `--text-tertiary` carried when A16 was written. It is
+    // written out, NOT read through the token, so no palette change can silence it.
+    expect(contrastRatio('#78838f', declaredHex('--surface'))).toBeLessThan(4.5);
+    // ...and `.section-tab` is no longer painted with it, whatever the token now holds.
+    expect(declaredHex(colorTokenOf('.section-tab', '/screens.css'))).not.toBe('#78838f');
     const block = /\.section-tab\s*\{([^}]*)\}/.exec(sheet('/screens.css'))![1];
     const size = Number(/font-size:\s*([\d.]+)px/.exec(block)![1]);
     const weight = Number(/font-weight:\s*(\d+)/.exec(block)![1]);
