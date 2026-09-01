@@ -1,0 +1,194 @@
+<!--
+  ISAAC Assistant artifact companion — page source.
+
+  NOT PUBLISHED, and publishing is not an agent's act. See
+  docs/isaac-assistant-artifact-operator-checklist.md.
+
+  THE MODEL / MCP CALL SURFACE IS AN UNIMPLEMENTED SEAM, ON PURPOSE.
+  The vendor documentation verified 2026-08-31 states that artifacts can embed AI
+  capabilities and can call MCP servers, but documents no JavaScript API for
+  either. This file therefore calls nothing. `runCompanionTurn` is the single seam;
+  it fails closed with a stated reason. Inventing the API from recall is what
+  CLAUDE.md §5 forbids, and a wrong guess would fail in an operator's hands rather
+  than in CI.
+
+  NO ARTIFACT URL, TOKEN, ENDPOINT, OR ACCOUNT IDENTIFIER APPEARS IN THIS FILE, and
+  a test asserts it. The deep link into ISAAC is supplied by an operator at runtime
+  and is disabled by default — see apps/api/isaac_api/artifact_link.py.
+-->
+<title>ISAAC Record Companion</title>
+<style>
+  :root {
+    --bg: #f7f8f9;
+    --surface: #ffffff;
+    --border: #d9dee3;
+    --text: #1c2126;
+    --text-muted: #5b6570;
+    --accent: #2f5d8a;
+    --warn-bg: #fdf6e3;
+    --warn-border: #d8c48a;
+    --warn-text: #6b5416;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14181c;
+      --surface: #1c2126;
+      --border: #333b44;
+      --text: #e6eaee;
+      --text-muted: #a3adb8;
+      --accent: #8fb8dd;
+      --warn-bg: #2a2415;
+      --warn-border: #5c4f28;
+      --warn-text: #e0cd94;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14181c;
+    --surface: #1c2126;
+    --border: #333b44;
+    --text: #e6eaee;
+    --text-muted: #a3adb8;
+    --accent: #8fb8dd;
+    --warn-bg: #2a2415;
+    --warn-border: #5c4f28;
+    --warn-text: #e0cd94;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    padding: 24px 20px 40px;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--text-muted); margin: 0 0 20px; font-size: 13.5px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+  .hint { color: var(--text-muted); font-size: 12.5px; margin: 6px 0 0; }
+  input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  button {
+    font: inherit;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) button { color: #14181c; }
+  }
+  :root[data-theme="dark"] button { color: #14181c; }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .status {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    color: var(--warn-text);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 13.5px;
+  }
+  .status strong { display: block; margin-bottom: 3px; }
+  ul { margin: 8px 0 0; padding-left: 20px; color: var(--text-muted); font-size: 13px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+</style>
+
+<main>
+  <h1>ISAAC Record Companion</h1>
+  <p class="sub">
+    Your Claude, calling your ISAAC. ISAAC itself has no model and no AI
+    subscription — this runs on yours.
+  </p>
+
+  <div class="card">
+    <label for="experiment-id">Experiment ID</label>
+    <input id="experiment-id" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Paste the record's ID from ISAAC" />
+    <p class="hint">
+      Typed or pasted, deliberately. No supported mechanism for passing an
+      Experiment ID into an artifact by link is documented, so this companion does
+      not pretend to receive one.
+    </p>
+  </div>
+
+  <div class="card">
+    <button id="start" type="button">Check this record</button>
+    <p class="hint">
+      Reads the record, its runs, and its open blocking questions. Writes nothing
+      until you confirm a specific value.
+    </p>
+  </div>
+
+  <div class="card" role="status" aria-live="polite">
+    <div class="status" id="seam-status">
+      <strong>Not connected to a model or an MCP server.</strong>
+      This companion's call surface is unimplemented in this build. It is not
+      disabled, throttled, or waiting — no request is made and no result is cached.
+    </div>
+    <ul>
+      <li>The ISAAC connector must be added to the organization by a Team Owner.</li>
+      <li>Each person then connects and authorises it in their own Claude settings.
+          Nobody can do that step for you.</li>
+      <li>Finalising a record — submit and export — is your act inside ISAAC. No
+          tool here can do it, by construction.</li>
+    </ul>
+  </div>
+</main>
+
+<script>
+  // The single seam. It fails closed, and it says which of the two reasons applies
+  // rather than collapsing them into one vague "unavailable".
+  //
+  // A future slice replaces the body of this function with the vendor-documented
+  // client call, once that documentation is in hand. Until then it must not
+  // fabricate a result, retry, or degrade to a cached answer: a companion that
+  // answers from memory while disconnected is the honesty defect CLAUDE.md §11
+  // records four separate instances of.
+  const COMPANION_SEAM_UNSET = "companion_seam_unset";
+
+  async function runCompanionTurn(_request) {
+    return {
+      ok: false,
+      reason: COMPANION_SEAM_UNSET,
+      message:
+        "No model or MCP call surface is wired in this build. Nothing was sent " +
+        "and nothing was received.",
+    };
+  }
+
+  const startButton = document.getElementById("start");
+  const experimentInput = document.getElementById("experiment-id");
+  const seamStatus = document.getElementById("seam-status");
+
+  startButton.addEventListener("click", async () => {
+    const experimentId = experimentInput.value.trim();
+    if (!experimentId) {
+      seamStatus.innerHTML =
+        "<strong>Enter an Experiment ID first.</strong>" +
+        "Nothing was sent.";
+      return;
+    }
+    const outcome = await runCompanionTurn({ experimentId });
+    if (!outcome.ok) {
+      seamStatus.innerHTML =
+        "<strong>Could not check this record.</strong>" + outcome.message;
+    }
+  });
+</script>

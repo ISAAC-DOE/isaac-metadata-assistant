@@ -1,0 +1,112 @@
+{
+  "$comment": "The tools this artifact companion is permitted to call, and nothing else. This file is a DECLARATION, not an enforcement point: enforcement is the scope check in apps/api/isaac_api/mcp/server.py and the closed operation allowlist in apps/api/isaac_api/mcp/policy.py, which run whatever a client does with this file. The declaration exists so that a drift between what the companion asks for and what the server permits is a failing test rather than a discovery in production.",
+  "companion": "isaac-assistant-artifact",
+  "derived_from": "apps/api/isaac_api/mcp/policy.py::PERMITTED_TOOL_NAMES",
+  "scopes_requested": [
+    "isaac:draft.write",
+    "isaac:read"
+  ],
+  "tools": [
+    {
+      "tool": "isaac_answer_questions",
+      "title": "Answer blocking questions",
+      "scope": "isaac:draft.write",
+      "mutates": true,
+      "purpose": "Close an open blocking question with a user-confirmed answer."
+    },
+    {
+      "tool": "isaac_check_run",
+      "title": "Check a run",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "Run the non-mutating validation check over a run and report findings."
+    },
+    {
+      "tool": "isaac_create_run",
+      "title": "Add a run to a record",
+      "scope": "isaac:draft.write",
+      "mutates": true,
+      "purpose": "Add a new run to a record (draft content only)."
+    },
+    {
+      "tool": "isaac_get_experiment",
+      "title": "Read one record",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "Read one record's current draft state and workflow status."
+    },
+    {
+      "tool": "isaac_get_run",
+      "title": "Read one run",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "Read one run's draft content."
+    },
+    {
+      "tool": "isaac_inspect_evidence",
+      "title": "Inspect a record's evidence",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "Read the evidence supporting a record's field values."
+    },
+    {
+      "tool": "isaac_list_experiments",
+      "title": "List records",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "List the scientist's records so the companion can offer a choice."
+    },
+    {
+      "tool": "isaac_list_questions",
+      "title": "List blocking questions",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "List the open blocking questions that stop a record exporting."
+    },
+    {
+      "tool": "isaac_list_runs",
+      "title": "List a record's runs",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "List the runs belonging to a record."
+    },
+    {
+      "tool": "isaac_update_draft",
+      "title": "Write draft values",
+      "scope": "isaac:draft.write",
+      "mutates": true,
+      "purpose": "Write draft values the scientist has explicitly confirmed."
+    }
+  ],
+  "never": {
+    "$comment": "Capabilities this companion must never acquire. Each is refused server-side by non-implementation; repeating them here makes a well-meaning future edit to the companion a test failure.",
+    "submit": "No tool submits a record. docs/ai-integration-decision-packet.md 6.2.",
+    "export": "No tool mints an official record or its evidence sidecar.",
+    "delete": "No tool deletes or discards a record, run, or asset.",
+    "governance": "No tool changes governance, roles, or visibility.",
+    "migration": "No tool applies a database migration.",
+    "forbidden_name_tokens": [
+      "accept",
+      "approve",
+      "delete",
+      "destroy",
+      "discard",
+      "drop",
+      "export",
+      "finalis",
+      "finaliz",
+      "governance",
+      "grant",
+      "migrat",
+      "publish",
+      "purge",
+      "remove",
+      "reset",
+      "revoke",
+      "sign_off",
+      "signoff",
+      "submit",
+      "truncate"
+    ]
+  }
+}
