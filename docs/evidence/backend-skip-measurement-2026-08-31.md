@@ -11,6 +11,9 @@ Measured at `main` @ `bebf4e2523a1cec8bf2ec6b58bdf18ded9f4cdc1` (= tag `v0.0.192
 
 This is the **complete** backend suite, not a partial collection. The 40 skips below
 sum to exactly 40; the arithmetic is shown so a reader can check it rather than trust it.
+**One family has since been closed** — see §3.5 — so a run today measures **39**, and both
+totals are carried in the §2 table with their vantage points rather than one overwriting
+the other.
 
 ---
 
@@ -36,10 +39,16 @@ reason a guess about a skip set is not a substitute for `-rs`.
 | 2 | `ISAAC_PERF_BENCH is not 1` — opt-in wall-clock benchmark | **4** | `test_pending_count_is_not_materialised.py:349` (2), `test_pending_reads_are_boundable.py:686` (1), `test_change_feed.py:1056` (1) | Yes | Yes | No — opt-in flag | No | Deliberately not (see §3.2) |
 | 3 | `psycopg2 is installed`; the **absent**-driver path is untestable | **2** | `tests/test_db_recon.py:1294`, `apps/api/tests/test_db_provider.py:703` | Yes | **Yes** | No | **YES — it did** | **Yes — now built (§3.3)** |
 | 4 | *"tolerated by the strict reader; covered by the route tests"* | **4** | `test_one_malformed_document_does_not_take_down_the_list.py:283` (`source`, `draft`, `created_utc`, `answer_log`) | Yes | Yes | No | No — covered elsewhere | Not needed (§3.4) |
-| 5 | *"the run-list route implements `q` in this checkout"* | **1** | `test_mcp_server.py:342` | Yes | Yes | No | **YES** | **Yes — see §3.5** |
-| | **Total** | **40** | | | | | | |
+| 5 | ~~*"the run-list route implements `q` in this checkout"*~~ — **CLOSED 2026-08-31, §3.5** | ~~1~~ **0** | `test_mcp_server.py:342` | — | — | No | **it did** | **Built** |
+| | **Total, as measured at `bebf4e2`** | **40** | | | | | | |
+| | **Total, after family 5 was closed (§3.5)** | **39** | | | | | | |
 
-`29 + 4 + 2 + 4 + 1 = 40.` ✔
+`29 + 4 + 2 + 4 + 1 = 40.` ✔ — the run this document reports, at `bebf4e2`.
+
+`29 + 4 + 2 + 4 + 0 = 39.` ✔ — after §3.5 closed family 5 on 2026-08-31. **Both sums are
+kept, each with its vantage point**, because a reader who runs `-rs` today and counts 39
+must be able to see that this is the *same* measurement advanced by one closure, not a
+second measurement that disagrees with the first.
 
 ---
 
@@ -133,11 +142,36 @@ The invariant is still worth having; only the example expired. The fix is to ass
 with a parameter the route genuinely lacks, **and to assert that the chosen parameter is
 still absent**, so the next widening fails loudly instead of skipping quietly.
 
-*Deferred by one slice, deliberately:* `apps/api/isaac_api/mcp/**` and
+~~*Deferred by one slice, deliberately:* `apps/api/isaac_api/mcp/**` and
 `test_mcp_server.py` are owned by a concurrent slice adding MCP proposal tools, which
 will move this operation table. Fixing it here would conflict with that work and be
 re-measured immediately afterwards. It is carried in this document so it cannot be
-lost, and is closed in the follow-up slice.
+lost, and is closed in the follow-up slice.~~
+
+**CLOSED 2026-08-31, in the follow-up slice this paragraph promised.** The fix is the
+one prescribed two paragraphs above, implemented literally: the probe is now **derived**
+rather than named —
+
+```python
+declared = OPERATIONS["list_runs"].query_parameters
+absent_filter = "no_such_filter_" + "".join(sorted(declared))[:24]
+assert absent_filter not in declared, ...
+```
+
+so the test **cannot go dead again** when the route grows a filter, and the derivation
+is *asserted* rather than assumed: a collision fails loudly instead of skipping quietly.
+
+**A SELECTIVITY CONTROL WAS ADDED IN THE SAME CHANGE, AND IT IS THE HALF THE ORIGINAL
+PRESCRIPTION DID NOT NAME.** A refusal test alone stays green under a *different* bug —
+a tool that refuses **every** extra argument, rejecting a caller's legitimate filter as
+unknown. `test_list_runs_accepts_a_filter_the_route_does_have` asserts the other half
+using `q` itself, which is what makes removing `q` from the refusal probe correct rather
+than merely convenient.
+
+**Measured, before → after:** `test_mcp_server.py` `63 passed, 1 skipped` → **`65 passed,
+0 skipped`** (`.venv/bin/pytest apps/api/tests/test_mcp_server.py -q -rs`). The +2 is the
+revived test plus the new control. **The suite-wide skip count therefore moves 40 → 39**,
+and family 5 in the §2 table is now empty rather than deferred.
 
 ---
 
