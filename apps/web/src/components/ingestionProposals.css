@@ -1,0 +1,440 @@
+/*
+ * Ingestion Proposals.
+ *
+ * Built entirely on the existing Scientific Clarity tokens — no new hue, no new
+ * radius, no new shadow, and no token declared here. The card geometry is
+ * `.note-card`'s, so a proposal and a note read as two kinds of thing on one screen
+ * rather than two screens.
+ *
+ * RESERVED VERDICT COLOUR (--pass-* / --fail-*) APPEARS NOWHERE IN THIS FILE. A
+ * lifecycle state is not a validator verdict about the science: `accepted` is not a
+ * pass and `rejected` is not a fail, and painting them that way would make the panel
+ * assert something about the record that no validator said.
+ *
+ * THE FIVE STATES SHARE ONE NEUTRAL CHIP TREATMENT, for the reason `unmappedNotes.css`
+ * gives its four: ranking them by colour would make `withdrawn` read as a worse
+ * outcome than `rejected`, and neither is a worse outcome than the other. A closed
+ * proposal is set BACK, never hidden and never struck through — strike-through reads
+ * as deletion, which is the one thing none of these states is.
+ *
+ * State is carried on `data-state`, matching `.run-card` and `.note-card`.
+ */
+
+.proposals-section {
+  margin-bottom: 20px;
+}
+
+.proposals-head {
+  margin-bottom: 10px;
+}
+
+.proposals-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.proposals-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+.proposals-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* --- toolbar --------------------------------------------------------------- */
+
+.proposals-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.proposals-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.proposals-control-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.proposals-filter,
+.proposal-form-input {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.proposals-filter:focus-visible,
+.proposal-form-input:focus-visible,
+.proposal-history-toggle:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+/*
+ * The live count. It is mounted in every state and blanks rather than holding stale
+ * numbers, so it needs a reserved line box — otherwise the toolbar reflows every time
+ * a reload starts.
+ */
+.proposals-count {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* --- the list -------------------------------------------------------------- */
+
+.proposals-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proposal-card {
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* A reviewed proposal is set back. It is still listed, still readable, still complete. */
+.proposal-card[data-state='rejected'],
+.proposal-card[data-state='superseded'],
+.proposal-card[data-state='withdrawn'],
+.proposal-card[data-state='accepted'] {
+  background: var(--surface-subtle);
+}
+
+.proposal-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 6px;
+}
+
+.proposal-state {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-strong);
+  background: var(--border-faint);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.proposal-path {
+  font-size: 11px;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+
+.proposal-scope,
+.proposal-when {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/*
+ * The sentence that keeps a proposal from reading as a value. It is quiet but it is
+ * never absent, and it is rendered in every state including `accepted`.
+ */
+.proposal-nature {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  max-width: 68ch;
+}
+
+.proposal-value {
+  margin: 0 0 8px;
+}
+
+.proposal-value-label {
+  margin: 0 0 3px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-slate);
+  text-transform: none;
+}
+
+.proposal-value-body {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  /* Wide values scroll inside their own box; the page never scrolls sideways. */
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.proposal-rule,
+.proposal-origin,
+.proposal-target-state,
+.proposal-acceptance-line,
+.proposal-closed-note {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 78ch;
+}
+
+.proposal-rule-label,
+.proposal-origin-label,
+.proposal-unavailable-label {
+  font-weight: 650;
+  color: var(--text-slate);
+}
+
+/* The note's own words, quoted. Verbatim, so its own spacing is preserved. */
+.proposal-excerpt {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-strong);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.proposal-excerpt-absent,
+.proposal-pending-note,
+.proposal-current-absent {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  max-width: 78ch;
+}
+
+/*
+ * Why acceptance is impossible for this proposal. Amber-adjacent advisory tokens
+ * rather than a failure red: nothing failed, and nothing about the record is wrong.
+ */
+.proposal-unavailable {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--advisory-text);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  border-radius: 6px;
+  max-width: 78ch;
+}
+
+.proposal-acceptance {
+  margin: 0 0 8px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+}
+
+/* --- the current-value read ------------------------------------------------ */
+
+.proposal-current {
+  margin: 0 0 8px;
+}
+
+.proposal-current-button {
+  margin-bottom: 6px;
+}
+
+.proposal-current-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.proposal-current-label {
+  margin: 0 0 3px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-slate);
+}
+
+/* --- actions and forms ----------------------------------------------------- */
+
+/*
+ * THE ACTS ARE PEERS. Reject, Supersede and Withdraw are not painted as destructive
+ * controls, because none of them destroys anything — reaching for `--danger-*` here
+ * would say, in the one language a reader cannot help absorbing, the opposite of what
+ * this feature does.
+ */
+.proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.proposal-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+}
+
+.proposal-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.proposal-form-input {
+  width: 100%;
+  max-width: 100%;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.proposal-form-hint,
+.proposal-form-meaning {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  max-width: 68ch;
+}
+
+.proposal-form-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  max-width: 68ch;
+}
+
+.proposal-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* --- history --------------------------------------------------------------- */
+
+.proposal-history {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-hair);
+}
+
+.proposal-history-toggle {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--action);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.proposal-history-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.proposal-history-act {
+  font-weight: 650;
+  color: var(--text-strong);
+}
+
+.proposal-history-when,
+.proposal-history-move,
+.proposal-history-reason,
+.proposal-history-actor {
+  color: var(--text-tertiary);
+}
+
+/* --- pager / empty / error -------------------------------------------------- */
+
+.proposals-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.proposals-pager-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.proposals-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px;
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.proposals-empty p {
+  margin: 0;
+  max-width: 68ch;
+}
+
+.proposals-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.proposals-error-text {
+  max-width: 78ch;
+}

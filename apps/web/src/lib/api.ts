@@ -60,6 +60,11 @@ import type {
   ApiPendingItem,
   ApiPendingPage,
   ApiPendingResponse,
+  ApiProposalAcceptedFrom,
+  ApiProposalReviewAction,
+  ApiProposalReviewed,
+  ApiProposalState,
+  ApiProposalsResponse,
   ApiProvenanceResponse,
   ApiProviderCapabilities,
   ApiProviderRefusal,
@@ -799,6 +804,27 @@ export interface ListRunsQuery {
  */
 export interface ListNotesQuery {
   state?: ApiNoteState;
+}
+
+/**
+ * The three parameters `GET .../proposals` accepts.
+ *
+ * `limit` AND `after` ARE NOT OPTIONAL DECORATION HERE, and this list is the one
+ * place in this client where that matters. Unlike `GET .../runs` and
+ * `GET .../pending`, OMITTING `limit` DOES NOT RETURN EVERYTHING — the server
+ * answers a window (`window_default`) and caps what may be asked for
+ * (`window_max`, and a larger `limit` is a 422, not a clamp). `after` continues
+ * from a previous window's `next_cursor`; an id the record does not hold is
+ * refused with `unknown_cursor` rather than treated as the start of the list,
+ * because silently restarting a page walk returns the same window forever.
+ *
+ * `state` is typed as the server's own union rather than `string`, so a filter this
+ * API does not offer is a compile error instead of a query the server ignores.
+ */
+export interface ListProposalsQuery {
+  state?: ApiProposalState;
+  limit?: number;
+  after?: string;
 }
 
 /*
@@ -1665,6 +1691,135 @@ export const api = {
         : {}),
     });
     if (res.ok) return readJson<ApiConflictResolved>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /*
+   * --- Persistent ingestion proposals ----------------------------------------
+   *
+   * WHAT A PROPOSAL IS, AND WHAT NO CALLER OF THESE THREE MAY PRESENT IT AS. A
+   * proposal is a STORED SUGGESTION: a value, the official field path it is for, and
+   * the deterministic rule that produced them, against the note the content was read
+   * from. It is not a field value, not evidence and not a confirmation, and it does
+   * not become one when it is accepted — accepting records that one of the three
+   * EXISTING writers wrote the value, and the field's value lives in the envelope
+   * that writer produced. The server serialises `verified`, `is_evidence` and
+   * `is_field_value` as constants for exactly that reason; `types.ts` types all three
+   * as the literal `false` so nothing here can branch on one being true.
+   *
+   * THERE IS NO `getProposal` HERE EITHER, AND IT WAS WRITTEN AND THEN DELETED.
+   * `GET .../proposals/{id}` exists on the server and this client does not call it:
+   * the list window already carries every field the panel renders, the full `history`
+   * included, so a detail read would be a second request for content already in hand.
+   * The function shipped anyway, with no caller — and its only measurable effect was
+   * to make `backend-down-state`'s derived inventory count a sub-read the application
+   * never performs, so `SUB_RESOURCE_LABELS` carried a product word for a path no
+   * reader could ever reach. Dead code kept alive by a counter is worse than a smaller
+   * counter. If a detail view is ever built that needs something the window omits,
+   * this comes back with the caller that needs it.
+   *
+   * THERE IS NO `createProposal` HERE, AND ITS ABSENCE IS DELIBERATE. Nothing in this
+   * build produces a proposal: the transcript reader still stores its candidates as
+   * Notes, the extractor still discards its residue, and CSV ingest still reconciles
+   * rather than applies. `POST .../proposals` exists on the server and has no
+   * automatic caller (`routes.py`: "NOTHING WAS REWIRED TO FEED THEM"), so adding a
+   * create button here would be this client manufacturing the queue it is reviewing.
+   * When a producer lands, the create call lands with it.
+   *
+   * ONE VALIDATOR, THE RECORD'S. A proposal lives inside the experiment's own state
+   * document, so a review carries the EXPERIMENT's version token — never a run's, and
+   * there is no per-proposal token to confuse it with. The acceptance precondition
+   * over the target's own content (`target_digest`) is a SECOND, different check that
+   * `If-Match` cannot express and that this client never computes.
+   *
+   * THE PATH LITERALS STAY WHOLE and the query is appended separately, exactly as
+   * `listNotes` and `listConflicts` do — `backend-down-state.test.tsx` reads this
+   * module's source to derive its per-record sub-read inventory.
+   */
+
+  /**
+   * ONE WINDOW of a record's proposals, with the server's own vocabularies.
+   *
+   * THE BOUND IS THE SERVER'S AND IS NOT RESTATED HERE. `limit` is passed through
+   * only when the caller named one, so an omitted `limit` gets `window_default` from
+   * the server rather than a number this client chose — the response reports
+   * `window_default` and `window_max`, and a client that transcribed either would be
+   * keeping a second copy of a bound the server enforces.
+   */
+  listProposals(
+    experimentId: string,
+    query: ListProposalsQuery = {},
+  ): Promise<ApiProposalsResponse> {
+    const params = new URLSearchParams();
+    if (query.state !== undefined) params.set('state', query.state);
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.after !== undefined) params.set('after', query.after);
+    const path = `/experiments/${enc(experimentId)}/proposals`;
+    const search = params.toString();
+    return getJson<ApiProposalsResponse>(search === '' ? path : `${path}?${search}`);
+  },
+
+  /**
+   * Perform ONE of the four review acts. There is no delete: `reject`, `supersede`
+   * and `withdraw` are STATES, and the proposal stays listed and readable afterwards
+   * with the act appended to its history.
+   *
+   * FOUR RULES, EACH OF WHICH THE SERVER REFUSES A 422 FOR RATHER THAN IGNORING:
+   *
+   *  1. `accepted_from` IS REQUIRED FOR `accept` AND HAS NO DEFAULT. `candidate` says
+   *     the proposed value is written as it stands; `edited` says it was wrong and
+   *     `value` carries the corrected one. Nothing here picks one.
+   *  2. `value` IS SENT ONLY FOR `edited`. On a `candidate` accept the server takes
+   *     the stored `proposed_value`, and a `value` that differs from it is refused
+   *     (`value_is_not_the_candidate`) — so echoing the candidate back would be this
+   *     client re-asserting a value it has no reason to re-send.
+   *  3. `reason` IS REFUSED ON `accept`. It belongs to the three refusing acts, and
+   *     the server refuses it rather than accepting and dropping it, "because a
+   *     sentence a scientist wrote must not disappear into a 200". It is sent only
+   *     when non-blank: a justification nobody wrote is never composed for them, and
+   *     `""` would be refused rather than stored as an empty one.
+   *  4. `confirmed_by_user: true` is sent unconditionally because this client calls
+   *     this only from a control a person activated.
+   *
+   * THE 409s ARE THE CALLER'S TO READ, NOT THIS FUNCTION'S TO INTERPRET.
+   * `mutationError` attaches the body for 409/412/422/400, and `human_actor_required`,
+   * `proposal_stale`, `target_run_removed` and `target_scope_mismatch` all arrive as
+   * 409 with different `error` values and different remedies. Collapsing them into one
+   * sentence here would put a second definition of each refusal in the client.
+   */
+  async reviewProposal(
+    experimentId: string,
+    proposalId: string,
+    opts: {
+      experimentVersion: string;
+      action: ApiProposalReviewAction;
+      acceptedFrom?: ApiProposalAcceptedFrom;
+      value?: unknown;
+      reason?: string;
+    },
+  ): Promise<ApiProposalReviewed> {
+    const path = `/experiments/${enc(experimentId)}/proposals/${enc(proposalId)}/review`;
+    const body: Record<string, unknown> = {
+      confirmed_by_user: true,
+      action: opts.action,
+    };
+    if (opts.action === 'accept') {
+      body.accepted_from = opts.acceptedFrom;
+      if (opts.acceptedFrom === 'edited') body.value = opts.value;
+    } else if ((opts.reason ?? '').trim() !== '') {
+      body.reason = (opts.reason ?? '').trim();
+    }
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      // Truthiness guard, `createRun`'s: an empty token must be sent as ABSENT
+      // (server 428) rather than as `If-Match: ""`, which is malformed (400) and
+      // would report a client bug as a precondition failure.
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiProposalReviewed>(res, path);
     throw await mutationError(res, path);
   },
 

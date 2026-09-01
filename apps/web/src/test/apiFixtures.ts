@@ -747,6 +747,98 @@ export function assetsPage(
 
 export const assetsEmpty = assetsPage([]);
 
+/**
+ * The 18 field paths `GET .../proposals` reports under `target_field_paths`, and the
+ * ONE of them that is record-scoped.
+ *
+ * MEASURED, NOT ASSUMED, AND THE FIRST VERSION OF THIS FIXTURE WAS WRONG — which is
+ * why the measurement is written down here rather than left implicit. It served
+ * `['sample.material.name', 'system.domain', 'system.technique']` with
+ * `record_scoped_target_field_paths: ['system.domain', 'system.technique']`, under a
+ * docstring claiming the shape came verbatim from the server. **`system.domain` is
+ * not a proposal target at all**, and exactly ONE path is record-scoped. An
+ * unmeasured fidelity claim in the artifact whose entire job is to stand in for the
+ * server is the defect `CLAUDE.md` §11 records over and over; a test that pinned
+ * behaviour against those values would have pinned it against a server that does not
+ * exist.
+ *
+ * Re-derive rather than trusting this list — it is a POINT-IN-TIME transcription of a
+ * set the server DERIVES (`routes.PROPOSAL_TARGET_PATHS` is
+ * `NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT`, which widens automatically when a
+ * path gains a write route), so it can go stale without anything here changing:
+ *
+ * ```
+ * .venv/bin/python -c "import sys; sys.path.insert(0,'apps/api'); from isaac_api import routes; \
+ *   print(len(routes.PROPOSAL_TARGET_PATHS)); print(sorted(routes.PROPOSAL_TARGET_PATHS)); \
+ *   print(sorted(p for p in routes.PROPOSAL_TARGET_PATHS \
+ *     if routes._PROPOSAL_WRITER_SCOPE[routes._proposal_writer_for(p)] == 'record'))"
+ * ```
+ *
+ * Measured 2026-09-01: 18 paths, and `record_scoped` is `['system.technique']`.
+ */
+export const PROPOSAL_TARGET_PATHS = [
+  'context.environment',
+  'context.temperature_K',
+  'context.thermodynamics.atmosphere',
+  'sample.composition.CuO2_mass_fraction',
+  'sample.composition.sucrose_mass_fraction',
+  'sample.geometry.pellet_diameter_mm',
+  'sample.material.formula',
+  'sample.material.name',
+  'sample.material.provenance',
+  'sample.sample_form',
+  'system.facility.beamline',
+  'system.facility.endstation',
+  'system.facility.facility_name',
+  'system.facility.organization',
+  'system.facility.site',
+  'system.technique',
+  'timestamps.acquired_end_utc',
+  'timestamps.acquired_start_utc',
+];
+
+/** The ONE record-scoped target. The other 17 are applied through a run's writer. */
+export const PROPOSAL_RECORD_SCOPED_TARGET_PATHS = ['system.technique'];
+
+/**
+ * An EMPTY ingestion-proposal window.
+ *
+ * ITS KEY SET is `routes._proposals_payload`'s, and its two path lists are the
+ * MEASURED values above rather than an illustrative sample — see the note on
+ * `PROPOSAL_TARGET_PATHS` for what the first version of this fixture claimed and got
+ * wrong.
+ *
+ * IT IS THE NEUTRAL DEFAULT FOR EVERY RECORD-SCREEN TEST, for the reason `runsEmpty`,
+ * `notesEmpty` and `conflictsEmpty` are: the panel renders its heading and its honest
+ * empty state and nothing else, so no assertion in any other file has to change. A
+ * test ABOUT proposals supplies its own body — `ingestion-proposals-panel.test.tsx`
+ * builds its own fixtures rather than importing these, so this one carries only what
+ * the shared record-screen fixture needs.
+ *
+ * THE FOUR SERVED VOCABULARIES ARE PRESENT AND NON-EMPTY, deliberately. The panel
+ * drives its filter options, its offered acts and its Accept availability off them,
+ * and a fixture that omitted them would exercise only the degraded branches — so a
+ * record-screen test would silently be testing a shape the server never sends.
+ */
+export const proposalsEmpty = {
+  proposals: [],
+  total: 0,
+  returned: 0,
+  by_state: { open: 0, accepted: 0, rejected: 0, superseded: 0, withdrawn: 0 },
+  has_more: false,
+  next_cursor: null,
+  window_default: 50,
+  window_max: 200,
+  max_per_record: 1000,
+  unreadable_entries: 0,
+  target_field_paths: PROPOSAL_TARGET_PATHS,
+  record_scoped_target_field_paths: PROPOSAL_RECORD_SCOPED_TARGET_PATHS,
+  states: ['open', 'accepted', 'rejected', 'superseded', 'withdrawn'],
+  review_actions: ['accept', 'reject', 'supersede', 'withdraw'],
+  accepted_from_values: ['candidate', 'edited'],
+  experiment_version: VERSION_FIELDS.version,
+};
+
 /** The official schema's own closed set at a dotted path, or `null`. READ, never listed. */
 function schemaEnum(path: string): string[] | null {
   let node: unknown = officialSchema;
@@ -1864,6 +1956,11 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, RouteEntry> {
     // record-screen assertion has to change. A test about notes supplies its own
     // body for this key.
     [`GET ${base}/notes`]: { body: notesEmpty },
+    // The Ingestion Proposals panel reads this on mount, with the same neutral default
+    // as `runs` and `notes` above. Without it the panel renders its honest API-down
+    // state — a second `role="alert"` on every record screen — which is correct
+    // behaviour and the wrong default for a fixture about something else.
+    [`GET ${base}/proposals`]: { body: proposalsEmpty },
     [`GET ${base}/assets`]: { body: assetsEmpty },
     // The Conflicting Evidence panel on the Evidence screen reads this on mount,
     // with the same neutral default as `runs` and `notes` above: NO conflicts
