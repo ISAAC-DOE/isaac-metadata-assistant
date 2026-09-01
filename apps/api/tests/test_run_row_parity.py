@@ -931,6 +931,26 @@ def test_parity_one_run_produces_exactly_one_row_equal_to_its_to_state(workspace
     assert generation == run.generation
     assert state == run.to_state()
     # The document really does carry every key, so "verbatim" is a measured claim.
+    #
+    # `changed_at_rev` ADMITTED DELIBERATELY, 2026-09-01, by the change-feed sequence
+    # slice. The feed's sort key is `(changed_at_rev, kind, entity_id)` and that leading
+    # component is a durable per-record sequence position stamped on the run, so it is
+    # part of the run document by design rather than by accident.
+    #
+    # THIS ASSERTION IS WHY THE KEY IS LISTED RATHER THAN THE SET BEING RELAXED. A
+    # `>=`-style or subset check would stop noticing a key that appears WITHOUT anyone
+    # deciding it should, which is the whole job of this line. The assertion above
+    # (`state == run.to_state()`) had already passed when this one failed in CI, so the
+    # row does store the document verbatim; only the enumeration was behind.
+    #
+    # AND NOTE WHERE THIS WAS CAUGHT, because it is the argument for keeping this suite:
+    # `test_run_row_parity.py` is gated on `ISAAC_RUN_REAL_ENGINE_PARITY`, so all 24 of
+    # its tests SKIP on a developer machine and run only in CI against a real
+    # PostgreSQL. The slice that added the key ran the full `apps/api` suite locally
+    # (6086 passed, 41 skipped) and an independent reviewer ran it too; this test
+    # skipped for both. A locally-green backend suite does not cover this path, and the
+    # 2026-08-31 skip measurement calling these 29 skips "not a coverage hole" is right
+    # only BECAUSE CI sets the flag.
     assert set(state) == {
         "id",
         "experiment_id",
@@ -943,6 +963,7 @@ def test_parity_one_run_produces_exactly_one_row_equal_to_its_to_state(workspace
         "rev",
         "updated_utc",
         "generation",
+        "changed_at_rev",
     }
     assert_parity(exp)
 
