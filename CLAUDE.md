@@ -1125,6 +1125,140 @@ Current state:
   automatable at all; personal-deploy retirement; and **every hosted QA** — `/krish` sits behind an
   Authentik edge this environment cannot authenticate to.
 
+- **Session of 2026-08-31/09-01 — seven PRs (#203, #204, #206–#210), and the recurring finding
+  was that a MEASUREMENT returned a plausible non-answer.** Org `main` at `31ca1d2`. Backend
+  6,870 → **6,973**; frontend 4,871 → **4,956** (183 → 189 files); skips 40 → **39**, every
+  one classified and summing exactly. Measured at `31ca1d2` in the MAIN CHECKOUT
+  (`.venv/bin/pytest -q -rs` → `6973 passed, 39 skipped`, exit 0; `npx vitest run` → `189
+  passed (189) / 4956 passed (4956)`; `npx tsc -b` → 0). Nothing about the hosted
+  deployment, the external authorizations, gates **G2**/**G3**, or Dean's **D1–D9** deferral
+  changed, and no agent touched a database. What a future session must not re-derive:
+
+  **FOUR TOOLS RETURNED A WRONG ANSWER WITHOUT ERRORING, and each was caught only because a
+  SECOND method disagreed — never because the first complained.** This is the session's
+  through-line and the reason every count below quotes its command:
+  - `tr -dc '\000' < f | wc -c` **aborts on binary input** on macOS (`tr: Illegal byte
+    sequence` on stderr) and the pipeline still exits 0 with a plausible number: **7** NULs
+    in a zip holding **918**. Use `python3 -c "print(open(f,'rb').read().count(b'\x00'))"`.
+  - `ugrep` hit a **complexity limit** and printed nothing, which read as "no regressions".
+  - A grep for `IMPROVED` over an a11y CI log missed **91 of 157** changed cells, because a
+    rule that stops firing **entirely** produces no axe result and is reported by a separate
+    loop as **`FIXED?`** (`e2e/helpers/axe.ts:214`).
+  - **"0 `foregrounds` failures" was VACUOUSLY TRUE.** `auditScan` reaches the `foregrounds`
+    check only when a count already MATCHES — there is a `continue` right after the
+    `IMPROVED` push — and not one of 161 cells matched. Transcribing the counts exposed
+    **14** failures on two unrecorded colours.
+
+  **A3 IS CLOSED, and it is the first accessibility number in this repository measured on
+  both platforms with nothing carried forward.** `--text-tertiary` `#78838f` → `#626c77`
+  (5.34:1 white; **4.54:1** on the worst ground `--assist-tint`, which paints the 342px
+  `.record-right`/`.memory-right` panels and `.assistant`). `A11Y_BASELINE_TOTAL_NODES`
+  darwin **2464 → 871**, linux **2466 → 871**; 161 cells → 70, with **91 reaching zero**
+  (13 whole surfaces). `DARWIN_CARRIED_FORWARD` is `[]`. **All 7 platform splits collapsed** —
+  again the finding §11 already records 15 times: a recorded "split" is often a stale darwin
+  column, not a platform difference. Measured: **zero declarations qualify for the 3:1
+  large-text exemption** (max font-size 13px), so the old palette's "smaller text → lighter
+  grey" was backwards, and meaningful scientific content sat at **2.53:1**.
+
+  **THE PRESERVED WIP OF TWO SLICES WAS AUDITED RATHER THAN TRUSTED, AND BOTH WERE BROKEN.**
+  A prior session left work uncommitted in two worktrees; it was committed first (nothing
+  lost), then judged. The A3 WIP had **deleted** the `--text-quaternary` declaration while
+  leaving **74 live `var()` references across 17 files** resolving to an invalid value, and
+  its chosen `#646e79` still failed at **4.41:1** on the assistant panel. The change-feed WIP
+  had **five** defects including three false published claims, left the suite red in 9 places
+  having never run it, and cited a test file twice in committed prose **that did not exist**.
+
+  **THE CHANGE FEED ORDERED BY A WHOLE-SECOND CLOCK AND LOST EVENTS SILENTLY.** Its own
+  docstring admitted a change "moved forward only into the second your cursor already sits in"
+  was not reported. The key is now `(changed_at_rev, kind, entity_id)` — a durable per-record
+  sequence position, floored ≥0 on read and ≥1 on write; `CURSOR_VERSION` 1→2 and a v1 cursor
+  is **refused (422)**, never misread. `updated_utc` stays for display and is load-bearing for
+  nothing. A third kind, `proposal`, is served carrying **no content**. `useChangeFeed`, which
+  had been mounted on no screen, is mounted in `lib/useRecordSession.ts`.
+
+  **A CORRECT CAVEAT WAS DELETED AND REPLACED WITH A STRONGER CLAIM, IN TEXT SERVED TO
+  CLIENTS.** `SEQUENCE_PROOF` published an unqualified three-step proof while all three steps
+  read `self.state_path` — the local filesystem, not the durable row. The description it
+  replaced said exactly the right thing: *"it is small because this application runs as a
+  single pod reading one clock — that is the REASON it is small, not a proof that it is
+  zero."* Re-scoped, the deleted sentence quoted and marked deleted, and a test now pins the
+  scope so it cannot vanish again.
+
+  **A DOCSTRING'S TWO CHOSEN EXAMPLES WERE EXACTLY WHAT HAPPENS.** `_position` claimed `bool`
+  is refused and `int("7")` never coerced; measured, `"7"`→7, `true`→1, `3.9`→3, because
+  `_as_int` coerces **before** `_position` runs, so its `isinstance` branch is unreachable
+  from any persisted document at all three call sites. **The claim was corrected, not the
+  code**, and the reason is a concurrency hazard rather than convenience: `rev` is also the
+  record's served `version` token and the basis of every `If-Match`, so refusing a coerced
+  `"7"` down to `0` would move a record's version **backwards** and could let a stale token
+  match. §11's rule is that a malformed **persisted** value must be READ, not refused — and
+  coercion is a form of reading it.
+
+  **THE TWELVE MISSING WEBSITE INPUTS DID NOT EXIST AS A GAP.** All **14** record-writable
+  paths have had accessible inputs since `7822b13`; three sessions measured otherwise because
+  `components/RecordDescriptionPanel.tsx` — *the file implementing record capture* — holds 2
+  NUL bytes. The real defect was different and real: the inventory was a hardcoded list whose
+  only guard was a **Python** test regex-parsing the TypeScript, so `vitest` alone stayed
+  green over a stale list. It is now derived from the server's own `capture.record_writable` —
+  and deliberately **not** from `record_writable_field_paths`, which is the note-mappable
+  intersection (**13**, dropping `system.domain`) and would have deleted a working picker.
+
+  **THE ARTIFACT DECISION IS DEEP LINK, on the vendor's own document structure.** "Embed
+  artifacts" is section **4**, inside the *publishing* branch, opening *"After publishing…"*;
+  the organization-sharing branch is sections 7–10 and contains **no** embedding instruction.
+  A Team artifact *"cannot be published publicly"* at all, so publishing was never an
+  available-but-unauthorized option. Four "do not assume" items are actively **refuted**:
+  artifact AI requires user auth, MCP is **not** org-wide, no link-parameter mechanism is
+  documented, and persistent storage exists **only for published artifacts** — so an
+  org-shared companion has none. Still undocumented, and now the load-bearing gap: the
+  **client API** for AI-powered/MCP-calling artifacts.
+
+  **TWO HONESTY GUARDS PASSED WHILE BEING WRONG, and both were found by review, not by CI.**
+  A **visible lowercase** "Status: connected to your ISAAC workspace" passed all 25 artifact
+  tests (the guard was case-sensitive and only required "Not connected" to exist *somewhere*),
+  and a **fabricating seam** returning `{ok: true, record: {status: "complete", …}}` passed
+  all 25 too, because the slice's central claim was pinned by **string presence, not
+  behaviour**. The seam is now executed in a Node harness asserting the returned key set.
+
+  **AND THE SAME SHAPE RECURRED IN THE CHANGE-FEED TESTS:** with the poller set
+  `enabled: false` — the feature wholly inert — two mount tests still passed, one of them the
+  **anti-loop guarantee** whose own docstring said *"ASSERTED STRUCTURALLY"*. As written it
+  proved no write happens *when nothing happens*.
+
+  **THE ENGINE-PARITY SKIPS EARNED THEIR KEEP, and this is the argument for keeping them.**
+  `test_run_row_parity.py` pins the run document's exact key set and is gated on
+  `ISAAC_RUN_REAL_ENGINE_PARITY`, so all **24** of its tests skip on a developer machine. The
+  slice that added `changed_at_rev` ran the full `apps/api` suite locally (6,086 passed, 41
+  skipped) **and** an independent reviewer ran it — it skipped for both. **Only CI, against a
+  real PostgreSQL, caught it.** That is the 2026-08-31 skip measurement vindicated rather than
+  contradicted: it called those 29 skips "not a coverage hole" precisely BECAUSE `ci.yml` sets
+  the flag at four sites and also sets `ISAAC_REQUIRE_REAL_ENGINE_PARITY`, so an absent engine
+  **fails** rather than skips.
+
+  **A CROSS-SLICE COLLISION WAS PREDICTED, SEQUENCED AROUND, AND THEN DID NOT HAPPEN — for a
+  reason worth keeping.** A3 and the change feed both move `settings-explorer` a11y cells,
+  because the Endpoint Explorer renders from the **live** `/api/openapi` and the feed's
+  description grew 7 → 9 paragraphs. A3 was merged first on review evidence. The predicted
+  failure never fired: **0** `IMPROVED`/`FIXED?`/`GREW`/`NEW COLOUR` lines. The prediction
+  reasoned about **rendered** nodes when the baseline counts **violating** nodes — and after
+  A3 that token is compliant, so more prose on it adds **zero** failures. Merging A3 first did
+  not merely avoid stale numbers; it **eliminated the collision**.
+
+  **A skip count without its checkout is not a measurement** — any backend skip total measured
+  in a git **worktree** is `+2` against the main checkout, because `graphify-out/graph.json` is
+  gitignored (absent from every worktree) and exactly two tests gate on it. This already
+  produced one false "skip regression" report.
+
+  **Named rather than implied, and still not done:** an apply route for
+  `POST /ingestion/csv/preview` remains a **committed human decision, not residual work**;
+  `isaac_runs` Stage 2b; the three ancestor-`opacity` composites A3 cannot reach without
+  destroying the ramp (the opacity must go — asserted still-open by test); the **five**
+  undeclared custom properties in `components/transcriptCapture.css`, a shipped ungated panel
+  (pre-existing, two-way ratchet added, repointing them is a visual decision); the human
+  responsive / 200%-zoom sign-off, which **no CDP method can drive**; personal-deploy
+  retirement; and **every hosted QA** — `/krish` sits behind an Authentik edge this
+  environment cannot authenticate to, so the honest status is `HOSTED QA PENDING (Krish)`.
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
