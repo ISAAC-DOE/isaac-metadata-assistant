@@ -132,8 +132,38 @@ scientific answer.
 **Dean's / the operator's**, unchanged: applying any migration. `0005` remains
 unapproved and the backfill has never run anywhere.
 
-**Nobody's — it is just work:** a text input for the twelve free-text record-writable
-paths; a `proposal` kind in the change feed; mounting `useChangeFeed` on a screen.
+~~**Nobody's — it is just work:** a text input for the twelve free-text record-writable
+paths; a `proposal` kind in the change feed; mounting `useChangeFeed` on a screen.~~
+
+**CORRECTED 2026-08-31 — THE FIRST OF THE THREE WAS ALREADY DONE, AND THE REASON NOBODY
+COULD SEE IT IS THE FINDING.** Struck rather than edited, because "it is just work" sends
+a future session to build something that exists.
+
+**The twelve free-text record-writable paths HAVE had a website input since `7822b13`** —
+all 14 record-writable paths do. Three separate sessions measured otherwise because
+`apps/web/src/components/RecordDescriptionPanel.tsx`, *the file that implements record
+capture*, holds **2 raw NUL bytes**, and `grep`/`rg` classify such a file as binary and
+skip it **silently, exiting 0**:
+
+```bash
+grep -rl  RecordDescriptionPanel apps/web/src   # 2 files  <- the panel is MISSING
+grep -ral RecordDescriptionPanel apps/web/src   # 3 files  <- -a finds it
+```
+
+Measured at `bebf4e2` and again at `f201e78`: **379 files under `apps/web/src`, exactly
+one holds a NUL**, and it is that one. `CLAUDE.md` §11 had declared this trap dead on
+2026-08-30 and told future sessions not to cite it as live; that was true of
+`lib/experimentGraph.ts` and false as a general claim. Both entries are corrected.
+
+**A real defect did exist there, and it was a different one:** the UI's field inventory
+was a hardcoded `RECORD_FIELDS` list whose only guard was a *Python* test that
+regex-parses the TypeScript — so `vitest` alone stayed green over a stale list. The
+inventory is now derived at runtime from the server's own `capture.record_writable`.
+
+**The other two remain accurate as written:** the change feed still has no `proposal`
+kind, and `useChangeFeed` is still mounted on no screen — re-measured with `grep -a`
+after the NUL finding, precisely because the first item on this list had just proved
+that a NUL-free measurement was not safe to assume.
 
 ---
 
