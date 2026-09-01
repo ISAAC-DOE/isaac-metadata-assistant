@@ -16,7 +16,12 @@
  *
  * ~~Ten of the 103 recorded triples hold a separate exact number for macOS and
  * for Linux~~ — ~~**RE-COUNTED 2026-08-29: EIGHT of 161.**~~ **RE-COUNTED AGAIN
- * 2026-08-30: FIVE of 161.** Eight was this branch's figure and the MERGE moved it:
+ * 2026-08-30: FIVE of 161.**~~ **RE-COUNTED AGAIN 2026-09-01: ZERO of 70** — the A3
+ * neutral-ink palette collapsed all seven splits the file held at that point (three by
+ * reaching 0 on both faces and being deleted, four by both faces landing on the same
+ * number) and deleted 91 of the 161 cells. The count of splits is now a count of
+ * nothing, and this sentence's own instruction is why it is renumbered rather than
+ * trusted: derive it, do not quote it. Eight was this branch's figure and the MERGE moved it:
  * `c7b9db6` took the linux halves CI measured at `6958459` and five splits collapsed
  * to scalars. Both earlier figures were right when written and neither is now.
  * Neither of the first two figures was right
