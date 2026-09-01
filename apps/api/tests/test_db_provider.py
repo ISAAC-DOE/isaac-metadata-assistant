@@ -700,11 +700,50 @@ def test_the_module_imports_cleanly_without_the_driver_and_reports_unavailable()
     except ImportError:
         pass
     else:  # pragma: no cover - depends on the environment
-        pytest.skip("psycopg2 is installed here; the absent-driver path is untestable")
+        pytest.skip(
+            "psycopg2 is installed here, so this test can only witness a "
+            "GENUINELY absent driver. The same refusal is proved "
+            "unconditionally by "
+            "test_an_unimportable_driver_reports_the_driver_gate below."
+        )
 
     with pytest.raises(db_provider.ProviderUnavailable) as caught:
         db_provider.connect_psycopg2(ENV)
     assert caught.value.gate == "driver"
+
+    provider = DatastoreRecordProvider(ENV)
+    assert list(provider.records()) == []
+
+
+def test_an_unimportable_driver_reports_the_driver_gate(monkeypatch):
+    """THE ``driver`` GATE, PROVED WHERE THE DRIVER *IS* INSTALLED.
+
+    The test above is gated on psycopg2 being genuinely absent, and it is
+    absent in neither environment this project runs in -- a developer checkout
+    and CI both install ``.[dev,api]``. Measured 2026-08-31: it skipped
+    locally and skips in CI for the same reason, so ``ProviderUnavailable``'s
+    ``driver`` gate, and the ``STATE_UNAVAILABLE`` degradation that rests on
+    it, were executed by no test anywhere.
+
+    ``None`` in ``sys.modules`` makes ``import psycopg2`` raise ``ImportError``
+    from the import machinery, so this drives the module's own
+    ``except ImportError`` rather than mocking around it.
+    ``monkeypatch.setitem`` restores the real entry at teardown.
+
+    THE SECOND ASSERTION IS THE POINT. An unavailable driver must DEGRADE --
+    ``DatastoreRecordProvider`` reports no records rather than raising -- which
+    is the behaviour ``connect_psycopg2``'s docstring promises and the reason
+    the import is lazy in the first place. A version of this test that checked
+    only the gate string would pass while that degradation was broken.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "psycopg2", None)
+
+    with pytest.raises(db_provider.ProviderUnavailable) as caught:
+        db_provider.connect_psycopg2(ENV)
+    assert caught.value.gate == "driver"
+    assert ".[api]" in str(caught.value)
 
     provider = DatastoreRecordProvider(ENV)
     assert list(provider.records()) == []
