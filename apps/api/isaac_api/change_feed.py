@@ -114,13 +114,23 @@ CURSOR_VERSION = 2
 #: of the order" is an ordinary key and every comparison below is one comparison.
 #:
 #: IT IS STRICTLY BELOW EVERY REAL KEY, and that now rests on ARITHMETIC rather than on
-#: a claim about strings. Every entity's sequence component is a NON-NEGATIVE integer —
-#: `save_versioned` only ever stamps a `rev` it is about to write, which is `>= 1`, and
-#: `workspace` clamps a persisted negative to `0` on hydration (`Run.__post_init__`,
-#: `_hydrate_change_revs`). So `-1` is below every real key on the FIRST component and
-#: the tie-break is never consulted. The previous `("", "", "")` needed a supporting
-#: argument about `kind` being a non-empty literal; this needs none, which is a
-#: strictly better footing for the one key the whole order is anchored to.
+#: a claim about strings. Every entity's sequence component is a NON-NEGATIVE integer,
+#: and that is enforced HERE by `_position` rather than argued from three other
+#: modules. The previous `("", "", "")` needed a supporting argument about `kind` being
+#: a non-empty literal; this needs none, which is a strictly better footing for the one
+#: key the whole order is anchored to.
+#:
+#: THE ARGUMENT-FROM-OTHER-MODULES WAS WRITTEN HERE FIRST AND WAS FALSE, and it is
+#: recorded rather than replaced because it is the shape of mistake this file exists to
+#: refuse. It read: "`save_versioned` only ever stamps a `rev` it is about to write,
+#: which is `>= 1`, and `workspace` clamps a persisted negative to `0` on hydration
+#: (`Run.__post_init__`, `_hydrate_change_revs`)." Both halves were true of RUNS and
+#: PROPOSALS and neither was true of the EXPERIMENT, whose sequence component is
+#: `exp.rev` itself — hydrated by `_as_int`, which never raises and never validates, so
+#: a persisted `"rev": -5` reached this key unclamped and put the record's own entry
+#: BELOW the start of the order, where no read of any kind returns it. The entry the
+#: module documents as "exactly one, always present" was absent. Two changes close it:
+#: `save_versioned` floors what it writes, and `_position` floors what is read.
 ZERO_KEY: tuple[int, str, str] = (-1, "", "")
 
 
@@ -138,19 +148,27 @@ SEQUENCE_PROOF = (
     "The key's leading component is a SEQUENCE POSITION, not a clock: it is the "
     "record's own `rev` at the save that last changed that entity. `rev` is durable, "
     "per-record and strictly increasing — every write that changes anything inside "
-    "the record takes it to `max(in-memory rev, on-disk rev) + 1`, so the persisted "
-    "value never repeats and never goes back. THE PROOF. A cursor's sequence "
-    "component R_c is, by construction, at most the record's rev at the moment that "
-    "cursor was issued: the record's own entry sits exactly at that rev and every "
-    "other entity sits at the rev of some earlier save. Any change made afterwards "
-    "is written at a rev R_new strictly greater than the rev on disk when it ran, "
-    "which is itself at least the rev the cursor was issued from. So R_new > R_c, "
-    "and the changed entity's new key (R_new, kind, id) is strictly greater than the "
-    "cursor key (R_c, k, e) ON THE FIRST COMPONENT ALONE — regardless of how the "
-    "kind and entity-id tie-break falls. That is exactly the property the timestamp "
-    "key lacked: a whole-second stamp could advance into the second a cursor already "
-    "sat in, leaving the tie-break to decide, and the tie-break could put the changed "
-    "entity behind the cursor. It cannot happen to an integer that must increase."
+    "the record takes it to `max(in-memory rev, on-disk rev, 0) + 1`, so the persisted "
+    "value never repeats, never goes back, and is always at least 1. THE PROOF, in "
+    "three steps, because two of them are properties the code has to hold up rather "
+    "than facts about arithmetic. STEP ONE: a position never moves backwards. A save "
+    "either stamps an entity with the rev it is about to write, or leaves that entity "
+    "alone — and the leave-alone branch clamps to the position already on disk rather "
+    "than writing back whatever an in-memory copy holds, so a stale reader cannot "
+    "regress an entity into a range a cursor has already passed. STEP TWO: a cursor's "
+    "sequence component R_c is, by construction, at most the record's rev at the "
+    "moment that cursor was issued (floored at zero, which is the identity for every "
+    "record this application has ever written): the record's own entry sits exactly "
+    "there and every other entity sits at the rev of some earlier save. STEP THREE: "
+    "any change made afterwards is written at a rev R_new strictly greater than the "
+    "rev on disk when it ran, which is itself at least the rev the cursor was issued "
+    "from. So R_new > R_c, and the changed entity's new key (R_new, kind, id) is "
+    "strictly greater than the cursor key (R_c, k, e) ON THE FIRST COMPONENT ALONE — "
+    "regardless of how the kind and entity-id tie-break falls. That is exactly the "
+    "property the timestamp key lacked: a whole-second stamp could advance into the "
+    "second a cursor already sat in, leaving the tie-break to decide, and the "
+    "tie-break could put the changed entity behind the cursor. It cannot happen to an "
+    "integer that must increase."
 )
 
 #: THE GAP GUARANTEE, stated honestly. Quoted verbatim by the route description and
@@ -359,6 +377,32 @@ class KindCollector:
     read: Callable[[Any], Iterable[ChangeEntry]]
 
 
+def _position(raw: Any) -> int:
+    """A stored sequence coordinate, as a NON-NEGATIVE `int`. The one clamp.
+
+    Every collector below runs its coordinate through this, so `ZERO_KEY`'s "strictly
+    below every real key" is a property of this module rather than a claim about what
+    `workspace` happens to persist. The three coordinates arrive from three different
+    places — `Experiment.rev`, `Run.changed_at_rev`, a value out of
+    `Experiment.proposal_change_revs` — and only a persisted document decides what is
+    in them; a reader must not have to check three modules to know the order holds.
+
+    NEGATIVE BECOMES `0`, NOT `ZERO_KEY`'s `-1`. `0` already has a defined meaning
+    here — "no versioned save has recorded this entity changing" — and it is the
+    honest bucket for a coordinate that cannot be read as a position at all. Putting
+    such an entity at `-1` would place it AT the start key, where `key > start` is
+    false and a cursorless resync would silently omit it.
+
+    NON-INTEGER BECOMES `0` TOO, and `bool` is refused explicitly because
+    `isinstance(True, int)` is `True` in Python — a `changed_at_rev` of `True` would
+    otherwise read as the position `1`, a real position nothing ever wrote. Nothing is
+    coerced: `int("7")` would invent a position out of a value that was never one.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return 0
+    return raw if raw > 0 else 0
+
+
 def _experiment_entries(exp: Any) -> Iterator[ChangeEntry]:
     """The record's own entry — exactly one, always present.
 
@@ -368,8 +412,12 @@ def _experiment_entries(exp: Any) -> Iterator[ChangeEntry]:
     A feed whose first page could be empty would make "nothing has changed" and "this
     record does not exist" look identical to a client.
 
-    ITS SEQUENCE POSITION IS `exp.rev` ITSELF, with nothing stored and nothing derived.
-    That is exact rather than approximate: `save_versioned` bumps `rev` on every write
+    ITS SEQUENCE POSITION IS `exp.rev` FLOORED AT ZERO, with nothing stored and nothing
+    derived. The floor is `_position` and it changes the value for exactly one input —
+    a persisted negative `rev`, which `_as_int` admits and nothing else refuses. For
+    every record this application has ever written it is the identity.
+
+    AND `exp.rev` IS EXACT RATHER THAN APPROXIMATE: `save_versioned` bumps `rev` on every write
     whose authoritative signature moved, and the signature covers the record's title,
     source, draft, record id, runs, notes and proposals — so the record's own entry
     changed at exactly the rev it holds. It is also the reason `SEQUENCE_PROOF`'s "R_c
@@ -379,7 +427,11 @@ def _experiment_entries(exp: Any) -> Iterator[ChangeEntry]:
     yield ChangeEntry(
         kind="experiment",
         entity_id=exp.id,
-        changed_at_rev=exp.rev,
+        changed_at_rev=_position(exp.rev),
+        # PUBLISHED VERBATIM, deliberately not through `_position`. `rev` is the
+        # entity's own version number and a client compares it to the `rev` every
+        # other route serves; a floor applied here would make this one surface
+        # disagree with all of them. Only the ORDER is clamped.
         rev=exp.rev,
         generation=exp.generation,
         updated_utc=exp.updated_utc,
@@ -399,7 +451,7 @@ def _run_entries(exp: Any) -> Iterator[ChangeEntry]:
         yield ChangeEntry(
             kind="run",
             entity_id=run.id,
-            changed_at_rev=run.changed_at_rev,
+            changed_at_rev=_position(run.changed_at_rev),
             rev=run.rev,
             generation=run.generation,
             updated_utc=run.updated_utc,
@@ -453,7 +505,7 @@ def _proposal_entries(exp: Any) -> Iterator[ChangeEntry]:
         yield ChangeEntry(
             kind="proposal",
             entity_id=proposal.proposal_id,
-            changed_at_rev=positions.get(proposal.proposal_id, 0),
+            changed_at_rev=_position(positions.get(proposal.proposal_id, 0)),
             updated_utc=(history[-1].at if history else proposal.proposed_utc),
             state=proposal.state,
         )
@@ -734,18 +786,29 @@ def changes_page(
     and `Experiment.pending` are counted by monkeypatching them for the request::
 
         runs   GET /changes bytes   entries   resolved_run_draft   export_draft   pending
-          25                5,196        26                    0              0        0
-         250                9,757        50                    0              0        0
-        1000                9,757        50                    0              0        0
+          25                4,997        26                    0              0        0
+         250                9,390        50                    0              0        0
+        1000                9,390        50                    0              0        0
 
-    THE BYTE COLUMN HAS BEEN WRONG ONCE AND STALE ONCE, AND BOTH ARE RECORDED RATHER
-    THAN QUIETLY REPLACED. It first read 4,676 / 8,757 / 8,757, measured honestly — and
-    then the wire key was renamed from `version_token` to `version` and the table was
-    not re-run, giving 4,520 / 8,457 / 8,457. Those figures were correct until this
-    change added a `changed_at_rev` key to every entry; the numbers above are from the
-    benchmark below, re-run afterwards. The lesson is the cheap one and worth keeping
-    twice: a measurement is invalidated by a change to the thing measured, including a
-    change that looks purely cosmetic.
+    THE BYTE COLUMN HAS NOW BEEN WRONG THREE TIMES, and every one is recorded rather
+    than quietly replaced, because the third is the one that matters most: it was wrong
+    while claiming to have been re-measured.
+
+    1. It first read 4,676 / 8,757 / 8,757, measured honestly.
+    2. The wire key was renamed `version_token` -> `version` (six characters shorter,
+       once per entry) and the table was not re-run: 4,520 / 8,457 / 8,457 corrected it.
+    3. The ordering fix added a `changed_at_rev` key to every entry and a third `kinds`
+       member, and the table was updated to 5,196 / 9,757 / 9,757 **beside a sentence
+       saying "the numbers above are from the benchmark below, re-run afterwards".**
+       The benchmark had NOT been re-run: running it produces the figures now in the
+       table, and 5,196 / 9,757 / 9,757 correspond to no build. A wrong number is
+       cheap; a wrong number wearing a provenance claim is what makes the next reader
+       stop checking.
+
+    The lesson, now earned three times: a measurement is invalidated by a change to the
+    thing measured, including a change that looks purely cosmetic — and "re-measured"
+    is itself a claim, which is why the command to re-derive it is printed below rather
+    than the figures being asked to be believed.
 
     Two things that table is claiming. The response is FLAT past the window — 250 runs
     and 1,000 runs are BYTE-IDENTICAL in length, because every entry is the same width

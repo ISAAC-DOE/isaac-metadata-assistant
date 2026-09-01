@@ -979,8 +979,33 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
         # when the directory moves. The per-proposal assertion below is what checks
         # that rather than this comment.
         "proposals",
+        # ``proposal_change_revs`` was added with the change feed's SEQUENCE ORDER,
+        # and it is ADMITTED HERE DELIBERATELY rather than because a test went red —
+        # ``runs``' and ``proposals``' rule, for a reason that is nearly but not quite
+        # theirs. It is NOT content: it is ``{proposal_id: this record's rev at the
+        # save that last changed that proposal}``, the same version coordinate
+        # ``Run.changed_at_rev`` holds, kept in a map beside the proposals because a
+        # field on the proposal would be hashed by ``_authoritative_signature`` (see
+        # ``_run_signature_payload`` for what that would cost). It belongs in the
+        # persisted document because it is per-record durable state that no other
+        # store holds, and it satisfies the property THIS test defends: the keys are
+        # proposal ids, the values are integers, and NEITHER can encode a scope — so
+        # a state file still cannot record a scope that goes stale when the directory
+        # moves. That is checked STRUCTURALLY immediately below rather than by a
+        # per-entry loop, and the note there says why a loop would be vacuous here.
+        "proposal_change_revs",
     }
     assert "session_id" not in state and "scope" not in state and "root" not in state
+    # ``proposal_change_revs`` IS EMPTY HERE, AND THAT IS SAID RATHER THAN ASSERTED
+    # OVER. Only ``_bump_changed_proposals`` writes it, and only from the write branch
+    # of ``save_versioned``, which this test deliberately does not call — it is about
+    # the SHAPE of ``to_state``, not about persistence. An ``all(...)`` over an empty
+    # map would be the vacuous coverage the two comments below exist to prevent, so
+    # the property is instead checked structurally: the map cannot carry a scope
+    # because its keys are proposal ids and its values are integers, and that is
+    # asserted at the type rather than at a sample.
+    assert state["proposal_change_revs"] == {}
+    assert isinstance(state["proposal_change_revs"], dict)
     assert len(state["runs"]) == 1, "the per-run assertion below must not be vacuous"
     assert all("session_id" not in r and "scope" not in r for r in state["runs"])
     # A PROPOSAL IS ADDED FOR THE SAME REASON THE RUN IS: without one,

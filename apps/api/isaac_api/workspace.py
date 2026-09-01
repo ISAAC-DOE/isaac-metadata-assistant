@@ -1247,9 +1247,9 @@ class Run:
     #: ``0`` is never lost, and the first real change stamps it normally.
     #:
     #: IT IS VERSION METADATA AND SO IS EXCLUDED FROM
-    #: :func:`_run_signature_payload` — for the reason ``rev``/``updated_utc``/
-    #: ``generation`` are: a field that both records a change and counts as one is a
-    #: feedback loop in which every save bumps every run forever.
+    #: :func:`_run_signature_payload`, for the reason ``rev``/``updated_utc``/
+    #: ``generation`` are. See that function for the reason, which was stated wrongly
+    #: here first and is CORRECTED there rather than in two places.
     changed_at_rev: int = 0
 
     def __post_init__(self) -> None:
@@ -1424,16 +1424,34 @@ def _run_signature_payload(run: Run) -> dict:
     metadata, exactly as ``Experiment`` excludes its own) and ``created_utc``
     (immutable identity).
 
-    ``changed_at_rev`` IS EXCLUDED FOR THE SHARPEST VERSION OF THAT REASON, and it is
-    named rather than left to the word "metadata". It records the experiment ``rev``
-    at which this run last changed. If it were hashed, stamping it would itself be a
-    change to the run's authoritative state, so the next save would find the
-    signature moved, stamp again, and the record would never reach a byte-stable
-    no-op: every save of an untouched record would bump every run forever. The
-    payload below is an explicit ALLOWLIST rather than an exclusion list, so the
-    field is out by construction; ``test_change_feed_sequence.py`` proves the
-    absence of the loop by saving twice and measuring that the second save writes
-    nothing.
+    ``changed_at_rev`` IS EXCLUDED, and the reason given here first was FALSE. It is
+    corrected in place rather than replaced, because the false reason is the plausible
+    one and the next reader will reach for it too.
+
+    ~~"If it were hashed, stamping it would itself be a change to the run's
+    authoritative state, so the next save would find the signature moved, stamp again,
+    and the record would never reach a byte-stable no-op: every save of an untouched
+    record would bump every run forever."~~ **MEASURED FALSE.** With the field added to
+    the payload below, a record saved four times from four fresh loads wrote NOTHING
+    each time and every run stayed at its position; so did three saves of one reused
+    object. There is no loop, because both sides of the comparison read the same
+    number: :meth:`_persisted_run_state` hashes the run as it is ON DISK, and a
+    freshly-loaded in-memory run carries exactly that value. The stamp cannot chase
+    itself.
+
+    **WHAT IS ACTUALLY WRONG WITH HASHING IT, which is narrower and is a real defect.**
+    The two sides read the same number only while the in-memory object is not stale. A
+    writer that loaded a record, had another writer change a run, and then re-entered a
+    save with NO changes of its own would compute a signature differing from disk in
+    the position alone — so a no-op would become a WRITE, and that writer's older
+    document would overwrite the other's. Excluding the field keeps a content-identical
+    re-entry a no-op, which is the property ``save_versioned``'s whole byte-stable-no-op
+    branch exists for. ``test_change_feed_sequence.py::
+    test_a_stale_object_whose_CONTENT_matches_disk_writes_nothing`` pins it, and goes
+    red if the field is hashed.
+
+    The payload below is an explicit ALLOWLIST rather than an exclusion list, so the
+    field is out by construction either way.
 
     Excluding ``rev`` is only safe because of an invariant that must not be broken:
     ``Experiment._bump_changed_runs`` is the ONLY thing that moves a run's ``rev``,
@@ -2952,10 +2970,13 @@ class Experiment:
     #: :class:`~isaac_api.proposals.IngestionProposal` is ``proposals.py``'s model,
     #: and ``_proposal_state_payload`` hands its WHOLE ``to_state()`` to
     #: :func:`_authoritative_signature`. A ``changed_at_rev`` field on the proposal
-    #: would therefore be HASHED, and a version stamp that counts as a change is the
-    #: feedback loop ``_run_signature_payload`` excludes ``rev`` to avoid: every save
-    #: would restamp, the signature would move again, and no record would ever reach
-    #: a byte-stable no-op. Excluding it there would mean editing the proposal
+    #: would therefore be HASHED, which is what :func:`_run_signature_payload` excludes
+    #: ``changed_at_rev`` to avoid — read that function for the reason, and note that
+    #: the "feedback loop" this comment used to name was MEASURED FALSE and corrected
+    #: there. The real cost is the same one: a stale writer whose CONTENT matches disk
+    #: would compute a differing signature from the position alone, turning a no-op
+    #: re-entry into a write that overwrites another writer's document. Excluding it
+    #: there would mean editing the proposal
     #: contract's own serialiser. Holding the coordinate beside the proposals instead
     #: keeps the whole question inside this module's version plumbing, and the
     #: signature payload is an allowlist that does not name this key, so it is
@@ -3776,8 +3797,8 @@ class Experiment:
             )
         return False
 
-    def _persisted_run_state(self) -> dict[str, tuple[str, int]]:
-        """``{run_id: (authoritative signature, rev)}`` of the CURRENTLY on-disk runs.
+    def _persisted_run_state(self) -> dict[str, tuple[str, int, int]]:
+        """``{run_id: (signature, rev, changed_at_rev)}`` of the CURRENTLY on-disk runs.
 
         ``{}`` when the state file is absent or unreadable — the same fail-open
         reading ``_persisted_sig_and_rev`` applies, so a corrupt file makes a real
@@ -3788,20 +3809,37 @@ class Experiment:
         entries are runs. Building the map by hand skipped a different set and
         collapsed duplicate ids onto one key, which would have silently discarded a
         run's on-disk ``rev`` and let a stale in-memory copy regress it.
+
+        ``changed_at_rev`` WAS ADDED TO THE TUPLE FOR EXACTLY THE REGRESSION THE
+        PARAGRAPH ABOVE NAMES, one field over. A run this save does not change is
+        SKIPPED by :meth:`_bump_changed_runs`, so it keeps whatever its in-memory
+        copy holds — and an in-memory copy older than disk would then be written
+        back, moving that run BACKWARDS in the change feed's order. A position that
+        moves backwards is a change no cursor ahead of it will ever report, which is
+        the one failure the sequence key exists to make impossible. Reading the
+        on-disk position here is what lets the skip clamp instead of overwrite.
         """
         if not self.state_path.exists():
             return {}
         try:
             state = json.loads(self.state_path.read_text(encoding="utf-8"))
             return {
-                run.id: (_run_signature(run), run.rev)
+                run.id: (_run_signature(run), run.rev, run.changed_at_rev)
                 for run in _hydrate_runs(state.get("runs"))
             }
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return {}
 
-    def _persisted_proposal_state(self) -> dict[str, str]:
-        """``{proposal_id: authoritative signature}`` of the CURRENTLY on-disk proposals.
+    def _persisted_proposal_state(self) -> dict[str, tuple[str, int]]:
+        """``{proposal_id: (signature, changed_at_rev)}`` of the on-disk proposals.
+
+        THE POSITION IS IN THE TUPLE FOR :meth:`_persisted_run_state`'s REASON, and
+        it is the same defect one entity kind over: a proposal this save does not
+        change keeps whatever position its in-memory map holds, and a map older than
+        disk would write that proposal BACKWARDS in the change feed's order. A
+        position that moves backwards is a change no cursor ahead of it will ever
+        report. Reading the on-disk position here is what lets the untouched branch
+        clamp instead of overwrite.
 
         ``{}`` when the state file is absent or unreadable — the same fail-open
         reading :meth:`_persisted_run_state` and ``_persisted_sig_and_rev`` apply, so
@@ -3830,7 +3868,11 @@ class Experiment:
             hydrated, _unreadable = _hydrate_proposals(
                 state.get(proposals_module.STATE_KEY)
             )
-            return {p.proposal_id: _proposal_signature(p) for p in hydrated}
+            positions = _hydrate_change_revs(state.get("proposal_change_revs"))
+            return {
+                p.proposal_id: (_proposal_signature(p), positions.get(p.proposal_id, 0))
+                for p in hydrated
+            }
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return {}
 
@@ -3867,8 +3909,13 @@ class Experiment:
         for proposal in self.proposals:
             pid = proposal.proposal_id
             prior = on_disk.get(pid)
-            if prior is not None and prior == _proposal_signature(proposal):
-                live[pid] = self.proposal_change_revs.get(pid, 0)
+            if prior is not None and prior[0] == _proposal_signature(proposal):
+                # MAX, NOT THE IN-MEMORY VALUE. See the paragraph above: this branch
+                # is the one a stale in-memory map would regress through, and the
+                # clamp is what makes "a position never moves backwards" a property
+                # of the code rather than of an assumption about how the caller
+                # loaded this object.
+                live[pid] = max(self.proposal_change_revs.get(pid, 0), prior[1])
                 continue
             live[pid] = next_rev
             stamped.append(pid)
@@ -3931,6 +3978,12 @@ class Experiment:
         for run in self.runs:
             prior = on_disk.get(run.id)
             if prior is not None and prior[0] == _run_signature(run):
+                # SKIPPED, BUT NOT LEFT BEHIND DISK. The run did not change, so its
+                # position must not MOVE — but a stale in-memory copy holding an
+                # older position would be written back and move it BACKWARDS, which
+                # is a change no cursor ahead of it will ever report. `max` keeps the
+                # skip a no-op in the ordinary case and a clamp in the stale one.
+                run.changed_at_rev = max(run.changed_at_rev, prior[2])
                 continue
             run.rev = max(run.rev, prior[1] if prior is not None else 0) + 1
             run.updated_utc = _now_iso()
@@ -4022,7 +4075,16 @@ class Experiment:
         # to stamp it, and ``self.rev`` must not be advanced before the no-op decision
         # is safely behind us — the paragraph above explains why the ordering is
         # load-bearing. Computing the number is not advancing the version.
-        next_rev = max(self.rev, disk_rev) + 1
+        #
+        # THE ``0`` IN THE ``max`` IS NOT PADDING. ``_as_int`` never raises but never
+        # validates either, so a persisted ``"rev": -5`` hydrates as ``-5``; without
+        # the floor this save would reach ``-4`` and stamp every entity it changed at
+        # a NEGATIVE position. ``change_feed.ZERO_KEY`` is ``(-1, "", "")`` and is
+        # documented as strictly below every real key — an entity stamped at ``-4``
+        # would sit BELOW the start of the order, where not even a cursorless resync
+        # reports it. One floor makes every position this application ever writes
+        # ``>= 1``, which is the arithmetic that claim rests on.
+        next_rev = max(self.rev, disk_rev, 0) + 1
         self._bump_changed_runs(next_rev)
         self._bump_changed_proposals(next_rev)
         self.rev = next_rev

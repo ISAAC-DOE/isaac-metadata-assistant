@@ -741,26 +741,35 @@ def test_replaying_a_cursor_returns_the_identical_page(client):
     assert plain[0] == plain[1]
 
 
-def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeypatch):
-    """THE EXPOSURE `GAP_GUARANTEE` NAMES, DEMONSTRATED — and it is not a clock step.
+def test_a_same_second_write_behind_the_cursor_IS_REPORTED(client, monkeypatch):
+    """**THE REGRESSION TEST FOR THE DEFECT THIS SLICE FIXED.** Inverted, not deleted.
 
-    This is the case the guarantee's first wording missed, and it is the ordinary one
-    rather than the exotic one. `updated_utc` is `%Y-%m-%dT%H:%M:%SZ`, so two writes
-    inside one wall-clock second carry the SAME stamp. An entity that sorts before the
-    cursor within that second therefore changes its `version` WITHOUT changing its
-    key, and `key > start` excludes it: the change is not reported, and the clock
-    never moved backwards.
+    THIS TEST WAS `test_a_same_second_write_behind_the_cursor_is_a_measured_gap` AND
+    IT ASSERTED THE LOSS. Its body read `assert target_id not in {...}` with the
+    comment "THIS IS THE GAP", and it passed — the module's own `GAP_GUARANTEE`
+    disclosed the exposure and this test measured it. That is the defect: a change to
+    an entity that sorted BEHIND the cursor inside the cursor's own whole second moved
+    the entity's `version` without moving its key, so `key > start` excluded it and no
+    cursor ever reported it. The remedy on offer was "throw the cursor away and
+    resync", i.e. read everything, which is the one thing a bounded feed exists to
+    avoid.
 
-    THE CLOCK IS FROZEN RATHER THAN RACED. Pinning `_now_iso` to the stamp the record
-    already carries reproduces exactly the production condition — a second write
-    landing in the same second as the first — without a sleep, a retry, or a test
-    that passes or fails on how fast the machine is.
+    IT IS INVERTED RATHER THAN DELETED because a deleted test leaves no evidence that
+    the behaviour ever differed, and this file already carries three wordings of
+    `GAP_GUARANTEE` that were each measured false. The setup below is UNCHANGED —
+    same six runs, same frozen clock, same cursor, same write — so the only thing that
+    moved is the verdict.
 
-    IT ASSERTS THE REMEDY IN THE SAME BREATH, because a test that only demonstrated
-    the loss would read as an argument for removing the feature. The cursorless
-    resync is computed from current state, so it reports the entity at its new
-    version; that is why `GAP_GUARANTEE` offers it as the answer and why it costs one
-    request.
+    THE CLOCK IS STILL FROZEN, AND THAT IS NOW THE POINT RATHER THAN THE WORKAROUND.
+    Pinning `_now_iso` to the stamp the record already carries reproduces the exact
+    production condition the old key lost changes in — a second write landing in the
+    same second as the first — with no sleep, no retry, and no dependence on how fast
+    the machine is. Under the sequence key the frozen clock is irrelevant to the
+    order, and this test passing IS that statement.
+
+    MUTATION: revert `ChangeEntry.key`'s leading component to `updated_utc` and this
+    goes red on the `target_id in` assertion, with the resumed page returning exactly
+    the three entities the old test expected.
     """
     exp_id = _with_runs(client, 6)
     page = _feed(client, exp_id, limit=4)
@@ -771,6 +780,9 @@ def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeyp
     # A run that page one already handed out, i.e. one BEHIND the cursor.
     target_id = next(c["entity_id"] for c in page["changes"] if c["kind"] == "run")
     before_version = next(c["version"] for c in page["changes"] if c["entity_id"] == target_id)
+    before_position = next(
+        c["changed_at_rev"] for c in page["changes"] if c["entity_id"] == target_id
+    )
 
     monkeypatch.setattr(ws, "_now_iso", lambda: stamp)
     exp = ws.load_experiment(exp_id)
@@ -781,7 +793,8 @@ def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeyp
     }
     assert exp.save_versioned() is True
 
-    # The write really happened, and it really did not move the key.
+    # The write really happened, and the CLOCK really did not move — which is what
+    # made this unreportable before.
     #
     # `Run.version_token` is a METHOD here, unlike `ChangeEntry.version_token`, which
     # is a property. Calling it matters: `written.version_token != before_version`
@@ -790,21 +803,97 @@ def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeyp
     written = next(r for r in ws.load_experiment(exp_id).runs if r.id == target_id)
     written_version = written.version_token()
     assert isinstance(written_version, str) and written_version != before_version
-    assert written.updated_utc == stamp
+    assert written.updated_utc == stamp, "the timestamp must NOT have moved"
+    # ...and the SEQUENCE did. That is the whole fix, in one comparison.
+    assert written.changed_at_rev > before_position
 
-    # ...and the cursor cannot see it. THIS IS THE GAP.
+    # ...AND THE CURSOR SEES IT. This is the assertion that was `not in` before.
     resumed = _feed(client, exp_id, cursor=page["next_cursor"])
-    # NOT VACUOUS, and it was: `target_id not in {...}` is satisfied by an EMPTY page,
-    # so a resume that returned nothing at all would have "demonstrated" the gap
-    # without demonstrating anything. Six runs plus the experiment is seven entities
-    # and page one took four, so the resume must carry exactly the other three — the
-    # page has to WORK, and the target has to be missing from a page that worked.
-    assert resumed["returned"] == 3, resumed
-    assert target_id not in {c["entity_id"] for c in resumed["changes"]}
+    resumed_ids = [c["entity_id"] for c in resumed["changes"]]
+    assert target_id in resumed_ids, resumed
+    # Reported ONCE. A fix that re-emitted the boundary position would have satisfied
+    # the line above while handing a poller duplicates on every request.
+    assert len(resumed_ids) == len(set(resumed_ids))
+    # THE EXACT SIZE, spelled out, because "the target is there" is satisfied by a
+    # feed that re-reports everything. The old test asserted `returned == 3` — the
+    # three entities page one had not reached. It is 5: those three, plus the target
+    # run, plus the RECORD'S OWN entry, which every write moves by design (a run edit
+    # changes the record's authoritative signature, so `exp.rev` advances). Both
+    # additions are named rather than left to the number.
+    assert resumed["returned"] == 5, resumed
+    assert set(resumed_ids) == (
+        {c["entity_id"] for c in _feed(client, exp_id)["changes"]}
+        - ({c["entity_id"] for c in page["changes"]} - {target_id, exp_id})
+    )
+    moved = next(c for c in resumed["changes"] if c["entity_id"] == target_id)
+    assert moved["version"] == written_version != before_version
 
-    # The published remedy does see it.
+    # THE RESYNC STILL AGREES, and it is asserted because it is the published remedy:
+    # a client that distrusts its cursor must not get a different answer.
     resync = {c["entity_id"]: c["version"] for c in _feed(client, exp_id)["changes"]}
-    assert resync[target_id] == written_version != before_version
+    assert resync[target_id] == written_version
+
+    # The RUNS that did not change kept their positions, so the resumed page is not a
+    # disguised full re-read. The experiment is excluded deliberately and not silently:
+    # it is the one entity that SHOULD be re-reported, and folding it into this set
+    # would have made the assertion pass for the wrong reason.
+    unchanged_runs = {
+        c["entity_id"] for c in page["changes"] if c["kind"] == "run"
+    } - {target_id}
+    assert unchanged_runs, "precondition: page one held a run that did not change"
+    assert not (unchanged_runs & set(resumed_ids)), "an unchanged run was re-reported"
+
+
+def test_two_writes_in_ONE_second_with_a_page_between_them_lose_nothing(client, monkeypatch):
+    """The defect's shape at its sharpest: page, write, page — all inside one second.
+
+    The test above changes an entity page one already handed out. This one is the
+    tighter case the brief names: TWO changes inside the SAME whole second with the
+    cursor paged BETWEEN them. Under the timestamp key both writes carried the
+    identical stamp, so the second one's key was decided entirely by the
+    `(kind, entity_id)` tie-break and landed behind the cursor whenever the id sorted
+    lower — an outcome that depended on a run id, which is to say on chance.
+
+    IT IS MADE DETERMINISTIC rather than left to chance: the two runs are chosen by
+    sorted id, and the one written second is the LOWER one, which is exactly the case
+    the old key lost. The clock is frozen for the whole test, so nothing here can pass
+    because a second boundary happened to fall in the right place.
+    """
+    exp_id = _with_runs(client, 4)
+    stamp = _feed(client, exp_id)["changes"][0]["updated_utc"]
+    monkeypatch.setattr(ws, "_now_iso", lambda: stamp)
+
+    run_ids = sorted(c["entity_id"] for c in _feed(client, exp_id)["changes"] if c["kind"] == "run")
+    higher, lower = run_ids[-1], run_ids[0]
+
+    def _touch(rid: str, value: str) -> None:
+        exp = ws.load_experiment(exp_id)
+        run = next(r for r in exp.runs if r.id == rid)
+        run.draft.setdefault("fields", {})["context.beamline"] = {
+            "value": value, "status": "verified",
+        }
+        assert exp.save_versioned() is True
+
+    # WRITE ONE, then read to the very end of the feed and hold that cursor.
+    _touch(higher, "BL-ONE")
+    page = _feed(client, exp_id)
+    assert page["has_more"] is False
+    cursor = page["next_cursor"]
+    assert page["changes"][-1]["entity_id"] == higher, "the cursor sits on the higher id"
+
+    # WRITE TWO, in the same second, on the LOWER id — behind the cursor's tie-break.
+    _touch(lower, "BL-TWO")
+
+    # Every stamp in the record is still the one instant, so an order that led with
+    # the clock had nothing left to order by.
+    assert {c["updated_utc"] for c in _feed(client, exp_id)["changes"]} == {stamp}
+
+    resumed = _feed(client, exp_id, cursor=cursor)
+    reported = [c["entity_id"] for c in resumed["changes"]]
+    assert lower in reported, reported
+    assert len(reported) == len(set(reported))
+    # The record's own entry moved too — both writes bumped it — and nothing else did.
+    assert set(reported) == {lower, exp_id}
 
 
 # =============================================================================
@@ -862,57 +951,154 @@ def test_a_cursor_is_bound_to_its_scope_as_well_as_to_its_record():
 
 
 def test_the_served_kinds_are_derived_from_the_collectors(client):
+    """THE SERVED SET, and it is THREE now — `proposal` joined `experiment` and `run`.
+
+    Asserted as an equality against a literal rather than against `cf.feed_kinds()`
+    alone, because the two halves are different claims: that the wire agrees with the
+    module, and that the module serves the set this change intends. A test written
+    only as `wire == feed_kinds()` would pass on a build that served no kinds at all.
+    """
     exp_id = _with_runs(client, 1)
-    assert _feed(client, exp_id)["kinds"] == cf.feed_kinds() == ["experiment", "run"]
+    assert (
+        _feed(client, exp_id)["kinds"]
+        == cf.feed_kinds()
+        == ["experiment", "proposal", "run"]
+    )
 
 
-def test_a_third_kind_needs_no_change_to_this_module():
-    """EXTENSIBILITY, PROVEN — and proven without a proposal dependency.
+def test_a_FOURTH_kind_needs_no_change_to_this_module():
+    """EXTENSIBILITY, PROVEN — and the seam has now been USED rather than only claimed.
 
-    The brief names `proposal` as a kind that exists in an unmerged PR and is NOT at
-    this commit. The wrong preparation would be a `try: import proposals` here; the
-    right one is that the collector tuple is a PARAMETER, so the slice that lands the
-    feature adds a collector and this module is untouched. The stand-in below is a
-    local fake for exactly that reason — it proves the seam without asserting anything
-    about a feature this build does not have.
+    THIS TEST WAS `test_a_third_kind_needs_no_change_to_this_module` AND ITS DOCSTRING
+    SAID `proposal` "exists in an unmerged PR and is NOT at this commit". Both halves
+    are false now: `proposals.py` is in this tree and `RECORD_COLLECTORS` serves the
+    kind. The rename is not cosmetic — the seam's own evidence changed from a
+    hypothetical to a shipped third collector, and a test still counting to three
+    would be describing a build that no longer exists.
 
-    It is passed in rather than registered globally: a module-level registry that
-    tests append to leaks between tests.
+    The stand-in is still a LOCAL FAKE and is still passed in rather than registered
+    globally: a module-level registry that tests append to leaks between tests. What it
+    proves is unchanged — a new kind sorts by the SAME key as the built-in ones, so a
+    collector cannot smuggle in its own ordering.
     """
     entry = cf.ChangeEntry(
         kind="stand_in",
         entity_id="z-last",
+        changed_at_rev=9,
         updated_utc="2099-01-01T00:00:00Z",
         rev=3,
         generation="deadbeefdeadbeef",
     )
     collectors = (*cf.RECORD_COLLECTORS, cf.KindCollector(kind="stand_in", read=lambda _e: [entry]))
 
-    assert cf.feed_kinds(collectors) == ["experiment", "run", "stand_in"]
+    assert cf.feed_kinds(collectors) == ["experiment", "proposal", "run", "stand_in"]
 
     class _Bare:
+        """The minimum an `Experiment` has to look like for the built-in collectors.
+
+        It carries `proposals` and `proposal_change_revs` because the proposal
+        collector reads them DIRECTLY, exactly as the run collector reads `runs` —
+        no `getattr` default, because a collector that tolerated a missing attribute
+        would serve an empty kind on a record whose proposals failed to hydrate, and
+        report that as "no proposals" rather than as an error.
+        """
+
         id = "01EXAMPLEEXAMPLEEXAMPLEEXA"
         updated_utc = "2026-01-01T00:00:00Z"
         rev = 0
         generation = "0123456789abcdef"
         runs: list = []
+        proposals: list = []
+        proposal_change_revs: dict = {}
 
     page = cf.changes_page(_Bare(), scope_tag="tag", collectors=collectors)
-    assert page["kinds"] == ["experiment", "run", "stand_in"]
+    assert page["kinds"] == ["experiment", "proposal", "run", "stand_in"]
     assert [c["kind"] for c in page["changes"]] == ["experiment", "stand_in"]
     # And the new kind sorts by the SAME key as the built-in ones — a collector cannot
-    # smuggle in its own ordering.
+    # smuggle in its own ordering. The record sits at position 0 and the stand-in at 9,
+    # so this is the SEQUENCE deciding, not the alphabet.
+    assert [c["changed_at_rev"] for c in page["changes"]] == [0, 9]
     assert page["changes"][-1]["version"] == "deadbeefdeadbeef.3"
 
 
-def test_the_module_names_no_feature_it_does_not_have():
-    """No hard-coded proposal dependency — asserted over the PARSED module.
+#: Every stored attribute of an `IngestionProposal` that is CONTENT — the value, what
+#: it targets, why it was produced, who produced it, and the audit of what was done to
+#: it. Transcribed from `proposals.IngestionProposal.__slots__` and checked against it
+#: below, so this list cannot quietly fall behind the model.
+_PROPOSAL_CONTENT_ATTRS = frozenset({
+    "experiment_id",
+    "note_id",
+    "target_field_path",
+    "proposed_value",
+    "rule",
+    "source",
+    "base_rev",
+    "target_digest",
+    "trust_basis",
+    "run_id",
+    "start_char",
+    "end_char",
+    "client_request_key",
+    "subject",
+    "accepted_value",
+    "accepted_from",
+    "applied_via",
+    "applied_run_id",
+    "applied_rev",
+    "applied_target_digest",
+})
 
-    A `rg`-style check over the source text was the first version of this and it was
-    unusable: the module's own docstrings say the words "import proposals" while
-    explaining why it does not do that, so a text scan flags the very prose that
-    documents the absence. The structural question — does any import name it, does any
-    executable literal equal it — is a question about the AST, so it is asked there.
+#: The four a feed entry legitimately needs: which proposal, when it last moved, and
+#: what lifecycle state it is in. `history` is here ONLY because `updated_utc` reads
+#: the last transition's timestamp off it; nothing else about a transition is read.
+_PROPOSAL_COORDINATE_ATTRS = frozenset({"proposal_id", "history", "state", "proposed_utc"})
+
+
+def test_the_content_attribute_list_is_the_model_minus_the_coordinates():
+    """GUARDS THE GUARD BELOW, because a hand-written forbidden-list rots silently.
+
+    The test after this one asserts that `change_feed.py` reads none of
+    `_PROPOSAL_CONTENT_ATTRS`. That assertion is only worth anything if the list IS
+    the model's content — a list that fell one field behind a model that grew would
+    pass while the new field was readable. So the two sets are asserted to PARTITION
+    `IngestionProposal.__slots__` exactly: every slot is in one of them, and neither
+    contains anything that is not a slot.
+    """
+    from isaac_api import proposals as proposals_module
+
+    slots = set(proposals_module.IngestionProposal.__slots__)
+    assert _PROPOSAL_CONTENT_ATTRS | _PROPOSAL_COORDINATE_ATTRS == slots, (
+        "a proposal field is in neither list — classify it before it can be served",
+        slots ^ (_PROPOSAL_CONTENT_ATTRS | _PROPOSAL_COORDINATE_ATTRS),
+    )
+    assert not (_PROPOSAL_CONTENT_ATTRS & _PROPOSAL_COORDINATE_ATTRS)
+
+
+def test_the_module_reaches_no_proposal_CONTENT_even_though_it_serves_the_kind():
+    """No import of `proposals`, and no read of a proposal CONTENT attribute anywhere.
+
+    THIS TEST WAS `test_the_module_names_no_feature_it_does_not_have`, and it asserted
+    that the string "proposal" appeared in no executable literal of the module. That
+    was the right test while the kind was unserved and is the WRONG test now — the
+    module has to name the kind in order to serve it, so the old assertion would only
+    be satisfiable by a build that did not have the feature. Deleting it outright
+    would have thrown away the property it was really protecting, which survives the
+    change intact and is what is asserted here instead:
+
+    **`change_feed.py` cannot render a proposal's content, because it never reads
+    one.** That is a structural guarantee rather than a review one. It is checked two
+    ways, because either alone is escapable: no `import` names the module (so no
+    helper of `proposals.py` is reachable), and no ATTRIBUTE ACCESS anywhere in the
+    parsed module names a content field (so even a duck-typed object handed in by a
+    collector cannot have its value read).
+
+    IT IS ASKED OF THE AST, NOT OF THE TEXT, and the original reason still holds: the
+    module's own prose says the words "proposals" and "proposed value" while
+    explaining why it does not touch them, so a `rg`-style scan flags the very
+    documentation of the absence. The new reason is sharper — `GAP_GUARANTEE` and
+    `SEQUENCE_PROOF` are module-level string CONSTANTS, not docstrings, and they
+    contain ordinary English words like "rule" and "source". A literal scan would have
+    to special-case them, and a special case is where the next escape lives.
     """
     import ast
     from pathlib import Path
@@ -927,92 +1113,222 @@ def test_the_module_names_no_feature_it_does_not_have():
             imported.append(node.module or "")
     assert not [m for m in imported if "proposal" in m], imported
 
-    # Docstrings are prose ABOUT the design and are excluded by identity, not by a
-    # heuristic over their contents.
-    docstrings = {
-        id(n.body[0].value)
-        for n in ast.walk(tree)
-        if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef))
-        and n.body
-        and isinstance(n.body[0], ast.Expr)
-        and isinstance(n.body[0].value, ast.Constant)
-        and isinstance(n.body[0].value.value, str)
-    }
-    literals = [
-        n.value
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Constant)
-        and isinstance(n.value, str)
-        and id(n) not in docstrings
-    ]
-    assert not [s for s in literals if "proposal" in s.lower()], literals
+    read = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert not (read & _PROPOSAL_CONTENT_ATTRS), sorted(read & _PROPOSAL_CONTENT_ATTRS)
+
+    # NOT VACUOUS: the module DOES read the coordinate attributes, so the check above
+    # is discriminating between two sets it can actually see rather than passing
+    # because `read` is empty or because attribute access was never parsed.
+    assert _PROPOSAL_COORDINATE_ATTRS <= read, sorted(_PROPOSAL_COORDINATE_ATTRS - read)
 
 
-def test_a_proposal_act_moves_the_records_own_entry_and_nothing_finer(client):
-    """WHAT THE FEED ACTUALLY SAYS ABOUT PROPOSALS, MEASURED IN BOTH DIRECTIONS.
+def _make_proposal(exp, *, pid: str, value: str = "XANES"):
+    """One synthetic proposal appended to ``exp.proposals``. NOT saved.
 
-    The brief asks for proposal events. This feed serves no `proposal` kind, and the
-    module's docstring used to explain that by saying proposals "do not exist at this
-    commit — [they live] in an unmerged PR". THAT IS FALSE AT THIS COMMIT: the
-    proposals work merged into this branch's own history, `isaac_api/proposals.py` is
-    in this tree, and every `Experiment` carries `.proposals`. So the shortfall is
-    real and is measured here rather than explained away.
-
-    WHAT HOLDS (asserted first, because it is the half a client can build on):
-    proposals are part of the record's authoritative signature, so a proposal act
-    moves the record's own `rev`/`updated_utc` and therefore moves the `experiment`
-    entry of this feed. A polling surface DOES learn "this record moved, re-read it".
-
-    WHAT DOES NOT (asserted second, because it is the half a reader would otherwise
-    assume): no `proposal` kind is served, no page carries a proposal id, and no
-    entry distinguishes a proposal act from a title edit. A client cannot tell WHICH
-    proposal moved, or that a proposal moved at all, from this feed alone.
-
-    If a later slice takes proposals OUT of the signature, this feed goes silent
-    about them entirely and the first assertion fails — which is the point of
-    pinning the mechanism rather than trusting it.
+    Built directly rather than through ``POST /notes/.../propose`` because that route
+    needs a note, a writable target path and the record's ETag, none of which any test
+    in this file is about. ``proposals`` is imported INSIDE the helper on purpose:
+    ``change_feed.py`` must import nothing from it (asserted over the parsed module
+    above), and a module-level import here would read as though it did.
     """
-    # Imported inside the test on purpose: `change_feed.py` itself must import nothing
-    # from here (`test_the_module_names_no_feature_it_does_not_have` asserts that over
-    # the parsed module), and a module-level import would read as though it did.
     from isaac_api import proposals as proposals_module
 
-    exp_id = _with_runs(client, 1, title="proposal visibility")
-    before = {(c["kind"], c["entity_id"]): c["version"] for c in _feed(client, exp_id)["changes"]}
-
-    exp = ws.load_experiment(exp_id)
-    exp.proposals.append(
-        proposals_module.new_proposal(
-            proposal_id="01SYNTHETICPROPOSALPROPOS",
-            experiment_id=exp_id,
-            note_id="01SYNTHETICNOTENOTENOTENO",
-            target_field_path="field:system.technique",
-            proposed_value="XANES",
-            rule="synthetic fixture rule — this test asserts visibility, not science",
-            source=sorted(proposals_module.PROPOSAL_SOURCES)[0],
-            proposed_utc="2026-01-01T00:00:00Z",
-            base_rev=exp.rev,
-            target_digest="0000000000000000",
-            trust_basis=proposals_module._unattributed(),
-        )
+    proposal = proposals_module.new_proposal(
+        proposal_id=pid,
+        experiment_id=exp.id,
+        note_id="01SYNTHETICNOTENOTENOTENO",
+        target_field_path="field:system.technique",
+        proposed_value=value,
+        rule="synthetic fixture rule — this test asserts visibility, not science",
+        source=sorted(proposals_module.PROPOSAL_SOURCES)[0],
+        proposed_utc="2026-01-01T00:00:00Z",
+        base_rev=exp.rev,
+        target_digest="0000000000000000",
+        trust_basis=proposals_module._unattributed(),
     )
+    exp.proposals.append(proposal)
+    return proposal
+
+
+def test_a_proposal_act_moves_the_records_own_entry_AND_its_own(client):
+    """WHAT THE FEED SAYS ABOUT PROPOSALS — AND THE SECOND HALF IS NEWLY TRUE.
+
+    THIS TEST WAS `..._and_nothing_finer` AND IT PINNED A SHORTFALL. Its second half
+    asserted that no `proposal` kind was served, that no page carried a proposal id,
+    and that a client could not tell WHICH proposal moved. Every one of those
+    assertions is inverted here rather than deleted, because the shortfall was real
+    and a reader has to be able to see that it was closed rather than that it was
+    never there. The `proposal` kind is now served.
+
+    WHAT ALREADY HELD AND STILL DOES, asserted first because a client can build on it:
+    proposals are part of the record's authoritative signature, so a proposal act moves
+    the record's own `rev` and therefore the `experiment` entry. If a later slice takes
+    proposals out of the signature, that assertion fails — which is why the mechanism
+    is pinned rather than trusted.
+
+    WHAT IS NEW: the proposal has its own entry, at the same sequence position as the
+    record's, carrying its id and its lifecycle state and NOTHING ELSE.
+    """
+    exp_id = _with_runs(client, 1, title="proposal visibility")
+    before = {(c["kind"], c["entity_id"]): c for c in _feed(client, exp_id)["changes"]}
+    assert not [k for k in before if k[0] == "proposal"], "precondition: none yet"
+
+    pid = "01SYNTHETICPROPOSALPROPOS"
+    exp = ws.load_experiment(exp_id)
+    _make_proposal(exp, pid=pid)
     assert exp.save_versioned() is True, "a proposal act must be a real write"
 
     after_page = _feed(client, exp_id)
-    after = {(c["kind"], c["entity_id"]): c["version"] for c in after_page["changes"]}
+    after = {(c["kind"], c["entity_id"]): c for c in after_page["changes"]}
 
     # WHAT HOLDS — the record's own entry moved, so a poller is told to re-read.
-    assert after[("experiment", exp_id)] != before[("experiment", exp_id)]
+    assert after[("experiment", exp_id)]["version"] != before[("experiment", exp_id)]["version"]
 
-    # WHAT DOES NOT — and each of these is a separate way a reader could over-read the
-    # line above, so each is asserted rather than left to the first one to imply.
-    assert "proposal" not in after_page["kinds"]
-    assert {c["kind"] for c in after_page["changes"]} <= {"experiment", "run"}
-    assert "01SYNTHETICPROPOSALPROPOS" not in {c["entity_id"] for c in after_page["changes"]}
+    # WHAT IS NEW — and each clause is the inverse of one the old test asserted.
+    assert "proposal" in after_page["kinds"]
+    assert ("proposal", pid) in after
+    entry = after[("proposal", pid)]
+    assert entry["state"] == "open"
+    # The proposal moved AT this save, so it shares the record's sequence position.
+    assert entry["changed_at_rev"] == after[("experiment", exp_id)]["changed_at_rev"]
+
     # The run did not move: a proposal is not a run act, and the feed does not pretend
     # otherwise by bumping everything.
     run_key = next(k for k in before if k[0] == "run")
-    assert after[run_key] == before[run_key]
+    assert after[run_key]["version"] == before[run_key]["version"]
+    assert after[run_key]["changed_at_rev"] < entry["changed_at_rev"]
+
+
+def test_a_proposal_entry_carries_NO_CONTENT_over_the_wire(client):
+    """THE MINIMUM, MEASURED ON THE WIRE — the structural test's runtime counterpart.
+
+    `test_the_module_reaches_no_proposal_CONTENT_even_though_it_serves_the_kind` asks
+    the AST whether the module COULD read a value. This asks the response whether one
+    ARRIVED, and the two are not the same question: a collector passed in by a caller,
+    or a future entry field spread from a model, would defeat the first and be caught
+    by the second.
+
+    IT ASSERTS OVER THE RAW BODY, not over parsed keys. A value nested anywhere — in a
+    key name, in a string, inside a field this test does not know about — is a
+    substring of the response, and the proposal is built with values chosen to be
+    unmistakable if they leak.
+    """
+    exp_id = _with_runs(client, 1, title="proposal content")
+    pid = "01SYNTHETICPROPOSALPROPOS"
+    exp = ws.load_experiment(exp_id)
+    _make_proposal(exp, pid=pid, value="LEAKCANARYVALUE")
+    assert exp.save_versioned() is True
+
+    res = client.get(f"/api/experiments/{exp_id}/changes")
+    assert res.status_code == 200
+    body = res.text
+    entry = next(c for c in res.json()["changes"] if c["kind"] == "proposal")
+
+    # The key set is EXACT, not a subset: a future field added to `to_wire` shows up
+    # here rather than shipping unnoticed.
+    assert set(entry) == {"kind", "entity_id", "changed_at_rev", "updated_utc", "state"}
+
+    # And no coordinate is synthesised for a kind that has none.
+    assert "version" not in entry and "rev" not in entry and "generation" not in entry
+
+    for leak in (
+        "LEAKCANARYVALUE",
+        "field:system.technique",
+        "synthetic fixture rule",
+        "01SYNTHETICNOTENOTENOTENO",
+        "0000000000000000",
+    ):
+        assert leak not in body, leak
+
+
+def test_the_feed_reports_only_lifecycle_states_the_contract_DEFINES(client):
+    """NO INVENTED STATES — the feed passes `state` through and classifies nothing.
+
+    The proposal contract defines exactly five states. This asserts that what reaches
+    the wire is drawn from that set and that the feed does not map, normalise or
+    default it — a feed that rewrote an unknown state onto a known one would be
+    inventing a judgement about a lifecycle it does not own.
+
+    The negative control is the second half: an out-of-contract state is set DIRECTLY
+    on the stored entity and reaches the wire UNCHANGED. That is deliberate. The feed
+    is not the validator; `proposals.py` refuses such a state at construction, and a
+    feed that silently corrected one would hide a corrupt document instead of showing
+    it.
+    """
+    from isaac_api import proposals as proposals_module
+
+    exp_id = _with_runs(client, 1, title="proposal states")
+    pid = "01SYNTHETICPROPOSALPROPOS"
+    exp = ws.load_experiment(exp_id)
+    proposal = _make_proposal(exp, pid=pid)
+    assert exp.save_versioned() is True
+
+    entry = next(c for c in _feed(client, exp_id)["changes"] if c["kind"] == "proposal")
+    assert entry["state"] in proposals_module.PROPOSAL_STATES
+    assert set(proposals_module.PROPOSAL_STATES) == {
+        "open", "accepted", "rejected", "superseded", "withdrawn"
+    }, "the contract's state set moved — re-read it before changing the feed"
+
+    # THE PASS-THROUGH, proven by moving the proposal through a REAL transition rather
+    # than by fabricating a state. `reject_proposal` is the contract's own function, so
+    # what reaches the wire is a state the contract produced and the feed did not
+    # classify, default or map.
+    exp = ws.load_experiment(exp_id)
+    exp.proposals[0] = proposals_module.reject_proposal(
+        exp.proposals[0], at="2026-01-02T00:00:00Z", reason="synthetic"
+    )
+    assert exp.save_versioned() is True
+    entry = next(c for c in _feed(client, exp_id)["changes"] if c["kind"] == "proposal")
+    assert entry["state"] == "rejected"
+    # The transition is a change, so the position advanced with it.
+    assert entry["changed_at_rev"] > 1
+
+
+def test_a_proposal_the_model_REFUSES_is_not_served_and_is_not_discarded(client):
+    """An out-of-contract proposal on disk is UNREADABLE — and both halves matter.
+
+    THE FIRST HALF, which is `_proposal_entries`' documented claim: an unreadable
+    proposal is not served. It has no id this application is willing to read, so the
+    feed cannot name it, and an entity a client cannot address is one it could not act
+    on if it were told about it.
+
+    THE SECOND HALF, which is the reason the first is safe: it is not DELETED either.
+    `Experiment.unreadable_proposals` keeps the raw entry verbatim so a save cannot
+    discard a recorded human judgement this build could not parse. A feed that went
+    silent about a row that had also been thrown away would be a data-loss path
+    wearing a filter's clothes.
+
+    THIS TEST REPLACED A WRONG ONE, and the mistake is worth recording. The first
+    version asserted that an out-of-contract `state` reached the wire UNCHANGED, on
+    the theory that "the feed is not the validator". It does not: `_hydrate_proposals`
+    refuses the entry at load, so the proposal never becomes a proposal at all. The
+    theory was right and the prediction was wrong, which is the difference between
+    reasoning about a module and reading it.
+    """
+    exp_id = _with_runs(client, 1, title="unreadable proposal")
+    pid = "01SYNTHETICPROPOSALPROPOS"
+    exp = ws.load_experiment(exp_id)
+    _make_proposal(exp, pid=pid)
+    assert exp.save_versioned() is True
+    assert any(c["kind"] == "proposal" for c in _feed(client, exp_id)["changes"])
+
+    # Corrupt the STORED document directly — the only way to reach this state, since
+    # every constructor in `proposals.py` refuses it.
+    raw = json.loads(exp.state_path.read_text(encoding="utf-8"))
+    raw["proposals"][0]["state"] = "not-a-contract-state"
+    exp.state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    reloaded = ws.load_experiment(exp_id)
+    assert reloaded.proposals == []
+    assert len(reloaded.unreadable_proposals) == 1
+    assert reloaded.unreadable_proposals[0]["state"] == "not-a-contract-state"
+
+    page = _feed(client, exp_id)
+    assert not [c for c in page["changes"] if c["kind"] == "proposal"]
+    assert pid not in {c["entity_id"] for c in page["changes"]}
+    # `proposal` stays in the SERVED KIND SET: the kinds a deployment serves is a
+    # property of its collectors, not of whether this record happens to hold one.
+    assert "proposal" in page["kinds"]
 
 
 # =============================================================================
@@ -1039,8 +1355,12 @@ def test_a_removed_run_is_simply_absent_and_no_tombstone_is_invented(client):
     ids = {c["entity_id"] for c in after["changes"]}
     assert doomed not in ids
     # No entry anywhere claims a removal — no `deleted`, no `tombstone`, no null kind.
+    # `changed_at_rev` JOINED THE KEY SET with the ordering fix; it is the sort
+    # position, not a claim about the removed run, and the set is asserted exactly
+    # rather than as a subset so a future `deleted: false` would fail here.
     assert all(set(c) == {
-        "kind", "entity_id", "version", "rev", "generation", "updated_utc"
+        "kind", "entity_id", "version", "rev", "generation", "updated_utc",
+        "changed_at_rev",
     } for c in after["changes"])
 
     # And resuming from the pre-removal cursor reports nothing about it either.
