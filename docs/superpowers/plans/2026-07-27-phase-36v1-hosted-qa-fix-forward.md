@@ -693,7 +693,7 @@ All 15 findings closed. Frontend **1690 → 1721** tests (84 files), no test wea
   asserted) · deep selection cleared when no deep layer is drawn, value cleared and prop untouched so
   Unit G's contract holds, **Browse deliberately exempt** because there it is the textual route in ·
   stale served-set clause covered both ways · neighbour cap, "capped from" wording and departing
-  concept nodes disclosed · raw NUL/SOH replaced with ` `/`` · the dead staleness branch
+  concept nodes disclosed · raw NUL/SOH replaced with `\x00`/`\x01` · the dead staleness branch
   widened (it would still have printed a false denial for a HEAD-describing point-in-time payload).
 
 **A real defect found by its own new test:** *Reveal Detail* from 140% landed on

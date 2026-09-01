@@ -944,7 +944,19 @@ Current state:
   this tree is only evidence of absence when run with `-a`, and a zero-hit result without it is
   not a measurement at all — it is indistinguishable from a skipped file.** A mechanical guard now
   exists (`apps/web/src/__tests__/source-is-greppable.test.ts`) asserting no file under
-  `apps/web/src` holds a NUL, so the next occurrence fails a test instead of costing a session. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
+  `apps/web/src` holds a NUL, so the next occurrence fails a test instead of costing a session.
+
+  **AND THE SWEEP ABOVE WAS ITSELF SCOPED TOO NARROWLY — widened 2026-08-31.** "Exactly one
+  file" is true of `apps/web/src`. Over **all tracked files** there are **three**, and the
+  second one is the joke this entry deserves: **`docs/superpowers/plans/2026-07-27-phase-36v1-hosted-qa-fix-forward.md`
+  held a literal NUL inside the sentence `raw NUL/SOH replaced with ...`** — a document
+  *describing* this defect, made invisible by it, in the directory §16's resume protocol
+  sends every new session to read. `grep -l "Phase 36V" <that file>` exited **1**; `grep -al`
+  exited **0**. The byte is now the printable escape the sentence says it is, and the file is
+  greppable. The third is `qa/validator-upload-package/isaac-validator-qa-files.zip`, a
+  genuine binary and the **only** legitimate exemption — so widening the guard to tracked
+  files costs **one** exemption, not the "binary fixtures and generated artifacts" (plural)
+  that the narrow scope was justified by. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
   through an adapter that returns a *different type*, was rendering **"FAIL — Invalid against
   official ISAAC schema v1.05"** about a record `validate_official` never opened.
 
