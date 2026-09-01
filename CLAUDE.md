@@ -919,7 +919,32 @@ Current state:
   under `apps/web/src`, ZERO containing a NUL byte; that file's NUL count is 0; `rg -l` and
   `rg -al` return the identical 63 files.** The file was rewritten since. The finding was real
   when written and the `-a` habit costs nothing — but **a future session must not skip an `rg`
-  sweep of `apps/web/src` on the strength of this**, and must not cite it as a live trap. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
+  sweep of `apps/web/src` on the strength of this**, and must not cite it as a live trap.
+
+  ***THE TRAP IS LIVE AGAIN, IN A DIFFERENT FILE, AND THE "DO NOT CITE IT AS LIVE" SENTENCE
+  ABOVE IS THEREFORE WITHDRAWN AS A GENERAL CLAIM — measured 2026-08-31.*** Both halves of the
+  2026-08-30 correction were true **of `experimentGraph.ts`**, and are kept for that reason. What
+  was wrong was generalising a fact about ONE file into a fact about the tree. Re-measured at
+  `bebf4e2` and again at `ddec2b5`: **379 files under `apps/web/src`, and exactly ONE holds a NUL
+  byte — `components/RecordDescriptionPanel.tsx`, 2 of them**, a `rows.join('\0')` separator typed
+  as a raw byte instead of an escape.
+
+  **IT COST EXACTLY THE CONFUSION THIS ENTRY PREDICTED, AND IT COST IT TO THE RECORD-CAPTURE
+  SURFACE.** `RecordDescriptionPanel.tsx` is the file implementing record-level field capture, so
+  a `grep`/`rg` sweep for those inputs returned **nothing** and exited **0** — which is how three
+  separate sessions came to believe the twelve free-text record paths *had no website input*. They
+  had one, shipped in `7822b13`. The measurement that says so:
+
+  ```bash
+  grep -rl  RecordDescriptionPanel apps/web/src   # 2 files  <- the panel itself is MISSING
+  grep -ral RecordDescriptionPanel apps/web/src   # 3 files  <- -a finds it
+  ```
+
+  **The durable rule, stated so it does not need re-deriving a third time: a `grep`/`rg` sweep of
+  this tree is only evidence of absence when run with `-a`, and a zero-hit result without it is
+  not a measurement at all — it is indistinguishable from a skipped file.** A mechanical guard now
+  exists (`apps/web/src/__tests__/source-is-greppable.test.ts`) asserting no file under
+  `apps/web/src` holds a NUL, so the next occurrence fails a test instead of costing a session. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
   through an adapter that returns a *different type*, was rendering **"FAIL — Invalid against
   official ISAAC schema v1.05"** about a record `validate_official` never opened.
 
