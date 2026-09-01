@@ -7,33 +7,79 @@
  * WCAG AA contrast (see inline comments below); the handoff doc still has
  * the original #9a6f24 and should be reconciled with this value.
  *
- * Exception (A3, this change): --text-tertiary and --missing-text were darkened
- * from #78838f, --text-quaternary #9aa4af was RETIRED, and --text-inactive was
- * added. The handoff doc still has the originals and should be reconciled.
+ * Exception (A3 / FINDING A11Y-01, this change): --text-tertiary and
+ * --missing-text were darkened from #78838f; --text-quaternary was RETIRED AS A
+ * DISTINCT TIER and is now an alias of --text-tertiary; --text-inactive was
+ * added to carry the one value that is genuinely entitled to fail. The handoff
+ * doc still has the originals and should be reconciled.
  *
- *   MEASURED BEFORE, on the five neutral grounds this app paints text on
- *   (#ffffff, #fbfcfd, #f4f6f9, #f6f8fa, #eef2f6):
- *     --text-tertiary   #78838f  3.86 / 3.76 / 3.56 / 3.62 / 3.43  — fails AA
- *     --text-quaternary #9aa4af  2.53 / 2.46 / 2.34 / 2.38 / 2.25  — fails AA
+ *   MEASURED BEFORE, on six of the nineteen grounds this app paints text on —
+ *   every one proved by a rule in this repository, not assumed (--surface
+ *   #ffffff, --surface-subtle #fbfcfd, --screen-base #f4f6f9, --missing-bg
+ *   #f6f8fa, --cover-bg/--border-faint #eef2f6, --assist-tint #ecebfb):
+ *     --text-tertiary   #78838f  3.86 / 3.76 / 3.56 / 3.62 / 3.43 / 3.28 — fails AA
+ *     --text-quaternary #9aa4af  2.53 / 2.46 / 2.34 / 2.38 / 2.25 / 2.15 — fails AA
  *                                                       AND the 3:1 non-text bar
- *     --missing-text    #78838f  3.62 on its own --missing-bg      — fails AA
+ *     --missing-text    #78838f  3.62 on its own --missing-bg           — fails AA
  *   MEASURED AFTER:
- *     --text-tertiary   #646e79  5.19 / 5.05 / 4.79 / 4.87 / 4.61
- *     --missing-text    #646e79  4.87 on --missing-bg
+ *     --text-tertiary   #626c77  5.34 / 5.20 / 4.93 / 5.02 / 4.75 / 4.54
+ *     --missing-text    #626c77  5.02 on --missing-bg
  *
- *   WHY THE TWO TOKENS DID NOT BOTH SURVIVE AS INK. There is no room below
- *   --text-muted (5.27:1 on the darkest ground) for TWO compliant steps: the
- *   lightest value clearing 4.5:1 everywhere is #646e79, and the next one down
- *   would be #636d78 — one 8-bit step away and indistinguishable. Keeping both
- *   names would have shipped a hierarchy the eye cannot see, so the 76 uses of
- *   --text-quaternary were re-pointed by CLASS instead: 74 informational ones
- *   to --text-tertiary, and the 2 genuinely disabled controls to the new
- *   --text-inactive, which keeps the old #9aa4af because 1.4.3 exempts an
- *   inactive control and nothing else was ever entitled to that value.
+ *   --assist-tint IS WHY THE VALUE IS #626c77 AND NOT SOMETHING TWO HEX STEPS
+ *   LIGHTER, and it is the ground an eyeballed fix misses. #ecebfb is not a chip
+ *   tint — `.record-right` and `.memory-right` are 342px-wide PANELS painted
+ *   with it (`screens.css`), as is `.assistant` itself, and those panels are
+ *   full of neutral secondary text. A value of #646e79 clears every other ground
+ *   in the app and lands at **4.41:1** here, so it would have shipped a fix that
+ *   still failed on the assistant panel. #626c77 is the lightest value on this
+ *   ramp that clears 4.5:1 on ALL NINETEEN measured grounds; its worst case is
+ *   exactly this one, at 4.54:1.
  *
- *   HUE IS PRESERVED. #646e79 is hue 211.43 deg — the hue --text-muted and the
+ *   FIVE BACKGROUND TOKENS ARE DELIBERATELY EXCLUDED from that set, and naming
+ *   them is the point, because #626c77 does NOT clear 4.5:1 on any of them:
+ *   --action-selected-border #cfe0f2 (3.97:1), --border-strong #d3dae2 (3.79:1),
+ *   --border #e4e9ef (4.38:1), --border-input #e0e6ec (4.25:1) and --app-canvas
+ *   #e7ebf0 (4.46:1). None is a TEXT ground. `.app` paints --app-canvas and is
+ *   fully covered by `.screen-card` bar 16px of padding; --border-input is three
+ *   rules, all 1px separators or a 5px progress segment; --border is one 14x8px
+ *   tutorial arrow; --border-strong is a 2px spine rail and a 12x12px legend
+ *   swatch; --action-selected-border appears only on `:active` fills of
+ *   action-tinted buttons, whose text is action blue rather than neutral ink. If
+ *   any of them ever carries text, #626c77 is not dark enough and this note is
+ *   the record of that. `palette-contrast.test.ts` re-derives the whole set
+ *   from the stylesheets and fails if a new fill appears unclassified.
+ *
+ *   WHY --text-quaternary COULD NOT SURVIVE AS A LIGHTER INK. The compliant
+ *   budget below --text-muted is almost empty: on --assist-tint #ecebfb, AA
+ *   admits nothing lighter than #626c77, and --text-muted #5b6570 already sits
+ *   at 5.04:1 there. A second, lighter, still-compliant step would have to live
+ *   inside a one-hex-step window — a hierarchy the eye cannot see. So the tier
+ *   is retired rather than faked. --text-quaternary is kept as an ALIAS, not
+ *   deleted: 71 declarations across 18 component and screen stylesheets still
+ *   name it, and deleting the declaration would leave every one of them
+ *   resolving to an invalid value at computed-value time. New code must use
+ *   --text-tertiary; the alias exists so the fix is a two-file change.
+ *
+ *   ONE CONSEQUENCE, STATED RATHER THAN DISCOVERED LATER: any rule that used
+ *   quaternary and tertiary to separate two states of the same control now
+ *   paints them identically. Exactly one such pair existed
+ *   (`.btn-danger-quiet:hover`/`:active`, plus `.btn-secondary` which had the
+ *   same shape); both are re-stepped in base.css so the press feedback survives.
+ *
+ *   HUE IS PRESERVED. #626c77 is hue 211.43 deg — the hue --text-muted and the
  *   retired --text-quaternary already carried, and 0.13 deg from the discarded
- *   --text-tertiary's 211.30 deg. The ramp did not change colour, only weight.
+ *   --text-tertiary's 211.30 deg. The ramp did not change colour, only weight:
+ *   HSL lightness 51.6% -> 42.5%, one step above --text-muted's 39.8%.
+ *
+ *   WHAT THIS DOES **NOT** FIX, because it cannot. A11Y-01 has three causes
+ *   (`e2e/a11y-baseline.ts`); this change addresses cause (a) for these two
+ *   tokens only. Cause (b) — text composited under an ancestor `opacity`
+ *   (`queue.css .exp-row.done`, `assistant.css .upcoming-row`,
+ *   `signals.css .advisory-nongating`) — still fails AFTER this change: at
+ *   opacity .82 #626c77 composites to roughly #7e868f (3.69:1) and at .72 to
+ *   roughly #8e959d (3.03:1). Those are formula-computed, not browser-measured.
+ *   The opacity has to go; darkening a token cannot reach them. Cause (c),
+ *   --verified-text and --src-derivation, is untouched here.
  */
 :root {
   /* neutrals — cool */
@@ -53,31 +99,45 @@
    * TEXT — two groups, and the split is the contract.
    *
    * INFORMATIONAL INK. Every token in the first group clears WCAG AA 4.5:1 on
-   * every neutral ground this application paints text on, down to the darkest
-   * one measured in the stylesheets (`--cover-bg` #eef2f6, which
-   * `.guided-owner-label` really does sit on). Any of them may carry meaning.
+   * every ground this application paints text on, down to the darkest one
+   * measured in the stylesheets — `--assist-tint` #ecebfb, the fill of the two
+   * 342px side panels and of `.assistant` itself. Any of them may carry meaning.
+   * The trailing ratios are that WORST-CASE figure, not the flattering
+   * white-background one, and not the `--cover-bg` #eef2f6 figure an earlier
+   * revision of this block used before `--assist-tint` was measured.
    *
    * NON-INFORMATIONAL INK. The second group is exempt from 1.4.3 because of
    * what it is used FOR, not because the debt was blessed: an inactive control,
    * or an `aria-hidden` mark whose meaning is carried by adjacent text. None of
-   * them may ever be given information to say. `palette-contrast.test.tsx`
-   * enforces both halves — the ratios AND the usage restriction — so the
-   * distinction cannot decay back into "a lighter grey".
+   * them may ever be given information to say. `palette-contrast.test.ts`
+   * enforces both halves — the ratios AND the usage restriction, the latter as
+   * an enumerated allow-list of exempt SITES — so the distinction cannot decay
+   * back into "a lighter grey".
    */
 
   /* text — informational ink (>= 4.5:1 on every ground; may carry meaning) */
-  --text-heading:    #111a24;  /* 15.59:1 on the darkest neutral ground */
-  --text-primary:    #1b2430;  /* 13.91:1 */
-  --text-strong:     #33404e;  /*  9.41:1 */
-  --text-secondary:  #46515f;  /*  7.17:1 — also #55606c on --text-muted */
-  --text-muted:      #5b6570;  /*  5.27:1 */
-  --text-slate:      #5b6b7d;  /*  4.86:1 — coverage + mono eyebrows/labels */
-  --text-tertiary:   #646e79;  /*  4.61:1 — A3: was #78838f (3.43:1). See below. */
+  --text-heading:    #111a24;  /* 14.91:1 on --assist-tint, the darkest text ground */
+  --text-primary:    #1b2430;  /* 13.30:1 */
+  --text-strong:     #33404e;  /*  8.99:1 */
+  --text-secondary:  #46515f;  /*  6.86:1 — also #55606c on --text-muted */
+  --text-muted:      #5b6570;  /*  5.04:1 */
+  --text-slate:      #5b6b7d;  /*  4.64:1 — coverage + mono eyebrows/labels */
+  --text-tertiary:   #626c77;  /*  4.54:1 — A3: was #78838f (3.28:1). See header. */
+
+  /*
+   * DEPRECATED ALIAS, not a tier. Was #9aa4af — 2.15:1 on the darkest ground,
+   * below even the 3:1 that 1.4.11 asks of a non-text control. It carried 71
+   * live declarations, 58 of them ordinary text or input placeholders, so it
+   * was never entitled to that value. It resolves to --text-tertiary rather
+   * than repeating the hex so the two can never drift apart. DO NOT USE IN NEW
+   * CODE; the header comment explains why no lighter compliant step exists.
+   */
+  --text-quaternary: var(--text-tertiary);
 
   /* text — non-informational ink (NEVER for information) */
-  --text-inactive:   #9aa4af;  /* inactive controls only — WCAG 1.4.3 exception */
-  --text-faint:      #aab2bb;  /* aria-hidden decorative marks only */
-  --text-disabled:   #c0c8d0;  /* disabled chevrons/icons — see A3 note, still open */
+  --text-inactive:   #9aa4af;  /*  2.15:1 — inactive controls ONLY; 1.4.3 exception */
+  --text-faint:      #aab2bb;  /*  1.82:1 — aria-hidden decorative marks ONLY */
+  --text-disabled:   #c0c8d0;  /*  1.44:1 — aria-hidden chevrons/discs + inactive */
 
   /* action — primary blue */
   --action:          #2c6ab0;
@@ -126,7 +186,7 @@
   --verified-text:   #2f7d78;  --verified-bg:   #e6f1f0;  --verified-border:   #c4e0dd; /* teal */
   --confirmed-text:  #6f5c3f;  --confirmed-bg:  #f5f1ea;  --confirmed-border:  #e6ddcd; /* warm tan = human motif */
   --inferred-text:   #5b6b7d;  --inferred-bg:   #eef1f5;  --inferred-border:   #d5dde5; /* slate */
-  --missing-text:    #646e79;  --missing-bg:    #f6f8fa;  --missing-border:    #c3ccd5; /* DASHED border; text darkened in A3 from #78838f, which was 3.62:1 on its own bg */
+  --missing-text:    #626c77;  --missing-bg:    #f6f8fa;  --missing-border:    #c3ccd5; /* DASHED border; text darkened in A3 from #78838f, 3.62:1 on its own bg; now 5.02:1 */
   --needsyou-text:   #8a6420;  --needsyou-bg:   #f8efdd;  --needsyou-border:   #ecd8ac; /* amber; text darkened P23C for WCAG AA (was #9a6f24, ~3.93:1) */
 
   /* evidence source-type icon strokes (chip bg #f6f8fa, border #e4e9ef, text #55606c) */
