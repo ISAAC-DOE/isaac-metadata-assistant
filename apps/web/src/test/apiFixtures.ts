@@ -7,7 +7,12 @@
 
 import { vi } from 'vitest';
 
-import type { ApiWorkflow } from '../lib/types';
+import type { ApiWorkflow, DraftFieldCapture } from '../lib/types';
+// THE VENDORED SCHEMA ITSELF, for the one thing a fixture must not transcribe: the
+// closed sets `capture.choices` carries. `system.technique` has 37 values, and a copy
+// of them here would be a second expression of the document `CLAUDE.md` §1 makes the
+// authority, free to go stale on a schema refresh with every test still green.
+import officialSchema from '../../../../schema/isaac_record_v1.json';
 // The verification report bodies live in their own module, with the rest of the
 // Record Verification wire fixtures. Imported rather than duplicated so one
 // contract has one fixture.
@@ -742,6 +747,74 @@ export function assetsPage(
 
 export const assetsEmpty = assetsPage([]);
 
+/** The official schema's own closed set at a dotted path, or `null`. READ, never listed. */
+function schemaEnum(path: string): string[] | null {
+  let node: unknown = officialSchema;
+  for (const segment of path.split('.')) {
+    const properties = (node as { properties?: Record<string, unknown> } | null)?.properties;
+    if (!properties || !(segment in properties)) return null;
+    node = properties[segment];
+  }
+  const values = (node as { enum?: unknown }).enum;
+  return Array.isArray(values) ? (values as string[]) : null;
+}
+
+/**
+ * THE `capture` BLOCK EVERY DRAFT FIELD ROW CARRIES — because the real response always
+ * carries one, and this fixture used to carry none.
+ *
+ * `serialize._draft_field` and `serialize._skeleton_field` BOTH set `capture` through
+ * `_capture_for`, which returns a dict on every call (`_UNKNOWN_CAPTURE` when the caller
+ * supplied no facts for the path). So there is no response this build can produce in
+ * which a field row lacks the key. A fixture that omitted it put every test that reads
+ * it on the "the server did not speak this contract" branch — a branch the server cannot
+ * reach — and the consequence was measured: with the panel's derivation reverted to a
+ * hardcoded list, all thirteen tests in `record-description.test.tsx` still passed.
+ *
+ * The shape is `routes.capture_facts`' own: three independent writability booleans (they
+ * are three different OPERATIONS and collapsing them loses the distinction a surface has
+ * to make), the experiment/run `level`, the schema's closed set, and the open namespace.
+ * Defaults here are the experiment-level record-writable case, because all three rows
+ * below are that case; anything else is passed explicitly.
+ */
+function recordCapture(
+  path: string,
+  over: Partial<DraftFieldCapture> = {},
+): DraftFieldCapture {
+  return {
+    level: 'experiment',
+    record_writable: true,
+    run_field_writable: false,
+    run_overridable: true,
+    // Served only where the schema declares one — null for the twelve free-text and
+    // numeric sample/facility paths, which is why `choices` is null far more often than
+    // it is populated. Read from the schema, so it follows a refresh.
+    choices: schemaEnum(path),
+    open_namespace: null,
+    ...over,
+  };
+}
+
+/*
+ * THE DRAFT RESPONSE FOR THE CANONICAL FIXTURE RECORD.
+ *
+ * WHAT IT IS NOT, STATED SO NOBODY READS MORE INTO IT. The real `GET .../draft` returns
+ * a row for EVERY path this build can extract into or write at — 26 rows in 4 groups on
+ * a fixture-seeded record, per `serialize.draft_to_groups`' own docstring. This fixture
+ * carries THREE, which long predates `capture` and is deliberately left alone here: it
+ * is the input to `bundleRoutes`, which most record-screen tests in this suite render
+ * through, and widening it would rewrite assertions across files that have nothing to do
+ * with the capture contract. The full 26-path transcription of `routes.capture_facts`
+ * lives in `__tests__/record-writable-inventory.test.tsx`, which is where the inventory
+ * is proved.
+ *
+ * The consequence, named rather than left to be discovered: the eleven record-level
+ * paths this fixture carries no row for reach the panel through the PER-PATH fallback in
+ * `recordFields.offeredRecordFields`. That is a branch the server genuinely can produce
+ * — a persisted envelope that is not a dict makes `draft_to_groups` skip the field and
+ * suppress its skeleton row — so the tests are exercising reachable behaviour, unlike
+ * the whole-draft no-`capture` branch this fixture used to put them on.
+ */
 export const draftResponse = {
   groups: [
     {
@@ -754,6 +827,8 @@ export const draftResponse = {
           status: 'verified',
           evidence_count: 1,
           source_types: ['spreadsheet'],
+          present: true,
+          capture: recordCapture('system.technique'),
         },
         {
           path: 'system.domain',
@@ -762,6 +837,12 @@ export const draftResponse = {
           status: 'inferred',
           evidence_count: 1,
           source_types: ['derivation'],
+          present: true,
+          // THE ONE OF THE FOURTEEN NO RUN CAN OVERRIDE — `system.domain` is absent from
+          // `EXPERIMENT_OVERRIDABLE_ADDRESSES`, and it is also the path the OTHER served
+          // key (`record_writable_field_paths`, on `GET .../notes`) drops. Both facts are
+          // load-bearing elsewhere, so the fixture states them rather than defaulting.
+          capture: recordCapture('system.domain', { run_overridable: false }),
         },
       ],
     },
@@ -775,6 +856,9 @@ export const draftResponse = {
           status: 'verified',
           evidence_count: 1,
           source_types: ['spreadsheet'],
+          present: true,
+          // `choices` resolves to null here: the schema declares no enum at this path.
+          capture: recordCapture('sample.material.formula'),
         },
       ],
     },

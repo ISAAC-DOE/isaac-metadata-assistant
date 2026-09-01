@@ -65,11 +65,13 @@ import {
   contributorRoleOptions,
   contributorRows,
   holdsAValue,
+  offeredRecordFields,
   parseRecordField,
   recordFieldFacts,
   tagRows,
   type ContributorRow,
   type RecordFieldFacts,
+  type RecordFieldSpec,
 } from '../lib/recordFields';
 import type { ApiDraftResponse, ApiRunsResponse, JsonSchemaNode } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
@@ -118,6 +120,18 @@ interface Loaded {
   schema: JsonSchemaNode | null;
   /** The bounded override picture, or `null` when the runs list could not be read. */
   overrides: OverrideSummary | null;
+  /**
+   * THE FIELDS THIS PANEL MAY OFFER — derived from the served draft, never listed here.
+   *
+   * See `recordFields.offeredRecordFields`. It is carried on `Loaded` rather than
+   * recomputed at each use so that every consumer in this file — the schema facts, the
+   * initial box contents, what a save collects, and what is rendered — reads ONE
+   * inventory. Four independent derivations of the same set is how three of them go
+   * stale.
+   */
+  fields: readonly RecordFieldSpec[];
+  /** `true` when the server reported the set; `false` when this is the declared fallback. */
+  fieldsServed: boolean;
 }
 
 type LoadState =
@@ -134,6 +148,26 @@ type SaveState =
   | { kind: 'failed'; message: string; landed: string[]; perKey: Record<string, string> };
 
 const NOTHING_TO_SAVE = 'Nothing has changed, so nothing was sent.';
+
+/**
+ * The separator two tag lists are compared through — a character no tag can contain.
+ *
+ * WRITTEN AS AN ESCAPE, AND THE ESCAPE IS THE WHOLE POINT. This was a literal
+ * NUL (`U+0000`) byte typed straight into the source, which is a perfectly good separator
+ * and made this file **invisible to `grep -r` and `rg`**: both classify a file holding a
+ * NUL byte as binary and skip it silently, exiting 0 with no diagnostic. Measured on
+ * this branch's PARENT commit (`bebf4e2`): of the 379 files under `apps/web/src`, exactly
+ * one held a NUL — this one, the only file that implements the record-level capture
+ * surface, and it held exactly two. A sweep for
+ * `RecordDescriptionPanel` across `apps/web/src` returned 2 files without `-a` and 3
+ * with it, so a reader auditing whether this feature exists was told it did not.
+ *
+ * `CLAUDE.md` §11 records the same trap in `lib/experimentGraph.ts` and records it as
+ * having since been rewritten away — which was true of that file and is why the habit
+ * must not rest on it. The escape sequence produces the identical string at runtime and
+ * costs nothing; the raw byte costs a future reader the file.
+ */
+const TAG_SEPARATOR = '\u0000';
 
 /**
  * The one sentence a reader needs about a blank box, stated where they would otherwise
@@ -235,11 +269,13 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
   }, []);
 
   const loaded = load.status === 'ready' ? load.loaded : null;
+  const offered = loaded?.fields ?? RECORD_FIELDS;
   const facts = useMemo<Record<string, RecordFieldFacts>>(() => {
     const out: Record<string, RecordFieldFacts> = {};
-    for (const spec of RECORD_FIELDS) out[spec.path] = recordFieldFacts(loaded?.schema, spec.path);
+    for (const spec of offered) out[spec.path] = recordFieldFacts(loaded?.schema, spec.path);
     return out;
-  }, [loaded]);
+  }, [loaded, offered]);
+  const nameOf = useCallback((key: string) => labelFor(key, offered), [offered]);
   const roles = useMemo(() => contributorRoleOptions(loaded?.schema), [loaded]);
 
   const attribution = loaded?.blocks[RECORD_ATTRIBUTION_ADDRESS];
@@ -405,7 +441,7 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
           together with its content is announced unreliably, and this is the one place
           the reader is told a save actually landed. */}
       <p className="rdesc-status" id={statusId} role="status">
-        {statusSentence(save)}
+        {statusSentence(save, nameOf)}
       </p>
 
       {summaryEntries.length > 0 && (
@@ -418,7 +454,7 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
           <ul className="rdesc-summary-list">
             {summaryEntries.map(([key, message]) => (
               <li key={key}>
-                <a href={`#${controlId(formId, key)}`}>{labelFor(key)}</a> — {message}
+                <a href={`#${controlId(formId, key)}`}>{nameOf(key)}</a> — {message}
               </li>
             ))}
           </ul>
@@ -431,7 +467,7 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
             This record changed somewhere else while you were editing, so nothing further
             was written.{' '}
             {save.landed.length > 0
-              ? `${save.landed.length} value${save.landed.length === 1 ? '' : 's'} had already been saved before that happened: ${save.landed.map(labelFor).join(', ')}.`
+              ? `${save.landed.length} value${save.landed.length === 1 ? '' : 's'} had already been saved before that happened: ${save.landed.map(nameOf).join(', ')}.`
               : 'No value from this save was written.'}{' '}
             Everything you typed is still here. Re-read the record to see what it says
             now, then save again — nothing is overwritten in the meantime.
@@ -442,11 +478,34 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
         </div>
       )}
 
-      {RECORD_FIELD_GROUPS.map((group) => (
+      {/*
+        THE INVENTORY IS THE SERVER'S — see `recordFields.offeredRecordFields`. A group
+        with no offered field renders NO fieldset, so a legend never stands over nothing;
+        that is what makes it safe for the derivation to have somewhere to put a path
+        this build does not declare.
+      */}
+      {loaded !== null && loaded.fieldsServed && offered.length === 0 && (
+        <p className="rdesc-lead">
+          This build reports no record-level field it will accept a value at, so no boxes
+          are offered here. Nothing is hidden from you: a box whose only outcome would be
+          a refusal is worse than none. The contributor and tag editors below are separate
+          and are unaffected.
+        </p>
+      )}
+      {loaded !== null && !loaded.fieldsServed && (
+        <p className="rdesc-lead">
+          This server did not say which fields it accepts a value at, so the boxes below
+          are this screen&rsquo;s own list rather than the server&rsquo;s. A value may
+          still be refused when you save it, and the refusal will say so.
+        </p>
+      )}
+      {RECORD_FIELD_GROUPS.filter((group) =>
+        offered.some((spec) => spec.group === group.id),
+      ).map((group) => (
         <fieldset className="rdesc-group" key={group.id}>
           <legend className="rdesc-legend">{group.title}</legend>
           <div className="rdesc-rows">
-            {RECORD_FIELDS.filter((spec) => spec.group === group.id).map((spec) => (
+            {offered.filter((spec) => spec.group === group.id).map((spec) => (
               <FieldRow
                 key={spec.path}
                 id={controlId(formId, spec.path)}
@@ -798,11 +857,20 @@ function controlId(formId: string, key: string): string {
   return `${formId}-${key.replace(/[.:]/g, '-')}`;
 }
 
-/** The human name of one key, for an error summary a person reads. */
-export function labelFor(key: string): string {
+/**
+ * The human name of one key, for an error summary a person reads.
+ *
+ * `fields` defaults to the DECLARED list so existing callers and tests are unchanged;
+ * the panel passes the SERVED inventory, so a path the server accepts and this build
+ * does not declare is named by its derived label rather than by its raw dotted path.
+ */
+export function labelFor(
+  key: string,
+  fields: readonly RecordFieldSpec[] = RECORD_FIELDS,
+): string {
   if (key === RECORD_ATTRIBUTION_ADDRESS) return 'Contributors';
   if (key === RECORD_TAGS_ADDRESS) return 'Tags';
-  return RECORD_FIELDS.find((spec) => spec.path === key)?.label ?? key;
+  return fields.find((spec) => spec.path === key)?.label ?? key;
 }
 
 /** Whether the record currently holds something at this key — the `/answers` vs `/edit` split. */
@@ -835,12 +903,15 @@ function toLoaded(
   for (const group of draft.groups ?? []) {
     for (const field of group.fields ?? []) stored[field.path] = field.value;
   }
+  const offered = offeredRecordFields(draft);
   return {
     version,
     stored,
     blocks: draft.record_blocks ?? {},
     schema,
     overrides: runs === null ? null : summariseOverrides(runs),
+    fields: offered.fields,
+    fieldsServed: offered.served,
   };
 }
 
@@ -872,7 +943,7 @@ export function summariseOverrides(runs: ApiRunsResponse): OverrideSummary {
 
 function initialText(loaded: Loaded): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const spec of RECORD_FIELDS) {
+  for (const spec of loaded.fields) {
     const value = loaded.stored[spec.path];
     out[spec.path] = value === null || value === undefined ? '' : String(value);
   }
@@ -899,7 +970,10 @@ export function collectChanges(input: {
 }): { values: Record<string, unknown>; errors: Record<string, string> } {
   const values: Record<string, unknown> = {};
   const errors: Record<string, string> = {};
-  for (const spec of RECORD_FIELDS) {
+  /* THE SERVED INVENTORY, NOT THE DECLARED ONE. A save must not be able to send a key
+     the panel is not offering a box for — that is how a stale list would still reach
+     the wire after the screen stopped showing it. */
+  for (const spec of input.loaded.fields) {
     const parsed = parseRecordField(
       input.facts[spec.path] ?? { declaredType: null, allowed: null },
       input.text[spec.path] ?? '',
@@ -935,7 +1009,7 @@ export function collectChanges(input: {
     if (rows.length !== new Set(rows).size) {
       errors[RECORD_TAGS_ADDRESS] =
         'The official schema requires tags to be unique. Nothing was sent.';
-    } else if (rows.join(' ') !== [...input.storedTags].join(' ')) {
+    } else if (rows.join(TAG_SEPARATOR) !== [...input.storedTags].join(TAG_SEPARATOR)) {
       values[RECORD_TAGS_ADDRESS] = rows;
     }
   }
@@ -1020,7 +1094,7 @@ export function overrideNote(
 }
 
 /** The status line. Every variant states what DID happen, never only what failed. */
-function statusSentence(save: SaveState): string {
+function statusSentence(save: SaveState, nameOf: (key: string) => string): string {
   switch (save.kind) {
     case 'saving':
       return 'Saving…';
@@ -1030,7 +1104,7 @@ function statusSentence(save: SaveState): string {
       return 'Nothing further was saved — this record changed somewhere else.';
     case 'failed':
       return save.landed.length > 0
-        ? `${save.landed.length} value${save.landed.length === 1 ? '' : 's'} were saved before this failed: ${save.landed.map(labelFor).join(', ')}.`
+        ? `${save.landed.length} value${save.landed.length === 1 ? '' : 's'} were saved before this failed: ${save.landed.map(nameOf).join(', ')}.`
         : save.message;
     default:
       return '';

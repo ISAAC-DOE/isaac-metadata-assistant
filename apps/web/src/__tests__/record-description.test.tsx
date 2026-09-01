@@ -337,6 +337,31 @@ describe('the record description panel', () => {
     ).toBeInTheDocument();
   });
 
+  it('runs on the SERVED inventory — the shared fixture carries the `capture` the API always sends', async () => {
+    /*
+     * WHY THIS IS ASSERTED AT ALL. `serialize._capture_for` returns a dict on every
+     * call, and both `_draft_field` and `_skeleton_field` route through it, so there is
+     * no `GET .../draft` response this build can produce in which a field row lacks
+     * `capture`. While the shared fixture omitted it, every test in this file ran on
+     * `offeredRecordFields`' whole-draft FALLBACK — a branch the server cannot reach —
+     * and the proof was mechanical: with the panel's derivation reverted to a hardcoded
+     * list, all thirteen tests here still passed.
+     *
+     * This pins the fixture back onto the served branch. It is the counterpart of
+     * `record-writable-inventory.test.tsx`'s deliberate `omitCapture` test, which keeps
+     * the fallback covered ON PURPOSE rather than by accident.
+     */
+    for (const group of draftResponse.groups) {
+      for (const field of group.fields) {
+        expect(field, `${field.path} carries no capture`).toHaveProperty('capture');
+      }
+    }
+    await open();
+    // AND THE PANEL IS ON THAT BRANCH: the fallback disclosure is the sentence it prints
+    // when the server has not spoken the contract, and it must not be on screen here.
+    expect(screen.queryByText(/did not say which fields it accepts a value at/i)).toBeNull();
+  });
+
   it('labels every control and keeps the status region mounted', async () => {
     await open();
     // EVERY OFFERED FIELD HAS A LABEL TIED TO ITS CONTROL. `getByLabelText` throws when
