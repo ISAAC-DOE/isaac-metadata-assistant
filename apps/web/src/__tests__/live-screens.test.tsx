@@ -330,7 +330,8 @@ describe('S3 · Review Record (live bundle)', () => {
 
   it('shows live pending as Needs You and live draft fields; signals stay three labeled segments', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
-    const { container, findByText, getByText, getByLabelText } = renderAt('/record/demo');
+    const { container, findByText, getAllByLabelText, getByText, getByLabelText } =
+      renderAt('/record/demo');
 
     // needs-you banner fed by /pending — concise structured label + the technical
     // locator surfaced verbatim (proves the live pending item drives the banner).
@@ -350,7 +351,23 @@ describe('S3 · Review Record (live bundle)', () => {
     // reveals the live field value.
     expect(getByText('System & Instrument')).toBeInTheDocument();
     fireEvent.click(container.querySelector('.fg-header') as HTMLButtonElement);
-    expect(getByText('HERFD-XAS')).toBeInTheDocument();
+    /*
+     * THE VALUE THE RECORD HOLDS, scoped to the row that states it.
+     *
+     * `HERFD-XAS` matches TWICE on this screen and BOTH matches are correct, so the
+     * scoping is not a query working around noise. The second is an `<option>` in the
+     * enum picker `FieldCaptureControl` renders whenever the served `capture` reports
+     * the path record-writable AND carries the official schema's own closed set — which
+     * `GET .../draft` does for `system.technique` on every response. The shared fixture
+     * carried no `capture` at all until it was corrected to match the wire, so this
+     * screen had never rendered that control in any test; the picker is asserted below
+     * rather than queried away.
+     */
+    expect(
+      [...container.querySelectorAll('.field-value')].map((node) => node.textContent),
+    ).toContain('HERFD-XAS');
+    const pickers = getAllByLabelText('Change this value') as HTMLSelectElement[];
+    expect(pickers.map((select) => select.value)).toContain('HERFD-XAS');
 
     // three signals: separate labeled segments, never merged; dry-run carries the
     // live server result as a note, no reserved verdict chip pre-export

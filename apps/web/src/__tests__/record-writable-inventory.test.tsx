@@ -154,11 +154,22 @@ function schemaChoices(path: string): string[] | null {
  */
 function draftWithCapture(
   overrides: Record<string, boolean | undefined> = {},
-  options: { stored?: Record<string, unknown>; omitCapture?: boolean } = {},
+  options: {
+    stored?: Record<string, unknown>;
+    omitCapture?: boolean;
+    /*
+     * Paths whose ROW is dropped from the response entirely — which is not a test-only
+     * shape. `serialize.draft_to_groups` skips a field whose persisted envelope is not a
+     * dict AND suppresses the skeleton row for it, so a record with one wrong-typed
+     * persisted value serves exactly this: every other row present, that path absent.
+     */
+    omitRows?: readonly string[];
+  } = {},
 ): ApiDraftResponse {
   const paths = [...new Set([...Object.keys(THE_SERVED_FACTS), ...Object.keys(overrides)])].sort();
   const fields = paths
     .filter((path) => overrides[path] !== undefined || path in THE_SERVED_FACTS)
+    .filter((path) => !(options.omitRows ?? []).includes(path))
     .map((path) => {
       const row = THE_SERVED_FACTS[path] ?? { R: false, F: false, O: false, level: null };
       const writable = overrides[path] ?? row.R;
@@ -340,6 +351,81 @@ describe('the offered inventory is derived from the served contract', () => {
     for (const path of RECORD_WRITABLE.filter((p) => p !== LOST)) {
       expect(controlForPath(path), `${path} disappeared too`).toBeTruthy();
     }
+  });
+
+  /*
+   * ── THE ROW THAT IS NOT THERE ────────────────────────────────────────────────
+   *
+   * `serialize.draft_to_groups` SKIPS a field whose persisted envelope is not a dict,
+   * and deliberately suppresses the skeleton row that would otherwise stand in for it
+   * ("a key whose envelope was skipped above … does NOT get a skeleton row inventing a
+   * clean one for it"). So the path vanishes from `GET .../draft` entirely — no row, and
+   * therefore no `capture` — on a record whose persisted value is malformed.
+   *
+   * Measured over HTTP against this build: a fresh record served 26 rows, 14
+   * record-writable. After `draft["fields"]["sample.material.name"]` was persisted as a
+   * bare string, `GET /draft` served that path NO ROW and 13 record-writable — while
+   * `POST .../answers` at that same path still answered **200**.
+   *
+   * A derivation that reads absence as refusal therefore withholds the box on exactly
+   * the record whose value needs correcting. These two tests pin that the panel
+   * distinguishes "the server said false" from "the server said nothing", per path.
+   */
+  it('NEGATIVE CONTROL — a declared path with NO ROW is still offered, while one reported false is not', async () => {
+    const ABSENT = 'sample.material.name';
+    const REFUSED = 'system.facility.beamline';
+    expect(RECORD_FIELDS.some((spec) => spec.path === ABSENT)).toBe(true);
+    expect(RECORD_FIELDS.some((spec) => spec.path === REFUSED)).toBe(true);
+
+    const draft = draftWithCapture({ [REFUSED]: false }, { omitRows: [ABSENT] });
+
+    // THE TWO CASES REALLY ARE DIFFERENT ON THE WIRE. Asserted about the fixture first,
+    // because if they were indistinguishable in the payload the panel could not be
+    // asked to distinguish them and this test would be demanding a guess.
+    const rows = (draft.groups?.[0]?.fields ?? []) as { path: string; capture?: { record_writable: boolean } }[];
+    expect(rows.some((row) => row.path === ABSENT)).toBe(false);
+    expect(rows.find((row) => row.path === REFUSED)?.capture?.record_writable).toBe(false);
+
+    // AND THE DERIVATION SEPARATES THEM, reporting which one it fell back for.
+    const offered = offeredRecordFields(draft);
+    expect(offered.served).toBe(true);
+    expect(offered.unspoken).toEqual([ABSENT]);
+    expect(offered.fields.map((spec) => spec.path)).toContain(ABSENT);
+    expect(offered.fields.map((spec) => spec.path)).not.toContain(REFUSED);
+
+    await open(draft);
+
+    // THE SCREEN FOLLOWS BOTH: a box for the path the server did not speak about …
+    expect(
+      controlForPath(ABSENT),
+      'a path the server carried no row for was withheld as though it had been refused',
+    ).toBeTruthy();
+    // … and none for the path it refused by name.
+    expect(controlForPath(REFUSED)).toBeUndefined();
+    // AND NOTHING ELSE MOVED, so this is the distinction and not a blank screen.
+    for (const path of RECORD_WRITABLE.filter((p) => p !== ABSENT && p !== REFUSED)) {
+      expect(controlForPath(path), `${path} disappeared too`).toBeTruthy();
+    }
+  });
+
+  it('sends a value typed into a box the server carried no row for, so the box is not a dead end', async () => {
+    const ABSENT = 'sample.material.name';
+    await open(draftWithCapture({}, { omitRows: [ABSENT] }), {
+      [`POST ${BASE}/answers`]: ACCEPTED,
+    });
+
+    const box = controlForPath(ABSENT) as HTMLInputElement;
+    expect(box, 'no box was offered for the path with no row').toBeTruthy();
+    fireEvent.change(box, { target: { value: 'Synthetic pellet A' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Save record description/ }));
+    });
+
+    // `collectChanges` walks the OFFERED inventory, so a path restored to the screen but
+    // not to the inventory would render a box that silently sends nothing.
+    const call = postCall('answers');
+    expect(call, 'no POST to /answers was made').toBeTruthy();
+    expect(JSON.parse(String(call![1].body)).answers).toEqual({ [ABSENT]: 'Synthetic pellet A' });
   });
 
   it('equals the served set exactly over three different contracts, so a stale list cannot pass', () => {

@@ -153,6 +153,13 @@ export const RECORD_FIELDS: readonly RecordFieldSpec[] = [
  * `serialize._UNKNOWN_CAPTURE` draws with `level: null`. In that case the derivation
  * falls back to the declared list and the panel DISCLOSES that it is doing so, rather
  * than either offering nothing or claiming server backing it does not have.
+ *
+ * THE SAME DISTINCTION HAS TO BE DRAWN PER PATH, and the first version of this
+ * derivation drew it only for the draft as a whole — which was a measured regression.
+ * A path can be MISSING FROM THE RESPONSE ENTIRELY while the routes still accept it, so
+ * "no row" cannot be read as "refused". `offeredRecordFields` below carries the
+ * measurement and the reasoning; `servedRecordWritablePaths` returns `spoken` so the two
+ * cases never have to be inferred from one global boolean again.
  */
 
 /** The presentation for a served path this file does not declare. Formatting only. */
@@ -184,6 +191,14 @@ export interface ServedRecordWritable {
   /** The paths the server reports a RECORD-level operation accepts a value at. */
   paths: readonly string[];
   /**
+   * EVERY path the server spoke about — carried a `capture` object at, whatever it said.
+   *
+   * It is the set `paths` is a subset of, and keeping both is the whole of the
+   * distinction below: a path in `spoken` but not in `paths` was REFUSED by name, and a
+   * path in neither was not mentioned at all.
+   */
+  spoken: readonly string[];
+  /**
    * Whether the server answered the question at all.
    *
    * `false` means no row carried a `capture` object — the server did not speak this
@@ -198,16 +213,20 @@ export function servedRecordWritablePaths(
   draft: ApiDraftResponse | null | undefined,
 ): ServedRecordWritable {
   const paths: string[] = [];
-  let reported = false;
+  const spoken: string[] = [];
   for (const group of draft?.groups ?? []) {
     for (const field of group?.fields ?? []) {
       const capture = field?.capture;
       if (capture === undefined || capture === null) continue;
-      reported = true;
+      spoken.push(field.path);
       if (capture.record_writable === true) paths.push(field.path);
     }
   }
-  return { paths: [...new Set(paths)].sort(), reported };
+  return {
+    paths: [...new Set(paths)].sort(),
+    spoken: [...new Set(spoken)].sort(),
+    reported: spoken.length > 0,
+  };
 }
 
 /** The offered inventory: which boxes this panel may render, and on whose authority. */
@@ -215,6 +234,13 @@ export interface OfferedRecordFields {
   fields: readonly RecordFieldSpec[];
   /** `true` when the set came from the server; `false` when it is the declared fallback. */
   served: boolean;
+  /**
+   * The declared paths offered although the draft carried NO ROW for them.
+   *
+   * Reported rather than merely handled, so a test can assert that a withheld path was
+   * withheld because the server SAID `false` and not because it went unmentioned.
+   */
+  unspoken: readonly string[];
 }
 
 /**
@@ -222,19 +248,54 @@ export interface OfferedRecordFields {
  *
  * ORDER: the declared paths the server confirms, in `RECORD_FIELDS` order (so the
  * familiar screen does not reshuffle), then any path the server accepts that this file
- * does not declare, sorted, with a derived label. A declared path the server does NOT
- * report is dropped — a control the routes would refuse is worse than an absent one.
+ * does not declare, sorted, with a derived label.
+ *
+ * ── "REFUSED BY NAME" AND "NOT MENTIONED" ARE DIFFERENT, AND COLLAPSING THEM WAS A
+ *    MEASURED REGRESSION ───────────────────────────────────────────────────────
+ *
+ * A declared path the server reports `record_writable: false` at is DROPPED. That is a
+ * genuine narrowing: the routes would refuse it, and a control whose only outcome is a
+ * 422 is the defect `CLAUDE.md` §11 records as *"a panel told the scientist to enter a
+ * value on 25 fields, and 7 accept none"*.
+ *
+ * A declared path the draft carries **no row at all** for is NOT dropped. It is
+ * offered, on this file's declared authority, because the server did not speak about it
+ * — and this build reaches that state on a record that needs the box most.
+ * `serialize.draft_to_groups` SKIPS a field whose persisted envelope is not a dict, and
+ * deliberately suppresses the skeleton row that would otherwise stand in for it, so the
+ * whole row is absent from `GET .../draft`. Measured over HTTP: a record whose
+ * `draft["fields"]["sample.material.name"]` had been persisted as a bare string served
+ * 13 record-writable rows instead of 14 with that path missing entirely — while
+ * `POST .../answers` at that same path still answered **200**. The first version of this
+ * derivation read the absence as a refusal and withheld the box, so the one record whose
+ * value needs correcting was the one record offering nowhere to correct it.
+ *
+ * The two cases ARE distinguishable on the wire — `spoken` is what distinguishes them —
+ * so nothing here guesses at writability, and nothing invents a value. An unmentioned
+ * path simply keeps the box this build has always offered for it.
  */
 export function offeredRecordFields(
   draft: ApiDraftResponse | null | undefined,
 ): OfferedRecordFields {
   const served = servedRecordWritablePaths(draft);
-  if (!served.reported) return { fields: RECORD_FIELDS, served: false };
+  if (!served.reported) {
+    return {
+      fields: RECORD_FIELDS,
+      served: false,
+      unspoken: RECORD_FIELDS.map((spec) => spec.path),
+    };
+  }
   const accepted = new Set(served.paths);
-  const declared = RECORD_FIELDS.filter((spec) => accepted.has(spec.path));
+  const spoken = new Set(served.spoken);
+  const declared = RECORD_FIELDS.filter(
+    (spec) => accepted.has(spec.path) || !spoken.has(spec.path),
+  );
+  const unspoken = RECORD_FIELDS.filter((spec) => !spoken.has(spec.path)).map(
+    (spec) => spec.path,
+  );
   const known = new Set(declared.map((spec) => spec.path));
   const extra = served.paths.filter((path) => !known.has(path)).map(derivedRecordFieldSpec);
-  return { fields: [...declared, ...extra], served: true };
+  return { fields: [...declared, ...extra], served: true, unspoken };
 }
 
 /** The two record-level BLOCK addresses, spelt exactly as the write operations take them. */
