@@ -163,14 +163,53 @@ decision.
 
 ## 8. One risk that is nobody's fault and should not be left
 
-Three `preserve/*` branches hold **19 commits that exist on this machine only** —
+> **CORRECTED 2026-08-31 — THE RISK THIS SECTION RAISED DOES NOT EXIST, AND THE
+> COMMAND IT OFFERED AS PROOF RETURNS THE OPPOSITE OF WHAT IT SAYS.** The original
+> text is struck in place rather than deleted, because "19 commits are one disk
+> failure from gone" is exactly the kind of claim a future session acts on — by
+> re-pushing refs that are already pushed, or by refusing to clean a worktree it
+> could safely clean.
+
+~~Three `preserve/*` branches hold **19 commits that exist on this machine only** —
 `git ls-remote --heads origin 'preserve/*'` returns nothing. A previous session renamed
 rather than deleted them precisely because they carry unique work. They are one disk
-failure from gone. Either push them or decide out loud that they are disposable.
+failure from gone. Either push them or decide out loud that they are disposable.~~
+
+**What is actually true, measured at `ddec2b5`:** that `ls-remote` returns **10 refs**,
+not nothing. All **19 commits are preserved on the remote** — 4 + 13 + 2, which is where
+the original 19 came from — and each local branch's tip is **byte-identical** to a remote
+ref's tip:
+
+| Local branch | Tip | Unique commits | Remote ref holding the same tip |
+|---|---|---:|---|
+| `preserve/feat-run-page-api-superseded` | `4dac6b3` | 4 | `origin/preserve/feat-run-page-api` |
+| `preserve/local-integration-qa-superseded` | `76622d4` | 13 | `origin/preserve/local-integration-qa` |
+| `preserve/test-visual-responsive-sweep-superseded` | `85ef50b` | 2 | `origin/preserve/test-visual-responsive-sweep` |
+
+**WHY THE ORIGINAL CLAIM LOOKED TRUE, because the mechanism is the reusable lesson and
+not the arithmetic.** The three *local* branches carry a **`-superseded` suffix that the
+remote refs do not**. So a lookup **by name** — `git ls-remote origin
+"refs/heads/$b"` for each local `$b` — correctly returns nothing for all three, and a
+session that checked that way would conclude, reasonably and wrongly, that the commits
+were unpushed. The commits are on the remote; only the *names* differ. **A name-based
+existence check is not a commit-based one, and for preservation only the second
+question matters.**
+
+Re-derive rather than trusting this table — the suffix mismatch is precisely why the
+name-based form is the wrong instrument:
 
 ```bash
-git ls-remote --heads origin 'preserve/*'          # currently empty
+# The glob form. Returns 10 refs, not nothing.
+git ls-remote --heads origin 'preserve/*'
+
+# The question that actually matters: is each local tip present on the remote?
 for b in $(git for-each-ref --format='%(refname:short)' refs/heads/preserve/); do
-  echo "$b $(git rev-list --count origin/main..$b)"
+  tip=$(git rev-parse "$b")
+  hit=$(git ls-remote origin 'refs/heads/preserve/*' | grep -c "^$tip")
+  echo "$b $(git rev-list --count origin/main..$b) commits  remote_copies=$hit"
 done
 ```
+
+**Consequence for cleanup:** these three local branches hold **no unique state**, so
+removing them destroys nothing. This section no longer asks anyone for a disposition
+decision, because there is no longer a decision to take.

@@ -330,22 +330,72 @@ def test_list_runs_exposes_exactly_the_filters_the_route_implements():
 
 
 def test_list_runs_refuses_a_filter_the_route_does_not_have(reader):
-    """`q` is not on this route at this commit, so the tool must refuse it here.
+    """A filter the route does not have must be REFUSED, never silently ignored.
 
-    This is the case that distinguishes "refused" from "ignored". Passing it
-    through would reach FastAPI, be dropped, and return every run under a claim of
-    a filtered search.
+    This is the case that distinguishes "refused" from "ignored". Passing an
+    unknown filter through would reach FastAPI, be dropped, and return every run
+    under a claim of a filtered search.
+
+    THIS TEST USED TO PROBE WITH ``q`` AND GUARD ITSELF WITH
+    ``if "q" in ...: pytest.skip(...)``. Measured 2026-08-31: the run-list route
+    HAS implemented ``q`` since some earlier commit, so that guard skipped
+    unconditionally in every environment and the invariant above was asserted
+    nowhere. **A guard written against one named parameter converts its own test
+    into a dead one the day the route gains that parameter**, and it reads as
+    environment-awareness rather than as the coverage hole it is.
+
+    The probe is therefore DERIVED rather than named: it is a parameter built to
+    be absent from whatever the route currently declares, so this test cannot go
+    dead again when the route grows a filter. The derivation is asserted, not
+    assumed -- if a future route somehow declared this name, the assertion below
+    fails loudly instead of skipping quietly.
     """
     from isaac_api.mcp.policy import OPERATIONS
 
-    if "q" in OPERATIONS["list_runs"].query_parameters:
-        pytest.skip("the run-list route implements `q` in this checkout")
+    declared = OPERATIONS["list_runs"].query_parameters
+    absent_filter = "no_such_filter_" + "".join(sorted(declared))[:24]
+    assert absent_filter not in declared, (
+        "the derived probe collided with a real route parameter; "
+        f"declared={sorted(declared)}"
+    )
+
     error = rpc(
         reader,
         "tools/call",
-        {"name": "isaac_list_runs", "arguments": {"experiment_id": a_record(reader), "q": "cu"}},
+        {
+            "name": "isaac_list_runs",
+            "arguments": {"experiment_id": a_record(reader), absent_filter: "cu"},
+        },
     )["error"]
     assert error["code"] == INVALID_PARAMS
+
+
+def test_list_runs_accepts_a_filter_the_route_does_have(reader):
+    """THE SELECTIVITY CONTROL for the test above, and it is load-bearing.
+
+    ``test_list_runs_refuses_a_filter_the_route_does_not_have`` would pass just as
+    green if the tool refused EVERY extra argument, which is a different bug
+    wearing the same result: a caller's legitimate filter rejected as unknown.
+    Refusal has to be selective to mean anything, so this asserts the other half
+    -- a parameter the route DOES declare is accepted rather than refused.
+
+    ``q`` is chosen because it is the very parameter whose arrival killed the
+    original test; asserting it is accepted here is what makes its removal from
+    the refusal probe correct rather than merely convenient.
+    """
+    from isaac_api.mcp.policy import OPERATIONS
+
+    assert "q" in OPERATIONS["list_runs"].query_parameters, (
+        "this control assumes the route declares `q`; if that changed, pick "
+        "another declared parameter rather than deleting the control"
+    )
+
+    response = rpc(
+        reader,
+        "tools/call",
+        {"name": "isaac_list_runs", "arguments": {"experiment_id": a_record(reader), "q": "cu"}},
+    )
+    assert "error" not in response, response
 
 
 def test_list_runs_refuses_a_page_size_beyond_the_routes_own_bound(reader):
