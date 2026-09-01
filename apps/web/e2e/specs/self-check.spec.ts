@@ -52,6 +52,24 @@ import { SURFACES } from '../surfaces';
 
 const experiments = SURFACES.find((s) => s.id === 'experiments')!;
 
+/**
+ * THE SURFACE THE a11y-BASELINE PROOFS USE, and why it is no longer `experiments`.
+ *
+ * Three of the proofs below need a surface where `color-contrast` IS baselined with a
+ * count > 0 — that is the whole fixture: they add a node, or recolour one, and assert
+ * the ratchet notices. `experiments` was that surface until 2026-09-01, when the A3
+ * neutral-ink palette took it (and twelve other whole surfaces) to ZERO and its pairs
+ * were DELETED from `a11y-baseline.ts`. Each proof's own message said what to do —
+ * "this proof needs colour-contrast to be baselined here" — and this is doing it.
+ *
+ * `experiments-example` is the same screen with the worked-example records in it, which
+ * keeps the proofs' intent intact; it holds 3 nodes at every viewport. It is one of the
+ * ten surfaces that survived, and if a future fix empties it too, the same message will
+ * fire and the same substitution is the answer. `experiments` stays the fixture for the
+ * layout, focus and never-recorded-rule proofs, none of which needs a non-zero count.
+ */
+const contrastBaselined = SURFACES.find((s) => s.id === 'experiments-example')!;
+
 test('@interaction the horizontal-scroll probe detects an injected overflow', async ({ page, app }) => {
   await app.open(experiments);
   const clean = await horizontalPageScroll(page);
@@ -260,13 +278,13 @@ test('@interaction the a11y baseline reports ONE extra node of a rule it does al
   page,
   app,
 }, testInfo) => {
-  await app.open(experiments);
+  await app.open(contrastBaselined);
   const project = testInfo.project.name;
 
-  expect(auditScan(await scan(page), experiments.id, project), 'the unmodified surface must audit clean').toEqual([]);
+  expect(auditScan(await scan(page), contrastBaselined.id, project), 'the unmodified surface must audit clean').toEqual([]);
 
   // Colour contrast IS a recorded defect on this surface, with an exact count.
-  const expectedContrast = expectedNodeCount('color-contrast', experiments.id, project);
+  const expectedContrast = expectedNodeCount('color-contrast', contrastBaselined.id, project);
   expect(expectedContrast, 'this proof needs colour-contrast to be baselined here').toBeGreaterThan(0);
 
   await page.evaluate(() => {
@@ -278,7 +296,7 @@ test('@interaction the a11y baseline reports ONE extra node of a rule it does al
     document.body.appendChild(p);
   });
 
-  const failures = auditScan(await scan(page), experiments.id, project);
+  const failures = auditScan(await scan(page), contrastBaselined.id, project);
   const contrast = failures.find((f) => f.rule === 'color-contrast');
   expect(
     contrast?.kind,
@@ -294,11 +312,14 @@ test('@interaction the a11y baseline reports a NEW foreground colour at an uncha
   page,
   app,
 }, testInfo) => {
-  await app.open(experiments);
+  await app.open(contrastBaselined);
   const project = testInfo.project.name;
 
   const clean = await scan(page);
-  expect(auditScan(clean, experiments.id, project), 'the unmodified surface must audit clean').toEqual([]);
+  expect(
+    auditScan(clean, contrastBaselined.id, project),
+    'the unmodified surface must audit clean'
+  ).toEqual([]);
 
   // Recolour an element that ALREADY fails contrast to a colour the baseline
   // has never recorded. The node count is unmoved; only the token changes.
@@ -311,7 +332,7 @@ test('@interaction the a11y baseline reports a NEW foreground colour at an uncha
     el.style.setProperty('background-color', '#ffffff', 'important');
   }, victim as string);
 
-  const failures = auditScan(await scan(page), experiments.id, project);
+  const failures = auditScan(await scan(page), contrastBaselined.id, project);
   const contrast = failures.filter((f) => f.rule === 'color-contrast');
   expect(
     contrast.map((f) => f.kind),
@@ -323,8 +344,12 @@ test('@interaction the a11y baseline reports a NEW foreground colour at an uncha
 /* ────────────────────────────────────────────────────────────────────────────
  * PLATFORM RESOLUTION self-checks.
  *
- * Ten a11y counts and two layout clips are recorded per platform, because the
- * app ships no webfont and text wraps differently under SF Pro and under the
+ * ~~Ten a11y counts and two layout clips are recorded per platform~~ — **ZERO a11y
+ * counts are, as of 2026-09-01**: the A3 neutral-ink palette collapsed every split in
+ * `a11y-baseline.ts`. The MECHANISM is still there and still has to be proved, which is
+ * why step 3 of the first test below now INJECTS a split rather than borrowing one; see
+ * the note there. The reason the mechanism exists is unchanged: the app ships no
+ * webfont and text wraps differently under SF Pro and under the
  * Linux system face. That mechanism has exactly the same silent-failure shape
  * as the wildcard it replaced: if resolution picked the wrong column, or
  * always picked the same one, or quietly tolerated either number, every test
@@ -360,41 +385,100 @@ test('@interaction platform resolution is this machine\'s, is exact, and refuses
   // 3. The default argument really does resolve to the current platform, proved
   //    on a triple whose two columns DIFFER — on a triple where they agree the
   //    assertion would pass under a broken resolver too.
+  //
+  //    ── 2026-09-01: THE FIXTURE IS NOW INJECTED, BECAUSE THE FILE HAS NO ──────
+  //       DIFFERING TRIPLE LEFT TO BORROW.
+  //
+  //    This used to read `validator@zoom-200`, which was `{ darwin: 4, linux: 5 }`.
+  //    The A3 neutral-ink palette took that cell to 0 on both faces and it is now
+  //    DELETED, along with every other split in `a11y-baseline.ts` — the file holds
+  //    ZERO per-platform pairs. So the message below ("pick another differing
+  //    triple") has no answer: there is no other.
+  //
+  //    THE PROOF IS NOT WEAKENED, AND THAT MATTERS MORE THAN KEEPING IT SHORT.
+  //    Deleting steps 3 and 4 would remove the only assertion that the DEFAULT
+  //    `platform` argument resolves to this machine's column rather than to a
+  //    hard-wired one, and the comment on the neighbouring test records that
+  //    exactly this went undetected once before ("replacing
+  //    `resolvePlatform(process.platform)` with `resolvePlatform('linux')` left this
+  //    test green"). So the split is CREATED here, in the same
+  //    mutate-and-restore-in-`finally` idiom the next test already uses and for the
+  //    same reason: each Playwright worker is its own process with its own module
+  //    instance and runs one test at a time.
+  //
+  //    Nothing invented reaches the committed file. The injected pair is
+  //    `{ thisPlatform: n, otherPlatform: n + 1 }` built from the cell's OWN
+  //    measured `n`, it exists for the length of the `try`, and the restoration is
+  //    asserted afterwards on BOTH columns.
   const platform = currentPlatform();
   const other = BASELINE_PLATFORMS.find((p) => p !== platform)!;
-  const differing = { rule: 'color-contrast', surface: 'validator', project: 'zoom-200' } as const;
-  const mine = expectedNodeCount(differing.rule, differing.surface, differing.project, platform);
-  const theirs = expectedNodeCount(differing.rule, differing.surface, differing.project, other);
+  const differing = {
+    rule: 'color-contrast',
+    surface: contrastBaselined.id,
+    project: 'desktop-1280x800',
+  } as const;
+  const probeEntry = baselineEntryFor(differing.rule)!;
+  const probeKey = baselineKey(differing.surface, differing.project);
+  const probeCounts = probeEntry.counts as Record<string, PlatformCount>;
+  const probeOriginal = probeCounts[probeKey];
   expect(
-    mine !== theirs,
-    `this proof needs ${differing.surface}@${differing.project} to differ between platforms; ` +
-      `it currently reads ${mine} on both. Pick another differing triple, or — if the font gap ` +
-      `has genuinely closed — collapse the entry to a bare number.`
-  ).toBe(true);
-  expect(expectedNodeCount(differing.rule, differing.surface, differing.project)).toBe(mine);
-  expect(expectedNodeCount(differing.rule, differing.surface, differing.project)).not.toBe(theirs);
+    typeof probeOriginal,
+    `this proof needs ${probeKey} to be a recorded SCALAR to build a split from; it reads ` +
+      `${JSON.stringify(probeOriginal)}. If it has become a split of its own, use it directly ` +
+      `instead of injecting one. If it has been deleted, pick another baselined cell.`
+  ).toBe('number');
+  const measured = probeOriginal as number;
 
-  // 4. NO TOLERANCE. The other platform's number is one away from this one, and
-  //    one away must still be red. This is the assertion that would fail if
-  //    somebody "fixed" CI by allowing a range.
-  expect(
-    verdictForCounts(mine, theirs),
-    `the two platform columns differ by ${Math.abs(mine - theirs)} node(s) and the ratchet called ` +
-      `that "ok". A range or a tolerance re-opens exactly the hole per-instance counting closed.`
-  ).not.toBe('ok');
+  try {
+    probeCounts[probeKey] = { [platform]: measured, [other]: measured + 1 } as Record<
+      BaselinePlatform,
+      number
+    >;
+    const mine = expectedNodeCount(differing.rule, differing.surface, differing.project, platform);
+    const theirs = expectedNodeCount(differing.rule, differing.surface, differing.project, other);
+    expect(mine, 'the injected split must put the cell\'s own measured number on this platform').toBe(
+      measured
+    );
+    expect(theirs).toBe(measured + 1);
+    expect(
+      mine !== theirs,
+      `the injected split did not take effect at ${probeKey}; both columns read ${mine}, so the ` +
+        `resolution assertions below would pass under a broken resolver.`
+    ).toBe(true);
+    expect(expectedNodeCount(differing.rule, differing.surface, differing.project)).toBe(mine);
+    expect(expectedNodeCount(differing.rule, differing.surface, differing.project)).not.toBe(theirs);
+
+    // 4. NO TOLERANCE. The other platform's number is one away from this one, and
+    //    one away must still be red. This is the assertion that would fail if
+    //    somebody "fixed" CI by allowing a range.
+    expect(
+      verdictForCounts(mine, theirs),
+      `the two platform columns differ by ${Math.abs(mine - theirs)} node(s) and the ratchet called ` +
+        `that "ok". A range or a tolerance re-opens exactly the hole per-instance counting closed.`
+    ).not.toBe('ok');
+  } finally {
+    probeCounts[probeKey] = probeOriginal;
+  }
+
+  // Restored on BOTH columns — a `finally` that put back the wrong shape would
+  // otherwise leak a split into every later test in this worker.
+  expect(expectedNodeCount(differing.rule, differing.surface, differing.project, platform)).toBe(measured);
+  expect(expectedNodeCount(differing.rule, differing.surface, differing.project, other)).toBe(measured);
 });
 
 test('@interaction tampering with THIS platform\'s count fails the audit; tampering with the other does not', async ({
   page,
   app,
 }, testInfo) => {
-  await app.open(experiments);
+  await app.open(contrastBaselined);
   const project = testInfo.project.name;
   const platform = currentPlatform();
   const other = BASELINE_PLATFORMS.find((p) => p !== platform)!;
 
-  // Repeated from the test above on purpose. `experiments` has the SAME count
-  // on both platforms — that is what makes it a clean tampering fixture — but
+  // Repeated from the test above on purpose. `contrastBaselined` has the SAME count
+  // on both platforms — that is what makes it a clean tampering fixture, and since
+  // 2026-09-01 EVERY cell in the file does, which is why it moved off `experiments`
+  // for the reason given at that constant — but
   // it also means everything below would pass unchanged if resolution were
   // hard-wired to the wrong column. Verified by sabotage: replacing
   // `resolvePlatform(process.platform)` with `resolvePlatform('linux')` left
@@ -405,11 +489,14 @@ test('@interaction tampering with THIS platform\'s count fails the audit; tamper
   // them, only the baseline is. That keeps the test to a single axe run and
   // makes it unambiguous that the DIFFERENCE comes from the baseline edit.
   const results = await scan(page);
-  expect(auditScan(results, experiments.id, project), 'the unmodified surface must audit clean').toEqual([]);
+  expect(
+    auditScan(results, contrastBaselined.id, project),
+    'the unmodified surface must audit clean'
+  ).toEqual([]);
 
   const entry = baselineEntryFor('color-contrast')!;
-  const key = baselineKey(experiments.id, project);
-  const recorded = expectedNodeCount('color-contrast', experiments.id, project, platform);
+  const key = baselineKey(contrastBaselined.id, project);
+  const recorded = expectedNodeCount('color-contrast', contrastBaselined.id, project, platform);
   expect(recorded, 'this proof needs colour-contrast to be baselined here').toBeGreaterThan(0);
 
   // Written as a per-platform pair with the CURRENT platform's slot named
@@ -427,9 +514,9 @@ test('@interaction tampering with THIS platform\'s count fails the audit; tamper
     // (a) Corrupt the OTHER platform's number badly. Nothing may change —
     //     otherwise the resolution is not selecting a column at all.
     counts[key] = pair(recorded, recorded + 7);
-    expect(expectedNodeCount('color-contrast', experiments.id, project, other)).toBe(recorded + 7);
+    expect(expectedNodeCount('color-contrast', contrastBaselined.id, project, other)).toBe(recorded + 7);
     expect(
-      auditScan(results, experiments.id, project),
+      auditScan(results, contrastBaselined.id, project),
       `a wrong number in the "${other}" column changed the verdict on "${platform}". The columns ` +
         `must be independent: CI's numbers must not be able to fail a developer's machine, and a ` +
         `developer's must not be able to pass CI.`
@@ -439,7 +526,7 @@ test('@interaction tampering with THIS platform\'s count fails the audit; tamper
     //     `improved`, because the baseline now claims more failing nodes than
     //     the page actually has.
     counts[key] = pair(recorded + 7, recorded);
-    const failures = auditScan(results, experiments.id, project);
+    const failures = auditScan(results, contrastBaselined.id, project);
     const contrast = failures.find((f) => f.rule === 'color-contrast');
     expect(
       contrast?.kind,
@@ -458,6 +545,6 @@ test('@interaction tampering with THIS platform\'s count fails the audit; tamper
 
   // Restored, and green again — so a failure above cannot be an artefact left
   // behind for the next test in this worker.
-  expect(expectedNodeCount('color-contrast', experiments.id, project, platform)).toBe(recorded);
-  expect(auditScan(results, experiments.id, project), 'the baseline must be restored').toEqual([]);
+  expect(expectedNodeCount('color-contrast', contrastBaselined.id, project, platform)).toBe(recorded);
+  expect(auditScan(results, contrastBaselined.id, project), 'the baseline must be restored').toEqual([]);
 });

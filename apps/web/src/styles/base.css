@@ -190,7 +190,13 @@ a:hover {
 .btn-action:disabled {
   background: var(--border-faint);
   border-color: var(--border);
-  color: var(--text-quaternary);
+  /* `--text-inactive` #9aa4af, the value this used to reach through
+     `--text-quaternary`. 2.25:1 on this fill, and it stays: WCAG 1.4.3 exempts
+     an inactive control, and `cursor: not-allowed` plus the `:disabled` state
+     is exactly what the exception describes. An inactive control is now the
+     only CLASS of use that value is entitled to — two sites in this file, both
+     enumerated in `palette-contrast.test.ts`'s exemption allow-list. */
+  color: var(--text-inactive);
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
@@ -201,15 +207,28 @@ a:hover {
   border-color: var(--border-strong);
   color: var(--text-secondary);
 }
-/* Secondary: border/background shift on hover; a clear, slightly deeper tint when pressed. */
+/*
+ * Secondary: border/background shift on hover; a clear, slightly deeper tint
+ * when pressed.
+ *
+ * THE TWO STEPS HAD TO MOVE TOGETHER, and that is the whole reason this rule is
+ * touched. Hover reached `--text-quaternary` and active reached
+ * `--text-tertiary` — two different greys, one press step apart. Retiring
+ * `--text-quaternary` onto `--text-tertiary` would have made hover and active
+ * the SAME colour and silently deleted the press feedback, so active moves one
+ * rung further down the same ramp instead. Measured on the hover fill
+ * `--border-faint` #eef2f6: rest `--border-strong` 1.25:1, hover 4.75:1,
+ * active 7.17:1 — still an escalation, and both states now clear the 3:1 that
+ * 1.4.11 asks of a border that carries state.
+ */
 .btn-secondary:hover {
-  border-color: var(--text-quaternary);
+  border-color: var(--text-tertiary);
   color: var(--text-strong);
   background: var(--border-faint);
 }
 .btn-secondary:active {
   background: var(--screen-base);
-  border-color: var(--text-tertiary);
+  border-color: var(--text-secondary);
 }
 
 /* Restrained destructive — the Reset Demo trigger. Fail accent on text/border
@@ -222,17 +241,31 @@ a:hover {
   border-color: var(--fail-border);
   color: var(--fail-text);
 }
+/*
+ * THE SAME TWO-STEP COLLAPSE `.btn-secondary` had, and it has to be re-stepped
+ * for the same reason. Hover reached `--text-quaternary` and active reached
+ * `--text-tertiary`; now that quaternary is an alias of tertiary those two
+ * states would paint the identical border and the press feedback would vanish
+ * silently. Active moves one rung further down the same ramp instead. Measured
+ * on the hover fill `--border-faint` #eef2f6: rest `--fail-border` 1.39:1,
+ * hover `--text-tertiary` 4.75:1, active `--text-secondary` 7.17:1 — still an
+ * escalation, and both interactive states clear the 3:1 that WCAG 1.4.11 asks
+ * of a border carrying state.
+ */
 .btn-danger-quiet:hover {
   background: var(--border-faint);
-  border-color: var(--text-quaternary);
+  border-color: var(--text-tertiary);
 }
 .btn-danger-quiet:active {
   background: var(--screen-base);
-  border-color: var(--text-tertiary);
+  border-color: var(--text-secondary);
 }
 .btn-danger-quiet:disabled {
   background: transparent;
-  color: var(--text-quaternary);
+  /* `--text-inactive`, not the informational ink: the second of the two sites
+     entitled to a sub-AA value, on the same 1.4.3 inactive-control exception
+     `.btn-action:disabled` above is taken under. */
+  color: var(--text-inactive);
   border-color: var(--border-strong);
   cursor: not-allowed;
 }
@@ -427,8 +460,20 @@ a:hover {
   padding: 0 13px;
   color: var(--text-primary);
 }
+/*
+ * A11Y-01 SIDE FINDING, fixed here rather than reported and left. This is the
+ * app's shared text-input primitive and its placeholder was `--text-faint`
+ * #aab2bb — 1.98:1 on the field's own `--screen-base` fill. Placeholder text is
+ * not "incidental": WCAG 1.4.3's exemptions are inactive controls, pure
+ * decoration and invisible text, and a hint that tells a scientist WHAT to type
+ * is none of those. axe-core evaluates it as text and so does this repository's
+ * baseline. The other eight placeholders in the app all reached
+ * `--text-quaternary` and are carried by that token's re-pointing; leaving the
+ * ninth — the most-used one — at 1.98:1 would have shipped an inconsistency
+ * that reads as an oversight.
+ */
 .input::placeholder {
-  color: var(--text-faint);
+  color: var(--text-tertiary); /* 4.93:1 on --screen-base, was 1.98:1 */
 }
 .input-mono {
   font-family: var(--font-mono);
@@ -486,11 +531,14 @@ a:hover {
   }
 }
 
-/* Mono meta line (paths, filenames). */
+/* Mono meta line (paths, filenames). `--text-tertiary` named directly rather
+   than reached through the `--text-quaternary` alias: a path or a filename is
+   information a scientist reads, so this belongs to the informational group by
+   NAME and not only by resolved value. */
 .meta {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-quaternary);
+  color: var(--text-tertiary);
 }
 
 /* Horizontally scrollable container for long data (hashes, URIs, values[]). */

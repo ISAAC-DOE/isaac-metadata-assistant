@@ -403,7 +403,27 @@ describe('the darwin column says how much of itself is measured', () => {
    * which that branch had written as scalars. The two lists are disjoint, which is
    * why "four" read plausibly and was wrong.
    */
-  it('the set of per-platform SPLIT cells is exactly the five measured on both faces', () => {
+  /*
+   * 2026-09-01 — THE SET IS NOW EMPTY, AND THAT IS THE FOURTH ROUND OF CHURN RATHER
+   * THAN THE END OF IT. The A3 neutral-ink palette took all seven splits at once:
+   * three (`memory-graph@zoom-200`, `settings-about@width-320`, `validator@zoom-200`)
+   * because both faces reached 0 and the cell is DELETED, and four
+   * (`settings-explorer@` laptop, tablet, mobile-375x812, width-390) because both
+   * faces landed on the same number — 16, 19, 20, 20.
+   *
+   * WHY AN EMPTY LIST IS STILL THE RIGHT ASSERTION, and must not be softened to
+   * `toHaveLength(0)` or deleted: this guard's job is to make ADDING a split a
+   * deliberate act with a stated provenance. It does that job better at zero than at
+   * seven, because now any `{ darwin, linux }` cell anywhere fails it.
+   *
+   * AND EMPTY IS NOT A PROPERTY OF THE APP. Every previous round of this comment says
+   * the same thing and it has been right every time: a split is the accident of two
+   * font stacks landing on different wrap points for the text that is there today.
+   * The reading (NOT the measurement) for why all seven went together is at the
+   * `darwin` block of `A11Y_BASELINE_TOTAL_NODES`. Change the text on any of those
+   * surfaces and they come back.
+   */
+  it('the set of per-platform SPLIT cells is empty — every half of every cell was measured', () => {
     const splits: string[] = [];
     for (const entry of A11Y_BASELINE) {
       for (const [key, count] of Object.entries(entry.counts)) {
@@ -418,25 +438,13 @@ describe('the darwin column says how much of itself is measured', () => {
         'and move A11Y_BASELINE_DARWIN_UNVERIFIED_NODES in the same edit. If you measured ' +
         'both, add it here and say where the darwin reading came from.'
     ).toEqual(
-      [
-        // ── RE-DERIVED 2026-08-30 after the merged proposals + change-feed round ──
-        // Seven, and the membership CHURNED IN BOTH DIRECTIONS in one transcription:
-        // `desktop-1280x800` and `zoom-200` LEFT (linux caught up to darwin exactly,
-        // 60 and 71, and a scalar is the only legal way to say the faces agree);
-        // `laptop-1024x768` and `width-390` JOINED (linux moved to a different number
-        // than darwin). `laptop` had been forced to a scalar one commit earlier when
-        // both halves read 59 — it splits again now that linux measured 60.
-        // Every half here is a CI figure or a local macOS reading AT THE MERGED TREE.
-        // `DARWIN_CARRIED_FORWARD` stays empty and
-        // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0: nothing is carried forward.
-        'color-contrast @ memory-graph@zoom-200',
-        'color-contrast @ settings-about@width-320',
-        'color-contrast @ settings-explorer@laptop-1024x768',
-        'color-contrast @ settings-explorer@mobile-375x812',
-        'color-contrast @ settings-explorer@tablet-768x1024',
-        'color-contrast @ settings-explorer@width-390',
-        'color-contrast @ validator@zoom-200',
-      ].sort()
+      // ── RE-DERIVED 2026-09-01, A3 NEUTRAL-INK PALETTE. ──
+      // The seven listed here on 2026-08-30 all collapsed in one transcription; see
+      // the block above this test for which went by deletion and which by agreement.
+      // `DARWIN_CARRIED_FORWARD` stays empty and
+      // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0: nothing is carried forward,
+      // and with no split left there is nowhere for a carried half to hide.
+      [] as string[]
     );
   });
 

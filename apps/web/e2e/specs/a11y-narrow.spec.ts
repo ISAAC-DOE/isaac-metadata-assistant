@@ -62,9 +62,14 @@
  * and the `ubuntu-latest` DejaVu/Liberation face wrap at different words, which is
  * why some cells hold two numbers. ~~10 of the existing 103 triples already hold two
  * numbers. Ten of ten differ by exactly ±1~~ — ~~**RE-COUNTED 2026-08-29: 8 of 161**~~
- * **RE-COUNTED AGAIN 2026-08-30: 5 of 161, and they do NOT all differ by ±1**
+ * ~~**RE-COUNTED AGAIN 2026-08-30: 5 of 161, and they do NOT all differ by ±1**
  * (`settings-about@width-320` differs by 2 and `settings-explorer@tablet-768x1024`
- * by 2). The 8 was this branch's count; the merge `c7b9db6` adopted CI's linux halves
+ * by 2).~~ **RE-COUNTED AGAIN 2026-09-01: 0 of 70.** The A3 neutral-ink palette
+ * collapsed every split the file had — including both of the by-2 examples named
+ * here, one of which (`settings-about@width-320`) is now DELETED because both faces
+ * reach 0. The instruction the paragraph gives is what keeps being right: transcribe,
+ * never guess, and never write a macOS reading as a bare number unless a linux run
+ * produced the same one. The 8 was this branch's count; the merge `c7b9db6` adopted CI's linux halves
  * from `6958459` and five splits collapsed to scalars. The second example named here
  * used to be `settings-explorer@width-320` "by 3" — that cell is a **scalar `76`** at
  * HEAD and no cell in the file has a gap of 3. The point the sentence was making survives its
