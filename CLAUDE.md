@@ -919,7 +919,86 @@ Current state:
   under `apps/web/src`, ZERO containing a NUL byte; that file's NUL count is 0; `rg -l` and
   `rg -al` return the identical 63 files.** The file was rewritten since. The finding was real
   when written and the `-a` habit costs nothing — but **a future session must not skip an `rg`
-  sweep of `apps/web/src` on the strength of this**, and must not cite it as a live trap. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
+  sweep of `apps/web/src` on the strength of this**, and must not cite it as a live trap.
+
+  ***THE TRAP IS LIVE AGAIN, IN A DIFFERENT FILE, AND THE "DO NOT CITE IT AS LIVE" SENTENCE
+  ABOVE IS THEREFORE WITHDRAWN AS A GENERAL CLAIM — measured 2026-08-31.*** Both halves of the
+  2026-08-30 correction were true **of `experimentGraph.ts`**, and are kept for that reason. What
+  was wrong was generalising a fact about ONE file into a fact about the tree. Re-measured at
+  `bebf4e2` and again at `ddec2b5`: **379 files under `apps/web/src`, and exactly ONE holds a NUL
+  byte — `components/RecordDescriptionPanel.tsx`, 2 of them**, a `rows.join('\0')` separator typed
+  as a raw byte instead of an escape.
+
+  **IT COST EXACTLY THE CONFUSION THIS ENTRY PREDICTED, AND IT COST IT TO THE RECORD-CAPTURE
+  SURFACE.** `RecordDescriptionPanel.tsx` is the file implementing record-level field capture, so
+  a `grep`/`rg` sweep for those inputs returned **nothing** and exited **0** — which is how three
+  separate sessions came to believe the twelve free-text record paths *had no website input*. They
+  had one, shipped in `7822b13`. The measurement that says so:
+
+  ```bash
+  grep -rl  RecordDescriptionPanel apps/web/src   # 2 files  <- the panel itself is MISSING
+  grep -ral RecordDescriptionPanel apps/web/src   # 3 files  <- -a finds it
+  ```
+
+  **The durable rule, stated so it does not need re-deriving a third time: a `grep`/`rg` sweep of
+  this tree is only evidence of absence when run with `-a`, and a zero-hit result without it is
+  not a measurement at all — it is indistinguishable from a skipped file.** A mechanical guard now
+  exists (`apps/web/src/__tests__/source-is-greppable.test.ts`) asserting no file under
+  `apps/web/src` holds a NUL, so the next occurrence fails a test instead of costing a session.
+
+  **AND THE SWEEP ABOVE WAS ITSELF SCOPED TOO NARROWLY — widened 2026-08-31.** "Exactly one
+  file" is true of `apps/web/src`. Over **all tracked files** there are **three**, and the
+  second one is the joke this entry deserves: **`docs/superpowers/plans/2026-07-27-phase-36v1-hosted-qa-fix-forward.md`
+  held a literal NUL inside the sentence `raw NUL/SOH replaced with ...`** — a document
+  *describing* this defect, made invisible by it, in the directory §16's resume protocol
+  sends every new session to read. `grep -l "Phase 36V" <that file>` exited **1**; `grep -al`
+  exited **0**. The byte is now the printable escape the sentence says it is, and the file is
+  greppable. The third is `qa/validator-upload-package/isaac-validator-qa-files.zip`, a
+  genuine binary and the **only** legitimate exemption — so widening the guard to tracked
+  files costs **one** exemption, not the "binary fixtures and generated artifacts" (plural)
+  that the narrow scope was justified by.
+
+  **AND THE TOOL USED TO FIND THEM FAILED THE SAME WAY THE THING IT WAS LOOKING FOR DOES.**
+  The first sweep here counted NULs with `tr -dc '\000' < "$f" | wc -c`. On macOS `tr`
+  **aborts on binary input** — `tr: Illegal byte sequence` on stderr — and the pipeline still
+  exits cleanly with a *plausible wrong number*: it reported **7** NULs in
+  `isaac-validator-qa-files.zip`, which actually holds **918** (across 86 lines; a
+  line-oriented `grep -c` says 242, a third number, all for the same file). The SET of three
+  files was right and is what the entry above rests on; the COUNT was not. Use a reader that
+  cannot fail silently:
+
+  ```bash
+  python3 -c "import sys;print(open(sys.argv[1],'rb').read().count(b'\x00'))" FILE
+  ```
+
+  Recorded because it is the same shape as the defect: **a text tool given binary input
+  reports success and a wrong answer**, and only a second method reveals it.
+
+  ***A THIRD OPERATIONAL TRAP, MEASURED 2026-08-31 AND RECORDED BESIDE THE `.venv` SYMLINK
+  AND THE SNAPSHOT CONFLICT, BECAUSE IT ALREADY PRODUCED ONE FALSE "SKIP REGRESSION" REPORT
+  IN THE SESSION THAT FOUND IT:*** **any backend skip count measured in a git WORKTREE is
+  `+2` against the same commit measured in the MAIN CHECKOUT.** `graphify-out/graph.json` is
+  **gitignored and untracked** (2,609,140 bytes, dated 2026-08-07), so it exists in the main
+  checkout and in **no worktree and no clone**. Exactly two tests gate on its presence —
+  `apps/api/tests/test_memory.py:856` and `apps/api/tests/test_memory_graph_detail.py:1568`
+  — and each names an unconditional sibling covering the same property, so they are genuine
+  environment gates and **not** untested paths wearing one: run in the main checkout, those
+  two files give **248 passed, 0 skipped**.
+
+  **The consequence is a comparison error, not a defect.** A slice measuring `42 skipped` in
+  its worktree, against a `40` quoted from a main-checkout run, has measured **no change at
+  all**. Both numbers are correct; they answer different questions. Re-derive rather than
+  trusting either:
+
+  ```bash
+  git check-ignore graphify-out/graph.json && echo "gitignored -> absent from every worktree"
+  ```
+
+  **Quote the environment with any skip count**, exactly as §15 now quotes a vantage point
+  with every constraint-coverage figure. A skip total without its checkout is not a
+  measurement.
+
+  **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
   through an adapter that returns a *different type*, was rendering **"FAIL — Invalid against
   official ISAAC schema v1.05"** about a record `validate_official` never opened.
 
