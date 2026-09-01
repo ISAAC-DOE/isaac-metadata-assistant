@@ -956,7 +956,33 @@ Current state:
   greppable. The third is `qa/validator-upload-package/isaac-validator-qa-files.zip`, a
   genuine binary and the **only** legitimate exemption — so widening the guard to tracked
   files costs **one** exemption, not the "binary fixtures and generated artifacts" (plural)
-  that the narrow scope was justified by. **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
+  that the narrow scope was justified by.
+
+  ***A THIRD OPERATIONAL TRAP, MEASURED 2026-08-31 AND RECORDED BESIDE THE `.venv` SYMLINK
+  AND THE SNAPSHOT CONFLICT, BECAUSE IT ALREADY PRODUCED ONE FALSE "SKIP REGRESSION" REPORT
+  IN THE SESSION THAT FOUND IT:*** **any backend skip count measured in a git WORKTREE is
+  `+2` against the same commit measured in the MAIN CHECKOUT.** `graphify-out/graph.json` is
+  **gitignored and untracked** (2,609,140 bytes, dated 2026-08-07), so it exists in the main
+  checkout and in **no worktree and no clone**. Exactly two tests gate on its presence —
+  `apps/api/tests/test_memory.py:856` and `apps/api/tests/test_memory_graph_detail.py:1568`
+  — and each names an unconditional sibling covering the same property, so they are genuine
+  environment gates and **not** untested paths wearing one: run in the main checkout, those
+  two files give **248 passed, 0 skipped**.
+
+  **The consequence is a comparison error, not a defect.** A slice measuring `42 skipped` in
+  its worktree, against a `40` quoted from a main-checkout run, has measured **no change at
+  all**. Both numbers are correct; they answer different questions. Re-derive rather than
+  trusting either:
+
+  ```bash
+  git check-ignore graphify-out/graph.json && echo "gitignored -> absent from every worktree"
+  ```
+
+  **Quote the environment with any skip count**, exactly as §15 now quotes a vantage point
+  with every constraint-coverage figure. A skip total without its checkout is not a
+  measurement.
+
+  **And a seventh no payload-shaped sweep could find** — `VerdictCard`, reached
   through an adapter that returns a *different type*, was rendering **"FAIL — Invalid against
   official ISAAC schema v1.05"** about a record `validate_official` never opened.
 
