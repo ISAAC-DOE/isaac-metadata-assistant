@@ -160,10 +160,39 @@ was a hardcoded `RECORD_FIELDS` list whose only guard was a *Python* test that
 regex-parses the TypeScript — so `vitest` alone stayed green over a stale list. The
 inventory is now derived at runtime from the server's own `capture.record_writable`.
 
-**The other two remain accurate as written:** the change feed still has no `proposal`
+~~**The other two remain accurate as written:** the change feed still has no `proposal`
 kind, and `useChangeFeed` is still mounted on no screen — re-measured with `grep -a`
 after the NUL finding, precisely because the first item on this list had just proved
-that a NUL-free measurement was not safe to assume.
+that a NUL-free measurement was not safe to assume.~~
+
+**BOTH CLOSED 2026-09-01, in PR #210 (`31ca1d2`).** The sentence above was true when
+written and is struck rather than edited so the sequence stays legible. Measured at
+`main`:
+
+```bash
+.venv/bin/python -c "import sys; sys.path.insert(0,'apps/api')
+from isaac_api import change_feed as cf; print(sorted(cf.feed_kinds()))"
+# ['experiment', 'proposal', 'run']
+
+grep -ral useChangeFeed apps/web/src | grep -v __tests__
+# apps/web/src/components/RecordActivityNote.tsx
+# apps/web/src/lib/useRecordSession.ts
+# apps/web/src/lib/useChangeFeed.ts
+# apps/web/src/lib/recordChanges.ts
+```
+
+`useChangeFeed` is mounted in **`lib/useRecordSession.ts`, not a screen** — that hook is
+already the single owner of record-scoped polling and all four record screens go through
+it, so mounting per-screen would have meant four screens agreeing to run one poller each
+with nothing enforcing it.
+
+**One thing that was NOT built, and was not faked to satisfy a proof step:** there is no
+proposal inbox in the frontend. `lib/api.ts` carries **zero** proposal references — no
+client, no list, no detail — so a proposal entry can honestly only *announce*, and no read
+surface was invented for it to refresh. A proposal entry carries no content either: its
+key set is exactly `{kind, entity_id, changed_at_rev, updated_utc, state}`, and a
+full-body scan of the served page for proposal values, notes, rules, digests and evidence
+returns zero hits.
 
 ---
 
