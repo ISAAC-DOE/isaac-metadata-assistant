@@ -16,7 +16,7 @@ in neither, and neither claims exactly-once delivery.
 Everything after that is a property the brief required, one section each, with the
 limitation stated honestly rather than the guarantee stated broadly:
 
-  1. naming and the three published properties
+  1. naming and the four published properties
   2. total order, with a tie-break that is doing real work
   3. the cursor is opaque, versioned, and refused rather than guessed at
   4. bounds are CLAMPED and the clamp is reported
@@ -125,6 +125,7 @@ def test_the_published_description_calls_it_a_state_feed_and_never_an_event_log(
 @pytest.mark.parametrize(
     "claim",
     [
+        pytest.param(cf.SEQUENCE_PROOF, id="sequence-proof"),
         pytest.param(cf.GAP_GUARANTEE, id="gap"),
         pytest.param(cf.DELETION_LIMITATION, id="deletion"),
         pytest.param(cf.EXPIRY_PROPERTY, id="expiry"),
@@ -134,8 +135,13 @@ def test_each_published_property_reaches_the_served_document_verbatim(client, cl
     """ONE definition, quoted — never a paraphrase in the route and a constant here.
 
     The same posture as ``dependencies.MISSING_REASON``: a claim written twice is a
-    claim free to drift, and these three are exactly the claims a client would build
+    claim free to drift, and these four are exactly the claims a client would build
     the wrong retry logic on top of.
+
+    ``SEQUENCE_PROOF`` JOINED THE LIST WITH THE ORDERING FIX, and it is published
+    rather than kept as an internal comment for the reason the other three are: it is
+    the argument a client's own correctness rests on, and a client that cannot read it
+    has to take "no entity is skipped" on trust.
     """
     assert claim in _description(client)
 
@@ -154,36 +160,59 @@ def test_the_gap_guarantee_names_its_own_failure_mode_rather_than_promising_none
     ``test_a_same_second_write_behind_the_cursor_is_a_measured_gap``, which
     demonstrates the loss rather than asserting prose about it.
     """
-    # ── RE-PINNED 2026-08-30, AND THIS IS THE SECOND TIME THIS ASSERTION HAS BEEN
-    # THE THING KEEPING A FALSE SENTENCE IN PLACE ─────────────────────────────────
+    # ── RE-PINNED AGAIN WITH THE SEQUENCE FIX, AND THE HISTORY IS THE POINT ───────
     #
-    # It first required "never moves backwards", which was false. It was then changed
-    # to require "STRICTLY ADVANCES", which an independent review ALSO measured false
-    # — reproduced with no clock manipulation at all: an entity's `updated_utc`
-    # advanced strictly, INTO the second the cursor already sat in, and the
-    # `kind`/`entity_id` tie-break still placed its key behind the cursor, so it was
-    # never reported. The stamp advanced; the entity was skipped.
-    #
-    # Two wrong provisos in a row is the signal that the sentence was being written
-    # about the wrong thing. The guarantee is a property of the KEY, not of the clock:
-    # an entity is reported exactly when its key advances strictly past the cursor.
-    # That one statement subsumes every mode — stamp unchanged, stamp advanced within
-    # the cursor's second, and the clock stepping backwards — so this test now pins
-    # THAT, and explicitly refuses the clock-only framing that failed twice.
+    # Three wordings of this sentence were measured false in turn: "never moves
+    # backwards", then "STRICTLY ADVANCES" (reproduced false with no clock
+    # manipulation at all — a stamp advancing INTO the cursor's own second, with the
+    # tie-break placing the entity behind), and then the honest third wording, which
+    # was true but which disclosed a real defect rather than describing a working
+    # feed. THE DEFECT IS NOW FIXED IN THE KEY rather than in the sentence, and this
+    # test's job changes with it: it pins that the guarantee is stated about the KEY,
+    # that the closed gap is RECORDED rather than deleted, and that what is still not
+    # promised is still named.
     assert "SORT KEY advances strictly past" in cf.GAP_GUARANTEE
-    assert "not claimed to be" in cf.GAP_GUARANTEE
-    # The CAUSE is still named, because a rule with no mechanism beside it reads as
-    # arbitrary and is the half a later tidy-up drops.
+    # The mechanism, because a rule with no mechanism beside it reads as arbitrary and
+    # is the half a later tidy-up drops.
+    assert "durable strictly-increasing SEQUENCE POSITION" in cf.GAP_GUARANTEE
+    assert "`(changed_at_rev, kind, entity_id)`" in cf.GAP_GUARANTEE
+    # THE CLOSED GAP IS KEPT AS A RECORDED CORRECTION. A disclosure deleted the moment
+    # it stopped applying leaves a reader unable to tell a fixed defect from one that
+    # was never there — and this file has three false wordings behind it that only
+    # make sense if the reader can see them.
+    assert "SAME-SECOND GAP THIS SENTENCE USED TO DISCLOSE IS CLOSED" in cf.GAP_GUARANTEE
     assert "WHOLE SECONDS" in cf.GAP_GUARANTEE
-    assert "kind`/`entity_id` tie-break" in cf.GAP_GUARANTEE
-    # AND THE FALSE FRAMING IS REFUSED BY NAME, so it cannot come back a third time.
-    assert "does NOT cover that second case" in cf.GAP_GUARANTEE
     assert "measured false" in cf.GAP_GUARANTEE
-    # The single-pod argument is offered as the REASON the exposure is small, and is
-    # explicitly refused as a proof that it is zero. That distinction is the whole
-    # point of the sentence and is the thing a later edit would smooth away.
-    assert "not a proof that it is zero" in cf.GAP_GUARANTEE
+    # AND THE FIX IS NAMED AS A KEY CHANGE, NOT A CLOCK CHANGE. A future reader who
+    # thought the remedy was a sub-second timestamp would be re-opening the decision
+    # this slice deliberately refused.
+    assert "fixed by changing the KEY, not the clock" in cf.GAP_GUARANTEE
+    # WHAT IS STILL NOT PROMISED, each named rather than implied by silence.
+    assert "not exactly-once delivery" in cf.GAP_GUARANTEE
+    assert "sits at 0" in cf.GAP_GUARANTEE
+    assert "starts a fresh sequence at 0" in cf.GAP_GUARANTEE
     assert "no cursor at all" in cf.GAP_GUARANTEE
+
+
+def test_the_ordering_proof_is_written_out_rather_than_asserted():
+    """The ARGUMENT is published, not just the conclusion.
+
+    Three successive wordings of `GAP_GUARANTEE` were measured false, and none of them
+    failed because someone reasoned badly — they failed because nobody had written the
+    reasoning down where a reader could check it. So the proof is a published constant
+    with the two steps that carry it, and this test pins both: that the cursor's
+    position is bounded above by the record's rev, and that a later change is written
+    at a strictly greater one. Drop either step and the conclusion does not follow.
+    """
+    assert "SEQUENCE POSITION, not a clock" in cf.SEQUENCE_PROOF
+    # Step 1: the cursor cannot name a position above the record's own rev.
+    assert "at most the record's rev at the moment that cursor was issued" in cf.SEQUENCE_PROOF
+    # Step 2: a later change is written strictly above it.
+    assert "strictly greater than the rev on disk when it ran" in cf.SEQUENCE_PROOF
+    # The conclusion, and the part that is the whole difference from the old key: the
+    # tie-break cannot rescue or ruin it, because the first component already decided.
+    assert "ON THE FIRST COMPONENT ALONE" in cf.SEQUENCE_PROOF
+    assert "regardless of how the kind and entity-id tie-break falls" in cf.SEQUENCE_PROOF
 
 
 def test_the_deletion_limitation_is_stated_as_a_limitation():
@@ -218,25 +247,61 @@ def test_expiry_is_published_as_a_property_and_no_code_handles_it():
 # =============================================================================
 
 
-def test_the_order_is_updated_utc_then_kind_then_entity_id(client):
+def test_the_order_is_changed_at_rev_then_kind_then_entity_id(client):
+    """THE PUBLISHED ORDER, over the wire, and the leading component is on the wire.
+
+    This was `test_the_order_is_updated_utc_then_kind_then_entity_id` and it is renamed
+    rather than edited in place, because the change it is tracking is the whole slice:
+    the key's leading component stopped being a whole-second timestamp and became a
+    durable sequence position. `updated_utc` is still published — clients display it —
+    and it is asserted below to be exactly what it now is, which is NOT the order.
+    """
     exp_id = _with_runs(client, 6)
     changes = _feed(client, exp_id)["changes"]
-    keys = [(c["updated_utc"], c["kind"], c["entity_id"]) for c in changes]
+    keys = [(c["changed_at_rev"], c["kind"], c["entity_id"]) for c in changes]
     assert keys == sorted(keys)
 
 
-def test_the_tie_break_is_load_bearing_because_the_timestamps_are_equal(client):
+def test_updated_utc_is_still_published_and_is_no_longer_the_order(client):
+    """The field a "nothing reads it any more" tidy-up would delete.
+
+    It is on the wire for every entry, because clients display "last updated" and the
+    frontend's `ApiChangeEntry` names it. It is NOT the order, and the two halves are
+    asserted separately: the timestamps are all EQUAL here (one write, one second),
+    so an order that still led with them would be decided entirely by the tie-break —
+    which is the exact condition under which the old key lost changes.
+    """
+    exp_id = _with_runs(client, 6)
+    changes = _feed(client, exp_id)["changes"]
+    assert all(isinstance(c["updated_utc"], str) and c["updated_utc"] for c in changes)
+    assert len({c["updated_utc"] for c in changes}) == 1
+    # And the key does not contain it at all — asserted structurally rather than by
+    # inspecting the wire, because `ChangeEntry.key` is what `changes_page` compares.
+    exp = ws.load_experiment(exp_id)
+    entry = cf.collect(exp)[0]
+    assert entry.key == (entry.changed_at_rev, entry.kind, entry.entity_id)
+    assert entry.updated_utc not in entry.key
+
+
+def test_the_tie_break_is_load_bearing_because_the_sequence_positions_are_equal(client):
     """The precondition the tie-break exists for is MEASURED, not assumed.
 
-    `updated_utc` is `%Y-%m-%dT%H:%M:%SZ` — one-second resolution — and one
-    `save_versioned` stamps every changed run with one instant. If this assertion ever
-    fails, the ordering tests below stop proving what they claim: they would be
-    passing on a timestamp that happened to be unique rather than on the tie-break.
+    One `save_versioned` stamps every entity it changed with the SAME sequence
+    position — that is the design, since they changed in one write — so on a record
+    whose runs were created together the leading component is constant and
+    `(kind, entity_id)` is doing all of the ordering. If this assertion ever fails, the
+    ordering tests below stop proving what they claim: they would be passing on a
+    position that happened to be unique rather than on the tie-break.
+
+    THE SEQUENCE FIX DID NOT MAKE THE TIE-BREAK REDUNDANT, and that is worth stating
+    because it is the natural assumption. The two solve different failures: the
+    tie-break stops a page boundary reordering between two requests; the sequence stops
+    a CHANGE being invisible to a cursor. Removing either reintroduces its own defect.
     """
     exp_id = _with_runs(client, 8)
     changes = _feed(client, exp_id)["changes"]
-    stamps = {c["updated_utc"] for c in changes}
-    assert len(stamps) == 1, stamps
+    positions = {c["changed_at_rev"] for c in changes}
+    assert len(positions) == 1, positions
     # ...and the order is therefore entirely `(kind, entity_id)`.
     assert [c["kind"] for c in changes] == ["experiment"] + ["run"] * 8
     run_ids = [c["entity_id"] for c in changes if c["kind"] == "run"]
@@ -261,17 +326,18 @@ def test_the_order_does_not_depend_on_the_stored_list_order(client):
 
 
 class _NoTieBreak(cf.ChangeEntry):
-    """A `ChangeEntry` whose key is THE TIMESTAMP ALONE, padded to the same arity.
+    """A `ChangeEntry` whose key is THE SEQUENCE POSITION ALONE, padded to the arity.
 
-    This is the mutant: `(updated_utc, "", "")` keeps the tuple three components wide
-    so `encode_cursor` still works, while removing every component that distinguishes
-    two entities stamped in the same second. It is what `ChangeEntry.key` would be if
-    someone "simplified" the tie-break away, and the test below shows what that costs.
+    This is the mutant: `(changed_at_rev, "", "")` keeps the tuple three components
+    wide so `encode_cursor` still works, while removing every component that
+    distinguishes two entities stamped by the same write. It is what `ChangeEntry.key`
+    would be if someone "simplified" the tie-break away on the grounds that the
+    sequence had made it unnecessary, and the test below shows what that costs.
     """
 
     @property
-    def key(self) -> tuple[str, str, str]:
-        return (self.updated_utc, "", "")
+    def key(self) -> tuple[int, str, str]:
+        return (self.changed_at_rev, "", "")
 
 
 def _tie_break_removed(exp):
@@ -280,6 +346,7 @@ def _tie_break_removed(exp):
         yield _NoTieBreak(
             kind=e.kind,
             entity_id=e.entity_id,
+            changed_at_rev=e.changed_at_rev,
             updated_utc=e.updated_utc,
             rev=e.rev,
             generation=e.generation,
@@ -315,8 +382,8 @@ def test_removing_the_tie_break_loses_entities_at_a_page_boundary(client):
     exp = ws.load_experiment(_with_runs(client, 7))
     everything = {e.entity_id for e in cf.collect(exp)}
     assert len(everything) == 8  # the record plus seven runs
-    # The precondition the whole test rests on: one write, one second, one stamp.
-    assert len({e.updated_utc for e in cf.collect(exp)}) == 1
+    # The precondition the whole test rests on: one write, one sequence position.
+    assert len({e.changed_at_rev for e in cf.collect(exp)}) == 1
 
     intact = _walk(exp, cf.RECORD_COLLECTORS, limit=3)
     assert len(intact) == len(set(intact)), "the real feed returned an entity twice"
@@ -329,7 +396,7 @@ def test_removing_the_tie_break_loses_entities_at_a_page_boundary(client):
     # And it lies about it: the page that dropped five entities said there were none
     # left, which is exactly why a cursor-paged reader cannot detect this itself.
     last = cf.changes_page(
-        exp, scope_tag="t", cursor=cf.encode_cursor(("", "", ""), scope="t"), limit=3, collectors=mutant
+        exp, scope_tag="t", cursor=cf.encode_cursor(cf.ZERO_KEY, scope="t"), limit=3, collectors=mutant
     )
     assert last["has_more"] is True
     resumed = cf.changes_page(exp, scope_tag="t", cursor=last["next_cursor"], collectors=mutant)
@@ -404,19 +471,58 @@ def test_a_cursor_of_another_version_is_refused_rather_than_interpreted(client):
     """
     exp_id = _with_runs(client, 2)
     tag = cf.record_scope_tag(exp_id, None)
-    token = _handmade({"v": 99, "s": tag, "t": "2026-01-01T00:00:00Z", "k": "run", "e": "x"})
+    token = _handmade({"v": 99, "s": tag, "q": 3, "k": "run", "e": "x"})
     res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": token})
     assert res.status_code == 422
     assert res.json()["reason"] == "not_decodable"
 
 
-@pytest.mark.parametrize("missing", ["t", "k", "e"])
+def test_a_version_1_cursor_is_REFUSED_rather_than_MISREAD(client):
+    """THE VERSION TRANSITION, and it is the case a bump exists for.
+
+    A v1 cursor's leading component was a `%Y-%m-%dT%H:%M:%SZ` STRING under the key
+    `t`; a v2 cursor's is an integer sequence position under `q`. Neither converts into
+    the other — a timestamp does not name a `rev`, and no arithmetic recovers one — so
+    the only two possible behaviours are REFUSE and GUESS, and guessing here means
+    answering a well-formed page computed from a position the caller never held.
+
+    Two independent refusals are asserted, not one, because either alone would leave
+    the other unproven: the version check fires first, and a payload that somehow
+    carried `v: 2` while keeping v1's shape is still missing `q`. A build that
+    "helpfully" migrated the old shape would pass neither.
+
+    The remedy is the published one and it is asserted here too — a client that gets
+    this `422` drops the cursor and resyncs, which is the SAME remedy the other
+    refusal reason has, which is why both share one status.
+    """
+    exp_id = _with_runs(client, 3)
+    tag = cf.record_scope_tag(exp_id, None)
+
+    v1 = _handmade({"v": 1, "s": tag, "t": "2026-01-01T00:00:00Z", "k": "run", "e": "x"})
+    res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": v1})
+    assert res.status_code == 422
+    assert res.json()["reason"] == "not_decodable"
+
+    # ...and the shape alone is refused even wearing the current version number.
+    relabelled = _handmade(
+        {"v": cf.CURSOR_VERSION, "s": tag, "t": "2026-01-01T00:00:00Z", "k": "run", "e": "x"}
+    )
+    res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": relabelled})
+    assert res.status_code == 422
+    assert res.json()["reason"] == "not_decodable"
+
+    # THE REMEDY WORKS. A test that only proved the refusal would read as an argument
+    # that the bump stranded every existing client.
+    assert _feed(client, exp_id)["returned"] == 4
+
+
+@pytest.mark.parametrize("missing", ["q", "k", "e"])
 def test_a_cursor_missing_a_key_component_is_refused(client, missing):
     exp_id = _with_runs(client, 2)
     payload = {
         "v": cf.CURSOR_VERSION,
         "s": cf.record_scope_tag(exp_id, None),
-        "t": "2026-01-01T00:00:00Z",
+        "q": 1,
         "k": "run",
         "e": "x",
     }
@@ -428,19 +534,38 @@ def test_a_cursor_missing_a_key_component_is_refused(client, missing):
     assert res.json()["reason"] == "not_decodable"
 
 
-def test_a_non_string_component_is_refused_and_never_coerced(client):
-    """`t: 7` must not become `"7"`.
-
-    Coercion here would build a key that compares against real keys and answer from a
-    position the caller never asked for — a wrong answer where an error was available.
-    """
+@pytest.mark.parametrize(
+    "payload_patch,why",
+    [
+        pytest.param({"q": "7"}, "a string sequence must not become 7", id="q-as-string"),
+        pytest.param({"q": 1.5}, "a float is not a sequence position", id="q-as-float"),
+        pytest.param({"q": None}, "null is not a position", id="q-as-null"),
+        pytest.param({"k": 7}, "an integer kind must not become '7'", id="kind-as-int"),
+        pytest.param({"e": 7}, "an integer id must not become '7'", id="id-as-int"),
+        # `isinstance(True, int)` is True in Python, so a bare integer check would
+        # ACCEPT this and decode it to the real position `1`. That is the one case in
+        # this list a reasonable implementation gets wrong by accident.
+        pytest.param({"q": True}, "a bool must not decode to the position 1", id="q-as-bool"),
+    ],
+)
+def test_a_wrong_typed_component_is_refused_and_never_coerced(client, payload_patch, why):
+    """Coercion here would build a key that compares against real keys and answer from
+    a position the caller never asked for — a wrong answer where an error was
+    available."""
     exp_id = _with_runs(client, 2)
-    token = _handmade(
-        {"v": cf.CURSOR_VERSION, "s": cf.record_scope_tag(exp_id, None), "t": 7, "k": "run", "e": "x"}
+    payload = {
+        "v": cf.CURSOR_VERSION,
+        "s": cf.record_scope_tag(exp_id, None),
+        "q": 1,
+        "k": "run",
+        "e": "x",
+    }
+    payload.update(payload_patch)
+    res = client.get(
+        f"/api/experiments/{exp_id}/changes", params={"cursor": _handmade(payload)}
     )
-    res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": token})
-    assert res.status_code == 422
-    assert res.json()["reason"] == "not_decodable"
+    assert res.status_code == 422, why
+    assert res.json()["reason"] == "not_decodable", why
 
 
 def test_a_cursor_from_another_record_is_refused_as_the_wrong_feed(client):
@@ -556,18 +681,26 @@ def test_an_entity_that_changes_after_your_cursor_comes_back(client):
     assert end["has_more"] is False
     before = {c["entity_id"]: c["version"] for c in end["changes"]}
 
+    # THE WRITE GOES THROUGH `save_versioned`, AND IT DID NOT USED TO. The earlier
+    # version of this test hand-set `updated_utc` to a far-future stamp and
+    # hand-incremented `target.rev` before a plain `save()` — which was enough while
+    # the key led with a timestamp, and is deliberately not enough now. A sequence
+    # position is written by the versioned save and by nothing else, so a test that
+    # fabricated one would have been asserting against a state the application cannot
+    # produce.
     exp = ws.load_experiment(exp_id)
     target = exp.sorted_runs()[0]
     target.draft["fields"] = {"context.beamline": {"value": "BL-SYNTH", "status": "verified"}}
-    exp.updated_utc = "2099-01-01T00:00:00Z"
-    target.updated_utc = "2099-01-01T00:00:00Z"
-    target.rev += 1
-    exp.save()
+    assert exp.save_versioned() is True
 
     resumed = _feed(client, exp_id, cursor=end["next_cursor"])
     moved = {c["entity_id"]: c["version"] for c in resumed["changes"]}
     assert target.id in moved
     assert moved[target.id] != before[target.id]
+    # The OTHER run did not move, so this is not a feed that re-reports everything on
+    # every write and would have passed the assertion above by accident.
+    other = exp.sorted_runs()[1].id
+    assert other not in moved
 
 
 def test_a_cursorless_read_is_the_resync_and_returns_the_start_of_the_order(client):
@@ -717,7 +850,7 @@ def test_a_cursor_is_bound_to_its_scope_as_well_as_to_its_record():
 
     with pytest.raises(cf.MalformedCursor) as err:
         cf.decode_cursor(
-            cf.encode_cursor(("2026-01-01T00:00:00Z", "run", "x"), scope=ordinary),
+            cf.encode_cursor((3, "run", "x"), scope=ordinary),
             scope=session,
         )
     assert err.value.reason == "wrong_feed"
@@ -1100,7 +1233,7 @@ def test_a_cursor_this_feed_did_not_issue_is_refused_on_its_ALPHABET(client):
     from isaac_api import change_feed as cf
 
     scope = "record|scope"
-    issued = cf.encode_cursor(("2026-08-31T00:00:00Z", "run", "01ABC"), scope=scope)
+    issued = cf.encode_cursor((7, "run", "01ABC"), scope=scope)
     # The control: what the feed actually issues still decodes.
     assert cf.decode_cursor(issued, scope=scope) is not None
 

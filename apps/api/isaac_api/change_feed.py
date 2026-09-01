@@ -11,8 +11,10 @@ table — the 2026-08-29 authorization deliberately adds none, and `CLAUDE.md` �
 enumerates every table this application may write, so appending immutable event rows
 is not something this slice may do even if it wanted to. What exists is the CURRENT
 state of an experiment document: each `Experiment` and each `Run` carries `rev`,
-`updated_utc` and `generation` (`workspace.py`), bumped by `save_versioned`. So the
-only thing derivable is a projection of where each entity stands *now*.
+`updated_utc` and `generation`, and each entity of the record carries the record's
+`rev` AT THE SAVE THAT LAST CHANGED IT (`workspace.py` — `Run.changed_at_rev`,
+`Experiment.proposal_change_revs`), all maintained by `save_versioned`. So the only
+thing derivable is a projection of where each entity stands *now*.
 
 Three consequences follow, and every one of them is a limitation a caller can be
 bitten by, so each is published rather than buried:
@@ -23,6 +25,19 @@ bitten by, so each is published rather than buried:
   learn is that the run moved, and to which version.
 * **The feed CANNOT REPORT DELETIONS.** See `DELETION_LIMITATION` below.
 * **A cursor CANNOT EXPIRE.** See `EXPIRY_PROPERTY` below.
+
+THE ORDER IS A SEQUENCE, NOT A CLOCK — AND IT USED TO BE A CLOCK
+================================================================
+The sort key's leading component is `changed_at_rev`: the record's own strictly
+increasing `rev` at the save that last changed that entity. It was `updated_utc`,
+and that was a MEASURED defect rather than a stylistic one — `workspace._now_iso`
+formats `%Y-%m-%dT%H:%M:%SZ`, so a change landing inside the second a cursor already
+names could move an entity's version without moving its key, and that change was
+then never reported by that cursor. `SEQUENCE_PROOF` states why the sequence closes
+it and `GAP_GUARANTEE` states what is now promised. The fix is deliberately NOT a
+sub-second timestamp: that would be a repo-wide storage change (exports, snapshots,
+record timestamps) and would trade a proven defect for the unproven assumption that
+two writes never share a microsecond.
 
 WHAT IT IS FOR
 ==============
@@ -46,6 +61,12 @@ and it is the reason the feed is cheap on a record whose detail response is not 
 see `changes_page`'s measurement table. It is also why this module imports nothing
 from the truth core: a change feed that could reach `transform` would be one refactor
 away from being O(runs) with an export-sized constant.
+
+IT IMPORTS NOTHING FROM `proposals.py` EITHER, and that is load-bearing now that a
+`proposal` kind is served. Every collector below reads STORED ATTRIBUTES and nothing
+else — no lifecycle function, no view builder, no model. A module that could not
+reach a proposal's content cannot leak it, which is a structural guarantee rather
+than a review one.
 """
 
 from __future__ import annotations
@@ -72,48 +93,95 @@ CHANGE_FEED_LIMIT_MAX = 200
 
 #: The cursor payload version. Bumped only if the tuple's SHAPE changes; a cursor
 #: carrying any other value is refused rather than guessed at.
-CURSOR_VERSION = 1
+#:
+#: **VERSION 1 -> 2, AND THE TRANSITION IS STATED RATHER THAN LEFT TO THE NUMBER.**
+#: A v1 cursor's leading component was a `%Y-%m-%dT%H:%M:%SZ` STRING; a v2 cursor's is
+#: an INTEGER sequence position. The two are not comparable and neither converts into
+#: the other — a timestamp does not name a `rev`, and no arithmetic recovers one. So a
+#: v1 cursor is **refused, not migrated and not misread**: `decode_cursor` rejects any
+#: payload whose `v` is not this constant, before it looks at anything else, and the
+#: refusal is the published `422 malformed_cursor` whose single remedy is already
+#: "drop the cursor and resync". A build that tried to interpret a v1 payload with v2
+#: rules would compare a string against an integer key and answer from a position the
+#: caller never asked for, which is the wrong-answer-instead-of-an-error failure this
+#: whole module's tone is aimed at. The payload's key for that component was also
+#: renamed `t` -> `q`, so a v1 token is missing a required component as well as
+#: carrying the wrong version — two independent refusals, not one.
+CURSOR_VERSION = 2
 
 #: The sort key that precedes every real entry, and the position an absent cursor
-#: resolves to. It is `("", "", "")` rather than a `None` special case so that "start
+#: resolves to. It is `(-1, "", "")` rather than a `None` special case so that "start
 #: of the order" is an ordinary key and every comparison below is one comparison.
 #:
-#: IT IS STRICTLY BELOW EVERY REAL KEY, and that rests on a stated invariant rather
-#: than on a hope: `kind` is a non-empty literal for every collector in this module
-#: (`"experiment"`, `"run"`), so even an entity whose `updated_utc` hydrated as `""`
-#: from a malformed document produces `("", "experiment", id) > ("", "", "")`.
-ZERO_KEY: tuple[str, str, str] = ("", "", "")
+#: IT IS STRICTLY BELOW EVERY REAL KEY, and that now rests on ARITHMETIC rather than on
+#: a claim about strings. Every entity's sequence component is a NON-NEGATIVE integer —
+#: `save_versioned` only ever stamps a `rev` it is about to write, which is `>= 1`, and
+#: `workspace` clamps a persisted negative to `0` on hydration (`Run.__post_init__`,
+#: `_hydrate_change_revs`). So `-1` is below every real key on the FIRST component and
+#: the tie-break is never consulted. The previous `("", "", "")` needed a supporting
+#: argument about `kind` being a non-empty literal; this needs none, which is a
+#: strictly better footing for the one key the whole order is anchored to.
+ZERO_KEY: tuple[int, str, str] = (-1, "", "")
 
 
-# --- the three published properties -------------------------------------------
+# --- the four published properties ---------------------------------------------
 #
 # These are module constants rather than prose inside a docstring because the route
 # description, the tests and the frontend copy all have to make the SAME claim, and a
 # claim written three times is a claim free to drift. Compare `dependencies.MISSING_REASON`.
+
+#: WHY THE ORDER CANNOT SKIP A CHANGE. The argument, written out, because the previous
+#: key's failure was not that anyone reasoned badly about it — it was that nobody
+#: reasoned about it in writing at all, so two successive wordings of `GAP_GUARANTEE`
+#: were measured false before the third was written about the right thing.
+SEQUENCE_PROOF = (
+    "The key's leading component is a SEQUENCE POSITION, not a clock: it is the "
+    "record's own `rev` at the save that last changed that entity. `rev` is durable, "
+    "per-record and strictly increasing — every write that changes anything inside "
+    "the record takes it to `max(in-memory rev, on-disk rev) + 1`, so the persisted "
+    "value never repeats and never goes back. THE PROOF. A cursor's sequence "
+    "component R_c is, by construction, at most the record's rev at the moment that "
+    "cursor was issued: the record's own entry sits exactly at that rev and every "
+    "other entity sits at the rev of some earlier save. Any change made afterwards "
+    "is written at a rev R_new strictly greater than the rev on disk when it ran, "
+    "which is itself at least the rev the cursor was issued from. So R_new > R_c, "
+    "and the changed entity's new key (R_new, kind, id) is strictly greater than the "
+    "cursor key (R_c, k, e) ON THE FIRST COMPONENT ALONE — regardless of how the "
+    "kind and entity-id tie-break falls. That is exactly the property the timestamp "
+    "key lacked: a whole-second stamp could advance into the second a cursor already "
+    "sat in, leaving the tie-break to decide, and the tie-break could put the changed "
+    "entity behind the cursor. It cannot happen to an integer that must increase."
+)
 
 #: THE GAP GUARANTEE, stated honestly. Quoted verbatim by the route description and
 #: pinned by `test_change_feed.py`.
 GAP_GUARANTEE = (
     "Paging this feed returns no entity twice, and reports an entity exactly when its "
     "SORT KEY advances strictly past the cursor you hold. That is the whole rule, and "
-    "it is stated as a property of the KEY rather than of the clock because two "
-    "earlier versions of this sentence were stated about the clock and both were "
-    "measured false. The key is `(updated_utc, kind, entity_id)` and `updated_utc` is "
-    "formatted to WHOLE SECONDS, so any change that leaves an entity's key at or "
-    "behind your cursor is not reported by that cursor — whether the stamp did not "
-    "move at all, or moved forward only into the second your cursor already sits in, "
-    "where the `kind`/`entity_id` tie-break can still place it behind. A guarantee "
-    "worded as *\"provided `updated_utc` strictly advances\"* does NOT cover that "
-    "second case: the stamp genuinely advances and the entity is still skipped, which "
-    "is why the wording here is about the key. This is a guarantee about ORDERING, not "
-    "exactly-once delivery, and it is not claimed to be. In every such case the change "
-    "appears the next time that entity moves into a LATER second, so nothing is lost "
-    "permanently on an entity that is still being written. The exposure is bounded by "
-    "one second per poll, and it is small because this application runs as a single "
-    "pod reading one clock \u2014 that is the REASON it is small, not a proof that it "
-    "is zero. The remedy is always available and costs one request: ask for the feed "
-    "with no cursor at all, which is computed from current state and so reports every "
-    "entity at the version it holds right now."
+    "it is stated as a property of the KEY rather than of the clock because three "
+    "earlier versions of this sentence were stated about the clock and every one of "
+    "them was measured false. The key is `(changed_at_rev, kind, entity_id)`, and "
+    "`changed_at_rev` is a durable strictly-increasing SEQUENCE POSITION rather than a "
+    "timestamp, so a change to an entity ALWAYS moves that entity's key strictly past "
+    "any cursor issued before it — see the ordering proof published beside this. "
+    "THE SAME-SECOND GAP THIS SENTENCE USED TO DISCLOSE IS CLOSED, and the disclosure "
+    "is recorded rather than deleted so a reader can see what changed: the key used to "
+    "lead with `updated_utc`, formatted to WHOLE SECONDS, so a change that moved an "
+    "entity's stamp forward only into the second the cursor already sat in — where the "
+    "`kind`/`entity_id` tie-break could place it behind — was silently never reported "
+    "by that cursor. It was fixed by changing the KEY, not the clock: `updated_utc` is "
+    "still published because clients display it, and it is no longer load-bearing for "
+    "correctness. Two things are still NOT promised, and neither is a clock problem. "
+    "This is a guarantee about ORDERING, not exactly-once delivery: an entity that "
+    "changes again after you were told about it is reported again, which is what a "
+    "state feed is for. And the sequence belongs to ONE record — an entity whose "
+    "position was never recorded sits at 0 (a document written before the sequence "
+    "existed, or an entity first persisted by the unversioned save primitive), and a "
+    "record that is destroyed and re-materialised, as the example-workspace reset does, "
+    "starts a fresh sequence at 0, so a cursor held across either must be dropped. The "
+    "remedy for both is the same, is always available and costs one request: ask for "
+    "the feed with no cursor at all, which is computed from current state and so "
+    "reports every entity at the version it holds right now."
 )
 
 #: THE DELETION LIMITATION. Quoted verbatim by the route description and pinned by test.
@@ -138,8 +206,9 @@ EXPIRY_PROPERTY = (
     "a retained log, so there is no retention window a cursor could fall outside of. "
     "This API therefore publishes no `cursor_expired` status and contains no code "
     "that handles one. A cursor is refused for exactly two reasons, and both are "
-    "`422 malformed_cursor`: it could not be decoded, or it belongs to a different "
-    "feed than the one it was sent to."
+    "`422 malformed_cursor`: it could not be decoded — which includes a cursor this "
+    "server issued under an older payload VERSION, refused rather than reinterpreted "
+    "— or it belongs to a different feed than the one it was sent to."
 )
 
 
@@ -154,16 +223,36 @@ class ChangeEntry:
     derived, composed, or looked up — which is the property that keeps the feed cheap,
     and it is asserted rather than assumed: see
     `test_change_feed.py::test_a_feed_request_composes_no_draft_and_runs_no_dry_run`.
+
+    THE COORDINATES AFTER `changed_at_rev` ARE PER-KIND, AND ABSENT RATHER THAN NULL
+    WHEN AN ENTITY DOES NOT CARRY ONE. An `Experiment` and a `Run` each carry their own
+    `rev`/`generation` series, so they publish a `version` token. A proposal carries
+    neither — `proposals.py` gives it no version series at all — so no `rev`,
+    `generation` or `version` appears on a proposal entry. The alternative would be to
+    synthesise one, and a fabricated version is worse than a missing one: a client
+    would compare two numbers that never came from a counter. What a proposal DOES
+    carry is its lifecycle `state`, which is a stored value on the entity.
     """
 
     kind: str
     entity_id: str
-    updated_utc: str
-    rev: int
-    generation: str
+    #: THE ORDERING COORDINATE. See `SEQUENCE_PROOF`.
+    changed_at_rev: int
+    #: The entity's own version series, for the kinds that have one.
+    rev: int | None = None
+    generation: str | None = None
+    #: KEPT ON THE WIRE, NO LONGER LOAD-BEARING. Clients display "last updated"; the
+    #: order and the cursor no longer depend on it in any way. Saying so here rather
+    #: than only in `GAP_GUARANTEE` because this is the field a later tidy-up would
+    #: delete on the grounds that "nothing reads it" — something does, just not this
+    #: module.
+    updated_utc: str | None = None
+    #: The entity's lifecycle state, for the kinds that have one. A stored value read
+    #: verbatim; this module classifies nothing and defines no state of its own.
+    state: str | None = None
 
     @property
-    def version_token(self) -> str:
+    def version_token(self) -> str | None:
         """`<generation>.<rev>` — the SAME value `Experiment.version_token` mints.
 
         NAMED FOR THE CODE, PUBLISHED AS `version`. `workspace` calls this
@@ -175,39 +264,64 @@ class ChangeEntry:
         Recomputed here rather than read off the object, so a `ChangeEntry` built for a
         test — or, later, for an entity kind that is not a workspace object — cannot
         publish a version that disagrees with its own two components.
+
+        `None` WHEN EITHER COMPONENT IS MISSING, which is the proposal case. Returning
+        `"None.None"` would be a token that compares, sorts and looks real.
         """
+        if self.rev is None or self.generation is None:
+            return None
         return f"{self.generation}.{self.rev}"
 
     @property
-    def key(self) -> tuple[str, str, str]:
-        """The TOTAL ORDER key: `(updated_utc, kind, entity_id)`.
+    def key(self) -> tuple[int, str, str]:
+        """The TOTAL ORDER key: `(changed_at_rev, kind, entity_id)`.
 
-        WHY THE TIE-BREAK IS NOT DECORATION. `updated_utc` has one-second resolution
-        (`workspace._now_iso` formats `%Y-%m-%dT%H:%M:%SZ`), and a single
-        `save_versioned` stamps every changed run with the SAME instant — so on a
-        record whose runs were all created in one write, the timestamp is constant and
-        `(kind, entity_id)` is doing all of the ordering. Without it, `sorted` would be
-        merely stable and a page boundary could reorder between two requests, which is
-        precisely how a cursor-paged reader loses an entity.
+        WHY THE TIE-BREAK IS NOT DECORATION, AND WHY IT IS STILL NEEDED AFTER THE
+        SEQUENCE FIX. One `save_versioned` stamps every entity it changed with the
+        SAME `rev` — that is the whole design, since they changed in one write — so on
+        a record whose runs were all created together the sequence component is
+        constant and `(kind, entity_id)` is doing all of the ordering. Without it,
+        `sorted` would be merely stable and a page boundary could reorder between two
+        requests, which is precisely how a cursor-paged reader loses an entity. The
+        sequence fixed a different failure: the tie-break deciding an order that a
+        CHANGE should have decided.
 
         THE ORDER IS TOTAL BECAUSE `(kind, entity_id)` IS UNIQUE, and that uniqueness
         is enforced rather than assumed: run ids are unique within an experiment
         (`Experiment.add_run` refuses a duplicate, `workspace._hydrate_runs` drops
-        one — the same invariant `sorted_runs` rests on), and the experiment's own
-        entry is the only one of its kind. An experiment id that happened to equal a
-        run id still produces two distinct keys, because `kind` differs.
+        one — the same invariant `sorted_runs` rests on), proposal ids likewise
+        (`_hydrate_proposals` files a duplicate as unreadable, and unreadable entries
+        are not served), and the experiment's own entry is the only one of its kind. An
+        experiment id that happened to equal a run id still produces two distinct keys,
+        because `kind` differs.
         """
-        return (self.updated_utc, self.kind, self.entity_id)
+        return (self.changed_at_rev, self.kind, self.entity_id)
 
     def to_wire(self) -> dict:
-        return {
+        """The published shape: the common core, plus the coordinates this kind has.
+
+        A COORDINATE THIS ENTITY DOES NOT CARRY IS ABSENT, never `null`. Both choices
+        are expressible; absence is the one that cannot be mistaken for a value, and it
+        is what makes the projection test below a statement about what the feed emits
+        rather than about which nulls it happens to emit.
+        """
+        wire: dict = {
             "kind": self.kind,
             "entity_id": self.entity_id,
-            "version": self.version_token,
-            "rev": self.rev,
-            "generation": self.generation,
-            "updated_utc": self.updated_utc,
+            "changed_at_rev": self.changed_at_rev,
         }
+        token = self.version_token
+        if token is not None:
+            wire["version"] = token
+        if self.rev is not None:
+            wire["rev"] = self.rev
+        if self.generation is not None:
+            wire["generation"] = self.generation
+        if self.updated_utc is not None:
+            wire["updated_utc"] = self.updated_utc
+        if self.state is not None:
+            wire["state"] = self.state
+        return wire
 
 
 # --- collectors: the kind set is DERIVED, never hard-coded --------------------
@@ -217,30 +331,23 @@ class ChangeEntry:
 class KindCollector:
     """One entity kind and the function that reads its entries off an experiment.
 
-    WHY A REGISTRY RATHER THAN TWO INLINE LOOPS. The brief names a third kind,
-    `proposal`, and a collector tuple is what lets the slice that owns that kind add
-    it without touching this module, while `feed_kinds()` publishes the truth about
-    which kinds a deployment actually serves instead of a hopeful literal. The wrong
-    way to prepare for it would be a `try: import proposals` here, or a branch on a
-    feature flag; a collector passed in as a parameter needs neither.
+    WHY A REGISTRY RATHER THAN THREE INLINE LOOPS. It is what let the `proposal` kind
+    be added by writing one function and appending one tuple entry, while
+    `feed_kinds()` publishes the truth about which kinds a deployment actually serves
+    instead of a hopeful literal. The wrong way to prepare for a kind would have been a
+    `try: import proposals` here, or a branch on a feature flag; a collector passed in
+    as a parameter needs neither, and the `proposal` collector below imports nothing.
 
-    THIS PARAGRAPH USED TO SAY THAT KIND "does NOT exist at this commit — it lives in
-    an unmerged PR", AND THAT IS CORRECTED RATHER THAN REPHRASED, because it was true
-    when written and is FALSE at this commit. The proposals work merged into this
-    branch's own history: `isaac_api/proposals.py` is in this tree and every
-    `Experiment` carries `.proposals`. A future reader must not take this docstring
-    as evidence that the feature is unavailable.
-
-    SERVING A `proposal` KIND IS STILL DELIBERATELY NOT DONE, and what IS observable
-    today is stated so the shortfall is measured rather than implied: proposals are
-    part of the record's AUTHORITATIVE SIGNATURE (`workspace._authoritative_signature`
-    hashes them), so proposing, accepting or refusing one moves the record's own `rev`
-    and `updated_utc`, and therefore moves the `experiment` entry of this feed. A
-    client learns "something about this record moved" and must re-read to learn what;
-    it does NOT learn which proposal moved, and no page carries a proposal id.
-    `test_change_feed.py` pins that mechanism, so a later change that took proposals
-    out of the signature — which would make this feed silent about them altogether —
-    fails a test instead of passing quietly.
+    THIS DOCSTRING HAS BEEN WRONG ABOUT PROPOSALS TWICE AND THE HISTORY IS KEPT,
+    because both wordings are the kind a future reader would act on. It first said the
+    kind "does NOT exist at this commit — it lives in an unmerged PR", which became
+    false when the proposals work merged. It was then corrected to say that serving a
+    `proposal` kind was "STILL DELIBERATELY NOT DONE", which is false as of this
+    change: `_proposal_entries` below serves it. What was true under BOTH wordings, and
+    remains true, is the mechanism they described — proposals are part of the record's
+    authoritative signature (`workspace._authoritative_signature` hashes them), so a
+    proposal act also moves the record's own `rev` and therefore its `experiment`
+    entry. A client now learns both "this record moved" and "this proposal moved".
 
     IT IS A TUPLE PASSED BY THE CALLER, NOT A MUTABLE MODULE-LEVEL REGISTRY. A global
     that tests append to is a global that leaks between tests; `changes_page` takes
@@ -260,13 +367,22 @@ def _experiment_entries(exp: Any) -> Iterator[ChangeEntry]:
     to a deterministic legacy value, so there is no state in which this yields nothing.
     A feed whose first page could be empty would make "nothing has changed" and "this
     record does not exist" look identical to a client.
+
+    ITS SEQUENCE POSITION IS `exp.rev` ITSELF, with nothing stored and nothing derived.
+    That is exact rather than approximate: `save_versioned` bumps `rev` on every write
+    whose authoritative signature moved, and the signature covers the record's title,
+    source, draft, record id, runs, notes and proposals — so the record's own entry
+    changed at exactly the rev it holds. It is also the reason `SEQUENCE_PROOF`'s "R_c
+    is at most the record's rev" step is airtight: this entry sits AT the maximum, so
+    no entity can ever sit above it.
     """
     yield ChangeEntry(
         kind="experiment",
         entity_id=exp.id,
-        updated_utc=exp.updated_utc,
+        changed_at_rev=exp.rev,
         rev=exp.rev,
         generation=exp.generation,
+        updated_utc=exp.updated_utc,
     )
 
 
@@ -277,15 +393,69 @@ def _run_entries(exp: Any) -> Iterator[ChangeEntry]:
     `key` moments later, so paying for a second sort on `(ordinal, created_utc, id)`
     would buy an order that is then discarded. The feed's order is deliberately NOT
     the record's presentation order — a feed ordered by ordinal could not be paged by
-    a timestamp cursor at all.
+    a cursor at all.
     """
     for run in exp.runs:
         yield ChangeEntry(
             kind="run",
             entity_id=run.id,
-            updated_utc=run.updated_utc,
+            changed_at_rev=run.changed_at_rev,
             rev=run.rev,
             generation=run.generation,
+            updated_utc=run.updated_utc,
+        )
+
+
+def _proposal_entries(exp: Any) -> Iterator[ChangeEntry]:
+    """One entry per readable proposal: its id, where it sits, and its lifecycle state.
+
+    WHAT IS AND IS NOT ON AN ENTRY, and the list is short on purpose. A feed entry is
+    the minimum an authorized consumer needs to decide "re-read this proposal from the
+    route that owns it": the id, the kind, the position in the order, when it last
+    moved, and the state it is in. NOTHING ELSE. No `proposed_value`, no
+    `target_field_path`, no `rule`, no note text, no excerpt, no evidence, no actor, no
+    digest. A change feed that carried scientific content would be a second read
+    surface for that content with none of the review the first one got, and the
+    authorization boundary is the ROUTE plus `record_scope_tag`, which is not weakened
+    here. The structural guarantee is that this module imports nothing from
+    `proposals.py`, so it holds no function that could render a value even by mistake.
+
+    `state` IS REPORTED, AND IT IS THE ONE THING THAT MAKES A PROPOSAL ENTRY USEFUL —
+    but read what it is. It is the proposal's CURRENT stored state, one of the five
+    `proposals.PROPOSAL_STATES`. It is NOT an event, and this feed does not report
+    lifecycle transitions: a proposal that was accepted between two polls is reported
+    as being `accepted` NOW, with no entry saying an acceptance happened, no actor and
+    no ordering against any other act. That is the module's coalescing property applied
+    to a lifecycle, and it is stated here plainly because "a proposal kind in a change
+    feed" is exactly the phrase a reader would take to mean an event stream. The
+    proposal's own history is an append-only audit trail on the entity; the route that
+    serves a proposal is where it is read.
+
+    NOTHING IS CLASSIFIED, DERIVED OR DEFAULTED. `state` is passed through verbatim, so
+    a state this build has never heard of reaches the client unchanged rather than
+    being mapped onto one this build does know — mapping would be this feed inventing a
+    judgement about a lifecycle it does not own.
+
+    UNREADABLE PROPOSALS ARE NOT SERVED, for `_hydrate_runs`' reason. An entry the
+    proposal model refused is kept verbatim in `Experiment.unreadable_proposals` so a
+    save cannot discard it, but this module cannot name it: it has no id this
+    application is willing to read, and an entity a client cannot address is one it
+    could not act on if it were told.
+
+    `updated_utc` IS THE LAST RECORDED ACT'S TIMESTAMP, falling back to when the
+    proposal was made. Both are stored on the entity; neither is computed. It is
+    display metadata exactly as it is for the other kinds, and exactly as
+    non-load-bearing.
+    """
+    positions = exp.proposal_change_revs
+    for proposal in exp.proposals:
+        history = proposal.history
+        yield ChangeEntry(
+            kind="proposal",
+            entity_id=proposal.proposal_id,
+            changed_at_rev=positions.get(proposal.proposal_id, 0),
+            updated_utc=(history[-1].at if history else proposal.proposed_utc),
+            state=proposal.state,
         )
 
 
@@ -294,6 +464,7 @@ def _run_entries(exp: Any) -> Iterator[ChangeEntry]:
 RECORD_COLLECTORS: tuple[KindCollector, ...] = (
     KindCollector(kind="experiment", read=_experiment_entries),
     KindCollector(kind="run", read=_run_entries),
+    KindCollector(kind="proposal", read=_proposal_entries),
 )
 
 
@@ -360,16 +531,18 @@ def record_scope_tag(experiment_id: str, session_id: str | None) -> str:
     return scope_digest("record", experiment_id, session_id)
 
 
-def encode_cursor(key: tuple[str, str, str], *, scope: str) -> str:
+def encode_cursor(key: tuple[int, str, str], *, scope: str) -> str:
     """A key plus its feed identity, as base64url of a compact versioned JSON object.
 
     OPAQUE BY CONTRACT, NOT BY CRYPTOGRAPHY, and saying which matters. Anyone can
     base64-decode this and read the tuple; it carries no secret and is not meant to.
     "Opaque" here is a rule for CLIENTS — do not construct one, do not parse one, do
     not reason about its contents — enforced by the fact that the server is free to
-    change the payload shape behind `CURSOR_VERSION` at any time. A client that has
-    hand-built a cursor is a client that breaks on the next version bump, which is why
-    the tests below construct one only to prove a bad one is refused.
+    change the payload shape behind `CURSOR_VERSION` at any time. That freedom has now
+    been EXERCISED rather than merely asserted: v1's `t` (a timestamp string) became
+    v2's `q` (an integer sequence position), and every v1 token in the wild is refused.
+    A client that had hand-built a cursor is a client that broke on that bump, which is
+    why the tests below construct one only to prove a bad one is refused.
 
     Base64URL WITHOUT PADDING so the token is safe in a query string with no escaping
     (`+`, `/` and `=` all need it; `-`, `_` do not).
@@ -377,7 +550,7 @@ def encode_cursor(key: tuple[str, str, str], *, scope: str) -> str:
     payload = {
         "v": CURSOR_VERSION,
         "s": scope,
-        "t": key[0],
+        "q": key[0],
         "k": key[1],
         "e": key[2],
     }
@@ -391,19 +564,28 @@ def encode_cursor(key: tuple[str, str, str], *, scope: str) -> str:
 _B64URL_TO_STANDARD = str.maketrans("-_", "+/")
 
 
-def decode_cursor(token: str, *, scope: str) -> tuple[str, str, str]:
+def decode_cursor(token: str, *, scope: str) -> tuple[int, str, str]:
     """The key a cursor names, or `MalformedCursor`.
 
     STRICT AT EVERY STEP, and every step is a real failure mode rather than defensive
     padding: a token that is not base64url; base64url that is not UTF-8; UTF-8 that is
     not JSON; JSON that is not an object; an object of a version this build does not
-    serve; a payload missing a component or carrying a non-string one; and a payload
-    whose scope digest belongs to a different feed. Each answers the SAME `422`, so a
-    client has one thing to handle, and each records its own `reason`.
+    serve — **which is every cursor issued before `CURSOR_VERSION` became 2** — a
+    payload missing a component or carrying one of the wrong type; and a payload whose
+    scope digest belongs to a different feed. Each answers the SAME `422`, so a client
+    has one thing to handle, and each records its own `reason`.
 
-    NOTHING IS COERCED. A `t` that arrived as the integer `7` is refused, not
-    `str()`-ed — coercing it would build a key that compares against real keys and
-    silently answers from a position the caller never asked for.
+    NOTHING IS COERCED. A `q` that arrived as the string `"7"` is refused, not
+    `int()`-ed, and a `k` that arrived as the integer `7` is refused, not `str()`-ed —
+    coercing either would build a key that compares against real keys and silently
+    answers from a position the caller never asked for. This is also where a v1 cursor
+    dies twice over: its version is wrong AND its leading component is a string under a
+    key this version does not read.
+
+    `bool` IS REFUSED AS THE SEQUENCE COMPONENT, explicitly, because
+    `isinstance(True, int)` is `True` in Python. A payload carrying `"q": true` would
+    otherwise decode to the position `1` — a real key, silently, from a value that was
+    never a number.
     """
     if not isinstance(token, str) or not token:
         raise MalformedCursor("not_decodable", "The cursor is empty.")
@@ -453,7 +635,12 @@ def decode_cursor(token: str, *, scope: str) -> tuple[str, str, str]:
         raise MalformedCursor(
             "not_decodable", "The cursor is not one this feed issued."
         )
-    parts = [payload.get("t"), payload.get("k"), payload.get("e")]
+    sequence = payload.get("q")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        raise MalformedCursor(
+            "not_decodable", "The cursor is not one this feed issued."
+        )
+    parts = [payload.get("k"), payload.get("e")]
     if not all(isinstance(p, str) for p in parts):
         raise MalformedCursor(
             "not_decodable", "The cursor is not one this feed issued."
@@ -464,7 +651,7 @@ def decode_cursor(token: str, *, scope: str) -> tuple[str, str, str]:
             "That cursor was issued by a different feed — a different record, or a "
             "different workspace scope. Ask for this feed with no cursor to resync.",
         )
-    return (parts[0], parts[1], parts[2])  # type: ignore[return-value]
+    return (sequence, parts[0], parts[1])  # type: ignore[return-value]
 
 
 # --- bounds -------------------------------------------------------------------
@@ -496,12 +683,13 @@ def collect(
     """Every entity's entry, in the feed's total order.
 
     O(entities) in cheap key extraction plus one sort, and that cost is unavoidable
-    rather than accepted: the runs live inside ONE experiment document that
-    `load_experiment` has already read whole, so there is no index to seek into and
-    no way to skip an entity without looking at it. What IS avoidable — and is
+    rather than accepted: the runs and proposals live inside ONE experiment document
+    that `load_experiment` has already read whole, so there is no index to seek into
+    and no way to skip an entity without looking at it. What IS avoidable — and is
     avoided — is doing anything expensive per entity. Compare `routes.list_experiments`,
     which is O(runs) per ANSWERED record because it composes drafts it does not thread;
-    this function touches five stored attributes per entity and composes nothing.
+    this function touches a handful of stored attributes per entity and composes
+    nothing.
     """
     entries: list[ChangeEntry] = []
     for collector in collectors:
@@ -526,22 +714,19 @@ def changes_page(
 
     STRICTLY AFTER, never at-or-after: `key > start` is what makes the page boundary
     non-overlapping, and it is why `next_cursor` is the key of the LAST RETURNED entry
-    rather than one past it. A cursor that names an entity which has since changed
-    resumes correctly WHENEVER that change moved the entity into a later second,
-    because its new key is then later than the old one and so is ahead of the cursor.
+    rather than one past it.
 
-    IT DOES **NOT** RESUME CORRECTLY WHEN THE CHANGE LANDED IN THE SAME SECOND, and
-    that is stated here rather than only in `GAP_GUARANTEE` because this is the
-    comparison it is a property of. `updated_utc` is whole seconds, so a write inside
-    the second a key already names moves `rev` without moving the key; `key > start`
-    is then false and the change is not reported until the entity moves again. The
-    strictness is still right — relaxing it to `>=` would re-emit every entity of the
-    boundary second on every poll while STILL missing an entity earlier in that
-    second, so it would buy duplicates without buying the gap back. Closing the gap
-    properly needs either a sub-second stamp (a storage change, in `workspace`) or a
-    lagging watermark that deliberately trades the no-duplicate property for it;
-    neither is this function's to choose, and `test_change_feed.py` measures the
-    exposure so it cannot be re-described as absent.
+    A CURSOR THAT NAMES AN ENTITY WHICH HAS SINCE CHANGED RESUMES CORRECTLY, FULL STOP,
+    and this paragraph used to carry a proviso that is now gone. It read "…WHENEVER
+    that change moved the entity into a later second", because the key led with a
+    whole-second `updated_utc` and a write inside the second a key already named moved
+    `rev` without moving the key. The leading component is now `changed_at_rev`, a
+    strictly-increasing per-record sequence position, so any change puts the entity
+    ahead of any earlier cursor on the first component alone — see `SEQUENCE_PROOF`.
+    The strictness of `>` is unchanged and was never the problem: relaxing it to `>=`
+    would have re-emitted every entity of the boundary position on every poll while
+    STILL missing an entity earlier in it, buying duplicates without buying the gap
+    back.
 
     MEASURED, at this commit, over HTTP against a record created through
     `POST /api/experiments` and given N runs in process (the `_with_runs` harness
@@ -549,25 +734,27 @@ def changes_page(
     and `Experiment.pending` are counted by monkeypatching them for the request::
 
         runs   GET /changes bytes   entries   resolved_run_draft   export_draft   pending
-          25                4,520        26                    0              0        0
-         250                8,457        50                    0              0        0
-        1000                8,457        50                    0              0        0
+          25                5,196        26                    0              0        0
+         250                9,757        50                    0              0        0
+        1000                9,757        50                    0              0        0
 
-    THE BYTE COLUMN WAS WRONG ONCE AND IS RECORDED RATHER THAN QUIETLY REPLACED. It
-    first read 4,676 / 8,757 / 8,757, measured honestly — and then the wire key was
-    renamed from `version_token` to `version` (six characters shorter, once per entry:
-    26 x 6 = 156, 50 x 6 = 300) and the table was not re-run. The numbers above are
-    from the benchmark below, after the rename. The lesson is the cheap one and worth
-    keeping: a measurement is invalidated by a change to the thing measured, including
-    a change that looks purely cosmetic.
+    THE BYTE COLUMN HAS BEEN WRONG ONCE AND STALE ONCE, AND BOTH ARE RECORDED RATHER
+    THAN QUIETLY REPLACED. It first read 4,676 / 8,757 / 8,757, measured honestly — and
+    then the wire key was renamed from `version_token` to `version` and the table was
+    not re-run, giving 4,520 / 8,457 / 8,457. Those figures were correct until this
+    change added a `changed_at_rev` key to every entry; the numbers above are from the
+    benchmark below, re-run afterwards. The lesson is the cheap one and worth keeping
+    twice: a measurement is invalidated by a change to the thing measured, including a
+    change that looks purely cosmetic.
 
     Two things that table is claiming. The response is FLAT past the window — 250 runs
     and 1,000 runs are BYTE-IDENTICAL in length, because every entry is the same width
-    (a 26-character id, a 16-hex generation, a one-second timestamp) and the window
-    stops at 50 either way. And the three expensive derivations are entered ZERO times
-    at every size, which is what makes the flatness durable rather than incidental: a
-    future edit reaching for `resolved_run_draft` here would give the feed the shape
-    `routes.list_experiments` already has, and the counter test fails if it does.
+    (a 26-character id, a 16-hex generation, a one-second timestamp, a sequence
+    position) and the window stops at 50 either way. And the three expensive
+    derivations are entered ZERO times at every size, which is what makes the flatness
+    durable rather than incidental: a future edit reaching for `resolved_run_draft`
+    here would give the feed the shape `routes.list_experiments` already has, and the
+    counter test fails if it does.
 
     WHAT THE TABLE DOES NOT CLAIM. No wall-clock figure appears in it or in any
     assertion. This repository has been bitten by timing assertions under CPU
