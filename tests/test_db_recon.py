@@ -1291,13 +1291,61 @@ def test_missing_psycopg2_gives_an_actionable_error_not_a_traceback(recon):
     except ImportError:
         pass
     else:  # pragma: no cover - only when the api extra is installed here
-        pytest.skip("psycopg2 is installed in this environment")
+        pytest.skip(
+            "psycopg2 is installed in this environment. This test can only "
+            "witness a GENUINELY absent driver; the same refusal is proved "
+            "unconditionally by "
+            "test_an_unimportable_psycopg2_is_refused_with_the_actionable_reason "
+            "below, so the path is not left untested by this skip."
+        )
 
     with pytest.raises(recon.MissingDependency) as exc:
         recon.connect_psycopg2(GOOD_ENV)
     reason = exc.value.reason
     assert "psycopg2 is not importable" in reason
     assert "pyproject.toml" in reason
+
+
+def test_an_unimportable_psycopg2_is_refused_with_the_actionable_reason(
+    recon, monkeypatch
+):
+    """THE SAME REFUSAL, PROVED WHERE THE DRIVER *IS* INSTALLED.
+
+    WHY THIS EXISTS. The test above is gated on psycopg2 being genuinely absent,
+    and it is absent in NEITHER environment this project runs in: a developer
+    checkout installs ``.[dev,api]`` and so does CI
+    (``.github/workflows/ci.yml`` runs ``pip install -e ".[dev,api]"``). Measured
+    on 2026-08-31, that gate skipped locally, and it skips in CI for the same
+    reason -- so the ``MissingDependency`` branch, which is the message an
+    operator reads when their interpreter lacks the extra, was executed by no
+    test anywhere. A skip that fires in every environment is not an
+    environment gate; it is an untested path wearing one.
+
+    HOW THE ABSENCE IS SIMULATED, AND WHY IT IS THE REAL BRANCH RATHER THAN A
+    MOCK OF IT. ``None`` in ``sys.modules`` is the one value the import system
+    treats as a poisoned entry: ``import psycopg2`` then raises ``ImportError``
+    from the machinery itself. So this drives the module's own
+    ``except ImportError`` -- the same line the same way -- rather than
+    substituting a double for ``connect_psycopg2``. ``monkeypatch.setitem``
+    restores the previous entry (or removes it) at teardown, so a later test in
+    this process still sees the real driver.
+
+    The environment-gated test above is deliberately KEPT rather than replaced:
+    it is the only one that witnesses a truly absent driver, which is a
+    different fact from a poisoned import, and it costs nothing while it skips.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "psycopg2", None)
+
+    with pytest.raises(recon.MissingDependency) as exc:
+        recon.connect_psycopg2(GOOD_ENV)
+
+    reason = exc.value.reason
+    assert "psycopg2 is not importable" in reason
+    assert "pyproject.toml" in reason
+    # The remedy has to be actionable, which means naming the extra to install.
+    assert ".[api]" in reason
     assert "api" in reason  # names the extra to install
     # the retired, now-false instruction must be gone
     assert "Do NOT add it to pyproject.toml" not in reason
