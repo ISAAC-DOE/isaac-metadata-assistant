@@ -55,9 +55,24 @@ export const contrastRatio = (a: string, b: string): number => {
  * The colour a foreground COMPOSITES to when an ancestor carries `opacity`.
  *
  * Not used to assert a pass anywhere — it exists so a test can state, with a
- * number, that darkening a token does NOT reach text under an ancestor
- * `opacity`. That is cause (b) of FINDING A11Y-01 in `e2e/a11y-baseline.ts`,
- * and it is the half of the debt a palette change cannot close.
+ * number, that darkening a token does not reach text under an ancestor
+ * `opacity` WITHOUT DESTROYING THE RAMP. That is cause (b) of FINDING A11Y-01
+ * in `e2e/a11y-baseline.ts`, and it is the half of the debt a palette change
+ * cannot close.
+ *
+ * THE QUALIFICATION IS NOT A HEDGE, AND IT IS A CORRECTION. This docstring, and
+ * three other sites, used to say flatly that "darkening a token cannot reach
+ * them". That is arithmetically FALSE and was published without being checked.
+ * Composited on white, a neutral grey still clears 4.5:1 at `opacity: .72` up
+ * to #414141, at .82 up to #585858 and at .85 up to #5e5e5e — all three
+ * re-derived BY SEARCH and asserted in `palette-contrast.test.ts`. So a dark
+ * enough tertiary DOES reach them. What it cannot do is remain a tertiary: all
+ * three of those values are darker than `--text-muted` #5b6570, the rung
+ * IMMEDIATELY above the tertiary, and the .72 one is darker than
+ * `--text-secondary` #46515f, two rungs above. The token would have to sit BELOW
+ * the tiers it exists to sit below, and the hierarchy would be gone. The opacity
+ * is what has to go — but for that reason, not for an impossibility that does
+ * not hold.
  *
  * THIS IS AN APPROXIMATION AND MUST BE LABELLED AS ONE WHEREVER IT IS QUOTED.
  * It composites in sRGB with a round-to-nearest per channel. A browser's actual

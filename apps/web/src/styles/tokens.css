@@ -55,16 +55,54 @@
  *   at 5.04:1 there. A second, lighter, still-compliant step would have to live
  *   inside a one-hex-step window — a hierarchy the eye cannot see. So the tier
  *   is retired rather than faked. --text-quaternary is kept as an ALIAS, not
- *   deleted: 71 declarations across 18 component and screen stylesheets still
- *   name it, and deleting the declaration would leave every one of them
+ *   deleted: 70 LIVE declarations across 16 component and screen stylesheets
+ *   still name it, and deleting the declaration would leave every one of them
  *   resolving to an invalid value at computed-value time. New code must use
  *   --text-tertiary; the alias exists so the fix is a two-file change.
  *
- *   ONE CONSEQUENCE, STATED RATHER THAN DISCOVERED LATER: any rule that used
- *   quaternary and tertiary to separate two states of the same control now
- *   paints them identically. Exactly one such pair existed
- *   (`.btn-danger-quiet:hover`/`:active`, plus `.btn-secondary` which had the
- *   same shape); both are re-stepped in base.css so the press feedback survives.
+ *   THAT FIGURE READ "71 declarations across 18 stylesheets" UNTIL IT WAS
+ *   MEASURED, and it is corrected in place rather than quietly replaced. 71 is
+ *   the count of textual occurrences, one of which is inside a COMMENT in
+ *   `components/chrome.css` and paints nothing; 16 is the file count, and 18
+ *   reproduces under no counting at all. The two commands that re-derive 16 and
+ *   70 are in the header of `palette-contrast.test.ts` rather than here,
+ *   because the second of them contains a comment-stripping regex that a CSS
+ *   comment cannot quote without ending itself.
+ *
+ *   TWO CONSEQUENCES, STATED RATHER THAN DISCOVERED LATER. Retiring a tier
+ *   collapses every distinction that tier was carrying, and there are two
+ *   different kinds of them. This block used to name only the first, which made
+ *   the cost read as one re-stepped button when it is not.
+ *
+ *   (1) STATE pairs — a rule that used quaternary and tertiary to separate two
+ *   states of the SAME control now paints them identically. Exactly one such
+ *   pair existed (`.btn-danger-quiet:hover`/`:active`, plus `.btn-secondary`
+ *   which had the same shape); both are re-stepped in base.css so the press
+ *   feedback survives, and `palette-contrast.test.ts` asserts none remain.
+ *
+ *   (2) SIBLING pairs — a quaternary element beside a tertiary sibling now
+ *   paints the same colour as it, so a rank the palette encoded is gone. These
+ *   are NOT re-stepped, because there is nothing compliant to re-step them to:
+ *   the paragraph above measures the budget below --text-muted as one hex step
+ *   wide. MEASURED HERE, under a definition stated so the figure is checkable —
+ *   two `color` rules in the same stylesheet, one on each token, whose last
+ *   class names share a block prefix (the class truncated at its final `-`
+ *   segment): 58 such pairs across 13 stylesheets, of which 8 also declare the
+ *   same font-size, font-weight and font-family. The command is in
+ *   `palette-contrast.test.ts`'s header. An independent review measured the same
+ *   phenomenon under a different sibling definition and reported 42 collisions
+ *   across 16 files, 17 of them identical in size, weight and family; that
+ *   figure is quoted with attribution and is NOT re-derived here, because the
+ *   two definitions are not the same measurement.
+ *
+ *   The exemplar both counts agree on is `.concept-lookup-subsection-heading`
+ *   (screens.css, 10.5px/600) — a subsection heading that ranked below its
+ *   siblings by being lighter, and now does not. THE TRADE IS DELIBERATE AND
+ *   THE REVIEW AGREED WITH IT: the lost distinction was between two greys that
+ *   BOTH failed 1.4.3 at 10-10.5px — 3.86:1 and 2.53:1 — so what is gone is a
+ *   rank that could only be read by someone who could already read both, and
+ *   what replaces it is text that everyone can read. Rank at these sizes has to
+ *   come from weight, case or spacing, not from a lighter grey.
  *
  *   HUE IS PRESERVED. #626c77 is hue 211.43 deg — the hue --text-muted and the
  *   retired --text-quaternary already carried, and 0.13 deg from the discarded
@@ -73,13 +111,35 @@
  *
  *   WHAT THIS DOES **NOT** FIX, because it cannot. A11Y-01 has three causes
  *   (`e2e/a11y-baseline.ts`); this change addresses cause (a) for these two
- *   tokens only. Cause (b) — text composited under an ancestor `opacity`
- *   (`queue.css .exp-row.done`, `assistant.css .upcoming-row`,
- *   `signals.css .advisory-nongating`) — still fails AFTER this change: at
- *   opacity .82 #626c77 composites to roughly #7e868f (3.69:1) and at .72 to
- *   roughly #8e959d (3.03:1). Those are formula-computed, not browser-measured.
- *   The opacity has to go; darkening a token cannot reach them. Cause (c),
- *   --verified-text and --src-derivation, is untouched here.
+ *   tokens only. Cause (b) — text composited under an ancestor `opacity` — still
+ *   fails AFTER this change, at all THREE of its sites:
+ *
+ *     queue.css       .exp-row.done       .82  --text-tertiary #626c77
+ *                                              -> #7e868f, 3.69:1 on --surface
+ *     assistant.css   .upcoming-row       .72  --text-tertiary #626c77
+ *                                              -> #8e959d, 3.03:1 on --surface
+ *     signals.css     .advisory-nongating .85  --advisory-text #8a6420
+ *                                              -> #9b793d, 3.59:1 on --advisory-bg
+ *
+ *   The third row is NEW HERE. It is not a #626c77 site at all — `.advisory-
+ *   nongating` sets its own `color: var(--advisory-text)` and sits inside
+ *   `.advisory`, whose fill is --advisory-bg — and its number had been published
+ *   nowhere while the site was listed as one of the three. All three composites
+ *   are formula-computed over the backdrop each element actually sits on, and
+ *   are NOT browser-measured; `src/test/contrast.ts` says why they must not be
+ *   transcribed into `e2e/a11y-baseline.ts`.
+ *
+ *   THE OPACITY HAS TO GO — but not because "darkening a token cannot reach
+ *   them", which is what this paragraph used to say and is arithmetically
+ *   FALSE. On white a neutral grey still clears 4.5:1 composited at .72 up to
+ *   #414141, at .82 up to #585858 and at .85 up to #5e5e5e. Darkening CAN reach
+ *   them; what it cannot do is reach them AND stay a tertiary. All three of
+ *   those values are darker than --text-muted #5b6570, the rung immediately
+ *   above this one, and the .72 one is darker than --text-secondary #46515f,
+ *   two rungs above — so the compliant value would have to sit below the tiers
+ *   it exists to sit below. `palette-contrast.test.ts` re-derives all three
+ *   thresholds by search and asserts both orderings.
+ *   Cause (c), --verified-text and --src-derivation, is untouched here.
  */
 :root {
   /* neutrals — cool */
@@ -96,7 +156,9 @@
   --border-input:    #e0e6ec;
 
   /*
-   * TEXT — two groups, and the split is the contract.
+   * TEXT — two groups, and the split is the contract THIS FILE MAKES. What
+   * enforces it is stated at the end, precisely, because an earlier revision of
+   * this block over-read its own guard.
    *
    * INFORMATIONAL INK. Every token in the first group clears WCAG AA 4.5:1 on
    * every ground this application paints text on, down to the darkest one
@@ -109,10 +171,35 @@
    * NON-INFORMATIONAL INK. The second group is exempt from 1.4.3 because of
    * what it is used FOR, not because the debt was blessed: an inactive control,
    * or an `aria-hidden` mark whose meaning is carried by adjacent text. None of
-   * them may ever be given information to say. `palette-contrast.test.ts`
-   * enforces both halves — the ratios AND the usage restriction, the latter as
-   * an enumerated allow-list of exempt SITES — so the distinction cannot decay
-   * back into "a lighter grey".
+   * them may ever be given information to say.
+   *
+   * WHAT IS ACTUALLY ENFORCED, stated as a boundary rather than as a promise.
+   * `palette-contrast.test.ts` enforces three things: (1) every token that
+   * RESOLVES TO A HEX and is painted by any `color` declaration in any
+   * stylesheet must be registered in exactly one usage class — informational
+   * ink, non-informational ink, a tinted status pair, or the semantic-colour
+   * registry — checked by set equality in both directions; (2) each class's
+   * ratio bar on the grounds that class names; and (3) for the
+   * non-informational group, an enumerated allow-list of exempt SITES with each
+   * exemption BASIS checked mechanically.
+   *
+   * THE FIRST OF THOSE USED TO BE NARROWER, AND THE NARROWNESS IS WHY THIS
+   * PARAGRAPH IS REWRITTEN. It scanned the `--text-*` NAMESPACE only. An
+   * independent review added `--ink-whisper: #b5bcc4` (1.92:1 on white —
+   * re-measured here; the review reported 2.51:1, which does not reproduce, and
+   * 2.53:1 is the retired --text-quaternary #9aa4af, so the two were probably
+   * transposed. The escape does not depend on which figure is right)
+   * alongside these tokens, painted it as 11px text, and the whole suite stayed
+   * green — the guard was literally accurate about `--text-*` tokens while the
+   * prose around it ("the distinction cannot decay back into a lighter grey")
+   * claimed a coverage the namespace could not give. It now keys on VALUE and
+   * USE rather than on a name, so a new lighter grey is caught whatever it is
+   * called. Three limits remain, and are limits rather than gaps: a colour
+   * written as a literal in a component stylesheet instead of as a token is not
+   * a token and is not seen; a token whose value is not a 6-digit hex cannot be
+   * assessed; and a custom property declared NOWHERE cannot be resolved at all
+   * — that last class is reported by its own test, with a named, dated
+   * exemption for the one file that has them.
    */
 
   /* text — informational ink (>= 4.5:1 on every ground; may carry meaning) */
@@ -126,9 +213,13 @@
 
   /*
    * DEPRECATED ALIAS, not a tier. Was #9aa4af — 2.15:1 on the darkest ground,
-   * below even the 3:1 that 1.4.11 asks of a non-text control. It carried 71
-   * live declarations, 58 of them ordinary text or input placeholders, so it
-   * was never entitled to that value. It resolves to --text-tertiary rather
+   * below even the 3:1 that 1.4.11 asks of a non-text control. It carries 70
+   * live declarations, and 69 of them are `color` — 61 ordinary text plus 8
+   * input placeholders — the 70th being a 1.5px border. So it was never
+   * entitled to that value. (This read "71 live declarations, 58 of them
+   * ordinary text or input placeholders"; both figures were unmeasured and
+   * both are corrected. 58 reproduces under no counting; the sub-count that
+   * does is 69.) It resolves to --text-tertiary rather
    * than repeating the hex so the two can never drift apart. DO NOT USE IN NEW
    * CODE; the header comment explains why no lighter compliant step exists.
    */
