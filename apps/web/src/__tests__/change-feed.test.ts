@@ -23,7 +23,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { api } from '../lib/api';
-import type { ApiChangeFeedPage } from '../lib/types';
+import type { ApiChangeEntry, ApiChangeFeedPage } from '../lib/types';
 import {
   useChangeFeed,
   CHANGE_FEED_CADENCE_CLAIM,
@@ -49,13 +49,31 @@ function page(over: Partial<ApiChangeFeedPage> = {}): ApiChangeFeedPage {
   };
 }
 
-const ENTRY = {
+const ENTRY: ApiChangeEntry = {
   kind: 'run',
   entity_id: '01RUN0000000000000000000AA',
+  // THE ORDERING COORDINATE. A run entry carries it alongside its own version
+  // series; `updated_utc` below is display metadata and orders nothing.
+  changed_at_rev: 4,
   version: 'abcdef0123456789.4',
   rev: 4,
   generation: 'abcdef0123456789',
   updated_utc: '2026-08-30T12:00:00Z',
+};
+
+/**
+ * A `proposal` entry, whose SHAPE IS THE POINT: it carries the ordering coordinate,
+ * a lifecycle `state` and nothing else — no `version`, no `rev`, no `generation`,
+ * because `proposals.py` gives a proposal no version series and the server omits a
+ * coordinate rather than synthesising one. Pinned on the wire by
+ * `test_a_proposal_entry_carries_NO_CONTENT_over_the_wire`.
+ */
+const PROPOSAL_ENTRY: ApiChangeEntry = {
+  kind: 'proposal',
+  entity_id: '01SYNTHETICPROPOSALPROPOS',
+  changed_at_rev: 7,
+  updated_utc: '2026-08-30T12:00:00Z',
+  state: 'open',
 };
 
 /**
@@ -525,5 +543,39 @@ describe('useChangeFeed', () => {
     // A backlog is not a reason to keep polling a tab nobody is looking at: the drain
     // is scheduled through the same `schedule` that the visibility gate guards.
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands a PROPOSAL entry through untouched, coordinates it does not carry and all', async () => {
+    /*
+     * THE THIRD KIND. A proposal carries `changed_at_rev`, `updated_utc` and `state`
+     * and NOTHING ELSE — no `version`, `rev` or `generation`, because `proposals.py`
+     * gives it no version series and the server omits a coordinate rather than
+     * synthesising one that would compare, sort and look real. The exact key set is
+     * pinned on the wire by
+     * `test_a_proposal_entry_carries_NO_CONTENT_over_the_wire`.
+     *
+     * This hook is a transport: it must not read, require, default or repair any of
+     * those. Before `ApiChangeEntry` was corrected, all four were declared REQUIRED,
+     * so this shape did not typecheck — which is a defect that would have surfaced at
+     * the first surface to actually mount the feed, and no surface did.
+     */
+    const onChanges = vi.fn();
+    vi.spyOn(api, 'getChanges').mockResolvedValue(
+      page({ changes: [PROPOSAL_ENTRY, ENTRY], returned: 2 }),
+    );
+    renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+
+    expect(onChanges).toHaveBeenCalledTimes(1);
+    // Passed through by reference and by value: nothing added, nothing dropped.
+    expect(onChanges.mock.calls[0][0]).toEqual([PROPOSAL_ENTRY, ENTRY]);
+    const [proposal] = onChanges.mock.calls[0][0];
+    expect(proposal).not.toHaveProperty('version');
+    expect(proposal).not.toHaveProperty('rev');
+    expect(proposal).not.toHaveProperty('generation');
+    expect(proposal.state).toBe('open');
   });
 });

@@ -20,6 +20,8 @@ import { disposeExperiment, flushExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
+import { RecordActivityNote } from '../components/RecordActivityNote';
+import { needsCanonicalRefetch, type RecordChangeSummary } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleAlert, ExternalLink } from '../components/icons';
@@ -202,9 +204,28 @@ export function RecordWorkbench() {
   // and silently refetches this read-only bundle (never blanks to loading). The
   // fetched bundle stays authoritative; the poller only tells us WHEN to refresh.
   const detail = bundle.status === 'data' ? bundle.data.detail : undefined;
+  /*
+   * SELECTIVE REFRESH. The rule — and the reason a proposal-only page refetches
+   * nothing, and the honest note that in this build a proposal act usually moves the
+   * record's entry too — lives ONCE, in `recordChanges.needsCanonicalRefetch`. It is
+   * deliberately not restated here: it was written out three times, drifted from
+   * nothing, and was pinned only against a fourth copy inside a test.
+   *
+   * What is local to this screen is the ACTION: `bundle.reloadSilent()`, a background refetch of this
+   * screen's own bundle that never blanks it and is not a page reload.
+   */
   const session = useRecordSession(id, {
     detail,
     onChange: () => bundle.reloadSilent(),
+    onEntitiesChanged: (summary) => {
+      // ONE shared gate — `recordChanges.needsCanonicalRefetch`, not a copy of its
+      // expression. This exact predicate stood inline here, in the other two
+      // read-only screens, and a fourth time in the mount test that was the only
+      // thing exercising it; see that function for what drifting cost.
+      if (needsCanonicalRefetch(summary)) {
+        bundle.reloadSilent();
+      }
+    },
   });
   const degraded = session.syncDegraded;
 
@@ -251,7 +272,12 @@ export function RecordWorkbench() {
     <LoadedWorkbench
       id={id}
       bundle={bundle.data}
-      degraded={degraded}
+      /* ONE indicator for two pollers. Both say the same thing to a reader —
+         background updating is not currently working — and `LiveSyncNote` already
+         carries that one sentence, so a second notice would be two notices for one
+         fact. Which poller degraded is a developer's question, not a scientist's. */
+      degraded={degraded || session.feedDegraded}
+      activity={session.activity}
       agentContext={session.context}
       agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
@@ -282,6 +308,7 @@ function LoadedWorkbench({
   id,
   bundle,
   degraded,
+  activity,
   agentContext,
   agentDegraded,
   onManualRefresh,
@@ -291,6 +318,8 @@ function LoadedWorkbench({
   id: string;
   bundle: RecordBundle;
   degraded: boolean;
+  /** The outstanding change-feed summary, or null. Ids and kinds; no content. */
+  activity: RecordChangeSummary | null;
   agentContext: AgentContext | undefined;
   agentDegraded: boolean;
   onManualRefresh: () => void;
@@ -471,6 +500,7 @@ function LoadedWorkbench({
       mainPad="pad"
     >
       <h1 className="sr-only">{LABELS.screenReview}</h1>
+      <RecordActivityNote activity={activity} onRefresh={onManualRefresh} />
       <LiveSyncNote
         degraded={degraded}
         refreshFailed={refreshFailed}

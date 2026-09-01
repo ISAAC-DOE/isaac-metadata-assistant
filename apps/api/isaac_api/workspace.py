@@ -1122,10 +1122,23 @@ def _as_int(raw: object) -> int:
 
     ``int(state.get("rev") or 0)`` still raises on ``"seven"`` or ``[]``, which on
     the read path is the same HTTP 500 the hard subscripts were.
+
+    ``OverflowError`` IS CAUGHT, AND "NEVER RAISES" WAS FALSE UNTIL IT WAS.
+    ``int(float("inf"))`` raises ``OverflowError``, which is neither a ``TypeError``
+    nor a ``ValueError``, and ``json.loads`` accepts the bare token ``Infinity`` by
+    default — so a persisted ``"rev": Infinity`` was a measured HTTP 500 on the three
+    read paths that hydrate through here, under a docstring promising it could not
+    be. Widening the clause is the whole fix, and it lands in the bucket every other
+    unreadable value already lands in: ``0``, i.e. the same tolerance
+    :func:`_as_str` applies for :func:`_as_str`'s reason. Refusing the read instead
+    is not an option — ``CLAUDE.md`` §11 is explicit that a malformed PERSISTED value
+    must be READ, because the reader did nothing wrong and their record must not
+    vanish. ``NaN`` needs no separate clause: ``int(float("nan"))`` raises
+    ``ValueError``, which was already caught.
     """
     try:
         return int(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 

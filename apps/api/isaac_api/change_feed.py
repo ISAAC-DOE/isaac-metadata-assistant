@@ -168,7 +168,35 @@ SEQUENCE_PROOF = (
     "property the timestamp key lacked: a whole-second stamp could advance into the "
     "second a cursor already sat in, leaving the tie-break to decide, and the "
     "tie-break could put the changed entity behind the cursor. It cannot happen to an "
-    "integer that must increase."
+    "integer that must increase. "
+    "WHERE THAT PROOF HOLDS, AND IT IS PUBLISHED BECAUSE ALL THREE STEPS READ ONE "
+    "FILESYSTEM RATHER THAN THE DURABLE ROW. Every number the three steps compare is "
+    "read from this deployment's own workspace file: STEP ONE's clamp reads the "
+    "on-disk positions, and STEP THREE's R_new is computed from the on-disk rev. So "
+    "what is proven is a property of ONE PROCESS READING ONE WORKSPACE FILESYSTEM, "
+    "which is the deployment as documented — the workspace is per-pod ephemeral "
+    "storage. It is NOT a proof about two processes sharing one database, and this "
+    "text is where that scope belongs: the wording this replaced carried a caveat "
+    "saying the residue is small BECAUSE the application runs as one process reading "
+    "one clock, and that it was the reason it is small rather than a proof that it is "
+    "zero. That caveat was deleted when the key stopped being a clock, and its "
+    "scoping half is restored here rather than left out. Two things are deliberately "
+    "not claimed in the other direction. This repository does not record how many "
+    "replicas the hosted deployment runs and nothing here claims it runs more than "
+    "one — but a rollout overlaps an old process with a new one whether or not it "
+    "does, so the scope is worth stating either way. And the shared layer is not "
+    "unguarded: the durable write is a COMPARE-AND-SWAP that admits a write only "
+    "when its rev is strictly ahead of the rev the stored row already holds, or the "
+    "offered document is byte-identical, so a writer whose file is behind the row "
+    "cannot commit a duplicate or a regressed position at all. It is refused as a "
+    "stale write, and the winner's document is written into that process's workspace "
+    "file before the refusal is raised, so that process's next write is strictly "
+    "ahead. WHAT NEITHER OF THOSE CLOSES, named rather than implied: a process whose "
+    "workspace file is behind the stored row keeps serving that record from that file "
+    "until one of its writes is refused, because hydration deliberately does not "
+    "refresh a record whose file is already present. That is staleness of the READ "
+    "COPY — every read of that record is equally behind, this feed included — and not "
+    "a property of the order, so no cursor discipline can fix it and none is offered."
 )
 
 #: THE GAP GUARANTEE, stated honestly. Quoted verbatim by the route description and
@@ -393,10 +421,54 @@ def _position(raw: Any) -> int:
     such an entity at `-1` would place it AT the start key, where `key > start` is
     false and a cursorless resync would silently omit it.
 
-    NON-INTEGER BECOMES `0` TOO, and `bool` is refused explicitly because
-    `isinstance(True, int)` is `True` in Python — a `changed_at_rev` of `True` would
-    otherwise read as the position `1`, a real position nothing ever wrote. Nothing is
-    coerced: `int("7")` would invent a position out of a value that was never one.
+    NON-INTEGER BECOMES `0` TOO, and `bool` is excluded from `int` explicitly because
+    `isinstance(True, int)` is `True` in Python.
+
+    THAT TYPE GUARD IS DEFENCE IN DEPTH AND IS UNREACHABLE FROM ANY PERSISTED
+    DOCUMENT AT ALL THREE CALL SITES, which is the opposite of what this paragraph
+    used to say. It read: "a `changed_at_rev` of `True` would otherwise read as the
+    position `1`, a real position nothing ever wrote. Nothing is coerced: `int("7")`
+    would invent a position out of a value that was never one." **BOTH NAMED EXAMPLES
+    ARE EXACTLY WHAT HAPPENS, measured over HTTP on a persisted document: a
+    `changed_at_rev` of `"7"` is served as the position 7, `true` as 1, `3.9` as 3 —
+    and the same for the experiment's `rev`.** The cause is one function earlier.
+    Hydration reaches these coordinates first and `workspace._as_int` COERCES
+    (`int("7") == 7`, `int(True) == 1`, `int(3.9) == 3`), so a value arriving here is
+    already an `int` and the `isinstance` branch cannot fire from stored state. It is
+    kept because it CAN fire from a directly-constructed `ChangeEntry` and from a
+    future collector reading something `workspace` does not hydrate — and it is now
+    tested rather than assumed
+    (`test_change_feed_sequence.py::test_position_refuses_a_non_integer_and_a_bool`).
+
+    THE REFUSAL IS REAL WHERE IT IS CLAIMED, ONE MODULE OVER, and that is where a
+    reader should look for it: `decode_cursor` refuses a non-`int` or `bool` `q` on
+    the CURSOR, and `workspace._hydrate_change_revs` refuses a non-`int`, `bool` or
+    negative value in the proposal position map. The asymmetry between those two and
+    this one is `CLAUDE.md` §11's rule: a malformed value in a REQUEST may be refused,
+    because the caller sent it and a typed refusal names what to fix; a malformed
+    value already PERSISTED must be READ, because the reader did nothing wrong and
+    their record must not vanish. The coercion is a weaker form of that same
+    tolerance, and it is deliberately left in place rather than tightened at the
+    hydration boundary: `rev` is not only this feed's coordinate, it is the record's
+    served `version` token and the basis of every `If-Match`, so dropping a coerced
+    `"7"` to `0` would move a record's version BACKWARDS and could let a stale token
+    match. That trades a wrong docstring for a concurrency hazard.
+
+    SO THE ONE THING THIS FUNCTION ACTUALLY CONTRIBUTES IS THE LOWER FLOOR, and that
+    IS live: `Experiment.rev` is hydrated by `_as_int`, which admits a persisted
+    `-5`, and nothing else clamps it. (`Run.changed_at_rev` is clamped again by
+    `Run.__post_init__`, and the proposal map by `_hydrate_change_revs`, so at those
+    two sites this is belt-and-braces; at the experiment's it is the only guard.)
+
+    THERE IS NO UPPER CLAMP, and "the one clamp" above is about the lower bound alone.
+    A persisted `changed_at_rev` of `10 ** 30` is served verbatim as a position, and
+    the consequence is the mirror of the one the floor closes: no cursor a client can
+    hold will ever advance past it, so that entity is reported on EVERY poll for as
+    long as it holds that value. It is disclosed rather than clamped because the
+    failure direction is the recoverable one — over-reporting, never a silent
+    omission, and a cursorless resync still returns the whole record at its current
+    positions — whereas an upper clamp would have to invent a ceiling, and a ceiling
+    set wrong WOULD silently omit.
     """
     if isinstance(raw, bool) or not isinstance(raw, int):
         return 0
@@ -638,6 +710,21 @@ def decode_cursor(token: str, *, scope: str) -> tuple[int, str, str]:
     `isinstance(True, int)` is `True` in Python. A payload carrying `"q": true` would
     otherwise decode to the position `1` — a real key, silently, from a value that was
     never a number.
+
+    A NEGATIVE `q` IS ADMITTED, AND THAT IS DELIBERATE RATHER THAN AN OVERSIGHT — it
+    is written down because "STRICT AT EVERY STEP" above, and the wire-published
+    `EXPIRY_PROPERTY`'s "refused for exactly two reasons", both invite a reader to
+    assume otherwise. `{"q": -99}` decodes and answers `200` with the whole feed.
+    Two reasons it stays. `-1` is a position this feed genuinely ISSUES —
+    `changes_page` encodes `ZERO_KEY` as the `next_cursor` of an empty first page —
+    so "negative" cannot be the test, and a bound of exactly `>= -1` would refuse
+    only values that are already harmless. And harmless is the whole point: every
+    real key's first component is `>= 0` by `_position`, so a `q` below that can only
+    place the caller EARLIER in the order than they asked for. The outcome is a
+    resync — every entity reported at its current position — which is precisely the
+    remedy `GAP_GUARANTEE` offers for everything, reached by a different route. It
+    can over-report and it cannot skip, so refusing it would buy a client one more
+    error to handle and buy correctness nothing.
     """
     if not isinstance(token, str) or not token:
         raise MalformedCursor("not_decodable", "The cursor is empty.")

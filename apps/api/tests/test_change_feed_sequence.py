@@ -375,6 +375,168 @@ def test_a_negative_persisted_RECORD_rev_still_appears_in_its_own_feed(client):
     assert next(c for c in after["changes"] if c["kind"] == "experiment")["rev"] == 1
 
 
+@pytest.mark.parametrize(
+    "raw,expected,why",
+    [
+        pytest.param(7, 7, "the ordinary case", id="int"),
+        pytest.param(0, 0, "0 is a real position, not a missing value", id="zero"),
+        pytest.param(-5, 0, "THE LIVE BRANCH: the lower floor", id="negative"),
+        pytest.param("7", 0, "a string is not a position", id="string"),
+        pytest.param(3.9, 0, "a float is not a position", id="float"),
+        pytest.param(True, 0, "isinstance(True, int) is True in Python", id="bool"),
+        pytest.param(False, 0, "…and so is False", id="bool-false"),
+        pytest.param(None, 0, "null is not a position", id="null"),
+        pytest.param([3], 0, "a list is not a position", id="list"),
+    ],
+)
+def test_position_refuses_a_non_integer_and_a_bool(raw, expected, why):
+    """``change_feed._position`` DIRECTLY, because nothing tested it at all.
+
+    ``grep _position apps/api/tests/`` matched only docstring mentions before this,
+    which is how the function's own docstring came to name two examples that were the
+    opposite of what happens — nothing was exercising the branch the claim was about.
+
+    WHAT THIS PROVES AND WHAT IT DELIBERATELY DOES NOT. It proves the function
+    behaves as documented for every input class, including the ``bool`` exclusion that
+    ``isinstance(True, int)`` makes necessary. It does NOT prove that a persisted
+    document can reach those branches — it cannot, and the test immediately below
+    measures why. The guard is reachable from a directly-constructed ``ChangeEntry``
+    and from a future collector reading something ``workspace`` does not hydrate,
+    which is the only claim made for it.
+    """
+    assert cf._position(raw) == expected, why
+
+
+@pytest.mark.parametrize(
+    "persisted,served,why",
+    [
+        pytest.param("7", 7, '`int("7") == 7`', id="string"),
+        pytest.param(True, 1, "`int(True) == 1`", id="bool"),
+        pytest.param(3.9, 3, "`int(3.9) == 3`, truncating", id="float"),
+    ],
+)
+def test_a_wrong_typed_persisted_POSITION_is_COERCED_by_hydration_not_refused(
+    client, persisted, served, why
+):
+    """THE MEASUREMENT ``_position``'s DOCSTRING GOT BACKWARDS, recorded so it stays.
+
+    ``_position`` used to claim that a ``changed_at_rev`` of ``True`` "would
+    otherwise read as the position 1" and that "nothing is coerced". Both named
+    examples are exactly what a persisted document produces, because hydration runs
+    FIRST: ``Run.from_state`` and ``Experiment.from_state`` read these two coordinates
+    through ``workspace._as_int``, which coerces, so the value ``_position`` receives
+    is already an ``int`` and its type branch never fires.
+
+    THIS TEST RECORDS THE BEHAVIOUR; IT DOES NOT ENDORSE IT. Two candidate fixes were
+    weighed and the docstring was corrected rather than the hydration tightened.
+    ``CLAUDE.md`` §11 is emphatic that a malformed PERSISTED value must be READ, and
+    the coercion IS a form of reading it — nothing 500s, nothing vanishes. Tightening
+    it at the hydration boundary is not free either: ``rev`` is also the record's
+    served ``version`` token and the basis of every ``If-Match``, so dropping a
+    coerced ``"7"`` to ``0`` would move a record's version BACKWARDS and could let a
+    stale token match. That trades a wrong docstring for a concurrency hazard.
+
+    BOTH COORDINATES ARE MEASURED, because the docstring named both. The run's
+    position and the record's own ``rev`` go through the same coercion.
+    """
+    exp_id = _record(client, runs=1, title="coerced position")
+    exp = ws.load_experiment(exp_id)
+    raw = json.loads(exp.state_path.read_text(encoding="utf-8"))
+    run_id = raw["runs"][0]["id"]
+    raw["runs"][0]["changed_at_rev"] = persisted
+    raw["rev"] = persisted
+    exp.state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    page = client.get(f"/api/experiments/{exp_id}/changes").json()
+    run_entry = next(c for c in page["changes"] if c["entity_id"] == run_id)
+    record_entry = next(c for c in page["changes"] if c["kind"] == "experiment")
+    assert run_entry["changed_at_rev"] == served, why
+    assert record_entry["changed_at_rev"] == served, why
+
+
+def test_an_ABSURD_persisted_position_over_reports_rather_than_omitting(client):
+    """THE UPPER BOUND IS NOT CLAMPED, and the consequence is bounded the safe way.
+
+    The mirror of ``test_a_negative_persisted_RECORD_rev_still_appears_in_its_own_feed``,
+    and the reason ``_position`` calls itself "the one clamp" about the LOWER bound
+    only. A persisted ``10 ** 30`` is served verbatim as a position: no cursor a
+    client can hold will ever advance past it, so that entity is reported on every
+    poll for as long as it holds that value.
+
+    IT IS DISCLOSED RATHER THAN CLAMPED BECAUSE THE FAILURE DIRECTION IS THE
+    RECOVERABLE ONE. Over-reporting an entity is what a state feed already does when
+    something changes twice; silently omitting one is the defect this whole slice
+    exists to close. An upper clamp would have to invent a ceiling, and a ceiling set
+    wrong WOULD omit. Both halves are asserted: the entity keeps being reported, and
+    the cursorless resync still returns the whole record.
+    """
+    exp_id = _record(client, runs=2, title="absurd position")
+    exp = ws.load_experiment(exp_id)
+    raw = json.loads(exp.state_path.read_text(encoding="utf-8"))
+    loud_run = raw["runs"][0]["id"]
+    quiet_run = raw["runs"][1]["id"]
+    raw["runs"][0]["changed_at_rev"] = 10**30
+    exp.state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    first = client.get(f"/api/experiments/{exp_id}/changes").json()
+    assert first["changes"][-1]["entity_id"] == loud_run  # last in the order
+    assert first["changes"][-1]["changed_at_rev"] == 10**30
+
+    # A cursor at the end of that page is now ABOVE every ordinary position, so the
+    # loud entity is re-reported and the quiet ones are not. That is the cost.
+    held = client.get(
+        f"/api/experiments/{exp_id}/changes", params={"cursor": first["next_cursor"]}
+    ).json()
+    assert held["changes"] == []
+    # …and it is capped: the resync remedy the contract publishes still works, and
+    # still names both runs at their current positions.
+    resync = client.get(f"/api/experiments/{exp_id}/changes").json()
+    assert {loud_run, quiet_run} <= {c["entity_id"] for c in resync["changes"]}
+
+
+def test_a_persisted_Infinity_rev_is_READ_as_0_rather_than_500(client):
+    """``_as_int`` PROMISED "never raises" AND RAISED, on a value JSON really carries.
+
+    ``int(float("inf"))`` raises ``OverflowError``, which is neither ``TypeError`` nor
+    ``ValueError``, so it escaped ``_as_int``'s except clause — and ``json.loads``
+    accepts the bare token ``Infinity`` by default, so this is a document a foreign
+    writer can produce rather than a construction only a test can reach. The measured
+    result was an HTTP 500 on three read paths, under a docstring saying it could not
+    happen.
+
+    PRE-EXISTING, NOT INTRODUCED HERE — ``_as_int`` is byte-identical on ``bebf4e2``
+    for this clause — but this slice adds a call site and prose asserting the promise,
+    so the promise is made true rather than the prose weakened. ``0`` is the bucket
+    every other unreadable value already lands in, which is ``CLAUDE.md`` §11's rule:
+    the reader did nothing wrong and their record must not vanish.
+
+    THE WHOLE-WORKSPACE LIST IS ASSERTED TOO, because that is the path a malformed
+    document has taken down before: one bad record used to 500 My Experiments for
+    every record.
+    """
+    exp_id = _record(client, runs=1, title="infinite rev")
+    exp = ws.load_experiment(exp_id)
+    text = exp.state_path.read_text(encoding="utf-8")
+    raw = json.loads(text)
+    raw["rev"] = 1
+    # Written as the literal token, because that is what a foreign writer would emit
+    # and what `json.dumps(float("inf"))` itself produces.
+    exp.state_path.write_text(
+        json.dumps(raw).replace('"rev": 1', '"rev": Infinity'), encoding="utf-8"
+    )
+    assert "Infinity" in exp.state_path.read_text(encoding="utf-8")
+
+    assert ws._as_int(float("inf")) == 0
+    assert ws._as_int(float("-inf")) == 0
+    assert ws.load_experiment(exp_id).rev == 0
+
+    page = client.get(f"/api/experiments/{exp_id}/changes")
+    assert page.status_code == 200, page.text
+    assert next(c for c in page.json()["changes"] if c["kind"] == "experiment")["rev"] == 0
+    assert client.get(f"/api/experiments/{exp_id}").status_code == 200
+    assert client.get("/api/experiments").status_code == 200
+
+
 # =============================================================================
 # 2. THE COORDINATE STAYS OUT OF THE AUTHORITATIVE SIGNATURE
 # =============================================================================

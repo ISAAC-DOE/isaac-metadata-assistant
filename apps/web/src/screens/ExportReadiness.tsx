@@ -14,6 +14,8 @@ import { ArtifactCard } from '../components/ArtifactCard';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
+import { RecordActivityNote } from '../components/RecordActivityNote';
+import { needsCanonicalRefetch } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
@@ -205,9 +207,31 @@ function LoadedExport({
   // the hard backstop. The poller tracks the held If-Match token (`currentVersion`,
   // which advances on export before the refetch remounts), so we hand the owner a
   // detail carrying it.
+  /*
+   * SELECTIVE REFRESH. The rule — and the reason a proposal-only page refetches
+   * nothing, and the honest note that in this build a proposal act usually moves the
+   * record's entry too — lives ONCE, in `recordChanges.needsCanonicalRefetch`. It is
+   * deliberately not restated here: it was written out three times, drifted from
+   * nothing, and was pinned only against a fourth copy inside a test.
+   *
+   * What is local to this screen is the ACTION: `onRefresh()` — this screen's own
+   * non-blanking `runFetch(false)`, which re-reads verdict, coverage and advisory
+   * WITHOUT unmounting the component that owns the feed cursor (`load` stays
+   * `'data'`, so `LoadedExport` is re-rendered rather than remounted). See the
+   * cursor-lifetime note on `useRecordSession`'s `onEntitiesChanged`.
+   */
   const session = useRecordSession(id, {
     detail: { ...detail, version: currentVersion },
     onChange: () => onRefresh(),
+    onEntitiesChanged: (summary) => {
+      // ONE shared gate — `recordChanges.needsCanonicalRefetch`, not a copy of its
+      // expression. This exact predicate stood inline here, in the other two
+      // read-only screens, and a fourth time in the mount test that was the only
+      // thing exercising it; see that function for what drifting cost.
+      if (needsCanonicalRefetch(summary)) {
+        onRefresh();
+      }
+    },
   });
   const degraded = session.syncDegraded;
 
@@ -500,7 +524,12 @@ function LoadedExport({
       mainPad="pad"
     >
       <h1 className="sr-only">{LABELS.screenExport}</h1>
-      <LiveSyncNote degraded={degraded} refreshFailed={refreshFailed} onRefresh={onRefresh} />
+      <RecordActivityNote activity={session.activity} onRefresh={onRefresh} />
+      <LiveSyncNote
+        degraded={degraded || session.feedDegraded}
+        refreshFailed={refreshFailed}
+        onRefresh={onRefresh}
+      />
       <WorkflowProgressBanner
         workflow={detail.workflow}
         recordId={id}

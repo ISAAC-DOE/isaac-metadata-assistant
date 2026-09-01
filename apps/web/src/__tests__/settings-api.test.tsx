@@ -2069,7 +2069,57 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // operation) and this branch's capture-surface prose. RE-DERIVED over the merged
     // document from `create_app().openapi()` rather than composed from three deltas:
     // 76 operations, 123,687 characters, 246 post-lead paragraphs.
-    expect(total).toBe(123687);
+    // ── SEQUENCE-CURSOR RE-MEASUREMENT, 2026-09-01. 123,687 -> 126,965 (+3,278) and
+    // the OPERATION COUNT DOES NOT MOVE (76): no endpoint was added. ONE description
+    // was re-transcribed — `GET .../changes`, whose backend docstring was rewritten
+    // when the feed's order stopped being a clock and became a sequence, and which
+    // also began serving a third `proposal` kind. Per operation, re-derived rather
+    // than apportioned: `GET .../changes` 4,087 -> 7,365 (+3,278). Every other entry
+    // is byte-identical, and `test_contract_description_parity.py` proves that in
+    // both directions rather than leaving it asserted here.
+    //
+    // MEASURED THREE WAYS THAT AGREE, none of them an increment of the old figure:
+    //   · over the SERVED document — the `splitPurpose` paragraph rule transcribed
+    //     into Python over `create_app().openapi()`, restricted to the 76 operations
+    //     this array names: 126,965.
+    //   · over the TRANSCRIBED array read back out of `apiFixtures.ts` as text: the
+    //     same 126,965, which is the parity check stated as an aggregate.
+    //   · internal consistency: raw sum of the 76 served descriptions = 127,461;
+    //     this figure drops the 248 `\n\n` separators, and 127,461 - 496 = 126,965.
+    //
+    // The collapsed-operation count is UNCHANGED at zero, and that was checked rather
+    // than hoped for: the new remainder is 7,036 characters, far past
+    // `PURPOSE_DISCLOSURE_MIN_CHARS`, and stays inline only because it carries six
+    // `BOUNDARY_CAVEAT_MARKERS` entries — `cannot`, `could not`, `deliberately`,
+    // `never`, `read-only` and `refus` — in the paragraphs disclosing that the feed
+    // coalesces, cannot report deletions, and writes nothing.
+    // ── PROOF-SCOPE RE-MEASUREMENT, 2026-09-01. 126,965 -> 129,149 (+2,184), and
+    // BOTH the operation count (76) and the POST-LEAD PARAGRAPH COUNT (248) are
+    // UNCHANGED — see the note above that assertion for why the second not moving is
+    // the informative half here, not an omission. The one description that moved is
+    // again `GET .../changes`: its published ordering proof was re-scoped, because all
+    // three of its steps read the local workspace FILE rather than the durable row and
+    // the text was publishing them as an unqualified proof (the caveat that had said
+    // so was deleted when the key stopped being a clock). Per operation, re-derived
+    // rather than apportioned: `GET .../changes` 7,365 -> 9,549 (+2,184), which is the
+    // whole delta. Every other entry is byte-identical, and
+    // `test_contract_description_parity.py` proves that in both directions rather than
+    // leaving it asserted here.
+    //
+    // MEASURED THREE WAYS THAT AGREE, none of them an increment of the old figure:
+    //   · over the SERVED document — the `splitPurpose` paragraph rule transcribed
+    //     into Python over `create_app().openapi()`, restricted to the 76 operations
+    //     this array names: 129,149.
+    //   · over the TRANSCRIBED array read back out of `apiFixtures.ts` as text: the
+    //     same 129,149, which is the parity check stated as an aggregate.
+    //   · internal consistency: raw sum of the 76 served descriptions = 129,645; this
+    //     figure drops the 248 `\n\n` separators, and 129,645 - 496 = 129,149.
+    //
+    // `collapsedOps` is STILL zero and was re-measured, not assumed: the remainder
+    // grew 7,036 -> 9,220 characters, which only puts it further past
+    // `PURPOSE_DISCLOSURE_MIN_CHARS` (400), and the appended prose adds `cannot` and
+    // `deliberately` to the `BOUNDARY_CAVEAT_MARKERS` already keeping it inline.
+    expect(total).toBe(129149);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2254,7 +2304,27 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // the character total for the measurement and for why three appended paragraphs
     // rather than woven prose was the deliberate choice. RE-MEASURED from the served
     // document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(246);
+    // 246 -> 248 (+2): `GET .../changes` APPENDED two post-lead paragraphs, going
+    // from 7 to 9, when its backend docstring was rewritten for the sequence cursor.
+    // It moves by exactly two because the new prose — the ordering proof, and the
+    // third `proposal` kind's content boundary — was appended as NEW paragraphs
+    // rather than woven into existing ones; a change that left this at 246 while the
+    // character total moved would mean it had been written into an existing
+    // paragraph, which is precisely why these two aggregates are asserted separately
+    // and neither is inferred from the other. RE-DERIVED from the served document by
+    // the transcribed paragraph rule, not incremented.
+    // 248 -> 248 (UNCHANGED), 2026-09-01 — and this is the case the paragraph above
+    // says these two aggregates are asserted separately FOR, arriving for the first
+    // time. `GET .../changes` gained 2,184 characters and NO paragraph, because the
+    // ordering proof's new scope was written INTO the existing `SEQUENCE_PROOF`
+    // paragraph rather than appended as a new one. That was deliberate: the scope is
+    // part of the proof, and a reader who stops at the end of the proof paragraph must
+    // already have read where it holds — a separate paragraph is skippable in a way a
+    // clause is not. RE-DERIVED from the served document rather than assumed to be
+    // unchanged: a change that moved this to 249 while the character total moved by the
+    // same 2,184 would mean the prose had been appended instead, which is a different
+    // (and here, worse) editorial decision rather than a different number.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(248);
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
     // for the reason every entry above gives: a change that moved one and not the

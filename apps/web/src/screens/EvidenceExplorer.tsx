@@ -14,6 +14,8 @@ import { AssistantDrawer } from '../components/AssistantDrawer';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { StatusBar } from '../components/StatusBar';
 import { LiveSyncNote } from '../components/LiveSyncNote';
+import { RecordActivityNote } from '../components/RecordActivityNote';
+import { needsCanonicalRefetch, type RecordChangeSummary } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { EvidenceGraphPanel } from './graph/EvidenceGraphPanel';
@@ -57,9 +59,28 @@ export function EvidenceExplorer() {
   // version + live AgentContext). Read-only surface: silently refetch on a change
   // signal (never blanks); the owner also invalidates any stale staged proposal.
   const detail = bundle.status === 'data' ? bundle.data.detail : undefined;
+  /*
+   * SELECTIVE REFRESH. The rule — and the reason a proposal-only page refetches
+   * nothing, and the honest note that in this build a proposal act usually moves the
+   * record's entry too — lives ONCE, in `recordChanges.needsCanonicalRefetch`. It is
+   * deliberately not restated here: it was written out three times, drifted from
+   * nothing, and was pinned only against a fourth copy inside a test.
+   *
+   * What is local to this screen is the ACTION: `bundle.reloadSilent()`, a background refetch of this
+   * screen's own bundle that never blanks it and is not a page reload.
+   */
   const session = useRecordSession(id, {
     detail,
     onChange: () => bundle.reloadSilent(),
+    onEntitiesChanged: (summary) => {
+      // ONE shared gate — `recordChanges.needsCanonicalRefetch`, not a copy of its
+      // expression. This exact predicate stood inline here, in the other two
+      // read-only screens, and a fourth time in the mount test that was the only
+      // thing exercising it; see that function for what drifting cost.
+      if (needsCanonicalRefetch(summary)) {
+        bundle.reloadSilent();
+      }
+    },
   });
   const degraded = session.syncDegraded;
 
@@ -90,7 +111,10 @@ export function EvidenceExplorer() {
     <LoadedEvidence
       id={id}
       data={bundle.data}
-      degraded={degraded}
+      /* ONE indicator for two pollers — see the note in `RecordWorkbench`. Both
+         say the same thing to a reader, and `LiveSyncNote` already says it once. */
+      degraded={degraded || session.feedDegraded}
+      activity={session.activity}
       agentContext={session.context}
       agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
@@ -105,6 +129,7 @@ function LoadedEvidence({
   id,
   data,
   degraded,
+  activity,
   agentContext,
   agentDegraded,
   onManualRefresh,
@@ -113,6 +138,8 @@ function LoadedEvidence({
   id: string;
   data: EvidenceBundle;
   degraded: boolean;
+  /** The outstanding change-feed summary, or null. Ids and kinds; no content. */
+  activity: RecordChangeSummary | null;
   agentContext: AgentContext | undefined;
   agentDegraded: boolean;
   onManualRefresh: () => void;
@@ -361,6 +388,7 @@ function LoadedEvidence({
           say; the wrapper carries no vertical margin, so an empty wrapper adds
           no space and `.evclass` still starts exactly one gutter below the bar. */}
       <div className="main-inset">
+        <RecordActivityNote activity={activity} onRefresh={onManualRefresh} />
         <LiveSyncNote
           degraded={degraded}
           refreshFailed={refreshFailed}

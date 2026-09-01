@@ -215,6 +215,62 @@ def test_the_ordering_proof_is_written_out_rather_than_asserted():
     assert "regardless of how the kind and entity-id tie-break falls" in cf.SEQUENCE_PROOF
 
 
+def test_the_ordering_proof_PUBLISHES_THE_SCOPE_IT_HOLDS_IN(client):
+    """A PROOF WITHOUT ITS SCOPE IS AN OVERCLAIM, and this one shipped without it.
+
+    All three of the proof's steps read the local workspace FILE rather than the
+    durable row — STEP ONE's clamp through `_persisted_run_state` /
+    `_persisted_proposal_state`, STEP THREE's `R_new` through
+    `_persisted_sig_and_rev` — so what is proven is a property of one process reading
+    one filesystem. The wording this replaced had said so, in a caveat that read "it
+    is small because this application runs as a single pod reading one clock — that is
+    the REASON it is small, not a proof that it is zero"; **that caveat was DELETED
+    when the key stopped being a clock, and the text that replaced it published the
+    three steps as an unqualified proof.** `grep` for `replica`, `single pod`,
+    `cross-process` or `one process` in this module and its tests returned nothing.
+
+    So this test pins the scope rather than the conclusion, in BOTH directions, because
+    each direction has its own way of going wrong:
+
+      · the scope is NAMED — one process, one filesystem, the deployment as documented;
+      · the mitigation that DOES exist at the shared layer is named too, so the
+        scoping is not read as "and nothing guards the multi-process case": the durable
+        write is a compare-and-swap that refuses a stale writer outright;
+      · the replica count is NOT asserted, because this repository does not record it
+        (`experiment_repository.py` says so in the same words about the same statement);
+      · and what neither closes is named — a process whose file is behind the row
+        serves that record from that file, which is staleness of the READ COPY and not
+        of the order.
+
+    It is asserted on the SERVED document as well as the constant, because the scope
+    only does its job where a client can read it.
+    """
+    served = _description(client)
+    for phrase in [
+        "ONE PROCESS READING ONE WORKSPACE FILESYSTEM",
+        "the deployment as documented",
+        "COMPARE-AND-SWAP",
+        "staleness of the READ COPY",
+    ]:
+        assert phrase in cf.SEQUENCE_PROOF, phrase
+        assert phrase in served, f"{phrase} does not reach the wire"
+
+    # THE DELETED CAVEAT IS RECORDED AS A DELETION, not silently reinstated — the same
+    # posture `GAP_GUARANTEE` takes about the gap it used to disclose.
+    assert "That caveat was deleted when the key stopped being a clock" in cf.SEQUENCE_PROOF
+    assert "rather than a proof that it is zero" in cf.SEQUENCE_PROOF
+
+    # AND THE OTHER DIRECTION: no replica count is claimed. The overclaim available
+    # here is "one pod, therefore no problem", and the honest form is that the number
+    # is unrecorded while the scope is stated anyway.
+    assert "does not record how many replicas" in cf.SEQUENCE_PROOF
+    assert "nothing here claims it runs more than" in cf.SEQUENCE_PROOF
+    # THE OLD "SINGLE POD" CLAIM SURVIVES EXACTLY ONCE, AS A QUOTATION. It is the
+    # deleted caveat being shown, not re-asserted — and pinning the count is what keeps
+    # a future edit from reintroducing it as this text's own claim.
+    assert cf.SEQUENCE_PROOF.count("runs as one process reading one clock") == 1
+
+
 def test_the_deletion_limitation_is_stated_as_a_limitation():
     assert "cannot report deletions" in cf.DELETION_LIMITATION
     assert "tombstone" in cf.DELETION_LIMITATION
@@ -566,6 +622,50 @@ def test_a_wrong_typed_component_is_refused_and_never_coerced(client, payload_pa
     )
     assert res.status_code == 422, why
     assert res.json()["reason"] == "not_decodable", why
+
+
+def test_a_NEGATIVE_cursor_position_is_ADMITTED_and_resyncs(client):
+    """THE ONE THING `decode_cursor` DOES NOT REFUSE, recorded rather than left to be
+    rediscovered.
+
+    "STRICT AT EVERY STEP" in `decode_cursor`, and the wire-published
+    `EXPIRY_PROPERTY`'s "a cursor is refused for exactly two reasons", both invite a
+    reader to expect a bound here. There is none: `{"q": -99}` decodes and answers
+    `200` with the whole feed. Two reasons it stays, and both are asserted below.
+
+    `-1` IS A POSITION THIS FEED ISSUES. `changes_page` encodes `ZERO_KEY` as the
+    `next_cursor` of an empty first page, so "negative" cannot be the test — and a
+    bound of exactly `>= -1` would refuse only values that are already harmless.
+
+    AND HARMLESS IS THE POINT. Every real key's first component is `>= 0` by
+    `_position`, so a `q` below that can only place the caller EARLIER in the order
+    than they asked for. The outcome is a resync — every entity at its current
+    position — which is exactly the remedy `GAP_GUARANTEE` publishes for everything,
+    reached by a different route. It over-reports and cannot skip, so refusing it would
+    give a client one more error to handle and buy correctness nothing.
+    """
+    exp_id = _with_runs(client, 3)
+    tag = cf.record_scope_tag(exp_id, None)
+    forged = _handmade({"v": cf.CURSOR_VERSION, "s": tag, "q": -99, "k": "", "e": ""})
+
+    res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": forged})
+    assert res.status_code == 200, res.text
+    # It behaves exactly as the cursorless resync does — the SAME entries, not merely
+    # "some entries", which is what makes "it cannot skip" a measurement.
+    assert res.json()["changes"] == _feed(client, exp_id)["changes"]
+
+    # AND `-1` REALLY IS ONE OF OURS, which is why the bound cannot simply be `>= 0`:
+    # an empty first page hands the caller back `ZERO_KEY`.
+    empty = _with_runs(client, 0, title="no runs at all")
+    first = _feed(client, empty)
+    resumed = client.get(
+        f"/api/experiments/{empty}/changes", params={"cursor": first["next_cursor"]}
+    )
+    assert resumed.status_code == 200
+    assert cf.decode_cursor(
+        cf.encode_cursor(cf.ZERO_KEY, scope=cf.record_scope_tag(empty, None)),
+        scope=cf.record_scope_tag(empty, None),
+    ) == cf.ZERO_KEY
 
 
 def test_a_cursor_from_another_record_is_refused_as_the_wrong_feed(client):
@@ -1249,11 +1349,21 @@ def test_the_feed_reports_only_lifecycle_states_the_contract_DEFINES(client):
     default it — a feed that rewrote an unknown state onto a known one would be
     inventing a judgement about a lifecycle it does not own.
 
-    The negative control is the second half: an out-of-contract state is set DIRECTLY
-    on the stored entity and reaches the wire UNCHANGED. That is deliberate. The feed
-    is not the validator; `proposals.py` refuses such a state at construction, and a
-    feed that silently corrected one would hide a corrupt document instead of showing
-    it.
+    THE SECOND HALF IS A REAL TRANSITION, NOT A FABRICATED STATE, and this docstring
+    used to describe the opposite of what the body does. It read: "The negative
+    control is the second half: an out-of-contract state is set DIRECTLY on the
+    stored entity and reaches the wire UNCHANGED." The body does no such thing — it
+    calls the contract's own `reject_proposal`, and its own inline comment two lines
+    below says so ("rather than by fabricating a state"). The stale sentence is
+    corrected rather than deleted because it is a reader's map of what this test
+    covers, and it pointed at a control that is NOT here.
+
+    What actually happens to an out-of-contract state is one test further down:
+    `_hydrate_proposals` refuses the entry at load, so it never becomes a proposal
+    and the feed cannot name it — see
+    `test_a_proposal_the_model_REFUSES_is_not_served_and_is_not_discarded`, whose own
+    docstring records that the same wrong theory was asserted there first and
+    measured false.
     """
     from isaac_api import proposals as proposals_module
 
