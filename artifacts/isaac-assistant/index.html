@@ -113,9 +113,32 @@
 <main>
   <h1>ISAAC Record Companion</h1>
   <p class="sub">
-    Your Claude, calling your ISAAC. ISAAC itself has no model and no AI
-    subscription — this runs on yours.
+    Built to run on your own Claude subscription — ISAAC has no model and no AI
+    subscription of its own. Nothing is wired up in this build; read the state
+    below before the controls.
   </p>
+
+  <!--
+    THE DISCLOSURE COMES FIRST, AND THE ORDER IS THE POINT. This card used to sit
+    BELOW the Experiment ID field and the button, so a reader met a capability
+    ("Check this record", "Reads the record, its runs…") before meeting the fact
+    that no call surface exists. Capability-first reading order is how an interface
+    implies a connection without ever claiming one.
+  -->
+  <div class="card" role="status" aria-live="polite">
+    <div class="status" id="seam-status">
+      <strong>Not connected to a model or an MCP server.</strong>
+      This companion's call surface is unimplemented in this build. It is not
+      disabled, throttled, or waiting — no request is made and no result is cached.
+    </div>
+    <ul>
+      <li>The ISAAC connector must be added to the organization by a Team Owner.</li>
+      <li>Each person then connects and authorises it in their own Claude settings.
+          Nobody can do that step for you.</li>
+      <li>Finalising a record — submit and export — is your act inside ISAAC. No
+          tool here can do it, by construction.</li>
+    </ul>
+  </div>
 
   <div class="card">
     <label for="experiment-id">Experiment ID</label>
@@ -131,24 +154,10 @@
   <div class="card">
     <button id="start" type="button">Check this record</button>
     <p class="hint">
-      Reads the record, its runs, and its open blocking questions. Writes nothing
-      until you confirm a specific value.
+      Once a call surface exists, this would read the record, its runs, and its
+      open blocking questions, and would write nothing until you confirm a
+      specific value. In this build it reads nothing and reports why.
     </p>
-  </div>
-
-  <div class="card" role="status" aria-live="polite">
-    <div class="status" id="seam-status">
-      <strong>Not connected to a model or an MCP server.</strong>
-      This companion's call surface is unimplemented in this build. It is not
-      disabled, throttled, or waiting — no request is made and no result is cached.
-    </div>
-    <ul>
-      <li>The ISAAC connector must be added to the organization by a Team Owner.</li>
-      <li>Each person then connects and authorises it in their own Claude settings.
-          Nobody can do that step for you.</li>
-      <li>Finalising a record — submit and export — is your act inside ISAAC. No
-          tool here can do it, by construction.</li>
-    </ul>
   </div>
 </main>
 
@@ -161,16 +170,33 @@
   // fabricate a result, retry, or degrade to a cached answer: a companion that
   // answers from memory while disconnected is the honesty defect CLAUDE.md §11
   // records four separate instances of.
+  //
+  // THE RESULT IS A FROZEN CONSTANT WITH EXACTLY ONE RETURN, AND THAT SHAPE IS
+  // TESTED. An independent review replaced this function's body with a fabricated
+  // success — `{ ok: true, record: { status: "complete", pending: 0 } }` — and the
+  // suite stayed green, because the seam's honesty was pinned by the mere PRESENCE
+  // of two strings elsewhere in the file. `test_assistant_artifact_companion.py`
+  // now EXECUTES this script in a Node harness and asserts what a turn returns, so
+  // a fabricating seam fails rather than passing.
   const COMPANION_SEAM_UNSET = "companion_seam_unset";
 
+  const SEAM_UNSET_RESULT = Object.freeze({
+    ok: false,
+    reason: COMPANION_SEAM_UNSET,
+    message:
+      "No model or MCP call surface is wired in this build. Nothing was sent " +
+      "and nothing was received.",
+  });
+
   async function runCompanionTurn(_request) {
-    return {
-      ok: false,
-      reason: COMPANION_SEAM_UNSET,
-      message:
-        "No model or MCP call surface is wired in this build. Nothing was sent " +
-        "and nothing was received.",
-    };
+    return SEAM_UNSET_RESULT;
+  }
+
+  // Exposed so the page's own contract can be executed rather than grepped. In a
+  // browser this is inert; in the test harness it is how a turn is invoked.
+  if (typeof globalThis !== "undefined") {
+    globalThis.runCompanionTurn = runCompanionTurn;
+    globalThis.SEAM_UNSET_RESULT = SEAM_UNSET_RESULT;
   }
 
   const startButton = document.getElementById("start");

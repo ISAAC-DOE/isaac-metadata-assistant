@@ -1,7 +1,8 @@
 # ISAAC Assistant as a Claude Artifact — feasibility, verified
 
-**Verification date: 2026-08-31.** Every vendor claim below was fetched from
-`support.claude.com` on that date and is quoted, not recalled. Every ISAAC claim
+**Verification date: 2026-08-31**; **§2.1 and §2.2's pages re-fetched and re-read
+from raw bytes 2026-08-31/09-01, and both corrected — read §0 first.** Every vendor
+claim below was fetched from `support.claude.com` and is quoted, not recalled. Every ISAAC claim
 was measured against the working tree at `ddec2b5`. Where a page does not address a
 question, this document says **NOT ADDRESSED** and stops — an unfetchable or silent
 page is never converted into an assumed "yes".
@@ -16,6 +17,98 @@ touches none of the first.
 
 ---
 
+## 0. CORRECTIONS — 2026-09-01, after an independent review and a re-fetch
+
+**Two of this document's conclusions rested on sentences that are on the pages it
+cites and were not read.** Both are corrected in place and marked, never silently
+edited, because "NOT ADDRESSED" and "the load-bearing gap" are exactly the kind of
+claims a future session acts on. Every page was re-fetched and re-read **from raw
+bytes** on 2026-08-31/09-01; the quotes below were located in the response body, not
+recalled.
+
+### C1 — The flagship "unknown" was answered, in the same paragraph, one clause later
+
+The artifacts page carries this sentence **between two sentences §2.1 already
+quotes**:
+
+> *"In addition to Anthropic's official MCP integrations, artifacts can connect to
+> any **custom MCP servers** you've configured."*
+>
+> — <https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them>
+
+It is **in the same paragraph** as the "tools like Asana, Google Calendar, and
+Slack" sentence, immediately after it, and the words *custom MCP servers* are a
+**hyperlink to Intercom article 11175166** — the custom-connector page §2.3 cites.
+
+**What it invalidates, named rather than quietly repaired:**
+
+| Was | Is |
+|---|---|
+| §3 **Q2**: *"**SUPPORTED** for MCP; **NOT ADDRESSED** for *custom* connectors specifically"*, confidence Medium | **SUPPORTED**, confidence High |
+| §3.2's argument: the three named examples are first-party, so custom connectors are *"a reasonable reading of the same sentence but … not separately documented"* | **Wrong.** The same paragraph names them explicitly and links to their page. |
+| §7 item 1: *"That a Claude artifact can call a **custom** (self-hosted, unverified) remote MCP server … This is the load-bearing gap."* | **Not a gap.** Struck in §7, with the quote that closes it. |
+
+**How the omission happened is the part worth carrying forward.** The paragraph was
+read *for* the sentence being looked for — artifact→MCP — and the reading stopped
+at that full stop. Everything downstream inherited the stop: §3.2's argument, §7's
+headline item, and the slice's own commit message, which told a future reader that
+*"the CUSTOM-connector page never mentions artifacts … It heads the
+externally-unverifiable list."* (A commit message cannot be corrected in place; this
+section is where that correction lives, and the follow-up commit says so.) It did
+**not** reach `artifact_link.py`, the page source, the behaviour contract or the
+operator checklist — measured, not assumed: `grep -rn custom` over those files
+returns only the checklist's two references to *adding a custom connector*, which
+are unaffected. Nothing was fabricated anywhere; **a silence was manufactured, and a
+manufactured silence is indistinguishable from a measured one** once it is written
+down as NOT ADDRESSED.
+
+**Four further sentences from the same pages were missing** and are added at §2.1,
+§2.2, §3.9 and §3.10. Three of them narrow what this companion may assume:
+
+- *"Persistent storage is only available for published artifacts. During
+  development and testing, storage operations will not succeed until the artifact
+  is published."* — so an **organization-shared** companion has **no persistent
+  storage at all**, which is a stronger fact than §3.10's rule and reaches it by a
+  different route.
+- *"MCP integration for artifacts is available on Pro, Max, Team, and Enterprise
+  plans on Claude web and desktop."* — a **plan and platform floor** this document
+  had not recorded: not Free, and not mobile.
+- *"Organization admins can enable or disable artifact MCP access at the
+  organization level but cannot manage which specific MCP servers artifacts can
+  use."* — an org-level kill switch exists (a documented unavailability state for
+  §3.9), and an org admin **cannot** restrict artifacts to ISAAC's connector alone.
+
+**Every other §3 verdict was re-checked against the re-fetched pages.** Q1, Q3, Q4,
+Q5, Q6, Q7, Q8, Q11 and Q12 are unchanged and rest on no part of the skipped
+sentence. Q9 and Q10 **gain** the facts above without changing verdict: Q9 stays
+partially documented (expiry and unreachability are still NOT ADDRESSED), and Q10
+stays NOT ADDRESSED for retention and visibility.
+
+### C2 — §4's dilemma rested on a fact the same page contradicts
+
+§4 framed the choice as *"deep link, or take an unauthorized publishing decision"*,
+which presents publishing as **available and merely forbidden**. On a SLAC Team
+organization it is **not offered at all**:
+
+> *"Artifacts created on Team or Enterprise accounts can only be shared within your
+> organization—they cannot be published publicly."*
+>
+> *"Publishing is available on Free, Pro, and Max plans."* · *"Internal sharing is
+> available on Team and Enterprise plans."*
+>
+> — <https://support.claude.com/en/articles/9547008-publish-and-share-artifacts>
+
+**The decision does not change; it stops depending on an authorization argument.**
+See the corrected §4.
+
+**And this document already held the adjacent fact.** The operator checklist's step
+1 said *"A Pro or Max account can publish **publicly only**"* — the same sentence's
+other half, never carried back into §4. That tension is resolved in both places:
+§4 now reasons from availability, and the checklist now states both directions and
+cites the sentence.
+
+---
+
 ## 1. The question
 
 Could the ISAAC record-completion assistant be delivered as a Claude Artifact,
@@ -23,8 +116,10 @@ shared privately inside a SLAC Team organization, calling ISAAC's existing MCP
 tools under each scientist's own Claude subscription — and could that artifact be
 surfaced from `isaac.slac.stanford.edu`?
 
-Short answer: **the artifact and MCP halves are documented and supported. The
-embedding half is not**, and the decision that follows is a deep link.
+Short answer: **the artifact and MCP halves are documented and supported —
+including MCP to a *custom* server, which §0/C1 corrects from an "unknown" to a
+quoted "yes". The embedding half is not offered at all for a Team/Enterprise
+artifact**, and the decision that follows is a deep link.
 
 ---
 
@@ -41,20 +136,39 @@ All five URLs fetched successfully on 2026-08-31. None failed.
   AI-powered apps. Users of your artifacts can access Claude's intelligence through
   a text-based API."*
 - *"Usage counts against each user's own Claude subscription limits, not yours."*
-- *"When you share AI-powered artifacts within your organization, team members can
-  use them without incurring additional costs to the creator."*
+- *"For Team and Enterprise plans, when you share AI-powered artifacts within your
+  organization, team members can use them without incurring additional costs to the
+  creator."* (**Quote corrected 2026-09-01** — this document previously dropped the
+  leading clause and recapitalised the sentence. The meaning is unchanged and the
+  clause it dropped is the one that scopes it to exactly the plan tier ISAAC would
+  use, so it should never have been trimmed.)
 - *"Users authenticate with their Claude account and interact with their own
   instance of the artifact."*
 - *"Artifacts can connect to external services through the Model Context Protocol
   (MCP), enabling interactive applications that read from and write to tools like
   Asana, Google Calendar, and Slack."*
+- **ADDED 2026-09-01 (see §0/C1).** The very next clause of that same paragraph:
+  *"In addition to Anthropic's official MCP integrations, artifacts can connect to
+  any **custom MCP servers** you've configured."* — and *custom MCP servers* is a
+  hyperlink to Intercom article **11175166**, i.e. to §2.3's page.
+- **ADDED 2026-09-01.** *"MCP integration for artifacts is available on Pro, Max,
+  Team, and Enterprise plans on Claude web and desktop."* (a callout heading the
+  MCP section — a plan **and platform** floor: not Free, and not mobile).
 - *"When an artifact needs to access an MCP tool, you'll be prompted to approve
   access on first interaction."*
 - *"Each user must authenticate MCP servers independently, even when using shared
   or published artifacts."*
+- **ADDED 2026-09-01.** The rest of that same callout: *"Organization admins can
+  enable or disable artifact MCP access at the organization level but cannot
+  manage which specific MCP servers artifacts can use."*
 - *"Artifacts can store data across sessions"*; *"20 MB storage limit per artifact,
   Text-only input—no images, files, or binary data, Personal and shared storage are
   isolated."*
+- **ADDED 2026-09-01.** *"Persistent storage is only available for published
+  artifacts. During development and testing, storage operations will not succeed
+  until the artifact is published."* And, heading that section: *"Persistent
+  storage for artifacts is available on Pro, Max, Team, and Enterprise plans on
+  Claude web and desktop."*
 - *"By default, artifacts in Claude Code are only visible to the individual who
   created them. They can choose to share artifacts with the rest of their
   organization, and they can't be shared publicly."*
@@ -73,6 +187,18 @@ who can read them.
   view and interact with it."*
 - Sharing: *"Makes your artifact available within your organization only. Viewers
   must be logged into your Team or Enterprise account to access it."*
+- **ADDED 2026-09-01 (see §0/C2).** *"Artifacts created on Team or Enterprise
+  accounts can only be shared within your organization—they cannot be published
+  publicly."* With the two plan callouts that bracket it: *"Publishing is available
+  on Free, Pro, and Max plans."* and *"Internal sharing is available on Team and
+  Enterprise plans."* The page's own labels carry the tiers too — *"Publishing
+  (Free, Pro, Max)"* and *"Sharing (Team, Enterprise)"*.
+- **ADDED 2026-09-01.** *"When you share an artifact, viewers also gain access to
+  any attachments and files in the conversation that created it. Consider this
+  before sharing artifacts from conversations containing sensitive documents."*
+  Found on the same re-fetch; it is a data-visibility fact this document's own
+  standard required recording, and it is now a line in the operator checklist's
+  **Never** list.
 - Access to published: *"Non-users: View and interact with any published artifact
   without signing up."*
 - Access to shared: *"Only members of your Team or Enterprise organization. Viewers
@@ -119,9 +245,16 @@ artifact; URL parameters or launch-with-input.
 - *"Custom connectors allow you to connect Claude to arbitrary services that have
   not been verified by Anthropic."*
 
-**Does NOT support / NOT ADDRESSED:** whether **artifacts** specifically can call
-**custom** connectors (this page never mentions artifacts); behaviour on an
-**expired** or unreachable connector; any logging or data-visibility statement.
+**Does NOT support / NOT ADDRESSED:** behaviour on an **expired** or unreachable
+connector; any logging or data-visibility statement.
+
+~~whether **artifacts** specifically can call **custom** connectors (this page never
+mentions artifacts)~~ — **CORRECTED 2026-09-01, and the precise form matters.** It
+remains true that *this* page never mentions artifacts. What is false is the
+inference drawn from that silence, because **the artifacts page names custom MCP
+servers explicitly and links here** (§2.1, §0/C1). The support is asserted by the
+artifacts page, not by this one; a page's silence about a subject is not evidence
+when another page addresses it directly.
 
 ### 2.4 Use voice mode
 <https://support.claude.com/en/articles/11101966-use-voice-mode>
@@ -175,14 +308,14 @@ Confidence is about the *evidence*, not about the desirability of the answer.
 | # | Question | Verdict | Confidence |
 |---|---|---|---|
 | 1 | Private Team artifact uses AI under each viewer's own subscription? | **SUPPORTED** | High |
-| 2 | Can it call a configured custom remote MCP server? | **SUPPORTED** for MCP; **NOT ADDRESSED** for *custom* connectors specifically | Medium |
+| 2 | Can it call a configured custom remote MCP server? | **SUPPORTED** (**corrected 2026-09-01** — was *"NOT ADDRESSED for custom connectors specifically", Medium*; see §0/C1) | High |
 | 3 | Does each scientist authenticate MCP independently? | **SUPPORTED** (stated twice, on two pages) | Very high |
 | 4 | Can the artifact remain private to the organization? | **SUPPORTED** | Very high |
 | 5 | Can a private org-shared artifact be embedded in an external domain? | **NOT ADDRESSED** | High |
 | 6 | If embedding is supported, what requirements apply? | **SUPPORTED** only for *public* artifacts (Allowed domains); everything else **NOT ADDRESSED** | High |
 | 7 | Can ISAAC safely deep-link to the private artifact? | **SUPPORTED** by the access model; the term "deep link" is **NOT ADDRESSED** | High |
 | 8 | Can the artifact receive an Experiment ID via a supported link mechanism? | **NOT ADDRESSED** | High |
-| 9 | What happens when MCP is disabled / disconnected / denied / expired? | **SUPPORTED** for disable, disconnect, deny; **NOT ADDRESSED** for expiry and unreachability | Medium |
+| 9 | What happens when MCP is disabled / disconnected / denied / expired? | **SUPPORTED** for disable, disconnect, deny and an org-level switch; **NOT ADDRESSED** for expiry and unreachability | Medium |
 | 10 | What data, logs, prompts and storage are visible to whom? | **NOT ADDRESSED** except storage shape | High |
 | 11 | Can artifact code and configuration be version-controlled in ISAAC? | **NOT ADDRESSED** by vendor; **SUPPORTED** as a measured repository fact | High |
 | 12 | What is deterministically testable without a live MCP endpoint or real data? | Measured repository fact | High |
@@ -198,18 +331,57 @@ own instance of the artifact."*
 **This directly refutes the assumption that artifact AI works without user auth.**
 It does not. Each viewer authenticates, and each viewer pays from their own plan.
 
-### 2. Calling a custom remote MCP server — SUPPORTED, with one honest gap
+### 2. Calling a custom remote MCP server — SUPPORTED
 
-The artifacts page states artifacts *"can connect to external services through the
-Model Context Protocol (MCP)"*. Its three named examples — Asana, Google Calendar,
-Slack — are all **first-party/verified connectors**. The custom-connector page,
-which is the one that governs *self-hosted, unverified* servers like ISAAC's,
-**never mentions artifacts at all**.
+> **CORRECTED 2026-09-01.** ~~*"The artifacts page states artifacts "can connect to
+> external services through the Model Context Protocol (MCP)". Its three named
+> examples — Asana, Google Calendar, Slack — are all first-party/verified
+> connectors. The custom-connector page, which is the one that governs
+> self-hosted, unverified servers like ISAAC's, never mentions artifacts at all. So:
+> artifact→MCP is documented. Artifact→ISAAC's own custom remote MCP server is a
+> reasonable reading of the same sentence but is not separately documented, and this
+> document will not upgrade it to a certainty. It is the single most important item
+> on the externally-unverifiable list in §7."*~~
+>
+> **The argument was wrong, and it was wrong about the same paragraph it quoted.**
+> It is struck rather than deleted because it was the stated basis for the
+> flagship entry in §7 and for a "never" paragraph in
+> `apps/api/isaac_api/artifact_link.py`'s neighbourhood; a reader who met only a
+> repaired version would not know a conclusion had moved.
 
-So: artifact→MCP is documented. Artifact→*ISAAC's own custom remote MCP server* is
-a reasonable reading of the same sentence but is **not separately documented**, and
-this document will not upgrade it to a certainty. It is the single most important
-item on the externally-unverifiable list in §7.
+The artifacts page names custom MCP servers **explicitly**, in the clause
+immediately after the one about Asana, Google Calendar and Slack, in the same
+paragraph:
+
+> *"In addition to Anthropic's official MCP integrations, artifacts can connect to
+> any **custom MCP servers** you've configured."*
+
+Three things make this the strongest form of the answer rather than a bare
+sentence. It **contrasts** custom servers with Anthropic's official integrations,
+so the three named examples are identified by the page itself as the *other*
+category rather than as the whole of it. It says **any**. And *custom MCP servers*
+is a **hyperlink to article 11175166** — §2.3's page, the one that governs
+self-hosted, unverified servers like ISAAC's. The two pages are joined by the
+vendor, not by this document's inference.
+
+**What is still not documented, stated narrowly so the correction is not
+over-read:** the *client API* an artifact would use to make such a call (§7 item 2,
+unchanged, and the reason the companion's seam is unset); and whether any specific
+server — ISAAC's included — is reachable, which is D1 and is Dean's.
+
+**Two constraints this answer arrives with**, both from the same section and
+neither previously recorded:
+
+- *"MCP integration for artifacts is available on Pro, Max, Team, and Enterprise
+  plans on Claude web and desktop."* A scientist on **Free**, or on **mobile**, has
+  no MCP path in an artifact at all. That is a real eligibility floor for the
+  companion and belongs in front of anyone planning a rollout.
+- *"Organization admins can enable or disable artifact MCP access at the
+  organization level but cannot manage which specific MCP servers artifacts can
+  use."* So the org-level control is **binary**: artifacts may use MCP, or they may
+  not. An admin cannot permit ISAAC's connector to artifacts while withholding
+  others. Anyone reasoning about SLAC governance should reason about that switch,
+  not about a per-server allowlist that does not exist.
 
 ### 3. Independent authentication per scientist — SUPPORTED, twice
 
@@ -280,6 +452,8 @@ has verified.
 | User disables a specific tool | **SUPPORTED** — *"disable any tools that aren't relevant to the current conversation"* |
 | User disconnects / revokes | **SUPPORTED** — *"You can revoke these permissions at any time by disconnecting the connector"* |
 | Owner removes the connector org-wide | **SUPPORTED** — *"Click 'Remove'…"* |
+| Org admin turns artifact MCP off entirely | **SUPPORTED** (added 2026-09-01) — *"Organization admins can enable or disable artifact MCP access at the organization level but cannot manage which specific MCP servers artifacts can use."* A binary org switch, not a per-server allowlist |
+| User is on **Free**, or on **mobile** | **SUPPORTED** as an eligibility floor (added 2026-09-01) — *"MCP integration for artifacts is available on Pro, Max, Team, and Enterprise plans on Claude web and desktop."* |
 | Token **expired** | **NOT ADDRESSED** |
 | Server unreachable / erroring | **NOT ADDRESSED** |
 
@@ -295,8 +469,28 @@ per artifact, Text-only input—no images, files, or binary data, Personal and s
 storage are isolated"*, and *"Artifact creators determine which data uses personal
 versus shared storage when building the artifact."*
 
+**Added 2026-09-01, and it settles the question for this companion by a route the
+rule below never needed:**
+
+> *"Persistent storage is only available for published artifacts. During
+> development and testing, storage operations will not succeed until the artifact
+> is published."*
+
+The companion is **organization-shared, never published** (§4, and the operator
+checklist's step 5). So it has **no persistent storage at all** — not storage that
+must be used carefully, none. The rule below therefore has two independent bases:
+the visibility one it always had, and now the plain fact that the capability is
+absent. Do not let the second retire the first: if this companion were ever
+published, the visibility argument is the only thing still standing, and it is the
+one that decides.
+
 Nothing documents what prompts, tool-call arguments, results or logs are retained,
-for how long, or who may read them.
+for how long, or who may read them. One adjacent fact **is** documented, and it is
+about the artifact rather than about storage: *"When you share an artifact, viewers
+also gain access to any attachments and files in the conversation that created
+it."* That makes the **conversation the artifact is created in** part of what gets
+shared, which is an operator instruction, not a design one (§2.2, and the
+checklist's **Never** list).
 
 **Consequence, stated as a rule rather than a preference: no ISAAC scientific
 record, evidence entry, file path, hash or draft value may be written to artifact
@@ -320,15 +514,39 @@ published artifact is a **build output** — never the other way round.
 
 Without any MCP endpoint, network, credential or real datum:
 
-- **This slice: 25 tests**, `apps/api/tests/test_assistant_artifact_companion.py`.
-  They pin the companion's declared tool set to `policy.PERMITTED_TOOL_NAMES`
-  exactly, pin each declared scope and mutation flag to the tool's own annotation,
-  pin the forbidden-token list to the server's, assert the config is unconfigured
-  by default and refuses seven classes of bad value without echoing it, assert
-  `embed_markup` raises, and assert the page source carries no artifact URL, no
-  token, no account identifier, no `Connected` claim, and no submit claim.
-- **Existing MCP suite: 382 test functions** across 16 files (`test_mcp_*.py` plus
-  `test_attack_mcp_token_confusion.py`), driving the **real** server in-process.
+- **This slice: 40 tests**, `apps/api/tests/test_assistant_artifact_companion.py`
+  (**25 as first written; 40 after the 2026-09-01 review fixes** — measured with
+  `pytest apps/api/tests/test_assistant_artifact_companion.py -q`, not counted by
+  hand). They pin the companion's declared tool set to
+  `policy.PERMITTED_TOOL_NAMES` exactly, pin each declared scope and mutation flag
+  to the tool's own annotation, pin the forbidden-token list to the server's,
+  assert the config is unconfigured by default and refuses **eight distinct
+  reasons across eleven shapes** without echoing any of them (a ninth, *"it is not
+  a parseable URL"*, is unreachable in practice and is marked `pragma: no cover`)
+  — now including a malformed port, which used to
+  escape as an uncaught `ValueError` **quoting the value back**, and a raw control
+  character, which used to be *validated* stripped and *stored* intact — assert
+  that an accepted value is stored in the normalised form that was validated,
+  assert `embed_markup` raises, and assert the page carries no artifact URL, no
+  token and no account identifier.
+
+  **Two of them changed from assertions about the file's bytes into assertions
+  about the page's behaviour**, because a review passed both a visible lowercase
+  *"connected to your ISAAC workspace and ready"* claim and a `runCompanionTurn`
+  that fabricated `{ ok: true, record: { status: "complete", pending: 0, qc:
+  "valid" } }`. The `Connected` guard is now case-insensitive, requires a negation
+  before every occurrence, and separately requires the disclosure to be **rendered
+  first inside the live region**; and the seam is **executed** in a Node harness
+  with a minimal DOM stub, which takes a turn and asserts the returned object — one
+  unconditional structural test backstops an environment with no Node.
+- **Existing MCP suite: 383 test functions** across **15** files (`test_mcp_*.py`
+  plus `test_attack_mcp_token_confusion.py`), driving the **real** server
+  in-process. *Corrected 2026-09-01. The file count was simply wrong — it has been
+  15 throughout, at `ddec2b5` and at `f201e78`. The function count was right at
+  `ddec2b5` (**382**) and moved to **383** when `test_mcp_server.py` gained a test
+  in `f201e78`; both are stated with their vantage point rather than one replacing
+  the other. Command:*
+  `grep -hEc "^[[:space:]]*(async )?def test_" apps/api/tests/test_mcp_*.py apps/api/tests/test_attack_mcp_token_confusion.py`
 - **`apps/web/src/__tests__/connect-your-agent.test.tsx`: 51 cases**, including
   *"states that no agent can submit, in its own section and in the boundary list"*.
 
@@ -355,20 +573,47 @@ not documented as a property of a **shared (organization-private)** one.
 
 ### Why that settles it rather than merely leaving it open
 
+> **CORRECTED 2026-09-01 — this subsection reasoned from an authorization where the
+> same page states an availability.** The old closing sentence read: ~~*"So the
+> choice is not 'embed vs. deep link, pick one'. It is 'deep link, or take an
+> unauthorized publishing decision'. Deep link."*~~ That frames publishing as
+> **offered and merely forbidden**. For the artifact this project would create it is
+> **not offered**. The decision is unchanged and its basis is stronger; the old
+> sentence is kept struck because a reader who thought the alternative existed
+> would look for who could authorize it.
+
 The only documented route to an embeddable artifact is to publish it publicly —
 *"Anyone with the link can view and interact with it"*, and *"Non-users: View and
-interact with any published artifact without signing up."* For an ISAAC-branded
-record-completion tool wired to SLAC's MCP connector, publishing publicly is a
-visibility decision that:
+interact with any published artifact without signing up."*
 
-- no agent may take (`CLAUDE.md` §15 forbids "exposing production-derived records"
-  and reserves visibility decisions to their owners);
-- gate **G2** already holds closed by default for far less; and
-- would put an ISAAC surface on a public URL while Dean's D1 — *whether the MCP
-  path may be internet-reachable at all* — is **deferred**.
+**And that route does not exist on the account this companion would live on:**
 
-So the choice is not "embed vs. deep link, pick one". It is "deep link, or take an
-unauthorized publishing decision". Deep link.
+> *"Artifacts created on Team or Enterprise accounts can only be shared within your
+> organization—they cannot be published publicly."*
+>
+> *"Publishing is available on Free, Pro, and Max plans."*
+
+So for an artifact created in a SLAC Team organization, the publish branch — and
+therefore the **"Embed artifacts"** section that hangs off it — is unreachable.
+Embedding is not a decision this project declines to take. It is a capability the
+vendor does not offer for the artifact in question.
+
+**The unauthorized decision the old sentence imagined is real, but it lives on a
+different branch, and naming it is what keeps the correction from reading as a
+loophole.** A Free, Pro or Max **personal** account *can* publish publicly and
+therefore *can* embed. Building the companion there instead would:
+
+- **destroy the property §3 Q4 establishes** — the artifact would no longer be
+  organization-private, and *"Non-users: View and interact … without signing up"*
+  would become its access model;
+- be a visibility decision **no agent may take** (`CLAUDE.md` §15 reserves those to
+  their owners, and gate **G2** holds closed by default for far less); and
+- put an ISAAC surface on a public URL while Dean's **D1** — *whether the MCP path
+  may be internet-reachable at all* — is **deferred**.
+
+So the corrected form: **on the Team account, embedding is not available; off it,
+embedding costs the organization-private property that was the whole requirement,
+and requires a decision nobody has taken. Deep link.**
 
 ### Exactly what would unblock embedding
 
@@ -381,6 +626,10 @@ One vendor capability, and only one:
 > (frame-ancestors / cross-origin / SSO behaviour), since §2.2 currently addresses
 > neither.
 
+**Sharpened 2026-09-01 by the correction above:** the change must land in the
+**sharing** branch specifically. A change that only widened *publishing* would not
+help, because a Team/Enterprise artifact cannot be published at all.
+
 Both halves are required. An embed code without a documented in-frame
 authentication story would leave ISAAC guessing at exactly the security boundary it
 must not guess at.
@@ -392,7 +641,11 @@ reason. It is a refusal, not a gap.
 
 ## 5. The ISAAC side, as measured
 
-Measured at `ddec2b5` by importing the modules, not by reading comments.
+Measured at `ddec2b5` by importing the modules, not by reading comments, and
+**re-verified 2026-09-01 at `f201e78`** (this branch's rebase base). Only
+`apps/api/tests/test_mcp_server.py` differs between the two commits — `policy.py`,
+`tools.py`, `routes.py` and `proposals.py` are byte-identical — so every line
+citation below still resolves, and the one figure that moved is called out in §5.5.
 
 ### 5.1 The MCP tool inventory — 10 tools, 2 scopes
 
@@ -507,8 +760,13 @@ not for ISAAC:
 | Fake | Stands in for |
 |---|---|
 | `apps/api/tests/mcp_oauth_keys.py` (`SEED = 20260829`, `SyntheticKey`, `jwks()`, `sign()`) | The OAuth AS / JWKS signer. *"This module signs. The application never does."* |
-| `fake_fetch` / `angry_fetch` (`test_mcp_oauth_never_leaks_a_token.py:481`, `:513`) | The `oauth.JWKS_FETCHER` network seam — no socket is opened |
-| `_explode` (`test_mcp_server.py:201`) | A broken HTTP client, to prove the JSON-RPC loop leaks nothing |
+| `fake_fetch` / `angry_fetch` (`test_mcp_oauth_never_leaks_a_token.py:480`, `:512`) | The `oauth.JWKS_FETCHER` network seam — no socket is opened |
+| `_explode` (`test_mcp_server.py:200`) | A broken HTTP client, to prove the JSON-RPC loop leaks nothing |
+
+*Three line citations corrected 2026-09-01: each was one greater than the line the
+`def` is actually on (481→480, 513→512, 201→200). Re-derive rather than trusting
+the numbers — `grep -n "def fake_fetch\|def angry_fetch" apps/api/tests/test_mcp_oauth_never_leaks_a_token.py`
+and `grep -n "def _explode" apps/api/tests/test_mcp_server.py`.*
 
 So the honest statement is: **ISAAC can already test its MCP server end-to-end with
 no network and no credential.** What it cannot test is the *Claude client* half.
@@ -520,8 +778,8 @@ no network and no credential.** What it cannot test is the *Claude client* half.
 **Built:** `artifacts/isaac-assistant/` (page source, behaviour contract,
 tool-permission manifest generated from `policy.py`);
 `apps/api/isaac_api/artifact_link.py` (disabled-by-default operator configuration,
-embedding refused); `apps/api/tests/test_assistant_artifact_companion.py` (25
-tests).
+embedding refused); `apps/api/tests/test_assistant_artifact_companion.py` (**40**
+tests — 25 as first written, see §3.12).
 
 **Deliberately not built:**
 
@@ -539,22 +797,37 @@ tests).
 
 ## 7. Externally unverifiable from this environment
 
-Named rather than implied, because a silent gap reads as a solved one.
+Named rather than implied, because a silent gap reads as a solved one — and,
+per §0/C1, because a **manufactured** gap reads exactly like a measured one.
 
-1. **That a Claude artifact can call a *custom* (self-hosted, unverified) remote
+1. ~~**That a Claude artifact can call a *custom* (self-hosted, unverified) remote
    MCP server.** The artifacts page documents artifact→MCP with first-party
    examples; the custom-connector page never mentions artifacts. This is the
-   load-bearing gap.
+   load-bearing gap.~~
+   **STRUCK 2026-09-01 — THIS WAS NEVER A GAP, AND IT IS STRUCK RATHER THAN
+   DELETED BECAUSE IT HEADED THIS LIST AND WAS CALLED LOAD-BEARING.** The artifacts
+   page states it directly, in the clause after the one this document quoted:
+   *"In addition to Anthropic's official MCP integrations, artifacts can connect to
+   any **custom MCP servers** you've configured."* — and links to the
+   custom-connector page from those words. See §0/C1 and the corrected §3.2. The
+   list below is therefore **seven** live items, numbered 2–8 as before so that
+   nothing cites a renumbered entry.
 2. **The client API for AI-powered and MCP-calling artifacts.** Undocumented on
-   every page fetched. Blocks the companion's seam.
+   every page fetched, and **re-confirmed absent on the 2026-09-01 re-read of both
+   artifact pages** — the MCP and AI-powered sections describe capability,
+   eligibility, approval and billing, and name no interface. This is now the
+   load-bearing gap, and it is the one that keeps the companion's seam unset.
 3. **Whether SLAC has a Claude Team or Enterprise organization at all**, and
    whether Krish or anyone else holds Owner rights in it. Nothing in this
    repository witnesses it.
 4. **What is retained or visible** — prompts, tool arguments, results, logs — to
    creators, org members, or Anthropic.
 5. **Failure semantics for an expired or unreachable connector.**
-6. **Whether an org-shared artifact can ever be embedded.** Undocumented today;
-   §4 states exactly what would change that.
+6. **Whether an org-shared artifact can ever be embedded.** Undocumented today —
+   and, per §0/C2, a Team/Enterprise artifact **cannot be published at all**, so
+   the publish-branch embed flow is unreachable rather than merely undocumented.
+   §4 states exactly what would change that, and that it must change in the
+   *sharing* branch.
 7. **Everything Dean deferred (D1–D9)**, unchanged: MCP internet reachability, the
    auth model, provider, credential, billing, egress, retention, data policy,
    transcription provider.

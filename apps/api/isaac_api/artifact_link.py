@@ -23,8 +23,17 @@ artifacts"** and **"Who can access published artifacts"** — the *public* branc
 The **"Share artifacts within your organization"** branch documents no embedding at
 all. Since ISAAC's requirement is an organization-private artifact, embedding it in
 ``isaac.slac.stanford.edu`` is **not documented as supported**, and the only
-documented way to get an embeddable artifact is to publish it publicly — which for
-this companion is a visibility decision nobody has made and an agent may not make.
+documented way to get an embeddable artifact is to publish it publicly.
+
+**And publishing is not available for the artifact in question** — corrected
+2026-09-01, because the earlier wording here framed it as a decision nobody had
+taken, which reads as though someone could take it: *"Artifacts created on Team or
+Enterprise accounts can only be shared within your organization—they cannot be
+published publicly"*, and *"Publishing is available on Free, Pro, and Max plans."*
+Publishing this companion from a **personal** account instead would forfeit the
+organization-private property that was the requirement, and *that* is the visibility
+decision nobody has made and an agent may not make. Either way the raise below is
+correct; it now rests on availability first and authorization second.
 
 A future author reaching for an ``<iframe>`` will find a raise and this paragraph
 rather than a blank space that looks like an oversight. Evidence and the full
@@ -36,17 +45,51 @@ The URL is operator-supplied configuration, so it is checked the way configurati
 is checked — fail closed, and never repeat the offending value back in an error,
 because an operator who pastes the wrong string into the wrong variable should not
 have it copied into a log.
+
+THE THING THAT IS VALIDATED IS THE THING THAT IS STORED
+=======================================================
+Two defects found by independent review on 2026-08-31, recorded here because the
+shape of each is more useful than the fix.
+
+**The port was read outside the guard.** ``urlsplit`` does not validate a port
+while parsing; it defers that to attribute access, so ``urlsplit(...).port`` raises
+``ValueError`` for ``https://claude.ai:abc/x`` and ``https://claude.ai:99999/x``.
+Reading it outside the ``try`` broke *both* of this module's stated contracts at
+once: a caller catching :class:`ArtifactLinkRefusal` got an uncaught ``ValueError``
+instead, and that ``ValueError``'s message **quotes the offending value** — the one
+thing every refusal here is written to avoid. The guard now covers the attribute
+access, which is where the parse actually happens.
+
+**And validation ran on the parsed form while the raw form was stored.**
+``urlsplit`` silently strips ASCII TAB, CR and LF before parsing, so
+``"https://claude.ai/x\\r\\nLocation: https://evil.example"`` validated as host
+``claude.ai`` and was then stored *with the CRLF intact*. Any consumer that does
+not re-parse — an ``href``, a ``Location:`` header, a ``fetch`` — could resolve the
+stored string differently from the string that was checked. That is the classic
+URL-validation bypass, and it defeats the threat model above exactly.
+
+**Both remedies are applied, and neither alone was enough.** A raw control
+character is refused by name, *before* parsing, so the operator is told what is
+wrong rather than having it quietly removed — refusal is the right posture for
+configuration. And the accepted value is stored **re-serialised from the parsed
+parts** rather than as pasted, so the string ISAAC serves is by construction the
+string that was checked, whatever a future parser might decide to strip. Refusal
+alone would leave the divergence class open to anything ``urlsplit`` learns to
+ignore next; normalisation alone would silently rewrite an operator's value.
+Normalisation also lowercases the host, which the permitted-host check already did
+and the store previously did not.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 __all__ = [
     "ARTIFACT_URL_ENV",
     "ArtifactLinkRefusal",
+    "CONTROL_CHARACTERS",
     "ConfiguredArtifactLink",
     "UnconfiguredArtifactLink",
     "embed_markup",
@@ -61,6 +104,12 @@ ARTIFACT_URL_ENV = "ISAAC_ASSISTANT_ARTIFACT_URL"
 #: URL", because the failure mode of a typo'd host is that ISAAC sends its
 #: scientists somewhere an attacker chose.
 PERMITTED_ARTIFACT_HOSTS = frozenset({"claude.ai", "www.claude.ai"})
+
+#: C0 controls and DEL. ``urlsplit`` strips TAB, CR and LF before parsing, so a
+#: value carrying one would be *validated* in a form it is not *stored* in. These
+#: are refused before parsing rather than stripped, because a configuration value
+#: containing one is an operator mistake worth surfacing.
+CONTROL_CHARACTERS = frozenset(chr(code) for code in range(0x20)) | {"\x7f"}
 
 
 class ArtifactLinkRefusal(Exception):
@@ -89,7 +138,12 @@ class UnconfiguredArtifactLink:
 
 @dataclass(frozen=True)
 class ConfiguredArtifactLink:
-    """An operator-supplied artifact URL that passed every check."""
+    """An operator-supplied artifact URL that passed every check.
+
+    ``url`` is the **normalised** form — re-serialised from the parsed parts, with
+    the host lowercased — not the string as pasted. See the module docstring: what
+    is validated and what is stored must be the same string.
+    """
 
     url: str
 
@@ -120,18 +174,35 @@ def resolve_artifact_link(
     if not raw:
         return UnconfiguredArtifactLink()
 
+    if any(character in CONTROL_CHARACTERS for character in raw):
+        # Checked BEFORE parsing, on purpose. ``urlsplit`` would remove TAB, CR and
+        # LF and hand back something that passes every check below while the value
+        # the operator actually pasted still carries them.
+        raise _refuse("it contains a control character")
+
     try:
         parts = urlsplit(raw)
-    except ValueError as exc:  # pragma: no cover - urlsplit is very permissive
+    except ValueError as exc:  # pragma: no cover - urlsplit itself rarely raises
         raise _refuse("it is not a parseable URL") from exc
 
     if parts.scheme != "https":
         raise _refuse("the scheme is not https")
     if parts.username or parts.password:
         raise _refuse("it carries embedded credentials")
-    if parts.port is not None:
+
+    try:
+        port = parts.port
+    except ValueError as exc:
+        # ``urlsplit`` defers port validation to attribute access, and the
+        # ``ValueError`` it raises QUOTES the offending value. Catching it here is
+        # what keeps both contracts: a present-but-wrong value raises
+        # ``ArtifactLinkRefusal``, and no refusal repeats what was pasted.
+        raise _refuse("its port is not a number in the range 0-65535") from exc
+    if port is not None:
         raise _refuse("it names an explicit port")
-    if (parts.hostname or "").lower() not in PERMITTED_ARTIFACT_HOSTS:
+
+    host = (parts.hostname or "").lower()
+    if host not in PERMITTED_ARTIFACT_HOSTS:
         raise _refuse("the host is not a permitted artifact host")
     if not parts.path or parts.path == "/":
         raise _refuse("it names no artifact path")
@@ -142,7 +213,10 @@ def resolve_artifact_link(
         # verified.
         raise _refuse("it carries a query string or fragment")
 
-    return ConfiguredArtifactLink(url=raw)
+    # Re-serialised from the parts that were checked, never the string as pasted.
+    # Query and fragment are empty by the refusal above; the host is the lowercased
+    # one the allowlist matched, so what is stored cannot differ from what passed.
+    return ConfiguredArtifactLink(url=urlunsplit(("https", host, parts.path, "", "")))
 
 
 def embed_markup(*_args: object, **_kwargs: object) -> str:
