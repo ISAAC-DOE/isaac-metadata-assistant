@@ -1189,6 +1189,136 @@ jobs:
           echo "discard: $passed scenarios ran against the real engine, none skipped"
           rm -rf /tmp/isaac-pg-discard
 
+      # PERSISTENT INGESTION PROPOSALS SURVIVE POSTGRESQL — the half nothing measured.
+      #
+      # WHAT WAS MEASURED, AND WHY THIS STEP EXISTS. A proposal lives at
+      # `state["proposals"]` inside the experiment state document, and that document
+      # is upserted whole into `isaac_experiments.state`, so durability is very
+      # likely BY CONSTRUCTION. Until `apps/api/tests/test_proposal_durability.py`,
+      # "very likely" was the entire evidence: at `7ff8194`,
+      # `grep -ac proposal apps/api/tests/test_experiment_repository.py` returned 0
+      # (exit 1), and the durable-restart family in
+      # `test_run_rows_become_authoritative.py` (`_survives_a_restart`) had no
+      # proposal member — its one `proposal` occurrence is a loose docstring word in
+      # the TRANSCRIPT case, and the transcript path stores Unmapped Notes.
+      # Filesystem durability WAS proven (`test_ingestion_proposals.py` reads
+      # `experiment.json` off disk); the round trip through the durable repository
+      # was not.
+      #
+      # WHY AN INFERENCE IS NOT ENOUGH HERE, in this repository specifically:
+      # `CLAUDE.md` §11 records that the `changed_at_rev` defect was missed by a
+      # local implementer AND by an independent reviewer and was caught ONLY by CI
+      # against a real PostgreSQL, because the engine-gated suites skip everywhere
+      # else. That is this step's whole justification.
+      #
+      # FOUR SCENARIOS, and each answers something a fake driver cannot: the durable
+      # row matches the working copy after EVERY proposal act (not merely at the
+      # end); a pod restart reproduces the WHOLE serialised state, histories
+      # included; an entry this build cannot read survives verbatim and is still
+      # counted by the list route afterwards; and — the control — the round-trip
+      # assertion goes RED when the stored `proposals` key is dropped OUT OF BAND
+      # through a legal policy-passing statement, and green again once the document
+      # is restored. A control suite that can only go green is not evidence.
+      #
+      # TEN FURTHER TESTS IN THAT FILE NEED NO ENGINE and run in the ordinary `test`
+      # job too: the six negative controls over the comparison every durable claim
+      # here rests on, plus the vacuity check, the checkpoint-plumbing rehearsal, a
+      # pure `WriteStatementPolicy` check of this file's three SQL statements, and a
+      # mutation control proving the post-restart hydration guard actually fires.
+      # They run HERE as well, against the same throwaway container, which is why the
+      # expected count below is 14 rather than 4.
+      #
+      # ONE PYTEST FILE, BY PATH, for the parity step's stated reason: running the
+      # whole backend suite with `PGHOST` set would silently move dozens of tests off
+      # the filesystem repository they are written for.
+      #
+      # THE TWO VARIABLES, AND ONLY ONE OF THEM DOES ANYTHING IN THIS STEP.
+      #
+      #   * `ISAAC_RUN_REAL_ENGINE_PARITY=1` is CONSENT TO CONNECT, and it is what
+      #     actually admits this file to the engine: `_probe_engine` checks it first
+      #     and unconditionally, and without it every `@real_engine` test skips
+      #     having opened nothing. This file WRITES, so that gate is load-bearing.
+      #   * `ISAAC_REQUIRE_REAL_ENGINE_PARITY=1` is INERT HERE, and is carried only
+      #     for parity with the two steps above. MEASURED, not reasoned:
+      #     `inspect.getsource(test_run_row_parity._probe_engine)` contains neither
+      #     `REQUIRE_ENV` nor the variable's literal name, so the gate that admits
+      #     this file to the engine never consults it. Every reader of the variable
+      #     lives in `test_run_row_parity.py` (the guard test, plus one probe case
+      #     asserting that REQUIRE without the opt-in is NOT consent) and in
+      #     `test_no_ambient_database.py`, which only pops it from an env dict —
+      #     and this step collects NEITHER file, because each real-engine suite runs
+      #     as its own one-file-by-path invocation. Setting it here therefore neither
+      #     arms nor disarms anything; it is kept so that an operator changing the
+      #     real-engine configuration finds the same pair on all three steps rather
+      #     than a silent exception on one.
+      #
+      # SO THE ANTI-SILENT-SKIP GUARD FOR THIS FILE IS THE SHELL CHECK BELOW, AND
+      # NOTHING ELSE. That is stated flatly because the near-miss reads as true: the
+      # parity suite's in-file guard turns an unreachable engine into a failure, but
+      # it does that in the PARITY step, over the parity file. Between an absent
+      # engine and a silent green here there is exactly one thing, and it is the
+      # `skipped` comparison twenty lines down. The file deliberately carries no
+      # in-file guard of its own — a second one would make two numbers describe one
+      # suite, which is the mistake the parity step's own comments warn about.
+      #
+      # NO HOSTED DATABASE IS INVOLVED. This is the same throwaway service container
+      # every other step in this job uses, and no migration is applied by this step.
+      - name: Prove ingestion proposals survive the durable round trip
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-proposals
+          ISAAC_RUN_REAL_ENGINE_PARITY: "1"
+          ISAAC_REQUIRE_REAL_ENGINE_PARITY: "1"
+        run: |
+          set -euo pipefail
+          pytest apps/api/tests/test_proposal_durability.py -q -rs \
+            | tee /tmp/proposals.log
+          # A SKIP IS NOT A PASS, and pytest exits 0 on a skipped test. The four
+          # `@real_engine` scenarios are the only reason this step exists, and they
+          # skip silently on any environment the gate refuses — so a non-zero skip
+          # count here means the engine was not reached and nothing this step claims
+          # was measured. That is a red build, not a green one.
+          #
+          # `| tail -1` ON BOTH CAPTURES, deliberately. `grep -Eo` is unanchored, so a
+          # stray "2 passed" inside a warning line yields a TWO-LINE capture and an
+          # unequal comparison. That is fail-closed — a false RED, never a false green
+          # — but a false red whose message reads as gibberish, so the last match (the
+          # summary line pytest prints last) is the one taken. Measured over nine
+          # cases against a transcription of this block: a stray count BEFORE the
+          # summary now passes correctly, and a stray count AFTER it still fails
+          # closed — so `tail -1` removes a false RED and introduces no false green
+          # in either direction. It is applied only to this step's captures; the
+          # parity and discard steps above are not this slice's to edit.
+          skipped=$(grep -Eo '[0-9]+ skipped' /tmp/proposals.log | grep -Eo '^[0-9]+' | tail -1 || true)
+          [ -z "$skipped" ] || {
+            echo "::error::$skipped proposal-durability test(s) SKIPPED against a real engine."
+            echo "::error::A skipped durability proof is not a passing one."
+            exit 1; }
+          # ...AND THE CONVERSE. A skip guard alone cannot see a DELETED scenario:
+          # all four real-engine tests could be removed tomorrow and this step would
+          # still print "none skipped" and pass green. The number is an EQUALITY
+          # rather than a floor, for the reason the parity step above records at
+          # length — a floor drifts the moment a scenario is added without bumping
+          # it, which is exactly how that step's 20-versus-28 happened.
+          #
+          # 14 = 10 that need no engine + 4 that do. If you are reading this
+          # because the step failed after you added or removed a test, change the
+          # number here in the same commit and say so in the PR.
+          #
+          # 13 -> 14: independent review found the post-restart hydration guard had
+          # been dropped (`ws.load_experiment` HYDRATES ON A MISS, so a later
+          # `is not None` passes whether or not `hydrate()` restored anything). The
+          # guard is back, and one test was added to prove it FIRES — measured, not
+          # read: both its arms drive the helper red, and it runs without an engine.
+          expected_scenarios=14
+          passed=$(grep -Eo '[0-9]+ passed' /tmp/proposals.log | grep -Eo '^[0-9]+' | tail -1 || echo 0)
+          [ "$passed" = "$expected_scenarios" ] || {
+            echo "::error::$passed proposal-durability test(s) passed; exactly $expected_scenarios are expected."
+            echo "::error::Fewer means the proof lost coverage. More means a scenario was added"
+            echo "::error::without updating \`expected_scenarios\` in this step. Neither is silent."
+            exit 1; }
+          echo "proposal durability: $passed scenarios ran against the real engine, none skipped"
+          rm -rf /tmp/isaac-pg-proposals
+
       # THE SUBMISSION LIFECYCLE, END TO END, AGAINST THE REAL ENGINE.
       #
       # WHAT ONLY A REAL POSTGRESQL CAN ANSWER, and why the unit suite is not enough
