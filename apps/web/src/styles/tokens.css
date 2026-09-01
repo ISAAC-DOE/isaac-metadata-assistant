@@ -6,6 +6,34 @@
  * Exception: --advisory-text / --needsyou-text were darkened in P23C for
  * WCAG AA contrast (see inline comments below); the handoff doc still has
  * the original #9a6f24 and should be reconciled with this value.
+ *
+ * Exception (A3, this change): --text-tertiary and --missing-text were darkened
+ * from #78838f, --text-quaternary #9aa4af was RETIRED, and --text-inactive was
+ * added. The handoff doc still has the originals and should be reconciled.
+ *
+ *   MEASURED BEFORE, on the five neutral grounds this app paints text on
+ *   (#ffffff, #fbfcfd, #f4f6f9, #f6f8fa, #eef2f6):
+ *     --text-tertiary   #78838f  3.86 / 3.76 / 3.56 / 3.62 / 3.43  — fails AA
+ *     --text-quaternary #9aa4af  2.53 / 2.46 / 2.34 / 2.38 / 2.25  — fails AA
+ *                                                       AND the 3:1 non-text bar
+ *     --missing-text    #78838f  3.62 on its own --missing-bg      — fails AA
+ *   MEASURED AFTER:
+ *     --text-tertiary   #646e79  5.19 / 5.05 / 4.79 / 4.87 / 4.61
+ *     --missing-text    #646e79  4.87 on --missing-bg
+ *
+ *   WHY THE TWO TOKENS DID NOT BOTH SURVIVE AS INK. There is no room below
+ *   --text-muted (5.27:1 on the darkest ground) for TWO compliant steps: the
+ *   lightest value clearing 4.5:1 everywhere is #646e79, and the next one down
+ *   would be #636d78 — one 8-bit step away and indistinguishable. Keeping both
+ *   names would have shipped a hierarchy the eye cannot see, so the 76 uses of
+ *   --text-quaternary were re-pointed by CLASS instead: 74 informational ones
+ *   to --text-tertiary, and the 2 genuinely disabled controls to the new
+ *   --text-inactive, which keeps the old #9aa4af because 1.4.3 exempts an
+ *   inactive control and nothing else was ever entitled to that value.
+ *
+ *   HUE IS PRESERVED. #646e79 is hue 211.43 deg — the hue --text-muted and the
+ *   retired --text-quaternary already carried, and 0.13 deg from the discarded
+ *   --text-tertiary's 211.30 deg. The ramp did not change colour, only weight.
  */
 :root {
   /* neutrals — cool */
@@ -21,17 +49,35 @@
   --border-hair:     #f0f3f6;  /* row separators (also #f1f4f7 / #f2f5f8) */
   --border-input:    #e0e6ec;
 
-  /* text */
-  --text-heading:    #111a24;
-  --text-primary:    #1b2430;
-  --text-strong:     #33404e;
-  --text-secondary:  #46515f;
-  --text-muted:      #5b6570;  /* also #55606c */
-  --text-slate:      #5b6b7d;  /* coverage + mono eyebrows/labels */
-  --text-tertiary:   #78838f;
-  --text-quaternary: #9aa4af;
-  --text-faint:      #aab2bb;
-  --text-disabled:   #c0c8d0;  /* disabled chevrons/icons */
+  /*
+   * TEXT — two groups, and the split is the contract.
+   *
+   * INFORMATIONAL INK. Every token in the first group clears WCAG AA 4.5:1 on
+   * every neutral ground this application paints text on, down to the darkest
+   * one measured in the stylesheets (`--cover-bg` #eef2f6, which
+   * `.guided-owner-label` really does sit on). Any of them may carry meaning.
+   *
+   * NON-INFORMATIONAL INK. The second group is exempt from 1.4.3 because of
+   * what it is used FOR, not because the debt was blessed: an inactive control,
+   * or an `aria-hidden` mark whose meaning is carried by adjacent text. None of
+   * them may ever be given information to say. `palette-contrast.test.tsx`
+   * enforces both halves — the ratios AND the usage restriction — so the
+   * distinction cannot decay back into "a lighter grey".
+   */
+
+  /* text — informational ink (>= 4.5:1 on every ground; may carry meaning) */
+  --text-heading:    #111a24;  /* 15.59:1 on the darkest neutral ground */
+  --text-primary:    #1b2430;  /* 13.91:1 */
+  --text-strong:     #33404e;  /*  9.41:1 */
+  --text-secondary:  #46515f;  /*  7.17:1 — also #55606c on --text-muted */
+  --text-muted:      #5b6570;  /*  5.27:1 */
+  --text-slate:      #5b6b7d;  /*  4.86:1 — coverage + mono eyebrows/labels */
+  --text-tertiary:   #646e79;  /*  4.61:1 — A3: was #78838f (3.43:1). See below. */
+
+  /* text — non-informational ink (NEVER for information) */
+  --text-inactive:   #9aa4af;  /* inactive controls only — WCAG 1.4.3 exception */
+  --text-faint:      #aab2bb;  /* aria-hidden decorative marks only */
+  --text-disabled:   #c0c8d0;  /* disabled chevrons/icons — see A3 note, still open */
 
   /* action — primary blue */
   --action:          #2c6ab0;
@@ -80,7 +126,7 @@
   --verified-text:   #2f7d78;  --verified-bg:   #e6f1f0;  --verified-border:   #c4e0dd; /* teal */
   --confirmed-text:  #6f5c3f;  --confirmed-bg:  #f5f1ea;  --confirmed-border:  #e6ddcd; /* warm tan = human motif */
   --inferred-text:   #5b6b7d;  --inferred-bg:   #eef1f5;  --inferred-border:   #d5dde5; /* slate */
-  --missing-text:    #78838f;  --missing-bg:    #f6f8fa;  --missing-border:    #c3ccd5; /* DASHED border */
+  --missing-text:    #646e79;  --missing-bg:    #f6f8fa;  --missing-border:    #c3ccd5; /* DASHED border; text darkened in A3 from #78838f, which was 3.62:1 on its own bg */
   --needsyou-text:   #8a6420;  --needsyou-bg:   #f8efdd;  --needsyou-border:   #ecd8ac; /* amber; text darkened P23C for WCAG AA (was #9a6f24, ~3.93:1) */
 
   /* evidence source-type icon strokes (chip bg #f6f8fa, border #e4e9ef, text #55606c) */

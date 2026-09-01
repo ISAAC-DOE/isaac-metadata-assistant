@@ -190,7 +190,12 @@ a:hover {
 .btn-action:disabled {
   background: var(--border-faint);
   border-color: var(--border);
-  color: var(--text-quaternary);
+  /* `--text-inactive` #9aa4af, the value this used to reach through
+     `--text-quaternary`. 2.25:1 on this fill, and it stays: WCAG 1.4.3 exempts
+     an inactive control, and `cursor: not-allowed` plus the `:disabled` state
+     is exactly what the exception describes. It is now the ONLY class of use
+     that value is entitled to. */
+  color: var(--text-inactive);
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
@@ -201,15 +206,28 @@ a:hover {
   border-color: var(--border-strong);
   color: var(--text-secondary);
 }
-/* Secondary: border/background shift on hover; a clear, slightly deeper tint when pressed. */
+/*
+ * Secondary: border/background shift on hover; a clear, slightly deeper tint
+ * when pressed.
+ *
+ * THE TWO STEPS HAD TO MOVE TOGETHER, and that is the whole reason this rule is
+ * touched. Hover reached `--text-quaternary` and active reached
+ * `--text-tertiary` — two different greys, one press step apart. Retiring
+ * `--text-quaternary` onto `--text-tertiary` would have made hover and active
+ * the SAME colour and silently deleted the press feedback, so active moves one
+ * rung further down the same ramp instead. Measured on the hover fill
+ * `--border-faint` #eef2f6: rest `--border-strong` 1.25:1, hover 4.61:1,
+ * active 7.17:1 — still an escalation, and both states now clear the 3:1 that
+ * 1.4.11 asks of a border that carries state.
+ */
 .btn-secondary:hover {
-  border-color: var(--text-quaternary);
+  border-color: var(--text-tertiary);
   color: var(--text-strong);
   background: var(--border-faint);
 }
 .btn-secondary:active {
   background: var(--screen-base);
-  border-color: var(--text-tertiary);
+  border-color: var(--text-secondary);
 }
 
 /* Restrained destructive — the Reset Demo trigger. Fail accent on text/border
