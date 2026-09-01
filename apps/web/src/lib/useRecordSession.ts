@@ -46,6 +46,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { UNREADABLE_BLOCKER_LABEL, isAnswerablePendingItem } from './adapt';
 import { useRecordSync } from './useRecordSync';
+import { useChangeFeed } from './useChangeFeed';
+import { summariseChanges, type RecordChangeSummary } from './recordChanges';
 import {
   invalidateStaleProposals,
   loadSession,
@@ -59,6 +61,7 @@ import type {
   WorkflowStep,
 } from './assistantAgent';
 import type {
+  ApiChangeEntry,
   ApiEvidenceClassification,
   ApiExperimentDetail,
   ApiPendingItem,
@@ -130,6 +133,46 @@ export interface UseRecordSessionOptions {
    * raise an input-preserving "changed elsewhere" banner (the completion form).
    */
   onChange?: (detail: ApiExperimentDetail) => void;
+  /**
+   * WHICH PARTS OF THE RECORD MOVED — the bounded change feed's signal, and a
+   * DIFFERENT question from `onChange` above.
+   *
+   * `onChange` answers "the record moved, here is the whole fresh detail" and is
+   * what a screen refetches its bundle from. This answers "these runs and these
+   * suggestions moved", without composing a draft or fetching the record at all,
+   * so a screen can decline to refetch when nothing it renders is affected.
+   *
+   * IT IS NEVER CALLED WITH NOTHING. A poll that finds no news makes no call, so a
+   * surface cannot mistake a quiet poll for a change.
+   *
+   * THE SUMMARY CARRIES IDS AND KINDS AND NO CONTENT. It is not a record, not a
+   * proposal, and not a substitute for reading either from the route that owns it.
+   *
+   * ── WHERE THE CALLER MOUNTS THIS HOOK MATTERS, AND IT IS NOT OBVIOUS. ───────────
+   *
+   * The feed cursor and `activity` live in THIS hook, so they live exactly as long as
+   * the component that calls it. Measured across the four record screens:
+   *
+   *   · `RecordWorkbench`, `EvidenceExplorer` — the hook is in the OUTER routed
+   *     component, and their refresh is `bundle.reloadSilent()`, which never unmounts
+   *     it. The cursor persists across a refresh.
+   *   · `ExportReadiness` — the hook is in the INNER `LoadedExport`, but its refresh
+   *     is `runFetch(false)`, which leaves `load.name === 'data'`; the component is
+   *     re-rendered in place, NOT remounted, so the cursor persists here too.
+   *   · `GuidedCompletion` — the hook is in the INNER `LoadedCompletion`, and its
+   *     `reload` is `useFetch`'s, which sets `{status: 'loading'}` and therefore
+   *     UNMOUNTS it. The cursor and `activity` are destroyed and the next poll is a
+   *     full cursorless resync.
+   *
+   * THE LIVE CONSEQUENCE, stated because it is a trap rather than a curiosity: a
+   * screen that wires `onEntitiesChanged` to a refresh path which unmounts the owner
+   * gets a SILENTLY DEAD notice — the callback refreshes, the remount discards
+   * `activity`, the resync filters every entry against the new revision, and nothing
+   * is ever shown. `GuidedCompletion` is the only screen in that position and it
+   * deliberately passes NO handler (see its own note); anything added later must check
+   * which side of this line it is on before wiring one.
+   */
+  onEntitiesChanged?: (summary: RecordChangeSummary) => void;
   /** When false the hook is fully inert (no poll, no fetch). Default true. */
   enabled?: boolean;
 }
@@ -166,6 +209,29 @@ export interface RecordSession {
   refresh: () => void;
   /** Pass-through to the poller's imperative immediate check. */
   checkNow: () => void;
+  /**
+   * THE OUTSTANDING COALESCED SUMMARY of what has moved since this view last
+   * adopted a revision, or `null` when nothing is outstanding.
+   *
+   * PRESENTATION STATE, NOT A CACHE, and the distinction is the reason this hook
+   * can hold it at all: it is a handful of ids and kinds describing what is now
+   * STALE. The entities themselves continue to live in exactly one place — the
+   * screen's own bundle — and nothing renders a value from this.
+   *
+   * CLEARED BY EXACTLY ONE THING: the view catching up, i.e. `recordRev` reaching the
+   * `highestRev` the summary reported. (Also on a record id change, where it belongs
+   * to a different record.) So a reader who acts on the notice sees it go away and one
+   * who does not keeps seeing it.
+   *
+   * ~~"and by `refresh()`"~~ — `refresh()` used to clear it unconditionally, and that
+   * was a permanent loss of a still-true notice: the feed cursor has already advanced
+   * past those entries, so nothing re-reports them. See `refresh()` for the full
+   * reasoning; this sentence is corrected in place because it is the description a
+   * caller reads.
+   */
+  activity: RecordChangeSummary | null;
+  /** The CHANGE FEED poller's degraded state — separate from `syncDegraded`. */
+  feedDegraded: boolean;
 }
 
 function toWorkflowSteps(detail: ApiExperimentDetail): WorkflowStep[] {
@@ -266,7 +332,7 @@ function toPendingItems(pending: ApiPendingItem[] | undefined): PendingItem[] {
 
 export function useRecordSession(
   id: string,
-  { detail, onChange, enabled = true }: UseRecordSessionOptions,
+  { detail, onChange, onEntitiesChanged, enabled = true }: UseRecordSessionOptions,
 ): RecordSession {
   const version = detail?.version;
   // Derived from `version`, NOT read from `detail.rev` independently, so the rev
@@ -280,6 +346,16 @@ export function useRecordSession(
   const [contextDegraded, setContextDegraded] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
+
+  /*
+   * THE OUTSTANDING "SOMETHING MOVED" SUMMARY.
+   *
+   * IT IS NOT A SECOND STORE, and the test that would fail if it became one is
+   * explicit about it: this holds ids and kinds, never an entity. Nothing renders a
+   * field, a value or a proposal from it, and the screen's bundle stays the single
+   * source of everything the record actually contains.
+   */
+  const [activity, setActivity] = useState<RecordChangeSummary | null>(null);
 
   // The P29.1 session snapshot. Re-read imperatively after a change/refresh so a
   // proposal marked stale by a revision change is immediately visible.
@@ -295,10 +371,18 @@ export function useRecordSession(
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  // Same, for the feed's callback: a screen passing an inline arrow must not
+  // re-subscribe the poller (and so restart its cadence) on every render.
+  const onEntitiesChangedRef = useRef(onEntitiesChanged);
+  onEntitiesChangedRef.current = onEntitiesChanged;
+
   // Reload the session snapshot whenever the record changes.
   useEffect(() => {
     setSession(loadSession(id));
     setConflict(false);
+    // A summary belongs to ONE record. Carrying it across would tell a reader that
+    // the record they just opened had changed elsewhere, which would be false.
+    setActivity(null);
   }, [id]);
 
   // Fetch the AgentContext inputs (pending + evidence classification). Keyed on
@@ -336,6 +420,24 @@ export function useRecordSession(
     setConflict(false);
   }, [version]);
 
+  /*
+   * THE NOTICE CLEARS ITSELF ONCE THE VIEW HAS CAUGHT UP TO WHAT IT WAS ABOUT.
+   *
+   * Compared against `highestRev` — the furthest position the summary reported —
+   * rather than simply cleared on any `version` change, and the difference is not
+   * cosmetic. A refetch that lands on a revision still BELOW the change would clear a
+   * notice that is still true, telling a reader they are current when they are not.
+   *
+   * It is also what stops the notice being sticky on the path that deliberately does
+   * NOT refetch: a proposal-only summary leaves the record's rev where it was, so the
+   * notice correctly stays until the reader acts on it — and their Refresh moves the
+   * rev, which clears it here without any screen having to remember to.
+   */
+  useEffect(() => {
+    if (!activity) return;
+    if (recordRev !== undefined && recordRev >= activity.highestRev) setActivity(null);
+  }, [recordRev, activity]);
+
   // The ONE poller for this record. On a change signal, invalidate any staged
   // proposal grounded in the OLD revision, surface the stale flag, raise
   // `conflict`, then delegate to the screen's handler (refetch or banner).
@@ -358,8 +460,69 @@ export function useRecordSession(
     enabled,
   });
 
+  /*
+   * THE ONE CHANGE-FEED POLLER FOR THIS RECORD, mounted here for the same reason
+   * `useRecordSync` is: a per-screen poller means four screens agreeing to run one
+   * each and nothing enforcing it. This hook is already the single owner of
+   * record-scoped polling, so the feed joins it rather than starting a second
+   * ownership story.
+   *
+   * IT IS GATED ON `active`, WHICH IS `enabled && !!id && !!version`. So it does not
+   * poll before the screen's bundle has arrived (no target yet), does not poll on a
+   * screen that has disabled the session, and stops on unmount — and the hook itself
+   * additionally pauses while the tab is hidden and resumes from the cursor it holds.
+   *
+   * WHAT IT MAY DO WITH WHAT IT LEARNS, exhaustively: raise `activity` for the
+   * notice, and call the screen's `onEntitiesChanged` so the screen can refetch its
+   * own canonical read. IT MAY NOT WRITE, and no path from here reaches a mutation
+   * — which is what makes "the client's own save cannot trigger a further save"
+   * structural rather than a promise about timing.
+   *
+   * IT DELIBERATELY DOES NOT CALL `onChange`. That callback carries a fresh
+   * `ApiExperimentDetail` and is the record poller's to fire; the feed never fetches
+   * the record, so it has no detail to pass and must not pretend otherwise.
+   */
+  const handleFeed = useCallback(
+    (entries: ApiChangeEntry[]) => {
+      // Measured against the revision THIS VIEW holds, which is what makes a
+      // scientist's own save the ordinary filtered case rather than a special one.
+      const summary = summariseChanges(entries, recordRev);
+      if (!summary) return; // nothing newer than what is on screen — say nothing
+      setActivity(summary);
+      onEntitiesChangedRef.current?.(summary);
+    },
+    [recordRev],
+  );
+
+  const { degraded: feedDegraded } = useChangeFeed(id, {
+    onChanges: handleFeed,
+    enabled: active,
+  });
+
   const refresh = useCallback(() => {
     setConflict(false);
+    /*
+     * THE NOTICE IS NOT CLEARED HERE, AND IT USED TO BE — unconditionally.
+     *
+     * The wording that stood here read: "The reader has acted on the notice. It is
+     * cleared here rather than left for the version to clear, because a refresh that
+     * finds nothing new would otherwise leave a notice standing about a change
+     * already taken on board." Both halves are wrong, and the second contradicts the
+     * `highestRev` effect above, which is the published reasoning for exactly this.
+     *
+     * A refresh that finds nothing new has NOT taken the change on board. `recordRev`
+     * is then unchanged and still below `activity.highestRev`, so the notice is STILL
+     * TRUE — and clearing it tells a reader they are current when they are not, which
+     * is the one thing that effect exists to prevent. Clearing it here made the loss
+     * PERMANENT rather than momentary: the feed cursor has already advanced past
+     * those entries, so nothing will report them again, and the only route back is a
+     * cursorless resync this hook never asks for.
+     *
+     * So the clear is left entirely to the `highestRev` effect, which fires the
+     * instant the view actually catches up — and it does catch up on this path,
+     * because `refresh()`'s only caller (`RecordWorkbench.onAgentRefresh`) pairs it
+     * with `bundle.reloadSilent()`, whose fresh `detail` advances `version`.
+     */
     setSession(loadSession(id));
     setRefreshNonce((n) => n + 1);
   }, [id]);
@@ -402,5 +565,7 @@ export function useRecordSession(
     conflict,
     refresh,
     checkNow,
+    activity,
+    feedDegraded,
   };
 }

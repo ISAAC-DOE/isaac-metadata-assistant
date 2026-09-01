@@ -16,7 +16,7 @@ in neither, and neither claims exactly-once delivery.
 Everything after that is a property the brief required, one section each, with the
 limitation stated honestly rather than the guarantee stated broadly:
 
-  1. naming and the three published properties
+  1. naming and the four published properties
   2. total order, with a tie-break that is doing real work
   3. the cursor is opaque, versioned, and refused rather than guessed at
   4. bounds are CLAMPED and the clamp is reported
@@ -125,6 +125,7 @@ def test_the_published_description_calls_it_a_state_feed_and_never_an_event_log(
 @pytest.mark.parametrize(
     "claim",
     [
+        pytest.param(cf.SEQUENCE_PROOF, id="sequence-proof"),
         pytest.param(cf.GAP_GUARANTEE, id="gap"),
         pytest.param(cf.DELETION_LIMITATION, id="deletion"),
         pytest.param(cf.EXPIRY_PROPERTY, id="expiry"),
@@ -134,8 +135,13 @@ def test_each_published_property_reaches_the_served_document_verbatim(client, cl
     """ONE definition, quoted — never a paraphrase in the route and a constant here.
 
     The same posture as ``dependencies.MISSING_REASON``: a claim written twice is a
-    claim free to drift, and these three are exactly the claims a client would build
+    claim free to drift, and these four are exactly the claims a client would build
     the wrong retry logic on top of.
+
+    ``SEQUENCE_PROOF`` JOINED THE LIST WITH THE ORDERING FIX, and it is published
+    rather than kept as an internal comment for the reason the other three are: it is
+    the argument a client's own correctness rests on, and a client that cannot read it
+    has to take "no entity is skipped" on trust.
     """
     assert claim in _description(client)
 
@@ -154,36 +160,115 @@ def test_the_gap_guarantee_names_its_own_failure_mode_rather_than_promising_none
     ``test_a_same_second_write_behind_the_cursor_is_a_measured_gap``, which
     demonstrates the loss rather than asserting prose about it.
     """
-    # ── RE-PINNED 2026-08-30, AND THIS IS THE SECOND TIME THIS ASSERTION HAS BEEN
-    # THE THING KEEPING A FALSE SENTENCE IN PLACE ─────────────────────────────────
+    # ── RE-PINNED AGAIN WITH THE SEQUENCE FIX, AND THE HISTORY IS THE POINT ───────
     #
-    # It first required "never moves backwards", which was false. It was then changed
-    # to require "STRICTLY ADVANCES", which an independent review ALSO measured false
-    # — reproduced with no clock manipulation at all: an entity's `updated_utc`
-    # advanced strictly, INTO the second the cursor already sat in, and the
-    # `kind`/`entity_id` tie-break still placed its key behind the cursor, so it was
-    # never reported. The stamp advanced; the entity was skipped.
-    #
-    # Two wrong provisos in a row is the signal that the sentence was being written
-    # about the wrong thing. The guarantee is a property of the KEY, not of the clock:
-    # an entity is reported exactly when its key advances strictly past the cursor.
-    # That one statement subsumes every mode — stamp unchanged, stamp advanced within
-    # the cursor's second, and the clock stepping backwards — so this test now pins
-    # THAT, and explicitly refuses the clock-only framing that failed twice.
+    # Three wordings of this sentence were measured false in turn: "never moves
+    # backwards", then "STRICTLY ADVANCES" (reproduced false with no clock
+    # manipulation at all — a stamp advancing INTO the cursor's own second, with the
+    # tie-break placing the entity behind), and then the honest third wording, which
+    # was true but which disclosed a real defect rather than describing a working
+    # feed. THE DEFECT IS NOW FIXED IN THE KEY rather than in the sentence, and this
+    # test's job changes with it: it pins that the guarantee is stated about the KEY,
+    # that the closed gap is RECORDED rather than deleted, and that what is still not
+    # promised is still named.
     assert "SORT KEY advances strictly past" in cf.GAP_GUARANTEE
-    assert "not claimed to be" in cf.GAP_GUARANTEE
-    # The CAUSE is still named, because a rule with no mechanism beside it reads as
-    # arbitrary and is the half a later tidy-up drops.
+    # The mechanism, because a rule with no mechanism beside it reads as arbitrary and
+    # is the half a later tidy-up drops.
+    assert "durable strictly-increasing SEQUENCE POSITION" in cf.GAP_GUARANTEE
+    assert "`(changed_at_rev, kind, entity_id)`" in cf.GAP_GUARANTEE
+    # THE CLOSED GAP IS KEPT AS A RECORDED CORRECTION. A disclosure deleted the moment
+    # it stopped applying leaves a reader unable to tell a fixed defect from one that
+    # was never there — and this file has three false wordings behind it that only
+    # make sense if the reader can see them.
+    assert "SAME-SECOND GAP THIS SENTENCE USED TO DISCLOSE IS CLOSED" in cf.GAP_GUARANTEE
     assert "WHOLE SECONDS" in cf.GAP_GUARANTEE
-    assert "kind`/`entity_id` tie-break" in cf.GAP_GUARANTEE
-    # AND THE FALSE FRAMING IS REFUSED BY NAME, so it cannot come back a third time.
-    assert "does NOT cover that second case" in cf.GAP_GUARANTEE
     assert "measured false" in cf.GAP_GUARANTEE
-    # The single-pod argument is offered as the REASON the exposure is small, and is
-    # explicitly refused as a proof that it is zero. That distinction is the whole
-    # point of the sentence and is the thing a later edit would smooth away.
-    assert "not a proof that it is zero" in cf.GAP_GUARANTEE
+    # AND THE FIX IS NAMED AS A KEY CHANGE, NOT A CLOCK CHANGE. A future reader who
+    # thought the remedy was a sub-second timestamp would be re-opening the decision
+    # this slice deliberately refused.
+    assert "fixed by changing the KEY, not the clock" in cf.GAP_GUARANTEE
+    # WHAT IS STILL NOT PROMISED, each named rather than implied by silence.
+    assert "not exactly-once delivery" in cf.GAP_GUARANTEE
+    assert "sits at 0" in cf.GAP_GUARANTEE
+    assert "starts a fresh sequence at 0" in cf.GAP_GUARANTEE
     assert "no cursor at all" in cf.GAP_GUARANTEE
+
+
+def test_the_ordering_proof_is_written_out_rather_than_asserted():
+    """The ARGUMENT is published, not just the conclusion.
+
+    Three successive wordings of `GAP_GUARANTEE` were measured false, and none of them
+    failed because someone reasoned badly — they failed because nobody had written the
+    reasoning down where a reader could check it. So the proof is a published constant
+    with the two steps that carry it, and this test pins both: that the cursor's
+    position is bounded above by the record's rev, and that a later change is written
+    at a strictly greater one. Drop either step and the conclusion does not follow.
+    """
+    assert "SEQUENCE POSITION, not a clock" in cf.SEQUENCE_PROOF
+    # Step 1: the cursor cannot name a position above the record's own rev.
+    assert "at most the record's rev at the moment that cursor was issued" in cf.SEQUENCE_PROOF
+    # Step 2: a later change is written strictly above it.
+    assert "strictly greater than the rev on disk when it ran" in cf.SEQUENCE_PROOF
+    # The conclusion, and the part that is the whole difference from the old key: the
+    # tie-break cannot rescue or ruin it, because the first component already decided.
+    assert "ON THE FIRST COMPONENT ALONE" in cf.SEQUENCE_PROOF
+    assert "regardless of how the kind and entity-id tie-break falls" in cf.SEQUENCE_PROOF
+
+
+def test_the_ordering_proof_PUBLISHES_THE_SCOPE_IT_HOLDS_IN(client):
+    """A PROOF WITHOUT ITS SCOPE IS AN OVERCLAIM, and this one shipped without it.
+
+    All three of the proof's steps read the local workspace FILE rather than the
+    durable row — STEP ONE's clamp through `_persisted_run_state` /
+    `_persisted_proposal_state`, STEP THREE's `R_new` through
+    `_persisted_sig_and_rev` — so what is proven is a property of one process reading
+    one filesystem. The wording this replaced had said so, in a caveat that read "it
+    is small because this application runs as a single pod reading one clock — that is
+    the REASON it is small, not a proof that it is zero"; **that caveat was DELETED
+    when the key stopped being a clock, and the text that replaced it published the
+    three steps as an unqualified proof.** `grep` for `replica`, `single pod`,
+    `cross-process` or `one process` in this module and its tests returned nothing.
+
+    So this test pins the scope rather than the conclusion, in BOTH directions, because
+    each direction has its own way of going wrong:
+
+      · the scope is NAMED — one process, one filesystem, the deployment as documented;
+      · the mitigation that DOES exist at the shared layer is named too, so the
+        scoping is not read as "and nothing guards the multi-process case": the durable
+        write is a compare-and-swap that refuses a stale writer outright;
+      · the replica count is NOT asserted, because this repository does not record it
+        (`experiment_repository.py` says so in the same words about the same statement);
+      · and what neither closes is named — a process whose file is behind the row
+        serves that record from that file, which is staleness of the READ COPY and not
+        of the order.
+
+    It is asserted on the SERVED document as well as the constant, because the scope
+    only does its job where a client can read it.
+    """
+    served = _description(client)
+    for phrase in [
+        "ONE PROCESS READING ONE WORKSPACE FILESYSTEM",
+        "the deployment as documented",
+        "COMPARE-AND-SWAP",
+        "staleness of the READ COPY",
+    ]:
+        assert phrase in cf.SEQUENCE_PROOF, phrase
+        assert phrase in served, f"{phrase} does not reach the wire"
+
+    # THE DELETED CAVEAT IS RECORDED AS A DELETION, not silently reinstated — the same
+    # posture `GAP_GUARANTEE` takes about the gap it used to disclose.
+    assert "That caveat was deleted when the key stopped being a clock" in cf.SEQUENCE_PROOF
+    assert "rather than a proof that it is zero" in cf.SEQUENCE_PROOF
+
+    # AND THE OTHER DIRECTION: no replica count is claimed. The overclaim available
+    # here is "one pod, therefore no problem", and the honest form is that the number
+    # is unrecorded while the scope is stated anyway.
+    assert "does not record how many replicas" in cf.SEQUENCE_PROOF
+    assert "nothing here claims it runs more than" in cf.SEQUENCE_PROOF
+    # THE OLD "SINGLE POD" CLAIM SURVIVES EXACTLY ONCE, AS A QUOTATION. It is the
+    # deleted caveat being shown, not re-asserted — and pinning the count is what keeps
+    # a future edit from reintroducing it as this text's own claim.
+    assert cf.SEQUENCE_PROOF.count("runs as one process reading one clock") == 1
 
 
 def test_the_deletion_limitation_is_stated_as_a_limitation():
@@ -218,25 +303,61 @@ def test_expiry_is_published_as_a_property_and_no_code_handles_it():
 # =============================================================================
 
 
-def test_the_order_is_updated_utc_then_kind_then_entity_id(client):
+def test_the_order_is_changed_at_rev_then_kind_then_entity_id(client):
+    """THE PUBLISHED ORDER, over the wire, and the leading component is on the wire.
+
+    This was `test_the_order_is_updated_utc_then_kind_then_entity_id` and it is renamed
+    rather than edited in place, because the change it is tracking is the whole slice:
+    the key's leading component stopped being a whole-second timestamp and became a
+    durable sequence position. `updated_utc` is still published — clients display it —
+    and it is asserted below to be exactly what it now is, which is NOT the order.
+    """
     exp_id = _with_runs(client, 6)
     changes = _feed(client, exp_id)["changes"]
-    keys = [(c["updated_utc"], c["kind"], c["entity_id"]) for c in changes]
+    keys = [(c["changed_at_rev"], c["kind"], c["entity_id"]) for c in changes]
     assert keys == sorted(keys)
 
 
-def test_the_tie_break_is_load_bearing_because_the_timestamps_are_equal(client):
+def test_updated_utc_is_still_published_and_is_no_longer_the_order(client):
+    """The field a "nothing reads it any more" tidy-up would delete.
+
+    It is on the wire for every entry, because clients display "last updated" and the
+    frontend's `ApiChangeEntry` names it. It is NOT the order, and the two halves are
+    asserted separately: the timestamps are all EQUAL here (one write, one second),
+    so an order that still led with them would be decided entirely by the tie-break —
+    which is the exact condition under which the old key lost changes.
+    """
+    exp_id = _with_runs(client, 6)
+    changes = _feed(client, exp_id)["changes"]
+    assert all(isinstance(c["updated_utc"], str) and c["updated_utc"] for c in changes)
+    assert len({c["updated_utc"] for c in changes}) == 1
+    # And the key does not contain it at all — asserted structurally rather than by
+    # inspecting the wire, because `ChangeEntry.key` is what `changes_page` compares.
+    exp = ws.load_experiment(exp_id)
+    entry = cf.collect(exp)[0]
+    assert entry.key == (entry.changed_at_rev, entry.kind, entry.entity_id)
+    assert entry.updated_utc not in entry.key
+
+
+def test_the_tie_break_is_load_bearing_because_the_sequence_positions_are_equal(client):
     """The precondition the tie-break exists for is MEASURED, not assumed.
 
-    `updated_utc` is `%Y-%m-%dT%H:%M:%SZ` — one-second resolution — and one
-    `save_versioned` stamps every changed run with one instant. If this assertion ever
-    fails, the ordering tests below stop proving what they claim: they would be
-    passing on a timestamp that happened to be unique rather than on the tie-break.
+    One `save_versioned` stamps every entity it changed with the SAME sequence
+    position — that is the design, since they changed in one write — so on a record
+    whose runs were created together the leading component is constant and
+    `(kind, entity_id)` is doing all of the ordering. If this assertion ever fails, the
+    ordering tests below stop proving what they claim: they would be passing on a
+    position that happened to be unique rather than on the tie-break.
+
+    THE SEQUENCE FIX DID NOT MAKE THE TIE-BREAK REDUNDANT, and that is worth stating
+    because it is the natural assumption. The two solve different failures: the
+    tie-break stops a page boundary reordering between two requests; the sequence stops
+    a CHANGE being invisible to a cursor. Removing either reintroduces its own defect.
     """
     exp_id = _with_runs(client, 8)
     changes = _feed(client, exp_id)["changes"]
-    stamps = {c["updated_utc"] for c in changes}
-    assert len(stamps) == 1, stamps
+    positions = {c["changed_at_rev"] for c in changes}
+    assert len(positions) == 1, positions
     # ...and the order is therefore entirely `(kind, entity_id)`.
     assert [c["kind"] for c in changes] == ["experiment"] + ["run"] * 8
     run_ids = [c["entity_id"] for c in changes if c["kind"] == "run"]
@@ -261,17 +382,18 @@ def test_the_order_does_not_depend_on_the_stored_list_order(client):
 
 
 class _NoTieBreak(cf.ChangeEntry):
-    """A `ChangeEntry` whose key is THE TIMESTAMP ALONE, padded to the same arity.
+    """A `ChangeEntry` whose key is THE SEQUENCE POSITION ALONE, padded to the arity.
 
-    This is the mutant: `(updated_utc, "", "")` keeps the tuple three components wide
-    so `encode_cursor` still works, while removing every component that distinguishes
-    two entities stamped in the same second. It is what `ChangeEntry.key` would be if
-    someone "simplified" the tie-break away, and the test below shows what that costs.
+    This is the mutant: `(changed_at_rev, "", "")` keeps the tuple three components
+    wide so `encode_cursor` still works, while removing every component that
+    distinguishes two entities stamped by the same write. It is what `ChangeEntry.key`
+    would be if someone "simplified" the tie-break away on the grounds that the
+    sequence had made it unnecessary, and the test below shows what that costs.
     """
 
     @property
-    def key(self) -> tuple[str, str, str]:
-        return (self.updated_utc, "", "")
+    def key(self) -> tuple[int, str, str]:
+        return (self.changed_at_rev, "", "")
 
 
 def _tie_break_removed(exp):
@@ -280,6 +402,7 @@ def _tie_break_removed(exp):
         yield _NoTieBreak(
             kind=e.kind,
             entity_id=e.entity_id,
+            changed_at_rev=e.changed_at_rev,
             updated_utc=e.updated_utc,
             rev=e.rev,
             generation=e.generation,
@@ -315,8 +438,8 @@ def test_removing_the_tie_break_loses_entities_at_a_page_boundary(client):
     exp = ws.load_experiment(_with_runs(client, 7))
     everything = {e.entity_id for e in cf.collect(exp)}
     assert len(everything) == 8  # the record plus seven runs
-    # The precondition the whole test rests on: one write, one second, one stamp.
-    assert len({e.updated_utc for e in cf.collect(exp)}) == 1
+    # The precondition the whole test rests on: one write, one sequence position.
+    assert len({e.changed_at_rev for e in cf.collect(exp)}) == 1
 
     intact = _walk(exp, cf.RECORD_COLLECTORS, limit=3)
     assert len(intact) == len(set(intact)), "the real feed returned an entity twice"
@@ -329,7 +452,7 @@ def test_removing_the_tie_break_loses_entities_at_a_page_boundary(client):
     # And it lies about it: the page that dropped five entities said there were none
     # left, which is exactly why a cursor-paged reader cannot detect this itself.
     last = cf.changes_page(
-        exp, scope_tag="t", cursor=cf.encode_cursor(("", "", ""), scope="t"), limit=3, collectors=mutant
+        exp, scope_tag="t", cursor=cf.encode_cursor(cf.ZERO_KEY, scope="t"), limit=3, collectors=mutant
     )
     assert last["has_more"] is True
     resumed = cf.changes_page(exp, scope_tag="t", cursor=last["next_cursor"], collectors=mutant)
@@ -404,19 +527,58 @@ def test_a_cursor_of_another_version_is_refused_rather_than_interpreted(client):
     """
     exp_id = _with_runs(client, 2)
     tag = cf.record_scope_tag(exp_id, None)
-    token = _handmade({"v": 99, "s": tag, "t": "2026-01-01T00:00:00Z", "k": "run", "e": "x"})
+    token = _handmade({"v": 99, "s": tag, "q": 3, "k": "run", "e": "x"})
     res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": token})
     assert res.status_code == 422
     assert res.json()["reason"] == "not_decodable"
 
 
-@pytest.mark.parametrize("missing", ["t", "k", "e"])
+def test_a_version_1_cursor_is_REFUSED_rather_than_MISREAD(client):
+    """THE VERSION TRANSITION, and it is the case a bump exists for.
+
+    A v1 cursor's leading component was a `%Y-%m-%dT%H:%M:%SZ` STRING under the key
+    `t`; a v2 cursor's is an integer sequence position under `q`. Neither converts into
+    the other — a timestamp does not name a `rev`, and no arithmetic recovers one — so
+    the only two possible behaviours are REFUSE and GUESS, and guessing here means
+    answering a well-formed page computed from a position the caller never held.
+
+    Two independent refusals are asserted, not one, because either alone would leave
+    the other unproven: the version check fires first, and a payload that somehow
+    carried `v: 2` while keeping v1's shape is still missing `q`. A build that
+    "helpfully" migrated the old shape would pass neither.
+
+    The remedy is the published one and it is asserted here too — a client that gets
+    this `422` drops the cursor and resyncs, which is the SAME remedy the other
+    refusal reason has, which is why both share one status.
+    """
+    exp_id = _with_runs(client, 3)
+    tag = cf.record_scope_tag(exp_id, None)
+
+    v1 = _handmade({"v": 1, "s": tag, "t": "2026-01-01T00:00:00Z", "k": "run", "e": "x"})
+    res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": v1})
+    assert res.status_code == 422
+    assert res.json()["reason"] == "not_decodable"
+
+    # ...and the shape alone is refused even wearing the current version number.
+    relabelled = _handmade(
+        {"v": cf.CURSOR_VERSION, "s": tag, "t": "2026-01-01T00:00:00Z", "k": "run", "e": "x"}
+    )
+    res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": relabelled})
+    assert res.status_code == 422
+    assert res.json()["reason"] == "not_decodable"
+
+    # THE REMEDY WORKS. A test that only proved the refusal would read as an argument
+    # that the bump stranded every existing client.
+    assert _feed(client, exp_id)["returned"] == 4
+
+
+@pytest.mark.parametrize("missing", ["q", "k", "e"])
 def test_a_cursor_missing_a_key_component_is_refused(client, missing):
     exp_id = _with_runs(client, 2)
     payload = {
         "v": cf.CURSOR_VERSION,
         "s": cf.record_scope_tag(exp_id, None),
-        "t": "2026-01-01T00:00:00Z",
+        "q": 1,
         "k": "run",
         "e": "x",
     }
@@ -428,19 +590,82 @@ def test_a_cursor_missing_a_key_component_is_refused(client, missing):
     assert res.json()["reason"] == "not_decodable"
 
 
-def test_a_non_string_component_is_refused_and_never_coerced(client):
-    """`t: 7` must not become `"7"`.
-
-    Coercion here would build a key that compares against real keys and answer from a
-    position the caller never asked for — a wrong answer where an error was available.
-    """
+@pytest.mark.parametrize(
+    "payload_patch,why",
+    [
+        pytest.param({"q": "7"}, "a string sequence must not become 7", id="q-as-string"),
+        pytest.param({"q": 1.5}, "a float is not a sequence position", id="q-as-float"),
+        pytest.param({"q": None}, "null is not a position", id="q-as-null"),
+        pytest.param({"k": 7}, "an integer kind must not become '7'", id="kind-as-int"),
+        pytest.param({"e": 7}, "an integer id must not become '7'", id="id-as-int"),
+        # `isinstance(True, int)` is True in Python, so a bare integer check would
+        # ACCEPT this and decode it to the real position `1`. That is the one case in
+        # this list a reasonable implementation gets wrong by accident.
+        pytest.param({"q": True}, "a bool must not decode to the position 1", id="q-as-bool"),
+    ],
+)
+def test_a_wrong_typed_component_is_refused_and_never_coerced(client, payload_patch, why):
+    """Coercion here would build a key that compares against real keys and answer from
+    a position the caller never asked for — a wrong answer where an error was
+    available."""
     exp_id = _with_runs(client, 2)
-    token = _handmade(
-        {"v": cf.CURSOR_VERSION, "s": cf.record_scope_tag(exp_id, None), "t": 7, "k": "run", "e": "x"}
+    payload = {
+        "v": cf.CURSOR_VERSION,
+        "s": cf.record_scope_tag(exp_id, None),
+        "q": 1,
+        "k": "run",
+        "e": "x",
+    }
+    payload.update(payload_patch)
+    res = client.get(
+        f"/api/experiments/{exp_id}/changes", params={"cursor": _handmade(payload)}
     )
-    res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": token})
-    assert res.status_code == 422
-    assert res.json()["reason"] == "not_decodable"
+    assert res.status_code == 422, why
+    assert res.json()["reason"] == "not_decodable", why
+
+
+def test_a_NEGATIVE_cursor_position_is_ADMITTED_and_resyncs(client):
+    """THE ONE THING `decode_cursor` DOES NOT REFUSE, recorded rather than left to be
+    rediscovered.
+
+    "STRICT AT EVERY STEP" in `decode_cursor`, and the wire-published
+    `EXPIRY_PROPERTY`'s "a cursor is refused for exactly two reasons", both invite a
+    reader to expect a bound here. There is none: `{"q": -99}` decodes and answers
+    `200` with the whole feed. Two reasons it stays, and both are asserted below.
+
+    `-1` IS A POSITION THIS FEED ISSUES. `changes_page` encodes `ZERO_KEY` as the
+    `next_cursor` of an empty first page, so "negative" cannot be the test — and a
+    bound of exactly `>= -1` would refuse only values that are already harmless.
+
+    AND HARMLESS IS THE POINT. Every real key's first component is `>= 0` by
+    `_position`, so a `q` below that can only place the caller EARLIER in the order
+    than they asked for. The outcome is a resync — every entity at its current
+    position — which is exactly the remedy `GAP_GUARANTEE` publishes for everything,
+    reached by a different route. It over-reports and cannot skip, so refusing it would
+    give a client one more error to handle and buy correctness nothing.
+    """
+    exp_id = _with_runs(client, 3)
+    tag = cf.record_scope_tag(exp_id, None)
+    forged = _handmade({"v": cf.CURSOR_VERSION, "s": tag, "q": -99, "k": "", "e": ""})
+
+    res = client.get(f"/api/experiments/{exp_id}/changes", params={"cursor": forged})
+    assert res.status_code == 200, res.text
+    # It behaves exactly as the cursorless resync does — the SAME entries, not merely
+    # "some entries", which is what makes "it cannot skip" a measurement.
+    assert res.json()["changes"] == _feed(client, exp_id)["changes"]
+
+    # AND `-1` REALLY IS ONE OF OURS, which is why the bound cannot simply be `>= 0`:
+    # an empty first page hands the caller back `ZERO_KEY`.
+    empty = _with_runs(client, 0, title="no runs at all")
+    first = _feed(client, empty)
+    resumed = client.get(
+        f"/api/experiments/{empty}/changes", params={"cursor": first["next_cursor"]}
+    )
+    assert resumed.status_code == 200
+    assert cf.decode_cursor(
+        cf.encode_cursor(cf.ZERO_KEY, scope=cf.record_scope_tag(empty, None)),
+        scope=cf.record_scope_tag(empty, None),
+    ) == cf.ZERO_KEY
 
 
 def test_a_cursor_from_another_record_is_refused_as_the_wrong_feed(client):
@@ -556,18 +781,26 @@ def test_an_entity_that_changes_after_your_cursor_comes_back(client):
     assert end["has_more"] is False
     before = {c["entity_id"]: c["version"] for c in end["changes"]}
 
+    # THE WRITE GOES THROUGH `save_versioned`, AND IT DID NOT USED TO. The earlier
+    # version of this test hand-set `updated_utc` to a far-future stamp and
+    # hand-incremented `target.rev` before a plain `save()` — which was enough while
+    # the key led with a timestamp, and is deliberately not enough now. A sequence
+    # position is written by the versioned save and by nothing else, so a test that
+    # fabricated one would have been asserting against a state the application cannot
+    # produce.
     exp = ws.load_experiment(exp_id)
     target = exp.sorted_runs()[0]
     target.draft["fields"] = {"context.beamline": {"value": "BL-SYNTH", "status": "verified"}}
-    exp.updated_utc = "2099-01-01T00:00:00Z"
-    target.updated_utc = "2099-01-01T00:00:00Z"
-    target.rev += 1
-    exp.save()
+    assert exp.save_versioned() is True
 
     resumed = _feed(client, exp_id, cursor=end["next_cursor"])
     moved = {c["entity_id"]: c["version"] for c in resumed["changes"]}
     assert target.id in moved
     assert moved[target.id] != before[target.id]
+    # The OTHER run did not move, so this is not a feed that re-reports everything on
+    # every write and would have passed the assertion above by accident.
+    other = exp.sorted_runs()[1].id
+    assert other not in moved
 
 
 def test_a_cursorless_read_is_the_resync_and_returns_the_start_of_the_order(client):
@@ -608,26 +841,35 @@ def test_replaying_a_cursor_returns_the_identical_page(client):
     assert plain[0] == plain[1]
 
 
-def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeypatch):
-    """THE EXPOSURE `GAP_GUARANTEE` NAMES, DEMONSTRATED — and it is not a clock step.
+def test_a_same_second_write_behind_the_cursor_IS_REPORTED(client, monkeypatch):
+    """**THE REGRESSION TEST FOR THE DEFECT THIS SLICE FIXED.** Inverted, not deleted.
 
-    This is the case the guarantee's first wording missed, and it is the ordinary one
-    rather than the exotic one. `updated_utc` is `%Y-%m-%dT%H:%M:%SZ`, so two writes
-    inside one wall-clock second carry the SAME stamp. An entity that sorts before the
-    cursor within that second therefore changes its `version` WITHOUT changing its
-    key, and `key > start` excludes it: the change is not reported, and the clock
-    never moved backwards.
+    THIS TEST WAS `test_a_same_second_write_behind_the_cursor_is_a_measured_gap` AND
+    IT ASSERTED THE LOSS. Its body read `assert target_id not in {...}` with the
+    comment "THIS IS THE GAP", and it passed — the module's own `GAP_GUARANTEE`
+    disclosed the exposure and this test measured it. That is the defect: a change to
+    an entity that sorted BEHIND the cursor inside the cursor's own whole second moved
+    the entity's `version` without moving its key, so `key > start` excluded it and no
+    cursor ever reported it. The remedy on offer was "throw the cursor away and
+    resync", i.e. read everything, which is the one thing a bounded feed exists to
+    avoid.
 
-    THE CLOCK IS FROZEN RATHER THAN RACED. Pinning `_now_iso` to the stamp the record
-    already carries reproduces exactly the production condition — a second write
-    landing in the same second as the first — without a sleep, a retry, or a test
-    that passes or fails on how fast the machine is.
+    IT IS INVERTED RATHER THAN DELETED because a deleted test leaves no evidence that
+    the behaviour ever differed, and this file already carries three wordings of
+    `GAP_GUARANTEE` that were each measured false. The setup below is UNCHANGED —
+    same six runs, same frozen clock, same cursor, same write — so the only thing that
+    moved is the verdict.
 
-    IT ASSERTS THE REMEDY IN THE SAME BREATH, because a test that only demonstrated
-    the loss would read as an argument for removing the feature. The cursorless
-    resync is computed from current state, so it reports the entity at its new
-    version; that is why `GAP_GUARANTEE` offers it as the answer and why it costs one
-    request.
+    THE CLOCK IS STILL FROZEN, AND THAT IS NOW THE POINT RATHER THAN THE WORKAROUND.
+    Pinning `_now_iso` to the stamp the record already carries reproduces the exact
+    production condition the old key lost changes in — a second write landing in the
+    same second as the first — with no sleep, no retry, and no dependence on how fast
+    the machine is. Under the sequence key the frozen clock is irrelevant to the
+    order, and this test passing IS that statement.
+
+    MUTATION: revert `ChangeEntry.key`'s leading component to `updated_utc` and this
+    goes red on the `target_id in` assertion, with the resumed page returning exactly
+    the three entities the old test expected.
     """
     exp_id = _with_runs(client, 6)
     page = _feed(client, exp_id, limit=4)
@@ -638,6 +880,9 @@ def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeyp
     # A run that page one already handed out, i.e. one BEHIND the cursor.
     target_id = next(c["entity_id"] for c in page["changes"] if c["kind"] == "run")
     before_version = next(c["version"] for c in page["changes"] if c["entity_id"] == target_id)
+    before_position = next(
+        c["changed_at_rev"] for c in page["changes"] if c["entity_id"] == target_id
+    )
 
     monkeypatch.setattr(ws, "_now_iso", lambda: stamp)
     exp = ws.load_experiment(exp_id)
@@ -648,7 +893,8 @@ def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeyp
     }
     assert exp.save_versioned() is True
 
-    # The write really happened, and it really did not move the key.
+    # The write really happened, and the CLOCK really did not move — which is what
+    # made this unreportable before.
     #
     # `Run.version_token` is a METHOD here, unlike `ChangeEntry.version_token`, which
     # is a property. Calling it matters: `written.version_token != before_version`
@@ -657,21 +903,97 @@ def test_a_same_second_write_behind_the_cursor_is_a_measured_gap(client, monkeyp
     written = next(r for r in ws.load_experiment(exp_id).runs if r.id == target_id)
     written_version = written.version_token()
     assert isinstance(written_version, str) and written_version != before_version
-    assert written.updated_utc == stamp
+    assert written.updated_utc == stamp, "the timestamp must NOT have moved"
+    # ...and the SEQUENCE did. That is the whole fix, in one comparison.
+    assert written.changed_at_rev > before_position
 
-    # ...and the cursor cannot see it. THIS IS THE GAP.
+    # ...AND THE CURSOR SEES IT. This is the assertion that was `not in` before.
     resumed = _feed(client, exp_id, cursor=page["next_cursor"])
-    # NOT VACUOUS, and it was: `target_id not in {...}` is satisfied by an EMPTY page,
-    # so a resume that returned nothing at all would have "demonstrated" the gap
-    # without demonstrating anything. Six runs plus the experiment is seven entities
-    # and page one took four, so the resume must carry exactly the other three — the
-    # page has to WORK, and the target has to be missing from a page that worked.
-    assert resumed["returned"] == 3, resumed
-    assert target_id not in {c["entity_id"] for c in resumed["changes"]}
+    resumed_ids = [c["entity_id"] for c in resumed["changes"]]
+    assert target_id in resumed_ids, resumed
+    # Reported ONCE. A fix that re-emitted the boundary position would have satisfied
+    # the line above while handing a poller duplicates on every request.
+    assert len(resumed_ids) == len(set(resumed_ids))
+    # THE EXACT SIZE, spelled out, because "the target is there" is satisfied by a
+    # feed that re-reports everything. The old test asserted `returned == 3` — the
+    # three entities page one had not reached. It is 5: those three, plus the target
+    # run, plus the RECORD'S OWN entry, which every write moves by design (a run edit
+    # changes the record's authoritative signature, so `exp.rev` advances). Both
+    # additions are named rather than left to the number.
+    assert resumed["returned"] == 5, resumed
+    assert set(resumed_ids) == (
+        {c["entity_id"] for c in _feed(client, exp_id)["changes"]}
+        - ({c["entity_id"] for c in page["changes"]} - {target_id, exp_id})
+    )
+    moved = next(c for c in resumed["changes"] if c["entity_id"] == target_id)
+    assert moved["version"] == written_version != before_version
 
-    # The published remedy does see it.
+    # THE RESYNC STILL AGREES, and it is asserted because it is the published remedy:
+    # a client that distrusts its cursor must not get a different answer.
     resync = {c["entity_id"]: c["version"] for c in _feed(client, exp_id)["changes"]}
-    assert resync[target_id] == written_version != before_version
+    assert resync[target_id] == written_version
+
+    # The RUNS that did not change kept their positions, so the resumed page is not a
+    # disguised full re-read. The experiment is excluded deliberately and not silently:
+    # it is the one entity that SHOULD be re-reported, and folding it into this set
+    # would have made the assertion pass for the wrong reason.
+    unchanged_runs = {
+        c["entity_id"] for c in page["changes"] if c["kind"] == "run"
+    } - {target_id}
+    assert unchanged_runs, "precondition: page one held a run that did not change"
+    assert not (unchanged_runs & set(resumed_ids)), "an unchanged run was re-reported"
+
+
+def test_two_writes_in_ONE_second_with_a_page_between_them_lose_nothing(client, monkeypatch):
+    """The defect's shape at its sharpest: page, write, page — all inside one second.
+
+    The test above changes an entity page one already handed out. This one is the
+    tighter case the brief names: TWO changes inside the SAME whole second with the
+    cursor paged BETWEEN them. Under the timestamp key both writes carried the
+    identical stamp, so the second one's key was decided entirely by the
+    `(kind, entity_id)` tie-break and landed behind the cursor whenever the id sorted
+    lower — an outcome that depended on a run id, which is to say on chance.
+
+    IT IS MADE DETERMINISTIC rather than left to chance: the two runs are chosen by
+    sorted id, and the one written second is the LOWER one, which is exactly the case
+    the old key lost. The clock is frozen for the whole test, so nothing here can pass
+    because a second boundary happened to fall in the right place.
+    """
+    exp_id = _with_runs(client, 4)
+    stamp = _feed(client, exp_id)["changes"][0]["updated_utc"]
+    monkeypatch.setattr(ws, "_now_iso", lambda: stamp)
+
+    run_ids = sorted(c["entity_id"] for c in _feed(client, exp_id)["changes"] if c["kind"] == "run")
+    higher, lower = run_ids[-1], run_ids[0]
+
+    def _touch(rid: str, value: str) -> None:
+        exp = ws.load_experiment(exp_id)
+        run = next(r for r in exp.runs if r.id == rid)
+        run.draft.setdefault("fields", {})["context.beamline"] = {
+            "value": value, "status": "verified",
+        }
+        assert exp.save_versioned() is True
+
+    # WRITE ONE, then read to the very end of the feed and hold that cursor.
+    _touch(higher, "BL-ONE")
+    page = _feed(client, exp_id)
+    assert page["has_more"] is False
+    cursor = page["next_cursor"]
+    assert page["changes"][-1]["entity_id"] == higher, "the cursor sits on the higher id"
+
+    # WRITE TWO, in the same second, on the LOWER id — behind the cursor's tie-break.
+    _touch(lower, "BL-TWO")
+
+    # Every stamp in the record is still the one instant, so an order that led with
+    # the clock had nothing left to order by.
+    assert {c["updated_utc"] for c in _feed(client, exp_id)["changes"]} == {stamp}
+
+    resumed = _feed(client, exp_id, cursor=cursor)
+    reported = [c["entity_id"] for c in resumed["changes"]]
+    assert lower in reported, reported
+    assert len(reported) == len(set(reported))
+    # The record's own entry moved too — both writes bumped it — and nothing else did.
+    assert set(reported) == {lower, exp_id}
 
 
 # =============================================================================
@@ -717,7 +1039,7 @@ def test_a_cursor_is_bound_to_its_scope_as_well_as_to_its_record():
 
     with pytest.raises(cf.MalformedCursor) as err:
         cf.decode_cursor(
-            cf.encode_cursor(("2026-01-01T00:00:00Z", "run", "x"), scope=ordinary),
+            cf.encode_cursor((3, "run", "x"), scope=ordinary),
             scope=session,
         )
     assert err.value.reason == "wrong_feed"
@@ -729,57 +1051,154 @@ def test_a_cursor_is_bound_to_its_scope_as_well_as_to_its_record():
 
 
 def test_the_served_kinds_are_derived_from_the_collectors(client):
+    """THE SERVED SET, and it is THREE now — `proposal` joined `experiment` and `run`.
+
+    Asserted as an equality against a literal rather than against `cf.feed_kinds()`
+    alone, because the two halves are different claims: that the wire agrees with the
+    module, and that the module serves the set this change intends. A test written
+    only as `wire == feed_kinds()` would pass on a build that served no kinds at all.
+    """
     exp_id = _with_runs(client, 1)
-    assert _feed(client, exp_id)["kinds"] == cf.feed_kinds() == ["experiment", "run"]
+    assert (
+        _feed(client, exp_id)["kinds"]
+        == cf.feed_kinds()
+        == ["experiment", "proposal", "run"]
+    )
 
 
-def test_a_third_kind_needs_no_change_to_this_module():
-    """EXTENSIBILITY, PROVEN — and proven without a proposal dependency.
+def test_a_FOURTH_kind_needs_no_change_to_this_module():
+    """EXTENSIBILITY, PROVEN — and the seam has now been USED rather than only claimed.
 
-    The brief names `proposal` as a kind that exists in an unmerged PR and is NOT at
-    this commit. The wrong preparation would be a `try: import proposals` here; the
-    right one is that the collector tuple is a PARAMETER, so the slice that lands the
-    feature adds a collector and this module is untouched. The stand-in below is a
-    local fake for exactly that reason — it proves the seam without asserting anything
-    about a feature this build does not have.
+    THIS TEST WAS `test_a_third_kind_needs_no_change_to_this_module` AND ITS DOCSTRING
+    SAID `proposal` "exists in an unmerged PR and is NOT at this commit". Both halves
+    are false now: `proposals.py` is in this tree and `RECORD_COLLECTORS` serves the
+    kind. The rename is not cosmetic — the seam's own evidence changed from a
+    hypothetical to a shipped third collector, and a test still counting to three
+    would be describing a build that no longer exists.
 
-    It is passed in rather than registered globally: a module-level registry that
-    tests append to leaks between tests.
+    The stand-in is still a LOCAL FAKE and is still passed in rather than registered
+    globally: a module-level registry that tests append to leaks between tests. What it
+    proves is unchanged — a new kind sorts by the SAME key as the built-in ones, so a
+    collector cannot smuggle in its own ordering.
     """
     entry = cf.ChangeEntry(
         kind="stand_in",
         entity_id="z-last",
+        changed_at_rev=9,
         updated_utc="2099-01-01T00:00:00Z",
         rev=3,
         generation="deadbeefdeadbeef",
     )
     collectors = (*cf.RECORD_COLLECTORS, cf.KindCollector(kind="stand_in", read=lambda _e: [entry]))
 
-    assert cf.feed_kinds(collectors) == ["experiment", "run", "stand_in"]
+    assert cf.feed_kinds(collectors) == ["experiment", "proposal", "run", "stand_in"]
 
     class _Bare:
+        """The minimum an `Experiment` has to look like for the built-in collectors.
+
+        It carries `proposals` and `proposal_change_revs` because the proposal
+        collector reads them DIRECTLY, exactly as the run collector reads `runs` —
+        no `getattr` default, because a collector that tolerated a missing attribute
+        would serve an empty kind on a record whose proposals failed to hydrate, and
+        report that as "no proposals" rather than as an error.
+        """
+
         id = "01EXAMPLEEXAMPLEEXAMPLEEXA"
         updated_utc = "2026-01-01T00:00:00Z"
         rev = 0
         generation = "0123456789abcdef"
         runs: list = []
+        proposals: list = []
+        proposal_change_revs: dict = {}
 
     page = cf.changes_page(_Bare(), scope_tag="tag", collectors=collectors)
-    assert page["kinds"] == ["experiment", "run", "stand_in"]
+    assert page["kinds"] == ["experiment", "proposal", "run", "stand_in"]
     assert [c["kind"] for c in page["changes"]] == ["experiment", "stand_in"]
     # And the new kind sorts by the SAME key as the built-in ones — a collector cannot
-    # smuggle in its own ordering.
+    # smuggle in its own ordering. The record sits at position 0 and the stand-in at 9,
+    # so this is the SEQUENCE deciding, not the alphabet.
+    assert [c["changed_at_rev"] for c in page["changes"]] == [0, 9]
     assert page["changes"][-1]["version"] == "deadbeefdeadbeef.3"
 
 
-def test_the_module_names_no_feature_it_does_not_have():
-    """No hard-coded proposal dependency — asserted over the PARSED module.
+#: Every stored attribute of an `IngestionProposal` that is CONTENT — the value, what
+#: it targets, why it was produced, who produced it, and the audit of what was done to
+#: it. Transcribed from `proposals.IngestionProposal.__slots__` and checked against it
+#: below, so this list cannot quietly fall behind the model.
+_PROPOSAL_CONTENT_ATTRS = frozenset({
+    "experiment_id",
+    "note_id",
+    "target_field_path",
+    "proposed_value",
+    "rule",
+    "source",
+    "base_rev",
+    "target_digest",
+    "trust_basis",
+    "run_id",
+    "start_char",
+    "end_char",
+    "client_request_key",
+    "subject",
+    "accepted_value",
+    "accepted_from",
+    "applied_via",
+    "applied_run_id",
+    "applied_rev",
+    "applied_target_digest",
+})
 
-    A `rg`-style check over the source text was the first version of this and it was
-    unusable: the module's own docstrings say the words "import proposals" while
-    explaining why it does not do that, so a text scan flags the very prose that
-    documents the absence. The structural question — does any import name it, does any
-    executable literal equal it — is a question about the AST, so it is asked there.
+#: The four a feed entry legitimately needs: which proposal, when it last moved, and
+#: what lifecycle state it is in. `history` is here ONLY because `updated_utc` reads
+#: the last transition's timestamp off it; nothing else about a transition is read.
+_PROPOSAL_COORDINATE_ATTRS = frozenset({"proposal_id", "history", "state", "proposed_utc"})
+
+
+def test_the_content_attribute_list_is_the_model_minus_the_coordinates():
+    """GUARDS THE GUARD BELOW, because a hand-written forbidden-list rots silently.
+
+    The test after this one asserts that `change_feed.py` reads none of
+    `_PROPOSAL_CONTENT_ATTRS`. That assertion is only worth anything if the list IS
+    the model's content — a list that fell one field behind a model that grew would
+    pass while the new field was readable. So the two sets are asserted to PARTITION
+    `IngestionProposal.__slots__` exactly: every slot is in one of them, and neither
+    contains anything that is not a slot.
+    """
+    from isaac_api import proposals as proposals_module
+
+    slots = set(proposals_module.IngestionProposal.__slots__)
+    assert _PROPOSAL_CONTENT_ATTRS | _PROPOSAL_COORDINATE_ATTRS == slots, (
+        "a proposal field is in neither list — classify it before it can be served",
+        slots ^ (_PROPOSAL_CONTENT_ATTRS | _PROPOSAL_COORDINATE_ATTRS),
+    )
+    assert not (_PROPOSAL_CONTENT_ATTRS & _PROPOSAL_COORDINATE_ATTRS)
+
+
+def test_the_module_reaches_no_proposal_CONTENT_even_though_it_serves_the_kind():
+    """No import of `proposals`, and no read of a proposal CONTENT attribute anywhere.
+
+    THIS TEST WAS `test_the_module_names_no_feature_it_does_not_have`, and it asserted
+    that the string "proposal" appeared in no executable literal of the module. That
+    was the right test while the kind was unserved and is the WRONG test now — the
+    module has to name the kind in order to serve it, so the old assertion would only
+    be satisfiable by a build that did not have the feature. Deleting it outright
+    would have thrown away the property it was really protecting, which survives the
+    change intact and is what is asserted here instead:
+
+    **`change_feed.py` cannot render a proposal's content, because it never reads
+    one.** That is a structural guarantee rather than a review one. It is checked two
+    ways, because either alone is escapable: no `import` names the module (so no
+    helper of `proposals.py` is reachable), and no ATTRIBUTE ACCESS anywhere in the
+    parsed module names a content field (so even a duck-typed object handed in by a
+    collector cannot have its value read).
+
+    IT IS ASKED OF THE AST, NOT OF THE TEXT, and the original reason still holds: the
+    module's own prose says the words "proposals" and "proposed value" while
+    explaining why it does not touch them, so a `rg`-style scan flags the very
+    documentation of the absence. The new reason is sharper — `GAP_GUARANTEE` and
+    `SEQUENCE_PROOF` are module-level string CONSTANTS, not docstrings, and they
+    contain ordinary English words like "rule" and "source". A literal scan would have
+    to special-case them, and a special case is where the next escape lives.
     """
     import ast
     from pathlib import Path
@@ -794,92 +1213,232 @@ def test_the_module_names_no_feature_it_does_not_have():
             imported.append(node.module or "")
     assert not [m for m in imported if "proposal" in m], imported
 
-    # Docstrings are prose ABOUT the design and are excluded by identity, not by a
-    # heuristic over their contents.
-    docstrings = {
-        id(n.body[0].value)
-        for n in ast.walk(tree)
-        if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef))
-        and n.body
-        and isinstance(n.body[0], ast.Expr)
-        and isinstance(n.body[0].value, ast.Constant)
-        and isinstance(n.body[0].value.value, str)
-    }
-    literals = [
-        n.value
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Constant)
-        and isinstance(n.value, str)
-        and id(n) not in docstrings
-    ]
-    assert not [s for s in literals if "proposal" in s.lower()], literals
+    read = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert not (read & _PROPOSAL_CONTENT_ATTRS), sorted(read & _PROPOSAL_CONTENT_ATTRS)
+
+    # NOT VACUOUS: the module DOES read the coordinate attributes, so the check above
+    # is discriminating between two sets it can actually see rather than passing
+    # because `read` is empty or because attribute access was never parsed.
+    assert _PROPOSAL_COORDINATE_ATTRS <= read, sorted(_PROPOSAL_COORDINATE_ATTRS - read)
 
 
-def test_a_proposal_act_moves_the_records_own_entry_and_nothing_finer(client):
-    """WHAT THE FEED ACTUALLY SAYS ABOUT PROPOSALS, MEASURED IN BOTH DIRECTIONS.
+def _make_proposal(exp, *, pid: str, value: str = "XANES"):
+    """One synthetic proposal appended to ``exp.proposals``. NOT saved.
 
-    The brief asks for proposal events. This feed serves no `proposal` kind, and the
-    module's docstring used to explain that by saying proposals "do not exist at this
-    commit — [they live] in an unmerged PR". THAT IS FALSE AT THIS COMMIT: the
-    proposals work merged into this branch's own history, `isaac_api/proposals.py` is
-    in this tree, and every `Experiment` carries `.proposals`. So the shortfall is
-    real and is measured here rather than explained away.
-
-    WHAT HOLDS (asserted first, because it is the half a client can build on):
-    proposals are part of the record's authoritative signature, so a proposal act
-    moves the record's own `rev`/`updated_utc` and therefore moves the `experiment`
-    entry of this feed. A polling surface DOES learn "this record moved, re-read it".
-
-    WHAT DOES NOT (asserted second, because it is the half a reader would otherwise
-    assume): no `proposal` kind is served, no page carries a proposal id, and no
-    entry distinguishes a proposal act from a title edit. A client cannot tell WHICH
-    proposal moved, or that a proposal moved at all, from this feed alone.
-
-    If a later slice takes proposals OUT of the signature, this feed goes silent
-    about them entirely and the first assertion fails — which is the point of
-    pinning the mechanism rather than trusting it.
+    Built directly rather than through ``POST /notes/.../propose`` because that route
+    needs a note, a writable target path and the record's ETag, none of which any test
+    in this file is about. ``proposals`` is imported INSIDE the helper on purpose:
+    ``change_feed.py`` must import nothing from it (asserted over the parsed module
+    above), and a module-level import here would read as though it did.
     """
-    # Imported inside the test on purpose: `change_feed.py` itself must import nothing
-    # from here (`test_the_module_names_no_feature_it_does_not_have` asserts that over
-    # the parsed module), and a module-level import would read as though it did.
     from isaac_api import proposals as proposals_module
 
-    exp_id = _with_runs(client, 1, title="proposal visibility")
-    before = {(c["kind"], c["entity_id"]): c["version"] for c in _feed(client, exp_id)["changes"]}
-
-    exp = ws.load_experiment(exp_id)
-    exp.proposals.append(
-        proposals_module.new_proposal(
-            proposal_id="01SYNTHETICPROPOSALPROPOS",
-            experiment_id=exp_id,
-            note_id="01SYNTHETICNOTENOTENOTENO",
-            target_field_path="field:system.technique",
-            proposed_value="XANES",
-            rule="synthetic fixture rule — this test asserts visibility, not science",
-            source=sorted(proposals_module.PROPOSAL_SOURCES)[0],
-            proposed_utc="2026-01-01T00:00:00Z",
-            base_rev=exp.rev,
-            target_digest="0000000000000000",
-            trust_basis=proposals_module._unattributed(),
-        )
+    proposal = proposals_module.new_proposal(
+        proposal_id=pid,
+        experiment_id=exp.id,
+        note_id="01SYNTHETICNOTENOTENOTENO",
+        target_field_path="field:system.technique",
+        proposed_value=value,
+        rule="synthetic fixture rule — this test asserts visibility, not science",
+        source=sorted(proposals_module.PROPOSAL_SOURCES)[0],
+        proposed_utc="2026-01-01T00:00:00Z",
+        base_rev=exp.rev,
+        target_digest="0000000000000000",
+        trust_basis=proposals_module._unattributed(),
     )
+    exp.proposals.append(proposal)
+    return proposal
+
+
+def test_a_proposal_act_moves_the_records_own_entry_AND_its_own(client):
+    """WHAT THE FEED SAYS ABOUT PROPOSALS — AND THE SECOND HALF IS NEWLY TRUE.
+
+    THIS TEST WAS `..._and_nothing_finer` AND IT PINNED A SHORTFALL. Its second half
+    asserted that no `proposal` kind was served, that no page carried a proposal id,
+    and that a client could not tell WHICH proposal moved. Every one of those
+    assertions is inverted here rather than deleted, because the shortfall was real
+    and a reader has to be able to see that it was closed rather than that it was
+    never there. The `proposal` kind is now served.
+
+    WHAT ALREADY HELD AND STILL DOES, asserted first because a client can build on it:
+    proposals are part of the record's authoritative signature, so a proposal act moves
+    the record's own `rev` and therefore the `experiment` entry. If a later slice takes
+    proposals out of the signature, that assertion fails — which is why the mechanism
+    is pinned rather than trusted.
+
+    WHAT IS NEW: the proposal has its own entry, at the same sequence position as the
+    record's, carrying its id and its lifecycle state and NOTHING ELSE.
+    """
+    exp_id = _with_runs(client, 1, title="proposal visibility")
+    before = {(c["kind"], c["entity_id"]): c for c in _feed(client, exp_id)["changes"]}
+    assert not [k for k in before if k[0] == "proposal"], "precondition: none yet"
+
+    pid = "01SYNTHETICPROPOSALPROPOS"
+    exp = ws.load_experiment(exp_id)
+    _make_proposal(exp, pid=pid)
     assert exp.save_versioned() is True, "a proposal act must be a real write"
 
     after_page = _feed(client, exp_id)
-    after = {(c["kind"], c["entity_id"]): c["version"] for c in after_page["changes"]}
+    after = {(c["kind"], c["entity_id"]): c for c in after_page["changes"]}
 
     # WHAT HOLDS — the record's own entry moved, so a poller is told to re-read.
-    assert after[("experiment", exp_id)] != before[("experiment", exp_id)]
+    assert after[("experiment", exp_id)]["version"] != before[("experiment", exp_id)]["version"]
 
-    # WHAT DOES NOT — and each of these is a separate way a reader could over-read the
-    # line above, so each is asserted rather than left to the first one to imply.
-    assert "proposal" not in after_page["kinds"]
-    assert {c["kind"] for c in after_page["changes"]} <= {"experiment", "run"}
-    assert "01SYNTHETICPROPOSALPROPOS" not in {c["entity_id"] for c in after_page["changes"]}
+    # WHAT IS NEW — and each clause is the inverse of one the old test asserted.
+    assert "proposal" in after_page["kinds"]
+    assert ("proposal", pid) in after
+    entry = after[("proposal", pid)]
+    assert entry["state"] == "open"
+    # The proposal moved AT this save, so it shares the record's sequence position.
+    assert entry["changed_at_rev"] == after[("experiment", exp_id)]["changed_at_rev"]
+
     # The run did not move: a proposal is not a run act, and the feed does not pretend
     # otherwise by bumping everything.
     run_key = next(k for k in before if k[0] == "run")
-    assert after[run_key] == before[run_key]
+    assert after[run_key]["version"] == before[run_key]["version"]
+    assert after[run_key]["changed_at_rev"] < entry["changed_at_rev"]
+
+
+def test_a_proposal_entry_carries_NO_CONTENT_over_the_wire(client):
+    """THE MINIMUM, MEASURED ON THE WIRE — the structural test's runtime counterpart.
+
+    `test_the_module_reaches_no_proposal_CONTENT_even_though_it_serves_the_kind` asks
+    the AST whether the module COULD read a value. This asks the response whether one
+    ARRIVED, and the two are not the same question: a collector passed in by a caller,
+    or a future entry field spread from a model, would defeat the first and be caught
+    by the second.
+
+    IT ASSERTS OVER THE RAW BODY, not over parsed keys. A value nested anywhere — in a
+    key name, in a string, inside a field this test does not know about — is a
+    substring of the response, and the proposal is built with values chosen to be
+    unmistakable if they leak.
+    """
+    exp_id = _with_runs(client, 1, title="proposal content")
+    pid = "01SYNTHETICPROPOSALPROPOS"
+    exp = ws.load_experiment(exp_id)
+    _make_proposal(exp, pid=pid, value="LEAKCANARYVALUE")
+    assert exp.save_versioned() is True
+
+    res = client.get(f"/api/experiments/{exp_id}/changes")
+    assert res.status_code == 200
+    body = res.text
+    entry = next(c for c in res.json()["changes"] if c["kind"] == "proposal")
+
+    # The key set is EXACT, not a subset: a future field added to `to_wire` shows up
+    # here rather than shipping unnoticed.
+    assert set(entry) == {"kind", "entity_id", "changed_at_rev", "updated_utc", "state"}
+
+    # And no coordinate is synthesised for a kind that has none.
+    assert "version" not in entry and "rev" not in entry and "generation" not in entry
+
+    for leak in (
+        "LEAKCANARYVALUE",
+        "field:system.technique",
+        "synthetic fixture rule",
+        "01SYNTHETICNOTENOTENOTENO",
+        "0000000000000000",
+    ):
+        assert leak not in body, leak
+
+
+def test_the_feed_reports_only_lifecycle_states_the_contract_DEFINES(client):
+    """NO INVENTED STATES — the feed passes `state` through and classifies nothing.
+
+    The proposal contract defines exactly five states. This asserts that what reaches
+    the wire is drawn from that set and that the feed does not map, normalise or
+    default it — a feed that rewrote an unknown state onto a known one would be
+    inventing a judgement about a lifecycle it does not own.
+
+    THE SECOND HALF IS A REAL TRANSITION, NOT A FABRICATED STATE, and this docstring
+    used to describe the opposite of what the body does. It read: "The negative
+    control is the second half: an out-of-contract state is set DIRECTLY on the
+    stored entity and reaches the wire UNCHANGED." The body does no such thing — it
+    calls the contract's own `reject_proposal`, and its own inline comment two lines
+    below says so ("rather than by fabricating a state"). The stale sentence is
+    corrected rather than deleted because it is a reader's map of what this test
+    covers, and it pointed at a control that is NOT here.
+
+    What actually happens to an out-of-contract state is one test further down:
+    `_hydrate_proposals` refuses the entry at load, so it never becomes a proposal
+    and the feed cannot name it — see
+    `test_a_proposal_the_model_REFUSES_is_not_served_and_is_not_discarded`, whose own
+    docstring records that the same wrong theory was asserted there first and
+    measured false.
+    """
+    from isaac_api import proposals as proposals_module
+
+    exp_id = _with_runs(client, 1, title="proposal states")
+    pid = "01SYNTHETICPROPOSALPROPOS"
+    exp = ws.load_experiment(exp_id)
+    proposal = _make_proposal(exp, pid=pid)
+    assert exp.save_versioned() is True
+
+    entry = next(c for c in _feed(client, exp_id)["changes"] if c["kind"] == "proposal")
+    assert entry["state"] in proposals_module.PROPOSAL_STATES
+    assert set(proposals_module.PROPOSAL_STATES) == {
+        "open", "accepted", "rejected", "superseded", "withdrawn"
+    }, "the contract's state set moved — re-read it before changing the feed"
+
+    # THE PASS-THROUGH, proven by moving the proposal through a REAL transition rather
+    # than by fabricating a state. `reject_proposal` is the contract's own function, so
+    # what reaches the wire is a state the contract produced and the feed did not
+    # classify, default or map.
+    exp = ws.load_experiment(exp_id)
+    exp.proposals[0] = proposals_module.reject_proposal(
+        exp.proposals[0], at="2026-01-02T00:00:00Z", reason="synthetic"
+    )
+    assert exp.save_versioned() is True
+    entry = next(c for c in _feed(client, exp_id)["changes"] if c["kind"] == "proposal")
+    assert entry["state"] == "rejected"
+    # The transition is a change, so the position advanced with it.
+    assert entry["changed_at_rev"] > 1
+
+
+def test_a_proposal_the_model_REFUSES_is_not_served_and_is_not_discarded(client):
+    """An out-of-contract proposal on disk is UNREADABLE — and both halves matter.
+
+    THE FIRST HALF, which is `_proposal_entries`' documented claim: an unreadable
+    proposal is not served. It has no id this application is willing to read, so the
+    feed cannot name it, and an entity a client cannot address is one it could not act
+    on if it were told about it.
+
+    THE SECOND HALF, which is the reason the first is safe: it is not DELETED either.
+    `Experiment.unreadable_proposals` keeps the raw entry verbatim so a save cannot
+    discard a recorded human judgement this build could not parse. A feed that went
+    silent about a row that had also been thrown away would be a data-loss path
+    wearing a filter's clothes.
+
+    THIS TEST REPLACED A WRONG ONE, and the mistake is worth recording. The first
+    version asserted that an out-of-contract `state` reached the wire UNCHANGED, on
+    the theory that "the feed is not the validator". It does not: `_hydrate_proposals`
+    refuses the entry at load, so the proposal never becomes a proposal at all. The
+    theory was right and the prediction was wrong, which is the difference between
+    reasoning about a module and reading it.
+    """
+    exp_id = _with_runs(client, 1, title="unreadable proposal")
+    pid = "01SYNTHETICPROPOSALPROPOS"
+    exp = ws.load_experiment(exp_id)
+    _make_proposal(exp, pid=pid)
+    assert exp.save_versioned() is True
+    assert any(c["kind"] == "proposal" for c in _feed(client, exp_id)["changes"])
+
+    # Corrupt the STORED document directly — the only way to reach this state, since
+    # every constructor in `proposals.py` refuses it.
+    raw = json.loads(exp.state_path.read_text(encoding="utf-8"))
+    raw["proposals"][0]["state"] = "not-a-contract-state"
+    exp.state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    reloaded = ws.load_experiment(exp_id)
+    assert reloaded.proposals == []
+    assert len(reloaded.unreadable_proposals) == 1
+    assert reloaded.unreadable_proposals[0]["state"] == "not-a-contract-state"
+
+    page = _feed(client, exp_id)
+    assert not [c for c in page["changes"] if c["kind"] == "proposal"]
+    assert pid not in {c["entity_id"] for c in page["changes"]}
+    # `proposal` stays in the SERVED KIND SET: the kinds a deployment serves is a
+    # property of its collectors, not of whether this record happens to hold one.
+    assert "proposal" in page["kinds"]
 
 
 # =============================================================================
@@ -906,8 +1465,12 @@ def test_a_removed_run_is_simply_absent_and_no_tombstone_is_invented(client):
     ids = {c["entity_id"] for c in after["changes"]}
     assert doomed not in ids
     # No entry anywhere claims a removal — no `deleted`, no `tombstone`, no null kind.
+    # `changed_at_rev` JOINED THE KEY SET with the ordering fix; it is the sort
+    # position, not a claim about the removed run, and the set is asserted exactly
+    # rather than as a subset so a future `deleted: false` would fail here.
     assert all(set(c) == {
-        "kind", "entity_id", "version", "rev", "generation", "updated_utc"
+        "kind", "entity_id", "version", "rev", "generation", "updated_utc",
+        "changed_at_rev",
     } for c in after["changes"])
 
     # And resuming from the pre-removal cursor reports nothing about it either.
@@ -1100,7 +1663,7 @@ def test_a_cursor_this_feed_did_not_issue_is_refused_on_its_ALPHABET(client):
     from isaac_api import change_feed as cf
 
     scope = "record|scope"
-    issued = cf.encode_cursor(("2026-08-31T00:00:00Z", "run", "01ABC"), scope=scope)
+    issued = cf.encode_cursor((7, "run", "01ABC"), scope=scope)
     # The control: what the feed actually issues still decodes.
     assert cf.decode_cursor(issued, scope=scope) is not None
 

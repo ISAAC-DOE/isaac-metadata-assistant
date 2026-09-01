@@ -22,6 +22,7 @@ import { isUnstorableFieldValue } from '../lib/mutationErrors';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
+import { RecordActivityNote } from '../components/RecordActivityNote';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import {
   answerValuePreview,
@@ -462,6 +463,29 @@ function LoadedCompletion({
   // still invalidates any stale staged assistant proposal and exposes the SAME
   // authoritative version/AgentContext the assistant reads, so the assistant and
   // this form can never disagree on the current revision.
+  /*
+   * NO `onEntitiesChanged` HANDLER, AND THAT IS THE POINT RATHER THAN AN OVERSIGHT.
+   *
+   * This surface holds STAGED, UNSENT INPUT. The change feed tells it which runs and
+   * suggestions moved; the only thing it is allowed to do with that is SAY SO.
+   * Passing a handler here would create the one edge that could refetch a form under
+   * a scientist mid-sentence, so the edge does not exist — `session.activity` is read
+   * for the notice and nothing subscribes to the callback.
+   *
+   * `CLAUDE.md` §11 records three banners that promised "your input is kept" beside a
+   * Refresh that destroyed it. What makes the promise true here is not this comment:
+   * it is that `staged` is a ref owned by the PARENT, above the component `reload`
+   * remounts, so neither a background update nor the Refresh button can reach it.
+   *
+   * AND THERE IS A SECOND, INDEPENDENT REASON A HANDLER HERE WOULD BE WRONG: it would
+   * not even work. `reload` is `useFetch`'s, which sets `{status: 'loading'}` and so
+   * UNMOUNTS this component, destroying the change-feed cursor and `session.activity`
+   * with it; the next poll would resync from scratch and filter every entry against
+   * the freshly-adopted revision, so the notice this screen exists to show would never
+   * appear. This screen is the only one of the four on that side of the line — see the
+   * cursor-lifetime note on `useRecordSession`'s `onEntitiesChanged` for the other
+   * three, which are re-rendered rather than remounted by their refresh.
+   */
   const session = useRecordSession(id, {
     detail: { ...detail, version: currentVersion },
     onChange: () => setChangedElsewhere(true),
@@ -926,7 +950,14 @@ function LoadedCompletion({
           </button>
         </div>
       )}
-      <LiveSyncNote degraded={degraded} onRefresh={reload} />
+      <RecordActivityNote
+        activity={session.activity}
+        onRefresh={reload}
+        /* This screen holds unsent answers, so the notice says so. The claim is
+           true of the Refresh button too — see the staged-ref note above. */
+        holdsUnsentInput
+      />
+      <LiveSyncNote degraded={degraded || session.feedDegraded} onRefresh={reload} />
       <WorkflowProgressBanner
         workflow={detail.workflow}
         recordId={id}

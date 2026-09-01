@@ -3248,15 +3248,54 @@ export interface ApiProvenanceResponse {
  */
 
 export interface ApiChangeEntry {
-  /** `experiment` or `run` today. DERIVED server-side; read `kinds`, never assume. */
+  /**
+   * `experiment`, `run` or `proposal` at this commit. DERIVED server-side from the
+   * deployment's own collectors; read `kinds` off the page, never assume this list.
+   */
   kind: string;
   entity_id: string;
-  /** `<generation>.<rev>` — the same value every other route publishes as `version`. */
-  version: string;
-  rev: number;
+  /**
+   * THE ORDERING COORDINATE, and the only one every kind carries. It is the
+   * record's own `rev` at the save that last changed this entity — a durable,
+   * strictly-increasing SEQUENCE POSITION, not a clock. It is what the cursor is
+   * built from; `updated_utc` is not, and no longer has been since `CURSOR_VERSION`
+   * went to 2.
+   *
+   * `0` is a real value and means "no versioned save has recorded this entity
+   * changing" — a document written before the sequence existed, or an entity first
+   * persisted by the unversioned save primitive. It is not a missing value.
+   */
+  changed_at_rev: number;
+  /**
+   * `<generation>.<rev>` — the same value every other route publishes as `version`.
+   *
+   * ABSENT, NEVER `null`, ON A KIND THAT CARRIES NO VERSION SERIES. A `proposal`
+   * has none: `proposals.py` gives it no `rev`/`generation` counter at all, and the
+   * server would rather omit the key than synthesise a token that compares, sorts
+   * and looks real. The same is true of `rev` and `generation` below, which is why
+   * all three are optional together rather than one at a time.
+   */
+  version?: string;
+  rev?: number;
   /** Minted fresh at genuine (re)creation, so a delete->recreate is visible at rev 0. */
-  generation: string;
-  updated_utc: string;
+  generation?: string;
+  /**
+   * DISPLAY ONLY, AND OPTIONAL. Clients show "last updated" from it; nothing about
+   * the order, the cursor or the gap guarantee depends on it. Optional because the
+   * server omits any coordinate an entity does not carry.
+   */
+  updated_utc?: string;
+  /**
+   * The entity's CURRENT stored lifecycle state, for the kinds that have one — a
+   * `proposal` today. Passed through verbatim: the feed classifies nothing, so a
+   * state this build has never heard of arrives unchanged rather than mapped onto
+   * one it knows.
+   *
+   * IT IS A STATE, NOT AN EVENT. A proposal accepted between two polls is reported
+   * as being `accepted` NOW, with no entry saying an acceptance happened, no actor
+   * and no ordering against any other act.
+   */
+  state?: string;
 }
 
 export interface ApiChangeFeedPage {

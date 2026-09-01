@@ -155,3 +155,63 @@
     border-bottom: 1px solid var(--border);
   }
 }
+
+/*
+ * The "changed elsewhere" activity note. Shares `livesync-changed`'s geometry
+ * deliberately — both say "what you are looking at predates something" and a reader
+ * should not have to learn two shapes for one idea. It is NOT error-coloured: a
+ * colleague editing a record is normal.
+ *
+ * TWO OF THE THREE TOKENS BELOW DO NOT EXIST, AND THE FALLBACKS ARE LOAD-BEARING
+ * RATHER THAN DEFENSIVE. `--surface-raised` and `--border-subtle` are defined nowhere
+ * in this repository (`rg -- '--surface-raised|--border-subtle' apps/web/src` finds
+ * only uses, never a declaration), so what actually renders is `#f7f9fb` and
+ * `#d8dee6` — the literals, every time. The names are pre-existing rather than
+ * invented here: `transcriptCapture.css` uses both at nine sites with NO fallback at
+ * all (so there they resolve to nothing), and `assistant.css` already records
+ * `--border-subtle` as undefined. This rule is the only one that supplies a value.
+ *
+ * It is written down rather than silently tidied for two reasons. The contrast claim
+ * this note makes rests on the FALLBACK, not on a token, so deleting a fallback would
+ * change the rendered colour rather than merely simplify the rule — and the pair reads
+ * as theme-aware while being nothing of the kind, so a future dark-mode pass must
+ * DEFINE these two in `tokens.css` and not assume they already respond. `--text-muted`
+ * is the one that IS defined (`styles/tokens.css`, `#5b6570`), which is why its
+ * fallback is the same value rather than a guess.
+ */
+.record-activity-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-subtle, #d8dee6);
+  border-radius: 6px;
+  background: var(--surface-raised, #f7f9fb);
+}
+
+.record-activity-note-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+  color: var(--text-muted, #5b6570);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* The disclosure carrying the cadence + limits claims. Full-width below the
+   sentence and the button, so opening it never reflows them. */
+.record-activity-note-about {
+  flex: 1 0 100%;
+  font-size: 12.5px;
+  color: var(--text-muted, #5b6570);
+}
+
+.record-activity-note-about > summary {
+  cursor: pointer;
+}
+
+.record-activity-note-about > p {
+  margin: 6px 0 0;
+  line-height: 1.5;
+}

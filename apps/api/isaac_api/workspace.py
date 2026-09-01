@@ -1122,10 +1122,23 @@ def _as_int(raw: object) -> int:
 
     ``int(state.get("rev") or 0)`` still raises on ``"seven"`` or ``[]``, which on
     the read path is the same HTTP 500 the hard subscripts were.
+
+    ``OverflowError`` IS CAUGHT, AND "NEVER RAISES" WAS FALSE UNTIL IT WAS.
+    ``int(float("inf"))`` raises ``OverflowError``, which is neither a ``TypeError``
+    nor a ``ValueError``, and ``json.loads`` accepts the bare token ``Infinity`` by
+    default — so a persisted ``"rev": Infinity`` was a measured HTTP 500 on the three
+    read paths that hydrate through here, under a docstring promising it could not
+    be. Widening the clause is the whole fix, and it lands in the bucket every other
+    unreadable value already lands in: ``0``, i.e. the same tolerance
+    :func:`_as_str` applies for :func:`_as_str`'s reason. Refusing the read instead
+    is not an option — ``CLAUDE.md`` §11 is explicit that a malformed PERSISTED value
+    must be READ, because the reader did nothing wrong and their record must not
+    vanish. ``NaN`` needs no separate clause: ``int(float("nan"))`` raises
+    ``ValueError``, which was already caught.
     """
     try:
         return int(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -1220,12 +1233,50 @@ class Run:
     #: Per-run opaque nonce, minted at genuine creation and preserved across saves,
     #: so a delete->recreate of the same run id is distinguishable even at rev 0.
     generation: str = ""
+    #: THE OWNING EXPERIMENT'S ``rev`` AT THE SAVE THAT LAST CHANGED THIS RUN — a
+    #: SEQUENCE coordinate, not a clock, and it exists because a clock could not do
+    #: this job. ``updated_utc`` is formatted to whole seconds (:func:`_now_iso`), so
+    #: two changes inside one wall-clock second are indistinguishable by it; a reader
+    #: that pages by a timestamp key therefore cannot tell "this entity moved" from
+    #: "this entity did not", and `change_feed.py` measured a class of change that was
+    #: silently never reported because of it. ``Experiment.rev`` is already a durable,
+    #: per-record, strictly-increasing sequence — ``save_versioned`` does
+    #: ``max(self.rev, disk_rev) + 1`` on every write that changes the record's
+    #: authoritative signature — so stamping it here gives every entity of one record
+    #: a position in ONE totally-ordered sequence that advances on every change.
+    #:
+    #: WRITTEN ONLY BY ``Experiment._bump_changed_runs``, exactly as ``rev`` is, and
+    #: rolled back with it by ``save_versioned``'s failure branch.
+    #:
+    #: ``0`` MEANS "NO VERSIONED SAVE HAS EVER RECORDED THIS RUN CHANGING", and it is
+    #: the honest default rather than a convenient one. It is reachable two ways: a
+    #: document written before this field existed, and a run first persisted by the
+    #: UNVERSIONED :meth:`Experiment.save` primitive, which stamps nothing (see
+    #: ``_bump_changed_runs``, where the same case leaves ``rev`` at 0). Defaulting to
+    #: the record's CURRENT ``rev`` instead would be a fabrication — it would assert
+    #: the run changed at a revision it may never have been touched at. ``0`` claims
+    #: nothing, sorts first, and costs nothing: a feed read with no cursor is computed
+    #: from current state and reports every entity whatever this holds, so a run at
+    #: ``0`` is never lost, and the first real change stamps it normally.
+    #:
+    #: IT IS VERSION METADATA AND SO IS EXCLUDED FROM
+    #: :func:`_run_signature_payload`, for the reason ``rev``/``updated_utc``/
+    #: ``generation`` are. See that function for the reason, which was stated wrongly
+    #: here first and is CORRECTED there rather than in two places.
+    changed_at_rev: int = 0
 
     def __post_init__(self) -> None:
         if not self.updated_utc:
             self.updated_utc = self.created_utc
         if not self.generation:
             self.generation = _legacy_generation(self.id)
+        # A NEGATIVE VALUE IS CLAMPED TO 0 rather than kept, because the whole feed
+        # order rests on this being non-negative: `change_feed.ZERO_KEY` sits at -1
+        # and is documented as strictly below every real key. A persisted `-5` would
+        # put an entity below the start of the order, where a cursorless read still
+        # finds it but the "strictly below every real key" claim would be false.
+        if self.changed_at_rev < 0:
+            self.changed_at_rev = 0
 
     def version_token(self) -> str:
         """The run's opaque concurrency token: ``<generation>.<rev>``.
@@ -1249,6 +1300,7 @@ class Run:
             "rev": self.rev,
             "updated_utc": self.updated_utc,
             "generation": self.generation,
+            "changed_at_rev": self.changed_at_rev,
         }
 
     @classmethod
@@ -1331,6 +1383,12 @@ class Run:
             rev=_as_int(state.get("rev")),
             updated_utc=_as_str(state.get("updated_utc")),
             generation=_as_str(state.get("generation")),
+            # A LEGACY DOCUMENT HAS NO SUCH KEY and hydrates to 0, which is exactly
+            # the "no versioned save ever recorded this run changing" case the field
+            # documents. ``_as_int`` for the same reason ``rev`` uses it — a
+            # persisted ``"seven"`` must not raise on the read path — and
+            # ``__post_init__`` clamps a negative.
+            changed_at_rev=_as_int(state.get("changed_at_rev")),
         )
 
 
@@ -1375,8 +1433,38 @@ def _run_signature_payload(run: Run) -> dict:
     """A run's AUTHORITATIVE content, for hashing. Version metadata is excluded.
 
     Covers ``{id, experiment_id, label, ordinal, draft, record_id, overrides}``.
-    EXCLUDES ``rev`` / ``updated_utc`` / ``generation`` (version metadata, exactly as
-    ``Experiment`` excludes its own) and ``created_utc`` (immutable identity).
+    EXCLUDES ``rev`` / ``updated_utc`` / ``generation`` / ``changed_at_rev`` (version
+    metadata, exactly as ``Experiment`` excludes its own) and ``created_utc``
+    (immutable identity).
+
+    ``changed_at_rev`` IS EXCLUDED, and the reason given here first was FALSE. It is
+    corrected in place rather than replaced, because the false reason is the plausible
+    one and the next reader will reach for it too.
+
+    ~~"If it were hashed, stamping it would itself be a change to the run's
+    authoritative state, so the next save would find the signature moved, stamp again,
+    and the record would never reach a byte-stable no-op: every save of an untouched
+    record would bump every run forever."~~ **MEASURED FALSE.** With the field added to
+    the payload below, a record saved four times from four fresh loads wrote NOTHING
+    each time and every run stayed at its position; so did three saves of one reused
+    object. There is no loop, because both sides of the comparison read the same
+    number: :meth:`_persisted_run_state` hashes the run as it is ON DISK, and a
+    freshly-loaded in-memory run carries exactly that value. The stamp cannot chase
+    itself.
+
+    **WHAT IS ACTUALLY WRONG WITH HASHING IT, which is narrower and is a real defect.**
+    The two sides read the same number only while the in-memory object is not stale. A
+    writer that loaded a record, had another writer change a run, and then re-entered a
+    save with NO changes of its own would compute a signature differing from disk in
+    the position alone — so a no-op would become a WRITE, and that writer's older
+    document would overwrite the other's. Excluding the field keeps a content-identical
+    re-entry a no-op, which is the property ``save_versioned``'s whole byte-stable-no-op
+    branch exists for. ``test_change_feed_sequence.py::
+    test_a_stale_object_whose_CONTENT_matches_disk_writes_nothing`` pins it, and goes
+    red if the field is hashed.
+
+    The payload below is an explicit ALLOWLIST rather than an exclusion list, so the
+    field is out by construction either way.
 
     Excluding ``rev`` is only safe because of an invariant that must not be broken:
     ``Experiment._bump_changed_runs`` is the ONLY thing that moves a run's ``rev``,
@@ -1400,6 +1488,37 @@ def _run_signature_payload(run: Run) -> dict:
         "record_id": run.record_id,
         "overrides": {p: o.to_state() for p, o in sorted(run.overrides.items())},
     }
+
+
+def _hydrate_change_revs(raw: object) -> dict[str, int]:
+    """A persisted ``{entity_id: changed_at_rev}`` map. NEVER RAISES, NEVER COERCES.
+
+    The same posture :func:`_hydrate_runs` takes, for the same measured reason: this
+    runs on the READ path, and a wrong-typed persisted value must not be able to 500
+    the record detail route and the whole-workspace list behind it. An entry whose key
+    is not a string, or whose value is not a non-negative integer, is DROPPED — which
+    puts that entity in exactly the bucket a missing entry was already in (0, "no
+    versioned save has recorded it changing"), where the existing policy applies
+    unchanged.
+
+    ``bool`` IS REFUSED EXPLICITLY, because ``isinstance(True, int)`` is ``True`` in
+    Python: a persisted ``{"p": true}`` would otherwise become the sequence position
+    ``1`` and place a proposal in the order at a revision nothing ever stamped.
+
+    Dropping rather than coercing follows :func:`_as_str`'s rule: a wrong-typed value
+    on disk is not evidence for any particular number, and inventing one would put an
+    entity at a position in the feed's order that no save ever produced.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            continue
+        out[key] = value
+    return out
 
 
 def _run_signature(run: Run) -> str:
@@ -1547,6 +1666,24 @@ def _note_state_payload(exp: "Experiment") -> list:
 # asserted. NO DATABASE TABLE AND NO MIGRATION IS ADDED HERE — the state document is
 # already upserted whole into ``isaac_experiments.state``, so a new key inside it
 # needs no DDL, and ``db_write.OWNED_TABLES`` is unchanged.
+
+
+def _proposal_signature(proposal: IngestionProposal) -> str:
+    """A proposal's whole stored state, hashed. NO EXCLUSIONS, and none are needed.
+
+    :func:`_run_signature_payload` has to exclude a run's version metadata because a
+    run CARRIES its version metadata. A proposal does not: its sequence coordinate
+    lives in ``Experiment.proposal_change_revs``, deliberately outside the entity, so
+    the whole of ``to_state()`` is authoritative content and hashing it whole cannot
+    feed back into the stamp that this hash decides.
+
+    It is a separate function from :func:`_authoritative_signature` rather than a
+    slice of it because the two answer different questions: that one asks "did
+    ANYTHING about this record change", this one asks "did THIS proposal change", and
+    a per-entity stamp cannot be derived from a whole-record hash.
+    """
+    blob = json.dumps(proposal.to_state(), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _hydrate_proposals(raw: object) -> tuple[list[IngestionProposal], list]:
@@ -2838,6 +2975,36 @@ class Experiment:
     #: path that either deletes a recorded human judgement or 500s the whole list
     #: screen over one malformed row.
     unreadable_proposals: list = field(default_factory=list)
+    #: ``{proposal_id: this record's ``rev`` at the save that last changed that
+    #: proposal}`` — the SAME sequence coordinate :attr:`Run.changed_at_rev` holds,
+    #: for the same reason, kept in a MAP here rather than as a field on the entity.
+    #:
+    #: THE PLACEMENT IS FORCED AND IS NOT A STYLE CHOICE. An
+    #: :class:`~isaac_api.proposals.IngestionProposal` is ``proposals.py``'s model,
+    #: and ``_proposal_state_payload`` hands its WHOLE ``to_state()`` to
+    #: :func:`_authoritative_signature`. A ``changed_at_rev`` field on the proposal
+    #: would therefore be HASHED, which is what :func:`_run_signature_payload` excludes
+    #: ``changed_at_rev`` to avoid — read that function for the reason, and note that
+    #: the "feedback loop" this comment used to name was MEASURED FALSE and corrected
+    #: there. The real cost is the same one: a stale writer whose CONTENT matches disk
+    #: would compute a differing signature from the position alone, turning a no-op
+    #: re-entry into a write that overwrites another writer's document. Excluding it
+    #: there would mean editing the proposal
+    #: contract's own serialiser. Holding the coordinate beside the proposals instead
+    #: keeps the whole question inside this module's version plumbing, and the
+    #: signature payload is an allowlist that does not name this key, so it is
+    #: excluded by construction.
+    #:
+    #: AN ABSENT ID MEANS 0, with :attr:`Run.changed_at_rev`'s meaning: no versioned
+    #: save has ever recorded that proposal changing. That is the state of every
+    #: proposal in a document written before this map existed, and the honest reading
+    #: — a map that guessed the record's current ``rev`` would assert a revision the
+    #: proposal may never have moved at.
+    #:
+    #: WRITTEN ONLY BY :meth:`_bump_changed_proposals`, rolled back with everything
+    #: else by ``save_versioned``'s failure branch, and PRUNED there to the ids the
+    #: record actually holds so it cannot grow without bound.
+    proposal_change_revs: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -2947,6 +3114,16 @@ class Experiment:
             # what makes "no recorded judgement is silently discarded" hold across a
             # save of a document this build could not fully parse.
             proposals_module.STATE_KEY: _proposal_state_payload(self),
+            # VERSION METADATA, not content, and it is the only key in this document
+            # that is. It sits at the top level rather than inside ``proposals``
+            # because ``proposals`` is hashed whole by
+            # :func:`_authoritative_signature` and this must not be — see the field's
+            # own comment. Sorted so the serialised document is byte-stable for a
+            # given set of coordinates.
+            "proposal_change_revs": {
+                pid: self.proposal_change_revs[pid]
+                for pid in sorted(self.proposal_change_revs)
+            },
         }
 
     def save(self) -> None:
@@ -3633,8 +3810,8 @@ class Experiment:
             )
         return False
 
-    def _persisted_run_state(self) -> dict[str, tuple[str, int]]:
-        """``{run_id: (authoritative signature, rev)}`` of the CURRENTLY on-disk runs.
+    def _persisted_run_state(self) -> dict[str, tuple[str, int, int]]:
+        """``{run_id: (signature, rev, changed_at_rev)}`` of the CURRENTLY on-disk runs.
 
         ``{}`` when the state file is absent or unreadable — the same fail-open
         reading ``_persisted_sig_and_rev`` applies, so a corrupt file makes a real
@@ -3645,19 +3822,120 @@ class Experiment:
         entries are runs. Building the map by hand skipped a different set and
         collapsed duplicate ids onto one key, which would have silently discarded a
         run's on-disk ``rev`` and let a stale in-memory copy regress it.
+
+        ``changed_at_rev`` WAS ADDED TO THE TUPLE FOR EXACTLY THE REGRESSION THE
+        PARAGRAPH ABOVE NAMES, one field over. A run this save does not change is
+        SKIPPED by :meth:`_bump_changed_runs`, so it keeps whatever its in-memory
+        copy holds — and an in-memory copy older than disk would then be written
+        back, moving that run BACKWARDS in the change feed's order. A position that
+        moves backwards is a change no cursor ahead of it will ever report, which is
+        the one failure the sequence key exists to make impossible. Reading the
+        on-disk position here is what lets the skip clamp instead of overwrite.
         """
         if not self.state_path.exists():
             return {}
         try:
             state = json.loads(self.state_path.read_text(encoding="utf-8"))
             return {
-                run.id: (_run_signature(run), run.rev)
+                run.id: (_run_signature(run), run.rev, run.changed_at_rev)
                 for run in _hydrate_runs(state.get("runs"))
             }
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return {}
 
-    def _bump_changed_runs(self) -> list[str]:
+    def _persisted_proposal_state(self) -> dict[str, tuple[str, int]]:
+        """``{proposal_id: (signature, changed_at_rev)}`` of the on-disk proposals.
+
+        THE POSITION IS IN THE TUPLE FOR :meth:`_persisted_run_state`'s REASON, and
+        it is the same defect one entity kind over: a proposal this save does not
+        change keeps whatever position its in-memory map holds, and a map older than
+        disk would write that proposal BACKWARDS in the change feed's order. A
+        position that moves backwards is a change no cursor ahead of it will ever
+        report. Reading the on-disk position here is what lets the untouched branch
+        clamp instead of overwrite.
+
+        ``{}`` when the state file is absent or unreadable — the same fail-open
+        reading :meth:`_persisted_run_state` and ``_persisted_sig_and_rev`` apply, so
+        a corrupt file makes a real save proceed rather than crash. The cost of
+        failing open here is one over-stamp: every proposal is treated as changed and
+        gets this save's ``rev``, which over-reports in the feed rather than losing
+        anything.
+
+        HYDRATES THROUGH :func:`_hydrate_proposals` rather than hashing the raw array,
+        for :meth:`_persisted_run_state`'s reason: this and ``Experiment.from_state``
+        must not disagree about which entries are proposals. Hashing raw entries would
+        also make the comparison sensitive to key order and to keys a foreign writer
+        added, so a document written elsewhere would read as changed on every save.
+        Both sides of the comparison are ``proposal.to_state()``.
+
+        The UNREADABLE entries are deliberately not in the map. They have no id this
+        module is willing to read, so there is nothing to key them by — and the feed
+        does not serve them either, for the same reason ``_hydrate_runs`` drops an
+        id-less run: an entity nothing can name cannot be reported to a client that
+        would then have to name it back.
+        """
+        if not self.state_path.exists():
+            return {}
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            hydrated, _unreadable = _hydrate_proposals(
+                state.get(proposals_module.STATE_KEY)
+            )
+            positions = _hydrate_change_revs(state.get("proposal_change_revs"))
+            return {
+                p.proposal_id: (_proposal_signature(p), positions.get(p.proposal_id, 0))
+                for p in hydrated
+            }
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return {}
+
+    def _bump_changed_proposals(self, next_rev: int) -> list[str]:
+        """Stamp ``next_rev`` on each proposal whose stored state changed. Prunes.
+
+        Returns the ids stamped (a MEASURED list, not an assertion), and is the ONLY
+        writer of :attr:`proposal_change_revs` — the invariant that makes the map's
+        absence from :func:`_authoritative_signature` sound, exactly as
+        :meth:`_bump_changed_runs` being the only writer of ``Run.rev`` makes that
+        field's absence from :func:`_run_signature_payload` sound.
+
+        Called only from the write branch of :meth:`save_versioned`, with the rev that
+        write is about to reach. A proposal whose signature matches disk is untouched,
+        so a title edit never moves a proposal's position in the feed.
+
+        A PROPOSAL NOT FOUND ON DISK IS STAMPED, which covers both a proposal made in
+        this save and a proposal first persisted by the unversioned :meth:`save`
+        primitive whose file this process has not read. Over-stamping re-reports an
+        entity that may not have moved; under-stamping loses a change. Only one of
+        those is recoverable by the reader, so the direction is chosen deliberately.
+
+        PRUNING IS PART OF THE SAME PASS rather than a separate tidy-up, because a
+        stale coordinate is not merely wasted bytes: an id no longer in ``proposals``
+        names an entity the feed will never emit, so a map that only grew would carry
+        a position for something unreportable, and every save would rewrite it. This
+        application has no operation that removes a proposal — review acts move
+        ``state``, they do not delete — so the prune is defence against a document
+        written elsewhere, and it is why the map cannot grow without bound.
+        """
+        on_disk = self._persisted_proposal_state()
+        stamped: list[str] = []
+        live: dict[str, int] = {}
+        for proposal in self.proposals:
+            pid = proposal.proposal_id
+            prior = on_disk.get(pid)
+            if prior is not None and prior[0] == _proposal_signature(proposal):
+                # MAX, NOT THE IN-MEMORY VALUE. See the paragraph above: this branch
+                # is the one a stale in-memory map would regress through, and the
+                # clamp is what makes "a position never moves backwards" a property
+                # of the code rather than of an assumption about how the caller
+                # loaded this object.
+                live[pid] = max(self.proposal_change_revs.get(pid, 0), prior[1])
+                continue
+            live[pid] = next_rev
+            stamped.append(pid)
+        self.proposal_change_revs = live
+        return stamped
+
+    def _bump_changed_runs(self, next_rev: int) -> list[str]:
         """Bump ``rev``/``updated_utc`` on each run whose authoritative state changed.
 
         Returns the ids bumped (a MEASURED list, not an assertion). Called only from
@@ -3697,15 +3975,32 @@ class Experiment:
 
         ``max(run.rev, disk_rev) + 1`` mirrors ``save_versioned``: a stale in-memory
         run can never regress the persisted rev.
+
+        ``next_rev`` IS THE EXPERIMENT REV THIS SAVE IS ABOUT TO REACH, and it is
+        PASSED IN rather than read off ``self`` because ``self.rev`` has deliberately
+        not been advanced yet when this runs — ``save_versioned`` keeps the no-op
+        decision strictly ahead of every version write. Each bumped run also records
+        it as :attr:`Run.changed_at_rev`, which is what gives every entity of one
+        record a position in ONE strictly-increasing sequence; ``Run.rev`` remains the
+        run's own per-run series and the two are not interchangeable. A run that is
+        SKIPPED keeps whatever ``changed_at_rev`` it already had, which is the whole
+        point: it did not change, so its position must not move.
         """
         on_disk = self._persisted_run_state()
         bumped: list[str] = []
         for run in self.runs:
             prior = on_disk.get(run.id)
             if prior is not None and prior[0] == _run_signature(run):
+                # SKIPPED, BUT NOT LEFT BEHIND DISK. The run did not change, so its
+                # position must not MOVE — but a stale in-memory copy holding an
+                # older position would be written back and move it BACKWARDS, which
+                # is a change no cursor ahead of it will ever report. `max` keeps the
+                # skip a no-op in the ordinary case and a clamp in the stale one.
+                run.changed_at_rev = max(run.changed_at_rev, prior[2])
                 continue
             run.rev = max(run.rev, prior[1] if prior is not None else 0) + 1
             run.updated_utc = _now_iso()
+            run.changed_at_rev = next_rev
             bumped.append(run.id)
         return bumped
 
@@ -3765,15 +4060,47 @@ class Experiment:
         that was never persisted, permanently offsetting that run's version series
         from disk. ``test_a_refused_write_rolls_back_run_versions_too`` pins it, and
         goes RED if the loop is removed.
+
+        THE ROLLBACK COVERS THE SEQUENCE COORDINATES TOO — ``Run.changed_at_rev`` and
+        ``proposal_change_revs`` — for a sharper version of the same argument, and it
+        is stated rather than left to "the loop restores the run's version metadata".
+        Those coordinates are the change feed's ORDER. A refused write that left them
+        advanced would put entities at a position derived from a ``rev`` that exists
+        nowhere: the record's own entry would roll back to the old ``rev`` while a run
+        sat ahead of it, so a client whose cursor is at the record's real position
+        would be handed a run entry claiming a revision that was never written, and
+        the next successful save — which reaches that same number — would then find
+        the run's coordinate already there and report nothing new. A version nobody
+        can reach and a change nobody is told about, from one un-rolled-back integer.
+        ``test_change_feed_sequence.py`` pins both halves.
         """
         old_sig, disk_rev = self._persisted_sig_and_rev()
         new_sig = _authoritative_signature(self)
         if old_sig is not None and old_sig == new_sig:
             return False
         previous = (self.rev, self.updated_utc)
-        previous_runs = {run.id: (run.rev, run.updated_utc) for run in self.runs}
-        self._bump_changed_runs()
-        self.rev = max(self.rev, disk_rev) + 1
+        previous_runs = {
+            run.id: (run.rev, run.updated_utc, run.changed_at_rev) for run in self.runs
+        }
+        previous_proposal_revs = dict(self.proposal_change_revs)
+        # COMPUTED BEFORE THE BUMPS, ASSIGNED AFTER THEM, and the split is the point.
+        # The two ``_bump_changed_*`` calls need the rev this save will reach in order
+        # to stamp it, and ``self.rev`` must not be advanced before the no-op decision
+        # is safely behind us — the paragraph above explains why the ordering is
+        # load-bearing. Computing the number is not advancing the version.
+        #
+        # THE ``0`` IN THE ``max`` IS NOT PADDING. ``_as_int`` never raises but never
+        # validates either, so a persisted ``"rev": -5`` hydrates as ``-5``; without
+        # the floor this save would reach ``-4`` and stamp every entity it changed at
+        # a NEGATIVE position. ``change_feed.ZERO_KEY`` is ``(-1, "", "")`` and is
+        # documented as strictly below every real key — an entity stamped at ``-4``
+        # would sit BELOW the start of the order, where not even a cursorless resync
+        # reports it. One floor makes every position this application ever writes
+        # ``>= 1``, which is the arithmetic that claim rests on.
+        next_rev = max(self.rev, disk_rev, 0) + 1
+        self._bump_changed_runs(next_rev)
+        self._bump_changed_proposals(next_rev)
+        self.rev = next_rev
         self.updated_utc = _now_iso()
         try:
             self.save()
@@ -3782,7 +4109,8 @@ class Experiment:
             for run in self.runs:
                 prior = previous_runs.get(run.id)
                 if prior is not None:
-                    run.rev, run.updated_utc = prior
+                    run.rev, run.updated_utc, run.changed_at_rev = prior
+            self.proposal_change_revs = previous_proposal_revs
             raise
         return True
 
@@ -3874,6 +4202,14 @@ class Experiment:
         # on legacy state.
         exp.proposals, exp.unreadable_proposals = _hydrate_proposals(
             state.get(proposals_module.STATE_KEY)
+        )
+        # NO MIGRATION IS REQUIRED FOR THE PROPOSAL SEQUENCE MAP EITHER, and the
+        # tolerance is the same one every optional key above gets: an absent key
+        # hydrates to ``{}``, i.e. "no versioned save has recorded any of these
+        # proposals changing", which is precisely true of a document written before
+        # the map existed.
+        exp.proposal_change_revs = _hydrate_change_revs(
+            state.get("proposal_change_revs")
         )
         return exp
 
