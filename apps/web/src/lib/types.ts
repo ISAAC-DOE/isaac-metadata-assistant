@@ -2711,6 +2711,213 @@ export interface ApiConflictResolved {
 }
 
 /* --------------------------------------------------------------------------
+ * Persistent ingestion proposals.
+ *
+ * `GET /experiments/{id}/proposals`, `GET .../proposals/{pid}` and
+ * `POST .../proposals/{pid}/review`. Every shape here is the server's, derived from
+ * `apps/api/isaac_api/proposals.py` (`IngestionProposal.to_state` / `proposal_view`)
+ * and `routes.py::_proposals_payload`; nothing in this block is computed on this side.
+ *
+ * THE ONE THING A READER OF THESE TYPES MUST NOT INFER. A proposal is a stored
+ * SUGGESTION. It is not a field value, not evidence and not a confirmation — not even
+ * once it has been accepted, because acceptance records that some OTHER writer wrote
+ * the value and the field's value lives in the envelope that writer produced. The
+ * backend serialises `status`, `verified`, `is_evidence` and `is_field_value` on the
+ * wire precisely so the guarantee survives the JSON boundary, and the three booleans
+ * are typed as the literal `false` below so no code on this side can branch on one
+ * being true. `status` is typed as its literal for the same reason: it is deliberately
+ * NOT one of the draft field statuses.
+ *
+ * `target_stale` AND `still_current` ARE THREE-VALUED, AND `null` IS NOT `false`. Both
+ * are derived on every read by re-digesting what the target holds now, and each is
+ * `null` when it CANNOT be answered — which happens when the run the proposal names
+ * has been removed. Typing them `boolean | null` rather than `boolean` is what stops a
+ * component collapsing "we could not look" into "nothing changed".
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The five lifecycle states. Four of them are terminal, and none of them is a delete:
+ * this API has no operation that removes a proposal, and the note the proposal cites
+ * survives every outcome including `rejected`.
+ */
+export type ApiProposalState = 'open' | 'accepted' | 'rejected' | 'superseded' | 'withdrawn';
+
+/** The acts that appear in a proposal's history. `propose` opens every one. */
+export type ApiProposalAction = 'propose' | 'accept' | 'reject' | 'supersede' | 'withdraw';
+
+/** The four a review request may name. `propose` is excluded — see `REVIEW_ACTIONS`. */
+export type ApiProposalReviewAction = Exclude<ApiProposalAction, 'propose'>;
+
+/**
+ * `candidate` — the proposed value is written as it stands. `edited` — it was wrong
+ * and the corrected value travels with the request. They are different claims and
+ * neither is a default.
+ */
+export type ApiProposalAcceptedFrom = 'candidate' | 'edited';
+
+/** Which EXISTING writer applied an accepted value. Never a writer of its own. */
+export type ApiProposalAppliedVia = 'run_field' | 'run_override' | 'record_enum_fields';
+
+/** One act in a proposal's life. Append-only; nothing rewrites an entry. */
+export interface ApiProposalTransition {
+  action: ApiProposalAction;
+  at: string;
+  /** The state before this act. `null` only for `propose`. */
+  from_state: ApiProposalState | null;
+  to_state: ApiProposalState;
+  /** `unattributed` whenever nobody was established. Never a placeholder name. */
+  actor_trust_basis: string | null;
+  actor_subject: string | null;
+  /** For `accept`: the value that was written. */
+  accepted_value: unknown;
+  accepted_from: ApiProposalAcceptedFrom | null;
+  /** For `reject`/`supersede`/`withdraw`: the reason, WHEN one was given. */
+  reason: string | null;
+}
+
+/**
+ * Who performed the accept, read off the accept transition rather than stored on the
+ * proposal. `subject` is `null` whenever the act was unattributed, and no placeholder
+ * name is ever substituted.
+ */
+export interface ApiProposalAcceptedBy {
+  subject: string | null;
+  trust_basis: string | null;
+  attributed: boolean;
+  at: string;
+}
+
+export interface ApiProposal {
+  proposal_id: string;
+  experiment_id: string;
+  /** THE NOTE THE CONTENT CAME FROM. Required — the verbatim words live there. */
+  note_id: string;
+  /** The run this proposal is about, or `null` for the record's own draft. */
+  run_id: string | null;
+  target_field_path: string;
+  proposed_value: unknown;
+  /** The sentence that produced the value and the target. Never an identifier. */
+  rule: string;
+  source: string;
+  proposed_utc: string;
+  /** FOR THE AUDIT RECORD ONLY. It is never the acceptance precondition. */
+  base_rev: number;
+  /** What the target held when the proposal was made. THE precondition. */
+  target_digest: string;
+  /** The half-open span of the note's VERBATIM text. Both or neither. */
+  start_char: number | null;
+  end_char: number | null;
+  client_request_key: string | null;
+  state: ApiProposalState;
+  subject: string | null;
+  trust_basis: string;
+  accepted_value: unknown;
+  accepted_from: ApiProposalAcceptedFrom | null;
+  applied_via: ApiProposalAppliedVia | null;
+  applied_run_id: string | null;
+  applied_rev: number | null;
+  applied_target_digest: string | null;
+  history: ApiProposalTransition[];
+  /** Always this literal. Deliberately not one of the draft field statuses. */
+  status: 'ingestion_proposal';
+  /** Always `false`. Typed as the literal so no code can branch on it being true. */
+  verified: false;
+  is_evidence: false;
+  /** Always `false`, ACCEPTED PROPOSALS INCLUDED. */
+  is_field_value: false;
+  /** Whether a value was written through this proposal. True only in `accepted`. */
+  applied: boolean;
+  /* --- derived on every read, never stored ------------------------------- */
+  /** The digest of what the target holds NOW, or `null` when it cannot be read. */
+  current_target_digest: string | null;
+  /** `null` is NOT `false` — see the block comment above. */
+  target_stale: boolean | null;
+  /** For an ACCEPTED proposal only; `null` when it cannot be answered. */
+  still_current: boolean | null;
+  /** The note's words at the stored offsets. `null` when there is no span. */
+  excerpt: string | null;
+  attributed: boolean;
+  accepted_by: ApiProposalAcceptedBy | null;
+}
+
+/**
+ * `GET /experiments/{id}/proposals` — ONE WINDOW, and this list is bounded where
+ * this API's other lists are not.
+ *
+ * Omitting `limit` returns `window_default` rows, not everything; `has_more` and
+ * `next_cursor` page through the rest. `total` stays how many proposals the record
+ * HOLDS — never how many were returned — so a client showing one window can always
+ * state the record's true size instead of implying the rest are gone.
+ */
+export interface ApiProposalsResponse {
+  proposals: ApiProposal[];
+  /** How many the record HOLDS. Ignores `state`, `limit` and `after`. */
+  total: number;
+  /** How many are in THIS window. */
+  returned: number;
+  by_state: Record<ApiProposalState, number>;
+  has_more: boolean;
+  next_cursor: string | null;
+  window_default: number;
+  window_max: number;
+  max_per_record: number;
+  /**
+   * Stored entries this build could not present as proposals. TWO KINDS, and the
+   * count does not separate them: an entry the model refused, and an entry whose id
+   * another proposal already holds. Either way it is preserved verbatim on the
+   * record and counted rather than rendered.
+   */
+  unreadable_entries: number;
+  /**
+   * The server's OWN list of the paths a proposal may target — 18 at time of writing,
+   * DERIVED server-side from the routes that write and never listed there by hand, so
+   * it widens by itself when a path gains a write route. No consumer may transcribe
+   * it: the whole point of serving it is that a client can be truthful about the path
+   * in front of the reader without keeping a second copy of a set the server enforces.
+   */
+  target_field_paths: string[];
+  /**
+   * The subset of those written on the RECORD; the rest are applied through a run's
+   * writer. ONE path at time of writing (`system.technique`) — and it is exactly the
+   * kind of number a client must not assume, because a surface that hard-coded "the
+   * record-scoped ones" would be wrong the day a second arrives.
+   */
+  record_scoped_target_field_paths: string[];
+  /**
+   * The server's own vocabularies.
+   *
+   * `states` IS `string[]` AND `ApiProposal.state` IS A CLOSED UNION, and the pair is
+   * deliberate rather than an inconsistency. `PROPOSAL_STATES` is closed server-side,
+   * so a proposal's OWN state is modelled as the five it can be; but a client renders
+   * `states` as a list of filter options it does not interpret, so a sixth member
+   * added server-side must appear in the filter rather than being dropped by a client
+   * that thinks it knows the set. The panel therefore handles an unrecognised member
+   * of THIS list (it becomes an option labelled with the raw token) and does not claim
+   * to handle an unrecognised `ApiProposal.state`, which the type says cannot arrive.
+   */
+  states: string[];
+  review_actions: string[];
+  accepted_from_values: string[];
+  /** The EXPERIMENT's version token — the `If-Match` every review must carry. */
+  experiment_version: string;
+}
+
+/*
+ * `GET .../proposals/{pid}` HAS NO TYPE HERE, AND THAT IS THE HONEST STATE OF IT. The
+ * operation exists on the server and returns `{proposal}` with the record's validator
+ * in the `ETag` header and NOT in the body; this client never calls it, because the
+ * list window already carries every field the review surface renders, `history`
+ * included. A wire type for an operation nothing calls is documentation that no
+ * compiler checks against a payload, and it was deleted with the uncalled client
+ * function it existed for. See `api.ts`'s proposals block for the full note.
+ */
+
+export interface ApiProposalReviewed {
+  proposal: ApiProposal;
+  experiment_version: string;
+}
+
+/* --------------------------------------------------------------------------
  * Transcript capture.
  *
  * THE FOUR OUTCOMES ARE A CLOSED UNION AND ARE NOT INTERCHANGEABLE. A

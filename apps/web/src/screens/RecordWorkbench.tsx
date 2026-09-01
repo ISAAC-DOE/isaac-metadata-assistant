@@ -14,6 +14,7 @@ import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
 import { RunsSection } from '../components/RunsSection';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
+import { IngestionProposalsPanel } from '../components/IngestionProposalsPanel';
 import { AssetReferencesPanel } from '../components/AssetReferencesPanel';
 import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment, flushExperiment } from '../lib/runAutosaveStore';
@@ -719,6 +720,36 @@ function LoadedWorkbench({
       <TranscriptCapturePanel experimentId={id} />
 
       <UnmappedNotesPanel experimentId={id} />
+
+      {/*
+        INGESTION PROPOSALS SIT DIRECTLY BELOW THE NOTES THEY CITE, and adjacency is the
+        argument. Every proposal names a note — `note_id` is required, and it is what
+        keeps the verbatim words safe from every review outcome — so the queue of
+        suggestions reads next to the content they were read out of. Reviewing a
+        proposal and triaging the note it came from are two decisions about the same
+        sentence, and putting a screen between them would hide that.
+
+        BELOW rather than above, because a note exists before anything proposes a value
+        from it: capture, then triage, then the suggestions that triage produced.
+
+        A section, not a tab, for `RunsSection`'s third reason — and here the reason is
+        sharper. This build has NO automatic producer for proposals, so the ordinary
+        state of this section is empty; behind a tab, a reader would never learn that
+        this record can hold reviewable suggestions at all, and an empty tab is exactly
+        the surface a person stops opening. The empty state says the absence is a fact
+        about the build rather than a failed read.
+
+        `activity` IS THE CHANGE-FEED SUMMARY THIS SCREEN ALREADY HOLDS, threaded in so
+        a proposal that moves elsewhere refreshes this list — SILENTLY, so nothing being
+        typed into an open editor is destroyed, and with no notice of its own, because
+        `RecordActivityNote` above already tells the reader something changed. It
+        carries ids and states only: a `proposal` feed entry has no content by
+        construction, so this panel re-reads through the list route and renders nothing
+        from the summary itself. It is the reason this slice's read surface makes the
+        feed's proposal kind visible at all — until now nothing on any screen consumed
+        it.
+      */}
+      <IngestionProposalsPanel experimentId={id} activity={activity} />
 
       {/*
         ASSET REFERENCES SIT BETWEEN THE UNMAPPED NOTES AND THE DRAFT BLOCKS, and the

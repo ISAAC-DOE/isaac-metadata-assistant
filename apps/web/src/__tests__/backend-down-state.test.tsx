@@ -721,7 +721,20 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // first segment nothing else used and therefore needed its own product word in
     // `SUB_RESOURCE_LABELS` ("recent changes"). Read out of this test's own failure
     // output (`expected 43 to be 42`), not derived by adding a delta.
-    expect(experimentPathLiterals.length).toBe(43);
+    // 43 -> 45: the two persistent-ingestion-proposal operations — `listProposals` and
+    // `reviewProposal`. TWO literals, not one, because unlike the note pair they do not
+    // share a base: the list writes `/experiments/${…}/proposals` and appends
+    // `?state=&limit=&after=` as a separate string (the shape `getPendingPage` and
+    // `getChanges` use, and for the reason their call sites record), while the review
+    // write builds its own `…/proposals/${…}/review` literal.
+    //
+    // IT WAS BRIEFLY 46, AND THE THIRD LITERAL WAS DELETED RATHER THAN KEPT. A
+    // `getProposal` detail read shipped with NO CALLER anywhere in the app, so this
+    // counter — and `SUB_RESOURCE_LABELS` through it — described a sub-read the
+    // application never performs. A counter is not a reason to keep dead code; see
+    // `api.ts`'s proposals block. Read out of this test's own failure output, not
+    // derived by adding a delta.
+    expect(experimentPathLiterals.length).toBe(45);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this
@@ -732,7 +745,12 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // this test's own failure output (`have a length of 33 but got 34`), not derived.
     // 34 -> 35: `changes`, the record's change feed. Read out of this test's own
     // failure output (`have a length of 34 but got 35`), not derived.
-    expect(SUB_READ_SUFFIXES).toHaveLength(35);
+    // 35 -> 37: the two proposal suffixes — `proposals` and `proposals/SEG-1/review`.
+    // This is the `notes` shape rather than the `revisions` one: a list read and an act
+    // under one first segment. It was briefly 38, with a `proposals/SEG-1` detail
+    // suffix that no caller reached — see the note on the literal count above. Read out
+    // of this test's own failure output, not derived by adding a delta.
+    expect(SUB_READ_SUFFIXES).toHaveLength(37);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -764,7 +782,12 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // word in `SUB_RESOURCE_LABELS` ("recent changes") — the guard below this line is
     // what surfaced that, which is exactly the leak it was written to catch. Read out
     // of this test's own failure output (`have a length of 21 but got 22`), not derived.
-    expect(SUB_READ_SEGMENTS).toHaveLength(22);
+    // 22 -> 23: `proposals`. TWO suffixes but ONE first segment, so this counter moves
+    // by one where the suffix counter above moved by two — the `notes` shape. It needed its own product word in `SUB_RESOURCE_LABELS` ("the ingestion
+    // proposals"), and the guard below this line is what surfaced that. Read out of
+    // this test's own failure output (`have a length of 22 but got 23`), not derived
+    // by adding a delta.
+    expect(SUB_READ_SEGMENTS).toHaveLength(23);
     // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
     // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
     // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`
@@ -798,6 +821,15 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     expect(SUB_READ_SUFFIXES).toContain('revisions/SEG-1');
     expect(SUB_READ_SUFFIXES).toContain('revisions/SEG-1/diff');
     expect(SUB_READ_SEGMENTS).toContain('revisions');
+    // The two ingestion-proposal operations, spot-checked for the reason the three
+    // above are: the counters alone cannot say that a change moved the RIGHT rows.
+    expect(SUB_READ_SUFFIXES).toContain('proposals');
+    expect(SUB_READ_SUFFIXES).toContain('proposals/SEG-1/review');
+    expect(SUB_READ_SEGMENTS).toContain('proposals');
+    // AND THE DETAIL READ IS PINNED ABSENT. `getProposal` shipped with no caller and
+    // was deleted; asserting only the two that exist would let it return unnoticed and
+    // silently re-inflate the counters above.
+    expect(SUB_READ_SUFFIXES).not.toContain('proposals/SEG-1');
   });
 });
 

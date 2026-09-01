@@ -10436,7 +10436,7 @@
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "25e4cf7e87a554b93f8e84d3c8e1e96419d12c3fe4187001d0d0d1bf4ff66002"
+        "sha256": "e9f7603345c1fa17edd679979b8bf6f2fea0c0e5a2f46fc3940fe6dbdbd21ce1"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "51faebe9a337a8d6aba3af7c2251deaa8b8138545051b02af922653c293ab515"
+        "sha256": "d2e1843c015dbb19c6af88ba6d78af9a1715df28c56636313deb35d724d33184"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "7f5652bfefa2fdc5b6bd55d7873cb599f3dea71e33c944cc0f5f50bac01c7b18"
+        "sha256": "319455048d51ecfccd6873a075da7633b27e578cf2f142c07a107b06e20f47dd"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "713d9ae1ac5da8a8fd98c7a46a919ddc2b434abf1fd94a049a0ed0d2204ef1b7"
+        "sha256": "74bf88b702c0c3ec947f20c7ce6d62a5e714820d52f4e9f7dc2e7a6b4f94550d"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "2052bd03248eb286610a2acbe1bd24f8ea1168849aaaa855439204c74bafa834"
+        "sha256": "fb4e331cec83506fec45483f4b692bc5c9a55993877f68c5d4dee908700f2195"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "5b894beb6b649340ca3484972c9ba69abb8db69f2123c475ff7c2409ffbe2a80"
+    "served_manifest_fingerprint": "d57a36538906a9efa13fbfaadbe3e17567666dfe7ccab39af60da977cf35ba85"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
