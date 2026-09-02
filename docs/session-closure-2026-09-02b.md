@@ -18,7 +18,7 @@ merge.
 
 | Gap (from the first session's §7) | Closed by | Merge SHA | Direct proof |
 |---|---|---|---|
-| `RunsSection` had no change-feed refresh path at all | #222, corrected by #224's contract in #222's own follow-up commit `4151203`, wired live by #226 | `2b8a017` (feat), redesign commit `4151203` pre-merge, wiring in #226 (pending) | `runs-live-refresh-integration.test.tsx` (#226): exactly one bounded `listRuns` re-read for a colleague's run edit, for a run removal, and when the record poller wins the race |
+| `RunsSection` had no change-feed refresh path at all | #222, corrected by #224's contract in #222's own follow-up commit `4151203`, wired live by #226 | `2b8a017` (feat), redesign commit `4151203` pre-merge, wiring merged `fd179f2` | `runs-live-refresh-integration.test.tsx` (#226): exactly one bounded `listRuns` re-read for a colleague's run edit, for a run removal, and when the record poller wins the race |
 | A colleague's proposal arrived with no announcement | #222 | `2b8a017` | `proposal-arrival-announcement.test.tsx`; suppressed on hydration, on the panel's own review acts, and on repeated no-op polls |
 | The drain budget was exactly exhausted at the row ceiling | #221 | `d5498e8` | `useChangeFeed.test.ts` — hard bound proven: ≤ 26 + T/8000 requests in any T ms window under sustained `has_more`; 100-page drain 645 s → 620.5 s |
 | Events refetched the full record bundle including unbounded `/pending` | #224 | `0cd8f6b` | `live-refresh-request-graph.test.tsx`: one run edit, record poller first, 44 req / 4 bundles / 4 unbounded `/pending` → 17 / 1 / 0 |
@@ -36,25 +36,44 @@ already included `isaac_answer_questions`, `isaac_create_run` (direct writes) an
 `isaac_propose_field_value` (a reviewable suggestion). Closed by #220, merged `542fe17`.
 
 PR #226 (wiring `RunsSection` to the two live-refresh producers, paging the change feed at 200,
-and the two-actor end-to-end proof) is **open, not merged**, at head `83ef774` at the time of
-writing. Its independent review already ran and returned three findings (I-1, I-2, four M items),
-fixed in that same head commit — see §4. TODO(second pass): merge SHA, release entry, and the
-evidence doc it will add (`docs/evidence/two-actor-workflow-proof-2026-09-02.md`).
+and the two-actor end-to-end proof) **merged as `fd179f2`** (head `83ef774`, `mergedAt`
+2026-09-02T22:57:09Z, verified via `gh pr view 226 --json mergeCommit,mergedAt,state`). Its
+independent review returned **MERGE-after-fixes** (quoted verbatim from the review-fix commit
+`83ef774`: *"Independent review returned MERGE-after-fixes on this branch"*) on findings I-1, I-2
+and four M items, all fixed in that same head commit before merge — see §4.
+`docs/evidence/two-actor-workflow-proof-2026-09-02.md` is now present on `main` (confirmed via
+`git show origin/main:docs/evidence/two-actor-workflow-proof-2026-09-02.md | head`) — read and
+cited in §2.
 
 ---
 
 ## 2. What was proven, and by what
 
-- **A two-actor proof exists** (#226, `e2e/trusted/two-actor-workflow.spec.ts`, one test, 20
-  steps): Scientist A holds the Record Workbench open; Scientist B acts over HTTP. Create → two
-  runs added through the website → record-scoped proposal by B → A's page announces it without
-  reload → reject with reason → run-scoped proposal on the second run → `RunsSection` and the
-  panel refresh with exactly one bounded run re-read → three distinct values compared → stale
-  protection (`409 proposal_stale`) → accept under the fixture verifier → only the second run
+- **A two-actor proof exists** (#226, merged `fd179f2`, `e2e/trusted/two-actor-workflow.spec.ts`,
+  one test, 20 steps): Scientist A holds the Record Workbench open; Scientist B acts over HTTP.
+  Create → two runs added through the website → record-scoped proposal by B → A's page announces
+  it without reload → reject with reason → run-scoped proposal on the second run → `RunsSection`
+  and the panel refresh with exactly one bounded run re-read → three distinct values compared →
+  stale protection (`409 proposal_stale`) → accept under the fixture verifier → only the second run
   changed → change feed drained at `limit=200` → validate/export dry-run see the accepted value →
   the permitted MCP tool list carries no submit/export/accept tool. (Quoted from the PR #226 body;
   the review-fix commit `83ef774` corrected three of this proof's own assertions before it could
-  be trusted — see §4.)
+  be trusted — see §4.) Full evidence, now on `main`:
+  [`docs/evidence/two-actor-workflow-proof-2026-09-02.md`](docs/evidence/two-actor-workflow-proof-2026-09-02.md),
+  which states its own three tiers of claim rather than blurring them: **proven here** — all 20
+  steps, against a real FastAPI process, a real Chromium, and a real filesystem-backed workspace;
+  **proven only in CI** — durability across a process restart, against a real PostgreSQL, via
+  `apps/api/tests/test_proposal_durability.py`'s real-engine scenarios (cited, never claimed by
+  this proof itself); **proven nowhere** — anything hosted, because no shipped deploy artifact
+  sets either trusted-identity variable (`test_deploy_config.py` pins that) and hosted acceptance
+  answers `409 human_actor_required` — `HOSTED QA PENDING (Krish)`. **B is HTTP, not a second
+  browser, for a measured reason, not convenience**: no surface in this build can create a
+  proposal (`routes.py`: *"NOTHING WAS REWIRED TO FEED THEM"*), so the reviewed act still happens
+  through the visible UI and B only establishes starting state and reads server state back as an
+  independent check — except step 13, labelled as the deliberate exception: **its stale-accept
+  `409` and the following withdraw are observed from B's HTTP request context, not from A's page**,
+  because the guarantee under test is the *server's* refusal (the panel deliberately still offers
+  the button regardless).
 - **Run-scoped proposals are provable end to end** (#223): 30 backend tests target paths derived
   at import from the server's own `PROPOSAL_TARGET_PATHS` / `_proposal_writer_for` /
   `_PROPOSAL_WRITER_SCOPE`, on an experiment with two runs, deliberately targeting the second;
@@ -188,11 +207,15 @@ HEAD against its own stale base. The exact-head-green rule protects the *head*; 
 about the *merge*, and this session produced two counterexamples in the space of nine minutes
 (`2b8a017` at 21:06, `1ef0c0d` at 21:27).
 
-**`f58e8d2`'s own CI (run `33687944765`) had NOT concluded at the time of writing** — measured
+~~**`f58e8d2`'s own CI (run `33687944765`) had NOT concluded at the time of writing** — measured
 `status: "in_progress"`, `conclusion: ""` via `gh run view 33687944765 --json headSha,conclusion,status`.
 This document does not claim `main` is green again; that claim needs a later, successful
-conclusion of that specific run, re-checked rather than assumed. TODO(second pass): confirm
-`33687944765`'s conclusion and record it here rather than inferring it from a later release.
+conclusion of that specific run, re-checked rather than assumed.~~ — **RESOLVED, this pass:**
+re-checked via the same command, `33687944765` now reads `{"conclusion":"success","status":
+"completed"}`. `main` at `f58e8d2` released cleanly as **v0.0.211** (§8). `fd179f2` (#226's merge,
+now on top of `f58e8d2`) has its OWN separate CI run (`33692815125`) which had **not** concluded at
+the time of this pass — see §7/§8; that is the run whose conclusion still needs confirming, not
+`33687944765`, which is now closed out.
 
 ---
 
@@ -307,34 +330,69 @@ and nothing is blocked on them.
   malformed page can wedge the drain loop permanently rather than just slowly.
 - **`isaac_runs` Stage 2b** and an apply route for `POST /ingestion/csv/preview` remain unchanged —
   the latter is a committed human decision (CLAUDE.md §15), not residual work.
-- **PR #226 is unmerged** at the time of writing. Its wiring (`RunsSection` now consuming both
-  `runActivity` and `recordVersion`; the change feed paged at `limit: 200`; the two-actor proof) has
-  passed its own independent review (§4) but has not gone through CI on `main`, has not released an
-  image, and has not been hosted-QA'd. Nothing in §1's table should be read as "shipped to
-  production" until §7 below is filled in.
+- **PR #226 has MERGED, as `fd179f2`**, since the previous pass of this document. Its wiring
+  (`RunsSection` now consuming both `runActivity` and `recordVersion`; the change feed paged at
+  `limit: 200`; the two-actor proof) passed its own independent review (§4, verdict
+  MERGE-after-fixes). `fd179f2`'s own CI run had **not yet concluded** at the time of this pass
+  (run `33692815125`, `status: in_progress`) — it has not released an image and has not been
+  hosted-QA'd. Nothing in §1's table should be read as "shipped to production" until §7/§8's
+  Part-2 markers and `fd179f2`'s CI conclusion are filled in.
 
 ---
 
-## 7. Measured state — SECOND PASS
+## 7. Measured state — SECOND PASS, PART 1
 
-The figures below are placeholders pending PR #226's merge. Do not treat any number in this
-section as measured until the markers are replaced.
+This is a two-part second pass. Part 1 (this pass) fills every marker answerable from git/gate-log
+state, verified in THIS worktree after merging `origin/main`. Part 2 — the main-checkout backend,
+frontend, `tsc -b` and snapshot counts — is being measured separately by the orchestrator directly
+against the main checkout at `fd179f2`, because a worktree cannot produce the main-checkout skip
+count (`graphify-out/graph.json` is gitignored and absent from every worktree; CLAUDE.md §11 and
+the first session's closure note both record the +2 skew this causes). Those markers are left in
+place below, unfilled, for Part 2.
 
-- Backend test count at final SHA, main checkout: TODO(second pass)
-- Frontend test count / file count at final SHA: TODO(second pass)
-- `tsc -b` result: TODO(second pass)
-- Snapshot `--check` result (both artifacts): TODO(second pass)
-- Served path set / manifest counts (should remain 201 / 200 unless a slice added or removed a
-  served path): TODO(second pass)
+- Backend test count at final SHA, main checkout: **TODO(second pass, part 2 — orchestrator
+  measuring in the main checkout)**
+- Frontend test count / file count at final SHA: **TODO(second pass, part 2)**
+- `tsc -b` result: **TODO(second pass, part 2)**
+- Snapshot `--check` result (both artifacts) — **in THIS worktree, after merging `origin/main` and
+  regenerating both artifacts: exit 0, no drift, confirmed by
+  `apps/api/tests/test_committed_snapshot.py` + `test_memory_graph_detail.py` — see the
+  verification block at the end of this document.** The main-checkout re-check is still Part 2's
+  to run, since a worktree's own green check does not by itself certify what `main` will read.
+- Served path set / manifest counts: **measured in this worktree, unchanged — 201 / 200.** Neither
+  new doc from this session (`docs/session-closure-2026-09-02b.md`, this document; nor
+  `docs/evidence/two-actor-workflow-proof-2026-09-02.md`, added by #226) appears in the served set
+  or the manifest — see the note below.
 - Backend skip count and classification (baseline this session started from: 43, per the first
-  session's closure doc §8): TODO(second pass)
-- PR #226 merge SHA: TODO(second pass)
-- PR #226 image version / release-gate row: TODO(second pass)
-- `docs/evidence/two-actor-workflow-proof-2026-09-02.md` — confirm it exists on `main` and is
-  manifest-listed or not: TODO(second pass)
-- Open PRs / worktrees / stranded work at the true end of this session: TODO(second pass)
-- Whether this document (`docs/session-closure-2026-09-02b.md`) itself is in the served-content
-  manifest: **measured now, not deferred** — see §8.
+  session's closure doc §8): **TODO(second pass, part 2)**
+- **PR #226 merge SHA: `fd179f2`** (`git log --oneline -1 origin/main`; `gh pr view 226 --json
+  mergeCommit,mergedAt,state` → `mergeCommit.oid: fd179f23e6b77ffd05a91722e1873bad64365c50`,
+  `mergedAt: 2026-09-02T22:57:09Z`, `state: MERGED`).
+- **PR #226 review verdict: MERGE-after-fixes**, quoted verbatim from the review-fix commit
+  `83ef774`'s own message (*"Independent review returned MERGE-after-fixes on this branch"*), after
+  findings I-1, I-2 and four M items were fixed in that same commit — see §4.
+- **`f58e8d2`'s CI: SUCCESS.** Run `33687944765`, re-verified via `gh run view 33687944765 --json
+  headSha,conclusion,status` → `{"conclusion":"success","headSha":"f58e8d2…","status":"completed"}`.
+  Release gate run `33691355159` printed `commit under release:
+  f58e8d27afe9ab829da369e081f3b41409ece2bd` and its build job set `TAG="v0.0.211"`;
+  `git rev-list -n1 v0.0.211` resolves to `f58e8d2`. §8's table row for `f58e8d2` is filled in below.
+- **`fd179f2`'s CI: PENDING**, not yet concluded at the time of writing. Re-verified via
+  `gh run list --branch main --limit 5 --json databaseId,headSha,name,status,conclusion` →
+  run `33692815125`, `name: "CI"`, `status: "in_progress"`, `conclusion: ""`. §8's table row for
+  `fd179f2` is left explicitly marked pending, not guessed.
+- `docs/evidence/two-actor-workflow-proof-2026-09-02.md` — **confirmed present on `main`**
+  (`git show origin/main:docs/evidence/two-actor-workflow-proof-2026-09-02.md | head` succeeds) —
+  and **confirmed NOT in the manifest or the served path set** after regenerating both artifacts in
+  this worktree: manifest stayed at exactly 200 entries and the served set at 201, and neither this
+  document's own path nor the two-actor evidence doc's path appears in either. **This means the
+  manifest bucket table in `CLAUDE.md` §17 ("37 | `docs/**` (excluding `docs/superpowers/`)") is not
+  a live discovery rule** — the manifest builder does not automatically add every new `docs/**`
+  file; whatever mechanism keeps that bucket at 37 either enumerates a fixed list or something else
+  gates it. This is worth a future session's attention but is out of scope for this closure note to
+  fix.
+- Open PRs / worktrees / stranded work at the true end of this session: **TODO(second pass, part
+  2)** — this worktree itself is one open worktree by definition; the orchestrator's vantage point
+  (main checkout, after this branch is dealt with) is the one that should report the true count.
 
 ---
 
@@ -352,7 +410,8 @@ All SHAs and tags below were read from each release-gate run's own log output
 | `0cd8f6b` | #224 | `33685927878` | `commit under release: 0cd8f6b…` → success | **v0.0.210** |
 | `2b8a017` | #222 | `33685276446` | **REFUSED** — `release gate REFUSED for 2b8a017…: a required 'CI' run for this commit concluded 'cancelled', not 'success'` | never released |
 | `1ef0c0d` | #223 | `33688344451` | **REFUSED** — `release gate REFUSED for 1ef0c0d…: a required 'CI' run for this commit concluded 'failure', not 'success'` | never released |
-| `f58e8d2` | #225 | (final `main` at time of writing) | pending — release gate had not yet reported at time of writing | TODO(second pass) |
+| `f58e8d2` | #225 | `33691355159` | `commit under release: f58e8d2…` → success | **v0.0.211** |
+| `fd179f2` | #226 | (fd179f2's own CI, run `33692815125`, was still `in_progress` at the time of writing) | **PENDING — not yet reported** | not yet released |
 
 **See §4 for why both merges broke `tsc -b` on `main` despite each PR being green on its own head — the underlying cause, not just the refusal.** Read the two refusals precisely; they are not the same reason. `2b8a017`'s own CI run was
 *cancelled* (superseded by the next merge landing before it finished). `1ef0c0d`'s own CI run
@@ -362,5 +421,12 @@ commits whose own CI did complete successfully, so neither being unreleased bloc
 naming this precisely matters because a future reader should not assume every rapid-merge sequence
 fails release for the identical reason.
 
-TODO(second pass): `f58e8d2`'s (#225's) release-gate outcome, and PR #226's merge SHA plus its
-release-gate outcome, once #226 merges.
+`f58e8d2` released cleanly as **v0.0.211** — re-verified this pass via `gh run view 33687944765
+--json headSha,conclusion,status` (CI: success) and `gh run view 33691355159 --log | grep -a
+"commit under release\|TAG="` (`commit under release: f58e8d27afe9ab829da369e081f3b41409ece2bd`;
+`TAG="v0.0.211"`), and cross-checked with `git rev-list -n1 v0.0.211` resolving to `f58e8d2`.
+
+`fd179f2` (PR #226's merge) has **not yet completed its own CI run** as of this writing — do not
+read the row above as a refusal; it is a status that has not arrived yet, and is deliberately left
+distinguishable from `2b8a017`'s and `1ef0c0d`'s actual refusals. TODO(second pass, part 2):
+`fd179f2`'s CI conclusion and, once it succeeds, its release-gate row and image tag.

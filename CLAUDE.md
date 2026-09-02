@@ -1301,7 +1301,7 @@ Current state:
   retirement; and **every hosted QA** — `/krish` sits behind an Authentik edge this
   environment cannot authenticate to, so the honest status is `HOSTED QA PENDING (Krish)`.
 
-- **Session of 2026-09-02 (second) — seven PRs (#219–#225, #226 pending), and the recurring
+- **Session of 2026-09-02 (second) — eight PRs (#219–#226, all merged), and the recurring
   finding was that a guard passed while being wrong.** Closure record:
   [`docs/session-closure-2026-09-02b.md`](docs/session-closure-2026-09-02b.md). This session closed
   the five application-side gaps the FIRST 2026-09-02 session's closure note (`docs/session-closure-2026-09-02.md`
@@ -1326,14 +1326,16 @@ Current state:
   wrong: "run-scoped proposals are structurally untestable" (above), and its own release/open-PR
   table, measured from inside its own still-open PR (#219, corrected same-session in `4748fda`).
   **CLAUDE.md §11's NUL-byte trap paragraph is corrected below** (this session re-measured it at 0).
-  PR #226 (wiring + the full two-actor proof) is **open, not merged**, at the time of writing;
-  its independent review already found and fixed three of its own proof's assertions being true by
-  construction (comparing a rev against zero instead of the pre-accept cursor; a count asserted to
-  *reach* a value but never to *stay* there; two loops that could iterate zero times and still
-  read as a pass). See the closure doc for the full account, every number's source, and what
-  remains — a server-side revision discriminator so a proposal-only act need not refetch the whole
-  bundle, `RUN_LIST_LIMIT_MAX`/`RUN_PAGE_MAX` literal duplication left untested, and every hosted
-  QA still `PENDING (Krish)`.
+  PR #226 (wiring + the full two-actor proof) **merged as `fd179f2`**, verdict
+  MERGE-after-fixes; its independent review found and fixed three of its own proof's assertions
+  being true by construction (comparing a rev against zero instead of the pre-accept cursor; a
+  count asserted to *reach* a value but never to *stay* there; two loops that could iterate zero
+  times and still read as a pass). `f58e8d2` (#225) released as **v0.0.211**; `fd179f2` (#226) had
+  not yet completed its own CI run at the time this bullet was last updated — do not read that as a
+  refusal, it is simply not yet reported. See the closure doc for the full account, every number's
+  source, and what remains — a server-side revision discriminator so a proposal-only act need not
+  refetch the whole bundle, `RUN_LIST_LIMIT_MAX`/`RUN_PAGE_MAX` literal duplication left untested,
+  and every hosted QA still `PENDING (Krish)`.
 
   **THE SESSION'S MOST IMPORTANT CI LESSON: `main`'s OWN CI FAILED TWICE, ON TWO MERGE COMMITS, AND
   ONLY THE RELEASE GATE STOPPED EITHER FROM SHIPPING.** `main` CI failed at `2b8a017` (#222's
