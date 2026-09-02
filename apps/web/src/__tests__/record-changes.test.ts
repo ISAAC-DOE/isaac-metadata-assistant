@@ -33,7 +33,7 @@ import type { ApiChangeEntry } from '../lib/types';
  * precisely the defect: `apps/web/e2e/mutation/proposals.spec.ts` measured a proposal
  * entry dropped forever because one number answered two questions.
  */
-const at = (rev: number | undefined): ChangeFloors => ({ record: rev, proposal: rev });
+const at = (rev: number | undefined): ChangeFloors => ({ record: rev, proposal: rev, run: rev });
 
 const run = (id: string, at: number): ApiChangeEntry => ({
   kind: 'run',
@@ -150,7 +150,7 @@ describe('summariseChanges — the two floors, and the change that used to be dr
 
     // After: the record's own entry is still correctly filtered — the view HAS adopted
     // that — and the proposal survives, because the proposal read has not.
-    const s = summariseChanges(entries, { record: 2, proposal: 1 })!;
+    const s = summariseChanges(entries, { record: 2, proposal: 1, run: 2 })!;
     expect(s).not.toBeNull();
     expect(s.proposalIds).toEqual(['P1']);
     expect(s.recordMoved).toBe(false);
@@ -168,7 +168,7 @@ describe('summariseChanges — the two floors, and the change that used to be dr
      */
     const s = summariseChanges(
       [experiment(2), run('R1', 2), { kind: 'note', entity_id: 'N1', changed_at_rev: 2 }],
-      { record: 2, proposal: -1 },
+      { record: 2, proposal: -1, run: 2 },
     );
     expect(s).toBeNull();
   });
@@ -177,8 +177,8 @@ describe('summariseChanges — the two floors, and the change that used to be dr
     // The other half of the same rule: once a position has been reported onward, a
     // replay of it is not news. This is what stops a cursorless resync re-announcing
     // every proposal on the record.
-    expect(summariseChanges([proposal('P1', 4)], { record: 0, proposal: 4 })).toBeNull();
-    expect(summariseChanges([proposal('P1', 4)], { record: 9, proposal: 4 })).toBeNull();
+    expect(summariseChanges([proposal('P1', 4)], { record: 0, proposal: 4, run: 0 })).toBeNull();
+    expect(summariseChanges([proposal('P1', 4)], { record: 9, proposal: 4, run: 9 })).toBeNull();
   });
 
   it('reports `proposalRev` as the PROPOSALS\' furthest position, not the batch\'s', () => {
@@ -203,7 +203,7 @@ describe('summariseChanges — the two floors, and the change that used to be dr
     // a genuine change.
     const none = summariseChanges([run('R1', 5)], at(0))!;
     expect(none.proposalRev).toBe(-1);
-    const zero = summariseChanges([proposal('P1', 0)], { record: -1, proposal: -1 })!;
+    const zero = summariseChanges([proposal('P1', 0)], { record: -1, proposal: -1, run: -1 })!;
     expect(zero.proposalRev).toBe(0);
   });
 });
@@ -216,6 +216,7 @@ describe('isCaughtUp — whether the notice would still be true if it were shown
     proposalStates: ['open'],
     otherKinds: [],
     highestRev,
+    runRev: -1,
     proposalRev: highestRev,
   });
 
@@ -370,6 +371,7 @@ describe('needsCanonicalRefetch — one gate, pinned where the screens actually 
         proposalStates: [],
         otherKinds: [],
         highestRev: 1,
+        runRev: -1,
         proposalRev: -1,
         ...over,
       });

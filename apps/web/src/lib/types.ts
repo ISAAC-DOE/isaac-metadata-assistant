@@ -1840,7 +1840,31 @@ export interface ApiDemoResetResult {
 export interface RecordBundle {
   detail: ApiExperimentDetail;
   groups: ApiDraftGroup[];
+  /**
+   * The open questions — COMPLETE on the initial load, and a PREFIX on a bounded
+   * refresh. `pendingTotal` beside it is what the record's own count must be read
+   * from; `pending.length` is the size of what was fetched, which is a different
+   * number the moment `getRecordBundle` is given a `pendingLimit`.
+   */
   pending: ApiPendingItem[];
+  /**
+   * THE WHOLE RECORD'S OPEN-QUESTION COUNT, whatever `pending` above happens to hold.
+   *
+   * IT EXISTS BECAUSE THE LIVE-REFRESH PATH BOUNDS `pending`, AND A COUNT TAKEN FROM A
+   * BOUNDED LIST IS AN UNDERSTATEMENT DRESSED AS A FACT. The record screen renders at
+   * most `NEEDSYOU_VISIBLE` (10) questions and states the remainder in words — "Showing
+   * the first 10 of N" — and the assistant's `pending_summary` chip states a count too.
+   * Reading either off a windowed list would tell a scientist who has 3,002 questions
+   * that they have 10, which is the class of defect `CLAUDE.md` §11 records four
+   * separate surfaces committing.
+   *
+   * On the unbounded initial load it is exactly `pending.length`; on a bounded refresh
+   * it is the server's `pending_page.total`, which speaks for the whole record. It is
+   * never inferred, never a maximum, and never derived from `detail.pending_count` —
+   * that field is computed elsewhere and making one stand in for the other would let
+   * two numbers about the same record disagree without either being wrong.
+   */
+  pendingTotal: number;
   validate: ApiValidateResult;
   audit: ApiAuditResponse;
   warnings: ApiWarningsResponse;

@@ -700,4 +700,115 @@ describe('the change feed, mounted on the record-session owner', () => {
     });
     expect(result.current.activity).toBeNull();
   });
+
+  /*
+   * ══ THE THIRD FLOOR — THE RUN LIST ═══════════════════════════════════════════════
+   *
+   * The same measured defect as the proposal one, in the kind the first split left
+   * behind. `RunsSection` fetches the run list itself (`api.listRuns`, its own paging,
+   * its own component), so a record refetch adopts none of it — and the record floor
+   * therefore filters a `run` entry the run list has never seen, permanently, whenever
+   * the record poller wins the race. Which it does, in the ordinary case.
+   *
+   * `activity` deliberately does NOT widen: it drives an announced sentence. See
+   * `useRecordSession.handleFeed`, which asks the two questions separately.
+   */
+  it('a RUN reaches the run list even when the RECORD poller got there first', async () => {
+    const spy = vi.spyOn(api, 'getChanges').mockResolvedValue(page());
+    const { result, rerender } = renderHook(
+      ({ detail }) => useRecordSession(EXP_ID, { detail }),
+      { initialProps: { detail: DETAIL } },
+    );
+    await flush();
+
+    // The record poller won: the bundle is already at R+1, so the record floor is too.
+    rerender({ detail: detailAtRev(KNOWN_REV + 1) });
+    await flush();
+
+    spy.mockResolvedValue(
+      page({
+        changes: [
+          { kind: 'experiment', entity_id: EXP_ID, changed_at_rev: KNOWN_REV + 1 },
+          { ...laterRun(), changed_at_rev: KNOWN_REV + 1 },
+        ],
+        returned: 2,
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+
+    // THE RUN LIST'S SIGNAL IS LIVE…
+    expect(result.current.runActivity).not.toBeNull();
+    expect(result.current.runActivity!.runIds).toEqual(['01RUN0000000000000000000AA']);
+    expect(result.current.runActivity!.runRev).toBe(KNOWN_REV + 1);
+
+    // …AND THE ANNOUNCED NOTICE IS UNCHANGED BY IT. This is the control that says the
+    // run floor did not leak into the sentence a screen-reader user hears: the record
+    // read HAS caught up, so "what is on screen was loaded before that" is false.
+    expect(result.current.activity).toBeNull();
+  });
+
+  it('NEGATIVE CONTROL: a run at or below the revision the list loaded at is NOT reported', async () => {
+    /*
+     * The floor is seeded from the revision the screen mounted at, because
+     * `RunsSection` issues its own first read then. Without that, the first (cursorless)
+     * poll would report every run on the record as news and the list would re-read for
+     * nothing on every mount.
+     */
+    vi.spyOn(api, 'getChanges').mockResolvedValue(
+      page({
+        changes: [{ ...laterRun(), changed_at_rev: KNOWN_REV }],
+        returned: 1,
+      }),
+    );
+    const { result } = renderHook(() => useRecordSession(EXP_ID, { detail: DETAIL }));
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(result.current.runActivity).toBeNull();
+  });
+
+  it('delivers a run signal ONCE — a replayed batch does not re-deliver it', async () => {
+    /*
+     * A cursorless resync returns every entity at its current position, so without an
+     * advancing floor the run list would be told to re-read on every resync for a
+     * change it took on board long ago. The floor advances here and deliberately does
+     * NOT on the proposal side; the divergence is safe only because this summary feeds
+     * no announced sentence, and `runFloorRef` carries the argument.
+     */
+    const spy = vi.spyOn(api, 'getChanges').mockResolvedValue(
+      page({ changes: [{ ...laterRun(), changed_at_rev: KNOWN_REV + 1 }], returned: 1 }),
+    );
+    const { result } = renderHook(() => useRecordSession(EXP_ID, { detail: DETAIL }));
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    const first = result.current.runActivity;
+    expect(first).not.toBeNull();
+
+    // The identical batch again — the same entity at the same position.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(spy.mock.calls.length).toBeGreaterThan(1); // the second poll really happened
+    expect(
+      Object.is(result.current.runActivity, first),
+      'the replay produced no new signal for the run list to act on',
+    ).toBe(true);
+
+    // …and a genuinely LATER move of the same run still is reported, which is the
+    // control that says the floor is a filter and not a mute.
+    spy.mockResolvedValue(
+      page({ changes: [{ ...laterRun(), changed_at_rev: KNOWN_REV + 2 }], returned: 1 }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(result.current.runActivity).not.toBeNull();
+    expect(result.current.runActivity!.runRev).toBe(KNOWN_REV + 2);
+  });
+
 });

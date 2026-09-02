@@ -232,6 +232,7 @@ function activityFor(
     proposalStates: [],
     otherKinds: [],
     highestRev,
+    runRev: -1,
     proposalRev,
   };
 }
