@@ -757,10 +757,16 @@ test('a rejected proposal stays readable with its history, and the note behind i
 // ---------------------------------------------------------------------------
 
 /**
- * HOW LONG A RECORD-DETAIL POLL IS HELD OPEN in the test below, and why one is held at
- * all. Read the block above the test before changing this.
+ * HOW LONG EACH CHANGE-FEED REQUEST IS HELD in the test below, and why one is held at
+ * all — on the FEED, which is the opposite route from the one this test used to hold.
+ * Read the block inside the test before changing this.
+ *
+ * It must exceed one full record-poll cadence with jitter (8 s ±20% → at most 9.6 s),
+ * so that between a feed poll being issued and its response arriving, the RECORD poller
+ * is certain to have polled and adopted the new revision. 12 s clears 9.6 s with margin
+ * and costs one extra cadence of wall clock.
  */
-const RECORD_POLL_HOLD_MS = 25_000;
+const FEED_POLL_HOLD_MS = 12_000;
 
 test('an unsaved correction survives a background change-feed refresh', async ({
   page,
@@ -771,51 +777,92 @@ test('an unsaved correction survives a background change-feed refresh', async ({
    * test waits on a real poll rather than a mocked clock. That is the whole point: the
    * property under test is what the REAL poller does to an open editor.
    *
-   * ── WHY THIS TEST SLOWS ONE POLLER DOWN, AND WHAT IT MEASURED FIRST ──────────────
+   * ── THE MEASUREMENT THIS TEST MADE, AND THE FIX IT PRODUCED ──────────────────────
+   *
+   * KEPT IN FULL, INCLUDING THE WORKAROUND IT ONCE NEEDED, because the numbers are the
+   * evidence for a production change and a deleted measurement cannot be re-checked.
    *
    * TWO pollers run on this screen at the same 8 s cadence: `useRecordSync` on the
-   * record, and `useChangeFeed` on the record's change feed. They share ONE floor —
-   * `summariseChanges(entries, recordRev)` drops every entry whose `changed_at_rev` is
-   * `<= recordRev`, and `recordRev` is `detail.rev`, which `RecordWorkbench`'s
-   * `onChange: () => bundle.reloadSilent()` advances the moment the RECORD poller
-   * notices a new version.
+   * record, and `useChangeFeed` on the record's change feed. THEY USED TO SHARE ONE
+   * FLOOR — `summariseChanges(entries, recordRev)` dropped every entry whose
+   * `changed_at_rev` was `<= recordRev`, and `recordRev` is `detail.rev`, which
+   * `RecordWorkbench`'s `onChange: () => bundle.reloadSilent()` advances the moment the
+   * RECORD poller notices a new version.
    *
    * A proposal act moves the record's `rev` (contract DEC-10), so a `proposal` entry
    * and the `experiment` entry beside it always carry the SAME `changed_at_rev`. If the
-   * record poller reaches that rev first, both entries are filtered, `summariseChanges`
-   * returns `null`, `onEntitiesChanged` never fires, and this panel's `activity` prop
-   * stays `null` — permanently, because the floor never goes back down.
+   * record poller reached that rev first, both entries were filtered,
+   * `summariseChanges` returned `null`, `onEntitiesChanged` never fired, and this
+   * panel's `activity` prop stayed `null` — permanently, because the floor never went
+   * back down.
    *
-   * THAT IS MEASURED, NOT REASONED. Two runs of the same scenario in this suite:
+   * THAT WAS MEASURED, NOT REASONED. Two runs of the same scenario in this suite:
    *
    *   · pollers untouched — the feed DID deliver `{"kind":"proposal", …,
    *     "changed_at_rev":2}` at 9,969 ms, the record poller had already refetched at
    *     7,541 ms, and the panel issued NO further `GET .../proposals` in 47 s. The
    *     count line read "Showing 0 of 0" before and after.
-   *   · the record-detail poll held open — the feed poll at 8,703 ms produced a
-   *     summary and the panel re-read `.../proposals` at 8,739 ms. "Showing 0 of 0"
+   *   · the record-detail poll held open for 25 s — the feed poll at 8,703 ms produced
+   *     a summary and the panel re-read `.../proposals` at 8,739 ms. "Showing 0 of 0"
    *     became "Showing 1 of 1".
    *
-   * So the ordering is what decides, and it is reported as a FINDING rather than fixed
-   * here — this is a measurement slice and the fix is a production change.
+   * So the ordering decided whether this panel ever refreshed, and the ordinary
+   * ordering was the losing one.
    *
-   * WHAT THE DELAY IS AND IS NOT. It holds a record-detail request open for
-   * `RECORD_POLL_HOLD_MS` and then lets the REAL one through. It synthesises no
-   * response, injects no failure (an abort would trip `syncDegraded` and change the
-   * screen), and mocks nothing — it makes one poller slower than the other, which is an
-   * ordering the cadence's own ±20% jitter can produce. Under that ordering the feed's
-   * entry is not pre-empted, which is the condition this test needs in order to measure
-   * what the panel does with a feed refresh at all.
+   * ── WHAT CHANGED, AND WHICH POLLER IS SLOWED NOW ────────────────────────────────
+   *
+   * ~~"So the ordering is what decides, and it is reported as a FINDING rather than
+   * fixed here — this is a measurement slice and the fix is a production change."~~ —
+   * the production change has since been made, and the sentence is struck rather than
+   * deleted so the sequence stays legible.
+   *
+   * `recordChanges.ChangeFloors` splits the one floor into two, because there are two
+   * independent reads on this screen and only one of them is the record's: refetching
+   * the record adopts NO proposal state, since the list lives behind its own route and
+   * its own component. A `proposal` entry is now measured against where the PROPOSAL
+   * read stands, and every other kind still against `recordRev`, which is what keeps a
+   * scientist's own save the ordinary filtered case rather than a special one.
+   *
+   * ── THE HOLD WAS NOT REMOVED. IT WAS INVERTED, AND THAT IS A MEASUREMENT, NOT A
+   *    PREFERENCE. ───────────────────────────────────────────────────────────────────
+   *
+   * The obvious way to show the fix works is to delete the hold and watch the test
+   * pass. IT DOES PASS — and it passes on the UNFIXED code too, which makes the
+   * deletion worthless as evidence. Measured on this machine, with the production
+   * `summariseChanges` reverted to a single floor and no hold at all, FIVE runs of this
+   * one test: PASS, FAIL, PASS, FAIL, PASS. It is a coin flip, because with nothing
+   * holding either poller the feed sometimes wins, and when it wins even the broken
+   * build refreshes. A test that passes on the defect half the time is not a regression
+   * test; it is a flake that reads like evidence.
+   *
+   * So the hold is kept and moved to the OTHER route. It used to delay
+   * `GET /api/experiments/{id}` so the FEED would win — the ordering under which even
+   * the old code worked, which is why the original measurement needed it to observe any
+   * refresh at all. It now delays `GET /api/experiments/{id}/changes` so the RECORD
+   * poller wins, which is the ordering that used to drop the proposal FOREVER. The test
+   * is therefore deterministic in the direction that fails on the defect: with the
+   * single-floor build, the panel issues no further list read and this test fails every
+   * time.
+   *
+   * WHAT THE DELAY IS AND IS NOT, unchanged from the original: it holds a request for
+   * `FEED_POLL_HOLD_MS` and then lets the REAL one through. It synthesises no response,
+   * injects no failure (an abort would trip `feedDegraded` and change the screen), and
+   * mocks nothing — it makes one poller slower than the other, which is an ordering the
+   * cadence's own ±20% jitter produces on its own, as the five runs above show.
    */
-  test.setTimeout(180_000);
+  test.setTimeout(120_000);
 
-  let holdRecordPolls = false;
+  /*
+   * THE RECORD POLLER IS LEFT ALONE AND THE FEED IS SLOWED — the inversion described
+   * above. Every change-feed request reaches the server `FEED_POLL_HOLD_MS` late, so
+   * by the time a `proposal` entry arrives the record poller has already refetched the
+   * bundle and `recordRev` has advanced onto that entry's own `changed_at_rev`. That
+   * is exactly the condition under which the single floor dropped it forever.
+   */
   await page.route(
-    (url) => /\/api\/experiments\/[^/?]+$/.test(url.pathname),
+    (url) => /\/api\/experiments\/[^/?]+\/changes$/.test(url.pathname),
     async (route) => {
-      if (holdRecordPolls) {
-        await new Promise((resolve) => setTimeout(resolve, RECORD_POLL_HOLD_MS));
-      }
+      await new Promise((resolve) => setTimeout(resolve, FEED_POLL_HOLD_MS));
       // Chains to the auto-use `scope` fixture's route, which attaches the
       // worked-example session header. A `fulfill` here would be a synthetic response.
       await route.fallback();
@@ -839,8 +886,6 @@ test('an unsaved correction survives a background change-feed refresh', async ({
   });
 
   await openRecord(page, id);
-  // From here the record poller is held; the feed poller is untouched.
-  holdRecordPolls = true;
   const card = cardFor(page, noteId);
 
   await card.getByRole('button', { name: 'Correct the Value, Then Accept' }).click();
@@ -870,7 +915,7 @@ test('an unsaved correction survives a background change-feed refresh', async ({
    * poller produces. The new card appearing WITHOUT any navigation or manual reload is
    * the poller doing its job, and it is asserted first.
    */
-  await expect(cardFor(page, otherNote)).toBeVisible({ timeout: 90_000 });
+  await expect(cardFor(page, otherNote)).toBeVisible({ timeout: 60_000 });
   expect(other.state).toBe('open');
   expect(
     listReads.length,
