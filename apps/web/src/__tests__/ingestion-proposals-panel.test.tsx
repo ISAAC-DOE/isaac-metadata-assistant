@@ -210,7 +210,21 @@ function urls(): string[] {
   return calls.map(([url]) => String(url));
 }
 
-function activityFor(ids: string[], highestRev: number): RecordChangeSummary {
+/**
+ * A FEED SUMMARY NAMING PROPOSALS, AT A POSITION.
+ *
+ * `proposalRev` is the field the panel actually keys its refresh on, and it defaults
+ * to `highestRev` here because in the shape these tests build — proposals and nothing
+ * else — the two are equal by construction. They diverge only when a batch also
+ * carries a run or the record's own entry at a HIGHER position, which is the case
+ * `keys its refresh on the PROPOSAL position, not the batch's furthest reach` builds
+ * explicitly by passing them apart.
+ */
+function activityFor(
+  ids: string[],
+  highestRev: number,
+  proposalRev: number = highestRev,
+): RecordChangeSummary {
   return {
     recordMoved: false,
     runIds: [],
@@ -218,6 +232,7 @@ function activityFor(ids: string[], highestRev: number): RecordChangeSummary {
     proposalStates: [],
     otherKinds: [],
     highestRev,
+    proposalRev,
   };
 }
 
@@ -1370,6 +1385,49 @@ describe('a background change-feed update', () => {
 
     // Created then reviewed is ONE id at TWO positions. Keying on the ids alone would
     // leave the second move unread.
+    await waitFor(() => expect(reads).toBe(3));
+  });
+
+  it('keys its refresh on the PROPOSAL position, not the batch\'s furthest reach', async () => {
+    /*
+     * THE PAGE-BOUNDARY CASE, ASSERTED AS A COUNTED REQUEST.
+     *
+     * The key used to be `highestRev` — how far the whole batch reached — and that is
+     * wrong in the direction that LOSES a change. The feed is ordered
+     * `(changed_at_rev, kind, entity_id)` and a page boundary may fall anywhere, so one
+     * page can end `[proposal@4, experiment@9]` and the next begin `[proposal@9]`
+     * (`'experiment' < 'proposal'` decides the tie at rev 9). Under `highestRev` both
+     * batches key `9:P1`, the key does not change, and P1's SECOND move is never read.
+     *
+     * The two batches below are exactly that: the same `highestRev`, different
+     * `proposalRev`. The assertion is the number of `GET .../proposals` the panel
+     * issued — not that a card appeared, which a stale list would also produce.
+     */
+    let reads = 0;
+    stubFetchRoutes({
+      [LIST]: () => {
+        reads += 1;
+        return { body: page([proposalFixture()]) };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+    expect(reads).toBe(1);
+
+    for (const proposalRev of [4, 9]) {
+      view.rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <IngestionProposalsPanel
+            experimentId={EXP}
+            activity={activityFor(['P1'], 9, proposalRev)}
+          />
+        </MemoryRouter>,
+      );
+    }
+
     await waitFor(() => expect(reads).toBe(3));
   });
 

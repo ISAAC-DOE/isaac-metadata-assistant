@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "74bf88b702c0c3ec947f20c7ce6d62a5e714820d52f4e9f7dc2e7a6b4f94550d"
+        "sha256": "eaac7cc13459c69226c3294d25824b362e15b8211b6680bfbac9cf255b3e3493"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "637c69819241f10aed3ff0150af0c84435031e3a9ba0c4e5a9f3671008428d3a"
+    "served_manifest_fingerprint": "1463b41e7e2a63769c8f230ac6b4bf1b3840ba2e415c9fec009336ede362dd42"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

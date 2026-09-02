@@ -16,10 +16,24 @@ import {
   RECORD_ACTIVITY_CADENCE_CLAIM,
   RECORD_ACTIVITY_INPUT_SAFETY_CLAIM,
   describeChangeSummary,
+  isCaughtUp,
   needsCanonicalRefetch,
   summariseChanges,
 } from '../lib/recordChanges';
+import type { ChangeFloors, RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiChangeEntry } from '../lib/types';
+
+/**
+ * BOTH READS STANDING AT THE SAME REVISION — the shape every call in this file had
+ * before `ChangeFloors` split the floor in two, kept as a helper so the tests that are
+ * about something else read unchanged.
+ *
+ * It is deliberately NOT the default of `summariseChanges`. A caller that could omit
+ * the second floor would get the single-floor behaviour back by silence, and that is
+ * precisely the defect: `apps/web/e2e/mutation/proposals.spec.ts` measured a proposal
+ * entry dropped forever because one number answered two questions.
+ */
+const at = (rev: number | undefined): ChangeFloors => ({ record: rev, proposal: rev });
 
 const run = (id: string, at: number): ApiChangeEntry => ({
   kind: 'run',
@@ -59,11 +73,11 @@ describe('summariseChanges — what is news to a view that already holds a revis
      * has already adopted all of it, and announcing "this record changed" on mount
      * would be false on every record in the product.
      */
-    expect(summariseChanges([experiment(9), run('R1', 4), run('R2', 9)], 9)).toBeNull();
+    expect(summariseChanges([experiment(9), run('R1', 4), run('R2', 9)], at(9))).toBeNull();
   });
 
   it('reports an entry strictly above the revision on screen', () => {
-    const s = summariseChanges([experiment(10), run('R1', 10)], 9)!;
+    const s = summariseChanges([experiment(10), run('R1', 10)], at(9))!;
     expect(s).not.toBeNull();
     expect(s.recordMoved).toBe(true);
     expect(s.runIds).toEqual(['R1']);
@@ -71,9 +85,7 @@ describe('summariseChanges — what is news to a view that already holds a revis
 
   it('splits one page by kind, de-duplicates and sorts', () => {
     const s = summariseChanges(
-      [run('R2', 5), run('R1', 5), run('R1', 6), proposal('P2', 5), proposal('P1', 5)],
-      0,
-    )!;
+      [run('R2', 5), run('R1', 5), run('R1', 6), proposal('P2', 5), proposal('P1', 5)], at(0))!;
     expect(s.runIds).toEqual(['R1', 'R2']);
     expect(s.proposalIds).toEqual(['P1', 'P2']);
     expect(s.recordMoved).toBe(false);
@@ -82,7 +94,7 @@ describe('summariseChanges — what is news to a view that already holds a revis
   it('files a kind this build does not know rather than dropping it', () => {
     // `feed_kinds()` is served so a client learns the set from the server. A build
     // that silently ignored a fourth kind would under-report a real change.
-    const s = summariseChanges([{ kind: 'note', entity_id: 'N1', changed_at_rev: 3 }], 0)!;
+    const s = summariseChanges([{ kind: 'note', entity_id: 'N1', changed_at_rev: 3 }], at(0))!;
     expect(s.otherKinds).toEqual(['note']);
     expect(s.recordMoved).toBe(false);
   });
@@ -92,26 +104,137 @@ describe('summariseChanges — what is news to a view that already holds a revis
     // failure mode that loses one. `changed_at_rev` is typed `number`, so this is
     // a payload a server could send that the type does not describe.
     const bad = { kind: 'run', entity_id: 'R1' } as unknown as ApiChangeEntry;
-    expect(summariseChanges([bad], 100)!.runIds).toEqual(['R1']);
+    expect(summariseChanges([bad], at(100))!.runIds).toEqual(['R1']);
   });
 
   it('filters nothing when the screen has not said where it stands', () => {
     // `undefined` is not `0`. A floor of 0 would suppress every entity whose
     // position was never recorded, which is every entity of a pre-sequence document.
-    const s = summariseChanges([run('R1', 0)], undefined)!;
+    const s = summariseChanges([run('R1', 0)], at(undefined))!;
     expect(s.runIds).toEqual(['R1']);
   });
 
   it('passes a lifecycle state through verbatim and never invents one', () => {
     const s = summariseChanges(
-      [proposal('P1', 5, 'accepted'), proposal('P2', 5, 'a_state_this_build_never_heard_of')],
-      0,
-    )!;
+      [proposal('P1', 5, 'accepted'), proposal('P2', 5, 'a_state_this_build_never_heard_of')], at(0))!;
     expect(s.proposalStates).toEqual(['a_state_this_build_never_heard_of', 'accepted']);
 
     // An absent state is absent, not defaulted to "open".
     const noState = { kind: 'proposal', entity_id: 'P3', changed_at_rev: 5 } as ApiChangeEntry;
-    expect(summariseChanges([noState], 0)!.proposalStates).toEqual([]);
+    expect(summariseChanges([noState], at(0))!.proposalStates).toEqual([]);
+  });
+});
+
+describe('summariseChanges — the two floors, and the change that used to be dropped', () => {
+  /*
+   * THE DEFECT, AT THE FUNCTION THAT HAD IT.
+   *
+   * Two pollers run on the record screen at the same cadence. A proposal act moves the
+   * record's own `rev` (contract DEC-10), so a `proposal` entry and the `experiment`
+   * entry beside it carry the SAME `changed_at_rev`. When the RECORD poller resolved
+   * first — measured in `apps/web/e2e/mutation/proposals.spec.ts` to be the ordinary
+   * ordering — `RecordWorkbench`'s `onChange` refetched the bundle, the single floor
+   * rose to that rev, and the proposal entry was filtered. A floor never comes back
+   * down, so it was dropped FOREVER: the panel issued no further list read in 47 s and
+   * its count line read "Showing 0 of 0" before and after.
+   *
+   * A record refetch adopts NO proposal state — the list lives behind its own route
+   * and its own component — so the record's revision was never the right question to
+   * ask about a proposal entry.
+   */
+  it('reports a proposal at a position the RECORD read has already reached', () => {
+    const entries = [experiment(2), proposal('P1', 2)];
+
+    // Before: one floor for both, and the whole batch vanishes.
+    expect(summariseChanges(entries, at(2))).toBeNull();
+
+    // After: the record's own entry is still correctly filtered — the view HAS adopted
+    // that — and the proposal survives, because the proposal read has not.
+    const s = summariseChanges(entries, { record: 2, proposal: 1 })!;
+    expect(s).not.toBeNull();
+    expect(s.proposalIds).toEqual(['P1']);
+    expect(s.recordMoved).toBe(false);
+  });
+
+  it('NEGATIVE CONTROL: the floor is not removed — every other kind still obeys it', () => {
+    /*
+     * The floor is load-bearing and this is the assertion that says the fix did not
+     * quietly delete it. Without it every poll would re-announce what the view already
+     * reflects, and a first (cursorless) poll would report the entire record on mount.
+     *
+     * The proposal floor is put at `-1` — the most permissive value there is — so the
+     * run and the record entry are filtered by the RECORD floor alone. If the fix had
+     * widened the exemption beyond the proposal kind, this would report them.
+     */
+    const s = summariseChanges(
+      [experiment(2), run('R1', 2), { kind: 'note', entity_id: 'N1', changed_at_rev: 2 }],
+      { record: 2, proposal: -1 },
+    );
+    expect(s).toBeNull();
+  });
+
+  it('filters a proposal the proposal read HAS adopted, whatever the record read did', () => {
+    // The other half of the same rule: once a position has been reported onward, a
+    // replay of it is not news. This is what stops a cursorless resync re-announcing
+    // every proposal on the record.
+    expect(summariseChanges([proposal('P1', 4)], { record: 0, proposal: 4 })).toBeNull();
+    expect(summariseChanges([proposal('P1', 4)], { record: 9, proposal: 4 })).toBeNull();
+  });
+
+  it('reports `proposalRev` as the PROPOSALS\' furthest position, not the batch\'s', () => {
+    /*
+     * THE PAGE-BOUNDARY CASE, which is why this is a separate field from `highestRev`.
+     *
+     * The feed is ordered `(changed_at_rev, kind, entity_id)` and a page boundary may
+     * fall anywhere, so one page can end `[proposal@4, experiment@9]` while the next
+     * begins `[proposal@9]` — `'experiment' < 'proposal'` decides the tie at rev 9.
+     * A consumer advancing a proposal position to `highestRev` (9) would filter the
+     * next page's `proposal@9` out and never read it; one keying a refresh on
+     * `highestRev` would see `9:P1` twice and skip the second move.
+     */
+    const s = summariseChanges([proposal('P1', 4), experiment(9)], at(0))!;
+    expect(s.highestRev).toBe(9);
+    expect(s.proposalRev).toBe(4);
+  });
+
+  it('reports `proposalRev` as -1 when no proposal survived, never as 0', () => {
+    // 0 is a real position. A summary carrying proposals at rev 0 must be
+    // distinguishable from one carrying none, or a floor seeded from it would filter
+    // a genuine change.
+    const none = summariseChanges([run('R1', 5)], at(0))!;
+    expect(none.proposalRev).toBe(-1);
+    const zero = summariseChanges([proposal('P1', 0)], { record: -1, proposal: -1 })!;
+    expect(zero.proposalRev).toBe(0);
+  });
+});
+
+describe('isCaughtUp — whether the notice would still be true if it were shown', () => {
+  const summary = (highestRev: number): RecordChangeSummary => ({
+    recordMoved: false,
+    runIds: [],
+    proposalIds: ['P1'],
+    proposalStates: ['open'],
+    otherKinds: [],
+    highestRev,
+    proposalRev: highestRev,
+  });
+
+  it('is true once the record read has reached the furthest position reported', () => {
+    expect(isCaughtUp(summary(2), 2)).toBe(true);
+    expect(isCaughtUp(summary(2), 3)).toBe(true);
+  });
+
+  it('is false while the record read is still behind — the notice is still TRUE then', () => {
+    // A refetch that lands BELOW the change must not clear the notice: telling a
+    // reader they are current when they are not is the one thing this rule prevents.
+    expect(isCaughtUp(summary(5), 4)).toBe(false);
+  });
+
+  it('is false when the screen has not said where it stands', () => {
+    // `undefined` is not zero, and it is not "caught up". Suppressing a notice on an
+    // unknown position would hide a change on exactly the screens that cannot report
+    // their revision.
+    expect(isCaughtUp(summary(5), undefined)).toBe(false);
   });
 });
 
@@ -132,7 +255,7 @@ describe('summariseChanges — NO proposal content can travel this path', () => 
       note_excerpt: 'a sentence a scientist wrote',
     } as unknown as ApiChangeEntry;
 
-    const s = summariseChanges([leaky], 0)!;
+    const s = summariseChanges([leaky], at(0))!;
     const serialised = JSON.stringify(s);
     for (const leak of [
       'LEAKCANARYVALUE',
@@ -151,11 +274,11 @@ describe('summariseChanges — NO proposal content can travel this path', () => 
 
 describe('describeChangeSummary — one coalesced sentence, and no claim it cannot keep', () => {
   it('states counts, not entities, and pluralises', () => {
-    const one = describeChangeSummary(summariseChanges([proposal('P1', 5)], 0)!);
+    const one = describeChangeSummary(summariseChanges([proposal('P1', 5)], at(0))!);
     expect(one).toContain('1 suggestion changed');
 
     const many = describeChangeSummary(
-      summariseChanges([proposal('P1', 5), proposal('P2', 5), run('R1', 5), run('R2', 5)], 0)!,
+      summariseChanges([proposal('P1', 5), proposal('P2', 5), run('R1', 5), run('R2', 5)], at(0))!,
     );
     expect(many).toContain('2 suggestions changed');
     expect(many).toContain('2 runs changed');
@@ -165,12 +288,12 @@ describe('describeChangeSummary — one coalesced sentence, and no claim it cann
     // The record's own entry moves on any act inside it, so naming it beside the
     // runs it contains would report one change twice.
     const withRuns = describeChangeSummary(
-      summariseChanges([experiment(5), run('R1', 5)], 0)!,
+      summariseChanges([experiment(5), run('R1', 5)], at(0))!,
     );
     expect(withRuns).toContain('1 run changed');
     expect(withRuns).not.toContain('this record changed');
 
-    const alone = describeChangeSummary(summariseChanges([experiment(5)], 0)!);
+    const alone = describeChangeSummary(summariseChanges([experiment(5)], at(0))!);
     expect(alone).toContain('this record changed');
   });
 
@@ -194,7 +317,7 @@ describe('describeChangeSummary — one coalesced sentence, and no claim it cann
       /(?<!rather than )\bimmediately\b/i,
     ];
     const copy = [
-      describeChangeSummary(summariseChanges([experiment(5), proposal('P1', 5)], 0)!),
+      describeChangeSummary(summariseChanges([experiment(5), proposal('P1', 5)], at(0))!),
       RECORD_ACTIVITY_CADENCE_CLAIM,
       RECORD_ACTIVITY_INPUT_SAFETY_CLAIM,
     ];
@@ -209,7 +332,7 @@ describe('describeChangeSummary — one coalesced sentence, and no claim it cann
   });
 
   it('tells the reader that what is on screen predates the change', () => {
-    expect(describeChangeSummary(summariseChanges([experiment(5)], 0)!)).toContain(
+    expect(describeChangeSummary(summariseChanges([experiment(5)], at(0))!)).toContain(
       'loaded before that',
     );
   });
@@ -247,6 +370,7 @@ describe('needsCanonicalRefetch — one gate, pinned where the screens actually 
         proposalStates: [],
         otherKinds: [],
         highestRev: 1,
+        proposalRev: -1,
         ...over,
       });
 
@@ -259,9 +383,39 @@ describe('needsCanonicalRefetch — one gate, pinned where the screens actually 
     expect(of({ proposalIds: ['P1'], proposalStates: ['open'] })).toBe(false);
     // …and `summariseChanges` would still have called that NEWS, which is what makes
     // these two different questions rather than one written twice.
-    const proposalOnly = summariseChanges([proposal('P1', 5)], 0)!;
+    const proposalOnly = summariseChanges([proposal('P1', 5)], at(0))!;
     expect(proposalOnly).not.toBeNull();
     expect(needsCanonicalRefetch(proposalOnly)).toBe(false);
+  });
+
+  it('the proposals panel is fed the PROPOSAL signal, never the notice', () => {
+    /*
+     * THE WIRING THAT THE FIX TURNS ON, PINNED WHERE IT IS ACTUALLY WRITTEN.
+     *
+     * `useRecordSession` exposes two reads of one summary: `activity`, which is null
+     * once the RECORD read has caught up (correct for a notice that says "what is on
+     * screen was loaded before that"), and `proposalActivity`, which is not. On the
+     * ordinary ordering — the record poller resolving first, which
+     * `apps/web/e2e/mutation/proposals.spec.ts` measured — `activity` is null at
+     * exactly the moment a colleague's proposal has arrived. Passing it to the panel is
+     * the defect this slice fixed, and it is one character away from returning.
+     *
+     * THIS IS A STRUCTURAL GUARD AND IS SAID TO BE ONE. It asserts what the source
+     * says, not what the screen does, which is a weaker thing than the rest of this
+     * file asserts. The BEHAVIOURAL proof is the browser measurement in
+     * `e2e/mutation/proposals.spec.ts` ("an unsaved correction survives a background
+     * change-feed refresh"), which counts the list reads the page issued with both
+     * pollers at their real cadence. This exists because that suite takes minutes and
+     * needs a backend, and a regression should not have to wait for it.
+     */
+    const src = rawSource('screens/RecordWorkbench.tsx');
+    expect(src, 'the panel is not fed the proposal signal').toMatch(
+      /<IngestionProposalsPanel[^>]*activity=\{proposalActivity\}/,
+    );
+    expect(src, 'the panel is fed the notice, which is null once the record catches up')
+      .not.toMatch(/<IngestionProposalsPanel[^>]*activity=\{activity\}/);
+    // And the signal it is fed really is the one the hook publishes for this purpose.
+    expect(src).toContain('proposalActivity={session.proposalActivity}');
   });
 
   it('is CALLED by all three screens, and its expression exists in exactly one file', () => {
