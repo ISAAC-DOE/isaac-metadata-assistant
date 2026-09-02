@@ -421,6 +421,35 @@
   max-width: 68ch;
 }
 
+/*
+ * AN ARRIVAL, NOT A REFUSAL — deliberately its own class rather than reusing
+ * `.proposals-error`. Its content is neutral news ("ready to review"), not a
+ * problem, so it takes the quieter `--surface-subtle` / `--border-hair` treatment
+ * `.runs-note` already uses for the same kind of announcement, never the stronger
+ * `--border-strong` this file reserves for a refusal.
+ *
+ * FLEX/WRAP ONLY, NO FIXED WIDTH, matching every other toolbar row in this file —
+ * the text and the Dismiss button wrap onto their own line at a narrow viewport
+ * rather than overflowing it.
+ */
+.proposals-arrival-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-inner);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-slate);
+}
+
+.proposals-arrival-note-text {
+  max-width: 68ch;
+}
+
 .proposals-error {
   display: flex;
   flex-wrap: wrap;

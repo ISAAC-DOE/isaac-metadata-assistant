@@ -69,6 +69,7 @@ import {
   RECORD_RUN_PARAM,
   RUN_COMPARE_MAX,
 } from '../lib/routes';
+import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiRunView } from '../lib/types';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import { mutationFailureCopy } from '../lib/mutationErrors';
@@ -150,7 +151,22 @@ function serverRefusalMessage(err: unknown): string | null {
   return typeof message === 'string' && message.trim() !== '' ? message : null;
 }
 
-export function RunsSection({ experimentId }: { experimentId: string }) {
+export function RunsSection({
+  experimentId,
+  activity,
+}: {
+  experimentId: string;
+  /**
+   * THE CHANGE-FEED SUMMARY THIS SCREEN ALREADY HOLDS, OR NULL — see
+   * `RecordChangeSummary`. IDS AND A REVISION ONLY, NEVER RUN CONTENT: this section
+   * treats a signal as "something moved, go re-read the first page", never as a
+   * value to render. The producer floors `experiment`/`run` entries at the rev this
+   * section was mounted at, so a signal never replays history this section has
+   * already adopted; `highestRev` is compared against this section's OWN loaded
+   * rev below, which is a second, independent floor against exactly that replay.
+   */
+  activity?: RecordChangeSummary | null;
+}) {
   return (
     <section className="runs-section" aria-labelledby="runs-heading">
       <div className="runs-head">
@@ -174,13 +190,22 @@ export function RunsSection({ experimentId }: { experimentId: string }) {
 
       {/* Keyed on the experiment so switching records rebuilds the browser's
           state — its page, its search, its filters — rather than carrying one
-          record's list criteria into another's. */}
-      <RunsBrowser key={experimentId} experimentId={experimentId} />
+          record's list criteria into another's. A remount is also what "starts
+          clean" means for the signal-handling refs below: they are declared with
+          `useRef` inside `RunsBrowser`, so a new `experimentId` gives them fresh
+          initial values along with everything else. */}
+      <RunsBrowser key={experimentId} experimentId={experimentId} activity={activity ?? null} />
     </section>
   );
 }
 
-function RunsBrowser({ experimentId }: { experimentId: string }) {
+function RunsBrowser({
+  experimentId,
+  activity,
+}: {
+  experimentId: string;
+  activity: RecordChangeSummary | null;
+}) {
   const baseId = useId();
   const searchId = `${baseId}-search`;
   const searchHintId = `${baseId}-search-hint`;
@@ -315,6 +340,32 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
    */
   const silentRef = useRef(false);
 
+  /*
+   * THE CHANGE-FEED SIGNAL, AND THE THREE REFS THAT MAKE IT SAFE TO ACT ON.
+   *
+   * `activity` is a summary this screen already holds elsewhere on the record
+   * screen, handed down as a prop rather than polled here — this section owns its
+   * OWN fetch (see the file header) and stays that way; it only reacts to being
+   * told something moved.
+   *
+   *   `lastRunsSignalKeyRef` — DEDUPE. The same `(highestRev, recordMoved, runIds)`
+   *   triple twice must trigger nothing: the producer re-delivers the same summary
+   *   on every poll until this screen's own rev catches up, and a card list is not
+   *   something to silently re-fetch on every 8-second tick.
+   *
+   *   `runsReloadInFlightRef` — COALESCE. True from the moment the first-page fetch
+   *   below leaves this component until its own response (or failure) is the
+   *   authoritative one for its generation. A signal that arrives while it is true
+   *   does not start a second request; it marks a follow-up instead.
+   *
+   *   `pendingSignalReloadRef` — the follow-up itself, consumed exactly once when
+   *   the in-flight request settles, so N signals that arrive mid-flight produce
+   *   AT MOST ONE extra request rather than N.
+   */
+  const lastRunsSignalKeyRef = useRef<string | null>(null);
+  const runsReloadInFlightRef = useRef(false);
+  const pendingSignalReloadRef = useRef(false);
+
   const setFocusRun = useCallback(
     (runId: string | null) => {
       /*
@@ -411,6 +462,30 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
     setLoadingMore(false);
     setMoreError(null);
 
+    /*
+     * THIS EFFECT RUN'S OWN REQUEST IS NOW THE ONE IN FLIGHT. Every dependency
+     * change re-enters this branch — a search, a filter, `reloadNonce` from Add
+     * Run / Remove Run / a signal — so "in flight" here means exactly "this
+     * component currently has an outstanding `listRuns` request", regardless of
+     * what caused it. `runsSignalFollowUp` below reads it back once this request's
+     * own response (or failure) has been accepted as authoritative for its
+     * generation, never for a superseded one.
+     */
+    runsReloadInFlightRef.current = true;
+
+    /**
+     * Consume a pending signal-driven follow-up, if one arrived while this
+     * request was outstanding. AT MOST ONE extra request per settle, never one
+     * per signal — see `pendingSignalReloadRef`'s own comment.
+     */
+    const runsSignalFollowUp = () => {
+      runsReloadInFlightRef.current = false;
+      if (!pendingSignalReloadRef.current) return;
+      pendingSignalReloadRef.current = false;
+      silentRef.current = true;
+      setReloadNonce((n) => n + 1);
+    };
+
     let alive = true;
     api
       .listRuns(experimentId, {
@@ -423,6 +498,7 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
           dropCreated();
           return;
         }
+        runsSignalFollowUp();
         setExperimentVersion(res.experiment_version);
         setList({
           status: 'data',
@@ -468,6 +544,7 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
       .catch((err: unknown) => {
         dropCreated();
         if (!alive || generation !== generationRef.current) return;
+        runsSignalFollowUp();
         setList({ status: 'error', error: asApiError(err) });
       });
     return () => {
@@ -478,6 +555,65 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
     // list they left, and refetching it would silently discard every page they
     // had loaded.
   }, [experimentId, query, overridesFilter, exportedFilter, reloadNonce]);
+
+  /*
+   * THE SIGNAL ITSELF — deciding whether `activity` means "reload the first page",
+   * and never doing the reload here directly. Every actual fetch still goes
+   * through the ONE effect above, by the same `reloadNonce` + `silentRef` path
+   * `addRun`, `removeRun` and `reloadSection` already use — so a signal-driven
+   * reload inherits everything that already makes those silent: cards keyed by id
+   * are not remounted, autosave state (`lib/runAutosaveStore.ts`, keyed
+   * `<experimentId>/<runId>`) is never touched here at all, and the search box and
+   * filters are left exactly as they are, because this effect's dependencies do
+   * not include them.
+   *
+   * A PROPOSAL-ONLY SIGNAL IS INVISIBLE HERE BY CONSTRUCTION, not by an explicit
+   * check: `activity.runIds.length === 0 && !activity.recordMoved` is exactly
+   * "nothing this section renders moved", the same distinction `needsCanonicalRefetch`
+   * draws for the record bundle.
+   *
+   * ONLY THE FIRST PAGE IS EVER RE-READ. A reader who has pressed Load More several
+   * times has pages beyond the first that this effect does not know about and does
+   * not attempt to preserve — the existing Load More control re-fetches them, from
+   * the new first page's `received` offset, exactly as it already does after any
+   * other silent reload. Reconciling a signal against deep pagination would mean
+   * this section tracking server-side state it does not own; the honest answer is
+   * the one `runs-more-note` already gives for offset paging generally.
+   */
+  useEffect(() => {
+    if (activity === null) return;
+    if (activity.runIds.length === 0 && !activity.recordMoved) return;
+    // No rev to compare against yet — the first load has not landed. Nothing is
+    // marked consumed here, so this effect re-evaluates the same `activity` once
+    // `experimentVersion` arrives (it is a dependency below).
+    if (experimentVersion === null) return;
+
+    const key = `${activity.highestRev}:${activity.recordMoved}:${activity.runIds.join(',')}`;
+    // DEDUPE. The producer re-delivers the same summary every poll until this
+    // screen's own rev catches up, and a repeat is not news a second time.
+    if (key === lastRunsSignalKeyRef.current) return;
+
+    // AT OR BELOW THIS SECTION'S OWN LOADED REV — covers this section's own Add
+    // Run / Remove Run, which already adopted the version the signal is reporting,
+    // and a replay of a batch this screen has already acted on for another reason.
+    const dot = experimentVersion.lastIndexOf('.');
+    const loadedRev = dot === -1 ? NaN : Number(experimentVersion.slice(dot + 1));
+    if (Number.isFinite(loadedRev) && activity.highestRev <= loadedRev) {
+      lastRunsSignalKeyRef.current = key;
+      return;
+    }
+
+    lastRunsSignalKeyRef.current = key;
+
+    if (runsReloadInFlightRef.current) {
+      // COALESCE. One follow-up, consumed by `runsSignalFollowUp` above once the
+      // in-flight request settles — not one request per signal that lands here.
+      pendingSignalReloadRef.current = true;
+      return;
+    }
+    silentRef.current = true;
+    setReloadNonce((n) => n + 1);
+  }, [activity, experimentVersion]);
 
   // --- one more page ------------------------------------------------------
   const loadMore = () => {
