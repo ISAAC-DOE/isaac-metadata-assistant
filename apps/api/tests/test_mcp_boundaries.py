@@ -38,6 +38,7 @@ from isaac_api.mcp.deployment import (
 )
 from isaac_api.mcp.policy import (
     ALLOWED_METHODS,
+    WRITE_SCOPES,
     DESTRUCTIVE_TOKENS,
     FORBIDDEN_PATH_TOKENS,
     FORBIDDEN_TOOL_TOKENS,
@@ -103,7 +104,10 @@ def rpc(server, method, params=None, *, credential=None):
 
 def test_the_registry_is_exactly_the_permitted_set_in_both_directions():
     assert registered_tool_names() == PERMITTED_TOOL_NAMES
-    assert len(PERMITTED_TOOL_NAMES) == 10
+    # 10 -> 14 on 2026-09-01: the four ingestion-proposal tools. The number is a
+    # tripwire for an ACCIDENTAL registration, not a claim about which tools are
+    # right; the names are asserted one line up, in both directions.
+    assert len(PERMITTED_TOOL_NAMES) == 14
 
 
 def test_no_forbidden_capability_is_registered_under_any_name():
@@ -279,10 +283,22 @@ def test_the_discard_operation_is_not_reachable_through_MCP_by_TWO_mechanisms():
 
 
 def test_every_mutating_operation_costs_the_write_scope_and_needs_a_precondition():
+    """~~``is Scope.DRAFT_WRITE``~~ — widened to :data:`WRITE_SCOPES` on 2026-09-01.
+
+    The property being kept is the one that matters and it is unchanged: a mutation may
+    never cost a READ scope, so a write cannot hide behind a read. What changed is that
+    there is more than one write scope. It is asserted against the NAMED SET rather than
+    against ``!= Scope.READ`` for the reason ``WRITE_SCOPES``' own comment gives: the
+    negative form would let a fourth scope acquire mutation rights by saying nothing.
+    """
+    assert Scope.READ not in WRITE_SCOPES
     for operation in OPERATIONS.values():
         if operation.mutates:
-            assert operation.scope is Scope.DRAFT_WRITE
+            assert operation.scope in WRITE_SCOPES, operation.id
             assert operation.requires_if_match
+    # AND THE SET IS EARNED RATHER THAN VACUOUS: each write scope really does carry a
+    # mutation, so `in WRITE_SCOPES` is not passing because nothing mutates.
+    assert {op.scope for op in OPERATIONS.values() if op.mutates} == WRITE_SCOPES
 
 
 def test_a_scope_named_submit_cannot_be_expressed_at_all():
@@ -290,12 +306,34 @@ def test_a_scope_named_submit_cannot_be_expressed_at_all():
 
     This is the structural half of "no Submit": even if a tool existed, no
     deployment could grant it a permission, because the permission is an enum
-    member and the enum has two.
+    member and the enum does not have one. ~~"and the enum has two"~~ — there are
+    three since 2026-09-01, and the count was never the guarantee: the CLOSEDNESS
+    is, which is why the assertion below enumerates the members rather than
+    counting them.
     """
-    assert {s.value for s in Scope} == {"isaac:read", "isaac:draft.write"}
+    assert {s.value for s in Scope} == {
+        "isaac:read",
+        "isaac:draft.write",
+        # Added 2026-09-01. It unlocks ONE operation — recording a suggestion that no
+        # draft, export or submission reads — and it is enumerated here rather than
+        # counted, so a fourth member cannot arrive unnoticed.
+        "isaac:proposals.write",
+    }
     from isaac_api.mcp.policy import parse_scope
 
-    for pretender in ("isaac:submit", "submit", "isaac:admin", "*", "isaac:export"):
+    for pretender in (
+        "isaac:submit",
+        "submit",
+        "isaac:admin",
+        "*",
+        "isaac:export",
+        # The names a future author would reach for to grant acceptance. None of them
+        # resolves, so no deployment can grant one however it is spelled.
+        "isaac:proposals.accept",
+        "isaac:proposals.review",
+        "isaac:proposals",
+        "isaac:proposals.write ",
+    ):
         assert parse_scope(pretender) is None
 
 

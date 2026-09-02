@@ -36,7 +36,7 @@
  *     rule are settled in the committed audit `docs/mcp-capability-audit.md`
  *     (§1 one-way, §4 annotations are hints not enforcement, §5 never build a
  *     submit/delete/migration/governance tool, §6 D1 and D2 deferred). The tool
- *     set and the two permissions below are what the interface is being built
+ *     set and the permissions below are what the interface is being built
  *     to; they are not running here. `MCP_CONNECT_COPY.provenanceNote` says so
  *     on the page, next to the material it qualifies — not in a footnote a
  *     reader can miss.
@@ -192,7 +192,7 @@ export const MCP_CONNECT_COPY = {
   /** Permissions. */
   permissionsHeading: 'Permissions an Agent Will Hold',
   permissionsDetail:
-    'Two permissions, and the draft-write one is additive only: it is granted on top of read, never instead of it. Every write tool costs both permissions, because a write also returns the record state it produced — so an agent granted draft-write alone can call nothing at all, not even a write, and would sit completely inert. Grant read for an agent that should only look, and read plus draft-write for one that should fill in drafts. Neither permission means “may finalize”, and there is no third permission that does.',
+    'Three permissions, and none of them is a superset of another — each is granted explicitly, and read is the base. Both write permissions are additive only: they are granted on top of read, never instead of it, because every tool also returns something the record says. So an agent granted either write permission by itself can call nothing at all, not even the write, and would sit completely inert. Grant read for an agent that should only look, read plus draft-write for one that should fill in drafts, and read plus proposals-write for one that should suggest values for you to review. The two writes are separate on purpose and neither includes the other: an agent that may suggest values cannot change them, and an agent that may change them cannot suggest. No permission means “may finalize”, and there is no fourth permission that does.',
 } as const;
 
 /** One capability row: what an agent will be able to do, in a scientist's terms. */
@@ -402,6 +402,57 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
       'Read the evidence trail for a record: each entry’s official path or block key, the kind of support behind it, and the source cited. Two limits, because this row used to promise more than the tool returns. A block-level entry — a QC verdict, a spectrum, a descriptor set, an attribution or a link — carries no value of its own, so the value has to be read from the record itself. And on a record that has runs, the trail is the record’s own only: each run’s evidence is not in it, so a record whose spectrum, verdict and descriptors were answered on a run — which is where ISAAC requires them once runs exist — reads as an empty trail.',
     tools: ['isaac_inspect_evidence'],
   },
+  {
+    /*
+     * THE ROW THAT IS EASIEST TO WRITE FALSELY, AND THE ONE A SCIENTIST DECIDES ON.
+     *
+     * `isaac_propose_field_value` is the channel the voice-and-chat workflow needs, and
+     * the temptation is to describe it as "let your agent fill in a value". It is not
+     * that, and the difference is the whole reason the tool was allowed to exist:
+     * `apps/api/isaac_api/proposals.py` cannot even REPRESENT a confirmed value —
+     * `status`, `verified`, `is_evidence` and `is_field_value` are read-only constants
+     * on a frozen, slotted class and are serialised on the wire — and a proposal is
+     * stored at `state["proposals"]`, OUTSIDE `draft`, so no exported record and no
+     * submission signature reads it. Creating one leaves every field of the record and
+     * of every run byte-for-byte unchanged (contract §5 I1/I2).
+     *
+     * So the row says what the agent CANNOT do first, in the scientist's own terms: it
+     * cannot enter data, and the value stays a suggestion until the scientist accepts
+     * it — which no agent tool at any permission can do. That refusal is structural in
+     * the same way "no agent can submit" is: `accept` is a forbidden substring in any
+     * tool name, checked at import, and the review route is in no operation allowlist.
+     *
+     * DELIBERATELY NOT MENTIONED: any suggestion that a connector exists. This tab is
+     * future-tense throughout and this row keeps that register.
+     */
+    id: 'propose-a-value',
+    action: 'Suggest a value for you to review',
+    detail:
+      'Record a suggestion against a record — a value, the field it is for, and the sentence explaining where it came from — for you to accept or refuse later. A suggestion is not an entry: it writes nothing into the record, counts as no evidence, changes nothing about what the record would export, and cannot make a blocked record exportable. It stays a suggestion until you accept it on the website, and no agent will be able to accept one — the tool that would is not built, and the same refusal that stops an agent submitting stops it. Every suggestion has to cite a note the record already holds, so the words behind it survive whatever you decide; no agent tool can create that note. Retrying is safe: a repeated suggestion returns the first one rather than making a second.',
+    tools: ['isaac_propose_field_value'],
+  },
+  {
+    id: 'read-proposals',
+    action: 'Read the suggestions and what you decided',
+    detail:
+      'List the suggestions stored against a record — including the ones you accepted, refused or withdrew, because those are outcomes rather than deletions — or read one in full with the note excerpt behind it and the history of what happened to it. The list arrives one window at a time and reports how many the record actually holds, so a short page is visibly a page. Reads only; deciding stays yours.',
+    tools: ['isaac_list_proposals', 'isaac_get_proposal'],
+  },
+  {
+    /*
+     * THE FEED IS A STATE FEED AND NOT AN EVENT LOG, and the copy has to say so
+     * because the name invites the other reading. `change_feed.py`'s own docstring is
+     * explicit: this application keeps no event table, so ten edits between two reads
+     * are ONE entry and nothing can say how many there were or in what order. A row
+     * that promised "see what changed" would promise a history this build cannot
+     * produce.
+     */
+    id: 'watch-for-changes',
+    action: 'Notice that something moved',
+    detail:
+      'Ask what on a record is at a later version than the last time it looked, so an agent can notice you answered a suggestion instead of asking again. It reports where things stand NOW, not what happened: several edits between two checks appear as one entry, and nothing in it can say how many there were, in what order, or what the intermediate values were. Reads only.',
+    tools: ['isaac_get_changes'],
+  },
 ];
 
 /**
@@ -482,7 +533,35 @@ export const MCP_PERMISSIONS: readonly McpPermission[] = [
     allows:
       'Added to read, it lets an agent change draft content: add a run, answer or re-answer the questions a record or one of its runs is blocked on — including a run’s spectrum, QC verdict and descriptors — correct an answered field, and edit a run’s own five context and timing fields. It does not export, submit or finalise anything.',
     refuses:
-      'On its own it permits nothing. Every write tool requires read as well, so an agent granted draft-write without read is refused all ten tools and is shown none of them. It also finalizes nothing: it unlocks a fixed, reviewed list of operations and none of them mints an official record.',
+      'On its own it permits nothing. Every tool this permission unlocks requires read as well, so an agent granted draft-write without read is refused every tool and is shown none of them. It also finalizes nothing: it unlocks a fixed, reviewed list of operations and none of them mints an official record. It does not let an agent record a suggestion either — that is a separate permission.',
+  },
+  {
+    /*
+     * WHY THIS IS NOT PART OF DRAFT-WRITE, which is the question a scientist reading
+     * three permissions will ask. Draft-write changes draft content directly. This
+     * changes nothing a draft, an export or a submission reads, and that inertness is
+     * exactly what makes it the safe permission to give a model-derived channel — so
+     * folding the two together would hand every suggesting agent the ability to write
+     * values, and every drafting agent the suggestion channel. `mcp/policy.py`'s
+     * `Scope.PROPOSALS_WRITE` records the same reasoning where it is enforced.
+     *
+     * ~~"alone, this permission is admitted by the permission check and then cannot
+     * finish"~~ — **THAT WAS BUILT, MEASURED AND WITHDRAWN ON 2026-09-01, and it is
+     * struck here rather than reworded because this is the copy a scientist reads
+     * BEFORE granting the permission.** The tool briefly cost proposals-write alone.
+     * Measured against the real server with that scope and nothing else: a fabricated
+     * validator earns a `412` that reports the record's `current_version`, the next
+     * request with it stores a proposal, and the success envelope's `etag` sustains the
+     * session. So "cannot finish" was false, and withholding the disclosure would have
+     * made the shape inert instead. The tool now costs read as well, and this row says
+     * what every other write row says.
+     */
+    id: 'proposals-write',
+    name: 'isaac:proposals.write',
+    allows:
+      'Record suggestions for you to review: a value, the field it is for, and the sentence explaining where it came from, cited to a note the record already holds. It writes nothing into the record, mints no evidence, and changes nothing about what the record would export.',
+    refuses:
+      'It cannot change a draft, answer a question, or add a run — those are the draft-write permission, and holding this one confers none of it. It cannot accept, refuse or withdraw a suggestion either: deciding is yours, on the website, and no agent tool at any permission does it. Like draft-write it permits nothing on its own — it is granted on top of read, never instead of it, and an agent holding it alone is refused every tool and shown none of them.',
   },
 ];
 
@@ -530,7 +609,7 @@ export const MCP_SETUP_STEPS: readonly McpSetupStep[] = [
     id: 'scope',
     title: 'Grant only what you need',
     detail:
-      'Grant the read permission for an agent that should only look, and add the draft-write permission on top of read if you want it filling in drafts. Draft-write is never a substitute for read: granted by itself it permits nothing, so an agent holding it alone is refused every tool.',
+      'Grant the read permission for an agent that should only look, and add the draft-write permission on top of read if you want it filling in drafts. Draft-write is never a substitute for read: granted by itself it permits nothing, so an agent holding it alone is refused every tool. Add the proposals-write permission instead if you want an agent that suggests values for you to review rather than entering them — it is the weaker of the two writes and does not include the other.',
   },
   {
     id: 'verify',

@@ -33,9 +33,14 @@ make about themselves.
 THE FIX, AND THE ONE THING IT MUST NOT BE READ AS
 =================================================
 The pattern is now the id SHAPE: ``\\A[0-9A-Z]{26}\\Z``. It is not a guess —
-``policy.OPERATIONS`` declares exactly two placeholders, ``experiment_id`` and
-``run_id`` (§1 asserts that, so a third one added later cannot inherit this
-predicate silently), and both name ids minted by ``isaac_records.ids``.
+``policy.OPERATIONS`` declares three placeholders — ``experiment_id``, ``run_id`` and
+``proposal_id`` (§1 asserts the set, so a fourth added later cannot inherit this
+predicate silently) — and every one of them names an id minted by
+``isaac_records.ids``. ``proposal_id`` arrived on 2026-09-01 and the review §1 forces
+is recorded rather than merely performed: ``routes.post_proposal`` mints it with
+``new_record_id()``, the same function ``workspace`` uses for a record and for a run,
+so the record-id shape is the right predicate for it and not an inherited
+approximation. §1 asserts that mechanically as well, by generating one.
 
 It is RESTATED rather than imported, because
 ``test_mcp_boundaries.test_nothing_in_the_mcp_package_imports_the_truth_path``
@@ -151,6 +156,26 @@ def test_a_DOTTED_experiment_id_is_refused_too(client):
     assert raised.value.data["parameter"] == "experiment_id"
 
 
+def test_the_PROPOSAL_placeholder_names_an_id_MINTED_BY_THE_SAME_FUNCTION(client):
+    """The review §1 demands, performed rather than asserted in prose.
+
+    A new placeholder inheriting ``_PATH_PARAM`` is only safe if the values that reach
+    it really are record ids. So one is MINTED here by the function the create route
+    uses, and the pattern is applied to it — a claim about the id generator, not about
+    a string somebody typed into a test. The negative half is the dot case below: the
+    same placeholder must refuse ``..``, which is what the pattern exists for.
+    """
+    from isaac_records.ids import new_record_id
+
+    minted = new_record_id()
+    assert _PATH_PARAM.match(minted), minted
+
+    with pytest.raises(ApiRefusal) as raised:
+        _call(client, "get_proposal", experiment_id=EXPERIMENT_ID, proposal_id="..")
+    assert raised.value.code == "invalid_path_parameter"
+    assert raised.value.data["parameter"] == "proposal_id"
+
+
 def test_a_REAL_ID_still_works_so_the_pattern_is_not_a_blanket_refusal(client):
     """The negative control. A pattern matching nothing would pass everything above."""
     result = _call(client, "get_experiment", experiment_id=EXPERIMENT_ID)
@@ -231,7 +256,7 @@ def test_every_MCP_PLACEHOLDER_names_an_id_this_pattern_describes(client):
     for operation in OPERATIONS.values():
         placeholders |= set(re.findall(r"\{([a-z_]+)\}", operation.path_template))
 
-    assert placeholders == {"experiment_id", "run_id"}, (
+    assert placeholders == {"experiment_id", "run_id", "proposal_id"}, (
         "a new MCP path placeholder appeared. `_PATH_PARAM` applies the RECORD ID "
         f"shape to every one of them; confirm that is right for: {placeholders}"
     )

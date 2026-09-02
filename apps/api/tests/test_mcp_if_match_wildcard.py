@@ -64,6 +64,13 @@ _WILDCARD_CASES = (
     ("answer_record_question", {"experiment_id": _ID}),
     ("answer_run_question", {"experiment_id": _ID, "run_id": _RUN_ID}),
     ("correct_run_field", {"experiment_id": _ID, "run_id": _RUN_ID}),
+    # The seventh write, added 2026-09-01 with the ingestion-proposal surface. It is
+    # here because THIS FILE'S coverage assertion is derived from `OPERATIONS`, so a
+    # write added without a case turns `test_every_mutating_operation_is_covered_by
+    # _this_file` red rather than shipping with an unguarded wildcard. It costs
+    # `PROPOSALS_WRITE` rather than `DRAFT_WRITE`, which changes nothing here: the
+    # wildcard refusal is `client._render_headers`', and it is scope-blind.
+    ("create_proposal", {"experiment_id": _ID}),
 )
 
 
@@ -244,6 +251,12 @@ def test_every_tool_that_declares_if_match_says_the_wildcard_is_refused():
         "isaac_create_run",
         "isaac_update_draft",
         "isaac_answer_questions",
+        # `isaac_propose_field_value` (2026-09-01) takes the RECORD's etag, because a
+        # proposal is stored inside the record's own state document. It is the first
+        # tool here that does NOT cost `DRAFT_WRITE` — and it must still carry the
+        # sentence, because the promise is about what the header may be, not about
+        # which permission the caller holds.
+        "isaac_propose_field_value",
     }, sorted(descriptions)
     for name, text in descriptions.items():
         assert "`*` is refused" in text, (name, text)

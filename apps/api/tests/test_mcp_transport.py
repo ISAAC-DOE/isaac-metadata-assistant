@@ -145,6 +145,11 @@ def configured(monkeypatch, *, scopes: str | None = None, session: str | None = 
 
 
 BOTH_SCOPES = f"{Scope.READ.value},{Scope.DRAFT_WRITE.value}"
+#: EVERY scope, derived from the enum rather than typed out, so a scope added later is
+#: granted here on the day it exists instead of leaving a "the whole registry" assertion
+#: quietly measuring a subset. `BOTH_SCOPES` is deliberately kept beside it: most cases
+#: here are about the read/draft-write pair and must not silently gain a third grant.
+ALL_SCOPES = ",".join(scope.value for scope in Scope)
 
 
 def rpc(client, method, params=None, *, mid=1, **kwargs):
@@ -440,7 +445,9 @@ def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_registry
     transport, into the JSON-RPC handler, and — for the call — back into the same
     application over ASGI.
     """
-    _, client = configured(workspace, scopes=BOTH_SCOPES)
+    # ALL_SCOPES, not BOTH_SCOPES: this case's claim is "exactly the registry", and a
+    # grant missing a scope would make it "exactly the part of the registry we granted".
+    _, client = configured(workspace, scopes=ALL_SCOPES)
 
     initialize = result_of(
         client,
@@ -453,10 +460,9 @@ def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_registry
     )
     assert initialize["protocolVersion"] == MCP_PROTOCOL_VERSION
     assert initialize["serverInfo"]["name"] == "isaac-metadata-assistant"
-    assert initialize["_isaac"]["grantedScopes"] == [
-        Scope.DRAFT_WRITE.value,
-        Scope.READ.value,
-    ]
+    assert initialize["_isaac"]["grantedScopes"] == sorted(
+        scope.value for scope in Scope
+    )
 
     # The handshake's notification carries no id, so the transport answers 202 with
     # NO BODY — not 200 with an empty object, which a client would try to parse.
@@ -468,7 +474,7 @@ def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_registry
 
     listed = {tool["name"] for tool in result_of(client, "tools/list")["tools"]}
     assert listed == set(PERMITTED_TOOL_NAMES)
-    assert len(listed) == 10
+    assert len(listed) == 14
 
     body = structured(client, "isaac_list_experiments")
     assert body["status"] == 200
@@ -526,7 +532,7 @@ def test_a_real_client_over_a_real_loopback_socket_completes_a_session(workspace
 
     session_id, _ids = ws.create_tutorial_session()
     workspace.setenv(DEPLOYMENT_ENV, LOCAL_LOOPBACK)
-    workspace.setenv(LOCAL_SCOPES_ENV, BOTH_SCOPES)
+    workspace.setenv(LOCAL_SCOPES_ENV, ALL_SCOPES)
     workspace.setenv(LOCAL_SESSION_ENV, session_id)
 
     config = uvicorn.Config(build_app(), host="127.0.0.1", port=0, log_level="warning")
@@ -1007,7 +1013,12 @@ def test_the_read_grant_is_the_default_and_the_write_tools_are_absent(workspace)
     listed = {tool["name"] for tool in result_of(client, "tools/list")["tools"]}
     assert "isaac_create_run" not in listed
     assert "isaac_update_draft" not in listed
-    assert len(listed) == 7
+    # The default grant reaches no write tool of ANY kind, which since 2026-09-01 means
+    # the proposal create as well as the three draft writes. Named rather than left to
+    # the count, because a count catches a tool that vanished and not one that leaked
+    # into the wrong grant.
+    assert "isaac_propose_field_value" not in listed
+    assert len(listed) == 10
 
 
 def test_a_read_only_caller_is_refused_a_write_tool_with_403(workspace):

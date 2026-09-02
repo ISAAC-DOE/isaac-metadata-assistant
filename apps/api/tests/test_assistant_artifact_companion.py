@@ -179,9 +179,32 @@ def test_every_declared_mutation_flag_matches_the_tools_own_annotation(manifest)
         assert entry["mutates"] is (not annotations["readOnlyHint"]), entry["tool"]
 
 
-def test_the_manifest_requests_no_scope_the_server_cannot_express(manifest):
-    """``Scope`` has two members on purpose. A third here would be a fiction."""
-    assert set(manifest["scopes_requested"]) == {scope.value for scope in policy.Scope}
+def test_the_manifest_requests_only_scopes_ITS_OWN_TOOLS_COST(manifest):
+    """~~"``Scope`` has two members on purpose. A third here would be a fiction."~~ —
+    **BOTH HALVES FAILED ON 2026-09-01, AND THE SECOND ONE IS THE INTERESTING ONE.**
+
+    The count went to three. More importantly, the assertion it sat on —
+    ``scopes_requested == {every Scope}`` — meant the companion automatically requested
+    every scope the server could express, so *adding* ``isaac:proposals.write`` to
+    ``policy.py`` turned this artifact into a model-derived write channel in the same
+    diff, as bookkeeping. That is the exact opposite of what ``policy.py`` spends forty
+    lines arguing: no scope implies another and every grant is explicit.
+
+    So the requested set is now the UNION OF WHAT THE DECLARED TOOLS COST — derived, so
+    it still cannot drift below what the companion needs, and no longer a standing
+    request for whatever exists. Same three today; a future scope added for a tool this
+    companion does not declare is silently NOT requested, which is the safe direction.
+    """
+    needed = {
+        scope.value
+        for entry in manifest["tools"]
+        for scope in tools.TOOLS[entry["tool"]].required_scopes
+    }
+    assert set(manifest["scopes_requested"]) == needed
+    # NOT VACUOUS: the companion really does declare tools costing more than one scope.
+    assert len(needed) > 1
+    # And it must not request a scope no declared tool costs.
+    assert not set(manifest["scopes_requested"]) - needed
 
 
 def test_no_declared_tool_name_carries_a_forbidden_capability_token(manifest):
