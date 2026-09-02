@@ -396,6 +396,18 @@ test.describe('two scientists, one record, end to end', () => {
       recordTarget.proposed
     );
     expect(arrivalText, 'step 7: and no field path').not.toContain(recordTarget.path);
+    /*
+     * AND THE SPOKEN SENTENCE IS CHECKED TOO, NOT ONLY THE VISIBLE ONE. They are built
+     * by two separate expressions — the visible note is a RUNNING TOTAL since the last
+     * dismiss, the announced one is THIS arrival's own delta — so content-freedom
+     * established on one is not established on the other. The live region is the half
+     * a reader cannot see and cannot un-hear.
+     */
+    const spokenText = (await proposals.locator('p.sr-only[role="status"]').textContent()) ?? '';
+    expect(spokenText, 'step 7: the ANNOUNCED sentence names no proposed value').not.toContain(
+      recordTarget.proposed
+    );
+    expect(spokenText, 'step 7: and no field path').not.toContain(recordTarget.path);
 
     // ── STEP 8 — the card renders, with current and proposed distinguishable ──
     const recordCard = proposalCard(page, recordTarget.path);
@@ -449,9 +461,17 @@ test.describe('two scientists, one record, end to end', () => {
      * the exact mutation `test_run_scoped_proposal_lifecycle.py` uses.
      */
     const runsReads: string[] = [];
+    /*
+     * THE FEED POLLS ARE COUNTED TOO, and they are the SETTLE this step needs rather
+     * than a duration. See the quiescence assertion after the count below.
+     */
+    const feedReads: string[] = [];
     const recordRunsRe = new RegExp(`/experiments/${id}/runs(\\?|$)`);
+    const recordChangesRe = new RegExp(`/experiments/${id}/changes(\\?|$)`);
     page.on('request', (req) => {
-      if (req.method() === 'GET' && recordRunsRe.test(req.url())) runsReads.push(req.url());
+      if (req.method() !== 'GET') return;
+      if (recordRunsRe.test(req.url())) runsReads.push(req.url());
+      if (recordChangesRe.test(req.url())) feedReads.push(req.url());
     });
     const runsReadsBefore = runsReads.length;
 
@@ -493,6 +513,49 @@ test.describe('two scientists, one record, end to end', () => {
     const attributedRead = runsReads[runsReadsBefore];
     const attributedLimit = new URL(attributedRead).searchParams.get('limit');
     expect(attributedLimit, `step 11: and it is BOUNDED — ${attributedRead}`).toBe('2');
+    /*
+     * AND IT IS STILL EXACTLY ONE AFTER TWO MORE FEED POLLS.
+     *
+     * `expect.poll(...).toBe(1)` above establishes only that the count REACHES 1 — it
+     * returns the instant it does, so a second, third or tenth re-read arriving a
+     * moment later would pass it. A bound that fires once per POLL rather than once
+     * per EVENT is exactly the defect `live-refresh-request-graph.test.tsx` exists to
+     * catch, and it is invisible to a "reaches" assertion.
+     *
+     * THE SETTLE IS THE CLIENT'S OWN POLLER, NOT A SLEEP AND NOT A SERVER READ. Two
+     * further `GET .../changes` from the PAGE are waited for, because that is the
+     * mechanism under suspicion: the feed re-delivers a summary every poll until the
+     * screen's own revision catches up, so if the runs re-read were keyed on
+     * delivery rather than deduped, more polls would mean more reads. Two is enough
+     * for the count to move if it is going to.
+     *
+     * `DISCOVERY_DEADLINE` IS PASSED EXPLICITLY, because `expect.poll`'s own default
+     * is 15 s and two polls of a JITTERED 4 s cadence do not reliably fit inside it
+     * under load — measured: `Expected: >= 2 Received: 1`. That is a budget, not a
+     * timing assertion; the deadline exists so a poller that has stopped fails
+     * instead of hanging.
+     *
+     * AN EARLIER VERSION POLLED THE SERVER FOR AN EMPTY FEED PAGE and could never
+     * pass: `server.changes(id, { limit: 200 })` sends NO CURSOR, so it is a
+     * cursorless resync that returns the record's whole entity set every time. It
+     * failed `Expected: 0 Received: 5`. A quiescence condition has to be a statement
+     * about the CLIENT, which is the thing that might be misbehaving.
+     */
+    const feedReadsAtCount = feedReads.length;
+    await expect
+      .poll(
+        () => feedReads.length - feedReadsAtCount,
+        {
+          message: 'step 11: settle — wait for two further feed polls from the page itself',
+          timeout: DISCOVERY_DEADLINE,
+        }
+      )
+      .toBeGreaterThanOrEqual(2);
+    expect(
+      runsReads.length - runsReadsBefore,
+      'step 11: and it is STILL exactly one after two further feed polls — the bound ' +
+        'fires once per EVENT, not once per poll'
+    ).toBe(1);
 
     // ── STEP 12 — three distinct values, and the label says whose ─────────────
     await runCard.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
@@ -613,6 +676,23 @@ test.describe('two scientists, one record, end to end', () => {
     // ── STEP 14 — A ACCEPTS through the UI, under the trusted identity ────────
     const runOneBefore = await server.runBody(id, runOne.id);
     const cursorBeforeAccept = (await server.changes(id, { limit: 200 })).next_cursor;
+    /*
+     * THE RECORD'S REV AT THE SAME INSTANT AS THE CURSOR — step 17's real floor.
+     *
+     * It is read here rather than derived in step 17 because the whole claim is
+     * "everything the feed reports after this point moved AFTER this point", and that
+     * needs the position captured BEFORE the accept. The token is
+     * `<generation>.<rev>`; the rev is the half after the last dot, parsed exactly as
+     * `useRecordSync` and `RunsSection` parse it.
+     */
+    const versionBeforeAccept = await server.version(id);
+    const revBeforeAccept = Number(
+      versionBeforeAccept.slice(versionBeforeAccept.lastIndexOf('.') + 1)
+    );
+    expect(
+      Number.isFinite(revBeforeAccept),
+      'step 14: the record version token must carry a numeric rev for step 17 to have a floor'
+    ).toBe(true);
     const liveRunCard = cardInState(page, runTarget.path, 'Awaiting your judgement');
     await expect(liveRunCard, 'step 14: the open card is the one A acts on').toBeVisible({
       timeout: DISCOVERY_DEADLINE,
@@ -701,12 +781,25 @@ test.describe('two scientists, one record, end to end', () => {
       seen.filter((c) => c.kind === 'run' && c.entity_id === runOne.id),
       'step 17: and run one is ABSENT — it did not move'
     ).toHaveLength(0);
-    // ABOVE THE CURSOR, which is the property that makes a cursor a cursor.
+    /*
+     * ABOVE THE CURSOR, which is the property that makes a cursor a cursor — and
+     * measured against the RECORD'S REV AT THE CURSOR, not against zero.
+     *
+     * `toBeGreaterThan(0)` stood here and was VACUOUS: `change_feed` floors every
+     * served position at >= 1 on read, so that assertion could not fail for any entry
+     * the feed is capable of returning, while its message claimed a comparison
+     * against the pre-accept cursor. It is the exact shape of defect this repository
+     * keeps recording — an assertion that reads as a guarantee and is true by
+     * construction. `revBeforeAccept` is captured in step 14 beside the cursor itself.
+     */
+    expect(seen.length, 'step 17: the page reports something, so the loop below is not vacuous')
+      .toBeGreaterThan(0);
     for (const entry of seen) {
       expect(
         entry.changed_at_rev,
-        `step 17: ${entry.kind} ${entry.entity_id} is above the pre-accept cursor`
-      ).toBeGreaterThan(0);
+        `step 17: ${entry.kind} ${entry.entity_id} at rev ${entry.changed_at_rev} must be ` +
+          `above the record's rev when the cursor was taken (${revBeforeAccept})`
+      ).toBeGreaterThan(revBeforeAccept);
     }
     // DRAINS, AND NO ENTRY IS SERVED TWICE ACROSS PAGES.
     let cursor = page1.next_cursor;
@@ -782,6 +875,17 @@ test.describe('two scientists, one record, end to end', () => {
      */
     expect(verdict.ok, 'step 19: it does not export yet, and says so').toBe(false);
     const messages = verdict.errors.map((e) => `${e.path} ${e.message}`);
+    /*
+     * NON-VACUITY FIRST. The loop below asserts a property OF EACH refusal, so on an
+     * empty `errors` it would assert nothing at all and read as a pass — the same
+     * shape as the `toBeGreaterThan(0)` defect corrected in step 17. `ok: false`
+     * above guarantees there is SOMETHING wrong; this guarantees the wire actually
+     * enumerated it, which is a different claim.
+     */
+    expect(
+      messages.length,
+      'step 19: the dry run enumerated its refusals, so the loop below is not vacuous'
+    ).toBeGreaterThan(0);
     for (const message of messages) {
       expect(
         message,

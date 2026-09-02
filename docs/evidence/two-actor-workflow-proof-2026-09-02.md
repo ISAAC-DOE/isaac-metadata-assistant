@@ -76,7 +76,7 @@ a failure message names its step.
 | 14 | A **accepts** through the UI under the trusted identity | card name becomes `… — Accepted` | `state: "accepted"`, `accepted_value` = proposed, `accepted_from: "candidate"`, `applied_run_id` = run two | ✅ |
 | 15 | **Only** run two changed | — | run two's target = the accepted value; **run one's WHOLE served document is `toEqual` its pre-accept snapshot** — `version`, `rev` and `updated_utc` included | ✅ |
 | 16 | Attribution and audit history | — | the `accept` history entry carries `actor_subject: "synthetic.browser.reviewer"` and `actor_trust_basis: "test_fixture"`; the `propose` entry carries `actor_subject: null` / `unattributed`; the run's field holds a `user_confirmation` evidence entry whose `answer` **is** the accepted value | ✅ |
-| 17 | Change feed, from a cursor taken before step 14 | — | `limit: 200` honoured; the proposal appears **once**, `state: "accepted"`; run two appears **once**; **run one is ABSENT**; every entry above the cursor; drains to `has_more: false`; **no entity served twice across pages**; a re-read of the drained cursor returns `[]` | ✅ |
+| 17 | Change feed, from a cursor taken before step 14 | — | `limit: 200` honoured; the proposal appears **once**, `state: "accepted"`; run two appears **once**; **run one is ABSENT**; **every entry's `changed_at_rev` is strictly above the record's rev at the instant the cursor was taken** (see §5.5 — the earlier wording said "above the cursor" over an assertion that only compared against `0`); the page is non-empty, so that loop is not vacuous; drains to `has_more: false`; **no entity served twice across pages**; a re-read of the drained cursor returns `[]` | ✅ |
 | 18 | Durability across a **reload** | after `page.reload()`: both runs, the accepted card, **and the rejected card** (a rejection is kept, not deleted) | `/api/health` asserted to report `experiment_storage.backend: "filesystem"`, so this step's scope cannot silently widen; A's record-level value survives | ✅ |
 | 19 | Validation reads the accepted value | — | `official_validator_ran: true`; `ok: false`; **no refusal message names the accepted value or A's record-level value**; the served run document at the target **is** the accepted value; per-run verdicts number `2` | ✅ |
 | 20 | The tooling cannot Submit, export, or accept | — | `PERMITTED_TOOL_NAMES` parsed out of `mcp/policy.py` (comments stripped) → **no name contains `accept`, `approve`, `submit`, `export`, `publish` or `delete`**; and `POST /api/mcp` `tools/list` → **`404`**, because this deployment mounts no transport at all | ✅ |
@@ -134,8 +134,8 @@ $ E2E_UVICORN=…/.venv/bin/uvicorn PYTHONPATH=…/apps/api:…/src \
     npx playwright test --config=playwright.trusted.config.ts two-actor
 [trusted-setup] hermetic: ordinary workspace empty; backend attributes through the test_fixture verifier, so acceptance is reachable.
 Running 1 test using 1 worker
-[1/1] [trusted-1280x800] › e2e/trusted/two-actor-workflow.spec.ts:240:3 › two scientists, one record, end to end › a colleague's proposals arrive, are judged, and land on exactly what they named
-  1 passed (34.7s)
+[1/1] [trusted-1280x800] › e2e/trusted/two-actor-workflow.spec.ts:248:3 › two scientists, one record, end to end › a colleague's proposals arrive, are judged, and land on exactly what they named
+  1 passed (52.8s)
 ```
 
 ### The whole trusted suite (this spec plus the five it joins)
@@ -148,8 +148,20 @@ Running 6 tests using 1 worker
 [3/6] … proposals-run-scoped.spec.ts:243:3 › accepting it through the screen writes ONE run …
 [4/6] … proposals-run-scoped.spec.ts:293:3 › the acceptance is attributed to the subject …
 [5/6] … proposals-run-scoped.spec.ts:327:3 › rejecting it through the screen leaves BOTH runs …
-[6/6] … two-actor-workflow.spec.ts:240:3 › a colleague's proposals arrive, are judged, …
-  6 passed (42.7s)
+[6/6] … two-actor-workflow.spec.ts:248:3 › a colleague's proposals arrive, are judged, …
+  6 passed (52.9s)
+```
+
+### The mutation suite
+
+Run at the post-merge head, on the same host, and recorded here because an earlier
+revision of §6 claimed it had not been run — see §6 for that correction.
+
+```
+$ E2E_UVICORN=… PYTHONPATH=… npm run test:e2e:mutation
+Running 113 tests using 1 worker
+[mutation-teardown] session discarded (DELETE → 204).
+  113 passed (2.3m)
 ```
 
 ### Typechecks
@@ -171,7 +183,7 @@ spec.
 
 | # | Mutation | Result | Reading |
 |---|---|---|---|
-| **A** | delete `activity={runActivity}` from `RecordWorkbench.tsx` | **7 passed** — inert | **An equivalent mutation on this screen.** `recordChanges.needsCanonicalRefetch` returns `true` whenever `summary.runIds.length > 0`, so *any* run signal also triggers a bundle refetch; the refetch moves `detail.version`; and `recordVersion` then fires the completeness path, which **subsumes** the fast path for every scenario the harness can build. Request **order** is identical too — measured by printing the recorded calls both ways. The prop is kept (it is the shipped contract and the only path that does not wait on a nine-request refetch), but no test here may be read as evidence it does anything. |
+| **A** | delete `activity={runActivity}` from `RecordWorkbench.tsx` | **7 passed** — inert | **An equivalent mutation on this screen.** `recordChanges.needsCanonicalRefetch` returns `true` whenever `summary.runIds.length > 0`, so *any* run signal also triggers a bundle refetch; the refetch moves `detail.version`; and `recordVersion` then fires the completeness path, which **subsumes** the fast path for every scenario the harness can build. Request **order** is identical too — measured by printing the recorded calls both ways. The prop is kept, and **§5.6 records exactly why, as reasoning rather than measurement** — do not read this row as licence to delete it. No test here may be read as evidence it does anything on this screen. |
 | **B** | delete `recordVersion={detail.version}` | **2 failed** | `expected 2 to be 1` (the removed run stays on screen) and `expected +0 to be 1`. Load-bearing, and it is the prop carrying the two cases the feed structurally cannot report. |
 | **C** | delete the in-flight coalesce in `RunsSection.triggerBoundedSilentReload` | **7 passed** — inert | Under fake timers the two paths never actually overlap, so nothing lands while a request is outstanding. The `toBe(1)` assertions are still real (control D fails them) but are not measuring the coalesce. |
 | **D** | delete **both** props — *exactly the tree before this branch* | **4 of 7 failed** | edit, removal, proposal-only and record-poller-first, each at a re-read count of 0 or a run still on screen. **This is the control that matters:** the wiring as a whole is load-bearing, and this file would have caught what two green branches shipped. |
@@ -257,6 +269,80 @@ branch's charter does not extend to it.
 
 ---
 
+### 5.5 THREE OF THIS FILE'S OWN ASSERTIONS WERE VACUOUS, and independent review found them
+
+Recorded prominently because the defect class is the one this repository keeps catching —
+**an assertion that reads as a guarantee and is true by construction** — and because it
+appeared *inside a proof whose whole purpose is to establish guarantees*.
+
+1. **Step 17's "above the cursor" compared against zero.** It asserted
+   `expect(entry.changed_at_rev).toBeGreaterThan(0)` under the message *"is above the
+   pre-accept cursor"*. `change_feed` floors every served position at `>= 1` on read, so
+   **no entry the feed is capable of returning could ever fail it.** The message named a
+   comparison the code did not make. It now reads the record's `rev` beside
+   `cursorBeforeAccept` in step 14 and asserts `changed_at_rev > revBeforeAccept`.
+
+   **Mutation control, run and reverted.** Comparing instead against a rev taken *after*
+   the accept must fail, and does:
+
+   ```
+   Error: MUTATION step 17: experiment 01M1J2RMB368R7M8537ZR36FTP at rev 13 vs a rev
+          taken AFTER the accept (13)
+   Expected: > 13
+   Received:   13
+     1 failed
+   ```
+
+   So the entries sit exactly **at** the post-accept rev, which is what makes the
+   pre-accept comparison discriminating rather than decorative.
+
+2. **Step 17's and step 19's per-entry loops could iterate zero times.** A `for` loop over
+   an empty list asserts nothing and reads as a pass. Both now assert non-emptiness first
+   (`seen.length` and `messages.length` `> 0`), which is a *different* claim from the
+   verdict above each — `ok: false` says something is wrong; it does not say the wire
+   enumerated it.
+
+3. **Step 11 asserted the re-read count REACHED one, never that it STAYED one.**
+   `expect.poll(...).toBe(1)` returns the instant the count hits 1, so a bound firing once
+   per *poll* rather than once per *event* would have passed it. A quiescent settle was
+   added — and **the first settle was itself wrong**, which is worth recording: it polled
+   the server for an empty feed page, but `server.changes(id, { limit: 200 })` sends **no
+   cursor**, so it is a cursorless resync that returns the record's whole entity set every
+   time and can never reach zero (`Expected: 0 Received: 5`). The working settle waits for
+   **two further `GET .../changes` from the page itself**, because the client is the thing
+   under suspicion. It needs `DISCOVERY_DEADLINE` explicitly: two polls of a jittered 4 s
+   cadence do not fit inside `expect.poll`'s 15 s default under load
+   (`Expected: >= 2 Received: 1`).
+
+Step 7's content-freedom check was also **half a check**: it tested only the visible note.
+The visible sentence is a running total since the last dismiss and the announced one is
+this arrival's own delta — two separate expressions — so the live region, the half a
+reader cannot see and cannot un-hear, is now asserted to exclude the proposed value and
+the field path too.
+
+### 5.6 What `runActivity` actually contributes on this screen — reasoning, not measurement
+
+Recorded here so no future session reads control A (§4) as licence to delete the prop.
+
+Independent review confirmed over HTTP what control A measured from the other side: **a run
+write moves the RECORD's version too.** So on the Record Workbench `runActivity` changes
+**when** `RunsSection` re-reads, never **whether** it does — the `recordVersion`
+completeness path would get there regardless. That is why control A is an equivalent
+mutation and why no test in this branch can be made to fail by removing the prop.
+
+The wiring is kept for two reasons, and both are **arguments rather than measurements**,
+stated as such:
+
+1. Dropping it would leave `useRecordSession.runActivity` a **producer with no consumer** —
+   a computed, tested, documented value that nothing reads. That is the shape of thing that
+   rots, and the shape of thing a later reader deletes as dead code without realising the
+   consumer was removed rather than never built.
+2. The fast path **does not wait on the nine-request bundle refetch**, and it still fires
+   **if that refetch fails**. Neither property is measured here — the harness cannot
+   distinguish them (§4, control A: request order is identical) — so neither is claimed as
+   evidence. They are the reasons the two-path design exists, and they are the reasons to
+   keep it until someone measures otherwise.
+
 ## 6. Assumptions, and what remains unverified
 
 **Assumptions this proof rests on, stated so a reader can attack them:**
@@ -287,9 +373,14 @@ branch's charter does not extend to it.
 - **PostgreSQL durability.** Cited (§0), not measured here.
 - **Bytes and latency.** jsdom has no wire; the browser suite counts requests and asserts
   their query strings, not their sizes or timings.
-- **The mutation suite** (`npm run test:e2e:mutation`) was **not run** on this branch — see
-  the session report for the reason and the load figures. Nothing in this branch touches a
-  file it covers, but that is an argument, not a measurement.
+- ~~**The mutation suite** (`npm run test:e2e:mutation`) was **not run** on this branch~~ —
+  **FALSE, and corrected in place rather than deleted, because this document and commit
+  `3da67fd`'s message CONTRADICTED EACH OTHER: the commit reported 113 passed in 2.4 m
+  while this line said the suite had not run.** The commit was right; this line was
+  written from a stale plan and never re-checked. Re-run at the post-merge head and
+  recorded in §3, it is **113 passed (2.3 m)**. The lesson is the one this repository keeps
+  recording: a "not done" claim is acted on by a future session, so it needs the same
+  measurement discipline as a "done" one.
 - **Concurrency between the two actors.** Every step here is ordered. Two writers racing
   the same field in the same instant is `apps/api/tests/test_concurrent_write_pairs_lose_no_update.py`'s
   subject, not this file's.
