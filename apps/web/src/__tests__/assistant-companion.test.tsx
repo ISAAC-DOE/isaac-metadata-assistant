@@ -387,6 +387,78 @@ describe('no state claims a connection, in any casing', () => {
   });
 });
 
+// --- NEGATIVE CONTROL 1b: the lead does not deny a write that really happens -
+
+/**
+ * THE OVER-DENIAL RATCHET.
+ *
+ * The `lead` used to say "nothing you do there changes a record here unless
+ * you come back and change it yourself" — an unqualified denial that was FALSE
+ * against `apps/api/isaac_api/mcp/policy.py::PERMITTED_TOOL_NAMES`:
+ * `isaac_answer_questions` and `isaac_create_run` write into a record's draft
+ * the moment a scientist confirms them in Claude, with no separate trip back
+ * to this website required for that write. This matches this file's own flat
+ * substring rule (rule 3 above): the phrase is banned exactly as written, not
+ * reworded around.
+ */
+const RECORD_UNTOUCHED_OVERCLAIM =
+  /\bnothing you do there changes a record here\b/i;
+
+/**
+ * THE POSITIVE CLAIM this section must make instead: that a confirmed action
+ * in the companion CAN write into the record directly, and that a suggestion
+ * left there is reviewed rather than applied — both true of the same tool set,
+ * and neither claim was present anywhere in this surface before this fix.
+ */
+const DIRECT_WRITE_CLAIM = /\bwrite\w* directly into this record’?s? draft\b/i;
+const REVIEWABLE_SUGGESTION_CLAIM = /\bsuggestion\b.*\breview\b/i;
+
+describe('the lead does not deny a write the companion can actually make', () => {
+  it('never renders the retired absolute denial, in any state', async () => {
+    for (const body of [
+      assistantCompanionUnconfigured,
+      assistantCompanionConfigured,
+      assistantCompanionRefused,
+    ]) {
+      const { container } = await renderWith(body);
+      expect(visibleText(container), 'the retired denial reached the DOM').not.toMatch(
+        RECORD_UNTOUCHED_OVERCLAIM,
+      );
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('states that a confirmed action writes into the draft, and that a suggestion is reviewed', async () => {
+    const { container } = await renderWith(assistantCompanionConfigured);
+    const text = visibleText(container);
+    expect(text, 'no claim that a confirmed action writes the draft').toMatch(
+      DIRECT_WRITE_CLAIM,
+    );
+    expect(text, 'no claim that a left suggestion is reviewed, not applied').toMatch(
+      REVIEWABLE_SUGGESTION_CLAIM,
+    );
+  });
+
+  it('THE RATCHET AND THE POSITIVE CLAIM ARE NOT VACUOUS', () => {
+    // The retired sentence, verbatim, must still be caught by the ratchet.
+    expect(
+      'It is a separate place you open, never a part of this website, and ' +
+        'nothing you do there changes a record here unless you come back and ' +
+        'change it yourself.',
+    ).toMatch(RECORD_UNTOUCHED_OVERCLAIM);
+    // The corrected sentence must not trip the ratchet it replaced.
+    expect(COPY.lead).not.toMatch(RECORD_UNTOUCHED_OVERCLAIM);
+    // And the positive matchers must fire on ordinary phrasings of the claim.
+    expect('actions there write directly into this record’s draft once you confirm').toMatch(
+      DIRECT_WRITE_CLAIM,
+    );
+    expect('leave a suggestion attached to the record for review').toMatch(
+      REVIEWABLE_SUGGESTION_CLAIM,
+    );
+  });
+});
+
 // --- NEGATIVE CONTROL 2: `unconfigured` does not read as an error ------------
 
 describe('the default state does not read as a fault', () => {
