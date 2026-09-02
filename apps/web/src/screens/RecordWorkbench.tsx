@@ -279,6 +279,7 @@ export function RecordWorkbench() {
          fact. Which poller degraded is a developer's question, not a scientist's. */
       degraded={degraded || session.feedDegraded}
       activity={session.activity}
+      proposalActivity={session.proposalActivity}
       agentContext={session.context}
       agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
@@ -310,6 +311,7 @@ function LoadedWorkbench({
   bundle,
   degraded,
   activity,
+  proposalActivity,
   agentContext,
   agentDegraded,
   onManualRefresh,
@@ -321,6 +323,17 @@ function LoadedWorkbench({
   degraded: boolean;
   /** The outstanding change-feed summary, or null. Ids and kinds; no content. */
   activity: RecordChangeSummary | null;
+  /**
+   * THE SAME FEED, ASKED WHETHER A PROPOSAL MOVED — a SECOND prop rather than a reuse
+   * of `activity`, and the duplication is the point.
+   *
+   * `activity` is null once THIS screen's record read has caught up, which is correct
+   * for a notice reading "what is on screen was loaded before that". It is wrong for
+   * the proposals list, which a record refetch does not touch — so on the ordinary
+   * ordering `activity` is null at exactly the moment a colleague's proposal has
+   * arrived. See `useRecordSession.proposalActivity`.
+   */
+  proposalActivity: RecordChangeSummary | null;
   agentContext: AgentContext | undefined;
   agentDegraded: boolean;
   onManualRefresh: () => void;
@@ -739,17 +752,34 @@ function LoadedWorkbench({
         the surface a person stops opening. The empty state says the absence is a fact
         about the build rather than a failed read.
 
-        `activity` IS THE CHANGE-FEED SUMMARY THIS SCREEN ALREADY HOLDS, threaded in so
-        a proposal that moves elsewhere refreshes this list — SILENTLY, so nothing being
-        typed into an open editor is destroyed, and with no notice of its own, because
-        `RecordActivityNote` above already tells the reader something changed. It
-        carries ids and states only: a `proposal` feed entry has no content by
-        construction, so this panel re-reads through the list route and renders nothing
-        from the summary itself. It is the reason this slice's read surface makes the
-        feed's proposal kind visible at all — until now nothing on any screen consumed
-        it.
+        `proposalActivity` IS THE CHANGE-FEED SUMMARY THIS SCREEN ALREADY HOLDS, asked
+        whether a PROPOSAL moved, threaded in so a proposal that moves elsewhere
+        refreshes this list — SILENTLY, so nothing being typed into an open editor is
+        destroyed. It carries ids, states and a position only: a `proposal` feed entry
+        has no content by construction, so this panel re-reads through the list route
+        and renders nothing from the summary itself. It is the reason this slice's read
+        surface makes the feed's proposal kind visible at all — until now nothing on any
+        screen consumed it.
+
+        ~~`activity` IS THE CHANGE-FEED SUMMARY…~~ — IT WAS `activity`, AND THAT IS THE
+        DEFECT, MEASURED IN A BROWSER RATHER THAN REASONED ABOUT. `activity` is null
+        once the RECORD read has caught up, and a proposal act moves the record's own
+        rev, so whichever poller resolved first decided whether this list ever
+        refreshed: with the record poller first the entry was filtered and the panel
+        issued no further list read in 47 s. See `recordChanges.ChangeFloors` and
+        `apps/web/e2e/mutation/proposals.spec.ts`.
+
+        ~~and with no notice of its own, because `RecordActivityNote` above already
+        tells the reader something changed~~ — HALF WITHDRAWN, and named rather than
+        quietly dropped. This panel still raises no notice of its own; what is no longer
+        true is the REASON. On the ordinary path `RecordActivityNote` does NOT fire,
+        because the record read has caught up and its sentence ("what is on screen was
+        loaded before that") would be false. So a colleague's proposal arrives in this
+        list without an announcement — which is the same thing that already happens to
+        every field on this screen when the record poller wins, and is a product
+        question about the notice rather than about this panel.
       */}
-      <IngestionProposalsPanel experimentId={id} activity={activity} />
+      <IngestionProposalsPanel experimentId={id} activity={proposalActivity} />
 
       {/*
         ASSET REFERENCES SIT BETWEEN THE UNMAPPED NOTES AND THE DRAFT BLOCKS, and the

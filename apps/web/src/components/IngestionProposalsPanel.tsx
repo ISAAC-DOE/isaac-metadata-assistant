@@ -575,13 +575,22 @@ function ProposalsBrowser({
    *
    * KEYED ON THE POSITION AS WELL AS THE IDS. `summariseChanges` reports the set of
    * proposal ids that moved, and one proposal can move twice — created, then reviewed
-   * — which would leave an id-only key unchanged and the second move unread.
-   * `highestRev` moves with every batch, so the pair is what distinguishes them. The
-   * cost of the pair is at most an extra silent read on an unrelated change.
+   * — which would leave an id-only key unchanged and the second move unread. The
+   * position moves with every act, so the pair is what distinguishes them.
+   *
+   * THE POSITION IS `proposalRev`, AND IT USED TO BE `highestRev`. That was wrong in
+   * the direction that loses a change rather than the one that costs a read. The feed
+   * is ordered `(changed_at_rev, kind, entity_id)` and a page boundary may fall
+   * anywhere, so one page can end `[proposal@4, experiment@9]` and the next begin
+   * `[proposal@9]`: under `highestRev` both batches key `9:P1`, the key does not
+   * change, and P1's SECOND move is never read. `proposalRev` is the furthest position
+   * a PROPOSAL entry in the batch actually occupied — `4:P1` then `9:P1` — so the two
+   * are distinguishable. It is also strictly less noisy, since it no longer moves for
+   * an unrelated run or record change riding in the same page.
    */
   const proposalSignal =
     activity !== null && activity.proposalIds.length > 0
-      ? `${activity.highestRev}:${activity.proposalIds.join(',')}`
+      ? `${activity.proposalRev}:${activity.proposalIds.join(',')}`
       : null;
   const lastSignalRef = useRef<string | null>(null);
   useEffect(() => {

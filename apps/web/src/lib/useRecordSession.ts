@@ -47,7 +47,7 @@ import { api } from './api';
 import { UNREADABLE_BLOCKER_LABEL, isAnswerablePendingItem } from './adapt';
 import { useRecordSync } from './useRecordSync';
 import { useChangeFeed } from './useChangeFeed';
-import { summariseChanges, type RecordChangeSummary } from './recordChanges';
+import { isCaughtUp, summariseChanges, type RecordChangeSummary } from './recordChanges';
 import {
   invalidateStaleProposals,
   loadSession,
@@ -230,6 +230,27 @@ export interface RecordSession {
    * caller reads.
    */
   activity: RecordChangeSummary | null;
+  /**
+   * THE SAME SUMMARY, ASKED A DIFFERENT QUESTION: did a PROPOSAL move? — `null` when
+   * the latest summary named none.
+   *
+   * IT IS NOT `activity`, AND WIRING A PROPOSAL SURFACE TO `activity` IS THE DEFECT
+   * THIS FIELD EXISTS TO PREVENT. `activity` answers "is what is on screen out of
+   * date", which is a statement about the RECORD read, and it is therefore null once
+   * that read has caught up. A record refetch adopts NO proposal state — the list
+   * lives behind its own route and its own component — so on the ordinary path (the
+   * record poller resolving before the feed poller; measured, see
+   * `recordChanges.ChangeFloors`) `activity` is null at exactly the moment a
+   * colleague's proposal has arrived and the panel most needs to re-read. Reading it
+   * from here instead is what makes the refresh work rather than work-if-it-wins-a-race.
+   *
+   * IDS, STATES AND A POSITION. NO CONTENT, EVER — a `proposal` feed entry carries
+   * none by construction (`change_feed.py` imports nothing from `proposals.py`), so a
+   * consumer must re-read through the route that owns the list. Key a refresh on
+   * `proposalRev` + the ids; never on `highestRev`, which can reach past the
+   * proposals in its own batch.
+   */
+  proposalActivity: RecordChangeSummary | null;
   /** The CHANGE FEED poller's degraded state — separate from `syncDegraded`. */
   feedDegraded: boolean;
 }
@@ -348,14 +369,24 @@ export function useRecordSession(
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   /*
-   * THE OUTSTANDING "SOMETHING MOVED" SUMMARY.
+   * THE LATEST "SOMETHING MOVED" SUMMARY, RAW.
    *
    * IT IS NOT A SECOND STORE, and the test that would fail if it became one is
    * explicit about it: this holds ids and kinds, never an entity. Nothing renders a
    * field, a value or a proposal from it, and the screen's bundle stays the single
    * source of everything the record actually contains.
+   *
+   * ~~IT USED TO BE `activity` ITSELF~~ — the state and the notice were one value, and
+   * separating them is what makes the two-floor fix expressible. Two consumers want
+   * DIFFERENT questions answered about the same summary: `RecordActivityNote` wants
+   * "is what is on screen out of date" (a statement about the RECORD read), and
+   * `IngestionProposalsPanel` wants "did a proposal move" (a statement about a read
+   * the record refetch does not touch). Storing only the first answer meant the second
+   * consumer could not be served at all on the path where the record read had already
+   * caught up — which the browser measurement in `recordChanges.ChangeFloors` shows is
+   * the ordinary path.
    */
-  const [activity, setActivity] = useState<RecordChangeSummary | null>(null);
+  const [latest, setLatest] = useState<RecordChangeSummary | null>(null);
 
   // The P29.1 session snapshot. Re-read imperatively after a change/refresh so a
   // proposal marked stale by a revision change is immediately visible.
@@ -366,6 +397,48 @@ export function useRecordSession(
   // currently-selected one (the useRecordSync currentRef pattern).
   const currentRef = useRef(id);
   currentRef.current = id;
+
+  /*
+   * WHERE THE PROPOSAL READ STANDS — the second floor, and the reason the change feed
+   * could not refresh the proposals panel before it existed.
+   *
+   * See `recordChanges.ChangeFloors` for the measurement. In one sentence: `recordRev`
+   * rises whenever the RECORD poller refetches, and a proposal act moves the record's
+   * rev too, so on the ordinary ordering the record poller raised the floor past the
+   * proposal entry before the feed poll delivered it — and a floor never comes back
+   * down, so the entry was dropped permanently.
+   *
+   * SEEDED FROM `recordRev`, ONCE PER RECORD, AND NOT FROM `-1`. Seeding from `-1`
+   * would make the first (cursorless) poll report every proposal on the record as
+   * news, which is a false notice and a redundant list read on every mount. Seeding
+   * from the revision the bundle arrived at is correct because `IngestionProposalsPanel`
+   * mounts only once `bundle.status === 'data'` and issues its own first read then —
+   * so its list already reflects every proposal at or below that position. If the two
+   * disagree it is in the safe direction: the panel's read can only be at or AFTER
+   * this revision, so at worst one already-held proposal is re-read silently.
+   *
+   * IT IS THEN FIXED FOR THE LIFE OF THE RECORD SCREEN, and never advanced — not by a
+   * record refetch, which is the defect, and NOT by reporting a proposal onward either,
+   * which was tried and withdrawn. `handleFeed` carries the measurement: a floor that
+   * advanced made a replayed batch arrive NARROWER than the one before it, which
+   * changed the outstanding notice's sentence and re-announced it. Deduplicating a
+   * replay is already the job of the sentence comparison in `RecordActivityNote` and
+   * the `proposalRev`+ids key in the panel, and both do it without making this
+   * stateful.
+   *
+   * A REF, NOT STATE, because nothing renders from it and a `setState` here would
+   * re-run the poll effect it is read inside. Assigned during render in the same
+   * style as `currentRef` above, so a record switch cannot leave the previous
+   * record's position in place for one poll.
+   */
+  const proposalFloorRef = useRef<{ id: string; rev: number | undefined }>({
+    id,
+    rev: undefined,
+  });
+  if (proposalFloorRef.current.id !== id) proposalFloorRef.current = { id, rev: undefined };
+  if (proposalFloorRef.current.rev === undefined && recordRev !== undefined) {
+    proposalFloorRef.current.rev = recordRev;
+  }
 
   // Latest onChange without re-subscribing the poller effect.
   const onChangeRef = useRef(onChange);
@@ -381,8 +454,9 @@ export function useRecordSession(
     setSession(loadSession(id));
     setConflict(false);
     // A summary belongs to ONE record. Carrying it across would tell a reader that
-    // the record they just opened had changed elsewhere, which would be false.
-    setActivity(null);
+    // the record they just opened had changed elsewhere, which would be false — and
+    // would hand the proposals panel another record's proposal ids to re-read on.
+    setLatest(null);
   }, [id]);
 
   // Fetch the AgentContext inputs (pending + evidence classification). Keyed on
@@ -421,22 +495,32 @@ export function useRecordSession(
   }, [version]);
 
   /*
-   * THE NOTICE CLEARS ITSELF ONCE THE VIEW HAS CAUGHT UP TO WHAT IT WAS ABOUT.
+   * THE NOTICE IS DERIVED, NOT STORED — and it USED TO BE AN EFFECT THAT CLEARED
+   * STORED STATE. The rule is unchanged and is still `isCaughtUp`; only where it is
+   * evaluated moved, and the move is what removes a defect the old shape had.
    *
-   * Compared against `highestRev` — the furthest position the summary reported —
-   * rather than simply cleared on any `version` change, and the difference is not
-   * cosmetic. A refetch that lands on a revision still BELOW the change would clear a
-   * notice that is still true, telling a reader they are current when they are not.
+   * The rule, unchanged: the notice stands until the view has caught up to
+   * `highestRev` — the furthest position the summary reported — rather than being
+   * cleared on any `version` change. A refetch that lands on a revision still BELOW
+   * the change would otherwise clear a notice that is still true, telling a reader
+   * they are current when they are not.
    *
-   * It is also what stops the notice being sticky on the path that deliberately does
-   * NOT refetch: a proposal-only summary leaves the record's rev where it was, so the
-   * notice correctly stays until the reader acts on it — and their Refresh moves the
-   * rev, which clears it here without any screen having to remember to.
+   * WHY DERIVED. An effect can only clear state AFTER a commit that already rendered
+   * it, so a summary arriving already-caught-up put `RecordActivityNote` — a visible
+   * banner with a Refresh button — on screen for one frame and announced its sentence
+   * into a live region, before removing it. That path was unreachable while one floor
+   * governed every kind (an already-caught-up entry was filtered out upstream and no
+   * summary was produced). Under two floors it is the ORDINARY path for a colleague's
+   * proposal, so the latent flicker would have become the common case. Deriving it
+   * means there is no such commit: the notice is null in the same render in which the
+   * summary is adopted.
+   *
+   * IT STILL STOPS THE NOTICE BEING STICKY on the path that deliberately does NOT
+   * refetch: a proposal-only summary above the record's rev leaves that rev where it
+   * was, so the notice correctly stays until the reader acts on it — and their Refresh
+   * moves the rev, which re-evaluates this without any screen having to remember to.
    */
-  useEffect(() => {
-    if (!activity) return;
-    if (recordRev !== undefined && recordRev >= activity.highestRev) setActivity(null);
-  }, [recordRev, activity]);
+  const activity = latest !== null && !isCaughtUp(latest, recordRev) ? latest : null;
 
   // The ONE poller for this record. On a change signal, invalidate any staged
   // proposal grounded in the OLD revision, surface the stale flag, raise
@@ -484,11 +568,47 @@ export function useRecordSession(
    */
   const handleFeed = useCallback(
     (entries: ApiChangeEntry[]) => {
-      // Measured against the revision THIS VIEW holds, which is what makes a
-      // scientist's own save the ordinary filtered case rather than a special one.
-      const summary = summariseChanges(entries, recordRev);
+      /*
+       * TWO FLOORS, BECAUSE THERE ARE TWO INDEPENDENT READS ON THIS SCREEN. The record
+       * floor is the revision THIS VIEW holds, which is what makes a scientist's own
+       * save the ordinary filtered case rather than a special one. The proposal floor
+       * is where the PROPOSAL read stands, which a record refetch does not move — see
+       * `recordChanges.ChangeFloors` for the browser measurement that says so.
+       */
+      const summary = summariseChanges(entries, {
+        record: recordRev,
+        proposal: proposalFloorRef.current.rev,
+      });
       if (!summary) return; // nothing newer than what is on screen — say nothing
-      setActivity(summary);
+
+      /*
+       * THE PROPOSAL FLOOR IS NOT ADVANCED HERE, AND IT WAS, AND THE TEST THAT CAUGHT
+       * IT IS THE FLOODING GUARD.
+       *
+       * The rejected version raised the floor to `summary.proposalRev` each time a
+       * proposal was reported onward, to keep a cursorless resync from re-reporting it.
+       * It worked, and it broke something better protected elsewhere: a REPLAYED batch
+       * then arrived NARROWER than the one before it — the proposal filtered, the
+       * record's own entry not — so an outstanding notice went from "1 suggestion
+       * changed" to "this record changed" and `RecordActivityNote` re-announced into a
+       * live region, which is precisely what
+       * `change-feed-preserves-unsaved-input.test.tsx`'s "does not re-announce when a
+       * later poll says the same thing" exists to prevent. A stateful floor made the
+       * SENTENCE stateful, and the sentence is what a screen-reader user hears.
+       *
+       * A replay needs no floor of its own, because two mechanisms already handle it
+       * and both are the ones designed for it: `RecordActivityNote` compares the
+       * rendered SENTENCE as a string and announces nothing when it is unchanged, and
+       * `IngestionProposalsPanel` keys its silent re-read on `proposalRev` + the ids,
+       * which a replay reproduces exactly. An identical batch is therefore already
+       * silent and already costs no request. Adding a third mechanism bought nothing
+       * and cost the second one its stability.
+       */
+
+      // Held RAW. Whether it is worth SHOWING is a separate question, asked once, at
+      // the derivation below — never here, and never in an effect that would have to
+      // undo a commit that already put a banner on screen.
+      setLatest(summary);
       onEntitiesChangedRef.current?.(summary);
     },
     [recordRev],
@@ -566,6 +686,9 @@ export function useRecordSession(
     refresh,
     checkNow,
     activity,
+    // Deliberately derived from `latest` rather than from `activity`: the whole point
+    // is that it survives the record read catching up.
+    proposalActivity: latest !== null && latest.proposalIds.length > 0 ? latest : null,
     feedDegraded,
   };
 }

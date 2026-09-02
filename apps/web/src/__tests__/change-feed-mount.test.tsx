@@ -18,7 +18,11 @@ import { api } from '../lib/api';
 import { useRecordSession } from '../lib/useRecordSession';
 import { POLL_INTERVAL_MS, POLL_MAX_BACKOFF_MS, DEGRADED_THRESHOLD } from '../lib/useRecordSync';
 import { clearAllSessions } from '../lib/assistantSession';
-import { needsCanonicalRefetch, type RecordChangeSummary } from '../lib/recordChanges';
+import {
+  describeChangeSummary,
+  needsCanonicalRefetch,
+  type RecordChangeSummary,
+} from '../lib/recordChanges';
 import {
   EXP_ID,
   experimentDetail,
@@ -275,6 +279,222 @@ describe('the change feed, mounted on the record-session owner', () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
     });
     expect(reloadSilent).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+   * ══ THE TWO FLOORS ═══════════════════════════════════════════════════════════════
+   *
+   * Everything below is about one measured defect: the record poller and the change
+   * feed shared ONE floor, so whichever resolved first decided whether a colleague's
+   * proposal ever reached the panel that shows it. The measurement is in
+   * `apps/web/e2e/mutation/proposals.spec.ts` and the reasoning in
+   * `recordChanges.ChangeFloors`; these are the same property asserted where it is
+   * cheap to assert — at the hook that owns both pollers.
+   */
+
+  /** The same record detail, moved to a given revision — what a bundle refetch produces. */
+  const detailAtRev = (rev: number): ApiExperimentDetail =>
+    ({ ...DETAIL, version: `1.${rev}`, rev }) as ApiExperimentDetail;
+
+  it("a proposal reaches the panel even when the RECORD poller got there first", async () => {
+    /*
+     * THE REGRESSION, IN THE ORDER IT HAPPENS IN A BROWSER.
+     *
+     *   1. the screen is open at rev R;
+     *   2. a colleague files a proposal, which moves the record's own rev to R+1;
+     *   3. the RECORD poller notices first and the screen refetches its bundle, so
+     *      `detail` — and therefore the floor — is now R+1;
+     *   4. the feed poll lands, carrying `experiment@R+1` and `proposal@R+1`.
+     *
+     * Under one floor step 4 produced `null` and the panel was never told. Measured:
+     * no further list read in 47 s, "Showing 0 of 0" before and after.
+     */
+    const onEntitiesChanged = vi.fn();
+    const spy = vi.spyOn(api, 'getChanges').mockResolvedValue(page());
+    const { result, rerender } = renderHook(
+      ({ detail }) => useRecordSession(EXP_ID, { detail, onEntitiesChanged }),
+      { initialProps: { detail: DETAIL } },
+    );
+    await flush();
+
+    // 3 — the record poller won the race and the bundle has already been adopted.
+    rerender({ detail: detailAtRev(KNOWN_REV + 1) });
+    await flush();
+
+    // 4 — and only now does the feed deliver the batch for that same save.
+    spy.mockResolvedValue(
+      page({
+        changes: [
+          { kind: 'experiment', entity_id: EXP_ID, changed_at_rev: KNOWN_REV + 1 },
+          { ...laterProposal(), changed_at_rev: KNOWN_REV + 1 },
+        ],
+        returned: 2,
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+
+    expect(spy).toHaveBeenCalled(); // the poll really happened
+    expect(onEntitiesChanged).toHaveBeenCalledTimes(1);
+    const summary = onEntitiesChanged.mock.calls[0][0];
+    expect(summary.proposalIds).toEqual(['01SYNTHETICPROPOSALPROPOS']);
+    expect(summary.proposalRev).toBe(KNOWN_REV + 1);
+
+    // THE PANEL'S SOURCE IS LIVE…
+    expect(result.current.proposalActivity).not.toBeNull();
+    expect(result.current.proposalActivity!.proposalIds).toEqual([
+      '01SYNTHETICPROPOSALPROPOS',
+    ]);
+
+    // …AND THE RECORD ENTRY BESIDE IT IS STILL FILTERED, which is the control that
+    // says the floor was not simply deleted. The view HAS adopted that save.
+    expect(summary.recordMoved).toBe(false);
+
+    // …AND THE NOTICE DOES NOT FIRE, because its sentence — "what is on screen was
+    // loaded before that" — is false here: the record read has caught up.
+    expect(result.current.activity).toBeNull();
+  });
+
+  it('NEGATIVE CONTROL: a RUN at that same position is still filtered', async () => {
+    /*
+     * The exemption is the proposal kind's alone. A run entry at a revision the record
+     * read has adopted is genuinely not news — `bundle.reloadSilent()` has already
+     * run — and reporting it would re-announce a change the view reflects, which is
+     * the reason the floor exists at all.
+     *
+     * Same harness, same revisions, one field changed. If this reported, the fix would
+     * have widened into "no floor" rather than "one floor per read".
+     */
+    const onEntitiesChanged = vi.fn();
+    const spy = vi.spyOn(api, 'getChanges').mockResolvedValue(page());
+    const { result, rerender } = renderHook(
+      ({ detail }) => useRecordSession(EXP_ID, { detail, onEntitiesChanged }),
+      { initialProps: { detail: DETAIL } },
+    );
+    await flush();
+    rerender({ detail: detailAtRev(KNOWN_REV + 1) });
+    await flush();
+
+    spy.mockResolvedValue(
+      page({
+        changes: [
+          { kind: 'experiment', entity_id: EXP_ID, changed_at_rev: KNOWN_REV + 1 },
+          { ...laterRun(), changed_at_rev: KNOWN_REV + 1 },
+        ],
+        returned: 2,
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+
+    expect(spy).toHaveBeenCalled();
+    expect(onEntitiesChanged).not.toHaveBeenCalled();
+    expect(result.current.activity).toBeNull();
+    expect(result.current.proposalActivity).toBeNull();
+  });
+
+  it('a replayed batch says the SAME thing — no narrowing, no re-announcement', async () => {
+    /*
+     * THE DUPLICATE-ANNOUNCEMENT CONTROL, AND THE DESIGN IT REJECTED.
+     *
+     * The feed drops its cursor whenever its effect re-subscribes, and the poll after
+     * that replays every entity at its current position. A first attempt at this fix
+     * suppressed the replay by ADVANCING the proposal floor each time an entry was
+     * reported onward. It did suppress it, and it broke something better protected
+     * elsewhere: the replayed batch then arrived NARROWER than the one before it — the
+     * proposal filtered, the record's own entry not — so an outstanding notice went
+     * from "1 suggestion changed" to "this record changed", and that is a CHANGED
+     * sentence in a live region, which is a re-announcement.
+     * `change-feed-preserves-unsaved-input.test.tsx`'s flooding guard caught it.
+     *
+     * So the floor is fixed and a replay is deduplicated where it already was: the
+     * summary is IDENTICAL, so the notice's sentence does not change and the panel's
+     * `proposalRev`+ids key does not change. This asserts that identity, which is the
+     * property both downstream guards depend on.
+     */
+    const onEntitiesChanged = vi.fn();
+    const spy = vi.spyOn(api, 'getChanges').mockResolvedValue(page());
+    const { result, rerender } = renderHook(
+      ({ detail }) => useRecordSession(EXP_ID, { detail, onEntitiesChanged }),
+      { initialProps: { detail: DETAIL } },
+    );
+    await flush();
+    rerender({ detail: detailAtRev(KNOWN_REV + 1) });
+    await flush();
+
+    spy.mockResolvedValue(
+      page({
+        changes: [{ ...laterProposal(), changed_at_rev: KNOWN_REV + 1 }],
+        returned: 1,
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(onEntitiesChanged).toHaveBeenCalledTimes(1);
+    const firstSentence = describeChangeSummary(onEntitiesChanged.mock.calls[0][0]);
+
+    // The identical page arrives three more times — the shape a resync produces.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 3);
+    });
+    expect(spy.mock.calls.length).toBeGreaterThan(1); // the polls really happened
+
+    // WHAT A READER HEARS is unchanged, on every one of them…
+    for (const [summary] of onEntitiesChanged.mock.calls) {
+      expect(describeChangeSummary(summary)).toBe(firstSentence);
+      // …and WHAT THE PANEL KEYS ON is unchanged, so it issues no further read.
+      expect(summary.proposalRev).toBe(KNOWN_REV + 1);
+      expect(summary.proposalIds).toEqual(['01SYNTHETICPROPOSALPROPOS']);
+    }
+    expect(result.current.activity).toBeNull(); // still caught up: no banner at all
+
+    // A LATER position for the same proposal IS news — created, then reviewed — and it
+    // is what makes the stability above a filter rather than a dead poller.
+    spy.mockResolvedValue(
+      page({
+        changes: [{ ...laterProposal(), changed_at_rev: KNOWN_REV + 2 }],
+        returned: 1,
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    const calls = onEntitiesChanged.mock.calls;
+    const last = calls[calls.length - 1][0];
+    expect(last.proposalRev).toBe(KNOWN_REV + 2);
+  });
+
+  it('the NOTICE is unchanged: a change the view has NOT adopted still raises it', async () => {
+    /*
+     * The other half of the honesty claim. The fix moves what the PANEL is told; it
+     * must not move what the READER is shown. A proposal above the record's revision
+     * is a change the view has not adopted, so the notice fires exactly as before —
+     * and keeps standing until the record read catches up.
+     */
+    const { result, rerender } = renderHook(
+      ({ detail }) => useRecordSession(EXP_ID, { detail }),
+      { initialProps: { detail: DETAIL } },
+    );
+    vi.spyOn(api, 'getChanges').mockResolvedValue(
+      page({ changes: [laterProposal()], returned: 1 }),
+    );
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    });
+    expect(result.current.activity).not.toBeNull();
+    expect(result.current.proposalActivity).not.toBeNull();
+
+    // …and it clears the moment the view reaches the position it was about.
+    rerender({ detail: detailAtRev(KNOWN_REV + 1) });
+    await flush();
+    expect(result.current.activity).toBeNull();
+    // The panel's source deliberately does NOT clear with it: the record read catching
+    // up adopts no proposal state, and treating it as though it did is the defect.
+    expect(result.current.proposalActivity).not.toBeNull();
   });
 
   it('NEVER writes: not one mutating client method is reachable from a change event', async () => {
