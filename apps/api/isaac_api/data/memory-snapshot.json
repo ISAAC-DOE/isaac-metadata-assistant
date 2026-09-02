@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "6d3fecbda690a4c10dc4c914f9ccd22098a895fa1179a9e6aeeb6bfef14a9704"
+        "sha256": "ad5e52671d23689bb83192bd7fa43098d08084cd10b676d16151dd0f81dae8c2"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "5f548845e88cc9e06a651042f2eb259a7e09a75099fa5178a70a27cd601a0d1d"
+    "served_manifest_fingerprint": "2b9edf55627f2fb127f8a7bb999fe3c55a59ffc847859e3881390ba3468c5f63"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
