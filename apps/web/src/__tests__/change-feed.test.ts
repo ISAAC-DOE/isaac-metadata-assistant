@@ -26,6 +26,7 @@ import { api } from '../lib/api';
 import type { ApiChangeEntry, ApiChangeFeedPage } from '../lib/types';
 import {
   useChangeFeed,
+  changeFeedBacklogDelayMs,
   CHANGE_FEED_CADENCE_CLAIM,
   CHANGE_FEED_LIMITS_CLAIM,
   CHANGE_FEED_DRAIN_DELAY_MS,
@@ -34,6 +35,7 @@ import {
   POLL_MAX_BACKOFF_MS,
   DEGRADED_THRESHOLD,
 } from '../lib/useChangeFeed';
+import { ApiError } from '../lib/api';
 import { EXP_ID, stubFetchRoutes } from '../test/apiFixtures';
 
 function page(over: Partial<ApiChangeFeedPage> = {}): ApiChangeFeedPage {
@@ -488,7 +490,7 @@ describe('useChangeFeed', () => {
     expect(spy).toHaveBeenCalledTimes(3);
   });
 
-  it('caps consecutive drains and falls back to the ordinary cadence, losing nothing', async () => {
+  it('caps the FULL-RATE burst at exactly the budget, then continues rather than stalling', async () => {
     let n = 0;
     const spy = vi
       .spyOn(api, 'getChanges')
@@ -497,32 +499,32 @@ describe('useChangeFeed', () => {
       );
     renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
 
+    // One cadence poll plus exactly the budget of full-rate drains — the BURST is
+    // bounded, and nothing beyond it arrives at the drain delay however long we wait.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
       await vi.advanceTimersByTimeAsync(
-        CHANGE_FEED_DRAIN_DELAY_MS * (CHANGE_FEED_MAX_CONSECUTIVE_DRAINS + 4),
+        CHANGE_FEED_DRAIN_DELAY_MS * CHANGE_FEED_MAX_CONSECUTIVE_DRAINS,
       );
     });
-    // One cadence poll plus exactly the budget — the burst is bounded.
-    const capped = spy.mock.calls.length;
-    expect(capped).toBe(1 + CHANGE_FEED_MAX_CONSECUTIVE_DRAINS);
+    const burst = spy.mock.calls.length;
+    expect(burst).toBe(1 + CHANGE_FEED_MAX_CONSECUTIVE_DRAINS);
 
-    // The budget really is spent: more drain delay buys nothing.
+    // THE OLD BEHAVIOUR WAS A CLIFF AND THIS ASSERTION IS WHERE IT SHOWED. The page
+    // after the budget used to wait a full POLL_INTERVAL_MS; it now waits the first
+    // continuation delay, which `changeFeedBacklogDelayMs` puts at twice the drain
+    // delay. Asserted through the function rather than as a literal so the ladder has
+    // exactly one definition.
+    const firstContinuation = changeFeedBacklogDelayMs(CHANGE_FEED_MAX_CONSECUTIVE_DRAINS);
+    expect(firstContinuation).toBe(CHANGE_FEED_DRAIN_DELAY_MS * 2);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS * 6);
+      await vi.advanceTimersByTimeAsync(firstContinuation - 1);
     });
-    expect(spy.mock.calls.length).toBe(capped);
-
-    // FALLS BACK rather than stops: the next cadence tick resumes progress with a
-    // fresh budget, so a genuine backlog longer than the cap still drains — more
-    // slowly, which is the whole intent of a cap aimed at a server defect. The
-    // assertion is "progress resumed", not an exact count: how many drains fit inside
-    // one advanced cadence window is timer bookkeeping, and pinning it would make
-    // this test about `vi.advanceTimersByTimeAsync` rather than about the cap.
+    expect(spy.mock.calls.length).toBe(burst); // not yet — the burst really is spent
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+      await vi.advanceTimersByTimeAsync(1);
     });
-    expect(spy.mock.calls.length).toBeGreaterThan(capped);
+    expect(spy.mock.calls.length).toBe(burst + 1);
   });
 
   it('does not drain while the tab is hidden', async () => {
@@ -577,5 +579,632 @@ describe('useChangeFeed', () => {
     expect(proposal).not.toHaveProperty('rev');
     expect(proposal).not.toHaveProperty('generation');
     expect(proposal.state).toBe('open');
+  });
+});
+
+// =============================================================================
+// 4. THE DRAIN BUDGET AND ITS CONTINUATION — every number here was measured
+// =============================================================================
+//
+// WHY THIS SECTION EXISTS, AND WHAT WAS WRONG BEFORE IT DID. The drain budget was
+// tested at exactly one point: "20 consecutive drains happen, and a 21st does not."
+// Nothing tested what a backlog of one page MORE than the budget cost, and the answer
+// was a cliff — measured on this file's own harness before the fix:
+//
+//   21 pages (1,050 entries at limit 50) -> caught up at mount+13,000 ms
+//   22 pages (1,100 entries at limit 50) -> caught up at mount+21,000 ms
+//
+// Eight full seconds of extra latency for ONE extra entry, at a boundary no scientist
+// can see, because past the budget the client dropped to one page per 8 s cadence and
+// `drains` never cleared while `has_more` stayed true. A 100-page backlog took
+// mount+645,000 ms — ten minutes and forty-five seconds — while `CHANGE_FEED_CADENCE_CLAIM`
+// tells the reader an update "appears shortly after it is made".
+//
+// Every "before" figure quoted in a comment below came from running this same harness
+// against the pre-fix hook, and every "after" figure is asserted by the test it sits
+// in. `docs/change-feed-client-contract.md` is the same table, with the test names.
+
+/**
+ * A DETERMINISTIC PAGING SERVER, in the shape the real one publishes.
+ *
+ * Cursors are `K-<n>` where `n` is how many entries the caller has already been
+ * handed — opaque to the hook, an index here. Every request records the FAKE clock at
+ * which it was made, which is what makes "time to drain" a measurement rather than an
+ * argument: `vi.useFakeTimers()` fakes `Date` as well as the timers, so `Date.now()`
+ * inside this stub reads the scheduler's own timeline.
+ *
+ * `grow` adds entries AFTER each page is cut, which is how a record under sustained
+ * writes is modelled: the cursor keeps moving and `has_more` never goes false.
+ */
+function feedServer(opts: { total: number; limit?: number; grow?: number }) {
+  const pageSize = opts.limit ?? 50;
+  let total = opts.total;
+  const at: number[] = [];
+  const sent: (string | undefined)[] = [];
+  let caughtUpAt: number | null = null;
+
+  const impl = async (
+    _id: string,
+    o: { cursor?: string; limit?: number } = {},
+  ): Promise<ApiChangeFeedPage> => {
+    const now = Date.now();
+    at.push(now);
+    sent.push(o.cursor);
+    const from = o.cursor === undefined ? 0 : Number(o.cursor.slice(2));
+    const size = o.limit ?? pageSize;
+    const end = Math.min(from + size, total);
+    const changes: ApiChangeEntry[] = Array.from({ length: end - from }, (_, i) => ({
+      ...ENTRY,
+      entity_id: `E-${from + i}`,
+      changed_at_rev: from + i,
+    }));
+    total += opts.grow ?? 0;
+    const has_more = end < total;
+    if (!has_more && caughtUpAt === null) caughtUpAt = now;
+    return {
+      changes,
+      next_cursor: `K-${end}`,
+      has_more,
+      limit: size,
+      returned: changes.length,
+      remaining: total - end,
+      kinds: ['experiment', 'run'],
+    };
+  };
+
+  return {
+    impl,
+    at,
+    sent,
+    get requests() {
+      return at.length;
+    },
+    get caughtUpAt() {
+      return caughtUpAt;
+    },
+  };
+}
+
+describe('changeFeedBacklogDelayMs — the two-tier ladder, as a pure function', () => {
+  it('holds the full drain rate for exactly the budget', () => {
+    for (let n = 0; n < CHANGE_FEED_MAX_CONSECUTIVE_DRAINS; n += 1) {
+      expect(changeFeedBacklogDelayMs(n)).toBe(CHANGE_FEED_DRAIN_DELAY_MS);
+    }
+  });
+
+  it('doubles from the ceiling and stops at the ordinary cadence', () => {
+    const M = CHANGE_FEED_MAX_CONSECUTIVE_DRAINS;
+    expect(changeFeedBacklogDelayMs(M)).toBe(500);
+    expect(changeFeedBacklogDelayMs(M + 1)).toBe(1000);
+    expect(changeFeedBacklogDelayMs(M + 2)).toBe(2000);
+    expect(changeFeedBacklogDelayMs(M + 3)).toBe(4000);
+    expect(changeFeedBacklogDelayMs(M + 4)).toBe(POLL_INTERVAL_MS);
+    // ...and never past it, however long the backlog lives. This is the ceiling the
+    // whole rate bound rests on, so it is asserted far out rather than at the knee.
+    for (const n of [M + 5, M + 40, M + 5000, Number.MAX_SAFE_INTEGER]) {
+      expect(changeFeedBacklogDelayMs(n)).toBe(POLL_INTERVAL_MS);
+    }
+  });
+
+  it('never returns a delay below the drain delay, at any input', () => {
+    // The one-way property: a continuation is always SLOWER than the burst, so no
+    // arithmetic slip can turn the escalation into an acceleration.
+    for (const n of [0, 1, 19, 20, 21, 25, 100]) {
+      expect(changeFeedBacklogDelayMs(n)).toBeGreaterThanOrEqual(CHANGE_FEED_DRAIN_DELAY_MS);
+    }
+  });
+});
+
+describe('useChangeFeed drain boundaries', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5); // jitter factor exactly 1.0
+    setVisibility('visible');
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** Advance the fake clock inside `act`, so React state settles with it. */
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  /** Mount against a `feedServer`, returning the server and the hook result. */
+  function mount(server: ReturnType<typeof feedServer>, onChanges = vi.fn()) {
+    vi.spyOn(api, 'getChanges').mockImplementation(server.impl as never);
+    const hook = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+    return { hook, onChanges };
+  }
+
+  /** The offsets of every request, relative to mount. */
+  function offsets(server: ReturnType<typeof feedServer>, mountAt: number): number[] {
+    return server.at.map((t) => t - mountAt);
+  }
+
+  // --- the small boundaries: no backlog, so no drain at all ------------------
+
+  it('EMPTY FEED: one request per cadence, no callback, and it says it is caught up', async () => {
+    const srv = feedServer({ total: 0 });
+    const t0 = Date.now();
+    const { hook, onChanges } = mount(srv);
+    await advance(POLL_INTERVAL_MS * 3);
+
+    expect(offsets(srv, t0)).toEqual([8000, 16000, 24000]);
+    // "Nothing changed" is the ABSENCE of a call, never a call with an empty array.
+    expect(onChanges).not.toHaveBeenCalled();
+    expect(hook.result.current.catchingUp).toBe(false);
+    expect(hook.result.current.remaining).toBe(0);
+  });
+
+  it('ONE PAGE: 10 of a 50 window is one request, and nothing follows at the drain delay', async () => {
+    const srv = feedServer({ total: 10 });
+    const t0 = Date.now();
+    const { hook, onChanges } = mount(srv);
+    await advance(POLL_INTERVAL_MS);
+    expect(offsets(srv, t0)).toEqual([8000]);
+    expect(onChanges).toHaveBeenCalledTimes(1);
+    expect(onChanges.mock.calls[0][0]).toHaveLength(10);
+    expect(hook.result.current.catchingUp).toBe(false);
+    expect(hook.result.current.remaining).toBe(0);
+
+    await advance(CHANGE_FEED_DRAIN_DELAY_MS * 10);
+    expect(srv.requests).toBe(1);
+  });
+
+  it('EXACTLY THE PAGE LIMIT: a FULL page with has_more:false does not drain', async () => {
+    /*
+     * THE ANTI-INFERENCE TEST. A client that guessed at continuation from
+     * `changes.length === limit` would fast-follow here, and be wrong: 50 entries in
+     * a 50 window with `has_more: false` is a feed that is exactly caught up. The
+     * server states continuation; the client never infers it.
+     */
+    const srv = feedServer({ total: 50, limit: 50 });
+    const t0 = Date.now();
+    const { hook, onChanges } = mount(srv);
+    await advance(POLL_INTERVAL_MS);
+    expect(onChanges.mock.calls[0][0]).toHaveLength(50);
+    expect(hook.result.current.catchingUp).toBe(false);
+
+    await advance(CHANGE_FEED_DRAIN_DELAY_MS * 10);
+    expect(offsets(srv, t0)).toEqual([8000]); // no fast follow-up at all
+  });
+
+  it('ONE PAST THE PAGE LIMIT: the 51st entry costs one drain, not one cadence', async () => {
+    const srv = feedServer({ total: 51, limit: 50 });
+    const t0 = Date.now();
+    const { hook, onChanges } = mount(srv);
+    await advance(POLL_INTERVAL_MS);
+    // Mid-backlog, the hook says so — from the server's own two fields.
+    expect(hook.result.current.catchingUp).toBe(true);
+    expect(hook.result.current.remaining).toBe(1);
+
+    await advance(CHANGE_FEED_DRAIN_DELAY_MS);
+    expect(offsets(srv, t0)).toEqual([8000, 8250]);
+    expect(srv.caughtUpAt! - t0).toBe(8250);
+    expect(hook.result.current.catchingUp).toBe(false);
+    expect(hook.result.current.remaining).toBe(0);
+    expect(onChanges.mock.calls.map((c) => c[0].length)).toEqual([50, 1]);
+  });
+
+  // --- the budget boundary, which is where the cliff was --------------------
+
+  it('EXACTLY THE BUDGET (21 pages): the whole backlog is one burst, caught up at mount+13,000 ms', async () => {
+    const srv = feedServer({ total: 1050, limit: 50 });
+    const t0 = Date.now();
+    const { hook } = mount(srv);
+    await advance(POLL_INTERVAL_MS + CHANGE_FEED_DRAIN_DELAY_MS * 25);
+
+    // One cadence poll plus exactly the 20-drain budget, at 250 ms apart.
+    expect(srv.requests).toBe(1 + CHANGE_FEED_MAX_CONSECUTIVE_DRAINS);
+    expect(offsets(srv, t0)).toEqual(
+      Array.from({ length: 21 }, (_, i) => POLL_INTERVAL_MS + i * CHANGE_FEED_DRAIN_DELAY_MS),
+    );
+    expect(srv.caughtUpAt! - t0).toBe(13_000);
+    expect(hook.result.current.catchingUp).toBe(false);
+  });
+
+  it('ONE PAGE PAST THE BUDGET (22 pages): +13,500 ms, where it used to be +21,000 ms', async () => {
+    /*
+     * THE CLIFF, AND ITS REMOVAL. Measured against the pre-fix hook on this exact
+     * harness: 22 pages caught up at mount+21,000 ms — 8,000 ms more than 21 pages,
+     * for one more entry. The 22nd page now arrives one CONTINUATION delay after the
+     * burst rather than one cadence, and the marginal cost of crossing the ceiling is
+     * 500 ms instead of 8,000 ms.
+     */
+    const srv = feedServer({ total: 1100, limit: 50 });
+    const t0 = Date.now();
+    const { hook, onChanges } = mount(srv);
+    await advance(POLL_INTERVAL_MS + 10_000);
+
+    expect(srv.requests).toBe(22);
+    expect(offsets(srv, t0)[20]).toBe(13_000); // the last burst page
+    expect(offsets(srv, t0)[21]).toBe(13_500); // the first continuation page
+    expect(srv.caughtUpAt! - t0).toBe(13_500);
+    expect(srv.caughtUpAt! - t0).toBeLessThan(21_000); // the measured "before"
+    expect(hook.result.current.catchingUp).toBe(false);
+    expect(hook.result.current.remaining).toBe(0);
+
+    // NO ENTRY IS SKIPPED AT THE CEILING. Every entity arrives exactly once, in feed
+    // order, across the burst/continuation boundary — which is the property the whole
+    // rate design is only allowed to touch if it preserves.
+    const seen = onChanges.mock.calls.flatMap((c) => c[0]).map((e: ApiChangeEntry) => e.entity_id);
+    expect(seen).toHaveLength(1100);
+    expect(seen).toEqual(Array.from({ length: 1100 }, (_, i) => `E-${i}`));
+  });
+
+  it('A LONG BACKLOG (100 pages) drains in bounded time, and every entry arrives once', async () => {
+    const srv = feedServer({ total: 5000, limit: 50 });
+    const t0 = Date.now();
+    const { hook, onChanges } = mount(srv);
+    // Advanced to EXACTLY the catch-up instant, so the count is the cost of draining
+    // and not that plus however many ordinary cadence polls a longer window allows.
+    await advance(620_500);
+
+    // 21 burst pages, then 500 + 1000 + 2000 + 4000, then 75 at the cadence ceiling.
+    expect(srv.requests).toBe(100);
+    expect(srv.caughtUpAt! - t0).toBe(620_500); // measured "before": 645,000 ms
+    expect(hook.result.current.catchingUp).toBe(false);
+    const seen = onChanges.mock.calls.flatMap((c) => c[0]).map((e: ApiChangeEntry) => e.entity_id);
+    expect(seen).toEqual(Array.from({ length: 5000 }, (_, i) => `E-${i}`));
+  }, 20_000);
+
+  // --- sustained writes: the hard rate bound -------------------------------
+
+  it('SUSTAINED has_more never exceeds the documented rate bound', async () => {
+    /*
+     * The pathological workload: the server hands back a moving cursor and says
+     * `has_more: true` forever, so nothing the client does ends the backlog. The
+     * claim being pinned is the one in `changeFeedBacklogDelayMs`'s docstring — at
+     * most `26 + T / POLL_INTERVAL_MS` requests in any window of T ms — and it is
+     * checked at three horizons, because a bound that only holds at one is not a bound.
+     */
+    const srv = feedServer({ total: 60, limit: 50, grow: 1000 });
+    const t0 = Date.now();
+    mount(srv);
+
+    for (const T of [60_000, 120_000, 600_000]) {
+      await advance(t0 + T - Date.now());
+      expect(srv.requests).toBeLessThanOrEqual(26 + T / POLL_INTERVAL_MS);
+    }
+    // ...and it is not vacuous: the client really is still paging, not stalled.
+    expect(srv.requests).toBeGreaterThan(26);
+    // The steady state IS the ordinary cadence — the last stretch adds one request
+    // per POLL_INTERVAL_MS and no more, which is the promise the escalation keeps.
+    const tail = srv.at.filter((t) => t - t0 > 200_000);
+    const gaps = tail.slice(1).map((t, i) => t - tail[i]);
+    expect(new Set(gaps)).toEqual(new Set([POLL_INTERVAL_MS]));
+  }, 20_000);
+
+  // --- the feed floor: a refused cursor -------------------------------------
+
+  it('RESYNCS FROM THE FEED FLOOR after a 422, instead of resending the refused cursor forever', async () => {
+    /*
+     * MEASURED DEFECT, NOT A HYPOTHETICAL. `422 malformed_cursor` is the server's
+     * published refusal of a cursor that is the wrong version, the wrong feed or
+     * corrupt, and its one documented remedy is "drop the cursor and resync". The
+     * hook did neither: it counted a failure, backed off, and sent the SAME refused
+     * cursor on every later poll — a feed permanently dark that no retry could clear.
+     */
+    const refusal = new ApiError('refused', { status: 422, reason: 'malformed_cursor' });
+    let refuse = true;
+    const spy = vi.spyOn(api, 'getChanges').mockImplementation(async (_id, o = {}) => {
+      if (refuse && o.cursor !== undefined) throw refusal;
+      return page({ next_cursor: 'FRESH-1', changes: [ENTRY], returned: 1, remaining: 0 });
+    });
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+
+    await advance(POLL_INTERVAL_MS); // 1st poll: no cursor, succeeds, cursor FRESH-1
+    expect(spy.mock.calls[0][1]).toEqual({});
+    expect(result.current.cursor).toBe('FRESH-1');
+
+    await advance(POLL_INTERVAL_MS); // 2nd poll: carries FRESH-1, refused
+    expect(spy.mock.calls[1][1]).toEqual({ cursor: 'FRESH-1' });
+    // The cursor is DROPPED, and `remaining` with it: the old figure described a
+    // position this client no longer holds, and `null` says "unknown", not "zero".
+    expect(result.current.cursor).toBeUndefined();
+    expect(result.current.remaining).toBeNull();
+
+    // The recovery is NOT delayed by a backoff step — the refusal has already been
+    // fixed, so the next poll comes at the ordinary cadence and carries no cursor.
+    await advance(POLL_INTERVAL_MS);
+    expect(spy.mock.calls[2][1]).toEqual({});
+    expect(result.current.cursor).toBe('FRESH-1');
+    expect(result.current.degraded).toBe(false);
+
+    refuse = false;
+    await advance(POLL_INTERVAL_MS * 2);
+    expect(result.current.degraded).toBe(false);
+  });
+
+  it('a 422 on a request that carried NO cursor is an ordinary failure, and still degrades', async () => {
+    /*
+     * The loop guard, stated as a test. Only a request that CARRIED a cursor may drop
+     * one, so a 422 that a resync cannot fix (a malformed `limit`, say — FastAPI
+     * answers 422 for that too and this client cannot tell them apart) falls through
+     * to the ordinary backoff ladder rather than retrying at the cadence forever.
+     */
+    const spy = vi
+      .spyOn(api, 'getChanges')
+      .mockRejectedValue(new ApiError('refused', { status: 422 }));
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+
+    await advance(POLL_INTERVAL_MS);
+    expect(spy).toHaveBeenCalledTimes(1);
+    // Backed off: nothing at the plain cadence, the 2nd attempt is at 2x.
+    await advance(POLL_INTERVAL_MS);
+    expect(spy).toHaveBeenCalledTimes(1);
+    await advance(POLL_INTERVAL_MS);
+    expect(spy).toHaveBeenCalledTimes(2);
+    await advance(POLL_INTERVAL_MS * 4);
+    expect(spy).toHaveBeenCalledTimes(DEGRADED_THRESHOLD);
+    expect(result.current.degraded).toBe(true);
+  });
+
+  it('a 404 does NOT drop the cursor: only the refusal whose remedy is a resync does', async () => {
+    let fail = false;
+    const spy = vi.spyOn(api, 'getChanges').mockImplementation(async () => {
+      if (fail) throw new ApiError('gone', { status: 404, reason: 'experiment_not_found' });
+      return page({ next_cursor: 'KEEP-1' });
+    });
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+    await advance(POLL_INTERVAL_MS);
+    expect(result.current.cursor).toBe('KEEP-1');
+
+    fail = true;
+    await advance(POLL_INTERVAL_MS);
+    expect(spy).toHaveBeenCalledTimes(2);
+    // A missing record is not a bad cursor. Replaying the whole feed on the next poll
+    // would turn one server-side condition into a full re-delivery of every entry.
+    expect(result.current.cursor).toBe('KEEP-1');
+  });
+
+  // --- errors, cancellation and visibility, all MID-DRAIN -------------------
+
+  it('a retryable failure MID-DRAIN forfeits the budget, backs off, and loses no entry', async () => {
+    const srv = feedServer({ total: 200, limit: 50 }); // 4 pages
+    const t0 = Date.now();
+    let failOnce = false;
+    const onChanges = vi.fn();
+    vi.spyOn(api, 'getChanges').mockImplementation(async (id, o = {}) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('transport');
+      }
+      return srv.impl(id as string, o);
+    });
+    renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await advance(POLL_INTERVAL_MS); // page 1
+    await advance(CHANGE_FEED_DRAIN_DELAY_MS); // page 2
+    expect(srv.requests).toBe(2);
+
+    failOnce = true;
+    await advance(CHANGE_FEED_DRAIN_DELAY_MS); // the drain attempt fails, at +8,500
+    expect(srv.requests).toBe(2);
+    // Backing off and fast-following are contradictory instructions: the budget is
+    // forfeited, so the retry comes at 2x the cadence (+16,000, i.e. at +24,500) and
+    // not at the drain delay. Advanced to one millisecond short of it first, so the
+    // assertion is that nothing came EARLY rather than merely that something came.
+    await advance(POLL_INTERVAL_MS * 2 - 1);
+    expect(srv.requests).toBe(2);
+    await advance(1);
+    expect(srv.requests).toBe(3);
+    expect(offsets(srv, t0)[2]).toBe(24_500);
+
+    // NOTHING WAS LOST: the retry resumed from the cursor page 2 issued, and the
+    // remaining pages arrive at the full drain rate again.
+    expect(srv.sent[2]).toBe('K-100');
+    await advance(CHANGE_FEED_DRAIN_DELAY_MS * 2);
+    const seen = onChanges.mock.calls.flatMap((c) => c[0]).map((e: ApiChangeEntry) => e.entity_id);
+    expect(seen).toEqual(Array.from({ length: 200 }, (_, i) => `E-${i}`));
+  });
+
+  it('a THROWING consumer does not advance the cursor past the page it could not process', async () => {
+    /*
+     * THE NO-LOSS ORDERING, pinned. `onChanges` runs BEFORE the cursor is adopted, so
+     * a consumer that throws leaves the position untouched and the same page is asked
+     * for again. The other order — which is what this hook used to do — advanced past
+     * a page nobody had processed and the poll still looked successful.
+     */
+    const srv = feedServer({ total: 10 });
+    let boom = true;
+    // Typed parameter so `mock.calls[n][0]` is the entry array rather than `never`.
+    const onChanges = vi.fn((_entries: ApiChangeEntry[]) => {
+      if (boom) throw new Error('consumer exploded');
+    });
+    vi.spyOn(api, 'getChanges').mockImplementation(srv.impl as never);
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await advance(POLL_INTERVAL_MS);
+    expect(srv.requests).toBe(1);
+    expect(result.current.cursor).toBeUndefined(); // NOT advanced to K-10
+
+    boom = false;
+    await advance(POLL_INTERVAL_MS * 4);
+    // The retry carried no cursor, so the page was re-delivered rather than skipped.
+    expect(srv.sent[1]).toBeUndefined();
+    expect(result.current.cursor).toBe('K-10');
+    expect(onChanges.mock.calls[1][0]).toHaveLength(10);
+  });
+
+  it('UNMOUNTING MID-DRAIN aborts the request in flight, leaves no timer, and updates no state', async () => {
+    const srv = feedServer({ total: 1000, limit: 50 });
+    const aborted: boolean[] = [];
+    // The LAST request never settles, so there is genuinely one in flight at unmount.
+    // Written this way because the first version of this test unmounted between polls
+    // and asserted an abort that could not have happened — it failed, which is the
+    // only reason the gap was visible at all.
+    let hang = false;
+    vi.spyOn(api, 'getChanges').mockImplementation((id, o = {}, signal) => {
+      signal?.addEventListener('abort', () => aborted.push(true));
+      if (hang) return new Promise<ApiChangeFeedPage>(() => {});
+      return srv.impl(id as string, o);
+    });
+    const errors: unknown[] = [];
+    const spyErr = vi.spyOn(console, 'error').mockImplementation((...a) => errors.push(a));
+
+    const { unmount } = renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+    await advance(POLL_INTERVAL_MS + CHANGE_FEED_DRAIN_DELAY_MS * 2);
+    const during = srv.requests;
+    expect(during).toBe(3); // genuinely mid-drain
+    hang = true;
+    await advance(CHANGE_FEED_DRAIN_DELAY_MS); // a 4th request, which never settles
+
+    unmount();
+    // Exactly one abort: each poll owns its own controller and only the one still in
+    // flight is torn down, so this also pins that a settled poll's controller is
+    // released rather than accumulated.
+    expect(aborted).toEqual([true]);
+    expect(vi.getTimerCount()).toBe(0); // no timer left behind
+
+    await advance(POLL_INTERVAL_MS * 5);
+    expect(srv.requests).toBe(during);
+    // React logs an "update on an unmounted component" warning through console.error;
+    // its absence is the assertion, not a nice-to-have.
+    expect(errors).toEqual([]);
+    spyErr.mockRestore();
+  });
+
+  it('UNMOUNTING BETWEEN POLLS leaves no pending timer', async () => {
+    /*
+     * SEPARATE FROM THE TEST ABOVE, AND THE REASON IS A SURVIVING MUTANT. That one
+     * unmounts with a request IN FLIGHT — at which moment no timer is pending anyway,
+     * because the chain schedules the next poll only in `.finally`. So its
+     * `getTimerCount() === 0` was vacuously true and a cleanup that never called
+     * `clearTimeout` passed it. This one unmounts while a timer really is armed.
+     */
+    const srv = feedServer({ total: 0 });
+    const { hook } = mount(srv);
+    await advance(POLL_INTERVAL_MS);
+    expect(srv.requests).toBe(1);
+    expect(vi.getTimerCount()).toBe(1); // the next cadence poll is armed
+
+    hook.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    await advance(POLL_INTERVAL_MS * 5);
+    expect(srv.requests).toBe(1);
+  });
+
+  it('a poll that SETTLES AFTER the tab is hidden arms no timer', async () => {
+    /*
+     * THE ONLY PATH THAT EXERCISES THE VISIBILITY GATE INSIDE `schedule`, and it took
+     * a surviving mutant to find that out. Hiding the tab between polls is handled by
+     * the visibility listener's `clearTimer`, and a timer that fires while hidden is
+     * handled by `runPoll`'s own guard — so removing the gate from `schedule` changed
+     * nothing either test could see. This is the remaining case: a request already in
+     * flight when the tab is hidden, whose `.finally` runs afterwards and would arm a
+     * timer on a paused poller.
+     */
+    let release: (p: ApiChangeFeedPage) => void = () => {};
+    vi.spyOn(api, 'getChanges').mockImplementation(
+      () => new Promise<ApiChangeFeedPage>((res) => (release = res)),
+    );
+    renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+
+    await advance(POLL_INTERVAL_MS);
+    expect(vi.getTimerCount()).toBe(0); // in flight: the chain arms nothing until it settles
+
+    await act(async () => {
+      setVisibility('hidden');
+    });
+    await act(async () => {
+      release(page({ next_cursor: 'LATE' }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('HIDING THE TAB MID-DRAIN stops the backlog, and showing it resumes from the same cursor', async () => {
+    const srv = feedServer({ total: 1000, limit: 50 });
+    mount(srv);
+    await advance(POLL_INTERVAL_MS + CHANGE_FEED_DRAIN_DELAY_MS * 2);
+    const during = srv.requests;
+    expect(during).toBe(3);
+
+    await act(async () => {
+      setVisibility('hidden');
+      await vi.advanceTimersByTimeAsync(CHANGE_FEED_DRAIN_DELAY_MS * 20);
+    });
+    // A backlog is not a reason to keep polling a tab nobody is looking at.
+    expect(srv.requests).toBe(during);
+    // AND IT PARKS RATHER THAN SPINS. The request count alone cannot tell those apart
+    // — `runPoll` bails on a hidden tab too, so a poller that kept scheduling timers
+    // that immediately return would look identical here. This is the assertion that
+    // separates them, and it was added because the mutant that removes the visibility
+    // gate from `schedule` survived without it.
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      setVisibility('visible');
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(srv.requests).toBe(during + 1);
+    // Resumed from where it stopped — the pause costs time, never entries.
+    expect(srv.sent[during]).toBe(`K-${during * 50}`);
+  });
+
+  it('reports catchingUp while the stuck-cursor guard is refusing to fast-follow', async () => {
+    // The server insists there is more and hands back the position already held. The
+    // client is right not to hammer it, and would be WRONG to let a surface render
+    // "up to date": `has_more` is the server's answer and it says otherwise.
+    vi.spyOn(api, 'getChanges').mockResolvedValue(
+      page({ has_more: true, next_cursor: 'STUCK', remaining: 7 }),
+    );
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+    await advance(POLL_INTERVAL_MS * 3);
+    expect(result.current.catchingUp).toBe(true);
+    expect(result.current.remaining).toBe(7);
+  });
+
+  it('reports remaining as null — never zero — when the server did not send a number', async () => {
+    vi.spyOn(api, 'getChanges').mockResolvedValue(
+      page({ remaining: undefined as unknown as number }),
+    );
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+    await advance(POLL_INTERVAL_MS);
+    // `null` is "this client does not know". Defaulting it to 0 would publish a
+    // caught-up claim the deployment never made.
+    expect(result.current.remaining).toBeNull();
+  });
+
+  it('keeps the last known catchingUp across a failed poll rather than inventing a verdict', async () => {
+    let fail = false;
+    vi.spyOn(api, 'getChanges').mockImplementation(async () => {
+      if (fail) throw new Error('down');
+      return page({ has_more: true, next_cursor: `M-${Math.random()}`, remaining: 400 });
+    });
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+    await advance(POLL_INTERVAL_MS);
+    expect(result.current.catchingUp).toBe(true);
+
+    fail = true;
+    await advance(POLL_INTERVAL_MS * 8);
+    // A failure says nothing about whether the backlog cleared, and clearing the flag
+    // would let a surface claim to be current on the strength of an error.
+    expect(result.current.catchingUp).toBe(true);
+    expect(result.current.degraded).toBe(true);
+  });
+
+  it('starts a NEW record with no cursor, no catch-up claim and no remaining', async () => {
+    const srv = feedServer({ total: 1000, limit: 50 });
+    vi.spyOn(api, 'getChanges').mockImplementation(srv.impl as never);
+    const { result, rerender } = renderHook(({ id }) => useChangeFeed(id, { onChanges: vi.fn() }), {
+      initialProps: { id: EXP_ID },
+    });
+    await advance(POLL_INTERVAL_MS + CHANGE_FEED_DRAIN_DELAY_MS);
+    expect(result.current.catchingUp).toBe(true);
+    expect(result.current.remaining).toBeGreaterThan(0);
+
+    rerender({ id: '01OTHEREXPERIMENT000000000' });
+    // A fresh feed is one nothing is known about — not one known to be caught up, and
+    // certainly not one carrying the previous record's backlog figure.
+    expect(result.current.catchingUp).toBe(false);
+    expect(result.current.remaining).toBeNull();
+    expect(result.current.cursor).toBeUndefined();
   });
 });
