@@ -16,7 +16,14 @@
  *
  * ~~Ten of the 103 recorded triples hold a separate exact number for macOS and
  * for Linux~~ — ~~**RE-COUNTED 2026-08-29: EIGHT of 161.**~~ **RE-COUNTED AGAIN
- * 2026-08-30: FIVE of 161.**~~ **RE-COUNTED AGAIN 2026-09-01: ZERO of 70** — the A3
+ * 2026-08-30: FIVE of 161.**~~ ~~**RE-COUNTED AGAIN 2026-09-01: ZERO of 70**~~ **RE-COUNTED
+ * AGAIN 2026-09-01, LATER THE SAME DAY: TWO of 70** — `settings-explorer@mobile-375x812`
+ * and `settings-explorer@width-390`, both created by the assistant-companion operation
+ * and both MEASURED on both faces at head `11e08da` rather than carried forward. They
+ * point in OPPOSITE directions (linux gains the node at 375px, darwin gains it at
+ * 390px), which is what rules out the stale-darwin-column explanation this file has
+ * had to withdraw fifteen times. The zero below was true for exactly as long as the
+ * operation count stood still, which is the fifth time this sentence has expired: the A3
  * neutral-ink palette collapsed all seven splits the file held at that point (three by
  * reaching 0 on both faces and being deleted, four by both faces landing on the same
  * number) and deleted 91 of the 161 cells. The count of splits is now a count of

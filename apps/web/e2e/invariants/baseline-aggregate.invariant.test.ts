@@ -423,7 +423,40 @@ describe('the darwin column says how much of itself is measured', () => {
    * `darwin` block of `A11Y_BASELINE_TOTAL_NODES`. Change the text on any of those
    * surfaces and they come back.
    */
-  it('the set of per-platform SPLIT cells is empty — every half of every cell was measured', () => {
+  /*
+   * 2026-09-01, LATER THE SAME DAY — THEY CAME BACK, EXACTLY AS THE PARAGRAPH ABOVE
+   * SAID THEY WOULD, AND FROM THE PREDICTED CAUSE. The `feat/assistant-companion-deep-link`
+   * branch publishes one more operation (`GET /api/runtime/assistant-companion`, 76 ->
+   * 77) and the Endpoint Explorer renders every operation the live `/api/openapi`
+   * exposes — so the text on that surface changed, and TWO of the four cells that
+   * collapsed by agreement have split again:
+   *
+   *   settings-explorer@mobile-375x812  { darwin: 20, linux: 21 }  linux moved, darwin did not
+   *   settings-explorer@width-390       { darwin: 21, linux: 20 }  darwin moved, linux did not
+   *
+   * WHERE EACH HALF CAME FROM, which is what this register exists to make anyone say:
+   *   · linux 21 at `@mobile-375x812` — TRANSCRIBED from CI run 33582340025, job
+   *     100099059937, head `11e08da` (a `GREW … 20 to 21` message).
+   *   · linux 20 at `@width-390` — MEASURED in that same run, which PASSED there
+   *     (test #47) while its six siblings failed. Not a number left standing.
+   *   · darwin 20 at `@mobile-375x812` — MEASURED: the cell PASSED in two consecutive
+   *     local macOS runs at `11e08da`, and an A/B probe reads 20 both with and without
+   *     the new operation.
+   *   · darwin 21 at `@width-390` — MEASURED: `GREW +1` in those same two runs.
+   *
+   * So NOTHING is carried forward, `DARWIN_CARRIED_FORWARD` stays `[]` and
+   * `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0. The two point in OPPOSITE
+   * directions at two widths 15 CSS px apart, which is the wrap-boundary signature
+   * `a11y-baseline.ts`'s header describes rather than a stale column. Full cause, the
+   * controlled A/B and the measured foreground are in the block above
+   * `settings-explorer@desktop-1280x800` in that file.
+   *
+   * The empty-set argument above is NOT weakened by this and must not be deleted: its
+   * point was that adding a split has to be a deliberate act with a stated provenance,
+   * and that is exactly what this entry is. The list going 7 -> 0 -> 2 in three days is
+   * the fifth round of churn, and the paragraph above predicted it by name.
+   */
+  it('every per-platform SPLIT cell is declared here with both halves measured', () => {
     const splits: string[] = [];
     for (const entry of A11Y_BASELINE) {
       for (const [key, count] of Object.entries(entry.counts)) {
@@ -438,13 +471,18 @@ describe('the darwin column says how much of itself is measured', () => {
         'and move A11Y_BASELINE_DARWIN_UNVERIFIED_NODES in the same edit. If you measured ' +
         'both, add it here and say where the darwin reading came from.'
     ).toEqual(
-      // ── RE-DERIVED 2026-09-01, A3 NEUTRAL-INK PALETTE. ──
-      // The seven listed here on 2026-08-30 all collapsed in one transcription; see
-      // the block above this test for which went by deletion and which by agreement.
+      // ── RE-DERIVED 2026-09-01, ASSISTANT COMPANION DEEP LINK. ──
+      // ~~The seven listed here on 2026-08-30 all collapsed in one transcription~~ —
+      // still true as history, and the empty list it produced held for one day. Two
+      // came back when the served contract grew an operation; the provenance of all
+      // four halves is in the block immediately above this test.
       // `DARWIN_CARRIED_FORWARD` stays empty and
-      // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0: nothing is carried forward,
-      // and with no split left there is nowhere for a carried half to hide.
-      [] as string[]
+      // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0: both halves of both cells
+      // were measured at the same head, `11e08da`.
+      [
+        'color-contrast @ settings-explorer@mobile-375x812',
+        'color-contrast @ settings-explorer@width-390',
+      ] as string[]
     );
   });
 

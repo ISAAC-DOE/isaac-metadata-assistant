@@ -59,10 +59,21 @@
  * cells — `mobile-375x812` and `width-390` — became splits afterwards, so by
  * `origin/main` `700cca2` it was **161 cells of which SEVEN differ and 154 are
  * scalars**. So the record on this figure is: three revisions published WRONG (ten of
- * 103, six of 168, eight of 161) and one published RIGHT and left to rot. **At HEAD the
+ * 103, six of 168, eight of 161) and one published RIGHT and left to rot. ~~**At HEAD the
  * file holds 70 cells, of which ZERO differ**: the A3 neutral-ink palette deleted 91
- * cells that reached 0 on both faces and collapsed all seven splits. Re-derive rather
- * than quoting — strip comments, match `'<surface>@<project>': <count-or-pair>`, and
+ * cells that reached 0 on both faces and collapsed all seven splits.~~ — **THAT IS THE
+ * SECOND SENTENCE IN THIS PARAGRAPH TO GO STALE RATHER THAN BE WRONG, and it lasted one
+ * day.** It was TRUE at `60f0c30` and both halves of it still are, as history: the
+ * palette really did delete 91 cells and collapse all seven splits. **At HEAD the file
+ * holds 70 cells, of which TWO differ** — `settings-explorer@mobile-375x812`
+ * `{ darwin: 20, linux: 21 }` and `settings-explorer@width-390` `{ darwin: 21, linux: 20 }`,
+ * both created on 2026-09-01 by the assistant-companion operation, both by exactly ±1,
+ * and pointing in OPPOSITE directions. The cell count is unchanged because no cell was
+ * added or deleted; only two scalars became pairs. Note what that costs the argument
+ * three paragraphs down: "zero splits" was briefly the strongest possible evidence that
+ * the darwin column was fresh, and it is not available any more — what stands in for it
+ * is that both halves of both pairs were measured at the same head, `11e08da`. Re-derive
+ * rather than quoting — strip comments, match `'<surface>@<project>': <count-or-pair>`, and
  * count the pairs whose halves are unequal. That instruction was in this paragraph
  * already, and following it is what found this. And they did NOT all differ by ±1:
  * `settings-about@width-320` was `{ darwin: 9, linux: 7 }`, a gap of 2 — ~~and
@@ -74,8 +85,10 @@
  * (0 on both faces) and the tablet cell is a scalar 19.
  * ~~`settings-explorer@width-320` is now `{ darwin: 76, linux: 73 }`, a gap of 3~~ —
  * **that cell is a SCALAR `76` at HEAD and no cell in this file has a gap of 3.**
- * (2026-09-01: it is a scalar **20** now. The gap-of-3 half of that correction stands —
- * no cell in this file has ever had one — and the "76" half is superseded.)
+ * (2026-09-01: it is a scalar ~~**20**~~ **21** now — the companion operation moved it the
+ * same day this line was written, which is the joke this paragraph keeps telling. The
+ * gap-of-3 half of that correction stands — no cell in this file has ever had one — and
+ * the "76" half is superseded.)
  * More to the point, the day this file recorded
  * TWENTY splits, **15 of them were not platform differences at all** — they were a
  * darwin column nothing had measured since a CI transcription moved their linux twin.
@@ -1488,8 +1501,93 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * two different bases produced them, which is why the +14 and the A11Y-06 -7 can
        * be summed without double-counting.
        */
-      'settings-explorer@desktop-1280x800': 16,
-      'settings-explorer@laptop-1024x768': 16,
+      /* ══ ASSISTANT COMPANION DEEP LINK, 2026-09-01. SIX OF THE SEVEN
+         `settings-explorer` CELLS MOVE +1 — AND THE ONE THAT DOES NOT IS A
+         DIFFERENT CELL ON EACH PLATFORM. ═══════════════════════════════════
+
+         desktop 16 -> 17; laptop 16 -> 17; tablet 19 -> 20; zoom-200 19 -> 20;
+         width-320 20 -> 21; mobile-375x812 20 -> { darwin 20, linux 21 };
+         width-390 20 -> { darwin 21, linux 20 }. Each cell repeats its own
+         figures beside itself; this block is written once so the seven cannot
+         drift apart.
+
+         PROVENANCE, PER FACE, because they come from different runs.
+         LINUX: CI run 33582340025, job 100099059937, head `11e08da` — six GREW
+         messages, TRANSCRIBED, never derived. The seventh cell, `@width-390`,
+         PASSED in that same run (test #47, `at 390px: Settings & API — Endpoint
+         Explorer`), which is what makes its linux 20 a measurement at this head
+         rather than a scalar left standing.
+         DARWIN: two consecutive local macOS runs of `DARWIN_MEASUREMENT.command`
+         at the same head `11e08da`, byte-identical (6 failed / 184 skipped /
+         165 passed both times), plus a third independent reading from the probe
+         described below. `DARWIN_CARRIED_FORWARD` stays `[]` and
+         `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0: every darwin half here
+         was measured at this head, including the two that did not move.
+
+         THE CAUSE IS MEASURED BY CONTROLLED EXPERIMENT, not read off the diff.
+         This branch publishes one more operation — `GET
+         /api/runtime/assistant-companion`, 76 -> 77 — and the Endpoint Explorer
+         renders every operation the LIVE `/api/openapi` exposes. The A/B held
+         the browser, the bundle and the backend fixed and intercepted
+         `GET /api/openapi` alone, serving the identical document with and
+         without that one path:
+
+           scan id              with it   without it
+           desktop-1280x800        17         16
+           laptop-1024x768         17         16
+           tablet-768x1024         20         19
+           mobile-375x812          20         20
+           zoom-200                20         19
+           width-390               21         20
+           width-320               21         20
+
+         The `without it` column reproduces the previously committed darwin
+         column EXACTLY on all seven cells, so the delta is that one operation
+         and nothing else. Note `mobile-375x812` reads 20 in BOTH arms on darwin:
+         the operation is rendered there and its chip is not among the nodes axe
+         judges, which is the same unexplained clip/displacement behaviour this
+         entry already records several times. Do not quote the clipping story as
+         a mechanism — see the note above `settings-explorer@tablet-768x1024`.
+
+         WHICH NODE, AND WHICH COLOUR — the question a `GREW` verdict CANNOT
+         answer, because `auditScan` `continue`s past the `foregrounds` and
+         `targetPattern` guards on every verdict except `ok`. That is the same
+         vacuity recorded at `foregrounds` above, and it is why this was measured
+         rather than inferred from the label. The added node is
+         `#settings-api-row-get-api-runtime-assistant-companion >
+         .api-docs-method-get`, and ALL 266 failing nodes across both arms of the
+         A/B carry ONE foreground: `fg=#2f7d78 bg=#e6f1f0 ratio=4.2`, read out of
+         `node.any[].data` rather than computed. That is `--verified-text`
+         (`styles/tokens.css:277`) on `--verified-bg`, i.e. the GET method chip
+         (`screens/screens.css:2141`), at 10.5px/700 — below the 18.66px bold
+         large-text threshold, so 4.5:1 applies and 4.2:1 fails. It is ALREADY in
+         this entry's `foregrounds` list. No new colour and no new element type:
+         this is one more instance of a recorded, unfixed defect.
+
+         WHY THIS COSTS +1 WHEN THE CHANGE FEED'S LONGER DESCRIPTION COST 0, and
+         why the two are not in tension. A3 (`60f0c30`) darkened the NEUTRAL inks
+         and took THIS cell from 59 to 16; prose on this screen stopped failing,
+         which is exactly why the predicted change-feed collision produced zero
+         lines. `tokens.css:142` says in as many words that "Cause (c),
+         --verified-text and --src-derivation, is untouched here". So more PROSE
+         on an existing operation costs nothing, and a new OPERATION ROW still
+         arrives carrying a teal GET chip A3 deliberately did not fix, and costs
+         one. The distinction is prose vs. row, not "the Explorer is now free".
+
+         THE TWO SPLITS ARE NOT A STALE DARWIN COLUMN — the failure mode this
+         file records 15 times. Both halves of both are measured at this head,
+         and they point in OPPOSITE directions: linux moves at `mobile-375x812`
+         and darwin does not; darwin moves at `width-390` and linux does not.
+         That is the wrap-boundary signature the header describes (SF Pro against
+         a DejaVu/Liberation face, at two widths 15 CSS px apart), and it is why
+         neither column is copied across.
+
+         NOT AN ACCESSIBILITY IMPROVEMENT ANYWHERE, and not something this branch
+         can fix inside its own scope: closing it means moving `--verified-text`,
+         a palette decision affecting every surface that paints a verified/GET
+         chip — the same kind of decision A3 was for the neutrals. */
+      'settings-explorer@desktop-1280x800': 17,
+      'settings-explorer@laptop-1024x768': 17,
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -1561,7 +1659,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          BECOMING a split because the two faces measured one node apart. Cause,
          provenance and the controlled experiment that established it are in the block
          above `settings-explorer@desktop-1280x800`. Both halves measured at `dad8715`. */
-      'settings-explorer@tablet-768x1024': 19,
+      /* ASSISTANT COMPANION DEEP LINK, 2026-09-01: 19 -> 20, still a scalar —
+         both faces measured 20 at `11e08da` (linux from CI run 33582340025,
+         darwin from two consecutive local runs). Cause, the A/B that established
+         it, and the colour: the block above
+         `settings-explorer@desktop-1280x800`. */
+      'settings-explorer@tablet-768x1024': 20,
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1638,7 +1741,18 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          measured difference and the well-formedness guard rejects equal halves. This is
          two measurements agreeing, not a linux figure asserted about darwin. Cause and
          provenance: the block above `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@mobile-375x812': 20,
+      /* ASSISTANT COMPANION DEEP LINK, 2026-09-01: a SCALAR 20 BECOMING A SPLIT,
+         because linux moved and darwin did not. linux 20 -> 21 (CI run
+         33582340025, GREW, transcribed); darwin STAYS 20, and that is a
+         measurement rather than a survival — this cell PASSED in both consecutive
+         local runs at `11e08da`, and the A/B probe reads 20 with the new operation
+         AND 20 without it. So on darwin the new row is rendered here and its chip
+         is simply not among the nodes axe judges. `width-390` below is the mirror
+         image of this cell — darwin moves there and linux does not — which is what
+         makes both splits wrap-boundary behaviour rather than a stale column.
+         Cause and provenance: the block above
+         `settings-explorer@desktop-1280x800`. */
+      'settings-explorer@mobile-375x812': { darwin: 20, linux: 21 },
       /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
          FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
          same change moved linux DOWN one and darwin not at all.
@@ -1667,7 +1781,10 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* /api/about DESCRIPTION, 2026-08-28: 53 -> 64, still a scalar — both faces
          measured 64 at `dad8715`. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@zoom-200': 19,
+      /* ASSISTANT COMPANION DEEP LINK, 2026-09-01: 19 -> 20, still a scalar —
+         both faces measured 20 at `11e08da`. Cause and provenance: the block
+         above `settings-explorer@desktop-1280x800`. */
+      'settings-explorer@zoom-200': 20,
       /*
        * ── STATISTICS-TAB SLICE, 2026-08-04 ──────────────────────────────────
        *
@@ -2033,7 +2150,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          The asymmetry the note above records — that `@width-320` and `@width-390` "did
          not behave alike" — is unchanged: they move by different amounts (+17 vs +15 on
          darwin) and only this one splits. */
-      'settings-explorer@width-320': 20,
+      /* ASSISTANT COMPANION DEEP LINK, 2026-09-01: 20 -> 21, still a scalar —
+         both faces measured 21 at `11e08da`. `@width-390` did NOT move on linux
+         while this one did, so the two narrow widths again did not behave alike;
+         the asymmetry noted above is unchanged and still unexplained. Cause and
+         provenance: the block above `settings-explorer@desktop-1280x800`. */
+      'settings-explorer@width-320': 21,
       /* DISCARD OPERATION, 2026-08-27: linux 51 -> 52, COLLAPSING to a scalar.
          darwin was already 52 and a darwin run the same day still reads 52, so the
          pair no longer marks a measured difference and the guard rejects equal
@@ -2060,7 +2182,17 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // macOS run of `a11y-narrow.spec.ts -g "390px: Settings & API — Endpoint
       // Explorer"` at this head PASSES against 76. That is why the key is absent from
       // `DARWIN_CARRIED_FORWARD`.
-      'settings-explorer@width-390': 20,
+      /* ASSISTANT COMPANION DEEP LINK, 2026-09-01: a SCALAR 20 BECOMING A SPLIT,
+         and this time it is DARWIN that moved. darwin 20 -> 21, measured in two
+         consecutive local runs at `11e08da` (GREW +1) and reproduced a third time
+         by the A/B probe. linux STAYS 20, and that is a measurement at this head,
+         not a number left standing: this cell PASSED in CI run 33582340025 (test
+         #47) while its six siblings failed, so linux was read here and did not
+         move. `mobile-375x812` above is the mirror image. Do NOT reconcile these
+         two cells by copying either column across — that is the exact failure this
+         file records 15 times. Cause and provenance: the block above
+         `settings-explorer@desktop-1280x800`. */
+      'settings-explorer@width-390': { darwin: 21, linux: 20 },
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
          `settings-about@width-320` above; ~~darwin carried forward unmeasured~~.
 
@@ -3570,7 +3702,31 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // move again when that slice merges. Those numbers are correct for THIS tree and
   // will need their own linux round-trip afterwards; that is not an error in this
   // transcription.
-  darwin: 871,
+  //
+  // ── ASSISTANT COMPANION DEEP LINK, 2026-09-01: darwin 871 -> 877 ───────────
+  //
+  // +6, and every one of the six is a MEASURED darwin cell at head `11e08da`, not a
+  // derivation: `settings-explorer@` desktop 16->17, laptop 16->17, tablet 19->20,
+  // zoom-200 19->20, width-320 20->21, width-390 20->21. The seventh
+  // `settings-explorer` cell, `@mobile-375x812`, contributes 0 to this total — it
+  // was measured at 20 on darwin and did not move, which is why it is now a split
+  // rather than a scalar raised on both faces.
+  //
+  // The linux column also moves +6, to the same 877, but from a DIFFERENT set of six
+  // (mobile-375x812 instead of width-390). The totals agreeing is arithmetic, not
+  // evidence that the two faces measured the same thing; see the block above
+  // `settings-explorer@desktop-1280x800`.
+  //
+  // `DARWIN_CARRIED_FORWARD` stays `[]` and `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES`
+  // stays 0. `DARWIN_MEASUREMENT` is deliberately NOT rewritten: it names the run the
+  // column as a whole comes from (`3f776e0`, the A3 palette), and repointing it at
+  // this branch would claim a re-measurement of the other 64 cells that this edit
+  // does not assert. The precedent is `c17cca4`, which measured one darwin cell and
+  // left the block alone. What IS true, and is stated here rather than in that block
+  // because it is this edit's claim: the two consecutive runs at `11e08da` re-ran the
+  // whole `a11y-axe` + `a11y-narrow` sweep, and every non-`settings-explorer` cell
+  // PASSED — so no other cell moved on darwin either.
+  darwin: 877,
   // ── MERGED: PROPOSALS + CHANGE FEED, 2026-08-30: darwin 2282 -> 2289. ──
   //
   // TWO SLICES MOVED THE SAME SEVEN CELLS FROM THE SAME BASE, and this file now
@@ -4021,7 +4177,33 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // had recorded. They are added, with measured ratios, at `foregrounds` above.
   // The lesson is the order: a colour guard cannot be read from the same run whose
   // counts it is about to be corrected by.
-  linux: 871,
+  //
+  // ── ASSISTANT COMPANION DEEP LINK, 2026-09-01: linux 871 -> 877 ────────────
+  //
+  // +6, TRANSCRIBED from CI run 33582340025 (job 100099059937) at head `11e08da`,
+  // which reported exactly six GREW messages and nothing else: `settings-explorer@`
+  // desktop 16->17, laptop 16->17, tablet 19->20, mobile-375x812 20->21, zoom-200
+  // 19->20, width-320 20->21. Counted over the WHOLE job log, not a filtered view —
+  // 0 IMPROVED, 0 FIXED?, 0 NEW, 0 NEW TARGET, 0 NEW COLOUR — because a rule that
+  // stops firing entirely is reported under `FIXED?`, not `IMPROVED`, and a grep for
+  // one label has already missed 91 of 157 changed cells once:
+  //
+  //   gh api repos/ISAAC-DOE/isaac-metadata-assistant/actions/jobs/100099059937/logs \
+  //     | grep -ao 'FIXED?\|IMPROVED\|GREW\|NEW  \|NEW TARGET\|NEW COLOUR' \
+  //     | sort | uniq -c
+  //
+  // `settings-explorer@width-390` is NOT in that six: it PASSED on linux at 20 in the
+  // same run, which is why it is now a split whose linux half is measured here rather
+  // than a scalar raised on both faces. The darwin total also moves +6 to 877, from a
+  // different set of six; the agreement is arithmetic, not corroboration.
+  //
+  // AND THE `NEW COLOUR` ZERO ABOVE APPLIES HERE TOO, in the narrow sense the note
+  // above establishes: all six of these cells were `grew`, and `auditScan` `continue`s
+  // past the `foregrounds` guard on every verdict but `ok`, so that guard did not run
+  // on any of them. It was not read as evidence. The colour was measured directly
+  // instead — one foreground, `#2f7d78`, already listed — see the block above
+  // `settings-explorer@desktop-1280x800`.
+  linux: 877,
   // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
   //
   //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)
@@ -4181,15 +4363,28 @@ export const DARWIN_MEASUREMENT = {
  * forward. It will stop being empty the first time CI transcribes a linux figure, and
  * that is the point — the list is a debt register, not a badge.
  *
- * STILL EMPTY AFTER 2026-09-01, and this is the strongest form that claim has had.
+ * STILL EMPTY AFTER 2026-09-01 (assistant companion deep link), and the reason is now
+ * a weaker one than it was that morning — which is worth saying, because the stronger
+ * reason is no longer available and quoting it would overstate the guarantee.
+ * TWO splits exist again (`settings-explorer@mobile-375x812` and `@width-390`), so
+ * "there is nowhere for a carried half to hide" has stopped being true. What holds
+ * instead is the ordinary reason: all four halves were MEASURED at head `11e08da` —
+ * the linux pair by CI run 33582340025 (one `GREW`, one PASS), the darwin pair by two
+ * consecutive local sweeps and an A/B probe. Six further cells moved on both faces at
+ * that head and were measured on both. No key was added here, none was removed, and
+ * `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0.
+ *
+ * ~~STILL EMPTY AFTER 2026-09-01, and this is the strongest form that claim has had.~~
  * The A3 palette transcription touched all 161 cells and is the first edit in this
  * file's history in which BOTH columns of EVERY cell were produced by a run at the
  * same tree: the linux column by CI run 33477992426 at `85a3b2d`, the darwin column by
  * two local sweeps at `3f776e0`, and the two heads proved to render byte-identical CSS
- * (see the `linux` block of `A11Y_BASELINE_TOTAL_NODES`). Every one of the seven splits
+ * (see the `linux` block of `A11Y_BASELINE_TOTAL_NODES`). ~~Every one of the seven splits
  * collapsed, so there is not even a `{ darwin, linux }` pair left in which a half could
- * be carried. No key was added here, none was removed (none was listed), and
- * `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0.
+ * be carried.~~ — the collapse happened and is history; the "not even a pair left"
+ * inference lasted one day and is struck above rather than deleted, because it was the
+ * load-bearing half of the claim. No key was added here, none was removed (none was
+ * listed), and `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stayed 0.
  *
  * STILL EMPTY AFTER 2026-08-28, and that is a measurement too rather than an oversight.
  * The eight cells that moved on the persistence-truthfulness branch had their linux
