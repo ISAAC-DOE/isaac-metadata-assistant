@@ -69,8 +69,30 @@ import {
   RECORD_RUN_PARAM,
   RUN_COMPARE_MAX,
 } from '../lib/routes';
+import type { RecordChangeSummary } from '../lib/recordChanges';
+
+/**
+ * `activity` AS THE RUNS FAST PATH ACTUALLY RECEIVES IT — `RecordChangeSummary`
+ * (`../lib/recordChanges`) plus `runRev`, a RUN-scoped floor exactly analogous to
+ * that module's own `proposalRev`: the highest `changed_at_rev` among the
+ * SURVIVING RUN entries, never inflated by a proposal entry riding in the same
+ * batch. `highestRev` on the base type is deliberately NOT used anywhere in this
+ * file (see the dedupe/gate below) — for `activity` specifically it is documented
+ * as a max over ALL surviving entries INCLUDING proposals, which is exactly the
+ * value that inflated the dedupe key and the gate before this fix, and is exactly
+ * the value `recordChanges.ts` warns `proposalRev` exists to avoid for proposals.
+ *
+ * `runRev` IS NOT YET A FIELD ON `RecordChangeSummary` IN THIS BRANCH. The
+ * producer side (a separate PR) adds it. It is declared as a local extension here
+ * — never imported — so this file compiles today against the base type AND
+ * remains correct once the two branches merge and `RecordChangeSummary` is
+ * structurally widened to carry it for real.
+ */
+export interface RunsSectionActivity extends RecordChangeSummary {
+  runRev: number;
+}
 import type { ApiRunView } from '../lib/types';
-import { RUNS_PAGE_SIZE } from '../lib/runPaging';
+import { RUNS_PAGE_SIZE, RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { mutationFailureCopy } from '../lib/mutationErrors';
 
 /*
@@ -150,7 +172,52 @@ function serverRefusalMessage(err: unknown): string | null {
   return typeof message === 'string' && message.trim() !== '' ? message : null;
 }
 
-export function RunsSection({ experimentId }: { experimentId: string }) {
+export function RunsSection({
+  experimentId,
+  activity,
+  recordVersion,
+}: {
+  experimentId: string;
+  /**
+   * THE FAST PATH — a RUN-scoped change-feed summary, or `null`. See
+   * `RunsSectionActivity` immediately above for its shape and why `runRev`
+   * exists. IDS AND A REVISION ONLY, NEVER RUN CONTENT: this section treats a
+   * signal as "something moved, go re-read what is on screen", never as a value
+   * to render.
+   *
+   * WHAT THIS PROP CANNOT SEE, NAMED RATHER THAN LEFT TO BE DISCOVERED. The
+   * change feed cannot report a deletion — removing a run moves only the
+   * record's OWN entry, never a `run` entry — so `activity` is `null` (or has
+   * empty `runIds`) for a removal, always. It is ALSO blind across a generation
+   * boundary: this section's own loaded rev is parsed from the bare REV half of
+   * `<generation>.<rev>`, so a `runRev` that is numerically behind a NEW
+   * generation's reset counter reads as "already seen" and is swallowed. Both
+   * gaps are closed by `recordVersion` below, not by this prop — see its own
+   * comment for why that split is the whole design.
+   */
+  activity?: RunsSectionActivity | null;
+  /**
+   * THE COMPLETENESS PATH — the record bundle's own `detail.version`, or
+   * `null`/omitted while that bundle has not loaded. Whenever this differs (by
+   * plain STRING inequality — deliberately not a numeric comparison, which is
+   * what makes it correct across a generation change without this section
+   * having to understand generations at all) from what THIS section itself has
+   * loaded, it performs one bounded silent reload. That is what catches a run
+   * REMOVAL (invisible to `activity`, see above) and a generation change (which
+   * `activity`'s own rev-only parse cannot see either): both change the
+   * record's version string, and a version string is all this path reads.
+   *
+   * IT ALSO COSTS ONE BOUNDED READ ON EVERY PROPOSAL ACT, and that is a
+   * disclosed trade rather than an oversight: a proposal act advances the
+   * record's own `rev` (contract DEC-10) exactly like a run edit does, and nothing
+   * in the wire contract lets a reader distinguish "this version bump was a
+   * proposal act" from "it was a run edit" without re-reading — the feed's own
+   * page order cannot prove which, and guessing wrong in the direction of NOT
+   * reading is how a real run change gets missed. One bounded list read is the
+   * honest price of the guarantee.
+   */
+  recordVersion?: string | null;
+}) {
   return (
     <section className="runs-section" aria-labelledby="runs-heading">
       <div className="runs-head">
@@ -174,13 +241,29 @@ export function RunsSection({ experimentId }: { experimentId: string }) {
 
       {/* Keyed on the experiment so switching records rebuilds the browser's
           state — its page, its search, its filters — rather than carrying one
-          record's list criteria into another's. */}
-      <RunsBrowser key={experimentId} experimentId={experimentId} />
+          record's list criteria into another's. A remount is also what "starts
+          clean" means for the signal-handling refs below: they are declared with
+          `useRef` inside `RunsBrowser`, so a new `experimentId` gives them fresh
+          initial values along with everything else. */}
+      <RunsBrowser
+        key={experimentId}
+        experimentId={experimentId}
+        activity={activity ?? null}
+        recordVersion={recordVersion ?? null}
+      />
     </section>
   );
 }
 
-function RunsBrowser({ experimentId }: { experimentId: string }) {
+function RunsBrowser({
+  experimentId,
+  activity,
+  recordVersion,
+}: {
+  experimentId: string;
+  activity: RunsSectionActivity | null;
+  recordVersion: string | null;
+}) {
   const baseId = useId();
   const searchId = `${baseId}-search`;
   const searchHintId = `${baseId}-search-hint`;
@@ -274,6 +357,15 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
   runsRef.current = list.status === 'data' ? list.loaded.runs : [];
 
   /*
+   * THE LOADED SNAPSHOT, read the same way — see `runsRef` immediately above for
+   * why a ref rather than a dependency. The signal-driven reload path needs
+   * `received` (not `runs.length`; see `Loaded.received`'s own comment on why
+   * they differ) to decide how large a single bounded re-read can safely be.
+   */
+  const loadedRef = useRef<Loaded | null>(null);
+  loadedRef.current = list.status === 'data' ? list.loaded : null;
+
+  /*
    * A run this section just created, waiting for the reload it triggered.
    * Held in a ref rather than in state because the only reader is the reload's
    * own `.then`, and re-rendering on it would say nothing.
@@ -314,6 +406,106 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
    * be wrong and showing it is the dishonest option.
    */
   const silentRef = useRef(false);
+
+  /*
+   * TWO PATHS TO THE SAME BOUNDED SILENT RELOAD, AND THE REFS THAT MAKE BOTH
+   * SAFE TO ACT ON.
+   *
+   * THE FAST PATH (`activity`) reacts to a RUN-scoped change-feed summary this
+   * screen already holds elsewhere, handed down as a prop rather than polled
+   * here — this section owns its OWN fetch (see the file header) and stays
+   * that way. It is fast because it needs no version comparison beyond a
+   * single integer, and it is INCOMPLETE by construction: the feed cannot
+   * report a run REMOVAL (only the record's own entry moves, never a `run`
+   * entry), and this section's own rev parse — the bare REV half of
+   * `<generation>.<rev>` — cannot see a generation change. Both were measured
+   * defects of an activity-only design and neither is fixed by trying harder
+   * to parse `activity`; see `recordVersion`'s own comment on `RunsSection` for
+   * why the fix is a SECOND, independent path instead.
+   *
+   * THE COMPLETENESS PATH (`recordVersion`) reacts to the record bundle's own
+   * version token by plain STRING inequality against what this section has
+   * itself loaded — no rev arithmetic, no generation awareness needed, which
+   * is exactly what makes it correct where the fast path structurally cannot
+   * be. It costs one bounded read on every version change this section did
+   * not itself cause, including a proposal act (see its own comment) — a
+   * disclosed trade, not a defect.
+   *
+   * THE TWO PATHS SHARE ONE BOUNDED-RELOAD MECHANISM (`triggerBoundedSilentReload`,
+   * defined after the fetch effect below, once `receivedBeforeThisRequest`
+   * exists to close over) and DEDUPE AGAINST EACH OTHER BY TOKEN EQUALITY,
+   * NEEDING NO SHARED STATE OF THEIR OWN: a fast-path reload adopts the new
+   * `experiment_version`, so a `recordVersion` prop that later arrives already
+   * equal to it is skipped by the completeness path's own check; a
+   * version-path reload adopts it first, so a same-batch `activity` signal is
+   * then skipped by the fast path's `runRev <= loadedRev` gate. Neither path
+   * has to know the other ran.
+   *
+   *   `lastRunsSignalKeyRef` — the FAST PATH's DEDUPE. The same `runRev:runIds`
+   *   pair twice must trigger nothing: the producer re-delivers the same
+   *   summary on every poll until this screen's own rev catches up. Keyed on
+   *   `runRev` — NEVER `highestRev`, which `activity` documents as a max over
+   *   ALL surviving entries INCLUDING proposals, and a proposal entry riding in
+   *   the same batch would drift that key on every poll even when nothing
+   *   about the runs changed, producing a redundant reload each time. It is
+   *   also NOT recorded in the swallow branch (`runRev <= loadedRev`) — the
+   *   defect that branch used to have: recording a key the producer's floor
+   *   had already advanced past made a legitimately-still-pending run change
+   *   undeliverable forever, because the same key arriving again would be
+   *   deduped as "already seen" rather than re-evaluated against the (by then
+   *   possibly still insufficient) loaded rev.
+   *
+   *   `lastRecordVersionRef` — the COMPLETENESS PATH's OWN "already handled
+   *   this exact delivery" marker — NOT a dedupe against the fast path (token
+   *   equality against `experimentVersion` already does that; see above). It
+   *   exists so that this section's OWN version advancing (an Add Run, a
+   *   fast-path reload, anything) does not itself look like a NEW
+   *   `recordVersion` delivery worth re-evaluating: the effect below is keyed
+   *   on `recordVersion` actually changing, not on `experimentVersion` moving
+   *   underneath an unchanged prop.
+   *
+   *   `runsReloadInFlightRef` — COALESCE, shared by both paths. True from the
+   *   moment the first-page fetch below leaves this component until its own
+   *   response (or failure) is the authoritative one for its generation. A
+   *   reload request from EITHER path that arrives while it is true does not
+   *   start a second request; it marks a follow-up instead.
+   *
+   *   `pendingSignalReloadRef` — the follow-up itself, consumed exactly once
+   *   when the in-flight request settles, so N reload requests from either or
+   *   both paths that arrive mid-flight produce AT MOST ONE extra request
+   *   rather than N.
+   *
+   *   `pendingSignalLimitRef` — HOW MANY RUNS THE NEXT BOUNDED REQUEST ASKS
+   *   FOR, shared by both paths. A silent reload used to always ask for
+   *   exactly `RUNS_PAGE_SIZE` (50) — the same request `Add Run`/`Remove Run`
+   *   already trigger — which REPLACES the loaded list with page one. That is
+   *   fine after an Add or a Remove, because this section is the one that
+   *   changed the count and already knows what page the reader is on. It is
+   *   NOT fine here: a reader who pressed Load More several times to reach,
+   *   say, 100 of 120 runs would have those 100 silently cut back to 50 by a
+   *   colleague's UNRELATED edit — measured on a 120-run fixture, 100 loaded
+   *   cards became 50. So a bounded reload asks for exactly what is already on
+   *   screen (`received`, capped at `RUN_LIST_LIMIT_MAX`) in ONE request, set
+   *   here and consumed once at the top of the fetch effect below.
+   */
+  const lastRunsSignalKeyRef = useRef<string | null>(null);
+  const lastRecordVersionRef = useRef<string | null>(null);
+  const runsReloadInFlightRef = useRef(false);
+  const pendingSignalReloadRef = useRef(false);
+  const pendingSignalLimitRef = useRef<number | null>(null);
+  /**
+   * TRUE WHEN A SIGNAL ARRIVED WHILE MORE THAN `RUN_LIST_LIMIT_MAX` RUNS WERE
+   * ALREADY LOADED — the case a single bounded request cannot safely reconcile.
+   * Reconciling it anyway would mean either truncating what the reader is
+   * looking at (the defect above, only worse) or paging through several
+   * requests behind their back while more may still be changing underneath. So
+   * this section does neither: it says so, and offers a normal (non-silent)
+   * Refresh, which re-reads the first page exactly as every other reload in
+   * this file already does. Further signals are ignored while this stands —
+   * the reader has to act before another silent decision is made on their
+   * behalf — see the effect below.
+   */
+  const [runsStaleNotice, setRunsStaleNotice] = useState(false);
 
   const setFocusRun = useCallback(
     (runId: string | null) => {
@@ -411,10 +603,61 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
     setLoadingMore(false);
     setMoreError(null);
 
+    /*
+     * THIS EFFECT RUN'S OWN REQUEST IS NOW THE ONE IN FLIGHT. Every dependency
+     * change re-enters this branch — a search, a filter, `reloadNonce` from Add
+     * Run / Remove Run / a signal — so "in flight" here means exactly "this
+     * component currently has an outstanding `listRuns` request", regardless of
+     * what caused it. `runsSignalFollowUp` below reads it back once this request's
+     * own response (or failure) has been accepted as authoritative for its
+     * generation, never for a superseded one.
+     */
+    runsReloadInFlightRef.current = true;
+
+    /*
+     * THE LIMIT THIS REQUEST ASKS FOR. A signal-driven reload sets
+     * `pendingSignalLimitRef` to `received` (capped) before bumping
+     * `reloadNonce`, and it is consumed here, ONCE, at the top of the effect run
+     * it was set for — every other trigger (a search, a filter, `Add Run`,
+     * `Remove Run`, the plain `Reload This Section` button, the over-cap
+     * Refresh) leaves it `null` and gets the ordinary `RUNS_PAGE_SIZE` first
+     * page, exactly as before this slice.
+     */
+    const requestLimit = pendingSignalLimitRef.current ?? RUNS_PAGE_SIZE;
+    pendingSignalLimitRef.current = null;
+    /** What was on screen before THIS request left — the fallback basis for a
+     *  follow-up decision if this request fails and there is no fresh count to
+     *  read one off. */
+    const receivedBeforeThisRequest = loadedRef.current?.received ?? 0;
+
+    /**
+     * Consume a pending signal-driven follow-up, if one arrived while this
+     * request was outstanding. AT MOST ONE extra request per settle, never one
+     * per signal — see `pendingSignalReloadRef`'s own comment.
+     *
+     * `basisCount` is what will be ON SCREEN once this settle is applied — the
+     * just-received page's own length on success, or what was already loaded on
+     * failure (nothing changed, so the prior count still describes the screen).
+     * A follow-up that would itself exceed the cap does not silently reload
+     * either; it raises the same over-cap notice a first signal would.
+     */
+    const runsSignalFollowUp = (basisCount: number) => {
+      runsReloadInFlightRef.current = false;
+      if (!pendingSignalReloadRef.current) return;
+      pendingSignalReloadRef.current = false;
+      if (basisCount > RUN_LIST_LIMIT_MAX) {
+        setRunsStaleNotice(true);
+        return;
+      }
+      pendingSignalLimitRef.current = basisCount > 0 ? basisCount : RUNS_PAGE_SIZE;
+      silentRef.current = true;
+      setReloadNonce((n) => n + 1);
+    };
+
     let alive = true;
     api
       .listRuns(experimentId, {
-        limit: RUNS_PAGE_SIZE,
+        limit: requestLimit,
         offset: 0,
         ...criteriaQuery(query, overridesFilter, exportedFilter),
       })
@@ -423,6 +666,7 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
           dropCreated();
           return;
         }
+        runsSignalFollowUp(res.runs.length);
         setExperimentVersion(res.experiment_version);
         setList({
           status: 'data',
@@ -468,6 +712,7 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
       .catch((err: unknown) => {
         dropCreated();
         if (!alive || generation !== generationRef.current) return;
+        runsSignalFollowUp(receivedBeforeThisRequest);
         setList({ status: 'error', error: asApiError(err) });
       });
     return () => {
@@ -478,6 +723,147 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
     // list they left, and refetching it would silently discard every page they
     // had loaded.
   }, [experimentId, query, overridesFilter, exportedFilter, reloadNonce]);
+
+  /*
+   * THE SHARED TRIGGER — never called directly from a render, only from the
+   * two effects below, each AFTER it has already decided a bounded reload is
+   * warranted. It never re-decides that; it only decides HOW to run one:
+   * refuse if the over-cap notice already stands or would now be raised,
+   * coalesce into a pending follow-up if a request is already in flight, or
+   * fire exactly one bounded request for what is already on screen.
+   */
+  const triggerBoundedSilentReload = () => {
+    if (runsStaleNotice) return;
+    const receivedNow = loadedRef.current?.received ?? 0;
+    if (receivedNow > RUN_LIST_LIMIT_MAX) {
+      setRunsStaleNotice(true);
+      return;
+    }
+    if (runsReloadInFlightRef.current) {
+      // COALESCE. One follow-up, consumed by `runsSignalFollowUp` above once the
+      // in-flight request settles — not one request per trigger that lands here,
+      // from either path.
+      pendingSignalReloadRef.current = true;
+      return;
+    }
+    pendingSignalLimitRef.current = receivedNow > 0 ? receivedNow : RUNS_PAGE_SIZE;
+    silentRef.current = true;
+    setReloadNonce((n) => n + 1);
+  };
+
+  /*
+   * THE FAST PATH — deciding whether `activity` means "reload what is on
+   * screen", and never doing the reload here directly; see
+   * `triggerBoundedSilentReload` above. Every actual fetch still goes through
+   * the ONE effect above, by the same `reloadNonce` + `silentRef` path
+   * `addRun`, `removeRun` and `reloadSection` already use — so a
+   * signal-driven reload inherits everything that already makes those
+   * silent: cards keyed by id are not remounted, autosave state
+   * (`lib/runAutosaveStore.ts`, keyed `<experimentId>/<runId>`) is never
+   * touched here at all, and the search box and filters are left exactly as
+   * they are, because this effect's dependencies do not include them.
+   *
+   * A PROPOSAL-ONLY SIGNAL IS INVISIBLE HERE BY CONSTRUCTION, not by an
+   * explicit check on `recordMoved` (which this path no longer reads at all —
+   * see `RunsSection`'s own comment on why a removal cannot reach this path):
+   * `activity.runIds.length === 0` is exactly "no RUN news", the producer's
+   * own contract for when `activity` carries anything to act on here.
+   *
+   * KEYED AND GATED ON `runRev`, NEVER `highestRev` — the fix for the defect
+   * measured against the producer's actual contract: `activity.highestRev` is
+   * documented as a max over ALL surviving entries INCLUDING proposals, so a
+   * proposal riding in the same batch inflates it on every poll even when the
+   * runs themselves are unchanged, which would make the OLD key drift
+   * (redundant reloads) and could make the OLD gate wrongly treat a
+   * still-pending run change as already seen. `runRev` is scoped to RUN
+   * entries only, exactly the way `recordChanges.ts` scopes `proposalRev` to
+   * proposal entries for the same reason.
+   *
+   * THE SWALLOW BRANCH NO LONGER RECORDS THE KEY. It used to, and that was the
+   * second half of the same defect: marking a key "already seen" while
+   * swallowing it meant a run change that arrived bundled with a stale
+   * position could never be delivered even once the section's own loaded rev
+   * caught up enough to matter, because the identical key arriving again would
+   * be deduped away before the rev comparison ever ran again. Not recording it
+   * costs nothing — the rev comparison is cheap and its answer cannot become
+   * MORE stale over time, only less — and it removes the failure mode
+   * entirely.
+   *
+   * WHAT THIS PATH STILL CANNOT SEE, EVEN AFTER THIS FIX: a run REMOVAL (no
+   * `run` entry moves) and a signal riding in on a NEW GENERATION whose reset
+   * rev counter reads as "behind" this section's own bare-rev parse. Both are
+   * closed by the completeness path below, not by this one — see
+   * `RunsSection`'s own comment on `recordVersion`.
+   *
+   * ONLY THE FIRST PAGE IS EVER RE-READ. A reader who has pressed Load More
+   * several times has pages beyond the first that this effect does not know
+   * about and does not attempt to preserve — the existing Load More control
+   * re-fetches them, from the new first page's `received` offset, exactly as
+   * it already does after any other silent reload. Reconciling a signal
+   * against deep pagination would mean this section tracking server-side
+   * state it does not own; the honest answer is the one `runs-more-note`
+   * already gives for offset paging generally.
+   */
+  useEffect(() => {
+    if (activity === null) return;
+    if (activity.runIds.length === 0) return;
+    // No rev to compare against yet — the first load has not landed. Nothing is
+    // marked consumed here, so this effect re-evaluates the same `activity` once
+    // `experimentVersion` arrives (it is a dependency below).
+    if (experimentVersion === null) return;
+
+    const key = `${activity.runRev}:${activity.runIds.join(',')}`;
+    // DEDUPE. The producer re-delivers the same summary every poll until this
+    // screen's own rev catches up, and a repeat is not news a second time.
+    if (key === lastRunsSignalKeyRef.current) return;
+
+    // AT OR BELOW THIS SECTION'S OWN LOADED REV — covers this section's own Add
+    // Run / Remove Run, which already adopted the version the signal is reporting,
+    // and a replay of a batch this screen has already acted on for another reason.
+    // NOT recorded as seen — see this effect's own comment above on why.
+    const dot = experimentVersion.lastIndexOf('.');
+    const loadedRev = dot === -1 ? NaN : Number(experimentVersion.slice(dot + 1));
+    if (Number.isFinite(loadedRev) && activity.runRev <= loadedRev) {
+      return;
+    }
+
+    lastRunsSignalKeyRef.current = key;
+    triggerBoundedSilentReload();
+  }, [activity, experimentVersion, runsStaleNotice]);
+
+  /*
+   * THE COMPLETENESS PATH — `recordVersion` is the record bundle's own
+   * version token (`detail.version`), handed down independently of `activity`.
+   * See `RunsSection`'s own comment on this prop for the two gaps it closes
+   * (a run removal, a generation change) that the fast path structurally
+   * cannot.
+   *
+   * THE GATE IS STRING INEQUALITY, ON PURPOSE — never a rev comparison. A
+   * generation change makes the WHOLE token different (`1.7` -> `2.0`), so
+   * plain inequality catches it without this section ever having to reason
+   * about what a generation is.
+   *
+   * `lastRecordVersionRef` GUARDS AGAINST THIS SECTION'S OWN VERSION MOVING,
+   * not against `recordVersion` repeating. Every OTHER reload in this file —
+   * Add Run, Remove Run, the fast path above, this path's own reload —
+   * advances `experimentVersion`, which is a dependency of this effect; without
+   * this ref, this section's own Add Run would make this effect see
+   * `recordVersion` (still the stale prop the parent has not caught up to
+   * yet) as "different from our NEW experimentVersion" and fire a redundant
+   * reload for content that did not change. The ref instead tracks "the last
+   * `recordVersion` VALUE this effect has evaluated", so it only acts again
+   * once the PROP itself delivers something new.
+   */
+  useEffect(() => {
+    if (recordVersion === null) return;
+    // No baseline loaded yet — wait for the ordinary first read, which sets
+    // `experimentVersion` and re-runs this effect (a dependency below).
+    if (experimentVersion === null) return;
+    if (recordVersion === lastRecordVersionRef.current) return;
+    lastRecordVersionRef.current = recordVersion;
+    if (recordVersion === experimentVersion) return;
+    triggerBoundedSilentReload();
+  }, [recordVersion, experimentVersion, runsStaleNotice]);
 
   // --- one more page ------------------------------------------------------
   const loadMore = () => {
@@ -740,6 +1126,20 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
     setAddStale(false);
     setRemoveError(null);
     setReloadNonce((n) => n + 1);
+  };
+
+  /*
+   * THE OVER-CAP NOTICE'S OWN REFRESH — a NORMAL (non-silent) reload, on
+   * purpose. Above `RUN_LIST_LIMIT_MAX` this section cannot re-read what is on
+   * screen in one bounded request, so it does not try to preserve it: this
+   * reload blanks the list and returns to the ordinary first `RUNS_PAGE_SIZE`
+   * page, exactly like every other "Reload This Section" control in this file.
+   * `pendingSignalLimitRef` is left untouched (`null`), so the fetch effect
+   * takes the ordinary path.
+   */
+  const refreshAfterRunsChangedElsewhere = () => {
+    setRunsStaleNotice(false);
+    reloadSection();
   };
 
   /*
@@ -1265,6 +1665,28 @@ function RunsBrowser({ experimentId }: { experimentId: string }) {
         <p className="runs-note" role="status">
           {removeNote}
         </p>
+      )}
+
+      {/*
+        RUNS CHANGED ELSEWHERE, AND TOO MANY ARE LOADED TO RE-READ SILENTLY.
+        `role="status"`, matching `addNote`/`removeNote`: this is information,
+        not a refusal of something the reader asked for. The button is `Reload
+        This Section`'s own sibling in shape — same `<div>` + `<p>` + button
+        layout `addError` uses below — deliberately NOT silent (see
+        `refreshAfterRunsChangedElsewhere`), because above the cap this section
+        cannot promise to preserve what was on screen anyway.
+      */}
+      {runsStaleNotice && (
+        <div className="runs-note" role="status">
+          <p>Runs changed elsewhere. Refresh to see the current list.</p>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={refreshAfterRunsChangedElsewhere}
+          >
+            Refresh
+          </button>
+        </div>
       )}
 
       {addError !== null && (
