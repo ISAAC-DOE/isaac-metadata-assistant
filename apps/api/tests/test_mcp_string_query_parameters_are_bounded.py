@@ -157,8 +157,9 @@ def test_a_string_parameter_with_no_bound_anywhere_is_a_refusal_not_a_schema():
         name="not_a_real_parameter", json_type="string", description="synthetic"
     )
     with pytest.raises(RuntimeError) as excinfo:
-        tools._query_schema([invented])
+        tools._query_schema("an_operation", [invented])
     assert "not_a_real_parameter" in str(excinfo.value)
+    assert "an_operation" in str(excinfo.value)
     assert "_DECLARED_STRING_BOUNDS" in str(excinfo.value)
 
     # …and the same parameter WITH a route bound builds fine, so the refusal is about the
@@ -169,8 +170,58 @@ def test_a_string_parameter_with_no_bound_anywhere_is_a_refusal_not_a_schema():
         description="synthetic",
         max_length=7,
     )
-    schema = tools._query_schema([bounded])
+    schema = tools._query_schema("an_operation", [bounded])
     assert schema["properties"]["not_a_real_parameter"]["maxLength"] == 7
+
+
+def test_a_declared_bound_belongs_to_ONE_operation_and_is_not_inherited_by_NAME():
+    """THE LIMIT THE MAP'S OWN COMMENT SAID TO REMOVE AT THE SECOND ENTRY, REMOVED.
+
+    ``_DECLARED_STRING_BOUNDS`` was keyed on the bare parameter name and its comment
+    said so, with the remedy and the trigger: *"it stops being tolerable the moment a
+    second name is added, and at that point this should be keyed on ``(operation,
+    parameter)``."* Two names were added on 2026-09-01 — ``after`` and ``cursor`` — so
+    the key is now the pair, and this is the assertion that makes that real rather than
+    cosmetic: a parameter named ``cursor`` on some OTHER operation must NOT silently
+    acquire the change feed's reviewed 256.
+    """
+    assert ("get_changes", "cursor") in tools._DECLARED_STRING_BOUNDS
+    inherited = policy.QueryParameter(
+        name="cursor", json_type="string", description="a cursor on some other route"
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        tools._query_schema("some_other_operation", [inherited])
+    assert "cursor" in str(excinfo.value)
+    assert "some_other_operation" in str(excinfo.value)
+
+
+def test_the_change_feed_cursor_bound_is_above_the_longest_cursor_the_server_MINTS():
+    """A BOUND BELOW A REAL CURSOR WOULD BREAK PAGING AT THIS BOUNDARY, PERMANENTLY.
+
+    Every other entry in ``_DECLARED_STRING_BOUNDS`` is an identifier whose length the
+    id generator fixes. A cursor's is not fixed by anything a schema can see: it is
+    base64url of a versioned JSON payload carrying a scope digest, a kind name, an
+    entity id and a sequence position. So the bound is MEASURED against the longest
+    shape this server can actually mint, here, rather than asserted in a comment — and
+    the direction that matters is checked: too small refuses a legitimate page walk with
+    no way forward.
+    """
+    from isaac_api import change_feed as cf
+
+    longest = max(
+        len(
+            cf.encode_cursor(
+                (10**12, kind, "0" * 26),
+                scope=cf.record_scope_tag("0" * 26, "0" * 26),
+            )
+        )
+        for kind in cf.feed_kinds(cf.RECORD_COLLECTORS)
+    )
+    bound = tools._DECLARED_STRING_BOUNDS[("get_changes", "cursor")]
+    assert longest < bound, (longest, bound)
+    assert TOOLS["isaac_get_changes"].input_schema["properties"]["cursor"][
+        "maxLength"
+    ] == bound
 
 
 def test_a_closed_set_needs_no_length_bound(reader):

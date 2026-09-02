@@ -73,8 +73,12 @@ from .policy import (
     OPERATIONS,
     PERMITTED_TOOL_NAMES,
     Scope,
+    changes_query_parameters,
     forbidden_tool_reason,
     pending_query_parameters,
+    proposal_list_query_parameters,
+    proposal_target_field_paths,
+    proposal_value_byte_ceiling,
     run_list_query_parameters,
 )
 
@@ -189,6 +193,46 @@ class Tool:
 
         Derived rather than declared, so a tool cannot be added with a
         hand-written scope set that disagrees with the scope its operations cost.
+
+        AN EXEMPTION WAS BUILT HERE ON 2026-09-01 AND WITHDRAWN THE SAME DAY, AND
+        THE WITHDRAWAL IS RECORDED RATHER THAN REVERTED SILENTLY — because the
+        next author to want a read-free write tool will reach for exactly the
+        design that was tried, and the reason it fails is a MEASUREMENT rather
+        than a preference.
+
+        ~~``isaac_propose_field_value`` costs ``PROPOSALS_WRITE`` alone, because
+        its handler returns no record content for a read scope to be
+        protecting.~~ The projection half of that was true and was verified by an
+        independent review. **The claim it supported was false, because the
+        SUCCESS branch is not the only branch.** ``_failed`` forwards a route's
+        refusal body whole — correctly, and for every other tool — and those
+        bodies were written for a caller holding ``READ``. Measured against the
+        real :class:`~.server.McpServer` with ``frozenset({Scope.PROPOSALS_WRITE})``
+        and nothing else::
+
+            if_match='"0.0"'  -> 412 {"current_rev": 1,
+                                      "current_version": "7ad6314fd58acce5.1"}
+            if_match='"7ad6314fd58acce5.1"'
+                              -> 200, proposal STORED, envelope etag
+                                 "7ad6314fd58acce5.2"
+            start/end 0..9999 -> 422 {"note_text_length": 55}   # a scientist's
+                                                                # verbatim note
+
+        So one extra request bootstraps the wall, and the success envelope's
+        ``etag`` sustains the session indefinitely. A bogus ``note_id``,
+        ``run_id`` or ``experiment_id`` is additionally a distinguishable
+        existence oracle.
+
+        **AND PROJECTING THE FAILURE BRANCH DOES NOT RESCUE IT**, which is why
+        option (a) rather than a bigger projection: the route's precondition is
+        the RECORD's ``ETag``, so a principal that may not read the record can
+        never obtain one legitimately. Withholding the ``412``'s
+        ``current_version`` would make the docstring true and the deployment
+        shape INERT — a capability that cannot work is not least privilege, it is
+        a fiction. What the new scope is actually for survives untouched: it
+        separates *may propose* from ``DRAFT_WRITE``'s *may change draft content
+        directly*. Only "and read nothing else" died, and it died to the numbers
+        above.
         """
         return frozenset({Scope.READ, self.scope})
 
@@ -248,13 +292,46 @@ _TYPE_CHECKS: Mapping[str, Callable[[Any], bool]] = {
     # bool first: `isinstance(True, int)` is True, and an agent sending `true` for
     # `limit` must be refused rather than paging by 1.
     "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    # `number` admits an integer too, which is what JSON Schema says and what a
+    # scientific value needs: a temperature of `300` and one of `300.5` are the same
+    # kind of thing. `bool` is excluded for the reason above — `True` is an `int` in
+    # Python and is not a number a spectrum ever holds.
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
     "boolean": lambda v: isinstance(v, bool),
     "object": lambda v: isinstance(v, dict),
+    "array": lambda v: isinstance(v, list),
 }
 
 _SUPPORTED_KEYWORDS = frozenset(
     {"type", "description", "enum", "minimum", "maximum", "minLength", "maxLength", "minProperties"}
 )
+
+
+def _declared_types(spec: Mapping[str, Any]) -> tuple[str, ...]:
+    """The JSON Schema type(s) a property declares, always as a tuple.
+
+    A LIST-VALUED ``type`` IS VALID JSON SCHEMA AND IS THE HONEST SPELLING OF "ANY
+    JSON VALUE HERE", which is what ``isaac_propose_field_value``'s ``proposed_value``
+    is: the official field paths a proposal may target hold strings, numbers, booleans,
+    objects and lists, and the route accepts any of them.
+
+    The two spellings that were rejected, recorded so nobody re-derives them:
+
+    * ``{"type": "any"}`` — not a JSON Schema type at all. This schema is PUBLISHED to
+      clients in ``tools/list``, so an invented keyword is a document a conforming
+      client validator may reject outright.
+    * omitting ``type`` — the correct JSON Schema idiom for "unconstrained", and
+      indistinguishable from a property somebody forgot to type. ``_validate_tool``
+      refuses an untyped property for exactly that reason, and relaxing it would turn
+      a typo into an unchecked argument.
+
+    The list form says the same thing explicitly and excludes ``null``, which is also
+    what the route does: ``proposed_value: null`` is refused with
+    ``422 invalid_proposed_value``, because a null would CLEAR the field if it were
+    ever applied.
+    """
+    declared = spec["type"]
+    return (declared,) if isinstance(declared, str) else tuple(declared)
 
 
 def validate_arguments(schema: Mapping[str, Any], arguments: Mapping[str, Any]) -> dict:
@@ -287,11 +364,22 @@ def validate_arguments(schema: Mapping[str, Any], arguments: Mapping[str, Any]) 
                 f"the schema for {name!r} uses keyword(s) {sorted(extra_keywords)} "
                 "this validator does not implement"
             )
-        expected = spec["type"]
-        if not _TYPE_CHECKS[expected](value):
-            raise InvalidArguments(f"{name!r} must be of type {expected}")
+        expected = _declared_types(spec)
+        if not any(_TYPE_CHECKS[option](value) for option in expected):
+            raise InvalidArguments(
+                f"{name!r} must be of type {expected[0] if len(expected) == 1 else list(expected)}"
+            )
         if "enum" in spec and value not in spec["enum"]:
             raise InvalidArguments(f"{name!r} must be one of {spec['enum']}")
+        # THE PER-TYPE KEYWORDS APPLY TO A SINGLE DECLARED TYPE ONLY, and that is a
+        # decision rather than an omission: `minLength` on a `["string", "object"]`
+        # property would silently not apply to half its admissible values, which is the
+        # "an unknown keyword must not become no constraint" failure one level up.
+        # `_validate_tool` refuses a union-typed property that declares any of them.
+        if len(expected) > 1:
+            accepted[name] = value
+            continue
+        (expected,) = expected  # type: ignore[assignment]
         if expected == "string":
             if len(value) < spec.get("minLength", 0):
                 raise InvalidArguments(
@@ -345,6 +433,12 @@ _RUN_ID = {
     "minLength": 1,
     "maxLength": 128,
     "description": "The run's id, as returned by isaac_list_runs.",
+}
+_PROPOSAL_ID = {
+    "type": "string",
+    "minLength": 1,
+    "maxLength": 128,
+    "description": "The proposal's id, as returned by isaac_list_proposals.",
 }
 
 #: THE ONE SENTENCE EVERY TOOL WHOSE OPERATION RETURNS `pending_page` HAS TO SAY.
@@ -632,6 +726,103 @@ async def _inspect_evidence(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOu
     return _settle("get_evidence", result)
 
 
+async def _list_proposals(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    query = {k: v for k, v in args.items() if k != "experiment_id"}
+    result = await ctx.client.call(
+        "list_proposals",
+        path_params={"experiment_id": args["experiment_id"]},
+        query=query,
+    )
+    return _settle("list_proposals", result)
+
+
+async def _get_proposal(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    result = await ctx.client.call(
+        "get_proposal",
+        path_params={
+            "experiment_id": args["experiment_id"],
+            "proposal_id": args["proposal_id"],
+        },
+    )
+    return _settle("get_proposal", result)
+
+
+async def _get_changes(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    query = {k: v for k, v in args.items() if k != "experiment_id"}
+    result = await ctx.client.call(
+        "get_changes",
+        path_params={"experiment_id": args["experiment_id"]},
+        query=query,
+    )
+    return _settle("get_changes", result)
+
+
+#: ~~``_PROPOSAL_ACK_KEYS``~~ — **A CLOSED PROJECTION OF THE CREATED PROPOSAL, BUILT ON
+#: 2026-09-01 AND REMOVED THE SAME DAY. The removal is recorded rather than reverted
+#: silently, because the projection WORKED and was still the wrong thing to keep.**
+#:
+#: It existed for exactly one reason: ``isaac_propose_field_value`` briefly cost
+#: ``PROPOSALS_WRITE`` alone, so its result had to be safe for a caller holding no read
+#: permission. An independent review confirmed the build was genuine — a key added to
+#: ``proposals.to_state`` could not leak through it, because the payload was constructed
+#: from the list rather than filtered against it. Then the same review measured that the
+#: FAILURE branch two lines above forwarded the route's refusal body whole, and that one
+#: ``412`` hands a propose-only caller the record's ``current_version``, which is all it
+#: needs to succeed on the next request. See :meth:`Tool.required_scopes` for the numbers.
+#:
+#: With the scope restored to ``{READ, PROPOSALS_WRITE}`` the projection guards NOTHING:
+#: the caller holds ``READ``, and every key it withheld is one ``isaac_get_proposal``
+#: away. Keeping it would have left a construction that LOOKS like a confidentiality
+#: boundary and is not one — the same defect ``oauth.py`` records deleting
+#: ``scopes_expressible`` for, where a distinction with no enforcement value *"was a
+#: comment, in a property, that somebody would eventually delete"*. It also cost an agent
+#: a round trip to confirm its span landed on the right words.
+#:
+#: So this handler now does what the other thirteen do: forward the route's own body
+#: through :func:`_settle`. **Do not rebuild the projection as a security measure without
+#: first re-reading the refusal-branch measurement** — the reason it failed was never the
+#: projection's quality.
+
+
+async def _propose_field_value(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    """Record one suggestion against a note, and acknowledge it without reading back.
+
+    ``client_request_key`` IS REQUIRED HERE AND OPTIONAL ON THE HTTP ROUTE, which is
+    the MCP boundary being deliberately narrower than the API it calls — the same
+    trade ``client._PATH_PARAM`` makes. Contract **DEC-13** argues it for exactly this
+    caller: *"two identical `POST`s mint two `proposal_id`s, so a retrying MCP client
+    duplicates"*, and §4 concludes that the key *"becomes load-bearing rather than
+    optional, because a retrying MCP client is exactly the case its reversal was argued
+    for."* (**DEC-13 is in §10.2; the sentence quoted here is in §4** — the MCP surface
+    lives in §4 throughout, and every citation in this slice pointed at §10.2 until it
+    was measured.) A person clicking a button in the product can see whether their proposal
+    landed; a model retrying a timed-out call cannot. Making it required is what lets
+    this tool declare ``idempotentHint: true`` truthfully instead of aspirationally.
+    """
+    body: dict[str, Any] = {
+        "note_id": args["note_id"],
+        "target_field_path": args["target_field_path"],
+        "proposed_value": args["proposed_value"],
+        "rule": args["rule"],
+        "client_request_key": args["client_request_key"],
+    }
+    for optional in ("run_id", "start_char", "end_char"):
+        if optional in args:
+            body[optional] = args[optional]
+
+    result = await ctx.client.call(
+        "create_proposal",
+        path_params={"experiment_id": args["experiment_id"]},
+        json_body=body,
+        if_match=args["if_match"],
+    )
+    # `_settle`, exactly as the other thirteen handlers do. ~~A projection used to sit
+    # here.~~ See the block above this function for what it was, why it was correct, and
+    # why it was still removed — and for the measurement that must be re-read before
+    # anyone rebuilds it.
+    return _settle("create_proposal", result)
+
+
 # --------------------------------------------------------------------------
 # The registry
 # --------------------------------------------------------------------------
@@ -660,17 +851,48 @@ async def _inspect_evidence(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOu
 #: not an unbounded schema — see :func:`_query_schema`. That is deliberate: the failure
 #: this closes was silent, and the next one should not be.
 #:
-#: KEYED ON THE BARE PARAMETER NAME, WHICH IS A KNOWN LIMIT AND NOT AN OVERSIGHT. A
-#: future ``run_id`` query parameter on an UNRELATED route would silently inherit this
-#: 128 with nobody reviewing it. That is tolerable at one entry, where the bound is the
-#: same identifier's own path-parameter bound one field over; it stops being tolerable
-#: the moment a second name is added, and at that point this should be keyed on
-#: ``(operation, parameter)``. Recorded here rather than pre-built, because a two-level
-#: map with one entry is harder to read than the limit it removes.
-_DECLARED_STRING_BOUNDS: dict[str, int] = {"run_id": _RUN_ID["maxLength"]}
+#: ~~KEYED ON THE BARE PARAMETER NAME~~ — **RE-KEYED ON ``(operation, parameter)`` ON
+#: 2026-09-01, WHICH IS WHAT THE PREVIOUS COMMENT SAID TO DO AT THIS EXACT POINT.** It
+#: read: *"That is tolerable at one entry … it stops being tolerable the moment a second
+#: name is added, and at that point this should be keyed on ``(operation, parameter)``.
+#: Recorded here rather than pre-built, because a two-level map with one entry is harder
+#: to read than the limit it removes."* Two names were added, so the limit is removed
+#: rather than inherited — a ``cursor`` on some future route must not silently acquire
+#: the change feed's reviewed 256.
+#:
+#: EVERY BOUND IS DERIVED FROM SOMETHING, NEVER PICKED:
+#:
+#: * ``("list_runs", "q")`` is absent because the ROUTE declares ``RUN_QUERY_MAX`` and
+#:   :attr:`~.policy.QueryParameter.max_length` carries it. This map is only for a
+#:   parameter whose route declares no bound at all.
+#: * ``list_questions.run_id`` — 128, the bound this server already publishes for the
+#:   SAME identifier one field over (``_RUN_ID``), where ``client._render_path``
+#:   independently refuses anything longer. A run id this rejects is one no MCP tool
+#:   could address anyway.
+#: * ``list_proposals.after`` — 128, for the identical reason: ``after`` is a proposal
+#:   id, minted by the same ``new_record_id()`` as a record and a run, and the same
+#:   ``_PATH_PARAM`` predicate refuses anything but 26 of ``[0-9A-Z]`` when the same id
+#:   appears as ``get_proposal``'s path parameter.
+#: * ``get_changes.cursor`` — 256. MEASURED rather than guessed: a cursor for the
+#:   longest shape this server can mint (a 12-digit sequence position, the longest kind
+#:   name ``proposal``, a 26-character entity id and a full scope digest) is **127**
+#:   characters, so 256 is a shade over 2× headroom. Command::
+#:
+#:       from isaac_api import change_feed as cf
+#:       len(cf.encode_cursor((999999999999, "proposal", "0" * 26),
+#:                            scope=cf.record_scope_tag("0" * 26, "0" * 26)))
+#:
+#:   Headroom matters in one direction only and this is the direction: a bound BELOW a
+#:   cursor the server actually issues would refuse a legitimate page walk at this
+#:   boundary, and the agent could never advance.
+_DECLARED_STRING_BOUNDS: dict[tuple[str, str], int] = {
+    ("list_questions", "run_id"): _RUN_ID["maxLength"],
+    ("list_proposals", "after"): _EXPERIMENT_ID["maxLength"],
+    ("get_changes", "cursor"): 256,
+}
 
 
-def _query_schema(parameters, *, base: dict | None = None) -> dict:
+def _query_schema(operation_id: str, parameters, *, base: dict | None = None) -> dict:
     """An ``experiment_id`` schema plus whatever query parameters the ROUTE actually has.
 
     See ``policy._query_parameters`` for why the set is derived rather than written down.
@@ -706,12 +928,15 @@ def _query_schema(parameters, *, base: dict | None = None) -> dict:
             # `overrides` is exempt by construction rather than by being listed. Every
             # OTHER string must carry one, from the route if the route declares one and
             # from the reviewed map if it does not. Neither: refuse, loudly, at import.
-            bound = parameter.max_length or _DECLARED_STRING_BOUNDS.get(parameter.name)
+            bound = parameter.max_length or _DECLARED_STRING_BOUNDS.get(
+                (operation_id, parameter.name)
+            )
             if bound is None:
                 raise RuntimeError(
-                    f"the query parameter {parameter.name!r} would be published as an "
-                    "unbounded string; declare a length bound on the route, or add a "
-                    "reviewed one to _DECLARED_STRING_BOUNDS"
+                    f"the query parameter {parameter.name!r} of {operation_id!r} would "
+                    "be published as an unbounded string; declare a length bound on the "
+                    "route, or add a reviewed one to _DECLARED_STRING_BOUNDS under the "
+                    "(operation, parameter) key"
                 )
             spec["maxLength"] = bound
         properties[parameter.name] = spec
@@ -720,7 +945,7 @@ def _query_schema(parameters, *, base: dict | None = None) -> dict:
 
 def _run_list_schema() -> dict:
     """``isaac_list_runs``'s schema, with the filters the ROUTE actually has."""
-    return _query_schema(run_list_query_parameters())
+    return _query_schema("list_runs", run_list_query_parameters())
 
 
 def _list_questions_schema() -> dict:
@@ -730,7 +955,17 @@ def _list_questions_schema() -> dict:
     ONE run of a 1,000-run record asks for that run's questions instead of the 1.78 MB
     the whole set measures.
     """
-    return _query_schema(pending_query_parameters())
+    return _query_schema("list_questions", pending_query_parameters())
+
+
+def _list_proposals_schema() -> dict:
+    """``isaac_list_proposals``'s schema, with the filters the ROUTE actually has."""
+    return _query_schema("list_proposals", proposal_list_query_parameters())
+
+
+def _changes_schema() -> dict:
+    """``isaac_get_changes``'s schema, with the parameters the ROUTE actually has."""
+    return _query_schema("get_changes", changes_query_parameters())
 
 
 def _tools() -> tuple[Tool, ...]:
@@ -1374,6 +1609,351 @@ def _tools() -> tuple[Tool, ...]:
             read_only=True,
             idempotent=True,
         ),
+        # ==================================================================
+        # THE INGESTION-PROPOSAL SURFACE
+        # ==================================================================
+        #
+        # Four tools, and the one that is NOT here is the point of the section:
+        # there is no accept tool, no review tool, no supersede tool and no
+        # withdraw tool, at any scope, and `POST .../proposals/{id}/review` is not
+        # in `policy.OPERATIONS` at all. See the block above `list_proposals` there.
+        Tool(
+            name="isaac_propose_field_value",
+            title="Propose a value for a record field",
+            description=(
+                "Record ONE suggestion against a record: a value, the official field "
+                "path it is for, and the deterministic rule that produced them, cited "
+                "to the note the content was read from. This is the channel for "
+                "model-derived output, and it is safe because of what it is NOT.\n\n"
+                # THE SENTENCE IS THE ROUTE'S OWN, QUOTED VERBATIM rather than
+                # paraphrased, so the two published contracts cannot drift by wording.
+                # `test_mcp_and_route_descriptions_agree.py` pins it in BOTH — the file
+                # that exists because `isaac_create_run` once told a person the truth
+                # and told a language model the reverse.
+                "**IT WRITES NO SCIENTIFIC VALUE AND MINTS NO EVIDENCE.** "
+                "Creating a proposal leaves every field of the record, and of "
+                "every run, byte-for-byte unchanged. A proposal is stored outside the "
+                "draft, so it is inert to export and to submission: it cannot make a "
+                "record exportable, cannot make one un-exportable, and does not appear "
+                "in any exported document. Every proposal carries `verified: false`, "
+                "`is_evidence: false`, `is_field_value: false` and a `status` of "
+                "`ingestion_proposal` — constants of the shape, not fields a request "
+                "can set. Do not describe a proposal to a scientist as a recorded "
+                "value; it is a suggestion awaiting their judgement.\n\n"
+                "**ONLY A PERSON CAN ACCEPT ONE, AND THIS SERVER HAS NO TOOL THAT "
+                "DOES.** Acceptance is what writes the value, through the same routes "
+                "manual entry uses, and it requires a trusted human identity. There is "
+                "no accept, review, supersede or withdraw tool here at any permission "
+                "level, and none will be added. After proposing, stop and tell the "
+                "scientist; use `isaac_get_proposal` or `isaac_get_changes` to see "
+                "whether they have answered.\n\n"
+                "`note_id` is REQUIRED and must name a note the record already holds. "
+                "The verbatim words stay on that note, which survives every outcome "
+                "including rejection, so refusing a proposal can never destroy the "
+                "content behind it. **THIS SERVER HAS NO TOOL THAT CREATES A NOTE** — "
+                "notes are captured in the product — so a record with no note cannot "
+                "yet be proposed against, and `note_id` is never invented. "
+                "`start_char`/`end_char` are optional, travel together, and index the "
+                "note's verbatim text; the excerpt is derived on read rather than "
+                "copied, so an edited note leaves no stale quotation.\n\n"
+                "`target_field_path` is a closed list published in this tool's own "
+                "schema — the paths this build can actually place a value at. It is a "
+                "SUBSET of the official ISAAC schema's fields, and a path outside it "
+                "says only that this application has no write route for it; it says "
+                "nothing about the official schema, which may well define the field. "
+                "`run_id` is required for every target except the record-scoped ones, "
+                "refused for those, and NEVER inferred from the only run that happens "
+                "to exist.\n\n"
+                "`rule` must be the SENTENCE that produced this value and this target "
+                "— not an identifier — so a person can check the proposal without a "
+                "lookup table. An unexplained proposal is a guess wearing a field "
+                "name. State what the source actually said; do not state a unit, a "
+                "confidence, a probability or an uncertainty, each of which this API "
+                "refuses BY NAME with its reason.\n\n"
+                "`client_request_key` is REQUIRED HERE, and it is optional on the "
+                "HTTP API. That is deliberate: a person clicking a button can see "
+                "whether their proposal landed and an agent retrying a timed-out call "
+                "cannot, so exactly-once is made a property of the call rather than of "
+                "your care. Send the SAME key when you retry and you get the SAME "
+                "proposal back with `deduplicated: true` and nothing minted; send a "
+                "new key and you have made a second, separate suggestion.\n\n"
+                "`if_match` is the RECORD's current `etag` from "
+                "`isaac_get_experiment`. Storing a proposal rewrites the record, so "
+                "the precondition is checked BEFORE the deduplication branch: a retry "
+                "carrying the etag you held before your first attempt is refused "
+                "`412`, and the remedy is to read the record again and retry with the "
+                "same `client_request_key`.\n\n"
+                "**READ `deduplicated` BEFORE YOU REPORT WHAT HAPPENED.** `false` "
+                "means this request minted the proposal in the result. `true` means a "
+                "proposal with your `client_request_key` was already on the record, so "
+                "nothing was minted and the EXISTING one is returned — its value, "
+                "target and rule may differ from what you just sent, and it may already "
+                "have been accepted or refused by a person. Do not describe a "
+                "deduplicated result as a suggestion you just made.\n\n"
+                "Attribution: this API records the proposal as `unattributed` with no "
+                "`subject`. It never attributes a proposal to a scientist, and an "
+                "acceptance later carries a different, separately-established "
+                "identity. Do not tell anyone a proposal was made in their name."
+            ),
+            scope=Scope.PROPOSALS_WRITE,
+            operation_ids=("create_proposal",),
+            input_schema=_object_schema(
+                {
+                    "experiment_id": dict(_EXPERIMENT_ID),
+                    "if_match": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": (
+                            "The RECORD's current ETag, exactly as isaac_get_experiment "
+                            "returned it. It must be a validator a read returned: `*` "
+                            "is refused, because it would apply this write whatever the "
+                            "record now says and overwrite a change made since your "
+                            "last read without reporting a conflict."
+                        ),
+                    },
+                    "note_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "description": (
+                            "Required. A note this record already holds, whose words "
+                            "this value was read from. This server has no tool that "
+                            "creates a note."
+                        ),
+                    },
+                    "target_field_path": {
+                        "type": "string",
+                        # THE CLOSED SET TRAVELS INTO THE SCHEMA, derived from the route
+                        # at import (`policy.proposal_target_field_paths`). A path this
+                        # build cannot write is refused HERE, naming every permitted
+                        # one, instead of reaching the route and coming back as a `422`
+                        # a model has to interpret. A closed set needs no `maxLength` —
+                        # its longest member is the bound.
+                        "enum": list(proposal_target_field_paths()),
+                        "description": (
+                            "Required. The official field path this value is for. The "
+                            "list is this build's own writable subset of the official "
+                            "ISAAC schema's paths; a path absent from it is a "
+                            "limitation of this application, not a statement about the "
+                            "schema."
+                        ),
+                    },
+                    "proposed_value": {
+                        # ANY JSON VALUE EXCEPT NULL, spelled as a list of types rather
+                        # than as an invented `"any"` or as an omitted `type` — see
+                        # `_declared_types`. The eighteen writable paths hold strings,
+                        # numbers and structured values, and the route refuses `null`
+                        # because a null would CLEAR the field if it were applied.
+                        #
+                        # NO LENGTH BOUND IS PUBLISHED HERE AND THAT IS DELIBERATE. The
+                        # route bounds `proposed_value` and `rule` TOGETHER, in BYTES,
+                        # and refuses `422 value_too_large` carrying the ceiling and the
+                        # measured size — without echoing the value back. A per-property
+                        # character bound would be a second, weaker copy of a joint
+                        # byte ceiling, and this argument travels in a request BODY, so
+                        # none of the URL-construction failure that made an unbounded
+                        # `run_id` dangerous applies to it.
+                        "type": ["string", "number", "integer", "boolean", "object", "array"],
+                        "description": (
+                            "Required, and never null. The value being suggested, as "
+                            "the source stated it. Do not convert units, round, or "
+                            "normalise: propose what was said and say so in `rule`."
+                        ),
+                    },
+                    "rule": {
+                        "type": "string",
+                        "minLength": 1,
+                        # DERIVED FROM THE ROUTE'S OWN JOINT CEILING, as an upper bound
+                        # only: a UTF-8 string of n characters is at least n bytes, so a
+                        # `rule` longer than this cannot fit under the joint ceiling and
+                        # refusing it here refuses nothing the route would have taken.
+                        "maxLength": proposal_value_byte_ceiling(),
+                        "description": (
+                            "Required. The sentence that produced this value and this "
+                            "target — the sentence, not an identifier. State no unit, "
+                            "confidence, probability or uncertainty; each is refused by "
+                            "name."
+                        ),
+                    },
+                    "client_request_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "description": (
+                            "Required here, though optional on the HTTP API. Retrying "
+                            "with the same key returns the SAME proposal and mints "
+                            "nothing; a new key makes a second, separate suggestion."
+                        ),
+                    },
+                    "run_id": {
+                        **_RUN_ID,
+                        "description": (
+                            "The run this proposal is about. Required for every target "
+                            "except a record-scoped path, refused for those, and never "
+                            "inferred from the only run that exists."
+                        ),
+                    },
+                    "start_char": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Optional, and travels with `end_char`. An offset into the "
+                            "note's verbatim text."
+                        ),
+                    },
+                    "end_char": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Optional, and travels with `start_char`. A span outside "
+                            "the note is refused rather than clamped, because a clamped "
+                            "excerpt would quote words nobody wrote."
+                        ),
+                    },
+                },
+                [
+                    "experiment_id",
+                    "if_match",
+                    "note_id",
+                    "target_field_path",
+                    "proposed_value",
+                    "rule",
+                    "client_request_key",
+                ],
+            ),
+            handler=_propose_field_value,
+            read_only=False,
+            # TRUE, AND EARNED RATHER THAN ASSERTED: `client_request_key` is REQUIRED by
+            # this tool's schema, so the same call twice returns the same proposal.
+            # `isaac_create_run` declares `False` for the opposite reason — it has no
+            # such key, so the same call twice adds two runs.
+            idempotent=True,
+        ),
+        Tool(
+            name="isaac_list_proposals",
+            title="List a record's proposals",
+            description=(
+                "One WINDOW of the suggestions stored against a record — each a "
+                "proposed value, the official field path it is for, the rule that "
+                "produced it, and the note it came from. Read-only.\n\n"
+                "**THIS LIST IS BOUNDED BY DEFAULT AND THE OTHER LISTS IN THIS SERVER "
+                "ARE NOT.** Omitting `limit` returns a window, not everything. Read "
+                "`total` for how many the record HOLDS, `returned` for how many you "
+                "were given, and page with `after` set to the previous response's "
+                "`next_cursor` while `has_more` is true. Never infer the record's "
+                "state from the length of this list.\n\n"
+                "CLOSED PROPOSALS ARE INCLUDED. Accepting, rejecting, superseding and "
+                "withdrawing are STATES reached by explicit acts, not deletions, and "
+                "this API has no operation that deletes a proposal. Filter with "
+                "`state` if you want only the open ones. `by_state` counts every state "
+                "over the whole record, not over this window.\n\n"
+                "`target_stale` and `still_current` are DERIVED on every read and "
+                "never stored. `target_stale: true` means the target moved since the "
+                "proposal was made, so accepting it now would be accepting a judgement "
+                "about content that is no longer there. `still_current` is for an "
+                "ACCEPTED proposal and says whether the target still holds what the "
+                "acceptance wrote. Either is `null` when it cannot be answered — which "
+                "happens when the run the proposal names has been removed — and `null` "
+                "is NOT `false`.\n\n"
+                "`unreadable_entries` counts stored entries this build cannot present "
+                "as proposals. They are preserved verbatim and counted rather than "
+                "rendered, because this server can neither say what one contains "
+                "without inventing it nor drop it. A non-zero count means the record "
+                "holds more than this list shows.\n\n"
+                "A proposal is not a value and not evidence: every entry carries "
+                "`verified: false`, `is_evidence: false` and `is_field_value: false`, "
+                "and `applied` is true only in state `accepted`."
+            ),
+            scope=Scope.READ,
+            operation_ids=("list_proposals",),
+            input_schema=_list_proposals_schema(),
+            handler=_list_proposals,
+            read_only=True,
+            idempotent=True,
+        ),
+        Tool(
+            name="isaac_get_proposal",
+            title="Read one proposal",
+            description=(
+                "One proposal in full: the value it proposes, the field path it is "
+                "for, the rule, the note it cites, the excerpt of that note, its "
+                "state, and the complete history of the acts performed on it. "
+                "Read-only.\n\n"
+                "A REJECTED, SUPERSEDED OR WITHDRAWN PROPOSAL IS RETURNED NORMALLY — "
+                "those are states, not deletions, and the note behind the proposal is "
+                "untouched by every outcome. `accepted_by` is read off the accept act; "
+                "its `subject` is `null` whenever that act was unattributed, and no "
+                "placeholder name is ever substituted, so `null` there means \"nobody "
+                "is recorded\" and never \"somebody, unnamed\".\n\n"
+                "`target_stale` and `still_current` are derived on THIS read and are "
+                "never stored; either is `null` when the run the proposal names has "
+                "been removed. The `etag` is the RECORD's current revision — proposals "
+                "have no validator of their own, because a proposal lives inside the "
+                "record's own document.\n\n"
+                "This tool cannot accept, reject, supersede or withdraw anything. "
+                "Reading a proposal changes nothing about it."
+            ),
+            scope=Scope.READ,
+            operation_ids=("get_proposal",),
+            input_schema=_object_schema(
+                {
+                    "experiment_id": dict(_EXPERIMENT_ID),
+                    "proposal_id": dict(_PROPOSAL_ID),
+                },
+                ["experiment_id", "proposal_id"],
+            ),
+            handler=_get_proposal,
+            read_only=True,
+            idempotent=True,
+        ),
+        Tool(
+            name="isaac_get_changes",
+            title="Read a record's change feed",
+            description=(
+                "**A COALESCING STATE FEED, NOT AN EVENT LOG.** It reports that an "
+                "entity of this record is at a version later than your cursor. It does "
+                "NOT report every act that happened: ten edits to one run between two "
+                "reads are ONE entry, and nothing here can tell you how many there "
+                "were, in what order, or what the intermediate values were. That is a "
+                "property of the storage — this application keeps no event table — and "
+                "not a limit of this tool.\n\n"
+                "A `proposal` entry is the clearest case. It says a proposal is at a "
+                "later version than your cursor and what lifecycle `state` it is in "
+                "NOW; it does NOT say that an acceptance, a rejection or a withdrawal "
+                "happened, who performed it, or in what order. Read the proposal "
+                "itself with `isaac_get_proposal` for anything more. A proposal entry "
+                "carries no proposed value, no target path, no rule and no note text "
+                "by design.\n\n"
+                "**Omit `cursor` to read from the start of the order** — that is the "
+                "resync path and is always available. Then send back the "
+                "`next_cursor` you were given. `next_cursor` is ALWAYS present, "
+                "including on an empty page, where it is the position you were already "
+                "at, so a poller that keeps returning what it was handed makes no "
+                "progress and loses nothing.\n\n"
+                "**DO NOT CONSTRUCT OR PARSE A CURSOR.** It is opaque by contract, its "
+                "payload is versioned, and the server is free to change its shape — a "
+                "cursor from an older version is REFUSED (`422`), never reinterpreted. "
+                "A cursor is also bound to one record and one workspace scope, so one "
+                "minted elsewhere is refused rather than answered from the wrong order. "
+                "There are exactly two refusal reasons, `not_decodable` and "
+                "`wrong_feed`; a cursor cannot expire. The remedy for both costs one "
+                "request — ask again with no cursor at all.\n\n"
+                "`limit` is CLAMPED to the server's range rather than refused, and the "
+                "value actually used is reported back as `limit`, so a clamp is never "
+                "silent. `kinds` reports the entity kinds this feed serves — read it "
+                "from the response rather than assuming a set. A coordinate a kind does "
+                "not carry is ABSENT from its entry rather than null.\n\n"
+                "Read-only: nothing here writes, composes a draft, resolves "
+                "inheritance, runs an export dry run, or asks what is pending."
+            ),
+            scope=Scope.READ,
+            operation_ids=("get_changes",),
+            input_schema=_changes_schema(),
+            handler=_get_changes,
+            read_only=True,
+            idempotent=True,
+        ),
     )
 
 
@@ -1421,10 +2001,27 @@ def _validate_tool(tool: Tool) -> None:
                 f"tool {tool.name!r} argument {name!r} uses schema keyword(s) "
                 f"{sorted(unsupported)} the argument validator does not implement"
             )
-        if spec.get("type") not in _TYPE_CHECKS:
+        declared = spec.get("type")
+        options = (
+            (declared,)
+            if isinstance(declared, str)
+            else tuple(declared)
+            if isinstance(declared, (list, tuple)) and declared
+            else ()
+        )
+        if not options or any(option not in _TYPE_CHECKS for option in options):
             raise RuntimeError(
                 f"tool {tool.name!r} argument {name!r} has unsupported type "
-                f"{spec.get('type')!r}"
+                f"{declared!r}"
+            )
+        if len(options) > 1 and (
+            set(spec) & {"minimum", "maximum", "minLength", "maxLength", "minProperties"}
+        ):
+            raise RuntimeError(
+                f"tool {tool.name!r} argument {name!r} declares more than one type and "
+                "also a per-type keyword; that keyword would apply to some admissible "
+                "values and silently not to others, which is exactly the "
+                "unknown-keyword-becomes-no-constraint failure this validator refuses"
             )
     for name in schema.get("required", ()):
         if name not in schema.get("properties", {}):

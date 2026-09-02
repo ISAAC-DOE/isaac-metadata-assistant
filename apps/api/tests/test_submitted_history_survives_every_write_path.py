@@ -748,6 +748,23 @@ def test_the_read_only_posts_really_are_read_only(client, db):
         assert _history(db) == history, path
 
 
+def _a_note(client, eid: str) -> str:
+    """Capture one note and return its id. A proposal must cite a note it holds.
+
+    Captured through the ordinary HTTP route rather than built in the store, because
+    the point of the case below is that the WHOLE path a proposal takes leaves a
+    submitted record's history alone — and capturing a note is itself a write to the
+    experiment document.
+    """
+    response = client.post(
+        f"/api/experiments/{eid}/notes",
+        json={"text": "the cell sat at 301 K throughout", "source": "typed_note"},
+        headers={"If-Match": _etag(client, eid)},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["note"]["id"]
+
+
 def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
     """THE SAME HANDLERS THROUGH THE OTHER CLIENT.
 
@@ -773,11 +790,33 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
         "answer_record_question",
         "answer_run_question",
         "correct_run_field",
+        # THE SEVENTH, added 2026-09-01. `create_proposal` writes into
+        # `state["proposals"]`, which is OUTSIDE `draft` — so it moves the record's
+        # `rev` and must still leave every submitted artifact and every history row
+        # exactly where they are. It is driven below rather than exempted: an
+        # operation whose whole safety argument is "it touches nothing authoritative"
+        # is precisely the one this sweep must exercise.
+        "create_proposal",
     }, f"the MCP mutating surface changed: {sorted(mutating)}"
-    for forbidden in ("submit", "discard", "export", "resolve_conflict"):
+    for forbidden in (
+        "submit",
+        "discard",
+        "export",
+        "resolve_conflict",
+        # THE PROPOSAL SURFACE PUBLISHES A CREATE AND A READ AND NEVER THE REVIEW.
+        # Reviewing is what ACCEPTS — it writes a scientific value and it is the one
+        # transition requiring a trusted human — so its absence is asserted here
+        # alongside submit and discard, in the same sweep, rather than only in the
+        # MCP suite.
+        "review_proposal",
+        "accept_proposal",
+    ):
         assert forbidden not in OPERATIONS, (
             f"MCP now publishes {forbidden!r}; this file must drive it before it ships"
         )
+    assert not any(
+        "/review" in op.path_template for op in OPERATIONS.values()
+    ), "an MCP operation now targets a review route"
 
     # THE VALIDATORS ARE FETCHED LAZILY, one call before it is used. Capturing all six
     # up front is the mistake this test made first: each accepted write advances the
@@ -839,8 +878,36 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
                 {"confirmed_by_user": True, "answers": {"qc": copy.deepcopy(QC)}},
             ),
         ),
+        (
+            # A REAL PROPOSAL, NOT A REFUSAL. It cites a note captured just above and
+            # names a run-scoped target with the run, so it LANDS — which is the only
+            # version of this case worth having: a create refused for a bad body would
+            # assert the invariant over a request that never reached the store.
+            "create_proposal",
+            # THE NOTE IS CAPTURED BEFORE THE ETAG IS READ, and the first version of
+            # this case had it the other way round. A tuple literal evaluates left to
+            # right, so `_etag(...)` ran first, `_a_note(...)` then advanced the record,
+            # and the create met `412` — landing nowhere while `reached >= 4` stayed
+            # green off the four run-level writes. The `landed` assertion below is what
+            # caught it, which is why it is named rather than counted.
+            lambda: (
+                lambda note_id: (
+                    {"experiment_id": eid},
+                    _etag(client, eid),
+                    {
+                        "note_id": note_id,
+                        "target_field_path": "context.temperature_K",
+                        "proposed_value": 301.0,
+                        "rule": "the transcript said the cell sat at 301 K",
+                        "run_id": run_a,
+                        "client_request_key": "mcp-history-sweep-1",
+                    },
+                )
+            )(_a_note(client, eid)),
+        ),
     )
     reached = 0
+    landed: set[str] = set()
     for operation_id, build in calls:
         path_params, validator, body = build()
         result = asyncio.run(
@@ -849,11 +916,23 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
         assert result.status < 500, (operation_id, result.status, str(result.body)[:300])
         if result.status < 300:
             reached += 1
+            landed.add(operation_id)
         assert _artifacts(eid) == artifacts, f"MCP {operation_id} rewrote a published record"
         _assert_no_row_moved(db, history, f"MCP {operation_id}")
     assert reached >= 4, (
         "at least four MCP writes must genuinely land, or this test is asserting the "
         "invariant over a set of refusals"
+    )
+    # NAMED RATHER THAN LEFT TO THE COUNT. `reached >= 4` is satisfied by the four
+    # run-level writes alone, so the newest operation could be refused for a bad body
+    # and this file would still be green while claiming to cover it — which is the
+    # exact shape of the failure the paragraph above `calls` records.
+    assert "create_proposal" in landed, (
+        "the MCP proposal create did not land, so the invariant below is being "
+        "asserted over a refusal"
+    )
+    assert ws.load_experiment(eid).proposals, (
+        "the proposal was reported stored and is not"
     )
     assert len(db.submissions) == len(history["submissions"]), (
         "no MCP operation may record a submission"

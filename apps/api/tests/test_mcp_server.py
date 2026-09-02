@@ -96,6 +96,23 @@ def write_only(app, session_id) -> McpServer:
     return _server(app, session_id, Scope.DRAFT_WRITE)
 
 
+@pytest.fixture()
+def proposer(app, session_id) -> McpServer:
+    """Read plus the proposal-write scope, and deliberately NOT ``DRAFT_WRITE``.
+
+    This is the realistic grant for a model-derived channel: it may read the record and
+    record a suggestion, and it may not change draft content. Every case using it is
+    therefore also asserting the separation, not only the capability.
+    """
+    return _server(app, session_id, Scope.READ, Scope.PROPOSALS_WRITE)
+
+
+@pytest.fixture()
+def propose_only(app, session_id) -> McpServer:
+    """The proposal-write scope ALONE. Reaches no read tool at all."""
+    return _server(app, session_id, Scope.PROPOSALS_WRITE)
+
+
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
@@ -223,13 +240,36 @@ def test_tools_list_is_filtered_by_the_callers_scopes(reader, writer):
     # rather than inferred: the pair is only useful if exactly one of them writes.
     assert "isaac_list_questions" in read_only
     assert "isaac_list_questions" in both
-    assert len(both) == 10
+    # THE PROPOSAL CREATE IS ABSENT FROM BOTH OF THESE, and that is the point of giving
+    # it its own scope rather than folding it into `DRAFT_WRITE`: a read-write agent is
+    # not thereby a proposing agent, and a proposing agent is not thereby a draft
+    # writer. The three READ-scoped proposal tools ARE in both, because they are reads.
+    assert "isaac_propose_field_value" not in read_only
+    assert "isaac_propose_field_value" not in both
+    for name in ("isaac_list_proposals", "isaac_get_proposal", "isaac_get_changes"):
+        assert name in read_only, name
+        assert name in both, name
+    # 10 -> 13: the registry is 14 and exactly one tool costs a scope neither of these
+    # callers holds.
+    assert len(both) == 13
 
 
-def test_every_descriptor_states_the_scope_a_call_will_cost(writer):
-    for tool in rpc(writer, "tools/list")["result"]["tools"]:
-        assert tool["_isaac"]["requiredScope"] in {"isaac:read", "isaac:draft.write"}
+def test_every_descriptor_states_the_scope_a_call_will_cost(app, session_id):
+    """Over a caller granted EVERY scope, so no tool is missing from the sweep.
+
+    It used to run over the read+draft-write fixture, which was every tool at the time.
+    Since 2026-09-01 it is not: `tools/list` is filtered by the caller's grant, so that
+    caller would have swept 13 of 14 while reading as though it swept the registry.
+    """
+    everything = _server(app, session_id, *Scope)
+    listed = rpc(everything, "tools/list")["result"]["tools"]
+    assert {tool["name"] for tool in listed} == set(TOOLS)
+    for tool in listed:
+        assert tool["_isaac"]["requiredScope"] in {s.value for s in Scope}
         assert tool["inputSchema"]["additionalProperties"] is False
+        # `requiredScopes` is the COMPLETE set the server checks, and it must never
+        # understate the grant a caller needs.
+        assert tool["_isaac"]["requiredScope"] in tool["_isaac"]["requiredScopes"]
 
 
 # ==========================================================================

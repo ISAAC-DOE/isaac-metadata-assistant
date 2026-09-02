@@ -1493,18 +1493,59 @@ def test_DEC7_proposals_are_absent_from_the_mcp_reachable_detail_payload(
     assert proposals.STATE_KEY not in json.dumps(listed)
 
 
-def test_DEC7_no_mcp_operation_or_tool_reaches_a_proposal_route():
-    """§4: no new tool, and the import-time bans must keep holding.
+def test_DEC7_no_mcp_operation_or_tool_reaches_the_proposal_REVIEW_route():
+    """~~``test_DEC7_no_mcp_operation_or_tool_reaches_a_proposal_route``~~ — **INVERTED
+    ON 2026-09-01, NOT DELETED, BECAUSE IT WAS PINNING A CLAIM THE CONTRACT WITHDREW.**
 
-    ``PERMITTED_TOOL_NAMES`` is closed and ``forbidden_tool_reason`` turns "we decided
-    not to" into an ``ImportError``. Nothing here adds a name, and nothing may.
+    This asserted *"no `proposal` in any operation path, no `proposal` in any tool name,
+    and exactly ten tools"*. ``docs/ingestion-proposal-contract.md`` §4's *"MCP: no new
+    tool"* is struck in place there and amended IN §4 ITSELF, which adds four tools — a
+    create at its own ``isaac:proposals.write`` scope, two reads, and the change feed —
+    because *"the Claude voice-to-proposal workflow it authorizes is unbuildable if MCP
+    cannot create a proposal"*.
+
+    **THE HALF THAT SURVIVES IS THE HALF THAT MATTERS, AND IT IS WHAT THIS NOW PINS.**
+    §4, unstruck: *"No accept, review, supersede, withdraw, finalize, export or
+    Submit tool may exist at any scope, and `POST .../proposals/{id}/review` must never
+    appear in an MCP `OPERATIONS` entry."* So the assertion moves from "no proposal
+    route" to "no REVIEW route", and gains the ``accept``-token check that is the second,
+    independent mechanism.
+
+    A blanket ``"proposal" not in name`` would now be green only by deleting the
+    feature, which is why the substring test is replaced by an enumeration of exactly
+    which proposal operations are reachable. DEC-7's own subject — that no ``proposals``
+    key is added to the MCP-reachable experiment DETAIL payload — is unchanged and is
+    asserted by the test immediately above this one.
     """
     from isaac_api.mcp import policy
 
-    for operation in policy.OPERATIONS.values():
-        assert "proposal" not in operation.path_template
-    assert not any("proposal" in name for name in policy.PERMITTED_TOOL_NAMES)
-    assert len(policy.PERMITTED_TOOL_NAMES) == 10
+    reachable = {
+        op.id for op in policy.OPERATIONS.values() if "proposal" in op.path_template
+    }
+    assert reachable == {"list_proposals", "get_proposal", "create_proposal"}
+
+    # THE REVIEW ROUTE IS UNREACHABLE, BY PATH AND BY NAME.
+    assert not any("/review" in op.path_template for op in policy.OPERATIONS.values())
+    for banned in ("accept", "approve", "submit", "export", "finalis", "publish"):
+        assert not any(
+            banned in op.path_template.lower() for op in policy.OPERATIONS.values()
+        ), banned
+        assert not any(banned in name for name in policy.PERMITTED_TOOL_NAMES), banned
+    for name in ("isaac_accept_proposal", "isaac_review_proposal_accept"):
+        assert policy.forbidden_tool_reason(name) is not None, name
+
+    # AND THE CREATE COSTS ITS OWN SCOPE, WHICH IS NOT THE DRAFT-WRITE ONE. A proposal
+    # is not a draft write (§5 I1/I2), and giving the model-derived channel
+    # `DRAFT_WRITE` would hand it the ability to change draft content directly.
+    assert (
+        policy.OPERATIONS["create_proposal"].scope is policy.Scope.PROPOSALS_WRITE
+    )
+    assert policy.Scope.PROPOSALS_WRITE not in {
+        policy.OPERATIONS[op].scope
+        for op in policy.OPERATIONS
+        if op != "create_proposal"
+    }
+    assert len(policy.PERMITTED_TOOL_NAMES) == 14
 
 
 # --- DEC-8: still_current is derived, never stored ----------------------------

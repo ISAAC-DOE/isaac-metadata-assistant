@@ -64,6 +64,18 @@ SHARED_CLAIMS: tuple[tuple[str, str, str], ...] = (
         "THE FIRST RUN ADOPTS THE RECORD'S PER-RUN CONTENT; A LATER RUN DOES "
         "NOT.",
     ),
+    (
+        # THE HIGHEST-STAKES CLAIM THE PROPOSAL SURFACE MAKES, and the one a
+        # paraphrase would quietly weaken. `isaac_propose_field_value` is the channel
+        # for model-derived output, and it is safe only because a proposal is not a
+        # value: `proposals.py` cannot represent a confirmed one, and the proposal is
+        # stored outside `draft`, so no export and no submission signature reads it.
+        # A tool description that softened this to "does not immediately write" would
+        # be describing a different feature to the one reader who acts on it alone.
+        "isaac_propose_field_value",
+        "create_proposal",
+        "IT WRITES NO SCIENTIFIC VALUE AND MINTS NO EVIDENCE.",
+    ),
 )
 
 #: Sentences that must appear in NO tool description, with the reason they were

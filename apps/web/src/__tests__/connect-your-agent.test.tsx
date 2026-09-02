@@ -327,10 +327,15 @@ describe('Connect Your Agent — what it tells a scientist', () => {
     }
   });
 
-  it('renders both permissions with what each allows and refuses', () => {
+  it('renders every permission with what each allows and refuses', () => {
     const { container } = renderPanel();
     const text = norm(visibleText(container));
-    expect(MCP_PERMISSIONS).toHaveLength(2);
+    // ~~`toHaveLength(2)`~~ — the count moved to 3 on 2026-09-01 and is now DERIVED,
+    // because a hand-written count in a rendering test is a second copy of the enum
+    // that decides it. The equality against `scopeValues()` lives in the parity block
+    // below; here the property is that every permission the module declares is
+    // actually SHOWN, which is what a count was standing in for.
+    expect(MCP_PERMISSIONS.length).toBeGreaterThan(0);
     for (const permission of MCP_PERMISSIONS) {
       expect(text).toContain(permission.name);
       expect(text).toContain(norm(permission.allows));
@@ -685,11 +690,41 @@ const TRANSPORT_SOURCE = readFileSync(join(REPO_ROOT, 'docs/mcp-local-transport.
   .replace(/\*+/g, '')
   .replace(/\s+/g, ' ');
 
-/** Every tool name the backend permits, read off `PERMITTED_TOOL_NAMES`. */
+/**
+ * Every tool name the backend permits, read off `PERMITTED_TOOL_NAMES`.
+ *
+ * COMMENT LINES ARE STRIPPED FIRST, AND THAT IS NOT DEFENSIVE PADDING — IT IS A
+ * MEASURED DEFECT. This harvested every double-quoted string inside the frozenset's
+ * braces, so a `#` comment INSIDE the literal carrying a quoted phrase read as a tool
+ * name. On 2026-09-01 a comment quoting the phrase `three tools` from the specifying
+ * contract put a fifteenth "tool" into this list, and the failure surfaced three
+ * assertions away as `expected 14 to deeply equal 15` — naming neither the comment nor
+ * the file.
+ *
+ * It is the same lesson `declaredTools()` below already records ("the lazy unbounded
+ * gap made the whole block below forgeable by a comment"), arriving through the other
+ * parser. A comment cannot satisfy a line that has been removed, and
+ * `test_a_comment_inside_the_literal_cannot_inject_a_tool_name` is the control that
+ * keeps this honest — without it, a stricter regex that matched NOTHING would also
+ * make the bug go away.
+ */
 function permittedToolNames(): string[] {
   const block = POLICY_SOURCE.match(/PERMITTED_TOOL_NAMES = frozenset\(\s*\{([^}]*)\}/);
   if (block === null) throw new Error('cannot find PERMITTED_TOOL_NAMES in policy.py');
-  return Array.from(block[1].matchAll(/"([^"]+)"/g), (m) => m[1]).sort();
+  return namesIn(block[1]);
+}
+
+/** The quoted strings on the non-comment lines of a Python literal's body. */
+function namesIn(body: string): string[] {
+  // FROM `#` TO END OF LINE, not whole-line comments only. Stripping only whole lines
+  // left `"isaac_real_tool",  # see "isaac_accept_proposal"` injecting a name — the same
+  // defect one character narrower. Safe here because these literals are lists of
+  // identifiers and no tool name can contain a `#`.
+  return body
+    .split('\n')
+    .map((line) => line.replace(/#.*$/, ''))
+    .flatMap((line) => Array.from(line.matchAll(/"([^"]+)"/g), (m) => m[1]))
+    .sort();
 }
 
 /** Every scope string the backend can express, read off the `Scope` enum. */
@@ -706,6 +741,33 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     // lines are what stop that.
     expect(permittedToolNames().length).toBeGreaterThan(0);
     expect(scopeValues().length).toBeGreaterThan(0);
+    // Every harvested name really is a tool name, which is what the comment-stripping
+    // in `permittedToolNames` exists to make true. Before it, a `#` comment quoting a
+    // phrase from the specifying contract added a fifteenth entry and the failure
+    // surfaced three assertions away as a count mismatch.
+    for (const name of permittedToolNames()) {
+      expect(name, `${name} is not a tool name`).toMatch(/^isaac_[a-z_]+$/);
+    }
+  });
+
+  it('a comment inside the literal cannot inject a tool name', () => {
+    // THE NEGATIVE CONTROL FOR THE STRIPPING ITSELF. A regex that matched nothing
+    // would also make the injected entry disappear, so the parser is driven over a
+    // synthetic literal with a comment in it and must return the real names and only
+    // those.
+    const injected = [
+      '        "isaac_real_tool",',
+      '        # a note quoting "three tools" from a document',
+      '        "isaac_other_tool",',
+      // A TRAILING comment, which a whole-line filter walks straight past. This is the
+      // second form of the same defect and was found by review after the first was fixed.
+      '        "isaac_third_tool",  # see "isaac_accept_proposal" for why not',
+    ].join('\n');
+    expect(namesIn(injected)).toEqual([
+      'isaac_other_tool',
+      'isaac_real_tool',
+      'isaac_third_tool',
+    ]);
   });
 
   it('the capability list covers every backend tool — exactly, in both directions', () => {
@@ -720,7 +782,10 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     expect(described).toEqual(permittedToolNames());
   });
 
-  it('the two permissions are exactly the scopes the backend can express', () => {
+  it('the permissions are exactly the scopes the backend can express', () => {
+    // Not "the two". The set is derived from the enum in both places, so a scope added
+    // to `policy.py` fails here until this tab says what holding it lets an agent do —
+    // which is the whole reason this assertion is an equality.
     expect(MCP_PERMISSIONS.map((p) => p.name).sort()).toEqual(scopeValues());
   });
 
@@ -806,11 +871,58 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
    * write tool cost DRAFT_WRITE alone, this flips and the assertions below
    * change with it instead of going quietly stale.
    */
+  /**
+   * Does every tool require READ on top of its own scope? Read off the
+   * `required_scopes` property rather than assumed.
+   *
+   * COMMENTS ARE STRIPPED BEFORE THE CHECK, and that is a measured hazard rather than
+   * tidiness. The check is `source.includes(...)` over whitespace-normalised source, so
+   * a COMMENTED-OUT copy of the literal satisfies it — and this file's own convention is
+   * to strike withdrawn code in place rather than delete it, which means a commented
+   * copy of exactly this line is the likely future state. `tools.py` now carries one:
+   * the withdrawn exemption's docstring quotes the rule it replaced. Without stripping,
+   * this function would answer `true` for a `tools.py` that had stopped doing it.
+   */
   function everyToolAlsoCostsRead(): boolean {
-    const source = readFileSync(join(REPO_ROOT, 'apps/api/isaac_api/mcp/tools.py'), 'utf8')
-      .replace(/\s+/g, ' ');
-    return source.includes('return frozenset({Scope.READ, self.scope})');
+    const body = requiredScopesBody();
+    const returns = body.split('\n').filter((line) => /^\s*return\s/.test(line));
+    // EXACTLY ONE RETURN, AND IT IS THE BLANKET ONE. `includes(...)` on the whole file
+    // was the previous check and it was forgeable TWICE: a commented-out copy satisfied
+    // it (fixed by reading only this property), and — measured on 2026-09-01 — so did
+    // ADDING a branch above the blanket line, which is exactly the exemption that had
+    // just been withdrawn. A property with one unconditional answer cannot have a
+    // per-tool exception hidden in it, and that is the thing being asserted.
+    return (
+      returns.length === 1 &&
+      returns[0].trim() === 'return frozenset({Scope.READ, self.scope})'
+    );
   }
+
+  /** The source of `Tool.required_scopes`, from its `def` to the next one. */
+  function requiredScopesBody(): string {
+    const source = readFileSync(join(REPO_ROOT, 'apps/api/isaac_api/mcp/tools.py'), 'utf8');
+    const start = source.indexOf('    def required_scopes(self)');
+    if (start === -1) throw new Error('cannot find Tool.required_scopes in tools.py');
+    const next = source.indexOf('\n    def ', start + 1);
+    return source.slice(start, next === -1 ? undefined : next);
+  }
+
+  /*
+   * ~~`readExemptTools()`~~ — **A READER OF A CLOSED SET IN `policy.py` THAT EXEMPTED
+   * ONE TOOL FROM ALSO COSTING READ. BUILT AND WITHDRAWN ON 2026-09-01.**
+   *
+   * `isaac_propose_field_value` briefly cost `isaac:proposals.write` alone, so that
+   * §4's "can create a proposal and read nothing else" would be literally true. It was
+   * measured unsafe: the create route's own `412` reports the record's
+   * `current_version`, one further request then stores a proposal, and an
+   * `invalid_span` refusal reports the true length of a scientist's note. The
+   * alternative — withholding those — makes the deployment shape inert rather than
+   * safe. `mcp/policy.py` carries the transcript.
+   *
+   * So the blanket rule is restored and `everyToolAlsoCostsRead()` is the whole rule
+   * again. The record is kept because the next author to want a read-free write tool
+   * will reach for exactly this.
+   */
 
   /**
    * The tools a principal holding EXACTLY `scope` can call.
@@ -827,7 +939,15 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
    * has to be `[]` DESPITE three write tools existing rather than because nothing was
    * read.
    */
-  function callableWithOnly(scope: 'READ' | 'DRAFT_WRITE'): string[] {
+  /** Every declared tool carrying `scope`, by name. */
+  function byScopeName(scope: string): string[] {
+    return declaredTools()
+      .filter((t) => t.scope === scope)
+      .map((t) => t.name)
+      .sort();
+  }
+
+  function callableWithOnly(scope: 'READ' | 'DRAFT_WRITE' | 'PROPOSALS_WRITE'): string[] {
     const alsoRead = everyToolAlsoCostsRead();
     const held = new Set<string>([scope]);
     return declaredTools()
@@ -844,7 +964,14 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     expect(declared.length).toEqual(permittedToolNames().length);
     expect(declared.map((t) => t.name).sort()).toEqual(permittedToolNames());
     expect(declared.some((t) => t.scope === 'DRAFT_WRITE')).toBe(true);
+    // The blanket rule, and it is blanket again: an exemption existed for one commit
+    // and was withdrawn on measurement. See the note above `everyToolAlsoCostsRead`.
     expect(everyToolAlsoCostsRead()).toBe(true);
+    // ANTI-VACUITY FOR THE PARSER ITSELF: a `requiredScopesBody` that returned nothing
+    // would make the check above report `false`, not a false `true` — but it would also
+    // silently stop being about `tools.py`, so it is pinned.
+    expect(requiredScopesBody()).toContain('def required_scopes(self)');
+    expect(requiredScopesBody()).toContain('frozenset({Scope.READ, self.scope})');
 
     // THE SPLIT, NOT JUST THE INVENTORY. The four assertions above all survive a
     // parse that gets every NAME right and every SCOPE wrong, which is exactly what
@@ -862,9 +989,102 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
       'isaac_create_run',
       'isaac_update_draft',
     ]);
-    expect(byScope('READ')).toHaveLength(declared.length - 3);
-    // No third scope: a tool carrying one would be invisible to both lists above.
-    expect(new Set(declared.map((t) => t.scope))).toEqual(new Set(['READ', 'DRAFT_WRITE']));
+    // THE THIRD SCOPE IS ENUMERATED, NOT FORBIDDEN. ~~"No third scope: a tool carrying
+    // one would be invisible to both lists above."~~ — that was the right assertion
+    // while there were two, and it is the reason `isaac_propose_field_value` could not
+    // be added quietly. It is replaced by the same guarantee stated over the whole
+    // partition: every declared tool falls into exactly one named bucket, so a fourth
+    // scope is still invisible to nothing.
+    expect(byScope('PROPOSALS_WRITE')).toEqual(['isaac_propose_field_value']);
+    expect(byScope('READ')).toHaveLength(declared.length - 4);
+    expect(new Set(declared.map((t) => t.scope))).toEqual(
+      new Set(['READ', 'DRAFT_WRITE', 'PROPOSALS_WRITE']),
+    );
+    // …and the buckets really do partition the set, so none of the three lengths above
+    // is passing because a tool went missing.
+    expect(
+      byScope('READ').length + byScope('DRAFT_WRITE').length + byScope('PROPOSALS_WRITE').length,
+    ).toEqual(declared.length);
+  });
+
+  it('the proposals-write permission does not nest with draft-write, in either direction', () => {
+    /*
+     * THE SEPARATION IS THE REASON THE THIRD PERMISSION EXISTS, so it is asserted here
+     * as well as in the backend suite — this is the file that decides whether the SCREEN
+     * describes it truthfully, and a screen that implied one grant included the other
+     * would mislead exactly the scientist deciding what to hand an agent.
+     *
+     * Recording a suggestion writes nothing into a record (`state["proposals"]` sits
+     * outside `draft`, so no export and no submission signature reads it); changing a
+     * draft does. Folding them together would give every suggesting agent the ability
+     * to write values.
+     */
+    // NEITHER WRITE PERMISSION REACHES ANYTHING ALONE, which is the restored blanket
+    // rule, and neither reaches the OTHER's tool even when read is added — which is the
+    // separation this permission exists for and is what the two lines after it pin.
+    expect(callableWithOnly('PROPOSALS_WRITE')).toEqual([]);
+    expect(callableWithOnly('DRAFT_WRITE')).toEqual([]);
+    expect(byScopeName('PROPOSALS_WRITE')).toEqual(['isaac_propose_field_value']);
+    expect(byScopeName('DRAFT_WRITE')).not.toContain('isaac_propose_field_value');
+
+    const row = MCP_PERMISSIONS.find((p) => p.id === 'proposals-write');
+    expect(row, 'the proposals-write permission row is gone').toBeDefined();
+    const copy = `${row!.allows} ${row!.refuses}`;
+    // IT MUST NOT READ AS "YOUR AGENT CAN FILL THIS IN". A suggestion is not an entry,
+    // and the row has to say what it cannot do, not only what it can.
+    expect(copy).toMatch(/writes nothing into the record|not an entry/i);
+    expect(copy).toMatch(/cannot accept|deciding is yours/i);
+    expect(copy).toMatch(/cannot change a draft/i);
+    // And it must not present itself as a superset of, or a substitute for, read.
+    expect(copy).not.toMatch(/includes draft-write/i);
+    expect(copy).toMatch(/on top of read|alongside read|permits nothing on its own/i);
+    // THE WITHDRAWN CLAIM MAY NOT RETURN. It said an agent holding this permission alone
+    // "cannot finish, because writing a suggestion needs the record's current version
+    // and only a read can supply that" — measurably false, and it was the copy a
+    // scientist read before granting.
+    expect(copy).not.toMatch(/cannot finish/i);
+    expect(MCP_CONNECT_COPY.permissionsDetail).not.toMatch(/so it costs no read/i);
+  });
+
+  it('the suggestion capability row does not imply an agent can enter data', () => {
+    /*
+     * THE ROW A SCIENTIST ACTS ON. `isaac_propose_field_value` is the tool it would be
+     * easiest to describe falsely — "let your agent fill in a value" — and the backend
+     * makes that description impossible rather than merely wrong: a proposal's
+     * `verified` / `is_evidence` / `is_field_value` are read-only constants serialised
+     * on the wire, and creating one leaves every field byte-for-byte unchanged.
+     *
+     * So the row is pinned on the REFUSALS, which are the half a reader skims.
+     */
+    const row = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'propose-a-value');
+    expect(row, 'the propose capability row is gone; re-read this test').toBeDefined();
+    expect(row!.detail).toMatch(/writes nothing into the record/i);
+    expect(row!.detail).toMatch(/counts as no evidence/i);
+    expect(row!.detail).toMatch(/no agent will be able to accept one/i);
+    expect(row!.detail).toMatch(/stays a suggestion until you accept it/i);
+    // The note requirement, which is what keeps the words behind a suggestion safe
+    // whatever the scientist decides — and the fact that no tool can create that note.
+    expect(row!.detail).toMatch(/cite a note the record already holds/i);
+    expect(row!.detail).toMatch(/no agent tool can create that note/i);
+    // NEGATIVE CONTROLS: the phrasings that would make it read as data entry.
+    expect(row!.detail).not.toMatch(/fills? in (a )?value/i);
+    expect(row!.detail).not.toMatch(/enters? (a )?value/i);
+    expect(row!.detail).not.toMatch(/records? the value on/i);
+  });
+
+  it('the change-feed row does not promise a history this build cannot produce', () => {
+    /*
+     * `change_feed.py` is explicit that there is no event table, so the feed reports
+     * WHERE THINGS STAND and not WHAT HAPPENED: several edits between two reads are one
+     * entry. A row promising "see what your agent changed" would promise an audit trail
+     * that does not exist.
+     */
+    const row = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'watch-for-changes');
+    expect(row, 'the change-feed capability row is gone; re-read this test').toBeDefined();
+    expect(row!.detail).toMatch(/where things stand/i);
+    expect(row!.detail).toMatch(/appear as one entry|as one entry/i);
+    expect(row!.detail).toMatch(/reads only/i);
+    expect(row!.detail).not.toMatch(/every change|full history|what happened, in order/i);
   });
 
   it('draft-write alone permits NOTHING, and the copy for it says so', () => {

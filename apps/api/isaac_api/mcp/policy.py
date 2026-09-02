@@ -17,10 +17,15 @@ tool, a migration tool, or anything that changes governance. A comment saying so
 is worth nothing the first time somebody adds a route. So the refusal is spread
 across four independent structures, each of which alone stops it:
 
-1. :class:`Scope` has exactly two members. There is no ``SUBMIT`` value, so a
-   tool cannot declare that it needs one and a deployment cannot grant one — the
-   permission is not a string that can be typed, it is an enum member that does
-   not exist.
+1. :class:`Scope` is a CLOSED ENUM and none of its members means "may finalise".
+   ~~"has exactly two members"~~ — **corrected 2026-09-01, when a third was added
+   (:attr:`Scope.PROPOSALS_WRITE`), and kept struck rather than reworded because a
+   reader who trusts a count stops checking the property.** The count was never the
+   guarantee; the CLOSEDNESS is. There is no ``SUBMIT`` value, so a tool cannot
+   declare that it needs one and a deployment cannot grant one — the permission is
+   not a string that can be typed, it is an enum member that does not exist.
+   ``test_mcp_boundaries.test_a_scope_named_submit_cannot_be_expressed_at_all``
+   enumerates the members rather than counting them.
 2. :data:`OPERATIONS` is a closed table of ``(method, path)`` pairs. The client
    in ``client.py`` takes an operation *id* and looks it up here; it will not
    issue a request that is not in this table, so a tool cannot reach a route by
@@ -42,6 +47,13 @@ WHY THE SCOPES DO NOT NEST
 and it is also how a caller ends up holding a permission nobody granted, so a
 deployment that wants a read-write agent grants both explicitly and a reader that
 was never granted the write scope cannot acquire it by being upgraded.
+
+``PROPOSALS_WRITE`` (added 2026-09-01) does not nest with either of them, in
+either direction, and that is the reason it exists rather than a property it
+happens to have: an agent that may record a SUGGESTION must not thereby be able to
+change draft content, and an agent that may change draft content must not silently
+acquire the suggestion channel. Three scopes, no implications, every grant
+explicit.
 """
 
 from __future__ import annotations
@@ -61,17 +73,28 @@ __all__ = [
     "FORBIDDEN_TOOL_TOKENS",
     "OPERATIONS",
     "PERMITTED_TOOL_NAMES",
+    "WRITE_SCOPES",
     "Operation",
     "Scope",
+    "changes_query_parameters",
     "forbidden_tool_reason",
     "parse_scope",
     "pending_query_parameters",
+    "proposal_list_query_parameters",
+    "proposal_target_field_paths",
+    "proposal_value_byte_ceiling",
     "run_list_query_parameters",
 ]
 
 
 class Scope(Enum):
-    """Every permission this server can express. There are two, on purpose.
+    """Every permission this server can express. A closed set, on purpose.
+
+    ~~"There are two, on purpose."~~ — **there are three since 2026-09-01, and the
+    old sentence is struck rather than edited because this file has twice made a
+    COUNT carry a guarantee that belongs to the CLOSEDNESS.** What is on purpose,
+    and is unchanged, is that the set is closed, that no member means "may
+    finalise", and that no member implies another.
 
     The string values are namespaced because a hosted OAuth binding will hand
     them to a token issuer as OAuth scope strings, and an unnamespaced ``read``
@@ -85,6 +108,38 @@ class Scope(Enum):
     #: operations it unlocks are enumerated in :data:`OPERATIONS` and none of
     #: them mints an official record.
     DRAFT_WRITE = "isaac:draft.write"
+    #: Record an ingestion PROPOSAL — a suggestion awaiting a person's judgement.
+    #:
+    #: WHY IT IS NOT ``DRAFT_WRITE``, which is the whole reason it exists.
+    #: ``DRAFT_WRITE`` changes draft content directly; this changes nothing a
+    #: draft, an export or a submission reads. ``docs/ingestion-proposal-contract.md``
+    #: §5 **I1** and **I2** make a proposal inert to ``export.transform`` and to
+    #: ``submissions.content_signature``, and §7 puts it at ``state["proposals"]``,
+    #: OUTSIDE ``draft``, so the inertness is structural rather than asserted. That
+    #: inertness is precisely what makes this the safe channel for model-derived
+    #: output — and giving that channel ``DRAFT_WRITE`` would hand it the unsafe one
+    #: alongside. Contract §4: *"The model-derived channel gets the weakest scope
+    #: that works."*
+    #:
+    #: IT UNLOCKS EXACTLY ONE OPERATION, ``create_proposal``. It unlocks no read,
+    #: no draft write, and — permanently — no acceptance: reviewing a proposal is
+    #: not in :data:`OPERATIONS` at any scope, and ``accept`` is in
+    #: :data:`FORBIDDEN_TOOL_TOKENS`, so the name for it is an ``ImportError``.
+    #:
+    #: **IT IS GRANTED ALONGSIDE ``READ``, NOT INSTEAD OF IT, AND THAT IS A
+    #: CORRECTION.** §4's table concludes *"a deployment granting only
+    #: `isaac:proposals.write` can create a proposal and read nothing else"*, and
+    #: this scope was briefly built to satisfy that literally. **Measured, it is
+    #: not achievable**: the create route's precondition is the RECORD's ``ETag``,
+    #: the route's own ``412`` discloses ``current_version``, and one further
+    #: request then stores a proposal — so the propose-only shape leaks and
+    #: bootstraps, while withholding the disclosure would make it inert instead.
+    #: ``tools.Tool.required_scopes`` carries the transcript. The clause is
+    #: **reported to the contract's owner as needing amendment** and is not edited
+    #: from here. What the scope is FOR is untouched and is the whole of its value:
+    #: it separates *may propose* from ``DRAFT_WRITE``'s *may change draft content
+    #: directly*, so a suggesting agent never acquires the ability to write values.
+    PROPOSALS_WRITE = "isaac:proposals.write"
 
 
 def parse_scope(raw: str) -> Scope | None:
@@ -99,6 +154,17 @@ def parse_scope(raw: str) -> Scope | None:
         if scope.value == raw:
             return scope
     return None
+
+
+#: The scopes that MAY cost a mutation. Named here so the property has a definition
+#: rather than living inside :func:`_validated`'s literal and inside a test's.
+#:
+#: IT IS NOT "every scope except ``READ``", and the difference is the point. Written
+#: that way, a fourth member added tomorrow would silently become permitted to mutate
+#: by saying nothing. Written as an enumeration, a scope that is to unlock a write has
+#: to be added here — which is a reviewed edit to this file — and a scope added and
+#: forgotten unlocks nothing at all. Fail-closed on the direction that matters.
+WRITE_SCOPES = frozenset({Scope.DRAFT_WRITE, Scope.PROPOSALS_WRITE})
 
 
 #: The HTTP methods an allowlist entry may use. ``DELETE`` and ``PUT`` are absent,
@@ -175,10 +241,16 @@ FORBIDDEN_TOOL_TOKENS = frozenset(
 #: ingestion is refused deployment-wide; ``tutorial/sessions`` because session
 #: lifecycle belongs to the deployment binding, not to a tool argument.
 #:
-#: NONE of the six added verbs collides with any of the eleven permitted operation
-#: paths — checked before they were added, and re-checked continuously by
-#: ``_validated``, which refuses at import time if a permitted path ever contains
-#: one. So this costs nothing today and refuses a whole class of route tomorrow.
+#: NONE of the six added verbs collides with any permitted operation path — checked
+#: before they were added, and re-checked continuously by ``_validated``, which
+#: refuses at import time if a permitted path ever contains one. So this costs
+#: nothing today and refuses a whole class of route tomorrow.
+#:
+#: ~~"any of the eleven permitted operation paths"~~ — the count was wrong when it was
+#: written (there were thirteen) and would have gone wrong again on 2026-09-01 (there
+#: are seventeen). It is replaced by the PROPERTY, which is what ``_validated``
+#: actually enforces, for the reason ``tools.py``'s own docstring gives: *"a
+#: hand-maintained tally in a safety comment drifts"*.
 FORBIDDEN_PATH_TOKENS = frozenset(
     {
         "database",
@@ -284,6 +356,36 @@ RUN_LIST_QUERY_ALLOWLIST = frozenset({"limit", "offset", "q", "overrides", "expo
 #: over question text, and that is a different question from paging — it is the one this
 #: gate exists to stop being answered by accident.
 PENDING_QUERY_ALLOWLIST = frozenset({"run_id", "offset", "limit"})
+
+#: Proposal-list query parameters this package is permitted to expose. Same review gate,
+#: same reason.
+#:
+#: WHAT WAS REVIEWED. All three BOUND or FILTER a list the route already bounds by
+#: default — unlike ``GET .../runs`` and ``GET .../pending``, `GET .../proposals` returns
+#: a WINDOW when `limit` is omitted, deliberately (contract §10 DEC-5). `state` selects on
+#: a LIFECYCLE state from the server's own closed set, never on content: it cannot name a
+#: field, a value, a note or a scientist. `after` is a cursor a previous window returned,
+#: and one this record does not hold is REFUSED (`422 unknown_cursor`) rather than treated
+#: as the start of the list, so it cannot be used to probe for ids. `limit` carries no
+#: record content at all.
+#:
+#: THERE IS NO `q` HERE AND NONE IS PRE-APPROVED. The proposal list has no free-text
+#: selector today; listing one pre-emptively would be pre-approving a search over a
+#: scientist's own words, since a proposal's excerpt is derived from a note's verbatim
+#: text. That is the question this gate exists to stop being answered by accident.
+PROPOSAL_LIST_QUERY_ALLOWLIST = frozenset({"state", "limit", "after"})
+
+#: Change-feed query parameters this package is permitted to expose.
+#:
+#: WHAT WAS REVIEWED. `cursor` is opaque BY CONTRACT (`change_feed.encode_cursor`): it
+#: carries a version, a scope digest and a position, no record content, and a cursor
+#: minted for a different record or a different workspace scope is REFUSED rather than
+#: answered from the wrong order. `limit` is CLAMPED by the route rather than refused,
+#: and the effective value is reported back, so an agent cannot be silently truncated.
+#: Neither can name a field, select on scientific content, or widen a response: the feed
+#: serves ids, positions, timestamps and — for a proposal — a lifecycle state, and
+#: nothing else.
+CHANGES_QUERY_ALLOWLIST = frozenset({"cursor", "limit"})
 
 
 @dataclass(frozen=True)
@@ -433,6 +535,66 @@ def pending_query_parameters() -> tuple[QueryParameter, ...]:
     return _query_parameters(get_pending, PENDING_QUERY_ALLOWLIST, "pending-list")
 
 
+def proposal_list_query_parameters() -> tuple[QueryParameter, ...]:
+    """The proposal-list route's own query parameters, gated by
+    :data:`PROPOSAL_LIST_QUERY_ALLOWLIST`."""
+    from ..routes import list_proposals  # local: keeps module import order flexible
+
+    return _query_parameters(
+        list_proposals, PROPOSAL_LIST_QUERY_ALLOWLIST, "proposal-list"
+    )
+
+
+def changes_query_parameters() -> tuple[QueryParameter, ...]:
+    """The change-feed route's own query parameters, gated by
+    :data:`CHANGES_QUERY_ALLOWLIST`."""
+    from ..routes import get_changes  # local: keeps module import order flexible
+
+    return _query_parameters(get_changes, CHANGES_QUERY_ALLOWLIST, "changes")
+
+
+def proposal_target_field_paths() -> tuple[str, ...]:
+    """The official field paths a proposal may target, READ OFF THE ROUTE MODULE.
+
+    Same derivation rule as every query-parameter set here, and it matters more than
+    usual: ``routes.PROPOSAL_TARGET_PATHS`` is itself derived — the note-mappable paths
+    that some write operation in this build accepts a value at — so it WIDENS on its own
+    the day one of the seven currently-unwritable paths gains a route. Transcribing the
+    18 into a published tool schema would create a second copy free to drift, and the
+    copy that drifts is the one an external agent reads before choosing a target.
+
+    Published as a closed ``enum`` in ``isaac_propose_field_value``'s schema so a wrong
+    path is refused HERE, naming every permitted one, rather than reaching the route and
+    coming back as a ``422`` an agent has to interpret. A closed set also needs no length
+    bound — its longest member is the bound — which is why this returns the values rather
+    than a maximum.
+    """
+    from ..routes import PROPOSAL_TARGET_PATHS  # local: keeps import order flexible
+
+    return tuple(sorted(PROPOSAL_TARGET_PATHS))
+
+
+def proposal_value_byte_ceiling() -> int:
+    """The bytes ``proposed_value`` and ``rule`` may occupy TOGETHER, off the route.
+
+    Read rather than transcribed, for the reason the route itself reads it from
+    ``_MAX_NOTE_BYTES``: *"a proposal whose ceiling was lower than its source's would
+    refuse a value read out of a note this application had already accepted"*, and a
+    third copy would be free to drift from both.
+
+    IT IS A JOINT BYTE CEILING AND ``maxLength`` IS A PER-STRING CHARACTER COUNT, so
+    they are not the same quantity and this is used as an UPPER bound only. Every UTF-8
+    string of *n* characters occupies at least *n* bytes, so a ``rule`` longer than this
+    many characters cannot possibly fit under the joint ceiling — publishing it as
+    ``maxLength`` therefore refuses nothing the route would have accepted. The tighter,
+    exact check stays where it can be exact: at the route, as ``422 value_too_large``,
+    measured over the rendered pair.
+    """
+    from ..routes import _MAX_PROPOSAL_BYTES  # local: keeps import order flexible
+
+    return _MAX_PROPOSAL_BYTES
+
+
 def _bounds(query: object) -> tuple[int | None, int | None]:
     """``(ge, le)`` for a FastAPI ``Query``, wherever this version keeps them.
 
@@ -489,6 +651,14 @@ def _run_list_query_names() -> frozenset[str]:
 
 def _pending_query_names() -> frozenset[str]:
     return frozenset(p.name for p in pending_query_parameters())
+
+
+def _proposal_list_query_names() -> frozenset[str]:
+    return frozenset(p.name for p in proposal_list_query_parameters())
+
+
+def _changes_query_names() -> frozenset[str]:
+    return frozenset(p.name for p in changes_query_parameters())
 
 
 # --------------------------------------------------------------------------
@@ -641,6 +811,79 @@ def _operations() -> tuple[Operation, ...]:
             mutates=False,
             summary="The field-by-field evidence trail for a record.",
         ),
+        # THE INGESTION-PROPOSAL SURFACE, AND THE ONE OPERATION DELIBERATELY ABSENT
+        # FROM IT.
+        #
+        # `docs/ingestion-proposal-contract.md` §4 strikes its own "MCP: no new tool"
+        # in ONE direction only, and this table is where the amendment and the part
+        # that survives it both live. What is added: a bounded read of the list, a
+        # read of one, a CREATE at its own weakest-that-works scope, and the change
+        # feed that lets an agent notice a person answered.
+        #
+        # WHAT IS NOT ADDED, AND MUST NEVER BE:
+        # `POST .../proposals/{proposal_id}/review`. It is the operation that
+        # ACCEPTS — it writes a scientific value through the manual writers, and it
+        # is the one transition that requires a trusted human. Contract §4: *"No
+        # accept, review, supersede, withdraw, finalize, export or Submit tool may
+        # exist at any scope, and `POST .../proposals/{id}/review` must never appear
+        # in an MCP `OPERATIONS` entry."* Its absence from this tuple is the
+        # enforcement; `accept` in `FORBIDDEN_TOOL_TOKENS` is the second, independent
+        # one, and `test_mcp_boundaries` asserts both rather than trusting this
+        # comment.
+        #
+        # AND THE ROUTES COMMENT THAT SAYS OTHERWISE IS NOW STALE, NAMED HERE RATHER
+        # THAN LEFT FOR A READER TO TRIP OVER: `routes.py`'s section 7c opens *"NO
+        # MCP TOOL, AND NO PROPOSAL IN AN MCP-REACHABLE PAYLOAD"*. Its FIRST half is
+        # superseded by the amendment above. Its SECOND half is unchanged and still
+        # enforced — no `proposals` key is added to `GET /api/experiments/{id}`,
+        # which `isaac_get_experiment` reaches (contract DEC-7); these are DEDICATED
+        # operations, which is a reviewed widening rather than a silent one.
+        Operation(
+            id="list_proposals",
+            method="GET",
+            path_template="/api/experiments/{experiment_id}/proposals",
+            scope=Scope.READ,
+            mutates=False,
+            summary="One bounded window of a record's ingestion proposals.",
+            query_parameters=_proposal_list_query_names(),
+        ),
+        Operation(
+            id="get_proposal",
+            method="GET",
+            path_template="/api/experiments/{experiment_id}/proposals/{proposal_id}",
+            scope=Scope.READ,
+            mutates=False,
+            summary="One ingestion proposal, with its derived staleness reads.",
+        ),
+        Operation(
+            id="create_proposal",
+            method="POST",
+            path_template="/api/experiments/{experiment_id}/proposals",
+            # THE ONLY OPERATION THIS SCOPE UNLOCKS, and the only operation that
+            # costs it. Not `DRAFT_WRITE`: creating a proposal writes no draft
+            # content, mints no evidence and is inert to export — see
+            # `Scope.PROPOSALS_WRITE`.
+            scope=Scope.PROPOSALS_WRITE,
+            # It DOES mutate: the proposal is stored inside the experiment's own
+            # state document, so the record's `rev` and ETag move. `mutates` is about
+            # whether stored state changes, not about whether a scientific value
+            # does, and conflating those is how a write ends up without a
+            # precondition.
+            mutates=True,
+            summary="Record one suggested value for a record field, awaiting review.",
+            requires_if_match=True,
+        ),
+        Operation(
+            id="get_changes",
+            method="GET",
+            path_template="/api/experiments/{experiment_id}/changes",
+            scope=Scope.READ,
+            mutates=False,
+            summary=(
+                "A bounded page of the record's coalescing state feed, from a cursor."
+            ),
+            query_parameters=_changes_query_names(),
+        ),
     )
 
 
@@ -671,9 +914,16 @@ def _validated(operations: tuple[Operation, ...]) -> Mapping[str, Operation]:
                 f"MCP operation {op.id!r} mutates state without an If-Match "
                 "precondition; a lost update is not an acceptable default"
             )
-        if op.mutates and op.scope is not Scope.DRAFT_WRITE:
+        # ~~`op.scope is not Scope.DRAFT_WRITE`~~ — widened 2026-09-01 to
+        # :data:`WRITE_SCOPES`, which is an ENUMERATION and not "anything but READ".
+        # The property being kept is unchanged and is the one that matters: a
+        # mutation may never cost a read scope, so a write cannot hide behind one.
+        # What changed is that there is now more than one write scope, and which
+        # scopes may carry a mutation is a reviewed list rather than a default.
+        if op.mutates and op.scope not in WRITE_SCOPES:
             raise RuntimeError(
-                f"MCP operation {op.id!r} mutates state but costs {op.scope.value!r}"
+                f"MCP operation {op.id!r} mutates state but costs {op.scope.value!r}, "
+                f"which is not one of {sorted(s.value for s in WRITE_SCOPES)}"
             )
         seen[op.id] = op
     return MappingProxyType(seen)
@@ -685,6 +935,35 @@ def _validated(operations: tuple[Operation, ...]) -> Mapping[str, Operation]:
 OPERATIONS: Mapping[str, Operation] = _validated(_operations())
 
 
+#: A DOCUMENTATION DEFECT IN THE SPECIFYING CONTRACT, RECORDED RATHER THAN RESOLVED
+#: SILENTLY. ``docs/ingestion-proposal-contract.md`` **§4 Operations, line 323 at
+#: `7ff8194`** heads its table *the amended surface — three tools, least privilege* and
+#: its cells name FOUR, across three rows: the middle row names ``isaac_list_proposals``
+#: and ``isaac_get_proposal`` together. The CELLS are the specification and they are what
+#: this file implements; the heading's count is wrong. It is reported to the document's
+#: owner rather than edited from here, and it is written down so nobody later reads the
+#: mismatch as this package having added a tool the contract did not authorise.
+#:
+#: ~~"§10.2's table"~~ — **every citation in this slice originally pointed at §10.2, and
+#: the note reporting a wrong count was itself filed against the wrong section.** §10.2
+#: is *The thirteen decisions* (line 681) and says nothing about the MCP surface; the
+#: surface, the scope table and the "read nothing else" clause are all §4 (lines 210–343).
+#: Re-derive rather than trusting either number::
+#:
+#:     git show 7ff8194:docs/ingestion-proposal-contract.md | grep -n '^## \|^### '
+#:
+#: The **DEC-N** citations elsewhere in this package are unaffected and correct: those
+#: decisions really are in §10.2.
+#:
+#: **THIS NOTE IS DELIBERATELY OUTSIDE THE FROZENSET BELOW, AND THAT IS NOT
+#: TYPOGRAPHY.** ``apps/web/src/__tests__/connect-your-agent.test.tsx`` parses this
+#: file with ``PERMITTED_TOOL_NAMES = frozenset\(\s*\{([^}]*)\}`` and then harvests
+#: every double-quoted string inside the braces. A comment carrying a quoted phrase
+#: therefore READ AS A TOOL NAME: the phrase was inside the set for one revision and
+#: the frontend suite reported 15 permitted tools, one of them the heading it was
+#: quoting. The spec's parser is hardened in the same change; keeping quoted prose out
+#: of the literal is the other half, and costs nothing.
+#:
 #: Every tool that may be registered. Closed, and checked both ways at import by
 #: ``tools.py`` — a tool missing from the registry fails, and a tool in the
 #: registry that is not named here fails.
@@ -703,8 +982,46 @@ PERMITTED_TOOL_NAMES = frozenset(
         "isaac_answer_questions",
         "isaac_check_run",
         "isaac_inspect_evidence",
+        # THE INGESTION-PROPOSAL SURFACE (2026-09-01), a reviewed widening of this
+        # set under `docs/ingestion-proposal-contract.md` §4. Four names, and the
+        # names matter: not one of them contains `accept`, `approve`, `submit`,
+        # `export` or any other member of `FORBIDDEN_TOOL_TOKENS` — checked by
+        # `forbidden_tool_reason` at import for every one of them, and asserted
+        # again over the registry by `test_mcp_boundaries`. The count discrepancy in
+        # the contract's own heading is recorded above this frozenset, deliberately
+        # OUTSIDE it — see the note there.
+        "isaac_propose_field_value",
+        "isaac_list_proposals",
+        "isaac_get_proposal",
+        "isaac_get_changes",
     }
 )
+
+
+#: ~~``RESULT_CARRIES_NO_RECORD_CONTENT``~~ — **A SET OF TOOLS EXEMPT FROM ALSO COSTING
+#: ``READ``. BUILT 2026-09-01, WITHDRAWN THE SAME DAY, AND RECORDED HERE RATHER THAN
+#: DELETED, because "a write tool that needs no read scope" is a design a future author
+#: will reach for and the reason it fails here is a measurement, not taste.**
+#:
+#: Its one member was ``isaac_propose_field_value``, on the argument that its handler
+#: returned a built projection carrying no record content, which made §4's *"a deployment
+#: granting only `isaac:proposals.write` can create a proposal and read nothing else"*
+#: true rather than aspirational. An independent review confirmed the projection was
+#: genuine and then measured the branch it did not cover — see
+#: ``tools.Tool.required_scopes`` for the transcript. In summary: the route's own ``412``
+#: hands a propose-only caller ``current_version``, the next request succeeds and stores
+#: a proposal, the success envelope's ``etag`` sustains the session, and an
+#: ``invalid_span`` refusal returns ``note_text_length`` — the true length of a
+#: scientist's verbatim note.
+#:
+#: **THE FIX IS NOT A BIGGER PROJECTION.** This route's precondition is the RECORD's
+#: ``ETag``; a principal that may not read the record cannot legitimately obtain one, so
+#: withholding the ``412``'s ``current_version`` would make the sentence true and the
+#: deployment shape inert. A capability that cannot work is not least privilege.
+#: ``isaac_propose_field_value`` therefore costs ``{READ, PROPOSALS_WRITE}`` like every
+#: other write tool, and the exemption mechanism is gone rather than left empty — an
+#: unused closed set with an import-time guard is machinery protecting nothing, which is
+#: what ``oauth.py`` records deleting ``scopes_expressible`` for.
 
 
 def forbidden_tool_reason(name: str) -> str | None:
