@@ -86,6 +86,7 @@ import { mutationFailureCopy, staleWriteCurrentVersion, statusOf } from '../lib/
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type {
   ApiProposal,
+  ApiProposalOrder,
   ApiProposalReviewAction,
   ApiProposalsResponse,
 } from '../lib/types';
@@ -410,6 +411,29 @@ function jsonText(value: unknown): string {
 }
 
 /**
+ * How the window's ORDER is disclosed — ONE string, so the wording cannot drift
+ * between the control and the sentence a screen reader hears.
+ *
+ * IT IS SAID IN BOTH DIRECTIONS, INCLUDING THE DEFAULT. Saying it only for
+ * `newest_first` would mean the count line is silent about order exactly when the
+ * reader has not chosen one, so "no clause" would have to be read as "oldest first"
+ * — an inference from an absence. Both are one short clause instead.
+ *
+ * IT RIDES THE COUNT LINE AND RAISES NO REGION OF ITS OWN. `.proposals-count` is
+ * already `aria-live="polite"`, so changing the order changes that sentence and it
+ * is announced once. A second live region for the same fact would announce it twice.
+ */
+function orderClause(order: ApiProposalOrder): string {
+  return order === 'newest_first' ? ' · newest first' : ' · oldest first';
+}
+
+/** The label the order control and its option share. */
+const ORDER_LABELS: Record<ApiProposalOrder, string> = {
+  oldest_first: 'Oldest first',
+  newest_first: 'Newest first',
+};
+
+/**
  * How `unreadable_entries` is disclosed — ONE string, used by the count line and by
  * both empty states, so two places on the same screen cannot say different things.
  *
@@ -483,6 +507,24 @@ function ProposalsBrowser({
 }) {
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [filter, setFilter] = useState<string>('all');
+  /**
+   * WHICH END OF THE RECORD'S PROPOSAL ORDER THIS PANEL IS READING FROM.
+   *
+   * The default is the SERVER'S default and this panel does not restate it in a
+   * request — see the fetch below. It matters that the default is unchanged: this
+   * list has always read oldest-first, a review queue reads chronologically, and
+   * flipping every existing reader's queue is not something an accessibility fix to
+   * one arrival note gets to decide.
+   *
+   * `newest_first` exists because the arrival announcement was otherwise a dead end.
+   * `workspace.py::_sorted_proposals` orders `(proposed_utc, proposal_id)` oldest
+   * first, a freshly created proposal carries the LATEST `proposed_utc` on the
+   * record and therefore sorts LAST, and this panel's default view is the first
+   * window. On a record already holding a full window the arrived proposal is not in
+   * the view at all — so the panel could truthfully say something arrived and leave
+   * the reader no way to see it without paging to the end.
+   */
+  const [order, setOrder] = useState<ApiProposalOrder>('oldest_first');
   const [version, setVersion] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -591,6 +633,7 @@ function ProposalsBrowser({
   const arrivalReloadRef = useRef(false);
 
   const filterId = useId();
+  const orderId = useId();
 
   useEffect(() => {
     let alive = true;
@@ -604,6 +647,9 @@ function ProposalsBrowser({
       .listProposals(experimentId, {
         ...(filter === 'all' ? {} : { state: filter as never }),
         ...(cursor === null ? {} : { after: cursor }),
+        // OMITTED AT THE DEFAULT, so the server's own default is what answers rather
+        // than a copy of it kept here. The same rule `limit` follows in `api.ts`.
+        ...(order === 'oldest_first' ? {} : { order }),
       })
       .then((loaded) => {
         if (!alive || generation !== generationRef.current) return;
@@ -665,7 +711,7 @@ function ProposalsBrowser({
     return () => {
       alive = false;
     };
-  }, [experimentId, filter, cursor, reloadNonce, announce]);
+  }, [experimentId, filter, cursor, order, reloadNonce, announce]);
 
   const reload = useCallback((silent: boolean) => {
     silentRef.current = silent;
@@ -805,7 +851,17 @@ function ProposalsBrowser({
     if (!loaded) return '';
     const total = `${loaded.total} ${loaded.total === 1 ? 'proposal' : 'proposals'} on this record`;
     const shown = `Showing ${loaded.returned} of ${total}`;
-    return `${shown}${unreadableClause(loaded.unreadable_entries)}`;
+    // `loaded.order`, NOT the `order` STATE, and the whole line is built from one
+    // source for that reason. `shown` is response state and `loaded` falls back to
+    // the last SUCCESSFUL window, so a clause taken from request state describes a
+    // window the numbers beside it are not from. Measured before the response
+    // carried its own order: after an order change whose read answered 503 the line
+    // read "… · newest first" over zero cards and stayed that way until Retry, and
+    // in flight it read "newest first" over the oldest-first rows. Because
+    // `.proposals-count` is `aria-live`, that made the one utterance a screen reader
+    // got the one where the claim was false — and no second utterance when it
+    // became true, since by then the text no longer changed.
+    return `${shown}${orderClause(loaded.order)}${unreadableClause(loaded.unreadable_entries)}`;
   }, [loaded]);
 
   /** The filter options: "All" plus whatever states the SERVER reports. */
@@ -813,6 +869,28 @@ function ProposalsBrowser({
     const states = loaded?.states ?? [];
     return [{ id: 'all', label: 'All' }, ...states.map((s) => ({ id: s, label: FILTER_LABELS[s] ?? s }))];
   }, [loaded]);
+
+  /**
+   * Move the view to a different end of the list, SILENTLY and from the first window.
+   *
+   * THE CURSOR HAS TO BE DROPPED AND THIS IS NOT TIDINESS. A `next_cursor` belongs to
+   * the order it was issued under; the server refuses one from the other direction
+   * (`422 cursor_order_mismatch`) rather than answering from the wrong side, so
+   * changing `order` while holding a cursor would turn the panel's next read into a
+   * refusal. Rewinding to the first window is also what the reader asked for: the
+   * whole point of the other direction is what is at the FRONT of it.
+   *
+   * SILENT, for rule 5 above — changing the order refreshes the list in place and
+   * never blanks it, so a half-written corrected value in an open editor survives.
+   * The cost is the same one the filter control states: for the duration of the read
+   * the counts still describe the previous view.
+   */
+  const changeOrder = useCallback((next: ApiProposalOrder) => {
+    silentRef.current = true;
+    setCursor(null);
+    setBack([]);
+    setOrder(next);
+  }, []);
 
   const offeredActions = useMemo<ApiProposalReviewAction[]>(() => {
     const served = loaded?.review_actions;
@@ -853,6 +931,31 @@ function ProposalsBrowser({
             ))}
           </select>
         </div>
+        {/*
+          THE ORDER CONTROL — a visible, keyboard-reachable, labelled `select`, sitting
+          beside the state filter because it is the same kind of thing: it changes what
+          this window shows and changes nothing on the record.
+
+          IT RAISES NO ANNOUNCEMENT OF ITS OWN. The count line beside it already
+          carries the order (`orderClause`) and is already `aria-live="polite"`, so
+          changing this select changes that sentence and it is spoken once. A second
+          region for the same fact would say it twice, which is the defect the arrival
+          note's own comment records avoiding.
+        */}
+        <div className="proposals-control">
+          <label className="proposals-control-label" htmlFor={orderId}>
+            Order
+          </label>
+          <select
+            id={orderId}
+            className="proposals-order"
+            value={order}
+            onChange={(e) => changeOrder(e.target.value as ApiProposalOrder)}
+          >
+            <option value="oldest_first">{ORDER_LABELS.oldest_first}</option>
+            <option value="newest_first">{ORDER_LABELS.newest_first}</option>
+          </select>
+        </div>
         {/* Mounted in every state and BLANKED rather than left stale while a reload is
             in flight: a live region remounted with its content is never announced, and
             holding the previous window's numbers through a read is worse than none. */}
@@ -883,6 +986,54 @@ function ProposalsBrowser({
       {arrivalNote !== null && (
         <div className="proposals-arrival-note" role="note">
           <span className="proposals-arrival-note-text">{arrivalNote}</span>
+          {/*
+            THE ACTION THAT MAKES THE SENTENCE ACTIONABLE, and without it the sentence
+            was a dead end on exactly the records it was written for. The arrival is
+            detected from `by_state.open`, which is the WHOLE record — deliberately, so
+            it is insensitive to the window — and the window it is announced into is
+            the OLDEST 50. On a record already holding that many, the proposal this
+            note is about is not on screen and no amount of re-reading puts it there.
+
+            IT DOES TWO THINGS AND ITS LABEL NAMES BOTH. The order moves to
+            `newest_first`, which is what puts the arrival in the first window; and the
+            filter moves to `open`, which is the state the sentence actually counted —
+            a reader sitting on `Accepted` would otherwise activate this and be shown a
+            window with none of the arrivals in it. Discarding a reader's filter
+            silently is the quiet side effect `EmptyProposals`' two-handler split
+            exists to avoid, so this control declares it in its own label rather than
+            doing it quietly. Both controls stay where they are and either can be put
+            straight back.
+
+            IT ANNOUNCES NOTHING ITSELF. The count line carries both the order and
+            (through the filter's own `select`) the selection, and it is already a live
+            region; the sr-only region above has already spoken this arrival once. A
+            third utterance for one event is the defect this note's own comment records
+            avoiding.
+          */}
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              // Silent, and the cursor is dropped: see `changeOrder`. The filter is
+              // set through the same silent path for the reason the filter control
+              // states — a loud reload would unmount every open editor.
+              changeOrder('newest_first');
+              setFilter('open');
+              // THE RUNNING TOTAL IS CLEARED HERE FOR THE SAME REASON DISMISS
+              // CLEARS IT, and the reason is worth stating because the two
+              // controls do opposite things with the same reset. `arrivalTotalRef`
+              // accumulates arrivals the reader has not ACKNOWLEDGED — not
+              // arrivals they have not reviewed; Dismiss's own comment below is
+              // explicit that it marks nothing reviewed, and neither does this.
+              // Being taken to the window that holds them is an acknowledgement,
+              // so leaving the total standing would make the NEXT arrival say
+              // "at least 3" while counting two the reader was already shown.
+              arrivalTotalRef.current = 0;
+              setArrivalNote(null);
+            }}
+          >
+            Show Open, Newest First
+          </button>
           {/*
             Dismiss clears the RUNNING TOTAL (M3) — and ONLY the running total.
             It does not mark anything reviewed and it never touches `proposals`,

@@ -161,6 +161,12 @@ function page(
     },
     has_more: false,
     next_cursor: null,
+    // THE SERVER STATES THE ORDER AND THIS FIXTURE STATES IT TOO, defaulting to
+    // the server's own default. It is deliberately not optional in
+    // `ApiProposalsResponse`: a test that wants to model a newest-first window has
+    // to say so, which is what makes "the count line describes the LOADED window"
+    // assertable at all.
+    order: 'oldest_first' as const,
     window_default: 50,
     window_max: 200,
     max_per_record: 1000,
@@ -332,6 +338,198 @@ describe('paging over a bounded list', () => {
 
     await screen.findByText(/Proposed value/);
     expect(screen.queryByRole('button', { name: 'Next Page' })).toBeNull();
+  });
+});
+
+// --- 2b. which END of the list the window comes from ---------------------------
+//
+// THE GAP. `workspace.py::_sorted_proposals` orders `(proposed_utc, proposal_id)`
+// oldest first and `routes.py::list_proposals` walks that order forward, so a freshly
+// created proposal — carrying the LATEST `proposed_utc` on the record — sorts LAST.
+// The panel's default view is the first window, so on a record already holding a full
+// one the newest proposal is not on screen and no re-read puts it there.
+
+describe('the order control', () => {
+  it('is a labelled, keyboard-reachable control that defaults to the SERVER default and sends nothing', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+
+    await screen.findByText('Proposed value');
+    const control = screen.getByLabelText('Order') as HTMLSelectElement;
+    expect(control.tagName).toBe('SELECT');
+    expect(control.value).toBe('oldest_first');
+    // THE DEFAULT IS THE SERVER'S AND IS NOT RESTATED. A client that sent
+    // `order=oldest_first` would be keeping a second copy of a default it does not own.
+    expect(urls().every((u) => !u.includes('order='))).toBe(true);
+  });
+
+  it('changing it asks the server for the other direction, from the FIRST window', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+
+    await screen.findByText('Proposed value');
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+
+    await waitFor(() =>
+      expect(urls().some((u) => u.endsWith('/proposals?order=newest_first'))).toBe(true),
+    );
+    // NO CURSOR RIDES ALONG. A `next_cursor` belongs to the order it was issued
+    // under and the server refuses one from the other direction
+    // (`422 cursor_order_mismatch`), so carrying it would turn the next read into a
+    // refusal — and the front of the other direction is what was asked for anyway.
+    expect(urls().some((u) => u.includes('order=newest_first') && u.includes('after='))).toBe(
+      false,
+    );
+  });
+
+  it('drops a cursor already held rather than replaying it in the other order', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        body: page([proposalFixture({ proposal_id: 'P1' })], {
+          total: 2,
+          returned: 1,
+          has_more: true,
+          next_cursor: 'P1',
+        }),
+      },
+      [`${LIST}?after=P1`]: {
+        body: page([proposalFixture({ proposal_id: 'P2' })], { total: 2, returned: 1 }),
+      },
+      [`${LIST}?order=newest_first`]: {
+        body: page([proposalFixture({ proposal_id: 'P2' })], {
+          total: 2,
+          returned: 1,
+          order: 'newest_first',
+        }),
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Next Page' }));
+    await waitFor(() => expect(urls().some((u) => u.endsWith('?after=P1'))).toBe(true));
+
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    await waitFor(() =>
+      expect(urls().some((u) => u.endsWith('/proposals?order=newest_first'))).toBe(true),
+    );
+    // The one request shape that would have been refused: the held cursor replayed.
+    expect(urls().some((u) => u.includes('after=P1') && u.includes('order='))).toBe(false);
+  });
+
+  it('states the order in the COUNT LINE, in both directions, and raises no second live region', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()], { total: 61, returned: 1 }) },
+      [`${LIST}?order=newest_first`]: {
+        body: page([proposalFixture()], {
+          total: 61,
+          returned: 1,
+          // THE STUB ANSWERS THE ORDER IT WAS ASKED FOR, exactly as the server
+          // does. It has to: the count line is built from `loaded.order`, so a
+          // fixture that echoed the default here would prove only that the panel
+          // renders a constant.
+          order: 'newest_first',
+        }),
+      },
+    });
+    renderPanel();
+
+    // SAID IN BOTH DIRECTIONS, INCLUDING THE DEFAULT: a clause present only for the
+    // non-default would make "oldest first" an inference from an absence.
+    const line = await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
+    expect(line.getAttribute('aria-live')).toBe('polite');
+
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    await screen.findByText(/Showing 1 of 61 proposals on this record · newest first/);
+
+    // ONE live region for this fact, not two. `role="status"` here is the ACT
+    // region and it must stay silent — the order changed nothing on the record.
+    expect(screen.getByRole('status').textContent ?? '').toBe('');
+  });
+
+  /*
+   * THE COUNT LINE DESCRIBES THE LOADED WINDOW, NEVER THE REQUEST.
+   *
+   * `shown` is response state and `loaded` falls back to the last SUCCESSFUL window,
+   * so a clause built from request state describes a window the numbers beside it
+   * are not from. `.proposals-count` is `aria-live`, which is what turns that from
+   * cosmetic into an honesty defect: the one utterance a screen reader receives is
+   * the one made while the claim is false, and there is no second utterance when it
+   * becomes true because by then the text no longer changes.
+   */
+  it('an order change whose read FAILS leaves the line describing the last window that loaded', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()], { total: 61, returned: 1 }) },
+      [`${LIST}?order=newest_first`]: { status: 503, body: {} },
+    });
+    renderPanel();
+
+    await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    // MUTANT: `orderClause(order)` — the line reads "· newest first" over zero
+    // cards, and keeps reading it until Retry. Nothing was read in that direction,
+    // so nothing may be described in it.
+    expect(
+      screen.getByText(/Showing 1 of 61 proposals on this record · oldest first/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/newest first/)).toBeNull();
+  });
+
+  it('does not change the clause IN FLIGHT — it moves when the response lands, not when the control does', async () => {
+    let release: (() => void) | null = null;
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()], { total: 61, returned: 1 }) },
+      [`${LIST}?order=newest_first`]: async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return {
+          body: page([proposalFixture()], {
+            total: 61,
+            returned: 1,
+            order: 'newest_first',
+          }),
+        };
+      },
+    });
+    renderPanel();
+
+    await screen.findByText(/· oldest first/);
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    await waitFor(() => expect(release).not.toBeNull());
+
+    // The control already says `newest_first` and the rows on screen are still the
+    // oldest-first ones. MUTANT: the line claims "newest first" over them here.
+    expect((screen.getByLabelText('Order') as HTMLSelectElement).value).toBe('newest_first');
+    expect(screen.getByText(/· oldest first/)).toBeTruthy();
+
+    release!();
+    await screen.findByText(/· newest first/);
+  });
+
+  it('does not blank the list, so an open editor survives the change', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()]) },
+      [`${LIST}?order=newest_first`]: {
+        body: page([proposalFixture()], { order: 'newest_first' }),
+      },
+    });
+    renderPanel();
+
+    await screen.findByText('Proposed value');
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    // THE DEFECT THIS CATCHES is rule 5 in this component's header: a reload that
+    // blanks the list unmounts every card and takes a half-written value with it.
+    expect(screen.queryByText(/Loading this record’s ingestion proposals/)).toBeNull();
+    expect(screen.getByText('Proposed value')).toBeTruthy();
+
+    // Settle the read this change started, so the assertion above is about the
+    // moment BEFORE it lands rather than about a request that never happened.
+    await waitFor(() =>
+      expect(urls().some((u) => u.endsWith('?order=newest_first'))).toBe(true),
+    );
+    expect(screen.getByText('Proposed value')).toBeTruthy();
   });
 });
 

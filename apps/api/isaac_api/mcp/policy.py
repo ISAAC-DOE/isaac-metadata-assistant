@@ -373,7 +373,14 @@ PENDING_QUERY_ALLOWLIST = frozenset({"run_id", "offset", "limit"})
 #: selector today; listing one pre-emptively would be pre-approving a search over a
 #: scientist's own words, since a proposal's excerpt is derived from a note's verbatim
 #: text. That is the question this gate exists to stop being answered by accident.
-PROPOSAL_LIST_QUERY_ALLOWLIST = frozenset({"state", "limit", "after"})
+#: `order` was ADDED 2026-09-02 and reviewed on the same ground as `state`: it names
+#: no field, selects on no scientific content, and widens no response — it chooses
+#: between the two directions of a total order the server already computes, and both
+#: return the same rows. It is exposed because WITHOUT it an agent reading a record
+#: that holds more proposals than one window cannot reach the newest proposal at all
+#: without walking every page, which is the same defect on the tool surface that the
+#: panel had on the website.
+PROPOSAL_LIST_QUERY_ALLOWLIST = frozenset({"state", "limit", "after", "order"})
 
 #: Change-feed query parameters this package is permitted to expose.
 #:
