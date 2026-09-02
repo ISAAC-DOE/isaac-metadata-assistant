@@ -46,7 +46,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-import { RunsSection, RUNS_PAGE_SIZE, type RunsSectionActivity } from '../components/RunsSection';
+import { RunsSection, RUNS_PAGE_SIZE } from '../components/RunsSection';
+import type { RecordChangeSummary } from '../lib/recordChanges';
 import { RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
 import { runFixture, stubFetchRoutes } from '../test/apiFixtures';
@@ -84,11 +85,12 @@ function mkRun(n: number, over: Record<string, unknown> = {}): Run {
   });
 }
 
-/** A `RunsSectionActivity`, defaulted to "no news" so a test only names the
+/** A `RecordChangeSummary` as the runs fast path receives it, defaulted to "no
+ *  news" so a test only names the
  *  fields it is about. `runRev` defaults to `-1` — never above any real loaded
  *  rev — so a test that forgets to set it fails closed (no request) rather
  *  than accidentally triggering one. */
-function summary(over: Partial<RunsSectionActivity> = {}): RunsSectionActivity {
+function summary(over: Partial<RecordChangeSummary> = {}): RecordChangeSummary {
   return {
     recordMoved: false,
     runIds: [],
@@ -176,7 +178,7 @@ function Harness({
   activity,
   recordVersion,
 }: {
-  activity: RunsSectionActivity | null;
+  activity: RecordChangeSummary | null;
   recordVersion?: string | null;
 }) {
   return (

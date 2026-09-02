@@ -112,6 +112,16 @@ import type {
  */
 const AGENT_CONTEXT_PENDING_WINDOW = 50;
 
+/**
+ * The change-feed page size this screen asks for. See the `useChangeFeed` call below
+ * for the measurement that chose it and for why duplicating the server's ceiling as a
+ * client literal is safe here.
+ *
+ * EXPORTED SO A TEST CAN PIN THE REQUEST, and pin it against this name rather than
+ * against a re-typed `200` — a literal in both places is two claims that can drift.
+ */
+export const CHANGE_FEED_CLIENT_LIMIT = 200;
+
 /** The additive AgentContext inputs the hook fetches (not always in the screen's
  *  bundle): the pending blockers and the evidence-support classification. */
 interface AgentExtras {
@@ -738,6 +748,40 @@ export function useRecordSession(
   const { degraded: feedDegraded } = useChangeFeed(id, {
     onChanges: handleFeed,
     enabled: active,
+    /*
+     * ASK FOR THE SERVER'S WHOLE PAGE, NOT THE DEFAULT FIFTY — and the reason is a
+     * measurement, not a preference.
+     *
+     * The independent review of PR #221 drained the product ceiling: 2,001 entities
+     * (1,000 runs + 1,000 proposals + the record's own entry). At the server's
+     * default window of 50 that took 41 requests / 148.5 s; at 200 it took
+     * 11 requests / 10.5 s. NO RATE BOUND CHANGES — `CHANGE_FEED_DRAIN_DELAY_MS`,
+     * `CHANGE_FEED_MAX_CONSECUTIVE_DRAINS` and the backoff after them are untouched;
+     * the drain simply needs a quarter as many turns of the same crank.
+     *
+     * IT IS ALSO STRICTLY LESS SERVER WORK, WHICH IS THE PART A "BIGGER PAGE COSTS
+     * MORE" READING GETS BACKWARDS. `change_feed.changes_page` walks EVERY entity of
+     * the record to build the ordered projection, then slices — so its cost is
+     * O(entities) per REQUEST regardless of `limit`. Fewer, larger pages is fewer
+     * whole walks for the same drain.
+     *
+     * THIS IS A PER-MOUNT COST TOO, not only a catch-up one: the first poll after
+     * every mount is cursorless, so each mount pays ceil(entities / limit) requests
+     * to reach `has_more: false`. At the ceiling that is 41 requests per mount at 50
+     * and 11 at 200 — the same ratio, paid every time the screen opens.
+     *
+     * 200 IS `change_feed.CHANGE_FEED_LIMIT_MAX`, WRITTEN AS A CLIENT LITERAL ON
+     * PURPOSE. It is not imported and not derived, because it does not have to be:
+     * `effective_limit` CLAMPS into `[1, CHANGE_FEED_LIMIT_MAX]` and the route
+     * declares `limit` as a bare `int | None` with no `le`, so an over-ask is
+     * silently reduced and never refused. If the server's max later moves DOWN, this
+     * request keeps working and gets the new max; if it moves UP, this client keeps
+     * asking for 200 and loses only the further improvement. Neither outcome is a
+     * break, which is what makes the duplicated number safe. The server reports the
+     * size it actually used back as `limit` on every page, so the effective value is
+     * observable rather than assumed.
+     */
+    limit: CHANGE_FEED_CLIENT_LIMIT,
   });
 
   const refresh = useCallback(() => {
