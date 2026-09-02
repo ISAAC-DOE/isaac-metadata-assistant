@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "13ea206edbb0917663effd118ac802fa5459d45d94097fe3618a2c48dd4f28dd"
+        "sha256": "bed30b63c1baa1bf7d2fd93ec69fbf904c4c49674d684f9a20ddcfe68fb626ca"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "9fa4915bb48f5d0c12f75664ca8f6e1c66776dec7abb77a693f81ee6160668c9"
+        "sha256": "08f41bf4095ec2b7d74c46204728556bda16290304dac129e04d00940af95002"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "3fcf60d4e9ecc61118e7964ac8401d38a67d4ab19c16956bce6bf0281bd591ce"
+        "sha256": "7f9db56edb13de1a93a8e891c2669d4861304b7e68072e77aa4fa2acc5fa87e7"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "b88aa0364fbe89d62e8fba7cd088edba89b3c05d9d5a0d7cf0c642cd44c29769"
+    "served_manifest_fingerprint": "5f548845e88cc9e06a651042f2eb259a7e09a75099fa5178a70a27cd601a0d1d"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
