@@ -774,9 +774,41 @@ Current state:
   (`answer_at`), which is what made the bound safe rather than merely cheap. Per accepted
   answer at 1,000 runs: **3,545,986 B → 61,558 B (98.3%)**. `PENDING_WINDOW = 50`, and the
   window is ANCHORED — head plus every still-open question of the unit just written — so the
-  answer you just gave is never withheld from you. `api.getPending` (unbounded, no parameters)
+  answer you just gave is never withheld from you. ~~`api.getPending` (unbounded, no parameters)
   **still exists and is still correct twice**, for Review Record and Export Readiness, which
-  would UNDERSTATE outstanding work from a page. Do not "fix" those two.
+  would UNDERSTATE outstanding work from a page. Do not "fix" those two.~~
+
+  **CORRECTED 2026-09-02 — "twice" IS NOW ONCE AND A HALF, AND THE INSTRUCTION IS KEPT
+  STRUCK RATHER THAN REWRITTEN BECAUSE "do not fix those two" IS EXACTLY THE KIND OF
+  SENTENCE A FUTURE SESSION ACTS ON.** `api.getPending` is unchanged, still exists, and
+  still sends no parameters. What changed is one of its two callers, and only on one of
+  that caller's paths:
+
+  - **Export Readiness is UNCHANGED.** `getExportReadiness` still calls `api.getPending`
+    on every load and every refresh. Nothing about it was touched, and the reason the
+    original sentence gives is still the reason: that screen reports what is unresolved
+    and a page would understate it.
+  - **Review Record's INITIAL LOAD is unchanged and still unbounded.** First paint issues
+    the same nine bundle requests and the pending member still carries no query string,
+    which is what keeps the assistant's grounding chip exact on a freshly-loaded record.
+  - **Review Record's LIVE REFRESH is now bounded** — `GET /pending?limit=10`, supplied
+    through the new opt-in `api.getRecordBundle(id, { pendingLimit })`. That path is a
+    refetch a POLLER caused, not a read a person asked for, and it re-downloaded the
+    record's entire question list every time either of the screen's two pollers fired.
+  - **NO COUNT UNDERSTATES ANYTHING, and that is a mechanism rather than a promise.**
+    `RecordBundle.pendingTotal` carries the server's `pending_page.total`, and every
+    count on the screen — banner title, the "Showing the first 10 of N" sentence, the
+    status-bar phase — plus the assistant's `pending_summary` chip reads THAT, never
+    `pending.length`. The window bounds what is FETCHED, never what is CLAIMED. Pinned by
+    `apps/web/src/__tests__/live-refresh-request-graph.test.tsx`, which fails if a count
+    is taken from the fetched array.
+
+  Measured: one run edited by a second client, record poller winning the race, went
+  **44 requests / 4 bundles / 4 unbounded `/pending` → 17 / 1 / 0**; in a real browser at
+  15 runs / 42 open questions the event window went **128,718 B → 97,217 B (−24.5%)**,
+  which is entirely that one route. Evidence, with the commands and with what could not be
+  measured named as such:
+  [`docs/evidence/live-refresh-request-graph-2026-09-02.md`](docs/evidence/live-refresh-request-graph-2026-09-02.md).
 
   **THE DETAIL ROUTE COMPOSED EVERY RUN FIVE TIMES, AND DRY-RAN EVERY UNIT TWICE.** Threading
   one `export_units()` list through the response (`routes._shared_units`) took

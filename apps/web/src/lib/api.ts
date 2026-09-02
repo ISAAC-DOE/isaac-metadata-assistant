@@ -2345,12 +2345,50 @@ export const api = {
   // fetched with the bundle rather than lazily because those sections render from
   // the same load as the field blocks beside them, and a second load would let the
   // two disagree about the same record.
-  async getRecordBundle(id: string): Promise<RecordBundle> {
-    const [detail, groups, pending, validate, audit, warnings, evidence, graph, artifacts] =
+  /*
+   * `pendingLimit` — THE ONE THING THIS BUNDLE MAY ASK FOR LESS OF, AND IT IS OPT-IN.
+   *
+   * Omitted, this is byte-identical to what it has always been: nine requests, and the
+   * pending member is the UNBOUNDED `GET /pending` with no query parameters at all.
+   * The initial load of the record screen omits it deliberately — the first paint must
+   * not change, and the complete list is what the assistant's grounding chip is exact
+   * over on a freshly-loaded record.
+   *
+   * Supplied, the pending member becomes `GET /pending?limit=N` and `pendingTotal`
+   * comes from the server's `pending_page.total` rather than from `pending.length`.
+   * The LIVE-REFRESH path supplies it, and that is the whole point of the parameter:
+   * a background refetch triggered by a poll used to re-download every open question
+   * of the record — measured at 1.77 MB / 3,000 entries on a 1,000-run record
+   * (`useRecordSession.AGENT_CONTEXT_PENDING_WINDOW` carries the measurement) — for a
+   * banner that renders ten of them.
+   *
+   * NOTHING IS HIDDEN BY IT, and the mechanism for that is `pendingTotal`, not a
+   * promise: every count on the screen and in the assistant chip reads that field, so
+   * a windowed refresh states the record's real number and says how many it is not
+   * showing. `api.getPending` — the complete reader — is UNCHANGED and is still what
+   * `getExportReadiness` calls, because a screen that reports what is unresolved would
+   * understate it from a page (`CLAUDE.md` §11). This is not a residue to clean up.
+   *
+   * A SERVER THAT ANSWERS WITHOUT A `pending_page` BLOCK IS ANSWERING COMPLETELY, by
+   * that route's contract, so `pending.length` is then the honest total and is used.
+   * Nothing invents a bound nobody applied.
+   */
+  async getRecordBundle(
+    id: string,
+    opts: { pendingLimit?: number } = {},
+  ): Promise<RecordBundle> {
+    const readPending =
+      opts.pendingLimit === undefined
+        ? this.getPending(id).then((pending) => ({ pending, total: pending.length }))
+        : this.getPendingPage(id, { limit: opts.pendingLimit }).then(({ pending, page }) => ({
+            pending,
+            total: page?.total ?? pending.length,
+          }));
+    const [detail, groups, pendingRead, validate, audit, warnings, evidence, graph, artifacts] =
       await Promise.all([
         this.getExperiment(id),
         this.getDraftGroups(id),
-        this.getPending(id),
+        readPending,
         this.validate(id),
         this.audit(id),
         this.getWarnings(id),
@@ -2358,7 +2396,18 @@ export const api = {
         this.getGraphStatus(),
         this.getArtifacts(id),
       ]);
-    return { detail, groups, pending, validate, audit, warnings, evidence, graph, artifacts };
+    return {
+      detail,
+      groups,
+      pending: pendingRead.pending,
+      pendingTotal: pendingRead.total,
+      validate,
+      audit,
+      warnings,
+      evidence,
+      graph,
+      artifacts,
+    };
   },
 
   // S6 — the export readiness view: the three signals + the gate inputs, each

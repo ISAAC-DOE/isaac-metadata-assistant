@@ -66,6 +66,21 @@ export interface RecordChangeSummary {
   /** The highest sequence position in this batch. Never used as a cursor. */
   highestRev: number;
   /**
+   * The highest sequence position among the RUN entries that survived, or `-1` when
+   * none did — the exact analogue of `proposalRev` below, and it exists for the same
+   * reason rather than for symmetry.
+   *
+   * `RunsSection` issues its OWN paged read (`api.listRuns`, `RUNS_PAGE_SIZE`); the
+   * record bundle does not carry the run list it renders. So "where the RUN read
+   * stands" is a third position, and a consumer keying a silent re-read on
+   * `highestRev` has the defect `proposalRev`'s note sets out in the other direction:
+   * `9:R1` followed by `9:R1` is an unchanged key and R1's SECOND move goes unread.
+   *
+   * A consumer that reasons about the run read reads THIS; `highestRev` answers only
+   * "how far did this whole batch reach".
+   */
+  runRev: number;
+  /**
    * The highest sequence position among the PROPOSAL entries that survived, or `-1`
    * when none did.
    *
@@ -129,12 +144,38 @@ export interface RecordChangeSummary {
 export interface ChangeFloors {
   /**
    * The revision the RECORD read has adopted — `detail.rev`, as derived from the
-   * authoritative version. Governs `experiment`, `run` and unknown kinds.
+   * authoritative version. Governs `experiment` and unknown kinds.
+   *
+   * ~~"Governs `experiment`, `run` and unknown kinds"~~ — corrected in place when
+   * `run` gained a floor of its own below. The sentence was accurate for as long as
+   * one number answered the run question too; leaving it would make a reader believe
+   * a `run` entry is measured against this, which is the exact class of confusion the
+   * proposal split was written to end.
    *
    * `undefined` means the screen has not said where it stands; nothing is then
    * filtered, because a filter with no floor would have to invent one.
    */
   record: number | undefined;
+  /**
+   * The revision at which the RUN read stands.
+   *
+   * IT IS A SEPARATE QUESTION FROM `record`, FOR THE REASON `proposal` IS, AND THE
+   * MEASUREMENT IS THE SAME ONE. `RunsSection` fetches the run list itself
+   * (`api.listRuns`, its own paging, its own component); the record bundle does not
+   * carry it. So refetching the record adopts no run-list state, and a run entry
+   * filtered against the RECORD floor after the record poller won is a run change the
+   * run list is never told about — a floor never comes back down, so it is dropped
+   * permanently. That is the same defect `ChangeFloors` was created for, in the one
+   * kind the original split left behind.
+   *
+   * IT IS NOT ALWAYS DIFFERENT FROM `record`, AND THAT IS DELIBERATE. A caller that
+   * wants the historical behaviour passes `run: floors.record` and gets a
+   * byte-identical summary — which is what `useRecordSession` does for the summary
+   * that drives the visible activity NOTICE, so the sentence a screen-reader user
+   * hears is unchanged by this field's existence. The separate, run-floored summary
+   * is what feeds a run surface's silent re-read.
+   */
+  run: number | undefined;
   /**
    * The revision at which the PROPOSAL read stands — in practice the record's revision
    * at the moment this screen loaded, because that is when the proposals list was
@@ -207,6 +248,7 @@ export function summariseChanges(
   // inventing `0` would report the entire record on the first poll.
   const recordFloor = floors.record ?? -1;
   const proposalFloor = floors.proposal ?? -1;
+  const runFloor = floors.run ?? -1;
 
   const runIds = new Set<string>();
   const proposalIds = new Set<string>();
@@ -215,6 +257,7 @@ export function summariseChanges(
   let recordMoved = false;
   let highestRev = -1;
   let proposalRev = -1;
+  let runRev = -1;
 
   for (const entry of entries) {
     // A non-numeric or missing coordinate cannot be compared, so it is treated as
@@ -224,7 +267,8 @@ export function summariseChanges(
     // THE FLOOR IS CHOSEN BEFORE THE COMPARISON, NOT AFTER IT. Reading `entry.kind`
     // here rather than inside the switch is what keeps the two questions apart: a
     // single comparison against a single floor is precisely the shape the defect had.
-    const floor = entry.kind === 'proposal' ? proposalFloor : recordFloor;
+    const floor =
+      entry.kind === 'proposal' ? proposalFloor : entry.kind === 'run' ? runFloor : recordFloor;
     if (at !== undefined && at <= floor) continue;
     if (at !== undefined && at > highestRev) highestRev = at;
 
@@ -234,6 +278,7 @@ export function summariseChanges(
         break;
       case 'run':
         runIds.add(entry.entity_id);
+        if (at !== undefined && at > runRev) runRev = at;
         break;
       case 'proposal':
         proposalIds.add(entry.entity_id);
@@ -255,6 +300,7 @@ export function summariseChanges(
     proposalStates: [...proposalStates].sort(),
     otherKinds: [...otherKinds].sort(),
     highestRev,
+    runRev,
     proposalRev,
   };
   return hasNews(summary) ? summary : null;

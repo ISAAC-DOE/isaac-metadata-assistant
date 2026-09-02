@@ -193,6 +193,13 @@ function activityFor(ids: string[], highestRev: number, proposalRev: number = hi
     proposalStates: [],
     otherKinds: [],
     highestRev,
+    // `-1` IS THE "NO RUN ENTRY SURVIVED" VALUE (`recordChanges.ts`), not a filler:
+    // every batch this file builds names proposals only. The field arrived with the
+    // bounded live-refresh work on `main`, which updated the identical helper in
+    // `ingestion-proposals-panel.test.tsx` and not this copy — the typechecker
+    // caught it on the merge rather than a test doing so, because a summary this
+    // panel reads for `proposalRev` alone behaves the same either way.
+    runRev: -1,
     proposalRev,
   };
 }

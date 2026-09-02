@@ -62,6 +62,31 @@ import type { ApiEvidenceEntry, ApiWorkflow, RecordBundle } from '../lib/types';
 export const NEEDSYOU_VISIBLE = 10;
 
 /**
+ * HOW MANY OPEN QUESTIONS A **LIVE REFRESH** OF THIS SCREEN ASKS FOR.
+ *
+ * THE INITIAL LOAD IS UNBOUNDED AND DELIBERATELY STAYS THAT WAY — first paint is
+ * unchanged, and the assistant's grounding chip is exact over a freshly-loaded record.
+ * This bound applies only to a refetch a POLL caused, which is where the cost is: an
+ * idle record screen runs two pollers, and before this every signal either of them
+ * produced re-downloaded the record's ENTIRE question list. Measured on a 1,000-run
+ * record, that list is 3,000 entries / 1.77 MB
+ * (`useRecordSession.AGENT_CONTEXT_PENDING_WINDOW` carries the column), and the screen
+ * renders ten of them.
+ *
+ * IT IS `NEEDSYOU_VISIBLE`, NOT A SECOND NUMBER, and the equality is deliberate rather
+ * than incidental: this window has to be at least what the banner renders, or the
+ * banner would show fewer rows after a background refresh than it showed on load —
+ * a list silently shrinking with no act by the reader. Pinned by
+ * `__tests__/live-refresh-request-graph.test.tsx`, so the two cannot drift apart.
+ *
+ * NOTHING IS HIDDEN BY IT. Every COUNT on this screen — the banner title, the overflow
+ * sentence, the status-bar phase, the assistant chip — reads `bundle.pendingTotal`,
+ * which is the server's `pending_page.total` and speaks for the whole record. The
+ * window bounds what is FETCHED, never what is CLAIMED.
+ */
+export const LIVE_PENDING_WINDOW = NEEDSYOU_VISIBLE;
+
+/**
  * The draft-phase half of the status-bar readout, taken from the SERVER'S OWN
  * workflow derivation instead of from `pending.length === 0`. Called only where
  * `pending.length === 0` (see `LoadedWorkbench`), which is the ONLY thing the
@@ -164,7 +189,30 @@ export function draftPhaseDotFromWorkflow(
  */
 export function RecordWorkbench() {
   const { id = '' } = useParams();
-  const bundle = useFetch(() => api.getRecordBundle(id), [id]);
+
+  /*
+   * IS THE NEXT RUN OF THE FETCHER A **LIVE REFRESH**? — a single-shot flag, consumed
+   * by the fetcher itself.
+   *
+   * `useFetch` has ONE fetcher for three callers: the deps effect (first paint), the
+   * explicit `reload` (the Refresh button, and the down-state retry) and `reloadSilent`
+   * (a poll signal, and the post-write refresh). Only the last of those may bound the
+   * question list — first paint must not change, and a reader who PRESSED Refresh is
+   * asking for the authoritative read. So the mode travels in a ref that
+   * `reloadFromSignal` sets immediately before calling `reloadSilent`, which invokes
+   * the fetcher SYNCHRONOUSLY, and the fetcher clears the flag as its first act.
+   *
+   * SINGLE-SHOT, NOT STICKY, and the difference is what stops the bound leaking. If the
+   * flag persisted, the next `reload` — a deliberate human act — would silently be
+   * served a windowed list too. Clearing it on read means the bounded mode lasts
+   * exactly one fetch and every other caller keeps the behaviour it had.
+   */
+  const liveRefreshRef = useRef(false);
+  const bundle = useFetch(() => {
+    const live = liveRefreshRef.current;
+    liveRefreshRef.current = false;
+    return api.getRecordBundle(id, live ? { pendingLimit: LIVE_PENDING_WINDOW } : {});
+  }, [id]);
 
   /*
    * THE RUN AUTOSAVE STORE IS DISPOSED HERE — at the RECORD screen's boundary, not at a
@@ -215,17 +263,105 @@ export function RecordWorkbench() {
    * What is local to this screen is the ACTION: `bundle.reloadSilent()`, a background refetch of this
    * screen's own bundle that never blanks it and is not a page reload.
    */
+  /*
+   * ── THE COALESCING GATE: AT MOST **ONE** BUNDLE REFETCH IN FLIGHT. ───────────────
+   *
+   * WHAT IT FIXES, AND IT WAS TWO FULL BUNDLES PER EVENT, NOT ONE. Two pollers watch
+   * this screen and BOTH used to refetch. `useRecordSync` conditionally GETs the record
+   * and, on a 200, calls `onChange` -> `reloadSilent()`. `useChangeFeed` reports which
+   * entities moved and, when `needsCanonicalRefetch` says this screen's canonical read
+   * is stale, called `reloadSilent()` AGAIN — for the same save, at the same revision.
+   * Whichever poller lost the race did the second one. Measured, one run edit issued
+   * 20 requests, of which 18 were two identical nine-request bundles and two of those
+   * eighteen were the record's ENTIRE open-question list, downloaded twice. See
+   * `docs/evidence/live-refresh-request-graph-2026-09-02.md`.
+   *
+   * ── THE KEY IS IN-FLIGHTNESS, AND IT IS DELIBERATELY **NOT** A REVISION. ─────────
+   *
+   * The first version of this gate compared revisions — "have I already asked for a
+   * refetch at or past rev R?" — and it was WRONG, in a way an existing fixture caught
+   * on the first run. The optimistic-concurrency token has the form
+   * `"<generation>.<rev>"`, so **a rev is not monotonic across generations**: the
+   * record fixtures move `1.0` -> `2.0`, which is a real change and derives the SAME
+   * rev (0) on both sides. A rev-keyed gate silently refused every refetch across a
+   * generation boundary — a live update dropped for good, which is the exact class of
+   * defect this whole slice exists to remove. The failure is recorded here rather than
+   * quietly corrected, because "compare the revs" is the obvious thing to reach for.
+   *
+   * In-flightness needs no arithmetic and no ordering assumption. A refetch reads the
+   * record as it is WHEN IT RUNS, so any signal arriving while one is outstanding is
+   * about a change that refetch will already carry; a signal arriving after it settles
+   * is either genuinely newer, or is filtered by `summariseChanges` against the freshly
+   * adopted revision. Both are handled, and neither needs this gate to know a number.
+   *
+   * WHAT IT GUARANTEES, in the words of the properties the tests assert: N feed entries
+   * in one page cost ONE refetch (they share a page and produce one summary); a signal
+   * arriving while a refetch is outstanding costs at most ONE follow-up; and the two
+   * pollers between them cost ONE bundle per record movement, whichever wins the race.
+   *
+   * IT RE-OPENS ON **EVERY** SETTLEMENT, WHICH IS THE HALF THAT IS EASY TO LEAVE OUT
+   * AND EXPENSIVE TO OMIT. A dropped signal is only safe if the refetch it was dropped
+   * in favour of actually completed. `reloadSilent` keeps the old data and raises
+   * `refreshFailed` when it does not — so the gate watches the SETTLED value's identity
+   * (a new bundle object, or an error) and `refreshFailed` beside it. Without that, one
+   * failed refetch would close this gate permanently: the poller would keep answering
+   * 200, every signal would keep being dropped as redundant, and the screen would keep
+   * showing pre-change data with the only recourse being the human pressing Refresh.
+   *
+   * IT IS NOT A CACHE AND IT HOLDS NO RECORD DATA — one boolean and one object
+   * identity, kept only to answer "is a read outstanding".
+   */
+  const refetchInFlightRef = useRef(false);
+  const settledRef = useRef<{ id: string; value: unknown }>({ id, value: undefined });
+  {
+    // A different record is a different question; nothing outstanding for the old one
+    // may gate the new one.
+    if (settledRef.current.id !== id) {
+      settledRef.current = { id, value: undefined };
+      refetchInFlightRef.current = false;
+    }
+    // `useFetch` exposes no settle callback, so settlement is observed as what it
+    // actually is: a NEW value. Both a fresh bundle object and an error count —
+    // `getRecordBundle` returns a fresh object literal every time, so identity is a
+    // faithful signal and never a false negative on unchanged content.
+    const settledValue =
+      bundle.status === 'data' ? bundle.data : bundle.status === 'error' ? bundle.error : undefined;
+    if (settledValue !== settledRef.current.value) {
+      settledRef.current.value = settledValue;
+      refetchInFlightRef.current = false;
+    }
+    // A SILENT refetch that failed settles nothing visible — `useFetch` keeps the old
+    // data on purpose, so the branch above cannot see it. This is the other half.
+    if (bundle.refreshFailed) refetchInFlightRef.current = false;
+  }
+
+  /**
+   * Refetch this screen's bundle because a poller said something moved — unless one is
+   * already outstanding. The caller is left no decision to make, which is the point:
+   * two call sites cannot implement the rule two ways, which is how the duplicate
+   * refetch existed in the first place.
+   */
+  const reloadFromSignal = () => {
+    if (refetchInFlightRef.current) return;
+    refetchInFlightRef.current = true;
+    liveRefreshRef.current = true;
+    bundle.reloadSilent();
+  };
+
   const session = useRecordSession(id, {
     detail,
-    onChange: () => bundle.reloadSilent(),
+    // The poller carries a fresh `detail`, and this screen deliberately does not read
+    // it: adopting a record's version without the eight reads beside it would leave
+    // the fields, evidence and verdicts on screen describing an older revision than
+    // the token they would be written back with. The bundle refetch is the adoption.
+    onChange: () => reloadFromSignal(),
     onEntitiesChanged: (summary) => {
       // ONE shared gate — `recordChanges.needsCanonicalRefetch`, not a copy of its
       // expression. This exact predicate stood inline here, in the other two
       // read-only screens, and a fourth time in the mount test that was the only
       // thing exercising it; see that function for what drifting cost.
-      if (needsCanonicalRefetch(summary)) {
-        bundle.reloadSilent();
-      }
+      //
+      if (needsCanonicalRefetch(summary)) reloadFromSignal();
     },
   });
   const degraded = session.syncDegraded;
@@ -341,7 +477,7 @@ function LoadedWorkbench({
   refreshFailed: boolean;
 }) {
   const navigate = useNavigate();
-  const { detail, pending, validate, audit, warnings, evidence, graph } = bundle;
+  const { detail, pending, pendingTotal, validate, audit, warnings, evidence, graph } = bundle;
 
   // The active VIEW is held in the URL, not in component state, so a graph can
   // be linked, bookmarked and reloaded back into. Anything unrecognised falls
@@ -436,8 +572,8 @@ function LoadedWorkbench({
     ? detail.record_id
       ? `Exported · ${detail.record_id}`
       : 'Exported'
-    : pending.length > 0
-      ? `Draft assembled · ${pending.length} fields to confirm`
+    : pendingTotal > 0
+      ? `Draft assembled · ${pendingTotal} fields to confirm`
       : draftPhaseFromWorkflow(detail.workflow);
 
   // D8 — the right rail is the assistant ONLY (advisory). Deterministic evidence
@@ -498,7 +634,7 @@ function LoadedWorkbench({
         <StatusBar
           phase={phase}
           phaseDot={
-            pending.length > 0
+            pendingTotal > 0
               ? 'attention'
               : detail.exported
                 ? 'idle'
@@ -552,7 +688,7 @@ function LoadedWorkbench({
              nothing in it is announced, focusable or scanned while the graph is up. */
           hidden={activeView !== 'fields'}
         >
-      {pending.length > 0 && (
+      {pendingTotal > 0 && (
         <div
           className="needsyou-banner"
           role="note"
@@ -561,7 +697,7 @@ function LoadedWorkbench({
           <CircleAlert className="needsyou-icon" size={20} strokeWidth={2.2} aria-hidden="true" />
           <div className="needsyou-body">
             <div className="needsyou-title">
-              {pending.length} Fields Need Your Confirmation
+              {pendingTotal} Fields Need Your Confirmation
             </div>
             <p className="needsyou-text">
               These are values the system refuses to guess. Confirm each before this record can
@@ -623,13 +759,13 @@ function LoadedWorkbench({
                 );
               })}
             </ol>
-            {pending.length > NEEDSYOU_VISIBLE && (
+            {pendingTotal > NEEDSYOU_VISIBLE && (
               /* NOT `aria-hidden`, and not a "…". A screen-reader user who has just
                  been told the count in the title needs to know this list is a
                  prefix of it, in words. */
               <p className="needsyou-more">
-                Showing the first {NEEDSYOU_VISIBLE} of {pending.length}.{' '}
-                {pending.length - NEEDSYOU_VISIBLE} more are waiting — open{' '}
+                Showing the first {NEEDSYOU_VISIBLE} of {pendingTotal}.{' '}
+                {pendingTotal - NEEDSYOU_VISIBLE} more are waiting — open{' '}
                 {LABELS.actionReviewAnswer} to work through all of them.
               </p>
             )}
