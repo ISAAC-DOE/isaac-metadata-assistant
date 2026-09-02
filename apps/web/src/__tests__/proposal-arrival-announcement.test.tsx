@@ -126,6 +126,12 @@ function page(
     },
     has_more: false,
     next_cursor: null,
+    // THE SERVER STATES THE ORDER AND THIS FIXTURE STATES IT TOO, defaulting to
+    // the server's own default. It is deliberately not optional in
+    // `ApiProposalsResponse`: a test that wants to model a newest-first window has
+    // to say so, which is what makes "the count line describes the LOADED window"
+    // assertable at all.
+    order: 'oldest_first' as const,
     window_default: 50,
     window_max: 200,
     max_per_record: 1000,
@@ -187,17 +193,12 @@ function activityFor(ids: string[], highestRev: number, proposalRev: number = hi
     proposalStates: [],
     otherKinds: [],
     highestRev,
-    /*
-     * NO RUN NEWS, WHICH IS WHAT EVERY CASE IN THIS FILE IS ABOUT — a proposal
-     * arriving. `runIds` above is already empty; `runRev` is the RUN-scoped floor
-     * that pairs with it, and `-1` is what `recordChanges.summarise` produces when
-     * no run entry was seen (it seeds the max at `-1` and never lowers it).
-     *
-     * Added 2026-09-02, when `RecordChangeSummary` was structurally widened to
-     * carry `runRev` for real. It was a REQUIRED field the moment the producer
-     * branch landed, so this literal stopped compiling — a merge-reconciliation
-     * gap, not a change to anything this file asserts.
-     */
+    // `-1` IS THE "NO RUN ENTRY SURVIVED" VALUE (`recordChanges.ts`), not a filler:
+    // every batch this file builds names proposals only. The field arrived with the
+    // bounded live-refresh work on `main`, which updated the identical helper in
+    // `ingestion-proposals-panel.test.tsx` and not this copy — the typechecker
+    // caught it on the merge rather than a test doing so, because a summary this
+    // panel reads for `proposalRev` alone behaves the same either way.
     runRev: -1,
     proposalRev,
   };
@@ -717,6 +718,221 @@ describe('the visible note', () => {
     await waitFor(() => expect(arrivalNoteText()).not.toBeNull());
 
     expect(document.activeElement).toBe(filterSelect);
+  });
+});
+
+/*
+ * THE ACTION THAT MAKES THE SENTENCE REACHABLE.
+ *
+ * Everything above pins that the arrival is DETECTED and SAID. None of it pins that
+ * the reader can then SEE the thing that arrived — and on the records this mechanism
+ * was written for they could not. The arrival is detected from `by_state.open`, which
+ * is the whole record; the window it is announced into is the OLDEST 50; and the
+ * arrival, carrying the latest `proposed_utc`, sorts LAST. So the note could be
+ * truthful and still be a dead end.
+ */
+describe('the arrival note leads somewhere', () => {
+  /** The list URLs the panel actually requested, in order. */
+  function urls(): string[] {
+    const calls = (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls;
+    return calls.map(([url]) => String(url));
+  }
+
+  /** The value only the NEWEST-first window renders. */
+  const NEWEST_VALUE = 'NEWEST_ARRIVAL_VALUE';
+
+  /**
+   * A record holding MORE OPEN PROPOSALS THAN THE WINDOW SHOWS, answering each
+   * order from its own end — which is the situation the whole feature is for, and
+   * which a fixture that served one page for every query could not model.
+   *
+   * The oldest-first window renders `SENTINEL`; the newest-first window renders
+   * `NEWEST_VALUE`. They are DISJOINT on purpose: an assertion that `NEWEST_VALUE`
+   * is on screen is then satisfiable only by a request that actually asked for the
+   * other direction, so a build that flipped the order client-side, or that ignored
+   * `order` entirely, cannot pass.
+   *
+   * `bump()` RAISES `by_state.open`, and it is a separate act rather than a read
+   * counter for a reason this fixture got wrong first time: the arrival mechanism
+   * compares against the count from the LAST successful read, whatever caused it, so
+   * a counter keyed on "the second read" makes the arrival land on a page change and
+   * leaves nothing for the signal to detect.
+   */
+  function stubBothOrders(): { bump: () => void } {
+    let open = 60;
+    stubFetchRoutes({
+      [LIST]: (_init, key) => {
+        const newest = String(key).includes('order=newest_first');
+        const shown = newest
+          ? [proposalFixture({ proposal_id: 'NEW_9', proposed_value: NEWEST_VALUE })]
+          : [proposalFixture({ proposal_id: 'OLD_1' })];
+        return {
+          body: pageWithOpenCount(shown, open, {
+            total: 61,
+            returned: 1,
+            has_more: !newest,
+            next_cursor: newest ? null : 'OLD_1',
+            // ANSWERED FROM THE KEY, as the server answers it from the query: the
+            // count line is built from `loaded.order`, so a stub that always
+            // returned the default would prove only that the panel renders a
+            // constant.
+            order: newest ? 'newest_first' : 'oldest_first',
+          }),
+        };
+      },
+    });
+    return {
+      bump: () => {
+        open += 1;
+      },
+    };
+  }
+
+  it('offers an action that puts the arrival in the FIRST window, and names both things it does', async () => {
+    const { bump } = stubBothOrders();
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+    // Before: the oldest window, and the arrival is not in it.
+    expect(screen.queryByText(NEWEST_VALUE)).toBeNull();
+
+    bump();
+    rerenderWith(view, activityFor(['NEW_9'], 9));
+    await waitFor(() => expect(arrivalNoteText()).not.toBeNull());
+
+    // THE LABEL NAMES BOTH ACTS. It changes the order AND the state filter, and a
+    // control that discarded the reader's filter without saying so is the quiet
+    // side effect `EmptyProposals`' two-handler split exists to avoid.
+    const action = screen.getByRole('button', { name: 'Show Open, Newest First' });
+    fireEvent.click(action);
+
+    await waitFor(() =>
+      expect(
+        urls().some((u) => u.includes('order=newest_first') && u.includes('state=open')),
+      ).toBe(true),
+    );
+    // THE MEASUREMENT THIS SLICE EXISTS FOR: the arrived proposal is now on screen,
+    // and it is on screen only because the OTHER direction was requested.
+    await screen.findByText(NEWEST_VALUE);
+  });
+
+  it('asks from the FIRST window, carrying no cursor the server would refuse', async () => {
+    const { bump } = stubBothOrders();
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    // Page forward first, so the panel is holding a cursor when the note arrives.
+    fireEvent.click(screen.getByRole('button', { name: 'Next Page' }));
+    await waitFor(() => expect(urls().some((u) => u.includes('after=OLD_1'))).toBe(true));
+
+    bump();
+    rerenderWith(view, activityFor(['NEW_9'], 9));
+    await waitFor(() => expect(arrivalNoteText()).not.toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Show Open, Newest First' }));
+
+    await waitFor(() => expect(urls().some((u) => u.includes('order=newest_first'))).toBe(true));
+    // A cursor from an oldest-first window is refused `422 cursor_order_mismatch`
+    // in the other order — so the one request shape that must never be built is
+    // one carrying both.
+    expect(urls().some((u) => u.includes('order=newest_first') && u.includes('after='))).toBe(
+      false,
+    );
+  });
+
+  it('is keyboard operable and does not steal focus, exactly as Dismiss is', async () => {
+    const { bump } = stubBothOrders();
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    const filterSelect = screen.getByLabelText('Show');
+    filterSelect.focus();
+
+    bump();
+    rerenderWith(view, activityFor(['NEW_9'], 9));
+    await waitFor(() => expect(arrivalNoteText()).not.toBeNull());
+    // Appearing next to a focused control must not move focus off it.
+    expect(document.activeElement).toBe(filterSelect);
+
+    const action = screen.getByRole('button', { name: 'Show Open, Newest First' });
+    expect(action.tagName).toBe('BUTTON');
+    action.focus();
+    expect(document.activeElement).toBe(action);
+    fireEvent.click(action);
+
+    // Activating it clears the note — the reader is being taken to the thing it
+    // was about, so leaving it standing would be a notice about a done act.
+    await waitFor(() => expect(arrivalNoteText()).toBeNull());
+  });
+
+  it('says the order in the count line and utters nothing new — one event, one utterance', async () => {
+    const { bump } = stubBothOrders();
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    bump();
+    rerenderWith(view, activityFor(['NEW_9'], 9));
+    await waitFor(() => expect(arrivalNoteText()).not.toBeNull());
+    const spokenAtArrival = statusText();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Open, Newest First' }));
+    await screen.findByText(/Showing 1 of 61 proposals on this record · newest first/);
+
+    // THE sr-only REGION IS UNTOUCHED BY THE ACT. It already spoke this arrival
+    // once; a second utterance from a control that only changed a view would be
+    // the twice-for-one-event defect this note's own comment records avoiding.
+    expect(statusText()).toBe(spokenAtArrival);
+    // And no proposal content ever reaches either surface.
+    expect(statusText()).not.toContain(SENTINEL);
+    expect(document.querySelector('.proposals-count')?.textContent ?? '').not.toContain(SENTINEL);
+  });
+
+  it('CLEARS THE RUNNING TOTAL, so the next arrival counts from there and not from before it', async () => {
+    /*
+     * `arrivalTotalRef` accumulates arrivals the reader has not ACKNOWLEDGED — not
+     * arrivals they have not reviewed; Dismiss's own comment is explicit that it
+     * marks nothing reviewed, and neither does this. Being taken to the window that
+     * HOLDS them is an acknowledgement, so the total has to reset here for the same
+     * reason it resets on Dismiss.
+     *
+     * MUTATION: deleted `arrivalTotalRef.current = 0` from the action's handler.
+     * Before this test the whole file passed 82/82 with the line gone — the reset
+     * was unpinned. With it, the second arrival reads "At least 2", counting one the
+     * reader had already been shown.
+     */
+    const { bump } = stubBothOrders();
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    bump();
+    rerenderWith(view, activityFor(['NEW_9'], 9));
+    await waitFor(() =>
+      expect(arrivalNoteText()).toBe('At least 1 proposed change arrived and is ready to review.'),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Open, Newest First' }));
+    await waitFor(() => expect(arrivalNoteText()).toBeNull());
+    // The reader has now SEEN that arrival — the window it is in is on screen.
+    await screen.findByText(NEWEST_VALUE);
+
+    // A SECOND, GENUINELY NEW arrival. It is one proposal, and the note must say so.
+    bump();
+    rerenderWith(view, activityFor(['NEW_10'], 14));
+    await waitFor(() => expect(arrivalNoteText()).not.toBeNull());
+    expect(arrivalNoteText()).toBe(
+      'At least 1 proposed change arrived and is ready to review.',
+    );
+    expect(arrivalNoteText()).not.toContain('At least 2');
+  });
+
+  it('NEGATIVE CONTROL: with no arrival there is no action to activate', async () => {
+    stubFetchRoutes({ [LIST]: { body: pageWithOpenCount([proposalFixture()], 2) } });
+    renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    expect(arrivalNoteText()).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show Open, Newest First' })).toBeNull();
+    // The ORDER CONTROL is still there — it is not part of the note and a reader
+    // may reach the other direction whenever they like.
+    expect((screen.getByLabelText('Order') as HTMLSelectElement).value).toBe('oldest_first');
   });
 });
 
