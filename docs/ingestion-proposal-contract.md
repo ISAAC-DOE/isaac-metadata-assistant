@@ -183,9 +183,28 @@ Constants that must be serialised on the wire, not merely held in the class — 
 | conflicted | **not a proposal state.** Derived from the address, by `conflict_resolution.state_of` (`:716`) |
 
 **Recommended set (5):** `open` · `accepted` · `rejected` · `superseded` · `withdrawn`,
-plus two **derived, never stored** reads: `stale` (from `base_rev`) and `appliable` (from §6).
+~~plus two **derived, never stored** reads: `stale` (from `base_rev`) and `appliable` (from §6).~~
 `accepted` is terminal-and-applied, because §6's recommendation makes acceptance-without-application
 unconstructible.
+
+**BOTH DERIVED READS AS NAMED HERE ARE WRONG, corrected 2026-09-01 and struck rather than edited,
+because §4's parenthetical was struck for exactly this and §3 WAS MISSED — a partially-swept
+correction is a failure this repository has published before.**
+
+- **`stale` is not derived from `base_rev`.** §10 **DEC-1** supersedes it: the precondition is
+  `target_digest`, and `base_rev` is *"kept, for the audit record only, and this module never
+  compares"* it (`proposals.py:96`; see also `:84` "STALENESS IS ``target_digest``, AND ``base_rev``
+  IS NOT", and `:331` "``base_rev`` is in the set because it is an audit anchor and never a
+  comparison"). The distinction is the whole of DEC-1: the record's rev moves on every unrelated act,
+  so using it would make every proposal on an active record permanently un-acceptable **while
+  leaving the target itself unchecked** — wrong in both directions at once.
+- **`appliable` was never implemented.** Measured at `7ff8194`:
+  `grep -rla 'appliable' apps/api/isaac_api/ --include='*.py'` -> **0 files**.
+
+**What is actually served as derived-and-never-stored** is `target_stale`, `still_current`,
+`excerpt`, `attributed` and `accepted_by` — each re-derived on every read, each `null` rather than
+`false` when it cannot be answered (the run was removed), which is a distinction no surface may
+collapse. `applied` is stored, not derived, and is true only in state `accepted`.
 
 Acts: `propose` (the opening entry, as `capture` is at `notes.py:180-182`) · `accept` · `reject` ·
 `supersede` · `withdraw`. Every act appends; nothing is removed; `revise_note`'s history-extension
@@ -320,7 +339,15 @@ an agent write a field. **The safety argument runs the other way from how §4 fi
 `submissions.content_signature`, so CREATING one mutates no authoritative metadata. That inertness
 is precisely what makes it the safe channel for model-derived output.
 
-**The amended surface — three tools, least privilege:**
+**The amended surface — ~~three~~ **FOUR** tools, least privilege:**
+
+*(Heading corrected 2026-09-01. It said "three" while the cells below name **four**; the cells are
+the spec and the count was wrong. The implementing slice found it, and — worth recording because it
+is the same class of error — the slice's own note reporting the defect was filed against §10.2,
+which is "The thirteen decisions" and says nothing about MCP tools. Both the defect and the
+misfiled complaint came from the same conflation. Re-derive with
+`grep -n '^## \|^### ' docs/ingestion-proposal-contract.md`: §4 Operations spans **210–343**, this
+table sits at **342–350**, and §10.2 begins at **681**.)*
 
 | Tool | Scope | Why this scope |
 |---|---|---|
@@ -329,7 +356,34 @@ is precisely what makes it the safe channel for model-derived output.
 | `isaac_get_changes` | `Scope.READ` | The bounded cursor feed. |
 
 Scopes still do not nest (`policy.py`, "WHY THE SCOPES DO NOT NEST"), so a deployment granting only
-`isaac:proposals.write` can create a proposal and read nothing else.
+~~`isaac:proposals.write` can create a proposal and read nothing else.~~
+
+**MEASURED FALSE 2026-09-01, AND STRUCK RATHER THAN REWORDED, because this sentence is what a slice
+cites when it decides what a tool may cost — and one did.** An implementation gave
+`isaac_propose_field_value` the `PROPOSALS_WRITE` scope ALONE to satisfy it. The safety case was
+that the handler returns a BUILT projection rather than the route body, and that was true of the
+SUCCESS branch. An independent review measured the other one — the refusal branch forwards the
+route's body whole, and the route's refusals were written for a caller holding `READ`:
+
+```
+if_match='"0.0"'   -> 412 {"current_rev": 1, "current_version": "...1"}
+if_match='"...1"'  -> 200, proposal STORED, envelope etag "...2"
+bad span           -> 422 {"note_text_length": 55}
+```
+
+So a propose-only principal reached a validator in **one extra request**, then kept one forever
+from each success envelope; bogus ids gave existence oracles besides.
+
+**The correct reading is that the create route's precondition is the RECORD's ETag, so a principal
+that may not read the record cannot use it.** Withholding `current_version` from the refusal does
+not rescue the shape — it makes it INERT, because such a caller could then never obtain an ETag and
+never create anything, and a capability that cannot work is not least privilege. The implementation
+therefore requires `{READ, PROPOSALS_WRITE}`, and a `PROPOSALS_WRITE`-only principal is served an
+**empty tool list**.
+
+**What this sentence was reaching for survives intact, and is the reason the scope still exists:**
+`isaac:proposals.write` separates *may propose* from `DRAFT_WRITE`'s *may change draft content
+directly*. That separation is real, is enforced, and is unaffected by the correction above.
 
 **Three consequences to state rather than discover.** §5 **I4** still binds unchanged: acceptance
 requires a trusted human identity and answers `409 human_actor_required` in every
@@ -611,9 +665,33 @@ proposal does not reach, in a section arguing that the storage location has no l
    alternation now matches `apps/api/isaac_api/routes.py`. Re-measured at this branch's HEAD:
    `next_cursor` is the **only** one of the six that matches — `get_changes_since`, `change_feed`,
    `changes_since`, `watermark` and `event_log` still return nothing but DB-API cursor objects. The
-   substantive claim the sentence was making is therefore **unchanged**: this repository still has
+   substantive claim the sentence was making is therefore ~~**unchanged**: this repository still has
    no change feed, no watermark and no event log. What it has gained is one paginated list's cursor,
-   which is the foundation DEC-5 named and is not the feed.
+   which is the foundation DEC-5 named and is not the feed.~~
+
+   **HALF OF THAT IS NOW FALSE, corrected 2026-09-01 and struck rather than deleted, because it was
+   TRUE when it was measured on 2026-08-30 and a reader must be able to see that it EXPIRED rather
+   than that it drifted.** The change feed shipped in PR #210 (merged `31ca1d2`), one day after the
+   sentence above was written. Re-measured at `7ff8194` in the MAIN CHECKOUT:
+
+   ```
+   for t in get_changes_since change_feed changes_since watermark event_log; do
+     grep -rla "$t" apps/api/isaac_api/ --include='*.py' | wc -l
+   done
+   ```
+
+   `change_feed` -> **3** files (`change_feed.py`, `routes.py`, `workspace.py`); the other four ->
+   **0**. So: **a change feed EXISTS** — `apps/api/isaac_api/change_feed.py`, served at
+   `GET /api/experiments/{experiment_id}/changes` (`routes.py:3850`), with a `proposal` kind whose
+   entry carries no content. **`watermark` and `event_log` remain at 0, and that half of the claim
+   still holds** — the feed is a cursor-paged read over stored positions, not an event log, and
+   `change_feed.py:548-556` says so itself: it reports current STATE and does not report lifecycle
+   transitions.
+
+   *A note on the measurement, because this document's own standard demands it: a first run of that
+   loop returned `change_feed -> 4`. The fourth was an uncommitted in-flight edit in the working
+   tree, not a committed fact. The figure above is from the committed tree and was cross-checked
+   with `git grep -la 'change_feed' 7ff8194 -- 'apps/api/isaac_api/**/*.py'`.*
 10. **Measurement.** No count, size, or timing in this document was measured against a running
     deployment. The path counts in §6 and the 15-member reading of
     `EXPERIMENT_OVERRIDABLE_ADDRESSES` in §5 were derived at HEAD by importing the constants;

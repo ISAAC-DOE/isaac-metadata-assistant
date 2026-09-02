@@ -11790,9 +11790,30 @@ def post_note_review(
 # inside it needs no DDL — and a feature needing a `0006` would not work until an
 # operator applied it, which is a hard stop no authorization lifts.
 #
-# NO MCP TOOL, AND NO PROPOSAL IN AN MCP-REACHABLE PAYLOAD. `PERMITTED_TOOL_NAMES` is
-# closed and `mcp/policy.py`'s import-time guard turns "we decided not to" into an
-# `ImportError`; nothing here adds a name. The narrower half is easier to lose:
+# ~~NO MCP TOOL, AND~~ NO PROPOSAL IN AN MCP-REACHABLE PAYLOAD. **The first half is
+# SUPERSEDED as of 2026-09-01 and is struck rather than deleted, because a reader who
+# takes it at face value will conclude the Claude-to-proposal workflow cannot exist.**
+# Four tools were added under contract §4's amended surface (lines 210-343, table at
+# 342-350): `isaac_propose_field_value` at the new `isaac:proposals.write` scope, plus
+# `isaac_list_proposals`, `isaac_get_proposal` and `isaac_get_changes` at `Scope.READ`.
+# `PERMITTED_TOOL_NAMES` went 10 -> 14.
+#
+# THE SECOND HALF STILL HOLDS, AND IS THE HALF THAT MATTERS. No tool can accept,
+# review, supersede, withdraw, finalize, export or Submit at any scope;
+# `POST .../proposals/{id}/review` appears in no `OPERATIONS` entry; and `accept` is
+# in `FORBIDDEN_TOOL_TOKENS`, so `isaac_accept_proposal` is an `ImportError` at
+# application start rather than a review miss. `PERMITTED_TOOL_NAMES` is still closed
+# and adding a name is still a reviewed change.
+#
+# ONE THING THE ADDING SLICE GOT WRONG, RECORDED SO IT IS NOT REPEATED: it first gave
+# `isaac_propose_field_value` the write scope ALONE, to satisfy §4's "can create a
+# proposal and read nothing else". The refusal branch forwards the route's body whole,
+# and the route's refusals were written for a caller holding READ — so a fabricated
+# `If-Match` returned `412` carrying `current_version`, and one more request created
+# successfully. The tool now costs `{READ, PROPOSALS_WRITE}`, a propose-only principal
+# is served an empty tool list, and §4's sentence is corrected in the contract.
+#
+# The narrower half is easier to lose:
 # `mcp/client.py` is bound to the OPERATION allowlist and not to a response SHAPE, so
 # adding a `proposals` key to `GET /api/experiments/{id}` — which `isaac_get_experiment`
 # reaches — would widen external-agent reads with no reviewed decision. It is not

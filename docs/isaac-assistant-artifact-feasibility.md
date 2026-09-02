@@ -781,14 +781,30 @@ tool-permission manifest generated from `policy.py`);
 embedding refused); `apps/api/tests/test_assistant_artifact_companion.py` (**40**
 tests — 25 as first written, see §3.12).
 
+**EXTENDED 2026-09-01.** An independent audit measured that `artifact_link.py` was
+**dead code**: `rg -an 'artifact_link'` over the repository (excluding `.md`)
+returned only the module and its own test, so no route registered it and no
+frontend referenced it — the architecture this document describes had no entry
+point. A later slice gave it one: `GET /api/runtime/assistant-companion`
+(three states, all 200, `unconfigured` by default), a Settings surface beside
+Connect Your Agent, `apps/api/tests/test_assistant_artifact_companion_route.py`
+(**59** tests) and `apps/web/src/__tests__/assistant-companion.test.tsx` (**44**).
+`artifact_link.py` itself is UNCHANGED — it needed a consumer, not a rewrite.
+
 **Deliberately not built:**
 
 - **The companion's model/MCP call surface.** No vendor documentation defines a
   client API for AI-powered or MCP-calling artifacts (§2.1). `runCompanionTurn` is
   a single marked seam that fails closed and says nothing was sent. Writing the
   call from recall is what `CLAUDE.md` §5 forbids.
-- **Any route wiring.** `artifact_link.py` is not mounted anywhere.
-  `apps/api/isaac_api/routes.py` was not touched.
+- ~~**Any route wiring.** `artifact_link.py` is not mounted anywhere.
+  `apps/api/isaac_api/routes.py` was not touched.~~ — **BOTH CLAUSES SUPERSEDED
+  2026-09-01, and struck rather than deleted because they were TRUE when written
+  and a reader must see that they expired rather than drifted.** The module is
+  now mounted at `GET /api/runtime/assistant-companion` and `routes.py` carries
+  one new section plus one import. What has NOT changed is the decision this
+  entry was protecting: the route serves a **deep link and never an embed**,
+  `embed_markup` still always raises, and nothing was published.
 - **Any published artifact.** Nothing was published, made public, or shared.
 - **Any voice or transcript integration.** §2.4 supports none of the three
   assumptions that would be needed.
