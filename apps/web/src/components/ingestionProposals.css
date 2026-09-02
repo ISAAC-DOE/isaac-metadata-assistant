@@ -70,7 +70,14 @@
   color: var(--text-secondary);
 }
 
+/*
+ * THE ORDER CONTROL SHARES THE FILTER'S RULE RATHER THAN GETTING ITS OWN. They are
+ * the same control in the same toolbar doing the same kind of thing — narrowing what
+ * this window shows, changing nothing on the record — and two rules that must stay
+ * identical are two rules that can drift apart.
+ */
 .proposals-filter,
+.proposals-order,
 .proposal-form-input {
   font: inherit;
   font-size: 12px;
@@ -82,6 +89,7 @@
 }
 
 .proposals-filter:focus-visible,
+.proposals-order:focus-visible,
 .proposal-form-input:focus-visible,
 .proposal-history-toggle:focus-visible {
   outline: 2px solid var(--action);

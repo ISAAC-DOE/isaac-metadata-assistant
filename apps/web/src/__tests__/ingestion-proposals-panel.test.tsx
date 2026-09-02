@@ -334,6 +334,122 @@ describe('paging over a bounded list', () => {
   });
 });
 
+// --- 2b. which END of the list the window comes from ---------------------------
+//
+// THE GAP. `workspace.py::_sorted_proposals` orders `(proposed_utc, proposal_id)`
+// oldest first and `routes.py::list_proposals` walks that order forward, so a freshly
+// created proposal — carrying the LATEST `proposed_utc` on the record — sorts LAST.
+// The panel's default view is the first window, so on a record already holding a full
+// one the newest proposal is not on screen and no re-read puts it there.
+
+describe('the order control', () => {
+  it('is a labelled, keyboard-reachable control that defaults to the SERVER default and sends nothing', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+
+    await screen.findByText('Proposed value');
+    const control = screen.getByLabelText('Order') as HTMLSelectElement;
+    expect(control.tagName).toBe('SELECT');
+    expect(control.value).toBe('oldest_first');
+    // THE DEFAULT IS THE SERVER'S AND IS NOT RESTATED. A client that sent
+    // `order=oldest_first` would be keeping a second copy of a default it does not own.
+    expect(urls().every((u) => !u.includes('order='))).toBe(true);
+  });
+
+  it('changing it asks the server for the other direction, from the FIRST window', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+
+    await screen.findByText('Proposed value');
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+
+    await waitFor(() =>
+      expect(urls().some((u) => u.endsWith('/proposals?order=newest_first'))).toBe(true),
+    );
+    // NO CURSOR RIDES ALONG. A `next_cursor` belongs to the order it was issued
+    // under and the server refuses one from the other direction
+    // (`422 cursor_order_mismatch`), so carrying it would turn the next read into a
+    // refusal — and the front of the other direction is what was asked for anyway.
+    expect(urls().some((u) => u.includes('order=newest_first') && u.includes('after='))).toBe(
+      false,
+    );
+  });
+
+  it('drops a cursor already held rather than replaying it in the other order', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        body: page([proposalFixture({ proposal_id: 'P1' })], {
+          total: 2,
+          returned: 1,
+          has_more: true,
+          next_cursor: 'P1',
+        }),
+      },
+      [`${LIST}?after=P1`]: {
+        body: page([proposalFixture({ proposal_id: 'P2' })], { total: 2, returned: 1 }),
+      },
+      [`${LIST}?order=newest_first`]: {
+        body: page([proposalFixture({ proposal_id: 'P2' })], { total: 2, returned: 1 }),
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Next Page' }));
+    await waitFor(() => expect(urls().some((u) => u.endsWith('?after=P1'))).toBe(true));
+
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    await waitFor(() =>
+      expect(urls().some((u) => u.endsWith('/proposals?order=newest_first'))).toBe(true),
+    );
+    // The one request shape that would have been refused: the held cursor replayed.
+    expect(urls().some((u) => u.includes('after=P1') && u.includes('order='))).toBe(false);
+  });
+
+  it('states the order in the COUNT LINE, in both directions, and raises no second live region', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()], { total: 61, returned: 1 }) },
+      [`${LIST}?order=newest_first`]: {
+        body: page([proposalFixture()], { total: 61, returned: 1 }),
+      },
+    });
+    renderPanel();
+
+    // SAID IN BOTH DIRECTIONS, INCLUDING THE DEFAULT: a clause present only for the
+    // non-default would make "oldest first" an inference from an absence.
+    const line = await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
+    expect(line.getAttribute('aria-live')).toBe('polite');
+
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    await screen.findByText(/Showing 1 of 61 proposals on this record · newest first/);
+
+    // ONE live region for this fact, not two. `role="status"` here is the ACT
+    // region and it must stay silent — the order changed nothing on the record.
+    expect(screen.getByRole('status').textContent ?? '').toBe('');
+  });
+
+  it('does not blank the list, so an open editor survives the change', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()]) },
+      [`${LIST}?order=newest_first`]: { body: page([proposalFixture()]) },
+    });
+    renderPanel();
+
+    await screen.findByText('Proposed value');
+    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    // THE DEFECT THIS CATCHES is rule 5 in this component's header: a reload that
+    // blanks the list unmounts every card and takes a half-written value with it.
+    expect(screen.queryByText(/Loading this record’s ingestion proposals/)).toBeNull();
+    expect(screen.getByText('Proposed value')).toBeTruthy();
+
+    // Settle the read this change started, so the assertion above is about the
+    // moment BEFORE it lands rather than about a request that never happened.
+    await waitFor(() =>
+      expect(urls().some((u) => u.endsWith('?order=newest_first'))).toBe(true),
+    );
+    expect(screen.getByText('Proposed value')).toBeTruthy();
+  });
+});
+
 // --- 3. the proposal is never the record's value -------------------------------
 
 describe('a proposal is never presented as the field value', () => {

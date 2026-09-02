@@ -2849,6 +2849,18 @@ export interface ApiProposal {
  * HOLDS — never how many were returned — so a client showing one window can always
  * state the record's true size instead of implying the rest are gone.
  */
+/**
+ * Which end of the record's proposal order a window is read from.
+ *
+ * `oldest_first` is the server's default and is the order this list has always
+ * returned. `newest_first` is the exact reverse of the same total order — the same
+ * rows and the same counts, the other direction — and it exists because a freshly
+ * created proposal carries the LATEST `proposed_utc` on the record and therefore
+ * sorts LAST: on a record already holding a full window it is not in the default
+ * window at all.
+ */
+export type ApiProposalOrder = 'oldest_first' | 'newest_first';
+
 export interface ApiProposalsResponse {
   proposals: ApiProposal[];
   /** How many the record HOLDS. Ignores `state`, `limit` and `after`. */
@@ -2857,6 +2869,16 @@ export interface ApiProposalsResponse {
   returned: number;
   by_state: Record<ApiProposalState, number>;
   has_more: boolean;
+  /**
+   * The cursor for the next window IN THE ORDER THIS ONE WAS READ IN, and it must be
+   * passed back with that same `order`. The server refuses a cursor from the other
+   * direction (`cursor_order_mismatch`) rather than answering it, because the id
+   * inside it does exist in both orders and the walk would otherwise continue from
+   * the wrong side and hand back rows already read as the next page.
+   *
+   * OPAQUE TO THIS CLIENT. Under `oldest_first` it is a bare proposal id and under
+   * `newest_first` it carries a prefix; nothing here may parse or construct one.
+   */
   next_cursor: string | null;
   window_default: number;
   window_max: number;

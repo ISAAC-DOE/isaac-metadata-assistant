@@ -63,6 +63,7 @@ import type {
   ApiProposalAcceptedFrom,
   ApiProposalReviewAction,
   ApiProposalReviewed,
+  ApiProposalOrder,
   ApiProposalState,
   ApiProposalsResponse,
   ApiProvenanceResponse,
@@ -808,7 +809,7 @@ export interface ListNotesQuery {
 }
 
 /**
- * The three parameters `GET .../proposals` accepts.
+ * The four parameters `GET .../proposals` accepts.
  *
  * `limit` AND `after` ARE NOT OPTIONAL DECORATION HERE, and this list is the one
  * place in this client where that matters. Unlike `GET .../runs` and
@@ -819,13 +820,23 @@ export interface ListNotesQuery {
  * refused with `unknown_cursor` rather than treated as the start of the list,
  * because silently restarting a page walk returns the same window forever.
  *
- * `state` is typed as the server's own union rather than `string`, so a filter this
- * API does not offer is a compile error instead of a query the server ignores.
+ * `order` CHOOSES WHICH END OF THE LIST THE WINDOW COMES FROM, and it is the reason
+ * a newly arrived proposal is reachable at all. The server sorts oldest first, so
+ * the newest proposal sorts LAST and is outside the default window on any record
+ * holding a full one. `newest_first` reads the same total order from the other end.
+ * A `next_cursor` BELONGS TO THE ORDER IT WAS ISSUED UNDER — pass the two together,
+ * or the server refuses with `cursor_order_mismatch` rather than answering from the
+ * wrong side.
+ *
+ * `state` and `order` are typed as the server's own unions rather than `string`, so
+ * a filter this API does not offer is a compile error instead of a query the server
+ * ignores.
  */
 export interface ListProposalsQuery {
   state?: ApiProposalState;
   limit?: number;
   after?: string;
+  order?: ApiProposalOrder;
 }
 
 /*
@@ -1755,6 +1766,10 @@ export const api = {
     if (query.state !== undefined) params.set('state', query.state);
     if (query.limit !== undefined) params.set('limit', String(query.limit));
     if (query.after !== undefined) params.set('after', query.after);
+    // PASSED THROUGH ONLY WHEN THE CALLER NAMED ONE, exactly as `limit` is: the
+    // server's default is `oldest_first`, and sending it explicitly from here would
+    // be this client keeping a second copy of a default the server owns.
+    if (query.order !== undefined) params.set('order', query.order);
     const path = `/experiments/${enc(experimentId)}/proposals`;
     const search = params.toString();
     return getJson<ApiProposalsResponse>(search === '' ? path : `${path}?${search}`);
