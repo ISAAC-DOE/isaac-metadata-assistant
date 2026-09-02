@@ -3272,6 +3272,53 @@ export interface ApiProviderSeam {
   selected_by: string;
 }
 
+/* --------------------------------------------------------------------------
+ * The assistant artifact companion link.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * `GET /api/runtime/assistant-companion` — whether this deployment has a
+ * companion artifact link, and the limits of that claim.
+ *
+ * EVERY KEY IS PRESENT IN EVERY STATE, which is why none of them is optional
+ * here. The route publishes a fixed shape on purpose: a key that appeared in one
+ * state and not another would make a client branch on a missing property rather
+ * than on the state it was given.
+ *
+ * `url` IS NON-NULL EXACTLY WHEN `state` IS `configured`. That is the route's
+ * invariant, not this type's — TypeScript cannot express it — so the component
+ * branches on `state` and reads `url` only inside that branch, and a test proves
+ * no other branch can render one.
+ */
+export interface ApiAssistantCompanion {
+  /**
+   * `unconfigured` (the default and a working state), `configured` (a value was
+   * supplied and passed the shape checks), or `refused` (a value was supplied
+   * and will not be used).
+   */
+  state: string;
+  /** The normalised link, or `null`. Never a default and never a placeholder. */
+  url: string | null;
+  /**
+   * Why there is no link, or which check a supplied one failed. Relayed from
+   * the server verbatim; it names a category and never repeats the value.
+   */
+  reason: string;
+  /** The NAME of the environment variable an operator sets. Never its value. */
+  configured_by: string;
+  /** A constant `deep_link`. Embedding is refused, not unimplemented. */
+  link_kind: string;
+  /**
+   * A constant `false`. Published so a client cannot read `configured` as
+   * `working`: the server checked the SHAPE of a link and never resolved it.
+   */
+  checked_reachable: boolean;
+  /** The condition this application cannot observe, stated in full. */
+  prerequisite: string;
+  /** The repository document recording the steps and who owns them. */
+  reference: string;
+}
+
 export interface ApiProviderCapabilities {
   any_provider_configured: boolean;
   decision_reference: string;

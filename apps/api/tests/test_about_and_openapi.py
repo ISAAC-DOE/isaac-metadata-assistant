@@ -669,7 +669,19 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # so the count is 76 — RE-MEASURED from `create_app().openapi()` on this tree, and
     # the arithmetic below is stated as a CHECK rather than as the derivation:
     # 71 + 4 + 1 = 76.
-    assert checked == 76, f"expected 76 documented operations, found {checked}"
+    #
+    # ── 76 -> 77, 2026-09-01: `GET /api/runtime/assistant-companion` ────────────
+    # The assistant artifact companion's link report, and the FIRST consumer
+    # `artifact_link.py` has ever had — that module shipped with no route
+    # registering it, no module importing it and no screen referencing it, so the
+    # entry point the companion needs did not exist and its validation was
+    # unreachable from anything a scientist meets. The operation reports
+    # configuration and acts on nothing: it opens no outbound connection, never
+    # calls `embed_markup` (which raises by design), holds no default link, and
+    # never repeats a refused value back to its caller.
+    #
+    # MEASURED from `create_app().openapi()`, not derived from the line above it.
+    assert checked == 77, f"expected 77 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1067,6 +1079,16 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # request that supplied nothing to work on. They are deliberately different
     # codes: a caller who retried the first would be waiting for a decision nobody
     # has made.
+    # The assistant artifact companion's link report. Two codes and no more,
+    # because there is no third thing that can happen: it takes no parameter and no
+    # body, so there is no shape to refuse, and a value it will NOT use is reported
+    # as a `200` carrying `state: "refused"` rather than as an error. That is
+    # deliberate and is the same choice `/api/runtime/verification` makes for an
+    # unrecognised mode — a refusal is a result the operator must be able to read,
+    # and a 4xx/5xx would present a configuration fact as a fault in the request or
+    # in the server. There is likewise no `404` when nothing is configured: an
+    # absent link is this deployment's normal state, not a missing resource.
+    ("/api/runtime/assistant-companion", "get"): ["200", "401"],
     ("/api/transcription", "post"): ["200", "401", "422", "501"],
     # THE ASSISTANT SEAM, and its codes are deliberately the transcription seam's.
     # 501 = no provider is configured in this deployment, which is an institutional

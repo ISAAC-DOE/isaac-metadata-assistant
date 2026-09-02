@@ -34,6 +34,7 @@ import { MCP_CONNECT_COPY } from '../lib/mcpConnectContent';
 import { ApiExplorerPanel, ApiQuickStartPanel } from './settings/ApiDocs';
 import { ApiKeysPanel } from './settings/ApiKeys';
 import { ConnectYourAgentPanel } from './settings/ConnectYourAgent';
+import { AssistantCompanionSection } from './settings/AssistantCompanion';
 import { HelpAndTutorialPanel } from './settings/HelpAndTutorial';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 
@@ -90,10 +91,32 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
  * the app's own generated contract — never a hand-maintained duplicate, no CDN,
  * no Swagger UI/ReDoc.
  *
- * All THREE fetches (`/api/about`, `/api/openapi`, `/api/graph/status`) are
- * issued once at page level so switching tabs is pure client state and never
- * re-hits the backend. The third feeds Copy Diagnostics' memory-provenance rows
- * on About; it is the cheap status endpoint, never the graph payload.
+ * These THREE PAGE-LEVEL fetches (`/api/about`, `/api/openapi`,
+ * `/api/graph/status`) are issued once at page level so switching tabs is pure
+ * client state and never re-hits the backend. The third feeds Copy Diagnostics'
+ * memory-provenance rows on About; it is the cheap status endpoint, never the
+ * graph payload.
+ *
+ * THE PAGE NOW ISSUES A FOURTH READ, AND IT IS DELIBERATELY NOT ONE OF THE THREE.
+ * `AssistantCompanionSection` fetches `/api/runtime/assistant-companion` at the
+ * SECTION level, against the convention above and for the reason the convention
+ * exists. That route re-reads its environment variable on every request,
+ * precisely so an operator who sets it does not have to restart anything.
+ *
+ * BE PRECISE ABOUT WHAT THE CLIENT SIDE OF THAT BUYS, because an earlier
+ * revision of this paragraph was not. `useFetch(…, [])` pins the answer for the
+ * life of the SECTION MOUNT, which on this tab is the page load unless the
+ * reader navigates away and back. So section-level placement does not make the
+ * answer live; it makes the answer re-read on every remount, where page-level
+ * placement would re-read it once per page load however often the reader
+ * returned. That is a narrower benefit than "no staleness", and it is the true
+ * one — the non-caching that matters is the ROUTE's, and it is verified there.
+ * The remount behaviour is asserted rather than assumed, by
+ * `assistant-companion.test.tsx`. The sentence above
+ * said "all" and was true when it was written — it is narrowed here rather than
+ * deleted, because "issued once at page level" remains the rule for those three
+ * and a future reader must be able to see that the fourth is an argued
+ * exception rather than a drift.
  */
 
 type SettingsTab = SettingsTabId;
@@ -778,6 +801,27 @@ function ConnectYourAgentTab({ onOpenExplorer }: { onOpenExplorer: () => void })
       sub={MCP_CONNECT_COPY.cardSub}
     >
       <ConnectYourAgentPanel onOpenExplorer={onOpenExplorer} />
+      {/* THE COMPANION ARTIFACT, a SIBLING of the panel above rather than a
+          section inside it, and the separation is deliberate twice over.
+
+          It is a DIFFERENT DIRECTION: everything in the panel above is ISAAC's
+          own agent interface — the tool surface a scientist's Claude would call,
+          which this deployment publishes no address for. The companion is the
+          other way round, an optional page a scientist opens in Claude, which
+          this website neither hosts nor depends on. It is on this tab because
+          its stated prerequisite is the same connector the panel's setup steps
+          describe, so a reader meets both claims or neither.
+
+          And `ConnectYourAgentPanel`'s docstring enumerates, claim by claim,
+          what that panel does not render — no endpoint URL, no activity date,
+          no control but one. Nesting a section that DOES render a link (when a
+          deployment has one) inside that component would make its own stated
+          contract false about its own subtree. As siblings under the card's
+          `h2`, each keeps its own contract and its own tests.
+
+          It reads its own live configuration; see `AssistantCompanion.tsx` for
+          why that read is not hoisted to the page with the other three. */}
+      <AssistantCompanionSection onOpenExplorer={onOpenExplorer} />
     </SettingsCard>
   );
 }

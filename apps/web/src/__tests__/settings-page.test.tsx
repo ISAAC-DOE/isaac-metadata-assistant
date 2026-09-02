@@ -23,6 +23,7 @@ import {
   aboutResponseNoCommit,
   graphStatusAvailable,
   openApiFixture,
+  assistantCompanionUnconfigured,
 } from '../test/apiFixtures';
 
 /**
@@ -114,6 +115,14 @@ function fullRoutes() {
     // Copy Diagnostics' memory-provenance rows (About tab). Page-level, like the
     // other two, so a tab switch never re-hits it — see the fetch-count test.
     [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+    /* The companion-link read (Connect Your Agent tab). NOT page-level: the route
+       re-reads the environment per request so an operator's change is never
+       reported from a cached value, so the section issues it where it renders.
+       Stubbed with the DEFAULT state — `unconfigured` — so this file's
+       forbidden-substring sweep and heading-outline checks run over the state
+       the overwhelming majority of deployments are in, rather than over the
+       failed-read branch an unstubbed route would produce. */
+    'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
   };
 }
 
@@ -618,6 +627,7 @@ describe('Settings — Overview', () => {
       [ABOUT_URL]: { body: { ...aboutResponse, data_regime: 'mixed-somehow' } },
       [OPENAPI_URL]: { body: openApiFixture },
       [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+      'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
     expect(
@@ -651,6 +661,7 @@ describe('Settings — Overview', () => {
       [ABOUT_URL]: { body: { ...aboutResponse, persistence: 'durable' } },
       [OPENAPI_URL]: { body: openApiFixture },
       [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+      'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
     fireEvent.click(tab('Data & Privacy'));
@@ -674,6 +685,7 @@ describe('Settings — Overview', () => {
       [ABOUT_URL]: { body: { ...aboutResponse, persistence: 'somehow-else' } },
       [OPENAPI_URL]: { body: openApiFixture },
       [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+      'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
     fireEvent.click(tab('Data & Privacy'));
@@ -724,6 +736,7 @@ describe('Settings — Overview', () => {
       [ABOUT_URL]: { body: { ...aboutResponse, persistence: 'unavailable' } },
       [OPENAPI_URL]: { body: openApiFixture },
       [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+      'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
     fireEvent.click(tab('Data & Privacy'));
@@ -1230,6 +1243,7 @@ describe('Settings — About', () => {
       [ABOUT_URL]: { body: aboutResponseNoCommit },
       [OPENAPI_URL]: { body: openApiFixture },
       [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+      'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
     openTab('About');
