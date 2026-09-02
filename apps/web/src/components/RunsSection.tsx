@@ -71,26 +71,28 @@ import {
 } from '../lib/routes';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 
-/**
- * `activity` AS THE RUNS FAST PATH ACTUALLY RECEIVES IT — `RecordChangeSummary`
- * (`../lib/recordChanges`) plus `runRev`, a RUN-scoped floor exactly analogous to
- * that module's own `proposalRev`: the highest `changed_at_rev` among the
- * SURVIVING RUN entries, never inflated by a proposal entry riding in the same
- * batch. `highestRev` on the base type is deliberately NOT used anywhere in this
- * file (see the dedupe/gate below) — for `activity` specifically it is documented
- * as a max over ALL surviving entries INCLUDING proposals, which is exactly the
- * value that inflated the dedupe key and the gate before this fix, and is exactly
- * the value `recordChanges.ts` warns `proposalRev` exists to avoid for proposals.
+/*
+ * `activity` AS THE RUNS FAST PATH ACTUALLY RECEIVES IT — plain
+ * `RecordChangeSummary` (`../lib/recordChanges`), whose `runRev` is a RUN-scoped
+ * floor exactly analogous to that module's own `proposalRev`: the highest
+ * `changed_at_rev` among the SURVIVING RUN entries, never inflated by a proposal
+ * entry riding in the same batch. `highestRev` on that type is deliberately NOT
+ * used anywhere in this file (see the dedupe/gate below) — it is documented as a
+ * max over ALL surviving entries INCLUDING proposals, which is exactly the value
+ * that inflated the dedupe key and the gate before that fix, and is exactly the
+ * value `recordChanges.ts` warns `proposalRev` exists to avoid for proposals.
  *
- * `runRev` IS NOT YET A FIELD ON `RecordChangeSummary` IN THIS BRANCH. The
- * producer side (a separate PR) adds it. It is declared as a local extension here
- * — never imported — so this file compiles today against the base type AND
- * remains correct once the two branches merge and `RecordChangeSummary` is
- * structurally widened to carry it for real.
+ * A LOCAL `RunsSectionActivity extends RecordChangeSummary { runRev: number }`
+ * STOOD HERE, AND IS GONE — recorded rather than silently removed, because the
+ * reason it existed is the reason it must not come back. When this file was
+ * written `runRev` did not yet exist on `RecordChangeSummary`: the producer side
+ * (`lib/useRecordSession.runActivity`, PR #224) added it on a different branch, so
+ * a structural local extension was the only way this file could compile against
+ * the base type today AND stay correct once the branches met. They have now met
+ * (2026-09-02, this branch): `recordChanges.ts:82` declares `runRev` for real, so
+ * the extension is redundant and the prop takes the shared type directly. A second
+ * declaration of a field the producer now owns would be free to drift from it.
  */
-export interface RunsSectionActivity extends RecordChangeSummary {
-  runRev: number;
-}
 import type { ApiRunView } from '../lib/types';
 import { RUNS_PAGE_SIZE, RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { mutationFailureCopy } from '../lib/mutationErrors';
@@ -179,9 +181,9 @@ export function RunsSection({
 }: {
   experimentId: string;
   /**
-   * THE FAST PATH — a RUN-scoped change-feed summary, or `null`. See
-   * `RunsSectionActivity` immediately above for its shape and why `runRev`
-   * exists. IDS AND A REVISION ONLY, NEVER RUN CONTENT: this section treats a
+   * THE FAST PATH — a RUN-scoped change-feed summary, or `null`. See the note
+   * above this file's imports for which field of it this path reads (`runRev`,
+   * never `highestRev`) and why. IDS AND A REVISION ONLY, NEVER RUN CONTENT: this section treats a
    * signal as "something moved, go re-read what is on screen", never as a value
    * to render.
    *
@@ -195,7 +197,7 @@ export function RunsSection({
    * gaps are closed by `recordVersion` below, not by this prop — see its own
    * comment for why that split is the whole design.
    */
-  activity?: RunsSectionActivity | null;
+  activity?: RecordChangeSummary | null;
   /**
    * THE COMPLETENESS PATH — the record bundle's own `detail.version`, or
    * `null`/omitted while that bundle has not loaded. Whenever this differs (by
@@ -261,7 +263,7 @@ function RunsBrowser({
   recordVersion,
 }: {
   experimentId: string;
-  activity: RunsSectionActivity | null;
+  activity: RecordChangeSummary | null;
   recordVersion: string | null;
 }) {
   const baseId = useId();

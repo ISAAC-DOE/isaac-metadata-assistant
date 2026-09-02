@@ -416,6 +416,7 @@ export function RecordWorkbench() {
       degraded={degraded || session.feedDegraded}
       activity={session.activity}
       proposalActivity={session.proposalActivity}
+      runActivity={session.runActivity}
       agentContext={session.context}
       agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
@@ -448,6 +449,7 @@ function LoadedWorkbench({
   degraded,
   activity,
   proposalActivity,
+  runActivity,
   agentContext,
   agentDegraded,
   onManualRefresh,
@@ -470,6 +472,19 @@ function LoadedWorkbench({
    * arrived. See `useRecordSession.proposalActivity`.
    */
   proposalActivity: RecordChangeSummary | null;
+  /**
+   * THE SAME FEED AGAIN, ASKED WHETHER A RUN MOVED — a THIRD prop rather than a
+   * reuse of either of the two above, for the same reason `proposalActivity` is not
+   * `activity`: each consumer's "have I caught up?" is answered by a different
+   * read, so one summary cannot be null at the right moment for all three.
+   *
+   * `activity` is null once THIS screen's record bundle has caught up. The runs
+   * list is a SEPARATE read with its own version, and a record refetch does not
+   * refresh it — so on the ordinary ordering `activity` is null at exactly the
+   * moment a colleague's run edit has arrived. See `useRecordSession.runActivity`,
+   * which is computed against the run list's own floor for precisely this.
+   */
+  runActivity: RecordChangeSummary | null;
   agentContext: AgentContext | undefined;
   agentDegraded: boolean;
   onManualRefresh: () => void;
@@ -798,7 +813,18 @@ function LoadedWorkbench({
            putting them behind a tab would hide from a reader on the fields view
            that this experiment has runs at all.
       */}
-      <RunsSection experimentId={id} />
+      <RunsSection
+        experimentId={id}
+        /* THE FAST PATH: a run-scoped feed summary. Ids and a rev, never content. */
+        activity={runActivity}
+        /*
+         * THE COMPLETENESS PATH: the record bundle's own version token, which moves
+         * for the two things the feed structurally cannot report — a run REMOVAL
+         * (no `run` entry moves, only the record's own) and a generation change.
+         * `RunsSection`'s comments on both props carry the full argument.
+         */
+        recordVersion={detail.version}
+      />
 
       {/*
         VALIDATE & REVIEW SITS DIRECTLY BELOW THE RUNS, and the placement is the
