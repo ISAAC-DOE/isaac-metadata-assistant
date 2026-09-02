@@ -1,28 +1,54 @@
 /*
- * RUNS SECTION — THE CHANGE-FEED `activity` PROP.
+ * RUNS SECTION — TWO PATHS TO ONE BOUNDED SILENT RELOAD.
  *
  * WHAT THIS FILE IS FOR. `RunsSection` owns its own fetch (see its file header)
- * and is deliberately NOT one of the pollers on the record screen. This slice
- * gives it an optional `activity` prop — a `RecordChangeSummary` a parent screen
- * already holds — and asks it to do exactly one thing when that summary reports
- * a run or the record moved: perform ONE SILENT first-page reload, the same kind
- * `Add Run` and `Remove Run` already trigger through `reloadNonce` + `silentRef`.
+ * and is deliberately NOT one of the pollers on the record screen. It takes two
+ * independent props: `activity` (a RUN-scoped change-feed summary — the FAST
+ * path) and `recordVersion` (the record bundle's own version token — the
+ * COMPLETENESS path). Both exist to trigger exactly one thing: a silent
+ * first-page reload, the same kind `Add Run` and `Remove Run` already trigger
+ * through `reloadNonce` + `silentRef`.
  *
- * EVERY ASSERTION HERE IS ABOUT REQUEST COUNTS AND THE SIGNAL GATE, not about the
- * paging or search mechanics `run-browser.test.tsx` already owns — this file
- * mounts the section directly, the same way, for the same measured cost reason
- * (see that file's header), and reuses its harness shape rather than duplicating
- * a second one that drifts from it.
+ * WHY TWO PATHS, MEASURED RATHER THAN ASSUMED. An earlier version of this slice
+ * used `activity` alone, keyed and gated on its `highestRev` field. An
+ * independent review of the PRODUCER side (PR #224) found three defects in that
+ * design, against the producer's actual contract:
+ *
+ *   (a) `highestRev` is a max over ALL surviving entries INCLUDING proposals, so
+ *       a stale proposal position inflates it — drifting the dedupe key on every
+ *       poll even when nothing about the runs changed (redundant reloads), and
+ *       the OLD swallow branch RECORDED that inflated key, so a run change that
+ *       arrived bundled with it could be lost permanently.
+ *   (b) this section's own loaded rev is parsed from the bare REV half of
+ *       `<generation>.<rev>`, so a signal after a generation change (`1.7` ->
+ *       `2.0`) reads as "already seen" and is swallowed.
+ *   (c) the change feed cannot report a run REMOVAL at all — only the record's
+ *       own entry moves, never a `run` entry — so `activity` is empty for a
+ *       removal, always.
+ *
+ * The fix is structural, not a smarter parse of `activity`: `activity` is now
+ * keyed and gated on `runRev` (a RUN-scoped floor, never `highestRev`) and no
+ * longer records the key when swallowing — closing (a). `recordVersion` closes
+ * (b) and (c) independently, by plain STRING inequality against what this
+ * section has itself loaded, which needs no rev arithmetic and is therefore
+ * correct across a generation boundary and for a removal without this section
+ * ever having to understand either. See `RunsSection`'s own prop comments for
+ * the full argument; this file pins the observable behaviour.
+ *
+ * EVERY ASSERTION HERE IS ABOUT REQUEST COUNTS AND THE SIGNAL GATE, not about
+ * the paging or search mechanics `run-browser.test.tsx` already owns — this
+ * file mounts the section directly, the same way, for the same measured cost
+ * reason (see that file's header), and reuses its harness shape rather than
+ * duplicating a second one that drifts from it.
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-import { RunsSection, RUNS_PAGE_SIZE } from '../components/RunsSection';
+import { RunsSection, RUNS_PAGE_SIZE, type RunsSectionActivity } from '../components/RunsSection';
 import { RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
-import type { RecordChangeSummary } from '../lib/recordChanges';
 import { runFixture, stubFetchRoutes } from '../test/apiFixtures';
 
 // A debounce-driven wait (the search box's own 300ms) plus this file's
@@ -58,9 +84,11 @@ function mkRun(n: number, over: Record<string, unknown> = {}): Run {
   });
 }
 
-/** A `RecordChangeSummary`, defaulted to "no news" so a test only names the
- *  fields it is about. */
-function summary(over: Partial<RecordChangeSummary> = {}): RecordChangeSummary {
+/** A `RunsSectionActivity`, defaulted to "no news" so a test only names the
+ *  fields it is about. `runRev` defaults to `-1` — never above any real loaded
+ *  rev — so a test that forgets to set it fails closed (no request) rather
+ *  than accidentally triggering one. */
+function summary(over: Partial<RunsSectionActivity> = {}): RunsSectionActivity {
   return {
     recordMoved: false,
     runIds: [],
@@ -69,6 +97,7 @@ function summary(over: Partial<RecordChangeSummary> = {}): RecordChangeSummary {
     otherKinds: [],
     highestRev: -1,
     proposalRev: -1,
+    runRev: -1,
     ...over,
   };
 }
@@ -143,13 +172,19 @@ function stubRunsBackend(initial: { runs: Run[]; version: string }) {
   };
 }
 
-function Harness({ activity }: { activity: RecordChangeSummary | null }) {
+function Harness({
+  activity,
+  recordVersion,
+}: {
+  activity: RunsSectionActivity | null;
+  recordVersion?: string | null;
+}) {
   return (
     <MemoryRouter
       initialEntries={[`/record/${ID}`]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      <RunsSection experimentId={ID} activity={activity} />
+      <RunsSection experimentId={ID} activity={activity} recordVersion={recordVersion ?? null} />
     </MemoryRouter>
   );
 }
@@ -185,8 +220,10 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
+// The fast path (`activity`)
+// ---------------------------------------------------------------------------
 
-describe('a run that arrived through the change feed', () => {
+describe('a run that arrived through the change feed (fast path)', () => {
   it('a created run becomes visible after a signal', async () => {
     const backend = stubRunsBackend({ runs: [mkRun(1), mkRun(2)], version: '1.0' });
     const { rerender } = render(<Harness activity={null} />);
@@ -197,7 +234,7 @@ describe('a run that arrived through the change feed', () => {
     // The colleague's create advanced the record to rev 1, and a third run now
     // exists on the server the section has not yet read.
     backend.setRuns([mkRun(1), mkRun(2), mkRun(3)], '1.1');
-    rerender(<Harness activity={summary({ runIds: ['RUN003'], highestRev: 1 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN003'], runRev: 1 })} />);
 
     await waitFor(() => expect(backend.calls).toHaveLength(2));
     await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002', 'RUN003']));
@@ -210,31 +247,16 @@ describe('a run that arrived through the change feed', () => {
     await screen.findByText('Run 1');
 
     backend.setRuns([mkRun(1, { label: 'Run 1 — recalibrated' })], '1.1');
-    rerender(<Harness activity={summary({ runIds: ['RUN001'], highestRev: 1 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN001'], runRev: 1 })} />);
 
     await screen.findByText('Run 1 — recalibrated');
     // Still one card, not two — the list is REPLACED from the response, never
     // appended, so a re-delivered run cannot render twice.
     expect(renderedIds()).toEqual(['RUN001']);
   });
-
-  it('a removed run disappears on a recordMoved signal — the feed cannot report a deletion directly', async () => {
-    const backend = stubRunsBackend({ runs: [mkRun(1), mkRun(2)], version: '1.0' });
-    const { rerender } = render(<Harness activity={null} />);
-    await waitForList();
-    await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002']));
-
-    // A run removed elsewhere moves the record's OWN entry; runIds stays empty by
-    // construction (see the file header on `RunsSection` and `RecordChangeSummary`).
-    backend.setRuns([mkRun(1)], '1.1');
-    rerender(<Harness activity={summary({ recordMoved: true, runIds: [], highestRev: 1 })} />);
-
-    await waitFor(() => expect(backend.calls).toHaveLength(2));
-    await waitFor(() => expect(renderedIds()).toEqual(['RUN001']));
-  });
 });
 
-describe('signals that must NOT cause a request', () => {
+describe('signals that must NOT cause a request (fast path)', () => {
   it('a proposal-only signal makes no request', async () => {
     const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
     const { rerender } = render(<Harness activity={null} />);
@@ -242,9 +264,7 @@ describe('signals that must NOT cause a request', () => {
     expect(backend.calls).toHaveLength(1);
 
     rerender(
-      <Harness
-        activity={summary({ proposalIds: ['P1'], proposalRev: 4, highestRev: 4 })}
-      />,
+      <Harness activity={summary({ proposalIds: ['P1'], proposalRev: 4, highestRev: 4 })} />,
     );
     await flush();
     expect(backend.calls).toHaveLength(1);
@@ -256,11 +276,11 @@ describe('signals that must NOT cause a request', () => {
     await waitForList();
     expect(backend.calls).toHaveLength(1);
 
-    rerender(<Harness activity={summary({ runIds: ['RUN001'], highestRev: 5 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN001'], runRev: 5 })} />);
     await flush();
     expect(backend.calls).toHaveLength(1);
 
-    rerender(<Harness activity={summary({ runIds: ['RUN001'], highestRev: 3 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN001'], runRev: 3 })} />);
     await flush();
     expect(backend.calls).toHaveLength(1);
   });
@@ -271,7 +291,7 @@ describe('signals that must NOT cause a request', () => {
     await waitForList();
     expect(backend.calls).toHaveLength(1);
 
-    const sig = summary({ runIds: ['RUN002'], highestRev: 1 });
+    const sig = summary({ runIds: ['RUN002'], runRev: 1 });
     rerender(<Harness activity={sig} />);
     await waitFor(() => expect(backend.calls).toHaveLength(2));
 
@@ -281,9 +301,51 @@ describe('signals that must NOT cause a request', () => {
     await flush();
     expect(backend.calls).toHaveLength(2);
 
-    rerender(<Harness activity={summary({ runIds: ['RUN002'], highestRev: 1 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1 })} />);
     await flush();
     expect(backend.calls).toHaveLength(2);
+  });
+});
+
+describe('defect (a) — the dedupe key and the gate use runRev, never highestRev', () => {
+  it('a stale, drifting highestRev (proposal noise) does not re-key an otherwise-identical run signal', async () => {
+    /*
+     * MEASURED AGAINST THE PRODUCER'S ACTUAL CONTRACT: `activity.highestRev` is
+     * a max over ALL surviving entries INCLUDING proposals, so it can keep
+     * moving on every poll even when the RUN news is exactly the same. If the
+     * dedupe key included it, each poll would look like a "new" signal and
+     * reload again — this is the redundant-reload half of defect (a).
+     */
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1, highestRev: 10 })} />);
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+
+    // SAME runRev, SAME runIds — but `highestRev` has drifted upward, as an
+    // unrelated proposal entry riding in the same batch would make it do.
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1, highestRev: 55 })} />);
+    await flush();
+    expect(backend.calls).toHaveLength(2);
+  });
+
+  it('a run signal already covered by the loaded rev makes no request, even when highestRev is far above it', async () => {
+    /*
+     * THE LOST-UPDATE HALF OF DEFECT (a), IN THE OTHER DIRECTION: a signal
+     * whose `runRev` is genuinely already loaded must be swallowed — the gate
+     * must not be fooled into treating it as news just because a stale
+     * proposal position inflated `highestRev` far past the loaded rev.
+     */
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.5' });
+    const { rerender } = render(<Harness activity={null} />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    rerender(<Harness activity={summary({ runIds: ['RUN003'], runRev: 2, highestRev: 99 })} />);
+    await flush();
+    expect(backend.calls).toHaveLength(1);
   });
 });
 
@@ -296,15 +358,15 @@ describe('coalescing while a reload is in flight', () => {
 
     backend.setHold(true);
     // Signal 1 starts the (held-open) reload — this is request #2.
-    rerender(<Harness activity={summary({ runIds: ['RUN002'], highestRev: 1 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1 })} />);
     await waitFor(() => expect(backend.calls).toHaveLength(2));
     await waitFor(() => expect(backend.outstanding()).toBe(1));
 
     // Two MORE signals arrive while #2 is still outstanding.
-    rerender(<Harness activity={summary({ runIds: ['RUN002', 'RUN003'], highestRev: 2 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN002', 'RUN003'], runRev: 2 })} />);
     await flush();
     rerender(
-      <Harness activity={summary({ runIds: ['RUN002', 'RUN003', 'RUN004'], highestRev: 3 })} />,
+      <Harness activity={summary({ runIds: ['RUN002', 'RUN003', 'RUN004'], runRev: 3 })} />,
     );
     await flush();
     // Neither started a THIRD request — they were coalesced, not queued.
@@ -323,7 +385,7 @@ describe('coalescing while a reload is in flight', () => {
 
 describe('remount hygiene', () => {
   it('a fresh mount starts with no memory of a previous one', async () => {
-    const sig = summary({ runIds: ['RUN002'], highestRev: 1 });
+    const sig = summary({ runIds: ['RUN002'], runRev: 1 });
 
     // Mount #1 consumes this exact key — its dedupe ref now holds it.
     const first = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
@@ -355,7 +417,7 @@ describe('remount hygiene', () => {
     await waitForList();
 
     backend.setHold(true);
-    rerender(<Harness activity={summary({ runIds: ['RUN002'], highestRev: 1 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1 })} />);
     await waitFor(() => expect(backend.outstanding()).toBe(1));
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -416,7 +478,7 @@ describe('what a silent reload must not disturb', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
 
     backend.setRuns([mkRun(1), mkRun(2)], '1.1');
-    rerender(<Harness activity={summary({ runIds: ['RUN001'], highestRev: 1 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN001'], runRev: 1 })} />);
     // Request #3 — unambiguously the SIGNAL's, because #2 already happened and
     // settled above.
     await waitFor(() => expect(backend.calls).toHaveLength(3));
@@ -425,6 +487,190 @@ describe('what a silent reload must not disturb', () => {
     expect(search.value).toBe('Run 1');
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
   });
+});
+
+// ---------------------------------------------------------------------------
+// The completeness path (`recordVersion`)
+// ---------------------------------------------------------------------------
+
+describe('the completeness path closes what the fast path structurally cannot', () => {
+  it('required test 1 — a recordVersion change with no activity performs ONE bounded reload (the removal case)', async () => {
+    // The feed cannot report a deletion: only the record's own entry moves.
+    // `activity` stays `null` throughout this test — the removal is visible
+    // ONLY through `recordVersion`.
+    const backend = stubRunsBackend({ runs: [mkRun(1), mkRun(2)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} recordVersion="1.0" />);
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002']));
+    expect(backend.calls).toHaveLength(1);
+
+    backend.setRuns([mkRun(1)], '1.1');
+    rerender(<Harness activity={null} recordVersion="1.1" />);
+
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+    await waitFor(() => expect(renderedIds()).toEqual(['RUN001']));
+  });
+
+  it('required test 4 — a generation change (1.7 -> 2.0) reloads via the version path', async () => {
+    /*
+     * DEFECT (b): the fast path's own rev parse discards the generation, so a
+     * `runRev` that is numerically BEHIND a new generation's reset counter
+     * would read as "already seen". This test does not even exercise the fast
+     * path — it proves the version path recovers the case on its own, by
+     * plain string inequality, needing no generation arithmetic at all.
+     */
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.7' });
+    const { rerender } = render(<Harness activity={null} recordVersion="1.7" />);
+    await waitForList();
+    await screen.findByText('Run 1');
+    expect(backend.calls).toHaveLength(1);
+
+    // A new generation — content changes too, so the assertion is not merely
+    // "a request happened" but "the reload actually reflects the new state".
+    backend.setRuns([mkRun(1, { label: 'Run 1 — new generation' })], '2.0');
+    rerender(<Harness activity={null} recordVersion="2.0" />);
+
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+    await screen.findByText('Run 1 — new generation');
+  });
+
+  it('a recordVersion equal to what is already loaded makes no request', async () => {
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} recordVersion="1.0" />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    // The SAME token delivered again — nothing to reconcile.
+    rerender(<Harness activity={null} recordVersion="1.0" />);
+    await flush();
+    expect(backend.calls).toHaveLength(1);
+  });
+
+  it('this section’s OWN version advancing (e.g. Add Run) does not, by itself, look like a new recordVersion delivery', async () => {
+    /*
+     * `lastRecordVersionRef` exists for exactly this: without it, this
+     * section's own `experimentVersion` moving (from ANY reload) would make a
+     * STALE, unchanged `recordVersion` prop suddenly look "different" from the
+     * new `experimentVersion`, and fire a redundant reload for content that
+     * never actually needed reconciling.
+     */
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} recordVersion="1.0" />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    // A fast-path signal advances this section's OWN experimentVersion to
+    // '1.1' — `recordVersion` (the prop) stays '1.0', UNCHANGED.
+    backend.setRuns([mkRun(1), mkRun(2)], '1.1');
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1 })} recordVersion="1.0" />);
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+    await flush();
+
+    // Still 2 — the unchanged `recordVersion` prop did not ALSO fire a
+    // completeness-path reload just because this section's own version moved
+    // out from under it.
+    expect(backend.calls).toHaveLength(2);
+  });
+});
+
+describe('the two paths dedupe against each other by token equality — no shared state needed', () => {
+  it('required test 2 — fast path fires first; recordVersion then arrives already matching → exactly 1 extra request', async () => {
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} recordVersion="1.0" />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    // The fast path fires — request #2 — and adopts '1.1'.
+    backend.setRuns([mkRun(1), mkRun(2)], '1.1');
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1 })} recordVersion="1.0" />);
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+    await flush();
+
+    // The parent bundle catches up: `recordVersion` NOW equals '1.1', which
+    // this section already adopted via the fast path. Token equality means the
+    // completeness path's own gate is already satisfied — no third request.
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1 })} recordVersion="1.1" />);
+    await flush();
+    expect(backend.calls).toHaveLength(2);
+  });
+
+  it('required test 3 — recordVersion fires first; the fast path then delivers a now-covered signal → exactly 1 extra request', async () => {
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} recordVersion="1.0" />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    // The version path fires first — request #2 — and adopts '1.1'.
+    backend.setRuns([mkRun(1), mkRun(2)], '1.1');
+    rerender(<Harness activity={null} recordVersion="1.1" />);
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+    await flush();
+
+    // The SAME batch's `activity` now arrives, naming the run that just moved
+    // — but its `runRev` (1) is already covered by what this section adopted
+    // via the version path. The fast path's own `runRev <= loadedRev` gate
+    // swallows it; no third request.
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1 })} recordVersion="1.1" />);
+    await flush();
+    expect(backend.calls).toHaveLength(2);
+  });
+});
+
+describe('required test 5 — a proposal-only signal, and the disclosed cost of the version bump it causes', () => {
+  it('a proposal-only activity makes no request BY ITSELF', async () => {
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} recordVersion="1.0" />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    rerender(
+      <Harness
+        activity={summary({ proposalIds: ['P1'], proposalRev: 9, highestRev: 9 })}
+        recordVersion="1.0"
+      />,
+    );
+    await flush();
+    expect(backend.calls).toHaveLength(1);
+  });
+
+  it(
+    'the SAME proposal act, once it bumps recordVersion, costs exactly ONE bounded read — ' +
+      'a disclosed cost, not a defect',
+    async () => {
+      /*
+       * A proposal act advances the record's own `rev` (contract DEC-10)
+       * exactly like a run edit does, and nothing in the wire contract lets a
+       * reader distinguish "this version bump was a proposal act" from "it was
+       * a run edit" without re-reading — the feed's own page order cannot
+       * prove which. Guessing wrong in the direction of NOT reading is how a
+       * real run change gets missed, so this section pays one bounded list
+       * read on every version change it did not itself cause, proposal-only
+       * or not. That is the price named in `RunsSection`'s own comment on
+       * `recordVersion`, and this test shows it is paid ONCE, not repeatedly,
+       * for one such bump.
+       */
+      const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+      const { rerender } = render(<Harness activity={null} recordVersion="1.0" />);
+      await waitForList();
+      expect(backend.calls).toHaveLength(1);
+
+      // The proposal-only activity itself: no request.
+      const proposalActivity = summary({ proposalIds: ['P1'], proposalRev: 9, highestRev: 9 });
+      rerender(<Harness activity={proposalActivity} recordVersion="1.0" />);
+      await flush();
+      expect(backend.calls).toHaveLength(1);
+
+      // The SAME act bumped the record's version — the parent's bundle
+      // catches up and hands down the new token. Content is UNCHANGED (no run
+      // was touched), but this section cannot know that without reading.
+      rerender(<Harness activity={proposalActivity} recordVersion="1.1" />);
+      await waitFor(() => expect(backend.calls).toHaveLength(2));
+      await flush();
+      // Exactly one — not one per render, not one per poll while the prop
+      // stays at '1.1'.
+      expect(backend.calls).toHaveLength(2);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -519,7 +765,7 @@ describe('I2 — a signal-driven reload re-reads what is on screen, not the plai
 
     // A colleague updates RUN001 — the signal arrives with 100 runs already on
     // screen.
-    rerender(<Harness activity={summary({ runIds: ['RUN001'], highestRev: 1 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN001'], runRev: 1 })} />);
 
     await waitFor(() => expect(backend.calls).toHaveLength(3));
     // THE ASSERTION THIS TEST EXISTS FOR: the signal's own request asked for
@@ -561,7 +807,7 @@ describe('I2 — over the cap, this section refuses to guess and asks the reader
     expect(250).toBeGreaterThan(RUN_LIST_LIMIT_MAX);
     const callsBeforeSignal = backend.calls.length;
 
-    rerender(<Harness activity={summary({ runIds: ['RUN001'], highestRev: 1 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN001'], runRev: 1 })} />);
 
     // THE NOTE APPEARS…
     await screen.findByText('Runs changed elsewhere. Refresh to see the current list.');
@@ -576,7 +822,7 @@ describe('I2 — over the cap, this section refuses to guess and asks the reader
     expect(renderedIds()).toHaveLength(250);
 
     // A SECOND signal while the notice stands changes nothing either.
-    rerender(<Harness activity={summary({ runIds: ['RUN002'], highestRev: 2 })} />);
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 2 })} />);
     await flush();
     expect(backend.calls.length).toBe(callsBeforeSignal);
 
