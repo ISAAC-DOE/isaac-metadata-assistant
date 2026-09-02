@@ -256,7 +256,7 @@ without its checkout is not a measurement.
 | Backend skips, baseline → now | 39 → **43** | the +4 are exactly the engine-gated durability tests |
 | Tracked files holding a NUL | **1** (the exempted zip, 918) | `python3 … count(b'\x00')`, never `tr` |
 | Tracked symlinks | **0** | `git ls-files -s \| awk '$1=="120000"'` |
-| Open PRs · worktrees · stranded | **0 · 1 · none** | `gh pr list`, `git worktree list`, `git rev-list --count` |
+| Open PRs · worktrees · stranded | ~~0 · 1 · none~~ — **corrected 2026-09-02: this row measured 0 open PRs from inside the PR that is itself open. PR #219, carrying this document, was open at the time of writing and remains open now.** **1 · 1 · none** | `gh pr list`, `git worktree list`, `git rev-list --count` |
 
 ### The 43 skips, classified so they sum exactly
 
@@ -283,7 +283,7 @@ reason the count is classified rather than quoted.
 |---|---|---|
 | `6aa4e20` (#218) | success | **v0.0.205** |
 | `fb1e1e3` (#217) | **failed the gate** — its CI was CANCELLED, superseded by the next push | never released |
-| `504c2ee` (#215, final `main`) | CI still running at the time of writing | **not yet released** |
+| `504c2ee` (#215, final `main`) | ~~CI still running at the time of writing~~ — **corrected 2026-09-02, after this document was already open as PR #219: CI concluded and the release completed while the PR sat open.** `504c2ee`'s CI (run 33594690869, `push` event) concluded `success`; the release gate then ran as run 33597271916 and its own log printed `commit under release: 504c2ee714cc30370f8afaf7800f40b8064e9675`; its build job set `TAG="v0.0.206"`; and `git rev-list -n1 v0.0.206` now resolves to `504c2ee`. | **v0.0.206** |
 
 **A trap worth recording, because it nearly produced a false claim here.** `gh run list --json
 headSha` reports the TRIGGER SHA, not the released one — the run whose `headSha` reads `504c2ee`
