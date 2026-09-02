@@ -1272,7 +1272,7 @@ jobs:
           set -euo pipefail
           pytest apps/api/tests/test_proposal_durability.py -q -rs \
             | tee /tmp/proposals.log
-          # A SKIP IS NOT A PASS, and pytest exits 0 on a skipped test. The four
+          # A SKIP IS NOT A PASS, and pytest exits 0 on a skipped test. The SIX
           # `@real_engine` scenarios are the only reason this step exists, and they
           # skip silently on any environment the gate refuses — so a non-zero skip
           # count here means the engine was not reached and nothing this step claims
@@ -1294,13 +1294,13 @@ jobs:
             echo "::error::A skipped durability proof is not a passing one."
             exit 1; }
           # ...AND THE CONVERSE. A skip guard alone cannot see a DELETED scenario:
-          # all four real-engine tests could be removed tomorrow and this step would
+          # all six real-engine tests could be removed tomorrow and this step would
           # still print "none skipped" and pass green. The number is an EQUALITY
           # rather than a floor, for the reason the parity step above records at
           # length — a floor drifts the moment a scenario is added without bumping
           # it, which is exactly how that step's 20-versus-28 happened.
           #
-          # 14 = 10 that need no engine + 4 that do. If you are reading this
+          # 20 = 14 that need no engine + 6 that do. If you are reading this
           # because the step failed after you added or removed a test, change the
           # number here in the same commit and say so in the PR.
           #
@@ -1309,7 +1309,19 @@ jobs:
           # `is not None` passes whether or not `hydrate()` restored anything). The
           # guard is back, and one test was added to prove it FIRES — measured, not
           # read: both its arms drive the helper red, and it runs without an engine.
-          expected_scenarios=14
+          #
+          # 14 -> 20 (2026-09-02): the file's §6 was added, and the gap it closes was
+          # MEASURED rather than supposed — before it, `grep -an applied_run_id` over
+          # `test_proposal_durability.py` returned exactly ONE line, a docstring, and
+          # no assertion touched the field. `build_the_scenario` accepts one proposal
+          # and that one is RECORD-scoped, so `applied_run_id` was `None` in every
+          # document the file had ever compared: a serialisation change that dropped
+          # it, or wrote it back as `null`, passed all fourteen scenarios. §6 builds a
+          # record with TWO runs and an accepted run-scoped proposal on EACH, so the
+          # field is non-null, differs between them, and cannot be reconstructed from
+          # "the first run". +4 local (one premise/rehearsal, three damage controls)
+          # and +2 `@real_engine` (per-act round trip, and a pod restart).
+          expected_scenarios=20
           passed=$(grep -Eo '[0-9]+ passed' /tmp/proposals.log | grep -Eo '^[0-9]+' | tail -1 || echo 0)
           [ "$passed" = "$expected_scenarios" ] || {
             echo "::error::$passed proposal-durability test(s) passed; exactly $expected_scenarios are expected."
@@ -3074,6 +3086,36 @@ jobs:
       - name: Run browser mutation suite (own backend, own workspace)
         working-directory: apps/web
         run: npm run test:e2e:mutation
+
+      # THE TRUSTED-IDENTITY SUITE — a THIRD backend, and the split is forced rather
+      # than stylistic.
+      #
+      # `e2e/mutation/proposals.spec.ts` measures that accepting a proposal is
+      # REFUSED — `409 human_actor_required` — which is what every shipped deployment
+      # does, and it asserts that premise from `/api/health` before asserting the
+      # refusal. The verifier is chosen from the BACKEND PROCESS's environment, so one
+      # process has one configuration and the refusal leg and the success leg cannot
+      # both be measured in one run of one suite. That spec says so itself.
+      #
+      # So this step starts a second backend, on its own port, with its own
+      # ISAAC_UI_WORKSPACE and with ISAAC_EDGE_TRUST_VERIFIER=test_fixture — see
+      # `playwright.trusted.config.ts`, which sets both variables itself. THE MUTATION
+      # SUITE IS UNCHANGED and still runs against a backend that still refuses.
+      #
+      # Nothing here makes acceptance reachable in a deployment: no shipped deploy
+      # artifact sets either variable, which `apps/api/tests/test_deploy_config.py`
+      # pins, and this config is not one — it starts a local uvicorn for the duration
+      # of the run.
+      #
+      # WHAT IT COVERS THAT NOTHING ELSE DOES: a run-scoped proposal reviewed in a
+      # browser on a record with TWO runs. The mutation suite cannot, and records why
+      # — it reviews the two EXPORTED canonical examples, and an exported record
+      # refuses `POST .../runs` with `409 already_exported_without_runs`. This suite
+      # creates its record through the product's own Create Experiment screen and adds
+      # both runs through the Add Run button.
+      - name: Run browser trusted-identity suite (own backend, own workspace)
+        working-directory: apps/web
+        run: npm run test:e2e:trusted
 
       - name: Backend log on failure
         if: failure()

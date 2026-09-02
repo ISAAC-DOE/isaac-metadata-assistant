@@ -753,7 +753,7 @@ def test_the_scenario_is_not_vacuous_and_the_comparison_PASSES_on_it(
     IT ALSO EXERCISES EVERY SHARED ASSERTION THE REAL-ENGINE HALF USES, and that is
     deliberate rather than incidental. There is no PostgreSQL and no container
     runtime on a developer machine in this project, so CI is the FIRST execution of
-    the four ``@real_engine`` cases; running their helpers here against the
+    the six ``@real_engine`` cases; running their helpers here against the
     filesystem repository is what turns their numbers — ``total == 4``,
     ``unreadable_entries == 1``, the ``by_state`` distribution, the append position
     of a later proposal — into things that were measured rather than reasoned.
@@ -955,6 +955,13 @@ def test_the_comparison_FAILS_on_each_way_a_proposal_can_be_silently_lost(
 # assertions in this repository that a proposal survives PostgreSQL, and they are
 # the reason the file exists. They SKIP everywhere else, including the ordinary CI
 # backend job, and a skip is a visible non-result.
+#
+# SIX, COUNTING §6. Two further `@real_engine` cases were added at the end of this
+# file on 2026-09-02, for the run-scoped acceptance this section's scenario cannot
+# express (`applied_run_id` is `None` in every document above). "These four" is left
+# as it is because it is TRUE OF THE FOUR THAT FOLLOW IT; the total is six, and
+# `.github/workflows/ci.yml`'s `expected_scenarios` is 20 rather than 14 for the
+# same reason.
 
 
 @pytest.fixture()
@@ -1113,7 +1120,8 @@ def test_REAL_ENGINE_the_round_trip_assertion_FAILS_on_a_dropped_key_and_recover
 ):
     """THE CONTROL FOR THE THREE ABOVE, AND IT MUTATES THE REAL ROW.
 
-    The three real-engine cases above can only report green or red, and a suite that
+    The three real-engine cases immediately above can only report green or red, and a
+    suite that
     has never been observed going red over a genuine defect is not evidence that it
     would. So the stored ``proposals`` key is DROPPED out of band — by the test,
     through a legal policy-passing statement, which is exactly the situation a
@@ -1189,3 +1197,379 @@ def test_REAL_ENGINE_the_round_trip_assertion_FAILS_on_a_dropped_key_and_recover
     assert_the_same_document(
         recovered.to_state(), expected, "the record restored from the repaired row"
     )
+
+
+# =============================================================================
+# 6. THE RUN-SCOPED ACCEPTANCE — added 2026-09-02, and the gap it closes is one
+#    the file above could not see
+# =============================================================================
+#
+# WHAT WAS MEASURED. Before this section, ``grep -an applied_run_id`` over this file
+# returned exactly ONE line: a docstring listing the six ``accepted_*``/``applied_*``
+# fields. No assertion touched it — and no assertion COULD, because
+# :func:`build_the_scenario` accepts exactly one proposal and that one is
+# RECORD-scoped, so ``applied_run_id`` is ``None`` in every document this file has
+# ever compared. A serialisation change that dropped it, or that wrote it back as
+# ``null``, would have passed all fourteen scenarios.
+#
+# ``None == None`` is the durability equivalent of ``[] == []``, which is the
+# vacuousness this file's own §2 exists to refuse. So the field is given a value
+# that is not ``None``, on a record with TWO runs so that the value is a CHOICE
+# rather than the only id available, and the whole-document comparison then has
+# something to lose.
+#
+# TWO RUNS, NOT ONE, AND THE SECOND ONE IS THE POINT. With one run, a reader that
+# invented ``applied_run_id`` from ``exp.runs[0].id`` would be indistinguishable
+# from one that carried it. The accepted proposals below name run TWO and run ONE
+# respectively, so a document that lost the field and reconstructed it has to be
+# wrong about at least one of them.
+#
+# The full lifecycle over two runs — isolation, attribution, the change feed, the
+# refusals — is ``apps/api/tests/test_run_scoped_proposal_lifecycle.py``; this
+# section proves only the DURABILITY of what that file establishes.
+
+def _schema_enum(path: str) -> tuple:
+    """The vendored official schema's ``enum`` at a dotted path, or ``()``.
+
+    A TEST-LOCAL reader of the document ``CLAUDE.md`` §1 makes the authority — not a
+    second definition of any application behaviour. It exists so
+    :data:`SECOND_RUN_FIELD_VALUE` below comes from the schema rather than from the
+    author, which is the rule :data:`RECORD_VALUE` follows one section up.
+    """
+    node: object = json.loads(
+        routes.schema_path(routes.REPO_ROOT).read_text(encoding="utf-8")
+    )
+    for segment in path.split("."):
+        if not isinstance(node, dict):
+            return ()
+        node = (node.get("properties") or {}).get(segment)
+        if node is None:
+            return ()
+    values = node.get("enum") if isinstance(node, dict) else None
+    return tuple(values) if isinstance(values, list) else ()
+
+
+def _second_run_field() -> tuple[str, object]:
+    """A SECOND run-level draft field and one legal value for it, both DERIVED.
+
+    Two gates, both read at import from sources the application owns:
+    :data:`routes.RUN_WRITABLE_FIELD_PATHS` — exactly what ``PATCH .../runs/{id}``
+    accepts, and the same set ``_proposal_writer_for`` dispatches ``run_field`` on —
+    and the vendored schema closing the path with a string ``enum``, which is what
+    makes a legal value available without this file inventing one.
+
+    ``sorted`` and ``[0]`` rather than "whatever the set yields first":
+    ``frozenset`` iteration order is not stable across processes, and a scenario
+    that picked a different path on different runs would make a failure
+    irreproducible.
+
+    THIS WAS TWO LITERALS UNDER A COMMENT CLAIMING THEY WERE DERIVED, which an
+    independent review measured. The comment is now true rather than removed,
+    because the claim was the right one to make: a hand-copied path or enum member
+    is a second copy of a document the server already publishes, free to rot into a
+    scenario that passes for the wrong reason.
+    """
+    for path in sorted(routes.RUN_WRITABLE_FIELD_PATHS):
+        if path == RUN_FIELD_PATH:
+            continue
+        values = _schema_enum(path)
+        if values and all(isinstance(value, str) for value in values):
+            return path, values[0]
+    raise AssertionError(
+        "no run-writable field other than RUN_FIELD_PATH is closed by a string enum "
+        "in the vendored schema, so this scenario has no second target"
+    )
+
+
+#: A second run-level draft field, so the two accepted proposals below differ in
+#: their target as well as in their run — and one value the official schema declares
+#: legal for it. DERIVED; see :func:`_second_run_field`.
+SECOND_RUN_FIELD_PATH, SECOND_RUN_FIELD_VALUE = _second_run_field()
+
+
+def build_the_two_run_scenario(client: TestClient, after_each=None) -> tuple[str, str, str]:
+    """One record, TWO runs, and an accepted run-scoped proposal on EACH.
+
+    Returns ``(experiment_id, first_run_id, second_run_id)``. ``after_each(rid,
+    label)`` is called after every act that writes, exactly as
+    :func:`build_the_scenario`'s is.
+
+    Deliberately NOT a variant of :func:`build_the_scenario`. That builder's shape is
+    load-bearing for eleven existing assertions — ``total == 4``, three
+    multi-transition histories, one unreadable entry, a four-key
+    ``proposal_change_revs`` — and widening it to carry a second run would have meant
+    editing every one of those numbers to prove something none of them is about.
+    """
+
+    created = client.post(
+        "/api/experiments", json={"title": "Run-scoped proposal durability"}
+    )
+    assert created.status_code == 201, created.text
+    rid = created.json()["id"]
+
+    def checkpoint(label: str) -> None:
+        if after_each is not None:
+            after_each(rid, label)
+
+    checkpoint("create the experiment")
+
+    run_ids: list[str] = []
+    for label in ("R1", "R2"):
+        response = client.post(
+            f"/api/experiments/{rid}/runs",
+            json={"label": label},
+            headers={"If-Match": _etag(client, rid)},
+        )
+        assert response.status_code == 201, response.text
+        run_ids.append(response.json()["run"]["id"])
+        checkpoint(f"add run {label}")
+    first, second = run_ids
+    assert first != second
+
+    note = client.post(
+        f"/api/experiments/{rid}/notes",
+        json={"text": NOTE_TEXT, "source": "typed_note"},
+        headers={"If-Match": _etag(client, rid)},
+    )
+    assert note.status_code == 201, note.text
+    note_id = note.json()["note"]["id"]
+    checkpoint("capture the note behind both proposals")
+
+    # The SECOND run first, so a document that reconstructed `applied_run_id` from
+    # "the first run" would be wrong about this one.
+    on_second = _create_proposal(
+        client,
+        rid,
+        path=RUN_FIELD_PATH,
+        value=300.0,
+        note_id=note_id,
+        run_id=second,
+    )
+    checkpoint("propose a run-level field on the second run")
+    on_first = _create_proposal(
+        client,
+        rid,
+        path=SECOND_RUN_FIELD_PATH,
+        value=SECOND_RUN_FIELD_VALUE,
+        note_id=note_id,
+        run_id=first,
+    )
+    checkpoint("propose a different run-level field on the first run")
+
+    _review(client, rid, on_second, action="accept", accepted_from="candidate")
+    checkpoint("accept the one that names the second run")
+    _review(client, rid, on_first, action="accept", accepted_from="candidate")
+    checkpoint("accept the one that names the first run")
+
+    return rid, first, second
+
+
+def assert_the_two_run_scenario_is_not_vacuous(
+    document: dict, first: str, second: str
+) -> None:
+    """``applied_run_id`` is REALLY set, REALLY differs, and names REAL runs.
+
+    Three separate claims, because two of them are the ones a broken round trip
+    would satisfy: a document that lost the field satisfies none, one that wrote
+    ``null`` satisfies none, and one that reconstructed the field from a single run
+    satisfies the first two and fails the third.
+    """
+    stored = document.get(proposals.STATE_KEY)
+    assert isinstance(stored, list) and len(stored) == 2, stored
+    assert all(entry["state"] == proposals.STATE_ACCEPTED for entry in stored), stored
+
+    # `.get`, and the presence check FIRST as an assertion — a bare subscript raises
+    # `KeyError`, which the drop control below would not recognise as a refusal.
+    assert all("applied_run_id" in entry for entry in stored), (
+        "a stored acceptance carries no `applied_run_id` key at all: " + json.dumps(stored)
+    )
+    applied = {entry["target_field_path"]: entry.get("applied_run_id") for entry in stored}
+    assert applied == {RUN_FIELD_PATH: second, SECOND_RUN_FIELD_PATH: first}, applied
+    assert all(value is not None for value in applied.values()), applied
+    assert len(set(applied.values())) == 2, (
+        "both acceptances landed on the same run; `applied_run_id` cannot then "
+        "distinguish a carried value from a reconstructed one"
+    )
+    for entry in stored:
+        assert entry["run_id"] == entry["applied_run_id"], entry
+        assert entry["applied_via"] == proposals.APPLIED_VIA_RUN_FIELD, entry
+        assert isinstance(entry["applied_rev"], int), entry
+        assert entry["history"][-1]["actor_subject"] == ACTOR, entry
+
+    positions = document.get("proposal_change_revs")
+    assert isinstance(positions, dict) and len(positions) == 2, positions
+
+
+def assert_each_run_holds_only_its_own_accepted_value(
+    client: TestClient, rid: str, first: str, second: str
+) -> None:
+    """The scientific consequence, read back over HTTP after the round trip.
+
+    A durable document that is byte-perfect while the runs it describes hold the
+    wrong values would be a passing durability suite over a broken record, so the
+    served runs are checked too.
+    """
+    def fields(run_id: str) -> dict:
+        response = client.get(f"/api/experiments/{rid}/runs/{run_id}")
+        assert response.status_code == 200, response.text
+        return response.json()["run"]["fields"]
+
+    on_first, on_second = fields(first), fields(second)
+    assert on_second[RUN_FIELD_PATH]["value"] == 300.0, on_second
+    assert on_first[SECOND_RUN_FIELD_PATH]["value"] == SECOND_RUN_FIELD_VALUE, on_first
+    assert RUN_FIELD_PATH not in on_first, (
+        "the value accepted for the second run reached the first: " + json.dumps(on_first)
+    )
+    assert SECOND_RUN_FIELD_PATH not in on_second, (
+        "the value accepted for the first run reached the second: "
+        + json.dumps(on_second)
+    )
+
+
+def test_the_two_run_scenario_sets_applied_run_id_where_the_original_cannot(
+    filesystem_workspace,
+):
+    """THE PREMISE, AND THE GAP, MEASURED IN THE SAME TEST.
+
+    The second half is the part worth keeping: it re-runs the ORIGINAL builder and
+    asserts that every ``applied_run_id`` it produces is ``None``. That is not a
+    criticism of that builder — it accepts a record-scoped proposal, which correctly
+    has no run — it is the reason this section had to exist, stated as an assertion
+    so that a future change making the original cover the field would make this
+    sentence fail rather than quietly become false.
+    """
+    client = _client()
+    assert repo.repository().backend == repo.BACKEND_FILESYSTEM
+
+    # THE CHECKPOINT PLUMBING, REHEARSED WHERE IT CAN BE RUN — the same reason
+    # `test_the_checkpoint_plumbing_really_fires_after_every_act` exists for the
+    # original builder. `test_REAL_ENGINE_a_run_scoped_acceptance_survives_the_round
+    # _trip_with_its_run` asserts `len(observed) == 8`; if this builder ever stopped
+    # calling the callback, that test would pass having asserted nothing and CI would
+    # be the only place anybody found out.
+    observed: list[str] = []
+
+    def after_each(rid_: str, label: str) -> None:
+        observed.append(label)
+        assert_the_same_document(
+            _document_in_the_workspace(rid_),
+            ws.load_experiment(rid_).to_state(),
+            f"the working copy after: {label}",
+        )
+
+    rid, first, second = build_the_two_run_scenario(client, after_each=after_each)
+    assert len(observed) == 8, observed
+    document = ws.load_experiment(rid).to_state()
+    assert_the_two_run_scenario_is_not_vacuous(document, first, second)
+    assert_the_same_document(
+        _document_in_the_workspace(rid), document, "the working copy"
+    )
+    assert_each_run_holds_only_its_own_accepted_value(client, rid, first, second)
+
+    original = ws.load_experiment(build_the_scenario(_client())).to_state()
+    applied = [
+        entry.get("applied_run_id")
+        for entry in original[proposals.STATE_KEY]
+        if isinstance(entry, dict) and entry.get("state") == proposals.STATE_ACCEPTED
+    ]
+    assert applied == [None], (
+        "the original scenario now sets `applied_run_id`; this section's premise — "
+        f"that it could not — is stale: {applied}"
+    )
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["drop_applied_run_id", "null_applied_run_id", "swap_applied_run_id"],
+)
+def test_the_comparison_FAILS_on_each_way_a_run_scoped_acceptance_can_be_LOST(
+    filesystem_workspace, damage
+):
+    """THE CONTROLS. Three ways ``applied_run_id`` can go wrong, all caught.
+
+    The third is the one a picked-key comparison would miss and a single-run fixture
+    could not even express: the field is present, non-null, and names the WRONG run.
+    """
+    client = _client()
+    rid, first, second = build_the_two_run_scenario(client)
+    expected = ws.load_experiment(rid).to_state()
+    assert_the_two_run_scenario_is_not_vacuous(expected, first, second)
+
+    damaged = copy.deepcopy(expected)
+    entries = damaged[proposals.STATE_KEY]
+    if damage == "drop_applied_run_id":
+        for entry in entries:
+            entry.pop("applied_run_id")
+    elif damage == "null_applied_run_id":
+        for entry in entries:
+            entry["applied_run_id"] = None
+    else:
+        for entry in entries:
+            entry["applied_run_id"] = first if entry["applied_run_id"] == second else second
+
+    assert damaged != expected, f"the {damage} control changed nothing"
+    with pytest.raises(AssertionError):
+        assert_the_same_document(damaged, expected, f"the {damage} document")
+    # ...and the vacuousness check refuses it too, so a future comparison that got
+    # laxer would still not make this section green by accident.
+    with pytest.raises(AssertionError):
+        assert_the_two_run_scenario_is_not_vacuous(damaged, first, second)
+
+
+@real_engine
+def test_REAL_ENGINE_a_run_scoped_acceptance_survives_the_round_trip_with_its_run(
+    durable_workspace,
+):
+    """``applied_run_id`` reaches PostgreSQL and comes back naming the same run.
+
+    Asserted after EVERY act, for the reason the per-act case above gives: "the
+    final state reached the database" and "each act reached the database" are
+    different claims, and only the second survives a pod roll mid-sequence.
+    """
+    _assert_the_backend_is_durable()
+    client = _client()
+    observed: list[str] = []
+
+    def after_each(rid: str, label: str) -> None:
+        observed.append(label)
+        assert_the_same_document(
+            _document_in_the_database(rid),
+            _document_in_the_workspace(rid),
+            f"the durable row after: {label}",
+        )
+
+    rid, first, second = build_the_two_run_scenario(client, after_each=after_each)
+    assert len(observed) == 8, observed
+
+    stored = _document_in_the_database(rid)
+    assert_the_two_run_scenario_is_not_vacuous(stored, first, second)
+    assert_the_same_document(
+        stored, ws.load_experiment(rid).to_state(), "the durable row at the end"
+    )
+    assert_each_run_holds_only_its_own_accepted_value(client, rid, first, second)
+
+
+@real_engine
+def test_REAL_ENGINE_the_run_scoped_acceptances_survive_a_pod_restart(
+    durable_workspace,
+):
+    """The working copy is destroyed, hydration restores it, and both runs are right.
+
+    The restart is what a durable repository is FOR, and it is the only path on
+    which the stored ``applied_run_id`` is actually read back by the application
+    rather than merely written and re-read by this test.
+    """
+    _assert_the_backend_is_durable()
+    client = _client()
+    rid, first, second = build_the_two_run_scenario(client)
+    expected = ws.load_experiment(rid).to_state()
+    assert_the_two_run_scenario_is_not_vacuous(expected, first, second)
+
+    shutil.rmtree(ws.workspace_root() / rid)
+    _hydrate_after_the_restart(rid)
+
+    restored = ws.load_experiment(rid)
+    assert restored is not None
+    assert_the_same_document(restored.to_state(), expected, "the record after a restart")
+    assert_the_two_run_scenario_is_not_vacuous(restored.to_state(), first, second)
+    assert_each_run_holds_only_its_own_accepted_value(client, rid, first, second)

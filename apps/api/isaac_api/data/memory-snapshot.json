@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "305a021b4cead5e9ca1ee8d24f17ed49af794befa3705fbcc10b7558bcab80a8"
+        "sha256": "5defce996a0e88d08403f52492f5e1903d3ece5ce60bd25dbcd632bf28e73d83"
       },
       {
         "path": "AGENTS.md",
@@ -10324,7 +10324,7 @@
       },
       {
         "path": "apps/web/package.json",
-        "sha256": "ea40c596e682ca11582143ea8426188fcc44463b46df38c7fa6a55609c7a2c0f"
+        "sha256": "1a8509ec1df6caf155da81974c1466869231058450a93ce9c3b9ad29613548e4"
       },
       {
         "path": "apps/web/src/App.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "b21fe0d158529fd562c96f011f37580cd016a4819d41d9f10e1ec06fe44059b8"
+    "served_manifest_fingerprint": "6158048ac4ef8c42d85d510a1fa9491bcedf4cefa25c9efdf9c36e7ab4eb0b71"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
