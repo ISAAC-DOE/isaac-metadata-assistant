@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { api } from '../lib/api';
-import { useRecordSession } from '../lib/useRecordSession';
+import { useRecordSession, CHANGE_FEED_CLIENT_LIMIT } from '../lib/useRecordSession';
 import { POLL_INTERVAL_MS, POLL_MAX_BACKOFF_MS, DEGRADED_THRESHOLD } from '../lib/useRecordSync';
 import { clearAllSessions } from '../lib/assistantSession';
 import {
@@ -156,12 +156,29 @@ describe('the change feed, mounted on the record-session owner', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
     });
-    expect(spy.mock.calls[0][1]).toEqual({ cursor: undefined });
+    /*
+     * THE WHOLE OPTIONS OBJECT, `limit` INCLUDED, and this assertion is deliberately
+     * not narrowed to the one key it is about. `toEqual` on the whole object is what
+     * pins "never a cursor it built itself": a client that started inventing one would
+     * add a key here, and a `toMatchObject` or a `.cursor` read would not see it.
+     *
+     * `limit` arrived on 2026-09-02, when `useRecordSession` began asking for the
+     * server's whole page (see `CHANGE_FEED_CLIENT_LIMIT` and the measurement at its
+     * `useChangeFeed` call site). Asserted through the imported constant rather than a
+     * re-typed `200`, so the two cannot drift apart.
+     */
+    expect(spy.mock.calls[0][1]).toEqual({
+      cursor: undefined,
+      limit: CHANGE_FEED_CLIENT_LIMIT,
+    });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
     });
-    expect(spy.mock.calls[1][1]).toEqual({ cursor: 'SERVER-A' });
+    expect(spy.mock.calls[1][1]).toEqual({
+      cursor: 'SERVER-A',
+      limit: CHANGE_FEED_CLIENT_LIMIT,
+    });
   });
 
   it('says nothing at all when every entry is at or below the revision on screen', async () => {
