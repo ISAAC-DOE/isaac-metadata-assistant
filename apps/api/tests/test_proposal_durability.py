@@ -753,7 +753,7 @@ def test_the_scenario_is_not_vacuous_and_the_comparison_PASSES_on_it(
     IT ALSO EXERCISES EVERY SHARED ASSERTION THE REAL-ENGINE HALF USES, and that is
     deliberate rather than incidental. There is no PostgreSQL and no container
     runtime on a developer machine in this project, so CI is the FIRST execution of
-    the four ``@real_engine`` cases; running their helpers here against the
+    the six ``@real_engine`` cases; running their helpers here against the
     filesystem repository is what turns their numbers — ``total == 4``,
     ``unreadable_entries == 1``, the ``by_state`` distribution, the append position
     of a later proposal — into things that were measured rather than reasoned.
@@ -1228,11 +1228,63 @@ def test_REAL_ENGINE_the_round_trip_assertion_FAILS_on_a_dropped_key_and_recover
 # refusals — is ``apps/api/tests/test_run_scoped_proposal_lifecycle.py``; this
 # section proves only the DURABILITY of what that file establishes.
 
+def _schema_enum(path: str) -> tuple:
+    """The vendored official schema's ``enum`` at a dotted path, or ``()``.
+
+    A TEST-LOCAL reader of the document ``CLAUDE.md`` §1 makes the authority — not a
+    second definition of any application behaviour. It exists so
+    :data:`SECOND_RUN_FIELD_VALUE` below comes from the schema rather than from the
+    author, which is the rule :data:`RECORD_VALUE` follows one section up.
+    """
+    node: object = json.loads(
+        routes.schema_path(routes.REPO_ROOT).read_text(encoding="utf-8")
+    )
+    for segment in path.split("."):
+        if not isinstance(node, dict):
+            return ()
+        node = (node.get("properties") or {}).get(segment)
+        if node is None:
+            return ()
+    values = node.get("enum") if isinstance(node, dict) else None
+    return tuple(values) if isinstance(values, list) else ()
+
+
+def _second_run_field() -> tuple[str, object]:
+    """A SECOND run-level draft field and one legal value for it, both DERIVED.
+
+    Two gates, both read at import from sources the application owns:
+    :data:`routes.RUN_WRITABLE_FIELD_PATHS` — exactly what ``PATCH .../runs/{id}``
+    accepts, and the same set ``_proposal_writer_for`` dispatches ``run_field`` on —
+    and the vendored schema closing the path with a string ``enum``, which is what
+    makes a legal value available without this file inventing one.
+
+    ``sorted`` and ``[0]`` rather than "whatever the set yields first":
+    ``frozenset`` iteration order is not stable across processes, and a scenario
+    that picked a different path on different runs would make a failure
+    irreproducible.
+
+    THIS WAS TWO LITERALS UNDER A COMMENT CLAIMING THEY WERE DERIVED, which an
+    independent review measured. The comment is now true rather than removed,
+    because the claim was the right one to make: a hand-copied path or enum member
+    is a second copy of a document the server already publishes, free to rot into a
+    scenario that passes for the wrong reason.
+    """
+    for path in sorted(routes.RUN_WRITABLE_FIELD_PATHS):
+        if path == RUN_FIELD_PATH:
+            continue
+        values = _schema_enum(path)
+        if values and all(isinstance(value, str) for value in values):
+            return path, values[0]
+    raise AssertionError(
+        "no run-writable field other than RUN_FIELD_PATH is closed by a string enum "
+        "in the vendored schema, so this scenario has no second target"
+    )
+
+
 #: A second run-level draft field, so the two accepted proposals below differ in
-#: their target as well as in their run. Read from the application's own derived set
-#: rather than written out, for the reason ``RECORD_VALUE`` is.
-SECOND_RUN_FIELD_PATH = "context.environment"
-SECOND_RUN_FIELD_VALUE = "in_situ"
+#: their target as well as in their run — and one value the official schema declares
+#: legal for it. DERIVED; see :func:`_second_run_field`.
+SECOND_RUN_FIELD_PATH, SECOND_RUN_FIELD_VALUE = _second_run_field()
 
 
 def build_the_two_run_scenario(client: TestClient, after_each=None) -> tuple[str, str, str]:

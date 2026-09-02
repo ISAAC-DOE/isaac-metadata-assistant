@@ -51,7 +51,7 @@
  *      appeared, so nothing in the setup accepts the proposal on its own;
  *   C. writing the UNTARGETED run out of band after the baseline was captured ->
  *      FAILED with "the run this proposal did not name was modified by accepting
- *      it", so the byte-identity comparison can say no.
+ *      it", so the document-identity comparison can say no.
  *
  * SYNTHETIC ONLY. Every record here is created by this file, seconds earlier.
  */
@@ -240,7 +240,7 @@ test.describe('a run-scoped ingestion proposal, reviewed in a browser', () => {
     await expect(label).toHaveText(/run/i);
   });
 
-  test('accepting it through the screen writes ONE run, and the other is byte-identical', async ({
+  test('accepting it through the screen writes ONE run, and the other is document-identical', async ({
     page,
     request,
     server,
@@ -276,9 +276,14 @@ test.describe('a run-scoped ingestion proposal, reviewed in a browser', () => {
     };
     expect(targetedAfter.run.fields[target.path]?.value).toBe(target.proposed);
 
-    // THE WHOLE DOCUMENT, not chosen keys. A run's version token is the RUN's
-    // `<generation>.<rev>`, so the record's revision moving does not touch it — which
-    // is what makes byte-identity the right claim rather than an over-strong one.
+    // THE WHOLE DOCUMENT, not chosen keys: every key of `GET .../runs/{id}` equal,
+    // `version`, `rev` and `updated_utc` included — a run's version token is the RUN's
+    // `<generation>.<rev>`, so the record's revision moving does not touch it.
+    //
+    // DOCUMENT-IDENTICAL, NOT BYTE-IDENTICAL, which this comment and the test's title
+    // both used to say. `toEqual` compares the PARSED bodies, so a key reordering or a
+    // whitespace change would pass. Content is the right thing to claim here; the
+    // stronger word was simply not the one being measured.
     expect(
       await server.runBody(id, first.id),
       'the run this proposal did not name was modified by accepting it'

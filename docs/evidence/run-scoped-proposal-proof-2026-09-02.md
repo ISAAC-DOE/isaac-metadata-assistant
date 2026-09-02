@@ -126,23 +126,29 @@ The browser spec derives the same thing from **two wire reads and no literals**:
 run-scoped set from the list operation, and a three-member string enum from
 `GET /api/schema`.
 
-## 4. The fourteen points, and where each is established
+## 4. The fourteen points, and what each one's status actually is
+
+**Thirteen are established; point 6 is UNMET BY DESIGN and is labelled as such in its
+own row rather than in a footnote.** The distinction matters: "the API offers no
+pre-acceptance edit primitive" is a finding about the contract, not a test result, and a
+row that read as though it had been demonstrated would be the exact defect this proof
+keeps catching elsewhere.
 
 | # | Claim | Where |
 |---|---|---|
-| 1 | a run-scoped proposal can be created with no export side effect | `test_1_creating_a_run_scoped_proposal_has_no_export_side_effect` — the whole authoritative snapshot (every export unit's draft + every run's `resolved_run_draft` + the record draft) and both run bodies are byte-identical; `exported` false; `record_id` null; `/artifacts` reports nothing; no `*.evidence.json` anywhere in the workspace. Positive control: `test_1_the_no_side_effect_comparison_is_not_vacuous` |
+| 1 | a run-scoped proposal can be created with no export side effect | `test_1_creating_a_run_scoped_proposal_has_no_export_side_effect` — the whole authoritative snapshot (every export unit's draft + every run's `resolved_run_draft` + the record draft) is **byte-identical**, as `json.dumps(..., sort_keys=True)`, and both run bodies are **document-identical** (every key of the served document equal); `exported` false; `record_id` null; `/artifacts` reports nothing; no `*.evidence.json` anywhere in the workspace. Positive control: `test_1_the_no_side_effect_comparison_is_not_vacuous` |
 | 2 | it survives a new request and a store reload | `test_2_the_proposal_survives_a_new_request_and_a_store_reload` (a fresh `create_app()`; every key of the create response compared except the three derived-on-read ones). **PostgreSQL: CI only** — `test_REAL_ENGINE_a_run_scoped_acceptance_survives_the_round_trip_with_its_run` and `test_REAL_ENGINE_the_run_scoped_acceptances_survive_a_pod_restart` |
 | 3 | listed and readable with `run_id` set | `test_3_the_proposal_is_listed_and_readable_with_its_run_id` (both the list and the detail operation) |
 | 4 | it appears in the website review surface | `proposals-run-scoped.spec.ts` › *the scientist sees it, and sees which RUN it is about* — the card's `.proposal-scope` reads exactly `On run <run id>` |
 | 5 | current run value and proposed value are distinguishable there | *the CURRENT value it shows is the targeted run's* — see §5 below |
-| 6 | editing changes only the proposal, not the run | `test_6_an_edited_acceptance_writes_the_CORRECTED_value_to_one_run_only`; `test_6_superseding_writes_nothing_to_either_run`; and the finding `test_6_no_operation_edits_a_stored_proposal_in_place` |
-| 7 | authorized acceptance changes ONLY the targeted run | `test_7_and_8_...[run_field]` and `[run_override]`, plus the browser's *accepting it through the screen writes ONE run* |
-| 8 | the other run is byte-identical | same tests — the untargeted run's **whole served document**, `version`, `rev` and `updated_utc` included. Negative control: `test_the_isolation_comparison_is_not_vacuous` |
+| 6 | *"editing (before acceptance) changes only the proposal, not the run"* — **UNMET BY DESIGN, not established.** No pre-acceptance edit primitive exists: a proposal is immutable (contract §3), and `PATCH`/`PUT`/`DELETE` on one all answer **405**, asserted by `test_6_no_operation_edits_a_stored_proposal_in_place`. The edit primitive this build has is the `accepted_from: "edited"` acceptance, and it is covered — `test_6_an_edited_acceptance_writes_the_CORRECTED_value_to_one_run_only` (the corrected value is written, `proposed_value` is not rewritten, the other run is untouched). The "change my mind before accepting" path is `supersede` + a new proposal, and it writes nothing: `test_6_superseding_writes_nothing_to_either_run` | 
+| 7 | authorized acceptance changes ONLY the targeted run | `test_7_and_8_acceptance_writes_the_named_run_and_the_other_is_document_identical[run_field]` and `[run_override]`, plus the browser's *accepting it through the screen writes ONE run* |
+| 8 | the other run is **document-identical** (every key of the served document equal) | same tests — the untargeted run's **whole** `GET .../runs/{id}` body, `version`, `rev` and `updated_utc` included. **Not byte-identical, and the word was corrected**: the comparison is `==` over the parsed JSON, so a key reordering or a whitespace change would pass it. Content is the right claim here; the stronger word was not the one being measured. Negative control: `test_the_isolation_comparison_is_not_vacuous` |
 | 9 | 412 / 428 / `409 proposal_stale` | `test_9_a_stale_if_match_is_412_and_carries_the_current_token`, `test_9_a_missing_if_match_is_428_when_an_actor_EXISTS`, `test_9_a_moved_target_is_409_proposal_stale_and_the_other_run_is_untouched`, paired with `test_9_an_unrelated_write_does_NOT_make_the_proposal_stale` |
 | 10 | attribution on the history; `user_confirmation` on the value | `test_10_the_acceptance_history_carries_the_fixture_subject_and_trust_basis`, `test_10_the_written_run_field_records_a_user_confirmation`, `test_10_the_override_acceptance_records_what_it_displaced`, and the browser's *the acceptance is attributed to the subject this deployment vouches for* |
 | 11 | change-feed entries above the pre-accept cursor, no duplicate, no loss | `test_11_the_feed_reports_the_proposal_and_the_targeted_run_above_the_cursor`, `test_11_paging_one_entry_at_a_time_loses_and_duplicates_nothing` |
 | 12 | rejection leaves both runs unchanged | `test_12_rejecting_leaves_both_runs_unchanged` and the browser's *rejecting it through the screen leaves BOTH runs exactly as they were* |
-| 13 | a retried create with the same `client_request_key` returns the existing proposal | `test_13_a_retried_create_with_the_same_client_request_key_returns_the_existing` — asserts the **scoped** claim DEC-13 actually makes and no more |
+| 13 | a retried create with the same `client_request_key` returns the existing proposal | `test_13_a_retried_create_with_the_same_client_request_key_returns_the_existing` — asserts the **scoped** claim DEC-13 actually makes and no more, in both directions: the retry on the same record deduplicates (and a retry naming a *different run* under that key still returns the FIRST proposal — the key is the identity, not the body), and **a second record given the same key mints its own**. Mutation-checked: making the route's lookup search every experiment in the scope drove the second-record leg RED while every same-record assertion still passed |
 | 14 | record-scoped proposals still behave | `test_14_a_record_scoped_proposal_is_refused_a_run_and_still_works`, plus the unchanged `test_ingestion_proposals.py` and `test_mcp_proposals.py` |
 | + | validation and the export dry run read the accepted canonical run value | `test_validation_and_the_export_dry_run_read_the_ACCEPTED_run_value` |
 
@@ -200,6 +206,14 @@ ORIGINAL builder still produces `applied_run_id == [None]`, so a future change t
 the original cover the field would make this section's justification **fail** rather than
 quietly become false.
 
+Its second target is DERIVED too, and this needed a correction: `SECOND_RUN_FIELD_PATH`
+and `SECOND_RUN_FIELD_VALUE` were two literals under a comment claiming they were *"read
+from the application's own derived set"*. They now are — `_second_run_field()` takes the
+lowest-sorting member of `routes.RUN_WRITABLE_FIELD_PATHS` other than `RUN_FIELD_PATH`
+that the vendored schema closes with a string enum, and its first member as the value
+(today `context.environment` / `operando`). `RUN_FIELD_PATH` beside it stays a literal
+and its comment says so, which is what made the false claim next to it visible.
+
 `.github/workflows/ci.yml`'s `expected_scenarios` moves **14 → 20** in the same commit
 (+4 local: one premise/rehearsal and three damage controls — dropped, nulled, and
 **swapped to the wrong run**, the last being the one a picked-key comparison would miss;
@@ -214,11 +228,12 @@ restored from a pristine copy (`git diff --stat` empty afterwards).
 |---|---|---|---|
 | 1 | `_apply_run_field(...)` added after `exp.add_proposal(proposal)` in the create route | `test_1_creating_a_run_scoped_proposal_has_no_export_side_effect` | **RED** |
 | 2 | `accepted_value = body["value"]` → `= proposal.proposed_value` | `test_6_an_edited_acceptance_writes_the_CORRECTED_value_to_one_run_only` | **RED** |
-| 3 | `run = exp.sorted_runs()[0]` at the top of the run-field branch | `test_7_and_8_...[run_field]` | **RED** |
+| 3 | `run = exp.sorted_runs()[0]` at the top of the run-field branch | `test_7_and_8_acceptance_writes_the_named_run_and_the_other_is_document_identical[run_field]` | **RED** |
 | 4 | `current != proposal.target_digest` → `proposal.base_rev != exp.rev` | `test_9_a_moved_target_...` **PASSED** (it cannot tell the two apart alone) and its pair `test_9_an_unrelated_write_does_NOT_make_the_proposal_stale` | **RED** |
 | 5 | `actor_subject = identity_module.stamp_actor(...)` → `= None` | `test_10_the_acceptance_history_carries_the_fixture_subject_and_trust_basis` | **RED** |
 | 6 | the run-field branch loops over `exp.sorted_runs()` and writes every one | `test_11_the_feed_reports_the_proposal_and_the_targeted_run_above_the_cursor` | **RED** |
 | 7 | the accept branch widened to `action in (ACTION_ACCEPT, ACTION_REJECT)` | `test_12_rejecting_leaves_both_runs_unchanged` | **RED** |
+| 8 | the create route's `client_request_key` lookup searched `[q for other in ws.list_experiments(session_id=scope) for q in other.sorted_proposals()]` instead of `exp.sorted_proposals()` | `test_13_...`'s second-record leg | **RED**, on exactly its own message, while every same-record assertion still passed |
 
 ## 8. Two measured facts a future session should not re-derive
 
@@ -319,3 +334,45 @@ re-measured by running the suite at `origin/main`.
   move, and `src/isaac_records/**` (the truth core) is untouched. The mutations in §7
   were applied to a working copy and reverted from a pristine backup; `git diff` over
   `routes.py` was empty afterwards, which is why it does not appear above.
+
+---
+
+## 11. Corrections made after independent review
+
+The review of PR #223 at head `75f7350` returned **FIX FIRST** on text-only claim
+defects — no assertion was wrong, and every one of these was a sentence claiming more
+than the code beside it did. They are recorded rather than silently swapped, because
+that is what this repository's §11 discipline asks for and because four of the five are
+the same shape as the defects this proof was written to catch.
+
+| id | defect | fix |
+|---|---|---|
+| **I1** | `test_13`'s docstring said the test *"shows the same key on a DIFFERENT record minting its own"*. **The body created no second experiment** — its last assertion was `listed["total"] == 1` on the one record. DEC-13's *"within a scope"* half was therefore unasserted while the docstring claimed it. | The leg was **added**, not the clause deleted: a second record is created through `POST /api/experiments`, given the same key, and asserted to mint its own `proposal_id`, with neither record seeing the other's. Mutation-checked (§7 row 8). |
+| **I2** | `test_proposal_durability.py`'s `SECOND_RUN_FIELD_PATH`/`SECOND_RUN_FIELD_VALUE` were **literals** under a comment saying they were derived *"for the reason `RECORD_VALUE` is"*. | Derived, via `_second_run_field()` — see §6. The comment is now true rather than removed, because it was the right claim to make. |
+| **I3** | the `@real_engine` count is **six** since §6 was added, and **three sites still said four**: `.github/workflows/ci.yml` (the skip guard and the deleted-scenario converse) and `test_proposal_durability.py`'s local-rehearsal docstring. | All three corrected. `ci.yml`'s other "four real-engine scenarios" line belongs to the **discard** step and is still right — it was deliberately left alone. |
+| **M1** | *"byte-identical"* described a `==` over `response.json()`, which is equality of every key and value and **not** of the response bytes. | Reworded to **document-identical (every key of the served document equal)** at every site, including the test's own **name**, with the reason stated in place. `_authoritative_snapshot`'s comparison keeps the word, because it really is a byte comparison over `json.dumps(..., sort_keys=True)`. |
+| **M2** | §4 row 6 read as though *"editing changes only the proposal"* had been demonstrated. | Relabelled **UNMET BY DESIGN** in the row itself, with the contract reference and what IS covered. §4's heading now says thirteen of fourteen are established. |
+
+Re-verified after these changes:
+
+```
+pytest apps/api/tests/test_ingestion_proposals.py apps/api/tests/test_mcp_proposals.py \
+       apps/api/tests/test_proposal_durability.py \
+       apps/api/tests/test_run_scoped_proposal_lifecycle.py -q -rs
+  247 passed, 6 skipped
+
+npx tsc -p e2e/tsconfig.json --noEmit                            exit 0
+pytest apps/api/tests/test_committed_snapshot.py \
+       apps/api/tests/test_memory_graph_detail.py -q              154 passed, 1 skipped
+snapshot regeneration + --check                                   no drift, exit 0
+```
+
+**`247`, UNCHANGED — and the first draft of this line said `248`, which had not been
+measured when it was written.** It is recorded rather than quietly replaced because it
+is the same defect class as I1 through M2 above, committed by the same hand inside the
+paragraph correcting them, and because the number was *reasoned* ("the leg must add
+one") when the arithmetic is the opposite: **none of these five fixes adds a test.** I1
+adds an assertion leg *inside* `test_13`; I2 replaces two literals with a derivation;
+I3, M1 and M2 are comment, name and prose. The collected counts are therefore identical
+to §9's — 30 for the lifecycle file, 20 for the durability file. Re-derive rather than
+trusting this sentence: `pytest <the four files> --collect-only -q`.

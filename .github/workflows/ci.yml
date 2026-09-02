@@ -1272,7 +1272,7 @@ jobs:
           set -euo pipefail
           pytest apps/api/tests/test_proposal_durability.py -q -rs \
             | tee /tmp/proposals.log
-          # A SKIP IS NOT A PASS, and pytest exits 0 on a skipped test. The four
+          # A SKIP IS NOT A PASS, and pytest exits 0 on a skipped test. The SIX
           # `@real_engine` scenarios are the only reason this step exists, and they
           # skip silently on any environment the gate refuses — so a non-zero skip
           # count here means the engine was not reached and nothing this step claims
@@ -1294,7 +1294,7 @@ jobs:
             echo "::error::A skipped durability proof is not a passing one."
             exit 1; }
           # ...AND THE CONVERSE. A skip guard alone cannot see a DELETED scenario:
-          # all four real-engine tests could be removed tomorrow and this step would
+          # all six real-engine tests could be removed tomorrow and this step would
           # still print "none skipped" and pass green. The number is an EQUALITY
           # rather than a floor, for the reason the parity step above records at
           # length — a floor drifts the moment a scenario is added without bumping

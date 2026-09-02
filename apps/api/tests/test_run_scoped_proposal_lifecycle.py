@@ -750,15 +750,25 @@ def test_6_superseding_writes_nothing_to_either_run(client, two_runs):
     ],
     ids=["run_field", "run_override"],
 )
-def test_7_and_8_acceptance_writes_the_named_run_and_the_other_is_byte_identical(
+def test_7_and_8_acceptance_writes_the_named_run_and_the_other_is_document_identical(
     armed_client, two_runs, path, value, expected_writer
 ):
     """BOTH run-scoped writer classes, on a record with two runs.
 
     The untargeted run's WHOLE served document is compared, not chosen keys — and
-    it is byte-identical, including its ``version``, ``rev`` and ``updated_utc``,
-    because a run's version token is the RUN's ``<generation>.<rev>`` and not the
-    record's. Nothing about the record's revision moving touches it.
+    it is DOCUMENT-IDENTICAL: every key of ``GET .../runs/{id}`` equal, including
+    ``version``, ``rev`` and ``updated_utc``, because a run's version token is the
+    RUN's ``<generation>.<rev>`` and not the record's. Nothing about the record's
+    revision moving touches it.
+
+    "DOCUMENT-IDENTICAL" AND NOT "BYTE-IDENTICAL", which an earlier revision of this
+    docstring said. The comparison is ``==`` over the parsed JSON, so it is equality
+    of every key and value and NOT of the response bytes: a key reordering or a
+    whitespace change would pass it. That is the right comparison here — the claim
+    is about the run's CONTENT — but the two are different claims and the stronger
+    word was not the one being measured. (``_authoritative_snapshot`` elsewhere in
+    this file IS a byte comparison, over ``json.dumps(..., sort_keys=True)``, and
+    keeps that word.)
 
     MUTATION: inserted ``run = exp.sorted_runs()[0]`` at the top of
     ``_apply_accepted_proposal``'s run-field branch; the ``run_field`` case went RED.
@@ -810,8 +820,8 @@ def test_7_and_8_acceptance_writes_the_named_run_and_the_other_is_byte_identical
 def test_the_isolation_comparison_is_not_vacuous(armed_client, two_runs):
     """NEGATIVE CONTROL for the whole-body comparison above.
 
-    Two accepts, one per run. The "other run is byte-identical" comparison must go
-    RED when the other run really has been written — otherwise a comparison that
+    Two accepts, one per run. The "other run is document-identical" comparison must
+    go RED when the other run really has been written — otherwise a comparison that
     always passed would make every isolation claim in this file worthless.
     """
     run_a, run_b = _runs(armed_client, two_runs.id)
@@ -1306,6 +1316,18 @@ def test_13_a_retried_create_with_the_same_client_request_key_returns_the_existi
     EXISTING proposal instead of minting a second"*. It does NOT claim cross-record
     uniqueness and no constraint enforces one, so this test asserts the scoped
     claim and then shows the same key on a DIFFERENT record minting its own.
+
+    THE SECOND-RECORD LEG IS THE HALF THAT MAKES "WITHIN A SCOPE" A MEASUREMENT
+    RATHER THAN A PARAPHRASE, and it was missing from an earlier revision of this
+    test while this docstring already claimed it — found by independent review. A
+    deduplication that ignored the experiment boundary would satisfy every
+    assertion above it, because they all name one record.
+
+    MUTATION: made the create route's deduplication search
+    ``[q for other in ws.list_experiments(session_id=scope) for q in
+    other.sorted_proposals()]`` instead of ``exp.sorted_proposals()``; the
+    second-record leg went RED on exactly its own message, and every assertion above
+    it still passed.
     """
     run_a, run_b = _runs(client, two_runs.id)
     key = "synthetic-retry-key-0001"
@@ -1352,6 +1374,59 @@ def test_13_a_retried_create_with_the_same_client_request_key_returns_the_existi
 
     listed = client.get(f"/api/experiments/{two_runs.id}/proposals").json()
     assert listed["total"] == 1, "a retry minted a second proposal"
+
+    # ---- THE SCOPE BOUNDARY ------------------------------------------------
+    # A SECOND record, created through the product's own path, given the SAME key.
+    # DEC-13 promises exactly-once "within a scope" and rests that on every write to
+    # ONE experiment holding `record_lock` — so the key is deliberately not unique
+    # across records and no constraint makes it so. This leg is what distinguishes
+    # the promise the contract makes from the stronger one it does not.
+    other = client.post("/api/experiments", json={"title": "A second record, same key"})
+    assert other.status_code == 201, other.text
+    other_id = other.json()["id"]
+    other_run = client.post(
+        f"/api/experiments/{other_id}/runs",
+        json={"label": "Run A", "confirmed_by_user": True},
+        headers={"If-Match": _etag(client, other_id)},
+    )
+    assert other_run.status_code == 201, other_run.text
+    other_note = client.post(
+        f"/api/experiments/{other_id}/notes",
+        json={"text": NOTE_TEXT, "source": "typed_note"},
+        headers={"If-Match": _etag(client, other_id)},
+    )
+    assert other_note.status_code == 201, other_note.text
+
+    elsewhere = client.post(
+        f"/api/experiments/{other_id}/proposals",
+        json={
+            "note_id": other_note.json()["note"]["id"],
+            "run_id": other_run.json()["run"]["id"],
+            "target_field_path": RUN_FIELD_TARGET,
+            "proposed_value": PROPOSED_RUN_VALUE,
+            "rule": "the number the note gives for this run",
+            "client_request_key": key,
+        },
+        headers={"If-Match": _etag(client, other_id)},
+    )
+    assert elsewhere.status_code == 200, elsewhere.text
+    minted_elsewhere = elsewhere.json()
+    assert minted_elsewhere["deduplicated"] is False, (
+        "the same `client_request_key` deduplicated ACROSS records. DEC-13 promises "
+        "exactly-once within a scope and rests it on the per-record lock; a global "
+        "key would silently refuse a legitimate proposal on an unrelated record."
+    )
+    assert (
+        minted_elsewhere["proposal"]["proposal_id"]
+        != minted["proposal"]["proposal_id"]
+    )
+    assert minted_elsewhere["proposal"]["experiment_id"] == other_id
+
+    # ...and neither record now sees the other's.
+    assert client.get(f"/api/experiments/{other_id}/proposals").json()["total"] == 1
+    assert (
+        client.get(f"/api/experiments/{two_runs.id}/proposals").json()["total"] == 1
+    )
 
 
 # --- 14. record scope still behaves ------------------------------------------
