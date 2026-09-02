@@ -537,6 +537,19 @@ function ProposalsBrowser({
    * utterance and needs no dismissal of its own.
    */
   const [arrivalNote, setArrivalNote] = useState<string | null>(null);
+  /**
+   * THE RUNNING TOTAL BEHIND `arrivalNote`, ACCUMULATED SINCE THE LAST DISMISS.
+   *
+   * A second arrival while the first note is still standing used to render the
+   * SAME sentence a second time — invisible, because the text had not changed —
+   * so a reader who dismissed nothing still lost the second arrival. The note is
+   * now built from this running total rather than from one arrival's own delta,
+   * and it is reset ONLY by Dismiss — never by this panel's own review acts,
+   * because a proposal counted here may still be sitting unreviewed regardless
+   * of what this reader just accepted, rejected, superseded or withdrew on a
+   * DIFFERENT proposal. See `dismissArrivalNote` below.
+   */
+  const arrivalTotalRef = useRef(0);
 
   /**
    * Put a sentence into the live region SO THAT IT IS ACTUALLY ANNOUNCED.
@@ -646,25 +659,47 @@ function ProposalsBrowser({
         const openNow = loaded.by_state.open ?? 0;
         const previousOpen = lastOpenCountRef.current;
         /*
-         * SUPPRESSED: initial hydration (`previousOpen === null`), a reload this
-         * panel caused itself (`isArrivalReload === false` — filter/page changes
-         * and review acts never set the ref), and "no new ids" (`openNow` did not
-         * increase — the only way it decreases or holds is a review act elsewhere
-         * or nothing having changed, and the only way it increases is an arrival).
-         * Repeated polling with an unchanged count and duplicate signals are both
-         * already excluded upstream: `proposalSignal`'s own dedupe (below) means
-         * this effect is not even re-entered for either.
+         * SUPPRESSED: initial hydration (`previousOpen === null`); a reload this
+         * panel caused itself (`isArrivalReload === false` — filter/page changes,
+         * `reload(false)`'s Retry, and this panel's own review acts never set the
+         * ref); an UNCHANGED count (`openNow === previousOpen` — nothing this
+         * panel can read moved either way, so there is nothing to say); and a
+         * count that fell (`openNow < previousOpen` — a review act ELSEWHERE
+         * moved a proposal out of `open`, which is not an arrival). Repeated
+         * polling with an unchanged count and duplicate signals are both already
+         * excluded upstream: `proposalSignal`'s own dedupe (below) means this
+         * effect is not even re-entered for either.
+         *
+         * `n` IS A LOWER BOUND, NOT AN EXACT COUNT, and the sentence says so.
+         * `openNow > previousOpen` is sound evidence that AT LEAST one arrival
+         * happened (nothing this panel does can raise `open`) — but it is a NET
+         * delta over the whole interval between two reads, and an arrival landing
+         * beside an unrelated review act ELSEWHERE nets to a smaller rise, or to
+         * none at all if the two exactly offset. A same-count `3 -> 3` where one
+         * proposal arrived and a different one was reviewed by someone else in
+         * the same window is invisible to this mechanism, by construction — see
+         * the `net-offset` test, which pins that this panel says nothing false
+         * about that case rather than overclaiming a count it cannot know.
          */
         if (isArrivalReload && previousOpen !== null && openNow > previousOpen) {
           const n = openNow - previousOpen;
-          const sentence =
-            `${n} ${n === 1 ? 'proposed change' : 'proposed changes'} arrived and ` +
+          arrivalTotalRef.current += n;
+          const total = arrivalTotalRef.current;
+          // The SPOKEN sentence is per-arrival (this arrival's own delta) so a
+          // screen-reader user hears each arrival as it happens, even while the
+          // VISIBLE note (below) already reflects an earlier, undismissed one.
+          const spoken =
+            `At least ${n} ${n === 1 ? 'proposed change' : 'proposed changes'} arrived and ` +
             `${n === 1 ? 'is' : 'are'} ready to review.`;
-          // ONE sentence, one mechanism for both halves — no proposal content, no
-          // field path, no note text, no actor: `n` and the fixed words above are
-          // the only things this can ever say, by construction of what it reads.
-          announce(sentence);
-          setArrivalNote(sentence);
+          // The VISIBLE note is the RUNNING TOTAL since the last Dismiss (M3) —
+          // never content, never a field path: `total` and the fixed words below
+          // are the only things this can ever say, by construction of what it
+          // reads.
+          const cumulative =
+            `At least ${total} ${total === 1 ? 'proposed change' : 'proposed changes'} arrived ` +
+            `and ${total === 1 ? 'is' : 'are'} ready to review.`;
+          announce(spoken);
+          setArrivalNote(cumulative);
         }
         lastOpenCountRef.current = openNow;
       })
@@ -974,15 +1009,34 @@ function ProposalsBrowser({
               // states — a loud reload would unmount every open editor.
               changeOrder('newest_first');
               setFilter('open');
+              // THE RUNNING TOTAL IS CLEARED HERE FOR THE SAME REASON DISMISS
+              // CLEARS IT, and the reason is worth stating because the two
+              // controls do opposite things with the same reset. `arrivalTotalRef`
+              // accumulates arrivals the reader has not ACKNOWLEDGED — not
+              // arrivals they have not reviewed; Dismiss's own comment below is
+              // explicit that it marks nothing reviewed, and neither does this.
+              // Being taken to the window that holds them is an acknowledgement,
+              // so leaving the total standing would make the NEXT arrival say
+              // "at least 3" while counting two the reader was already shown.
+              arrivalTotalRef.current = 0;
               setArrivalNote(null);
             }}
           >
             Show Open, Newest First
           </button>
+          {/*
+            Dismiss clears the RUNNING TOTAL (M3) — and ONLY the running total.
+            It does not mark anything reviewed and it never touches `proposals`,
+            `filter`, `cursor` or triggers a reload: the arrived proposals may
+            still be sitting unreviewed after this click, exactly as before it.
+          */}
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => setArrivalNote(null)}
+            onClick={() => {
+              arrivalTotalRef.current = 0;
+              setArrivalNote(null);
+            }}
           >
             Dismiss
           </button>

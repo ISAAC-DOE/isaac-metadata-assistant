@@ -226,9 +226,9 @@ describe('an arrival is announced', () => {
     await waitFor(() => expect(reads).toBe(2));
 
     await waitFor(() =>
-      expect(arrivalNoteText()).toBe('1 proposed change arrived and is ready to review.'),
+      expect(arrivalNoteText()).toBe('At least 1 proposed change arrived and is ready to review.'),
     );
-    expect(statusText()).toContain('1 proposed change arrived and is ready to review.');
+    expect(statusText()).toContain('At least 1 proposed change arrived and is ready to review.');
   });
 
   it('pluralises for more than one', async () => {
@@ -252,7 +252,7 @@ describe('an arrival is announced', () => {
 
     rerenderWith(view, activityFor(['P2', 'P3'], 9));
     await waitFor(() =>
-      expect(arrivalNoteText()).toBe('2 proposed changes arrived and are ready to review.'),
+      expect(arrivalNoteText()).toBe('At least 2 proposed changes arrived and are ready to review.'),
     );
   });
 
@@ -438,6 +438,135 @@ describe('an arrival is NOT announced', () => {
 
     expect(arrivalNoteText()).toBeNull();
   });
+
+  it(
+    'I1a: on a signal-driven reload whose open count did NOT rise — the mutant `>` -> `>=` ' +
+      'would say "At least 0 proposed changes arrived"',
+    async () => {
+      let reads = 0;
+      stubFetchRoutes({
+        [LIST]: () => {
+          reads += 1;
+          // The count is IDENTICAL across both reads — nothing this panel can
+          // read has moved, even though the signal is genuinely signal-driven.
+          return { body: pageWithOpenCount([proposalFixture()], 1) };
+        },
+      });
+      const view = renderPanel(null);
+      await screen.findByText('Proposed value');
+
+      rerenderWith(view, activityFor(['P1'], 9));
+      await waitFor(() => expect(reads).toBe(2));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(arrivalNoteText()).toBeNull();
+      expect(statusText()).toBe('');
+    },
+  );
+
+  it(
+    'I3: a net-offset arrival (open goes 3 -> 3 because one proposal arrived while ' +
+      'another was reviewed elsewhere) is invisible to this mechanism, and says nothing false',
+    async () => {
+      let reads = 0;
+      stubFetchRoutes({
+        [LIST]: () => {
+          reads += 1;
+          return {
+            body:
+              reads === 1
+                ? pageWithOpenCount(
+                    [
+                      proposalFixture(),
+                      proposalFixture({ proposal_id: 'P2' }),
+                      proposalFixture({ proposal_id: 'P3' }),
+                    ],
+                    3,
+                    { by_state: { open: 3, accepted: 0, rejected: 0, superseded: 0, withdrawn: 0 } },
+                  )
+                : // A colleague's P4 arrived (open would-be 4) at the same moment
+                  // someone else accepted P1 elsewhere (open -1) — net 3 -> 3, and
+                  // `by_state.accepted` moved to record that the OTHER shift was a
+                  // real review act, not a fabricated "nothing happened" reading.
+                  pageWithOpenCount(
+                    [
+                      proposalFixture({ state: 'accepted' }),
+                      proposalFixture({ proposal_id: 'P2' }),
+                      proposalFixture({ proposal_id: 'P3' }),
+                      proposalFixture({ proposal_id: 'P4' }),
+                    ],
+                    3,
+                    { by_state: { open: 3, accepted: 1, rejected: 0, superseded: 0, withdrawn: 0 } },
+                  ),
+          };
+        },
+      });
+      const view = renderPanel(null);
+      // Three cards on hydration — the heading is not unique.
+      await screen.findAllByText('Proposed value');
+
+      rerenderWith(view, activityFor(['P4'], 9));
+      await waitFor(() => expect(reads).toBe(2));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // Not "0 arrived", not "an arrival was missed" — nothing at all. The
+      // mechanism cannot see a net-zero arrival, and it must not GUESS at one.
+      expect(arrivalNoteText()).toBeNull();
+      expect(statusText()).toBe('');
+    },
+  );
+});
+
+describe('I1b — the arrival flag does not leak onto a later, unrelated request', () => {
+  it('a signal-driven reload followed by a filter-change reload whose count happens to rise does NOT announce', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [LIST]: () => {
+        reads += 1;
+        // Read 1: initial hydration, open=1.
+        // Read 2: the SIGNAL-driven reload — open unchanged at 1 (no real arrival
+        //         this time; the signal was for something else the panel still
+        //         has to re-read, e.g. a state-only move that nets to zero).
+        // Read 3: a FILTER CHANGE the reader makes right after — open coincidentally
+        //         rises to 2. If `arrivalReloadRef.current = false` at the top of
+        //         the fetch effect were ever deleted, this request would still be
+        //         flagged as arrival-eligible from read 2's leftover `true`, and
+        //         this filter change would wrongly announce an arrival it did not
+        //         cause and cannot attribute.
+        if (reads <= 2) return { body: pageWithOpenCount([proposalFixture()], 1) };
+        return {
+          body: pageWithOpenCount(
+            [proposalFixture(), proposalFixture({ proposal_id: 'P2' })],
+            2,
+          ),
+        };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    rerenderWith(view, activityFor(['P1'], 9));
+    await waitFor(() => expect(reads).toBe(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(arrivalNoteText()).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'open' } });
+    await waitFor(() => expect(reads).toBe(3));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The count DID rise on this third read (1 -> 2) — and it must still say
+    // nothing, because this request was never signal-driven.
+    expect(arrivalNoteText()).toBeNull();
+    expect(statusText()).toBe('');
+  });
 });
 
 describe('no proposal content ever reaches the announcement', () => {
@@ -501,6 +630,55 @@ describe('the visible note', () => {
     // Dismissing clears only the visible note. The one-shot sr-only utterance is
     // not retracted — it was already spoken and there is nothing to take back.
     expect(statusText()).toContain('arrived');
+  });
+
+  it('M3: two arrivals before a Dismiss accumulate into ONE running total, not two identical notes', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [LIST]: () => {
+        reads += 1;
+        if (reads === 1) return { body: pageWithOpenCount([proposalFixture()], 1) };
+        if (reads === 2) {
+          return {
+            body: pageWithOpenCount(
+              [proposalFixture(), proposalFixture({ proposal_id: 'P2' })],
+              2,
+            ),
+          };
+        }
+        return {
+          body: pageWithOpenCount(
+            [
+              proposalFixture(),
+              proposalFixture({ proposal_id: 'P2' }),
+              proposalFixture({ proposal_id: 'P3' }),
+            ],
+            3,
+          ),
+        };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    // Arrival 1: open 1 -> 2.
+    rerenderWith(view, activityFor(['P2'], 9));
+    await waitFor(() =>
+      expect(arrivalNoteText()).toBe('At least 1 proposed change arrived and is ready to review.'),
+    );
+
+    // Arrival 2, WITHOUT a Dismiss in between: open 2 -> 3.
+    rerenderWith(view, activityFor(['P3'], 12));
+    await waitFor(() =>
+      expect(arrivalNoteText()).toBe(
+        'At least 2 proposed changes arrived and are ready to review.',
+      ),
+    );
+
+    // Dismiss resets the running total — a THIRD arrival after it starts fresh
+    // at 1, not 3.
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(arrivalNoteText()).toBeNull();
   });
 
   it('does not steal focus when it appears', async () => {
