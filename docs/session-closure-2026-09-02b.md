@@ -340,31 +340,38 @@ and nothing is blocked on them.
 
 ---
 
-## 7. Measured state — SECOND PASS, PART 1
+## 7. Measured state — SECOND PASS (complete)
 
-This is a two-part second pass. Part 1 (this pass) fills every marker answerable from git/gate-log
-state, verified in THIS worktree after merging `origin/main`. Part 2 — the main-checkout backend,
-frontend, `tsc -b` and snapshot counts — is being measured separately by the orchestrator directly
-against the main checkout at `fd179f2`, because a worktree cannot produce the main-checkout skip
-count (`graphify-out/graph.json` is gitignored and absent from every worktree; CLAUDE.md §11 and
-the first session's closure note both record the +2 skew this causes). Those markers are left in
-place below, unfilled, for Part 2.
+This was a two-part second pass. Part 1 filled every marker answerable from git/gate-log state,
+from THIS worktree, after merging `origin/main`. Part 2 — the main-checkout backend, frontend,
+`tsc -b` and snapshot counts — was **measured in the main checkout at `fd179f2` by the
+orchestrator**, `/Users/krishverma/Documents/ISAAC`, clean tree, because a worktree cannot produce
+the main-checkout skip count (`graphify-out/graph.json` is gitignored and absent from every
+worktree; CLAUDE.md §11 and the first session's closure note both record the +2 skew this causes).
+All Part-2 figures below are quoted as measured by the orchestrator, not re-run in this worktree.
 
-- Backend test count at final SHA, main checkout: **TODO(second pass, part 2 — orchestrator
-  measuring in the main checkout)**
-- Frontend test count / file count at final SHA: **TODO(second pass, part 2)**
-- `tsc -b` result: **TODO(second pass, part 2)**
-- Snapshot `--check` result (both artifacts) — **in THIS worktree, after merging `origin/main` and
-  regenerating both artifacts: exit 0, no drift, confirmed by
-  `apps/api/tests/test_committed_snapshot.py` + `test_memory_graph_detail.py` — see the
-  verification block at the end of this document.** The main-checkout re-check is still Part 2's
-  to run, since a worktree's own green check does not by itself certify what `main` will read.
-- Served path set / manifest counts: **measured in this worktree, unchanged — 201 / 200.** Neither
-  new doc from this session (`docs/session-closure-2026-09-02b.md`, this document; nor
-  `docs/evidence/two-actor-workflow-proof-2026-09-02.md`, added by #226) appears in the served set
-  or the manifest — see the note below.
-- Backend skip count and classification (baseline this session started from: 43, per the first
-  session's closure doc §8): **TODO(second pass, part 2)**
+- **Backend, measured in the main checkout at `fd179f2` by the orchestrator:**
+  `.venv/bin/pytest -q -rs` → **7,131 passed, 45 skipped, 0 failed**, exit 0, 475.78 s.
+- **Backend skip classification** (from `SKIPPED [n]` line multipliers, 11 distinct lines summing
+  to 45), measured in the main checkout at `fd179f2` by the orchestrator: **34** —
+  `ISAAC_RUN_REAL_ENGINE_PARITY` not set (was 32 at the first session's baseline; **+2** are the two
+  run-scoped durability scenarios #223 added, both of which CI runs with
+  `ISAAC_REQUIRE_REAL_ENGINE_PARITY`, so an absent engine there fails rather than skips); **1** —
+  `ISAAC_REQUIRE_REAL_ENGINE_PARITY` not set; **4** — opt-in benchmarks (`ISAAC_PERF_BENCH`: 2
+  wall-clock + 1 scale envelope + 1 opt-in); **2** — psycopg2-installed (each names its
+  unconditional sibling); **4** — strict-reader tolerances (`source`/`draft`/`created_utc`/
+  `answer_log`, each covered by a route test). Total **45**, none an untested path wearing an
+  environment gate. A worktree reads **+2** (47) — consistent with the +2 skew named above, and
+  this worktree's own `pytest` run (§ notes elsewhere in this document) is not being re-quoted here
+  for that reason.
+- **Frontend, measured in the main checkout at `fd179f2` by the orchestrator:** `cd apps/web &&
+  npx vitest run` → **195 files / 5,174 tests passed**, exit 0 (baseline at the first session's
+  final SHA `504c2ee` was 191 files / 5,074 tests).
+- **`tsc -b`, measured in the main checkout at `fd179f2` by the orchestrator:** exit **0**.
+- **Snapshot `--check`, measured in the main checkout at `fd179f2` by the orchestrator:** no drift
+  on both artifacts; served path set **201** / manifest **200**, unchanged from the first session's
+  final state. This worktree's own `--check` (after merging `origin/main` and regenerating both
+  artifacts here) also read exit 0 with no drift — the two independent checks agree.
 - **PR #226 merge SHA: `fd179f2`** (`git log --oneline -1 origin/main`; `gh pr view 226 --json
   mergeCommit,mergedAt,state` → `mergeCommit.oid: fd179f23e6b77ffd05a91722e1873bad64365c50`,
   `mergedAt: 2026-09-02T22:57:09Z`, `state: MERGED`).
@@ -376,10 +383,10 @@ place below, unfilled, for Part 2.
   Release gate run `33691355159` printed `commit under release:
   f58e8d27afe9ab829da369e081f3b41409ece2bd` and its build job set `TAG="v0.0.211"`;
   `git rev-list -n1 v0.0.211` resolves to `f58e8d2`. §8's table row for `f58e8d2` is filled in below.
-- **`fd179f2`'s CI: PENDING**, not yet concluded at the time of writing. Re-verified via
-  `gh run list --branch main --limit 5 --json databaseId,headSha,name,status,conclusion` →
-  run `33692815125`, `name: "CI"`, `status: "in_progress"`, `conclusion: ""`. §8's table row for
-  `fd179f2` is left explicitly marked pending, not guessed.
+- **`fd179f2`'s CI: still PENDING**, re-verified at the time of this pass via `gh run list --branch
+  main --workflow CI --json headSha,status,conclusion` → `{"conclusion":"","headSha":"fd179f2…",
+  "status":"in_progress"}`. §8's table row for `fd179f2` is left explicitly marked pending, not
+  guessed, per the coordinator's instruction not to infer a conclusion.
 - `docs/evidence/two-actor-workflow-proof-2026-09-02.md` — **confirmed present on `main`**
   (`git show origin/main:docs/evidence/two-actor-workflow-proof-2026-09-02.md | head` succeeds) —
   and **confirmed NOT in the manifest or the served path set** after regenerating both artifacts in
@@ -390,9 +397,11 @@ place below, unfilled, for Part 2.
   file; whatever mechanism keeps that bucket at 37 either enumerates a fixed list or something else
   gates it. This is worth a future session's attention but is out of scope for this closure note to
   fix.
-- Open PRs / worktrees / stranded work at the true end of this session: **TODO(second pass, part
-  2)** — this worktree itself is one open worktree by definition; the orchestrator's vantage point
-  (main checkout, after this branch is dealt with) is the one that should report the true count.
+- **Open PRs / worktrees / stranded work at the true end of this session**, measured by the
+  orchestrator from the main checkout: **open PRs — none, except this closure document's own PR**
+  (to be opened from this branch after this pass); **worktrees — two**, the main checkout plus this
+  one; **stranded work — none**, all eight of this session's branches measured **0 ahead of
+  `origin/main`** and had their local refs deleted.
 
 ---
 
@@ -426,7 +435,10 @@ fails release for the identical reason.
 "commit under release\|TAG="` (`commit under release: f58e8d27afe9ab829da369e081f3b41409ece2bd`;
 `TAG="v0.0.211"`), and cross-checked with `git rev-list -n1 v0.0.211` resolving to `f58e8d2`.
 
-`fd179f2` (PR #226's merge) has **not yet completed its own CI run** as of this writing — do not
-read the row above as a refusal; it is a status that has not arrived yet, and is deliberately left
-distinguishable from `2b8a017`'s and `1ef0c0d`'s actual refusals. TODO(second pass, part 2):
-`fd179f2`'s CI conclusion and, once it succeeds, its release-gate row and image tag.
+`fd179f2` (PR #226's merge) has **not yet completed its own CI run**, re-confirmed at the time of
+this pass via `gh run list --branch main --workflow CI --json headSha,status,conclusion` →
+`{"conclusion":"","headSha":"fd179f2…","status":"in_progress"}`. Do not read the row above as a
+refusal; it is a status that has not arrived yet, and is deliberately left distinguishable from
+`2b8a017`'s and `1ef0c0d`'s actual refusals. This document does not fill in `fd179f2`'s release-gate
+row or image tag, because neither exists yet — a third session (or a later check of this same PR)
+would need to observe and record that conclusion when it lands.
